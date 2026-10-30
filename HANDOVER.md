@@ -93,7 +93,6 @@ packages/
     src/levelMeshes.ts   incremental per-wall/hub/room meshes keyed by geometry hash
     src/extrude.ts       convex polygon -> prism with outward normals
 .github/workflows/ci.yml          lint, typecheck, unit tests, build, e2e; Go fmt/vet/race/build
-.github/workflows/deploy-api.yml  API Worker deploy (main -> production, branches -> preview)
 .claude/skills/design-taste-frontend  vendored taste-skill (MIT)
 ```
 
@@ -152,9 +151,17 @@ running when this was written. Read their findings in the PR or session before P
 
 ## 5. Owner to-dos
 
-1. **Repository secrets for automatic API deploys.** Add `CLOUDFLARE_API_TOKEN` (Workers Scripts,
-   Containers and Durable Objects edit) and `CLOUDFLARE_ACCOUNT_ID`. Until then, deploy the API by
-   hand with the commands in §8. The web app already deploys through Pages' Git integration.
+1. **Connect the API Worker to Git (one time, in the dashboard).** The Builds API refuses the
+   account token, so this can't be scripted. In **Workers & Pages → dhd-api → Settings → Builds →
+   Connect**, choose GitHub `zeecm/dream-home-designer`, then set:
+   - Root directory `apps/edge`, build command empty.
+   - Deploy command `npx wrangler@4.152.0 deploy`.
+   - Non-production branch builds on, with deploy command
+     `npx wrangler@4.152.0 deploy --env preview`.
+   - Watch paths `apps/api/*` and `apps/edge/*`.
+
+   Until it's connected, deploy the API by hand (§8). The web app already deploys through Pages'
+   Git integration.
 2. **Domain:** point it at the Pages project. The `/api` routing comes with it.
 3. **Merge** the open PR when happy.
 
