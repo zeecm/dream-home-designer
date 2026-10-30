@@ -54,7 +54,7 @@ export function addWall(
   levelId: string,
   a: Endpoint,
   b: Endpoint,
-  opts: { thickness?: number; height?: number; kind?: Wall['kind'] } = {},
+  opts: { thickness?: number; height?: number; kind?: Wall['kind']; side?: Wall['side'] } = {},
 ): AddWallResult {
   const wallId = newId('w');
   const aId = 'vertexId' in a ? a.vertexId : newId('v');
@@ -84,6 +84,7 @@ export function addWall(
         materialLeft: 'paint-white',
         materialRight: 'paint-white',
         ...(opts.kind === 'boundary' ? { kind: 'boundary' as const } : {}),
+        ...(opts.side ? { side: opts.side } : {}),
       };
     },
   };
@@ -189,6 +190,7 @@ const WallPatch = Wall.pick({
   materialLeft: true,
   materialRight: true,
   kind: true,
+  side: true,
 }).partial();
 export type WallPatch = z.input<typeof WallPatch>;
 
@@ -202,6 +204,7 @@ export function updateWall(levelId: string, wallId: string, patch: WallPatch): C
       if (!w) throw new Error(`wall ${wallId} not found`);
       Object.assign(w, p);
       if ('height' in patch && patch.height === undefined) delete w.height;
+      if ('side' in patch && patch.side === undefined) delete w.side; // centred on its line
       if (w.kind === 'wall') delete w.kind; // absent means a wall
       if (w.kind === 'boundary') {
         // A boundary has nothing to put a door or window in.
@@ -460,7 +463,7 @@ export function drawWall(
   snapshot: Level,
   rawStart: WallEnd,
   rawEnd: WallEnd,
-  opts: { thickness?: number; height?: number; kind?: Wall['kind'] } = {},
+  opts: { thickness?: number; height?: number; kind?: Wall['kind']; side?: Wall['side'] } = {},
 ): DrawWallResult {
   const levelId = snapshot.id;
   const start = attach(snapshot, rawStart);
@@ -594,6 +597,7 @@ export function drawWall(
           materialLeft: 'paint-white',
           materialRight: 'paint-white',
           ...(opts.kind === 'boundary' ? { kind: 'boundary' as const } : {}),
+          ...(opts.side ? { side: opts.side } : {}),
         };
         if (opts.height === undefined) delete lvl.walls[id]?.height;
       }

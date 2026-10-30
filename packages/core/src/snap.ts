@@ -229,6 +229,27 @@ export function snapCorner(
 }
 
 /**
+ * Where to add a corner to a wall without moving its doors or windows: its middle, or the
+ * nearer jamb of an opening there. Null if every spot near there is in an opening.
+ */
+export function cornerSpot(level: Level, wallId: string): Vec2 | null {
+  const w = level.walls[wallId];
+  const a = w && level.vertices[w.a];
+  const b = w && level.vertices[w.b];
+  if (!a || !b) return null;
+  const length = Math.hypot(b.x - a.x, b.y - a.y);
+  const p = jambSnap(level, wallId, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  const u = projectOnSegment(p, a, b).t * length;
+  const inside = Object.values(level.openings).some(
+    (o) =>
+      o.wallId === wallId &&
+      u > o.t * length - o.width / 2 + 1e-6 &&
+      u < o.t * length + o.width / 2 - 1e-6,
+  );
+  return inside || u < 0.05 || u > length - 0.05 ? null : p;
+}
+
+/**
  * A point on a wall that falls inside a door or window moves to the opening's nearer jamb,
  * so a wall drawn to it meets the wall beside the opening instead of splitting it (which
  * would have to shove the opening aside). Only the point being drawn moves, and the drawing

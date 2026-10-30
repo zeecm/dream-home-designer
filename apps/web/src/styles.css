@@ -1525,3 +1525,8 @@ select {
     animation: none;
   }
 }
+
+/* Dragging to look while walking must reach the 3D view, not scroll or zoom the page. */
+.app-walking canvas {
+  touch-action: none;
+}

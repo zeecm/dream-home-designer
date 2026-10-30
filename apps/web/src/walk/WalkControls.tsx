@@ -43,6 +43,7 @@ export function WalkControls({
   stick,
   pose,
   initial,
+  onLeave,
 }: {
   level: Level;
   stick: StickInput;
@@ -50,6 +51,8 @@ export function WalkControls({
   pose: MutableRefObject<WalkPose | null>;
   /** Where to start (the last walk's spot), or null for the plan's start point. */
   initial?: () => WalkPose | null;
+  /** Told where the walk ended, however it ended (Esc, another view, another plan). */
+  onLeave?: (pose: WalkPose) => void;
 }) {
   const { camera, gl } = useThree();
   const segments = useMemo(() => collisionSegments(level), [level]);
@@ -62,6 +65,16 @@ export function WalkControls({
     };
   }
   const keys = useRef(new Set<string>());
+  const leave = useRef(onLeave);
+  leave.current = onLeave;
+  // Hold on to the pose object itself: the canvas has its own renderer, so the parent can
+  // clear its ref before this cleanup runs.
+  useEffect(() => {
+    const walked = pose.current;
+    return () => {
+      if (walked) leave.current?.(walked);
+    };
+  }, [pose]);
 
   // A wider lens indoors; the orbit view's lens comes back on leaving.
   useEffect(() => {

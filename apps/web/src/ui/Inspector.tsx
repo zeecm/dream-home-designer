@@ -1,6 +1,7 @@
 import {
   type Level,
   type Opening,
+  cornerSpot,
   deleteOpening,
   deleteVertex,
   deleteWall,
@@ -190,6 +191,8 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
   const length = wallLine(level, wall).length;
   const onWall = Object.values(level.openings).filter((o) => o.wallId === id).length;
   const boundary = isBoundary(wall);
+  // Near the middle, but beside a door or window rather than in it.
+  const corner = cornerSpot(level, id);
   return (
     <>
       <Header title={boundary ? 'Room boundary' : 'Wall'} onClose={clear} />
@@ -223,6 +226,18 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
       />
       {!boundary && (
         <>
+          <Segmented
+            label="On its line"
+            value={wall.side ?? 'centre'}
+            options={[
+              { value: 'centre', label: 'Centred', title: 'Half the thickness each side' },
+              { value: 'left', label: 'One side', title: 'One face on the line' },
+              { value: 'right', label: 'Other side', title: 'The other face on the line' },
+            ]}
+            onChange={(v) =>
+              dispatch(updateWall(level.id, id, { side: v === 'centre' ? undefined : v }))
+            }
+          />
           <LengthField
             label="Thickness"
             value={wall.thickness}
@@ -255,18 +270,19 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
         type="button"
         className="btn"
         title="Or double-click the wall where the corner should go"
+        disabled={!corner}
         onClick={() => {
-          const a = level.vertices[wall.a];
-          const b = level.vertices[wall.b];
-          if (!a || !b) return;
-          const r = splitWall(level.id, id, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, level);
+          if (!corner) return;
+          const r = splitWall(level.id, id, corner, level);
           dispatch(r.command);
           // The new corner, selected so it can be dragged or nudged into place.
-          useEditor.getState().select({ kind: 'vertex', id: r.vertexId });
+          if (useStore.getState().editor.doc.levels[0]?.vertices[r.vertexId]) {
+            useEditor.getState().select({ kind: 'vertex', id: r.vertexId });
+          }
         }}
       >
         {icons.split}
-        Add a corner in the middle
+        Add a corner
       </button>
       <DeleteButton
         label={boundary ? 'Delete boundary' : 'Delete wall'}

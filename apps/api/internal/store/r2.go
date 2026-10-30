@@ -174,7 +174,7 @@ func (s *R2) Update(ctx context.Context, id string, expected int, name string, b
 	}
 	// Keep the version being replaced, so a bad save (or a vandal with an edit link) can be
 	// undone by hand. Best effort: a failed copy doesn't block the save.
-	_ = s.copy(ctx, objectKey(id), previousKey(id), m.etag)
+	_ = s.copy(ctx, objectKey(id), previousKey(id, m.version), m.etag)
 	err = s.put(ctx, Record{ID: id, Name: name, Version: next, Doc: doc}, http.Header{"If-Match": {m.etag}})
 	if errors.Is(err, errPrecondition) {
 		// Someone else wrote between our HEAD and PUT; report what's there now.
@@ -191,15 +191,24 @@ func (s *R2) Update(ctx context.Context, id string, expected int, name string, b
 }
 
 func (s *R2) Delete(ctx context.Context, id string) error {
-	m, err := s.head(ctx, id)
+	// A deleted project is kept for a while (the bucket's lifecycle rule expires it), so a
+	// delete can be undone by hand. No copy, no delete. A save landing in between changes
+	// the version to copy, so look again.
+	var err error
+	for try := 0; try < 3; try++ {
+		var m objectMeta
+		if m, err = s.head(ctx, id); err != nil {
+			return err
+		}
+		if err = s.copy(ctx, objectKey(id), deletedKey(id), m.etag); !errors.Is(err, errPrecondition) {
+			break
+		}
+	}
 	if err != nil {
 		return err
 	}
-	// A deleted project is kept for a while (the bucket's lifecycle rule expires it), so a
-	// delete can be undone by hand. No copy, no delete.
-	if err := s.copy(ctx, objectKey(id), deletedKey(id), m.etag); err != nil {
-		return err
-	}
+	// Its owner too, so a restored project isn't left open to anyone with the link.
+	_ = s.copy(ctx, accessKey(id), deletedAccessKey(id), "")
 	// The project goes first: if a later step fails, a leftover image or access record is
 	// harmless, whereas a project without its access record would be open to anyone.
 	res, err := s.do(ctx, http.MethodDelete, objectKey(id), nil, nil, nil)
@@ -214,17 +223,21 @@ func (s *R2) Delete(ctx context.Context, id string) error {
 
 var errPrecondition = errors.New("precondition failed")
 
-// Recovery copies: the version a save replaced, and deleted projects. The bucket's
-// lifecycle rule expires both prefixes (see HANDOVER), so they never pile up.
-func previousKey(id string) string { return "previous/" + id + ".json" }
-func deletedKey(id string) string  { return "deleted/" + id + ".json" }
+// Recovery copies: each version a save replaced, and deleted projects with their access
+// records. The bucket's lifecycle rules expire both prefixes (see HANDOVER), so they never
+// pile up.
+func previousKey(id string, version int) string {
+	return fmt.Sprintf("previous/%s/%d.json", id, version)
+}
+func deletedKey(id string) string       { return "deleted/" + id + ".json" }
+func deletedAccessKey(id string) string { return "deleted/" + id + ".access.json" }
 
 // copy copies an object within the bucket on the server side, only if it is still the
-// version with etag `match`.
+// version with etag `match` (any version if empty).
 func (s *R2) copy(ctx context.Context, from, to, match string) error {
-	h := http.Header{
-		"X-Amz-Copy-Source":          {"/" + url.PathEscape(s.Bucket) + "/" + from},
-		"X-Amz-Copy-Source-If-Match": {match},
+	h := http.Header{"X-Amz-Copy-Source": {"/" + url.PathEscape(s.Bucket) + "/" + from}}
+	if match != "" {
+		h.Set("X-Amz-Copy-Source-If-Match", match)
 	}
 	res, err := s.do(ctx, http.MethodPut, to, nil, h, nil)
 	if err != nil {

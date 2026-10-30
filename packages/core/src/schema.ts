@@ -31,10 +31,27 @@ export const Wall = z.object({
    * openings. Absent means a wall.
    */
   kind: z.enum(['wall', 'boundary']).optional(),
+  /**
+   * Which side of its line (a to b) the wall's thickness lies on: absent means centred on
+   * it; 'left' or 'right' puts one face on the line. Walls of different thickness in a
+   * row keep a flush face this way, as an outside wall does where it thins at a window.
+   */
+  side: z.enum(['left', 'right']).optional(),
 });
 export type Wall = z.infer<typeof Wall>;
 
 export const isBoundary = (w: Pick<Wall, 'kind'>): boolean => w.kind === 'boundary';
+
+/** How far a wall's left and right faces lie from its line (left is +n, n = d rotated +90°). */
+export function wallFaces(w: Pick<Wall, 'thickness' | 'side' | 'kind'>): {
+  left: number;
+  right: number;
+} {
+  if (isBoundary(w)) return { left: 0, right: 0 };
+  if (w.side === 'left') return { left: w.thickness, right: 0 };
+  if (w.side === 'right') return { left: 0, right: w.thickness };
+  return { left: w.thickness / 2, right: w.thickness / 2 };
+}
 
 export const OpeningKind = z.enum(['door', 'window', 'passage']);
 export type OpeningKind = z.infer<typeof OpeningKind>;
@@ -109,7 +126,7 @@ export const Underlay = z.object({
 });
 export type Underlay = z.infer<typeof Underlay>;
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const Project = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),

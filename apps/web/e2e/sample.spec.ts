@@ -9,7 +9,7 @@ test('a first visit opens its own copy of the sample flat, saved on the server',
   await expect(page).toHaveURL(/\?p=prj_/);
   await expect(page.getByTestId('sync')).toHaveText('Saved');
   await expect(page.getByText('You’re exploring a sample flat')).toBeVisible();
-  await expect(floorArea(page)).toHaveText('69.0 m²');
+  await expect(floorArea(page)).toHaveText('68.9 m²');
   await expect(page.locator('.room-list li')).toHaveCount(9);
   // It is the published HDB plan, traced, with the plan itself underneath.
   await expect(page.locator('image.underlay')).toBeVisible();
@@ -62,7 +62,7 @@ test('a wall can become a room boundary: rooms stay, the wall goes from 3D', asy
   await expect(page.locator('line.boundary')).toHaveCount(3);
   await page.keyboard.press('Escape');
   await expect(page.locator('.room-list li')).toHaveCount(9);
-  await expect(floorArea(page)).toHaveText('69.0 m²');
+  await expect(floorArea(page)).toHaveText('68.9 m²');
   await page.keyboard.press('Control+z');
   await expect(page.locator('line.boundary')).toHaveCount(2);
 });

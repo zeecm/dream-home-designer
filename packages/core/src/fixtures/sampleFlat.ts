@@ -13,28 +13,38 @@ export const SAMPLE_PLAN_KEY =
  * The sample flat new visitors explore: an HDB 3-room Type 4 flat (Blk 39A), traced from
  * its published floor plan, which sits under it already scaled. Two bedrooms, two
  * bathrooms, a kitchen, a household shelter, an air-con ledge, and an L-shaped living and
- * dining room with a dry kitchen marked off by room boundaries. It is built with the same
- * commands the editor uses, so it is always a valid, fully connected plan, then given
- * readable ids. Coordinates are wall centre lines in millimetres from the plan's top left.
+ * dining room with a dry kitchen marked off by room boundaries.
  *
- *    0.15      3.3        6.35          10.16
- *  0 +---------+----------+
- *    | Main    | Bedroom  |
- *    | bedroom |          +--------------+ 1.58
- *    |         +----------+              |
- *    |         |   (3.1)     Living and  |
- *    +----+----+----+.......  dining     | 4.33
- *    |Bath|Bath     |Dry   :             |
- *    | 1  | 2       |kitch.:             |
- *    +----+----+----+------+-----+-------+ 6.15
- *    |Ledge|   |Kitchen    |Shel-|
- *    +-----+   |           |ter  |         7.17 / 7.89
- *              +-----------+-----+         8.89
+ * Every wall has the thickness measured off the plan: 300 mm structural walls, the 255 mm
+ * shelter, 150 mm window walls, 100 mm partitions. Where a wall changes thickness along its
+ * run with one face flush (the bedroom's 300 mm wall thinning to 100 mm, the shelter's wall
+ * carrying on as the kitchen's 125 mm one), the line is that face and the wall lies to one
+ * side of it. It is built with the same commands the editor uses, so it is always a valid,
+ * fully connected plan, then given readable ids. Coordinates are in millimetres from the
+ * outside corner at the plan's top left.
+ *
+ *    0.15     2.95 3.27      6.5           10.15
+ *  0 +---------+----+--------+
+ *    | Main         | Bedroom|
+ *    | bedroom      |        +-------------+ 1.57
+ *    |         +----+--------+             |
+ *    |         D  corridor      Living and |
+ *    +----+----+-----+.......:  dining     | 4.32
+ *    |Bath|Bath 2    |Dry    :             |
+ *    | 1  |          |kitchen:             |
+ *    +----+-+--+-----+-------+-----+-------+ 6.04 / 6.17
+ *    |Ledge |  |Kitchen      |Shel-|
+ *    +------+  |             |ter  |         7.17 / 7.90
+ *              +-------------+-----+         8.88
  */
 export function sampleFlatProject(id = 'prj_sample'): Project {
   let s: EditorDoc = { doc: blankProject('3-room HDB (sample)', id), history: emptyHistory() };
   const level = () => s.doc.levels[0] as Level;
-  const wall = (pts: [number, number][], thickness = 0.1, kind?: 'boundary') => {
+  const wall = (
+    pts: [number, number][],
+    thickness: number,
+    opts: { side?: 'left' | 'right'; kind?: 'boundary' } = {},
+  ) => {
     for (let i = 0; i + 1 < pts.length; i++) {
       const [ax, ay] = pts[i] as [number, number];
       const [bx, by] = pts[i + 1] as [number, number];
@@ -42,87 +52,180 @@ export function sampleFlatProject(id = 'prj_sample'): Project {
         level(),
         { point: { x: ax / 1000, y: ay / 1000 } },
         { point: { x: bx / 1000, y: by / 1000 } },
-        { thickness, ...(kind ? { kind } : {}) },
+        { thickness: thickness / 1000, ...opts },
       );
       s = dispatch(s, r.command);
     }
   };
 
-  // The outside of the flat, then the shelter's thick walls.
+  // Outside walls, clockwise from the top left. The left wall is 300 mm all the way down,
+  // structural or round the main bedroom's side window.
   wall(
     [
-      [150, 72],
-      [6352, 72],
-      [6352, 1579],
-      [10158, 1579],
-      [10158, 6150],
-      [8136, 6150],
-      [8136, 7891],
-      [6435, 7891],
-      [6435, 8886],
-      [3285, 8886],
-      [3285, 6150],
-      [2450, 6150],
-      [2450, 7171],
-      [150, 7171],
-      [150, 72],
+      [150, 75],
+      [6495, 75],
     ],
-    0.2,
+    150,
+  );
+  // The bedroom's outside wall: 300 mm, then 100 mm, its living-room face flush (x 6.495).
+  wall(
+    [
+      [6495, 75],
+      [6495, 2156],
+    ],
+    300,
+    { side: 'left' },
   );
   wall(
     [
-      [8136, 6150],
-      [6435, 6150],
-      [6435, 7891],
+      [6495, 2156],
+      [6495, 3098],
     ],
-    0.2,
+    100,
+    { side: 'left' },
   );
-  wall([
-    [150, 6150],
-    [2450, 6150],
-  ]);
-  wall([
-    [3285, 6150],
-    [6435, 6150],
-  ]);
-  wall([
-    [150, 4327],
-    [4545, 4327],
-    [4545, 6150],
-  ]);
-  wall([
-    [3285, 72],
-    [3285, 4327],
-  ]);
-  wall([
-    [2450, 4327],
-    [2450, 6150],
-  ]);
-  wall([
-    [6352, 1579],
-    [6352, 3100],
-    [3285, 3100],
-  ]);
+  wall(
+    [
+      [6495, 1574],
+      [10152, 1574],
+    ],
+    150,
+  );
+  wall(
+    [
+      [10152, 1574],
+      [10152, 6044],
+    ],
+    254,
+  );
+  // The front wall, then the household shelter's 255 mm walls.
+  wall(
+    [
+      [10152, 6044],
+      [8120, 6044],
+      [6291, 6044],
+    ],
+    255,
+  );
+  wall(
+    [
+      [8120, 6044],
+      [8120, 7897],
+      [6291, 7897],
+    ],
+    255,
+  );
+  // The shelter's kitchen wall, carrying on as the kitchen's 125 mm outside wall: one
+  // flush kitchen face (x 6.291), the walls lying to the shelter's side of it.
+  wall(
+    [
+      [6291, 6044],
+      [6291, 7897],
+    ],
+    255,
+    { side: 'right' },
+  );
+  wall(
+    [
+      [6291, 7897],
+      [6291, 8875],
+    ],
+    125,
+    { side: 'right' },
+  );
+  wall(
+    [
+      [6291, 8875],
+      [3266, 8875],
+    ],
+    300,
+  );
+  wall(
+    [
+      [3266, 8875],
+      [3266, 6171],
+    ],
+    150,
+  );
+  wall(
+    [
+      [150, 75],
+      [150, 7170],
+    ],
+    300,
+  );
+  // The air-con ledge's parapets.
+  wall(
+    [
+      [150, 7170],
+      [2491, 7170],
+      [2491, 6171],
+    ],
+    105,
+  );
+  // Inside: bathrooms, bedrooms and the walls between.
+  wall(
+    [
+      [150, 6171],
+      [6291, 6171],
+    ],
+    106,
+  );
+  wall(
+    [
+      [150, 4322],
+      [4532, 4322],
+    ],
+    100,
+  );
+  wall(
+    [
+      [4532, 4322],
+      [4532, 6171],
+    ],
+    300,
+  );
+  wall(
+    [
+      [2397, 4322],
+      [2397, 6171],
+    ],
+    90,
+  );
+  wall(
+    [
+      [3266, 75],
+      [3266, 3098],
+    ],
+    100,
+  );
+  wall(
+    [
+      [2950, 4322],
+      [2950, 3098],
+      [6495, 3098],
+    ],
+    100,
+  );
   // The dry kitchen is open to the living room: dashed boundaries, not walls.
   wall(
     [
-      [4545, 4327],
-      [6435, 4327],
-      [6435, 6150],
+      [4532, 4322],
+      [6291, 4322],
+      [6291, 6044],
     ],
-    0.1,
-    'boundary',
+    100,
+    { kind: 'boundary' },
   );
-
   const rooms: [string, string, Vec2][] = [
-    ['Main bedroom', 'wood-walnut', { x: 1.7, y: 1.5 }],
+    ['Main bedroom', 'wood-walnut', { x: 1.5, y: 1.5 }],
     ['Bedroom', 'wood-oak', { x: 4.8, y: 1.5 }],
-    ['Living and dining', 'wood-oak', { x: 8.3, y: 4.3 }],
-    ['Dry kitchen', 'tile-grey', { x: 5.5, y: 5.2 }],
-    ['Bath/WC 1', 'tile-grey', { x: 1.1, y: 5.5 }],
-    ['Bath/WC 2', 'tile-grey', { x: 3.5, y: 5.5 }],
-    ['Kitchen', 'tile-grey', { x: 4.6, y: 7.9 }],
-    ['Household shelter', 'paint-white', { x: 7.3, y: 7.2 }],
+    ['Living and dining', 'wood-oak', { x: 8.3, y: 3.8 }],
+    ['Dry kitchen', 'tile-grey', { x: 5.4, y: 5.2 }],
+    ['Bath/WC 1', 'tile-grey', { x: 1.3, y: 5.2 }],
+    ['Bath/WC 2', 'tile-grey', { x: 3.5, y: 5.2 }],
+    ['Kitchen', 'tile-grey', { x: 4.7, y: 7.5 }],
+    ['Household shelter', 'paint-white', { x: 7.2, y: 7.0 }],
     ['Air-con ledge', 'paint-white', { x: 1.3, y: 6.7 }],
   ];
   for (const [name, floorMaterial, at] of rooms) {
@@ -133,22 +236,24 @@ export function sampleFlatProject(id = 'prj_sample'): Project {
     s = dispatch(s, updateRoom(level().id, room.id, { name, floorMaterial }));
   }
 
-  // Each opening is placed on the wall nearest `at`; a door swings to the side `at` is on.
+  // Each opening goes on the wall nearest `at`, at the width measured off the plan; a door
+  // swings to the side `at` is on.
   const openings: [OpeningKind, number, Vec2][] = [
-    ['door', 1.0, { x: 9.257, y: 6.09 }], // main door
-    ['door', 0.8, { x: 3.24, y: 3.725 }], // main bedroom
-    ['door', 0.8, { x: 3.944, y: 3.05 }], // bedroom
-    ['door', 0.7, { x: 1.7, y: 4.28 }], // bath 1
-    ['door', 0.7, { x: 3.9, y: 4.28 }], // bath 2
-    ['door', 0.8, { x: 6.39, y: 7.218 }], // shelter
-    ['passage', 1.2, { x: 5.81, y: 6.15 }], // kitchen
-    ['window', 1.8, { x: 1.828, y: 0.072 }], // main bedroom
-    ['window', 1.6, { x: 0.15, y: 3.387 }], // main bedroom, side
-    ['window', 1.8, { x: 4.678, y: 0.072 }], // bedroom
-    ['window', 2.4, { x: 8.17, y: 1.579 }], // living
-    ['window', 0.8, { x: 1.062, y: 6.15 }], // bath 1
-    ['window', 0.6, { x: 2.867, y: 6.15 }], // bath 2
-    ['window', 1.2, { x: 3.285, y: 7.3 }], // kitchen
+    ['door', 1.0, { x: 9.109, y: 5.85 }], // main door
+    ['door', 0.9, { x: 2.85, y: 3.705 }], // main bedroom
+    ['door', 0.9, { x: 3.915, y: 3.0 }], // bedroom
+    ['door', 0.9, { x: 1.526, y: 4.42 }], // bath 1, folding into the bathroom
+    ['door', 0.9, { x: 3.74, y: 4.42 }], // bath 2, folding into the bathroom
+    ['door', 0.8, { x: 6.24, y: 7.219 }], // shelter, opening into the kitchen
+    ['passage', 1.1, { x: 5.737, y: 6.171 }], // dry kitchen to kitchen
+    ['window', 1.8, { x: 1.82, y: 0.075 }], // main bedroom
+    ['window', 1.75, { x: 0.15, y: 3.388 }], // main bedroom, side
+    ['window', 1.8, { x: 4.672, y: 0.075 }], // bedroom
+    ['window', 2.4, { x: 8.16, y: 1.574 }], // living
+    ['window', 0.8, { x: 1.05, y: 6.171 }], // bath 1
+    ['window', 0.5, { x: 2.8, y: 6.171 }], // bath 2
+    ['window', 1.8, { x: 3.266, y: 7.471 }], // kitchen, side
+    ['window', 1.45, { x: 5.567, y: 8.875 }], // kitchen, back
   ];
   for (const [kind, width, at] of openings) {
     const p = placeOpening(planGeometry(level()), at, width, 0.3);

@@ -1,4 +1,4 @@
-import { type Level, type Vec2, isBoundary } from './schema';
+import { type Level, type Vec2, isBoundary, wallFaces } from './schema';
 
 /**
  * Plan-space outline of one wall with mitred ends. "Left" is the side of the normal
@@ -32,7 +32,9 @@ interface End {
   atA: boolean;
   /** Unit direction pointing away from the junction along the wall. */
   e: Vec2;
-  half: number;
+  /** How far the faces on the +90° and -90° sides of e lie from the line. */
+  ccwW: number;
+  cwW: number;
   angle: number;
   /** Corner on the +90° side of e (towards the next wall by angle). */
   ccw?: Vec2;
@@ -74,13 +76,14 @@ export function wallFootprints(level: Level): Footprints {
     if (len < 1e-9) continue;
     const d = { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
     dirs.set(w.id, d);
-    const half = w.thickness / 2;
-    for (const [vid, e, atA] of [
-      [w.a, d, true],
-      [w.b, { x: -d.x, y: -d.y }, false],
+    // Seen from a, the +90° side of e is the wall's left; from b it is the wall's right.
+    const faces = wallFaces(w);
+    for (const [vid, e, atA, ccwW, cwW] of [
+      [w.a, d, true, faces.left, faces.right],
+      [w.b, { x: -d.x, y: -d.y }, false, faces.right, faces.left],
     ] as const) {
       const list = ends.get(vid) ?? [];
-      list.push({ wallId: w.id, atA, e, half, angle: Math.atan2(e.y, e.x) });
+      list.push({ wallId: w.id, atA, e, ccwW, cwW, angle: Math.atan2(e.y, e.x) });
       ends.set(vid, list);
     }
   }
@@ -93,17 +96,17 @@ export function wallFootprints(level: Level): Footprints {
     const k = list.length;
     if (k === 1) {
       const end = list[0] as End;
-      end.ccw = offset(v, perp(end.e), end.half);
-      end.cw = offset(v, perp(end.e), -end.half);
+      end.ccw = offset(v, perp(end.e), end.ccwW);
+      end.cw = offset(v, perp(end.e), -end.cwW);
       continue;
     }
     for (let i = 0; i < k; i++) {
       const p = list[i] as End;
       const q = list[(i + 1) % k] as End;
-      const pSide = offset(v, perp(p.e), p.half);
-      const qSide = offset(v, perp(q.e), -q.half);
+      const pSide = offset(v, perp(p.e), p.ccwW);
+      const qSide = offset(v, perp(q.e), -q.cwW);
       const corner = intersect(pSide, p.e, qSide, q.e);
-      const limit = MITER_LIMIT * Math.max(p.half, q.half);
+      const limit = (MITER_LIMIT * Math.max(p.ccwW + p.cwW, q.ccwW + q.cwW)) / 2;
       if (corner && Math.hypot(corner.x - v.x, corner.y - v.y) <= limit) {
         p.ccw = corner;
         q.cw = corner;

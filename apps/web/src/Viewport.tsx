@@ -88,11 +88,9 @@ export function Viewport() {
   const stick = useRef<Vec2>({ x: 0, y: 0 });
   const projectId = useProject().id;
   const pose = useRef<WalkPose | null>(null);
-  // Leaving a walk remembers where it was for this project; the next one picks up there.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: on leaving a walk only
+  // Leaving a walk forgets the pose here (WalkControls hands it to saveWalkPose as it goes).
   useEffect(() => {
     if (!walking) {
-      if (pose.current) saveWalkPose(projectId, pose.current);
       pose.current = null;
       stick.current = { x: 0, y: 0 }; // a thumb still on the stick when the walk ended
     }
@@ -139,6 +137,7 @@ export function Viewport() {
             stick={stick}
             pose={pose}
             initial={() => loadWalkPose(projectId, level)}
+            onLeave={(p) => saveWalkPose(projectId, p)}
           />
         ) : (
           <>

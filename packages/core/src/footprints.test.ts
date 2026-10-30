@@ -3,7 +3,8 @@ import { emptyLevel } from './factory';
 import { hdb4RoomLevel } from './fixtures/hdb4room';
 import { MITER_LIMIT, footprintPolygon, footprintSpans, wallFootprints } from './footprints';
 import { signedArea } from './geometry';
-import type { Level, Vec2 } from './schema';
+import { wallFrame } from './plan';
+import type { Level, Vec2, Wall } from './schema';
 
 type W = [id: string, a: string, b: string, thickness: number];
 
@@ -143,5 +144,54 @@ describe('wallFootprints', () => {
         expect(u, w.id).toBeLessThanOrEqual(len + 0.1 + 1e-9);
       }
     }
+  });
+});
+
+describe('walls to one side of their line', () => {
+  const sided = (l: Level, side: 'left' | 'right') => {
+    for (const w of Object.values(l.walls)) w.side = side;
+    return l;
+  };
+
+  it('keep a flush face where a thick wall runs on into a thin one', () => {
+    // Along +x, the right side is -y: both walls lie below the line y = 0.
+    const l = sided(
+      makeLevel({ a: [0, 0], b: [2, 0], c: [4, 0] }, [
+        ['thick', 'a', 'b', 0.3],
+        ['thin', 'b', 'c', 0.1],
+      ]),
+      'right',
+    );
+    const f = wallFootprints(l).walls;
+    for (const p of [f.thick?.aL, f.thick?.bL, f.thin?.aL, f.thin?.bL])
+      expect(p?.y).toBeCloseTo(0, 9);
+    near(f.thick?.aR, 0, -0.3);
+    near(f.thin?.bR, 4, -0.1);
+  });
+
+  it('mitre on their faces at a corner, so a room traced on its inside faces stays square', () => {
+    // A corner traced on the room side: the walls lie outside the line (to its left here).
+    const l = sided(
+      makeLevel({ a: [0, 0], b: [3, 0], c: [3, 3] }, [
+        ['x', 'a', 'b', 0.2],
+        ['y', 'b', 'c', 0.3],
+      ]),
+      'right',
+    );
+    const f = wallFootprints(l);
+    // The faces on the line meet exactly at the corner; the outer faces meet at their mitre.
+    near(f.walls.x?.bL, 3, 0);
+    near(f.walls.y?.aL, 3, 0);
+    near(f.walls.x?.bR, 3.3, -0.2);
+    near(f.walls.y?.aR, 3.3, -0.2);
+    expect(f.hubs).toHaveLength(0);
+  });
+
+  it('put the frame on the wall centre line, off the drawn line', () => {
+    const l = sided(makeLevel({ a: [0, 0], b: [2, 0] }, [['w', 'a', 'b', 0.3]]), 'left');
+    const fp = wallFootprints(l).walls.w;
+    const frame = wallFrame(l, l.walls.w as Wall, fp);
+    expect(frame?.a.y).toBeCloseTo(0.15, 9);
+    expect(frame?.half).toBeCloseTo(0.15, 9);
   });
 });

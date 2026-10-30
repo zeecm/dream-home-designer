@@ -75,6 +75,7 @@ export function useWallTool(ctx: ToolContext): ToolController {
     setTurn(null);
     chain.current = new Set();
     steps.current = [];
+    lastDir.current = { x: 1, y: 0 };
   };
 
   // Undo can remove the corner the chain is drawing from; start over rather than fail.
@@ -248,7 +249,8 @@ export function useWallTool(ctx: ToolContext): ToolController {
       const s0 = fromPos && worldToScreen(view, size, fromPos);
       const len = fromPos && at ? Math.hypot(at.x - fromPos.x, at.y - fromPos.y) : 0;
       // A second row, once a length is typed: which way it goes, and any problem.
-      const more = !!typed || !!error;
+      // Turning needs a wall to turn from: not before the chain's first.
+      const more = (!!typed && steps.current.length > 0) || !!error;
       return (
         <g className="draw-overlay" pointerEvents="none">
           {from && (
@@ -444,6 +446,7 @@ export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolControl
       }
       setPlace(null);
       setMissed(null);
+      setOnBoundary(null);
       const r = addOpening(ctx.level.id, {
         wallId: at.wallId,
         kind,
@@ -714,7 +717,8 @@ export function useCalibrateTool(ctx: ToolContext): ToolController {
       const lineY =
         a && b ? (worldToScreen(view, size, a).y + worldToScreen(view, size, b).y) / 2 : 0;
       const cardH = asking ? 96 : 40;
-      const cardY = asking && lineY < size.height / 2 ? size.height - cardH - 12 : 12;
+      // At the bottom, it sits above the corner controls (Fit) and the scale bar.
+      const cardY = asking && lineY < size.height / 2 ? size.height - cardH - 72 : 12;
       return (
         <g pointerEvents="none">
           <foreignObject
@@ -809,7 +813,10 @@ export function useRoomTool(ctx: ToolContext): ToolController {
   const thickness = useEditor((s) => s.wallThickness);
   const tool = useEditor((s) => s.tool);
   useEffect(() => {
-    if (tool !== 'room') setStart(null);
+    if (tool !== 'room') {
+      setStart(null);
+      setError(null);
+    }
   }, [tool]);
 
   const snapAt = (p: PlanPointer): SnapResult =>
@@ -884,7 +891,11 @@ export function useRoomTool(ctx: ToolContext): ToolController {
       // way out; a problem shows here too, since there may be no pointer to show it by.
       const notice = (error || start) && (
         <foreignObject x={8} y={8} width={Math.max(0, size.width - 16)} height={52}>
-          <div className="draw-bar draw-bar-notice">
+          <div
+            className="draw-bar draw-bar-notice"
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerUp={(e) => e.stopPropagation()}
+          >
             <span
               className={error ? 'draw-bar-error' : undefined}
               role={error ? 'alert' : undefined}

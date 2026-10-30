@@ -7,11 +7,13 @@ import {
   type Vec2,
   type Wall,
   isBoundary,
+  wallFaces,
 } from './schema';
 
 /**
- * A wall's local frame: origin at vertex a, unit direction d towards b, left normal n,
- * and where each mitred side starts and ends (u measured along d from a).
+ * A wall's local frame: origin on the wall's centre line level with vertex a (on its line,
+ * unless the wall lies to one side of it), unit direction d towards b, left normal n, and
+ * where each mitred side starts and ends (u measured along d from a).
  */
 export interface WallFrame {
   wall: Wall;
@@ -41,13 +43,17 @@ export function wallFrame(
     fp && !boundary
       ? footprintSpans(fp, a, d)
       : { left: [0, length] as [number, number], right: [0, length] as [number, number] };
+  const n = { x: -d.y, y: d.x };
+  // A wall to one side of its line has its centre line off it, by half the difference.
+  const faces = wallFaces(wall);
+  const shift = (faces.left - faces.right) / 2;
   return {
     wall,
-    a: { x: a.x, y: a.y },
+    a: { x: a.x + n.x * shift, y: a.y + n.y * shift },
     d,
-    n: { x: -d.y, y: d.x },
+    n,
     length,
-    half: boundary ? 0 : wall.thickness / 2,
+    half: (faces.left + faces.right) / 2,
     left: spans.left,
     right: spans.right,
   };

@@ -17,6 +17,8 @@ export class NewerSchemaError extends Error {
 const MIGRATIONS: Record<number, (doc: Record<string, unknown>) => Record<string, unknown>> = {
   // 2 adds the optional Wall.kind ('boundary'); every version-1 wall is a wall as it was.
   1: (doc) => doc,
+  // 3 adds the optional Wall.side; every version-2 wall stays centred on its line.
+  2: (doc) => doc,
 };
 
 export function migrate(input: unknown): unknown {

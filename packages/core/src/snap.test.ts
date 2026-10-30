@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { hdb4RoomLevel } from './fixtures/hdb4room';
-import { projectOnSegment, segmentIntersection, snapCorner, snapPoint } from './snap';
+import { sampleFlatProject } from './fixtures/sampleFlat';
+import { wallLine } from './geometry';
+import { cornerSpot, projectOnSegment, segmentIntersection, snapCorner, snapPoint } from './snap';
 
 const l = hdb4RoomLevel();
 
@@ -87,5 +89,31 @@ describe('snapCorner', () => {
       x: 7,
       y: 8.5,
     });
+  });
+});
+
+describe('cornerSpot', () => {
+  const l = sampleFlatProject().levels[0]!;
+  const along = (id: string, p: { x: number; y: number }) => {
+    const line = wallLine(l, l.walls[id]!);
+    return projectOnSegment(p, line.a, line.b).t * line.length;
+  };
+
+  it('is the middle of a wall with nothing there', () => {
+    const p = cornerSpot(l, 'w_bath-wc-1_bath-wc-2');
+    expect(p).toEqual({ x: 2.397, y: 5.2465 });
+  });
+
+  it('moves to a jamb rather than into a door or window', () => {
+    for (const w of Object.values(l.walls)) {
+      const p = cornerSpot(l, w.id);
+      if (!p) continue;
+      const len = wallLine(l, w).length;
+      const u = along(w.id, p);
+      for (const o of Object.values(l.openings).filter((o) => o.wallId === w.id)) {
+        const inside = u > o.t * len - o.width / 2 + 1e-6 && u < o.t * len + o.width / 2 - 1e-6;
+        expect(inside, `${w.id} at ${u}`).toBe(false);
+      }
+    }
   });
 });

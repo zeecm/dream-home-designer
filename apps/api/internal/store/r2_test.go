@@ -194,13 +194,16 @@ func TestR2KeepsThePreviousVersionAndDeletedProjects(t *testing.T) {
 	f, srv := newFakeS3(t)
 	s := NewR2(srv.URL, "bucket", "test", "secret")
 	ctx := context.Background()
+	if err := s.CreateAccess(ctx, "prj_a", Access{OwnerHash: "h"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Create(ctx, Record{ID: "prj_a", Name: "Flat", Doc: []byte(`{"v":1}`)}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Update(ctx, "prj_a", 1, "Flat", func(int) ([]byte, error) { return []byte(`{"v":2}`), nil }); err != nil {
 		t.Fatal(err)
 	}
-	if got := string(f.objects[previousKey("prj_a")].body); got != `{"v":1}` {
+	if got := string(f.objects[previousKey("prj_a", 1)].body); got != `{"v":1}` {
 		t.Fatalf("previous version: %q", got)
 	}
 	if err := s.Delete(ctx, "prj_a"); err != nil {
@@ -209,8 +212,33 @@ func TestR2KeepsThePreviousVersionAndDeletedProjects(t *testing.T) {
 	if got := string(f.objects[deletedKey("prj_a")].body); got != `{"v":2}` {
 		t.Fatalf("deleted copy: %q", got)
 	}
+	if _, ok := f.objects[deletedAccessKey("prj_a")]; !ok {
+		t.Fatal("deleted project's access record wasn't kept")
+	}
 	if _, err := s.Get(ctx, "prj_a"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("deleted project still there: %v", err)
+	}
+}
+
+func TestR2DeleteRetriesWhenASaveLandsMidway(t *testing.T) {
+	f, srv := newFakeS3(t)
+	s := NewR2(srv.URL, "bucket", "test", "secret")
+	ctx := context.Background()
+	if err := s.Create(ctx, Record{ID: "prj_a", Name: "Flat", Doc: []byte(`{"v":1}`)}); err != nil {
+		t.Fatal(err)
+	}
+	// A save lands between the delete's HEAD and its copy.
+	f.beforePut = func() {
+		other := NewR2(srv.URL, "bucket", "test", "secret")
+		if _, err := other.Update(ctx, "prj_a", 1, "Flat", func(int) ([]byte, error) { return []byte(`{"v":2}`), nil }); err != nil {
+			t.Error(err)
+		}
+	}
+	if err := s.Delete(ctx, "prj_a"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if got := string(f.objects[deletedKey("prj_a")].body); got != `{"v":2}` {
+		t.Fatalf("deleted copy: %q", got)
 	}
 }
 

@@ -27,11 +27,14 @@ test('walk through the flat in first person, then leave with Esc', async ({ page
       const id = new URL(location.href).searchParams.get('p');
       return JSON.parse(localStorage.getItem(`dhd:walk:${id}`) ?? 'null')?.at;
     });
+  // The 3D view's own renderer lets the walk go a moment after the button comes back.
+  await expect.poll(spot).toBeTruthy();
   const left = await spot();
-  expect(left).toBeTruthy();
   await page.getByRole('button', { name: 'Walk through' }).click();
   await expect(page.getByRole('button', { name: 'Leave walk' })).toBeVisible();
   await page.getByRole('button', { name: 'Leave walk' }).click();
+  await expect(page.getByRole('button', { name: 'Walk through' })).toBeVisible();
+  await page.waitForTimeout(300);
   const again = await spot();
   expect(again.x).toBeCloseTo(left.x, 3);
   expect(again.y).toBeCloseTo(left.y, 3);
