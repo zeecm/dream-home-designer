@@ -1,19 +1,15 @@
 import { moveVertex, renameProject, roomArea } from '@dhd/core';
 import { useEffect, useState } from 'react';
 import { Viewport } from './Viewport';
-import { type SyncStatus, useProject, useStore } from './store';
-
-const PROJECT_ID = 'prj_demo';
+import { type SyncStatus, initialProjectId, useProject, useStore } from './store';
 const LEVEL = 'lvl_ground';
 
-function syncLabel(s: SyncStatus): string {
+function syncLabel(s: SyncStatus, local: boolean): string {
   switch (s.kind) {
     case 'loading':
       return 'Loading…';
-    case 'offline':
-      return 'Offline';
     case 'saved':
-      return `Saved · v${s.version}`;
+      return local ? `Saved in this browser · v${s.version}` : `Saved · v${s.version}`;
     case 'dirty':
       return 'Unsaved changes';
     case 'saving':
@@ -119,12 +115,14 @@ function Rooms() {
 }
 
 export function App() {
-  const { load, save, undo, redo } = useStore.getState();
+  const { load, save, undo, redo, createProject } = useStore.getState();
   const sync = useStore((s) => s.sync);
+  const local = useStore((s) => s.backend?.kind === 'local');
+  const projectId = useProject().id;
   const canUndo = useStore((s) => s.canUndo);
   const canRedo = useStore((s) => s.canRedo);
   useShortcuts();
-  useEffect(() => void load(PROJECT_ID), [load]);
+  useEffect(() => void load(initialProjectId()), [load]);
 
   return (
     <div className="app">
@@ -137,18 +135,21 @@ export function App() {
           <button type="button" onClick={redo} disabled={!canRedo} title="Redo (Ctrl/⌘ ⇧ Z)">
             Redo
           </button>
-          <button type="button" onClick={() => void save()} disabled={sync.kind === 'offline'}>
+          <button type="button" onClick={() => void createProject()}>
+            New plan
+          </button>
+          <button type="button" onClick={() => void save()} disabled={sync.kind === 'loading'}>
             Save
           </button>
           <button
             type="button"
-            onClick={() => void load(PROJECT_ID)}
-            title="Discard local state and reload from the server"
+            onClick={() => void load(projectId)}
+            title="Discard unsaved changes and reopen the saved version"
           >
             Reload
           </button>
           <span className={`sync sync-${sync.kind}`} data-testid="sync">
-            {syncLabel(sync)}
+            {syncLabel(sync, local)}
           </span>
         </div>
       </header>
@@ -159,7 +160,6 @@ export function App() {
           <WallSlider />
           <p className="hint">Drag, then undo. Changes save 2 s after you stop.</p>
         </section>
-        {sync.kind === 'offline' && <p className="banner">{sync.message}</p>}
         {sync.kind === 'error' && <p className="banner">{sync.message}</p>}
       </aside>
       <main>

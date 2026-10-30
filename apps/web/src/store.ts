@@ -3,6 +3,7 @@ import {
   type DispatchOptions,
   type EditorDoc,
   type Project,
+  blankProject,
   canRedo,
   canUndo,
   dispatch as coreDispatch,
@@ -12,11 +13,19 @@ import {
   hdb4RoomProject,
 } from '@dhd/core';
 import { create } from 'zustand';
-import { ConflictError, NotFoundError, createProject, getProject, saveProject } from './api';
+import {
+  type Backend,
+  ConflictError,
+  NotFoundError,
+  apiAvailable,
+  localBackend,
+  remoteBackend,
+} from './backend';
+
+export const SAMPLE_ID = 'prj_demo';
 
 export type SyncStatus =
   | { kind: 'loading' }
-  | { kind: 'offline'; message: string }
   | { kind: 'saved'; version: number }
   | { kind: 'dirty' }
   | { kind: 'saving' }
@@ -24,6 +33,7 @@ export type SyncStatus =
   | { kind: 'error'; message: string };
 
 interface State {
+  backend: Backend | null;
   editor: EditorDoc;
   sync: SyncStatus;
   canUndo: boolean;
@@ -32,26 +42,66 @@ interface State {
   undo: () => void;
   redo: () => void;
   load: (id: string) => Promise<void>;
+  /** Creates a blank project, stores it and opens it. */
+  createProject: (name?: string) => Promise<void>;
   save: () => Promise<void>;
 }
 
 const AUTOSAVE_MS = 2000;
 let autosaveTimer: ReturnType<typeof setTimeout> | undefined;
+let backendPromise: Promise<Backend> | undefined;
+
+/** Probes the API once; without one, projects live in this browser. */
+function resolveBackend(): Promise<Backend> {
+  backendPromise ??= apiAvailable().then((ok) => (ok ? remoteBackend : localBackend()));
+  return backendPromise;
+}
+
+/** Puts the open project in the URL (?p=id) so reloads and links reopen it. */
+function rememberProject(id: string) {
+  const url = new URL(window.location.href);
+  if (url.searchParams.get('p') !== id) {
+    url.searchParams.set('p', id);
+    window.history.replaceState(null, '', url);
+  }
+  try {
+    window.localStorage.setItem('dhd:last', id);
+  } catch {
+    // Storage can be disabled; the URL still works.
+  }
+}
+
+export function initialProjectId(): string {
+  const fromUrl = new URL(window.location.href).searchParams.get('p');
+  if (fromUrl) return fromUrl;
+  try {
+    return window.localStorage.getItem('dhd:last') ?? SAMPLE_ID;
+  } catch {
+    return SAMPLE_ID;
+  }
+}
 
 export const useStore = create<State>((set, get) => {
   const commit = (editor: EditorDoc) => {
     set({ editor, canUndo: canUndo(editor), canRedo: canRedo(editor) });
-    const s = get().sync;
-    if (s.kind === 'offline' || s.kind === 'conflict') return;
+    if (get().sync.kind === 'conflict') return;
     set({ sync: { kind: 'dirty' } });
     clearTimeout(autosaveTimer);
     autosaveTimer = setTimeout(() => void get().save(), AUTOSAVE_MS);
   };
 
-  const replace = (doc: Project, sync: SyncStatus) =>
-    set({ editor: { doc, history: emptyHistory() }, sync, canUndo: false, canRedo: false });
+  const open = (doc: Project) => {
+    set({
+      editor: { doc, history: emptyHistory() },
+      sync: { kind: 'saved', version: doc.version },
+      canUndo: false,
+      canRedo: false,
+    });
+    rememberProject(doc.id);
+  };
 
   return {
+    backend: null,
     editor: { doc: hdb4RoomProject(), history: emptyHistory() },
     sync: { kind: 'loading' },
     canUndo: false,
@@ -61,41 +111,68 @@ export const useStore = create<State>((set, get) => {
       const next = coreDispatch(get().editor, cmd, opts);
       if (next !== get().editor) commit(next);
     },
-    undo: () => commit(coreUndo(get().editor)),
-    redo: () => commit(coreRedo(get().editor)),
+    undo: () => {
+      const next = coreUndo(get().editor);
+      if (next !== get().editor) commit(next);
+    },
+    redo: () => {
+      const next = coreRedo(get().editor);
+      if (next !== get().editor) commit(next);
+    },
 
     load: async (id) => {
       clearTimeout(autosaveTimer);
       set({ sync: { kind: 'loading' } });
       try {
+        const backend = await resolveBackend();
+        set({ backend });
         let doc: Project;
         try {
-          doc = await getProject(id);
+          doc = await backend.get(id);
         } catch (e) {
           if (!(e instanceof NotFoundError)) throw e;
+          if (id !== SAMPLE_ID) {
+            // A stale link or a project from another browser: fall back to the sample.
+            return get().load(SAMPLE_ID);
+          }
           try {
-            doc = await createProject(hdb4RoomProject(id));
+            doc = await backend.create(hdb4RoomProject(id));
           } catch (createErr) {
             // Another tab (or React StrictMode's double effect) created it first.
             if (!(createErr instanceof ConflictError)) throw createErr;
-            doc = await getProject(id);
+            doc = await backend.get(id);
           }
         }
-        replace(doc, { kind: 'saved', version: doc.version });
+        open(doc);
       } catch (e) {
-        replace(hdb4RoomProject(id), {
-          kind: 'offline',
-          message: `API unreachable, working locally (${(e as Error).message})`,
+        set({
+          sync: { kind: 'error', message: `Could not open the project: ${(e as Error).message}` },
+        });
+      }
+    },
+
+    createProject: async (name) => {
+      clearTimeout(autosaveTimer);
+      if (get().sync.kind === 'dirty') await get().save();
+      set({ sync: { kind: 'loading' } });
+      try {
+        const backend = await resolveBackend();
+        open(await backend.create(blankProject(name)));
+      } catch (e) {
+        set({
+          sync: { kind: 'error', message: `Could not create a project: ${(e as Error).message}` },
         });
       }
     },
 
     save: async () => {
       clearTimeout(autosaveTimer);
+      const backend = get().backend;
+      if (!backend) return;
       const sent = get().editor.doc;
       set({ sync: { kind: 'saving' } });
       try {
-        const version = await saveProject(sent);
+        const version = await backend.save(sent);
         // Stamp the new version onto the live doc without touching undo history.
         const live = get().editor;
         set({ editor: { ...live, doc: { ...live.doc, version } } });
@@ -111,6 +188,21 @@ export const useStore = create<State>((set, get) => {
       }
     },
   };
+});
+
+/**
+ * Local saves are synchronous under the hood, so flushing on pagehide keeps the last
+ * edit. For the API, warn instead: a request started during unload may not finish.
+ */
+window.addEventListener('pagehide', () => {
+  const { sync, backend, save } = useStore.getState();
+  if (sync.kind === 'dirty' && backend?.kind === 'local') void save();
+});
+window.addEventListener('beforeunload', (e) => {
+  const { sync, backend } = useStore.getState();
+  if (backend?.kind === 'remote' && (sync.kind === 'dirty' || sync.kind === 'saving')) {
+    e.preventDefault();
+  }
 });
 
 export const useProject = () => useStore((s) => s.editor.doc);
