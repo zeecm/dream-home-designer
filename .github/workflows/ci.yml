@@ -15,9 +15,8 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      # No lockfile is committed yet; switch to --frozen-lockfile once pnpm-lock.yaml lands.
-      - run: pnpm install --no-frozen-lockfile
-      - run: pnpm exec biome lint .
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm --filter @dhd/web build
