@@ -560,6 +560,10 @@ event, detail, country). No project ids, plan content or personal data. Query:
 `curl -X POST https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/analytics_engine/sql -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --data "SELECT blob1 AS event, SUM(_sample_interval) AS n FROM dhd_events WHERE timestamp > NOW() - INTERVAL '7' DAY GROUP BY event"`.
 The Go API logs it locally (`POST /telemetry`, 204).
 
+**Wall tool on phones:** a finger drag previews the first wall (and a room, in Room) from where
+it went down (`ToolController.move`'s `dragFrom`); the last wall's ends show as handles, and a
+finger on one drags that corner (`grabs`; snapped, settled, one undo step) instead of drawing.
+
 **Walk-through link:** Share offers `?p=<id>&walk=1`, which opens the plan straight into a
 walk (once; the parameter is then dropped from the address).
 
@@ -609,6 +613,25 @@ blocked by the network proxy and Sketchfab needs an API key.
 algorithm notes and the checklists for Phases 3 to 5.
 
 ## 7. Conventions
+
+**Acceptance testing method (owner, 30 Oct: "add more testing methods").** Basic phone
+interactions got through earlier rounds (no wall preview under the finger; no way to adjust
+a wall just drawn). Every acceptance round now does all of these, and reports a missing
+affordance as major:
+1. **Fingers only on a phone profile** (CDP touch events; no keyboard, no mouse), and the
+   same tasks with a mouse on desktop.
+2. **Mid-gesture checks:** for every drag (draw, move, resize, look around), a screenshot
+   while the finger is still down. Feedback must show before the lift.
+3. **Make it, then fix it:** after creating anything by touch, adjust it by touch: in the
+   same tool straight away, and in Select. Undo each step.
+4. **First use:** start from "New blank plan", not the sample, and follow the
+   getting-started guide as a newcomer would.
+5. **Slow device:** repeat the touch tasks with CPU throttling
+   (`Emulation.setCPUThrottlingRate`, rate 4) to surface lost taps and merged moves.
+6. **Expectations:** for each step, write what a person used to phone apps would try next,
+   then try it.
+The e2e suite follows the same rules for the phone (`mobile.spec.ts` checks the first wall's
+preview mid-drag and drags its end).
 
 - Every document mutation goes through a `Command` in `packages/core/src/commands.ts`.
   UI code never mutates the project directly.

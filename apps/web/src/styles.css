@@ -1411,6 +1411,11 @@ h3.field-label {
 .typed.error {
   stroke: var(--negative);
 }
+.end-handle {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 2.5px;
+}
 .snap-marker {
   fill: none;
   stroke: var(--accent);

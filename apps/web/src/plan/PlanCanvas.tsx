@@ -274,8 +274,9 @@ export function PlanCanvas() {
       pan.current = p.screen;
       return;
     }
-    // Drawing tools follow the finger as they follow a hovering mouse.
-    active.move(p, t.claimed);
+    // Drawing tools follow the finger as they follow a hovering mouse, and see where a drag
+    // they'll get whole (touchDrag) began, to preview it.
+    active.move(p, t.claimed, !t.claimed && active.touchDrag ? t.start : undefined);
   };
   const onTouchUp = (e: React.PointerEvent) => {
     // A busy page can merge a quick drag's moves into the lift: play its last stretch as a
@@ -312,6 +313,7 @@ export function PlanCanvas() {
     touch.current = null;
     pan.current = null;
     if (t?.claimed && ctx) active.up(t.start);
+    else if (ctx) active.touchCancel?.();
   };
 
   // Pointer events don't reliably carry a click count, so detect double-clicks here.

@@ -50,7 +50,11 @@ export interface ToolContext {
 export interface ToolController {
   /** Return true to claim the gesture; otherwise a drag on the canvas pans. */
   down: (p: PlanPointer) => boolean;
-  move: (p: PlanPointer, dragging: boolean) => void;
+  /**
+   * The pointer moved. `dragFrom` is where a finger drag that will end in `touchDrag`
+   * started, so a tool can preview from there before the finger lifts (a first wall, a room).
+   */
+  move: (p: PlanPointer, dragging: boolean, dragFrom?: PlanPointer) => void;
   up: (p: PlanPointer) => void;
   key: (e: KeyboardEvent) => boolean;
   overlay: (ctx: ToolContext) => ReactNode;
@@ -66,12 +70,14 @@ export interface ToolController {
    * line's end), so the drag goes to down, move and up as with a mouse instead.
    */
   grabs?: (p: PlanPointer) => boolean;
+  /** A finger drag ended without acting (the system took the touch): drop its preview. */
+  touchCancel?: () => void;
 }
 
 export const TOOL_HINTS: Record<Tool, string> = {
   select:
     'Tap or click to select; drag a corner or a door to move it. Tab and the arrow keys work too; double-click a wall to add a corner.',
-  wall: 'Tap or click each corner, or drag from corner to corner. Type a length for an exact wall. Joining an existing wall, or Done, finishes.',
+  wall: 'Tap or click each corner, or drag from corner to corner. Type a length for an exact wall. Drag an end of the wall you just drew to adjust it. Joining an existing wall, or Done, finishes.',
   room: 'Drag from one corner to the opposite one, or tap both, to draw a rectangular room.',
   door: 'Pick a width, then tap or click a wall to add a door.',
   window: 'Pick a width, then tap or click a wall to add a window.',

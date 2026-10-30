@@ -174,3 +174,84 @@ test('on a phone: a swipe looks around while standing still', async ({ page }) =
     spot?.split('rotate')[0],
   );
 });
+
+/** A finger that goes down, moves and stays down until `lift` is called. */
+async function finger(page: Page, from: { x: number; y: number }) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ ...from, id: 0 }],
+  });
+  return {
+    async moveTo(to: { x: number; y: number }, steps = 8) {
+      const at = { ...from };
+      for (let i = 1; i <= steps; i++) {
+        const p = { x: at.x + ((to.x - at.x) * i) / steps, y: at.y + ((to.y - at.y) * i) / steps };
+        await cdp.send('Input.dispatchTouchEvent', {
+          type: 'touchMove',
+          touchPoints: [{ ...p, id: 0 }],
+        });
+        await page.waitForTimeout(16);
+      }
+      from.x = to.x;
+      from.y = to.y;
+    },
+    async lift() {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await page.waitForTimeout(100);
+    },
+  };
+}
+
+test('on a phone: the first wall shows under the finger, and its ends can be dragged to adjust it', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.evaluate(() => document.fonts.ready);
+  await page.getByRole('button', { name: 'Projects' }).tap();
+  await page.getByRole('button', { name: 'New blank plan' }).tap();
+  await expect(page.getByText('Start your plan')).toBeVisible();
+  await page.getByRole('button', { name: /^Wall/ }).tap();
+  const walls = page.locator('.facts dd').first();
+
+  // Mid-drag, before lifting: the wall is drawn under the finger with its length.
+  let r = await planBox(page);
+  const f = await finger(page, { x: r.x + r.width * 0.25, y: r.y + r.height * 0.55 });
+  await f.moveTo({ x: r.x + r.width * 0.65, y: r.y + r.height * 0.55 });
+  // (A level line has no height, so it counts as drawn, not as "visible".)
+  await expect(page.locator('.ghost-wall')).toHaveCount(1);
+  await expect(page.locator('.draw-overlay text.num').first()).toHaveText(/^\d+\.\d\d m$/);
+  await f.lift();
+  await expect(walls).toHaveText('1');
+
+  // Its far end, dragged: the same wall gets longer, no new wall.
+  r = await planBox(page);
+  const handles = page.locator('.end-handle');
+  await expect(handles).toHaveCount(2);
+  const end = await handles.nth(1).boundingBox();
+  if (!end) throw new Error('no end handle');
+  const from = { x: end.x + end.width / 2, y: end.y + end.height / 2 };
+  const g = await finger(page, from);
+  await g.moveTo({ x: from.x + 60, y: from.y });
+  await g.lift();
+  await expect(walls).toHaveText('1');
+  const moved = await handles.nth(1).boundingBox();
+  expect((moved?.x ?? 0) - end.x).toBeGreaterThan(40);
+  // One undo puts it back.
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().tap();
+  await expect
+    .poll(async () => (await handles.nth(1).boundingBox())?.x ?? 0)
+    .toBeLessThan(end.x + 5);
+  await expect(walls).toHaveText('1');
+
+  // A room previews mid-drag too.
+  await page.getByRole('button', { name: 'Done' }).tap();
+  await page.getByRole('button', { name: /^Room/ }).tap();
+  r = await planBox(page);
+  const h = await finger(page, { x: r.x + r.width * 0.2, y: r.y + r.height * 0.15 });
+  await h.moveTo({ x: r.x + r.width * 0.5, y: r.y + r.height * 0.4 });
+  await expect(page.locator('.ghost-room')).toBeVisible();
+  await h.lift();
+  await expect(walls).toHaveText('5');
+});
