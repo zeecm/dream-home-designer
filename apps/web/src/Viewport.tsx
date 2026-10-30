@@ -164,7 +164,11 @@ export function Viewport() {
               Walk through
             </button>
           )}
-          <p className="viewport-hint">Drag to orbit · right-drag to pan · scroll to zoom</p>
+          <p className="viewport-hint">
+            {coarsePointer()
+              ? 'Drag to orbit · pinch to zoom · two fingers to pan'
+              : 'Drag to orbit · right-drag to pan · scroll to zoom'}
+          </p>
         </>
       )}
     </div>

@@ -1,4 +1,5 @@
 import { levelBounds, planGeometry, underlayToWorld } from '@dhd/core';
+import type { Vec2 } from '@dhd/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type Tool, useEditor } from '../editor';
 import { useProject, useStore } from '../store';
@@ -140,12 +141,115 @@ export function PlanCanvas() {
     [v, size],
   );
 
+  // ---- touch: a touch waits until it's clear what the finger is doing. A tap acts where the
+  // finger lifts; a drag in a drawing tool previews under the finger and acts from where it
+  // started to where it lifts; a second finger turns it into pinch-zoom and two-finger pan,
+  // in every tool, without ever placing anything.
+  const touches = useRef(new Map<number, Vec2>());
+  const touch = useRef<{
+    start: PlanPointer;
+    moved: boolean;
+    /** Handed to the tool as a press (Select dragging a corner or door). */
+    claimed: boolean;
+  } | null>(null);
+  const gesture = useRef<{ dist: number; mid: Vec2 } | null>(null);
+  const screenOf = (e: { clientX: number; clientY: number }): Vec2 => {
+    const r = svgRef.current?.getBoundingClientRect();
+    return { x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0) };
+  };
+  const twoFingers = () => {
+    const [a, b] = [...touches.current.values()];
+    if (!a || !b) return null;
+    return {
+      dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+      mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+    };
+  };
+  const onTouchDown = (e: React.PointerEvent) => {
+    touches.current.set(e.pointerId, screenOf(e));
+    if (touches.current.size >= 2) {
+      // A second finger: whatever the first one was starting is called off.
+      if (touch.current?.claimed && ctx) active.up(touch.current.start);
+      touch.current = null;
+      pan.current = null;
+      gesture.current = twoFingers();
+      return;
+    }
+    if (gesture.current) return; // still lifting fingers from a pinch
+    touch.current = { start: pointer(e), moved: false, claimed: false };
+  };
+  const onTouchMove = (e: React.PointerEvent) => {
+    if (!touches.current.has(e.pointerId)) return;
+    touches.current.set(e.pointerId, screenOf(e));
+    if (gesture.current) {
+      const now = twoFingers();
+      if (!now) return;
+      const cur = useEditor.getState().view ?? v;
+      const panned = panBy(
+        cur,
+        now.mid.x - gesture.current.mid.x,
+        now.mid.y - gesture.current.mid.y,
+      );
+      setView(zoomAt(panned, size, now.mid, now.dist / gesture.current.dist), true);
+      gesture.current = now;
+      return;
+    }
+    const t = touch.current;
+    if (!t || !ctx) return;
+    const p = pointer(e);
+    if (!t.moved && Math.hypot(p.screen.x - t.start.screen.x, p.screen.y - t.start.screen.y) < 8) {
+      return;
+    }
+    if (!t.moved) {
+      t.moved = true;
+      if (tool === 'select') {
+        // Select acts on press: drag a corner or a door, or pan the plan.
+        t.claimed = active.down(t.start);
+        if (!t.claimed) pan.current = t.start.screen;
+      }
+    }
+    if (pan.current) {
+      setView(panBy(v, p.screen.x - pan.current.x, p.screen.y - pan.current.y), true);
+      pan.current = p.screen;
+      return;
+    }
+    // Drawing tools follow the finger as they follow a hovering mouse.
+    active.move(p, t.claimed);
+  };
+  const onTouchUp = (e: React.PointerEvent) => {
+    touches.current.delete(e.pointerId);
+    if (gesture.current) {
+      if (touches.current.size === 0) gesture.current = null;
+      return;
+    }
+    const t = touch.current;
+    touch.current = null;
+    if (pan.current) {
+      pan.current = null;
+      return;
+    }
+    if (!t || !ctx) return;
+    const end = pointer(e);
+    if (t.claimed) {
+      active.up(end);
+    } else if (t.moved && active.touchDrag) {
+      active.touchDrag(t.start, end);
+    } else {
+      active.down(t.moved ? end : t.start);
+      active.up(t.moved ? end : t.start);
+    }
+  };
+
   // Pointer events don't reliably carry a click count, so detect double-clicks here.
   const lastDown = useRef({ t: 0, x: 0, y: 0 });
   const onPointerDown = (e: React.PointerEvent) => {
     lastPointer.current = Date.now();
     setRing(false);
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    if (e.pointerType === 'touch') {
+      onTouchDown(e);
+      return;
+    }
     const now = performance.now();
     const prev = lastDown.current;
     const double =
@@ -162,6 +266,10 @@ export function PlanCanvas() {
     toolDrag.current = true;
   };
   const onPointerMove = (e: React.PointerEvent) => {
+    if (e.pointerType === 'touch') {
+      onTouchMove(e);
+      return;
+    }
     const p = pointer(e);
     if (pan.current) {
       setView(panBy(v, p.screen.x - pan.current.x, p.screen.y - pan.current.y), true);
@@ -171,6 +279,10 @@ export function PlanCanvas() {
     if (ctx) active.move(p, toolDrag.current);
   };
   const onPointerUp = (e: React.PointerEvent) => {
+    if (e.pointerType === 'touch') {
+      onTouchUp(e);
+      return;
+    }
     if (pan.current) {
       pan.current = null;
       setPanning(false);

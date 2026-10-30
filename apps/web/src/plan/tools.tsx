@@ -47,18 +47,25 @@ export interface ToolController {
   key: (e: KeyboardEvent) => boolean;
   overlay: (ctx: ToolContext) => ReactNode;
   cursor: string;
+  /**
+   * A one-finger drag on a touch screen, from `start` to where the finger lifted. Tools that
+   * draw between two points take both (a wall or room corner to corner, a scale line end to
+   * end); without this, the drag acts as a tap where the finger lifted.
+   */
+  touchDrag?: (start: PlanPointer, end: PlanPointer) => void;
 }
 
 export const TOOL_HINTS: Record<Tool, string> = {
   select:
-    'Click to select; Tab and the arrow keys work too. Double-click a wall to add a corner, or a room to rename it.',
-  wall: 'Click to place corners; type a length for an exact wall. Joining an existing corner or wall, Enter or a double-click finishes.',
-  room: 'Click two opposite corners to draw a rectangular room. Esc cancels.',
-  door: 'Pick a width, then click a wall to add a door.',
-  window: 'Pick a width, then click a wall to add a window.',
-  passage: 'Pick a width, then click a wall to add an opening.',
-  measure: 'Click two points to measure. Esc clears.',
-  calibrate: 'Click two points on the plan image, then type the real distance.',
+    'Tap or click to select; drag a corner or a door to move it. Tab and the arrow keys work too; double-click a wall to add a corner.',
+  wall: 'Tap or click each corner, or drag from corner to corner. Type a length for an exact wall. Joining an existing wall, or Done, finishes.',
+  room: 'Drag from one corner to the opposite one, or tap both, to draw a rectangular room.',
+  door: 'Pick a width, then tap or click a wall to add a door.',
+  window: 'Pick a width, then tap or click a wall to add a window.',
+  passage: 'Pick a width, then tap or click a wall to add an opening.',
+  measure: 'Tap both ends, or drag between them, to measure.',
+  calibrate:
+    'Tap both ends of a length you know on the plan image, or drag along it, then enter the real length.',
 };
 
 /** Rounds to a grid step unless Alt is held. */
@@ -302,6 +309,7 @@ export function useMeasureTool(ctx: ToolContext): ToolController {
 
   return {
     cursor: 'crosshair',
+    touchDrag: (a, b) => setPoints([snap(a), snap(b)]),
     down: (p) => {
       const at = snap(p);
       setPoints((prev) => (prev.length >= 2 ? [at] : [...prev, at]));

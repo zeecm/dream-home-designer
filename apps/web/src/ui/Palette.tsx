@@ -64,14 +64,14 @@ const OPENING_TITLES: Record<OpeningKind, string> = {
   passage: 'Opening width',
 };
 
-function ToolOptions({ tool }: { tool: Tool }) {
+export function ToolOptions({ tool, idPrefix = '' }: { tool: Tool; idPrefix?: string }) {
   const thickness = useEditor((s) => s.wallThickness);
   const widths = useEditor((s) => s.openingWidths);
   const { setWallThickness, setOpeningWidth } = useEditor.getState();
   if (tool === 'wall' || tool === 'room') {
     return (
       <Choices
-        id="wall-opts"
+        id={`${idPrefix}wall-opts`}
         title="New walls"
         presets={THICKNESS_PRESETS}
         value={thickness}
@@ -82,7 +82,7 @@ function ToolOptions({ tool }: { tool: Tool }) {
   if (tool === 'door' || tool === 'window' || tool === 'passage') {
     return (
       <Choices
-        id="opening-opts"
+        id={`${idPrefix}opening-opts`}
         title={OPENING_TITLES[tool]}
         presets={OPENING_PRESETS[tool]}
         value={widths[tool]}
@@ -91,6 +91,27 @@ function ToolOptions({ tool }: { tool: Tool }) {
     );
   }
   return null;
+}
+
+/**
+ * On phones and tablets the palette is a bar of icons, so the active tool's name, options
+ * and hint show at the top of the details panel instead (and Set scale's plan-image
+ * controls with them).
+ */
+export function ToolPanel() {
+  const tool = useEditor((s) => s.tool);
+  const only3d = useEditor((s) => s.viewMode === '3d');
+  const viewer = useStore((s) => s.role === 'viewer');
+  if (tool === 'select' || only3d || viewer) return null;
+  const def = TOOLS.find((t) => t.id === tool);
+  return (
+    <section className="tool-panel" aria-label={`${def?.label ?? 'Tool'} tool`}>
+      <p className="tool-panel-title">{def?.label}</p>
+      <p className="tool-panel-hint">{TOOL_HINTS[tool]}</p>
+      <ToolOptions tool={tool} idPrefix="panel-" />
+      {tool === 'calibrate' && <PlanImagePanel />}
+    </section>
+  );
 }
 
 export function Palette() {

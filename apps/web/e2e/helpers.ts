@@ -1,7 +1,8 @@
 import { type Page, expect } from '@playwright/test';
 
 export async function waitSaved(page: Page) {
-  await expect(page.getByTestId('sync')).toHaveText(/^Saved/);
+  // The first load probes the API, which can take a while under a busy parallel run.
+  await expect(page.getByTestId('sync')).toHaveText(/^Saved/, { timeout: 30_000 });
 }
 
 /** Opens a new blank plan in Plan view. */

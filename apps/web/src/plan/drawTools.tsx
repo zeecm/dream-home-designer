@@ -74,12 +74,17 @@ export function useWallTool(ctx: ToolContext): ToolController {
 
   /** Corners this chain created or started from, so returning to them doesn't end it. */
   const chain = useRef(new Set<string>());
+  /** Where each wall of the chain started, for "Undo last". */
+  const starts = useRef<string[]>([]);
+  /** The direction of the last wall, for a typed length with no pointer to aim by. */
+  const lastDir = useRef<Vec2>({ x: 1, y: 0 });
   const finish = () => {
     setFrom(null);
     setFirst(null);
     setTyped('');
     setError(null);
     chain.current = new Set();
+    starts.current = [];
   };
 
   // A new thickness starts a new chain (it is how people switch to inner walls).
@@ -90,13 +95,22 @@ export function useWallTool(ctx: ToolContext): ToolController {
     chain.current = new Set();
   }, [thickness]);
 
-  const commit = (end: WallEnd) => {
-    if (!from) return;
+  const commit = (end: WallEnd, start: WallEnd | null = from) => {
+    if (!start) return;
     try {
       const existed = new Set(Object.keys(ctx.level.vertices));
-      const r = drawWall(ctx.level, from, end, newWallOptions(thickness));
+      const level = useStore.getState().editor.doc.levels[0] ?? ctx.level;
+      const r = drawWall(level, start, end, newWallOptions(thickness));
       ctx.dispatch(r.command);
       setError(null);
+      starts.current.push(r.startVertexId);
+      const after = useStore.getState().editor.doc.levels[0];
+      const a = after?.vertices[r.startVertexId];
+      const b = after?.vertices[r.endVertexId];
+      if (a && b && Math.hypot(b.x - a.x, b.y - a.y) > 1e-9) {
+        const n = Math.hypot(b.x - a.x, b.y - a.y);
+        lastDir.current = { x: (b.x - a.x) / n, y: (b.y - a.y) / n };
+      }
       // The chain ends where it joins what is already drawn: back at its first corner,
       // on an existing corner, or on an existing wall. Free clicks keep it going.
       const closed = 'vertexId' in end && end.vertexId === first;
@@ -117,8 +131,50 @@ export function useWallTool(ctx: ToolContext): ToolController {
     }
   };
 
+  /** Adds the next wall at the typed length, towards the pointer (or on along the last wall). */
+  const addTyped = () => {
+    const len = parseLength(typed);
+    if (!fromPos || !len || len <= 0) {
+      setError('Enter a length such as 3200 (mm) or 3.2 m.');
+      return;
+    }
+    const target = snap?.point;
+    let d = lastDir.current;
+    if (target) {
+      const n = Math.hypot(target.x - fromPos.x, target.y - fromPos.y);
+      if (n > 0.05) d = { x: (target.x - fromPos.x) / n, y: (target.y - fromPos.y) / n };
+    }
+    setTyped('');
+    commit({ point: { x: fromPos.x + d.x * len, y: fromPos.y + d.y * len } });
+  };
+
+  /** Takes back the chain's last wall and carries on from where it started. */
+  const undoLast = () => {
+    const start = starts.current.pop();
+    useStore.getState().undo();
+    const level = useStore.getState().editor.doc.levels[0];
+    if (start && level?.vertices[start]) setFrom({ vertexId: start });
+    else finish();
+  };
+
   return {
     cursor: 'crosshair',
+    touchDrag: (start, end) => {
+      // A finger dragged from one corner to another draws that wall.
+      if (from) {
+        commit(endFor(snapAt(end)));
+        return;
+      }
+      const s0 = snapAt(start);
+      const s1 = snapPoint(ctx.level, end.world, {
+        tolerance: snapTolerance(ctx),
+        grid: 0.1,
+        from: s0.point,
+      });
+      setFirst(s0.vertexId ?? null);
+      chain.current = new Set(s0.vertexId ? [s0.vertexId] : []);
+      commit(endFor(s1), endFor(s0));
+    },
     down: (p) => {
       const s = snapAt(p);
       if (p.clicks === 2) {
@@ -146,20 +202,8 @@ export function useWallTool(ctx: ToolContext): ToolController {
         return true;
       }
       if (e.key === 'Enter' && from) {
-        const len = typed ? parseLength(typed) : null;
-        if (typed && fromPos && len && len > 0) {
-          const target = snap?.point ?? { x: fromPos.x + 1, y: fromPos.y };
-          let dx = target.x - fromPos.x;
-          let dy = target.y - fromPos.y;
-          const n = Math.hypot(dx, dy) || 1;
-          dx /= n;
-          dy /= n;
-          if (n < 1e-9) dx = 1;
-          setTyped('');
-          commit({ point: { x: fromPos.x + dx * len, y: fromPos.y + dy * len } });
-        } else {
-          finish();
-        }
+        if (typed) addTyped();
+        else finish();
         return true;
       }
       if (e.key === 'Escape' && from) {
@@ -175,6 +219,50 @@ export function useWallTool(ctx: ToolContext): ToolController {
       const len = fromPos && at ? Math.hypot(at.x - fromPos.x, at.y - fromPos.y) : 0;
       return (
         <g className="draw-overlay" pointerEvents="none">
+          {from && (
+            // While a chain is open: an exact length, take back the last wall, or finish.
+            // Buttons and a real field, so it all works without a keyboard.
+            <foreignObject
+              x={8}
+              y={8}
+              width={Math.max(0, size.width - 16)}
+              height={56}
+              pointerEvents="auto"
+            >
+              <form
+                className="draw-bar"
+                onPointerDown={(e) => e.stopPropagation()}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  addTyped();
+                }}
+              >
+                <input
+                  className="input num"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  aria-label="Next wall length"
+                  placeholder="Length, e.g. 3200"
+                  value={typed}
+                  onChange={(e) => setTyped(e.target.value)}
+                />
+                <button type="submit" className="btn" disabled={!typed}>
+                  Add
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={starts.current.length === 0}
+                  onClick={undoLast}
+                >
+                  Undo
+                </button>
+                <button type="button" className="btn btn-primary" onClick={finish}>
+                  Done
+                </button>
+              </form>
+            </foreignObject>
+          )}
           {s0 && s1 && (
             <>
               {snap?.angle !== undefined && (
@@ -204,8 +292,8 @@ export function useWallTool(ctx: ToolContext): ToolController {
             </>
           )}
           {s1 && <SnapMarker snap={snap} at={s1} />}
-          {s1 && (typed || error) && (
-            <g transform={`translate(${s1.x + 14} ${s1.y + 22})`}>
+          {s1 && error && (
+            <g transform={`translate(${Math.min(s1.x + 14, size.width - 270)} ${s1.y + 22})`}>
               <rect
                 x={0}
                 y={-14}
@@ -215,7 +303,7 @@ export function useWallTool(ctx: ToolContext): ToolController {
                 className={error ? 'typed error' : 'typed'}
               />
               <text x={8} y={2}>
-                {error ?? `Length: ${typed} ⏎`}
+                {error ?? `Length: ${typed}`}
               </text>
             </g>
           )}
@@ -397,13 +485,13 @@ export function useCalibrateTool(ctx: ToolContext): ToolController {
     const len = parseLength(typed);
     if (!p1 || !p2) return;
     if (!len || len <= 0) {
-      setError('Type the real length, e.g. 4.5 m or 4500 mm, then press Enter.');
+      setError('Enter the real length, e.g. 4500 (mm) or 4.5 m.');
       return;
     }
     const factor = len / Math.hypot(p2.x - p1.x, p2.y - p1.y);
     if (factor > 100 || factor < 0.01) {
       setError(
-        `That would change the scale ${factor > 1 ? 'up' : 'down'} more than 100×. Check the length and its unit, then press Enter.`,
+        `That would change the scale ${factor > 1 ? 'up' : 'down'} more than 100×. Check the length and its unit.`,
       );
       return;
     }
@@ -431,6 +519,11 @@ export function useCalibrateTool(ctx: ToolContext): ToolController {
 
   return {
     cursor: 'crosshair',
+    // A finger dragged along the dimension line marks both ends at once.
+    touchDrag: (a, b) => {
+      setPoints(points.length === 1 && points[0] ? [points[0], b.world] : [a.world, b.world]);
+      setError(null);
+    },
     down: (p) => {
       if (points.length >= 2) setPoints([p.world]);
       else setPoints((prev) => [...prev, p.world]);
@@ -466,7 +559,7 @@ export function useCalibrateTool(ctx: ToolContext): ToolController {
       const banner = !useStoreUnderlay()
         ? 'Set scale needs a plan image. Upload one from the Plan image panel first.'
         : points.length < 2
-          ? `Set scale ${step}/2 · Click both ends of a wall whose length you know (${points.length}/2 clicked).`
+          ? `Set scale ${step}/2 · Tap or click both ends of a length you know, or drag along it (${points.length}/2).`
           : 'Set scale 2/2 · Type its real length and press Enter (e.g. 4.5 m or 4500 mm).';
       const asking = points.length === 2;
       return (
@@ -497,7 +590,7 @@ export function useCalibrateTool(ctx: ToolContext): ToolController {
                     className="input num"
                     inputMode="decimal"
                     autoComplete="off"
-                    placeholder="e.g. 4500 mm or 4.5 m"
+                    placeholder="e.g. 4500 (mm) or 4.5 m"
                     // biome-ignore lint/a11y/noAutofocus: the next step is typing this length
                     autoFocus
                     value={typed}
@@ -602,6 +695,11 @@ export function useRoomTool(ctx: ToolContext): ToolController {
 
   return {
     cursor: 'crosshair',
+    // A finger dragged corner to corner draws the room in one go.
+    touchDrag: (a, b) => {
+      build(start ?? snapAt(a), snapAt(b).point);
+      setStart(null);
+    },
     down: (p) => {
       const s = snapAt(p);
       if (!start) {

@@ -136,7 +136,7 @@ Writes are rate-limited per IP at the Worker (60/min). IDs must match `^[a-z0-9]
 
 **Tests:**
 - 126 core and 12 render unit tests, plus 22 web unit tests.
-- A 10-test end-to-end suite.
+- An 11-test end-to-end suite, one of them on a phone with touch only.
 - Go tests, including a store contract test that has passed against live R2.
 
 **Independent acceptance testing, round 1, found:** cropped Split view, the Esc handling in
@@ -316,6 +316,33 @@ owner's plan):**
   - a save refused with 403 turns the tab view-only with a notice.
 - **Deploy order:** a web app that expects roles must not meet an API without them, or every
   visitor becomes a viewer. Deploy the API first.
+
+**Mobile (from a fingers-only audit):**
+- **Touch on the plan:**
+  - A tap acts where the finger lifts.
+  - A one-finger drag in a drawing tool previews under the finger and acts from start to end
+    (`ToolController.touchDrag`): a wall or room corner to corner, a scale or measure line end
+    to end.
+  - Select drags a corner or door, or pans.
+  - Two fingers pinch-zoom and pan in every tool, and never place anything.
+- **Wall tool:** a drawing bar (length field, Add, Undo, Done) shows while a chain is open.
+- **Set scale:** a real length field and button.
+- **Details panel:**
+  - On phones and tablets it shows the active tool's name, hint and options (thickness or
+    widths), and Set scale's plan-image controls.
+  - On phones it folds to one row when there's nothing to edit.
+- **Top bar:** the project menu is no longer clipped, and the save status shows as a dot on
+  phones.
+- **Touch targets:** they are at least 40–44 px on coarse pointers.
+- **Testing:** `e2e/mobile.spec.ts` drives a phone with touch events only. Earlier acceptance
+  rounds used keyboard events a phone can't send, which is how the Set scale and menu bugs got
+  through; every mobile check now uses fingers only.
+- **Still open:**
+  - landscape phones get the desktop layout;
+  - placing points on lift with a magnifier;
+  - draggable calibration points;
+  - room deletion;
+  - auto-zoom to a PDF's drawing.
 
 **Sample flat:** `sampleFlatProject` (core fixtures) is a 96 m² HDB-style 4-room flat with a
 service yard, kitchen, household shelter, two bathrooms, three bedrooms and an L-shaped

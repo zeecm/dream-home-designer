@@ -15,10 +15,12 @@ import {
   updateWall,
   wallLine,
 } from '@dhd/core';
+import { useEffect, useState } from 'react';
 import { useEditor } from '../editor';
 import { OPENING_PRESETS, ROOM_NAMES } from '../presets';
 import { useProject, useStore } from '../store';
 import { formatArea, formatLength } from '../units';
+import { ToolPanel } from './Palette';
 import { LengthField, Segmented, SelectField, TextField } from './fields';
 import { icons } from './icons';
 
@@ -34,7 +36,14 @@ const THICKNESS_HINT = 'HDB walls are usually 0.10 m inside and 0.20 m on the ou
 export function Inspector() {
   const level = useProject().levels[0];
   const selection = useEditor((s) => s.selection);
+  const tool = useEditor((s) => s.tool);
   const viewer = useStore((s) => s.role === 'viewer');
+  // On a phone the panel folds to one row when there's nothing to edit, so the plan gets
+  // the screen; it opens for a selection or a drawing tool, or by hand.
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new selection or tool decides afresh
+  useEffect(() => setUserOpen(null), [selection, tool]);
+  const open = userOpen ?? (!!selection || tool !== 'select');
   if (!level) return null;
   let body = <PlanSummary level={level} />;
   // Keyed by object: another selection mounts fresh fields, and the old ones commit any
@@ -50,7 +59,16 @@ export function Inspector() {
     body = <RoomInspector key={key} level={level} id={selection.id} />;
   }
   return (
-    <aside className="panel inspector" aria-label="Details">
+    <aside className={`panel inspector${open ? '' : ' inspector-folded'}`} aria-label="Details">
+      <button
+        type="button"
+        className="inspector-toggle"
+        aria-expanded={open}
+        onClick={() => setUserOpen(!open)}
+      >
+        {open ? 'Hide details' : 'Show plan details'}
+      </button>
+      <ToolPanel />
       {/* A view-only link shows the details but can't change them. */}
       <fieldset className="inspector-body" disabled={viewer}>
         {body}
