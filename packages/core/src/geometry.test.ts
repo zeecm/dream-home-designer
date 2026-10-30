@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { hdb4RoomLevel, hdb4RoomProject } from './fixtures/hdb4room';
-import { levelBounds, roomArea, signedArea, wallLine, wallPieces } from './geometry';
+import {
+  labelPoint,
+  levelBounds,
+  pointInPolygon,
+  polygonCentroid,
+  roomArea,
+  signedArea,
+  wallLine,
+  wallPieces,
+} from './geometry';
 import type { Opening } from './schema';
 import { Project } from './schema';
 
@@ -114,5 +123,46 @@ describe('wallPieces', () => {
     ]);
     const solid = p.reduce((s, q) => s + (q.u1 - q.u0) * (q.y1 - q.y0), 0);
     expect(solid).toBeCloseTo(5 * 2.6 - 1 * 2.1 - 1.5 * 1.2);
+  });
+});
+
+describe('polygon helpers', () => {
+  const L = [
+    { x: 0, y: 0 },
+    { x: 4, y: 0 },
+    { x: 4, y: 1 },
+    { x: 1, y: 1 },
+    { x: 1, y: 4 },
+    { x: 0, y: 4 },
+  ];
+
+  it('area centroid of a rectangle is its centre, either winding', () => {
+    const r = [
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+      { x: 4, y: 2 },
+      { x: 0, y: 2 },
+    ];
+    expect(polygonCentroid(r)).toEqual({ x: 2, y: 1 });
+    expect(polygonCentroid([...r].reverse())).toEqual({ x: 2, y: 1 });
+  });
+
+  it('point in polygon handles an L shape', () => {
+    expect(pointInPolygon({ x: 0.5, y: 3 }, L)).toBe(true);
+    expect(pointInPolygon({ x: 2, y: 2 }, L)).toBe(false);
+  });
+
+  it('label point stays inside a thin L whose centroid falls outside', () => {
+    const thin = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 0.5 },
+      { x: 0.5, y: 0.5 },
+      { x: 0.5, y: 10 },
+      { x: 0, y: 10 },
+    ];
+    expect(pointInPolygon(polygonCentroid(thin), thin)).toBe(false);
+    expect(pointInPolygon(labelPoint(thin), thin)).toBe(true);
+    expect(pointInPolygon(labelPoint(L), L)).toBe(true);
   });
 });

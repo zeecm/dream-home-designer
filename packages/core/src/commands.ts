@@ -126,6 +126,25 @@ export function deleteWall(levelId: string, wallId: string): Command {
   };
 }
 
+/** Deletes a corner and every wall that meets it, in one undo step. */
+export function deleteVertex(levelId: string, vertexId: string): Command {
+  return {
+    label: 'Delete corner',
+    recipe: (d) => {
+      const lvl = level(d, levelId);
+      for (const w of Object.values(lvl.walls)) {
+        if (w.a === vertexId || w.b === vertexId) deleteWall(levelId, w.id).recipe(d);
+      }
+      if (lvl.vertices[vertexId]) {
+        delete lvl.vertices[vertexId];
+        for (const room of Object.values(lvl.rooms)) {
+          if (room.loop.includes(vertexId)) delete lvl.rooms[room.id];
+        }
+      }
+    },
+  };
+}
+
 export function addOpening(
   levelId: string,
   opening: Omit<Opening, 'id'>,

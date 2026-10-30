@@ -1,178 +1,112 @@
-import { moveVertex, renameProject, roomArea } from '@dhd/core';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Viewport } from './Viewport';
-import { type SyncStatus, initialProjectId, useProject, useStore } from './store';
-const LEVEL = 'lvl_ground';
+import { type Tool, type ViewMode, useEditor } from './editor';
+import { PlanCanvas } from './plan/PlanCanvas';
+import { initialProjectId, useProject, useStore } from './store';
+import { Inspector } from './ui/Inspector';
+import { Palette, TOOLS } from './ui/Palette';
+import { TopBar } from './ui/TopBar';
+import { icons } from './ui/icons';
 
-function syncLabel(s: SyncStatus, local: boolean): string {
-  switch (s.kind) {
-    case 'loading':
-      return 'Loading…';
-    case 'saved':
-      return local ? `Saved in this browser · v${s.version}` : `Saved · v${s.version}`;
-    case 'dirty':
-      return 'Unsaved changes';
-    case 'saving':
-      return 'Saving…';
-    case 'conflict':
-      return `Changed elsewhere (v${s.serverVersion})`;
-    case 'error':
-      return 'Save failed';
-  }
-}
+const isTyping = (t: EventTarget | null) =>
+  t instanceof HTMLElement &&
+  (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName));
+
+const VIEW_KEYS: Record<string, ViewMode> = { '1': 'plan', '2': 'split', '3': '3d' };
 
 function useShortcuts() {
-  const { undo, redo, save } = useStore.getState();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const { undo, redo, save } = useStore.getState();
+      const ed = useEditor.getState();
       const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
       const k = e.key.toLowerCase();
-      if (k === 'z' && !e.shiftKey) undo();
-      else if ((k === 'z' && e.shiftKey) || k === 'y') redo();
-      else if (k === 's') void save();
-      else return;
+      if (mod) {
+        if (isTyping(e.target) && k !== 's') return; // let fields keep their own undo
+        if (k === 'z' && !e.shiftKey) undo();
+        else if ((k === 'z' && e.shiftKey) || k === 'y') redo();
+        else if (k === 's') void save();
+        else return;
+        e.preventDefault();
+        return;
+      }
+      if (isTyping(e.target) || e.altKey) return;
+      const tool = TOOLS.find((t) => t.key.toLowerCase() === k);
+      if (tool) {
+        ed.setTool(tool.id as Tool);
+      } else if (VIEW_KEYS[k]) {
+        ed.setViewMode(VIEW_KEYS[k] as ViewMode);
+      } else if (k === 'f') {
+        ed.requestFit();
+      } else if (e.key === 'Escape') {
+        // Tools handle their own Escape first (the canvas listener runs before this one
+        // only when a tool claims it); otherwise clear the selection, then the tool.
+        if (ed.selection) ed.select(null);
+        else if (ed.tool !== 'select') ed.setTool('select');
+        else return;
+      } else {
+        return;
+      }
       e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo, save]);
-}
-
-function ProjectName() {
-  const name = useProject().name;
-  const dispatch = useStore((s) => s.dispatch);
-  const [draft, setDraft] = useState(name);
-  useEffect(() => setDraft(name), [name]);
-  const commit = () => {
-    const v = draft.trim();
-    if (v && v !== name) dispatch(renameProject(v));
-    else setDraft(name);
-  };
-  return (
-    <input
-      className="name"
-      aria-label="Project name"
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-    />
-  );
-}
-
-/**
- * Phase 0 stand-in for the plan editor: slides the Bedroom 2 / Master wall to prove
- * that edits flow store -> 3D, coalesce into one undo step, and autosave.
- */
-function WallSlider() {
-  const level = useProject().levels[0];
-  const dispatch = useStore((s) => s.dispatch);
-  const x = level?.vertices.v10?.x;
-  if (x === undefined || !level?.vertices.v5) return null;
-  return (
-    <label className="field">
-      <span>Master bedroom wall · x = {x.toFixed(2)} m</span>
-      <input
-        type="range"
-        min={5.6}
-        max={9.6}
-        step={0.05}
-        value={x}
-        onChange={(e) => {
-          const nx = Number(e.target.value);
-          const opts = { coalesceKey: 'slide:master-wall' };
-          dispatch(moveVertex(LEVEL, 'v10', { x: nx, y: 4.5 }), opts);
-          dispatch(moveVertex(LEVEL, 'v5', { x: nx, y: 8.5 }), opts);
-        }}
-      />
-    </label>
-  );
-}
-
-function Rooms() {
-  const level = useProject().levels[0];
-  if (!level) return null;
-  const rooms = Object.values(level.rooms);
-  const total = rooms.reduce((s, r) => s + roomArea(level, r), 0);
-  return (
-    <section>
-      <h2>Rooms</h2>
-      <ul className="rooms">
-        {rooms.map((r) => (
-          <li key={r.id}>
-            <span>{r.name}</span>
-            <span className="num">{roomArea(level, r).toFixed(1)} m²</span>
-          </li>
-        ))}
-        <li className="total">
-          <span>Total</span>
-          <span className="num">{total.toFixed(1)} m²</span>
-        </li>
-      </ul>
-    </section>
-  );
+  }, []);
 }
 
 let started = false;
 
-export function App() {
-  const { load, save, undo, redo, createProject } = useStore.getState();
+function Notice() {
+  const notice = useStore((s) => s.notice);
+  const dismiss = useStore((s) => s.dismissNotice);
   const sync = useStore((s) => s.sync);
-  const local = useStore((s) => s.backend?.kind === 'local');
-  const projectId = useProject().id;
-  const canUndo = useStore((s) => s.canUndo);
-  const canRedo = useStore((s) => s.canRedo);
+  const text = notice ?? (sync.kind === 'error' ? sync.message : null);
+  if (!text) return null;
+  return (
+    <output className={`notice${sync.kind === 'error' && !notice ? ' notice-error' : ''}`}>
+      <span>{text}</span>
+      {notice && (
+        <button type="button" className="icon-btn" aria-label="Dismiss" onClick={dismiss}>
+          {icons.close}
+        </button>
+      )}
+    </output>
+  );
+}
+
+export function App() {
+  const { id: projectId, name } = useProject();
+  const viewMode = useEditor((s) => s.viewMode);
   useShortcuts();
+
   useEffect(() => {
     // StrictMode runs effects twice in dev; only start once.
     if (started) return;
     started = true;
     const id = initialProjectId();
-    void (id ? load(id) : useStore.getState().openSample());
-  }, [load]);
+    const { load, openSample } = useStore.getState();
+    void (id ? load(id) : openSample());
+  }, []);
+
+  // A different project starts with a clean editor and a fitted view.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the open project changes
+  useEffect(() => useEditor.getState().reset(), [projectId]);
 
   return (
     <div className="app">
-      <header>
-        <ProjectName />
-        <div className="actions">
-          <button type="button" onClick={undo} disabled={!canUndo} title="Undo (Ctrl/⌘ Z)">
-            Undo
-          </button>
-          <button type="button" onClick={redo} disabled={!canRedo} title="Redo (Ctrl/⌘ ⇧ Z)">
-            Redo
-          </button>
-          <button type="button" onClick={() => void createProject()}>
-            New plan
-          </button>
-          <button type="button" onClick={() => void save()} disabled={sync.kind === 'loading'}>
-            Save
-          </button>
-          <button
-            type="button"
-            onClick={() => void load(projectId)}
-            title="Discard unsaved changes and reopen the saved version"
-          >
-            Reload
-          </button>
-          <span className={`sync sync-${sync.kind}`} data-testid="sync">
-            {syncLabel(sync, local)}
-          </span>
-        </div>
-      </header>
-      <aside>
-        <Rooms />
-        <section>
-          <h2>Try an edit</h2>
-          <WallSlider />
-          <p className="hint">Drag, then undo. Changes save 2 s after you stop.</p>
-        </section>
-        {sync.kind === 'error' && <p className="banner">{sync.message}</p>}
-      </aside>
-      <main>
-        <Viewport />
-      </main>
+      <TopBar />
+      <div className="workspace">
+        <Palette />
+        <main className={`panel stage stage-${viewMode}`}>
+          <Notice />
+          <div className="stage-views">
+            {viewMode !== '3d' && <PlanCanvas />}
+            {viewMode !== 'plan' && <Viewport key={projectId} />}
+          </div>
+        </main>
+        <Inspector />
+      </div>
+      <h1 className="visually-hidden">{name} · Dream Home Designer</h1>
     </div>
   );
 }

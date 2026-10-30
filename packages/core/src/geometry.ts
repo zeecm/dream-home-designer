@@ -125,3 +125,62 @@ export function clampOpeningT(wallLength: number, width: number, t: number): num
   const half = Math.min(0.5, width / 2 / wallLength);
   return Math.min(1 - half, Math.max(half, t));
 }
+
+/** Area-weighted centroid of a simple polygon; the vertex average if it has no area. */
+export function polygonCentroid(points: readonly Vec2[]): Vec2 {
+  const a = signedArea(points);
+  if (Math.abs(a) < 1e-12) return centroid(points);
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i] as Vec2;
+    const q = points[(i + 1) % points.length] as Vec2;
+    const f = p.x * q.y - q.x * p.y;
+    cx += (p.x + q.x) * f;
+    cy += (p.y + q.y) * f;
+  }
+  return { x: cx / (6 * a), y: cy / (6 * a) };
+}
+
+/** Even-odd test; points exactly on an edge may land either way. */
+export function pointInPolygon(p: Vec2, poly: readonly Vec2[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i] as Vec2;
+    const b = poly[j] as Vec2;
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/**
+ * A point inside the polygon to hang its label on: the area centroid when that is
+ * inside (most rooms), otherwise the middle of the widest horizontal run through the
+ * polygon's vertical centre.
+ */
+export function labelPoint(poly: readonly Vec2[]): Vec2 {
+  const c = polygonCentroid(poly);
+  if (pointInPolygon(c, poly)) return c;
+  const ys = poly.map((p) => p.y);
+  const y = (Math.min(...ys) + Math.max(...ys)) / 2;
+  const xs: number[] = [];
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i] as Vec2;
+    const b = poly[j] as Vec2;
+    if (a.y > y !== b.y > y) xs.push(((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x);
+  }
+  xs.sort((p, q) => p - q);
+  let best: Vec2 = c;
+  let width = -1;
+  for (let i = 0; i + 1 < xs.length; i += 2) {
+    const x0 = xs[i] as number;
+    const x1 = xs[i + 1] as number;
+    if (x1 - x0 > width) {
+      width = x1 - x0;
+      best = { x: (x0 + x1) / 2, y };
+    }
+  }
+  return best;
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   deleteOpening,
+  deleteVertex,
   setCeilingHeight,
   setWallLength,
   updateOpening,
@@ -90,5 +91,19 @@ describe('clampOpeningT', () => {
     expect(clampOpeningT(4, 1, 0)).toBeCloseTo(0.125);
     expect(clampOpeningT(4, 1, 1)).toBeCloseTo(0.875);
     expect(clampOpeningT(4, 1, 0.5)).toBe(0.5);
+  });
+});
+
+describe('deleteVertex', () => {
+  it('removes every wall at the corner and the rooms that used it, as one step', () => {
+    const s0 = fresh();
+    const s = dispatch(s0, deleteVertex(L, 'v10')); // Bed 2 / Master / Kitchen corner
+    const l = lvl(s);
+    expect(l.vertices.v10).toBeUndefined();
+    for (const w of Object.values(l.walls)) expect([w.a, w.b]).not.toContain('v10');
+    expect(l.rooms.rm_master).toBeUndefined();
+    expect(l.openings.op_master).toBeUndefined(); // it sat on w_mid_3 (v9 -> v10)
+    expect(s.history.past).toHaveLength(1);
+    expect(undo(s).doc).toEqual(s0.doc);
   });
 });
