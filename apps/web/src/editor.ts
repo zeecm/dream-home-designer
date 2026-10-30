@@ -2,6 +2,7 @@ import type { OpeningKind, Variant } from '@dhd/core';
 import { create } from 'zustand';
 import type { View } from './plan/view';
 import { DEFAULT_OPENING_WIDTH } from './presets';
+import { track } from './telemetry';
 
 /**
  * Editor state that is never saved with the project: the active tool, the selection,
@@ -138,7 +139,10 @@ export const useEditor = create<EditorState>((set) => ({
   setVariant: (variant) =>
     set((s) => (s.variant === variant ? {} : { variant, selection: null, hover: null })),
   // Walking takes the whole stage (and isn't remembered as the view mode).
-  startWalk: () => set((s) => ({ walking: { returnTo: s.viewMode }, viewMode: '3d' })),
+  startWalk: () => {
+    track('walk');
+    set((s) => ({ walking: { returnTo: s.viewMode }, viewMode: '3d' }));
+  },
   stopWalk: () => set((s) => (s.walking ? { viewMode: s.walking.returnTo, walking: null } : {})),
   requestFit: () => set({ fitRequested: true, viewAdjusted: false }),
   fitDone: () => set({ fitRequested: false }),

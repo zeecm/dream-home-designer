@@ -2,6 +2,7 @@ import type * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { type ViewMode, useEditor } from './editor';
 import { useStore } from './store';
+import { track } from './telemetry';
 
 /**
  * Downloads: the plan as a picture or a printout, the 3D view as a picture, the 3D model,
@@ -21,6 +22,7 @@ export function fileStem(name: string): string {
 }
 
 export function download(blob: Blob, filename: string) {
+  track('download', filename.split('.').pop() ?? '');
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

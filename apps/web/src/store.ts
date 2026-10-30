@@ -41,6 +41,7 @@ import {
   recentProjects,
   rememberRecent,
 } from './recent';
+import { track } from './telemetry';
 
 export type SyncStatus =
   | { kind: 'loading' }
@@ -172,6 +173,18 @@ const VALID_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
  */
 export const ownsPlan = (id: string) => !!keysFor(id).owner || storedLocally(id);
 
+/** Usage events from edits: the steps of a first plan, and the big features. */
+function countUsage(label: string, before: EditorDoc, after: EditorDoc) {
+  const count = (d: EditorDoc, k: 'walls' | 'rooms' | 'items') =>
+    d.doc.levels.reduce((n, l) => n + Object.keys(l[k]).length, 0);
+  if (count(before, 'walls') === 0 && count(after, 'walls') > 0) track('first-wall');
+  if (count(before, 'rooms') === 0 && count(after, 'rooms') > 0) track('first-room');
+  if (count(after, 'items') > count(before, 'items')) track('furnish');
+  if (label === 'Calibrate plan image') track('calibrate');
+  else if (label === 'Plan a renovation') track('renovation');
+  else if (label === 'Restore an earlier version') track('restore-version');
+}
+
 /** Commands that remove things get an Undo toast; this is its text, or null for none. */
 function toastFor(label: string): string | null {
   if (label === 'Discard the renovation') return 'Renovation discarded';
@@ -271,9 +284,11 @@ export const useStore = create<State>((set, get) => {
     dispatch: (cmd, opts) => {
       // Nothing is edited until a real project is open (not while loading or unreachable).
       if (!canEdit(get())) return;
-      const next = coreDispatch(get().editor, cmd, opts);
+      const editorBefore = get().editor;
+      const next = coreDispatch(editorBefore, cmd, opts);
       if (next === get().editor) return;
       commit(next);
+      countUsage(cmd.label, editorBefore, next);
       const text = toastFor(cmd.label);
       if (text) set({ toast: { text, at: Date.now() } });
     },
@@ -354,13 +369,17 @@ export const useStore = create<State>((set, get) => {
 
     createProject: async (name) => {
       const doc = blankProject(name);
+      track('new-plan');
       // A first plan of one's own gets the getting-started guide.
       startGuide(doc.id);
       await createFrom(doc);
       // A blank plan is drawn in the plan view; 3D has nothing to show yet.
       useEditor.getState().setViewMode('plan');
     },
-    openSample: () => createFrom(sampleFlatProject(newId('prj')), true),
+    openSample: () => {
+      track('open-sample');
+      return createFrom(sampleFlatProject(newId('prj')), true);
+    },
     deletePlans: async (ids) => {
       const list = get().recent;
       const doomed = list.filter((r) => ids.includes(r.id) && deletable(r, list));

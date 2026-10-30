@@ -278,6 +278,9 @@ export function PlanCanvas() {
     active.move(p, t.claimed);
   };
   const onTouchUp = (e: React.PointerEvent) => {
+    // A busy page can merge a quick drag's moves into the lift: play its last stretch as a
+    // move first, so a drag that arrived all at once is still a drag, not a tap.
+    onTouchMove(e);
     touches.current.delete(e.pointerId);
     if (gesture.current) {
       if (touches.current.size === 0) gesture.current = null;

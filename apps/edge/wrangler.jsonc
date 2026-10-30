@@ -25,6 +25,7 @@
     "R2_ENDPOINT": "https://4b562836b582b9cd6065c491c8e1af7a.r2.cloudflarestorage.com",
     "R2_BUCKET": "dhd-projects"
   },
+  "analytics_engine_datasets": [{ "binding": "EVENTS", "dataset": "dhd_events" }],
   "env": {
     "preview": {
       "name": "dhd-api-preview",
@@ -46,7 +47,8 @@
       "vars": {
         "R2_ENDPOINT": "https://4b562836b582b9cd6065c491c8e1af7a.r2.cloudflarestorage.com",
         "R2_BUCKET": "dhd-projects-preview"
-      }
+      },
+      "analytics_engine_datasets": [{ "binding": "EVENTS", "dataset": "dhd_events_preview" }]
     }
   }
 }

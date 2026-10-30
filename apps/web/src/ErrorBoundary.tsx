@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from 'react';
+import { reportError } from './telemetry';
 
 /**
  * The last line of defence: an error while rendering would otherwise leave a blank page.
@@ -13,6 +14,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
 
   override componentDidCatch(error: Error) {
     console.error(error);
+    reportError(error);
   }
 
   override render() {

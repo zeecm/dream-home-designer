@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { shareLink } from '../keys';
 import { useProject, useStore } from '../store';
+import { track } from '../telemetry';
 import { icons } from './icons';
 
 function CopyField({ label, value }: { label: string; value: string }) {
@@ -175,7 +176,10 @@ export function ShareMenu() {
         className="btn btn-small share-btn"
         aria-expanded={open}
         aria-label="Share"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          if (!open) track('share');
+          setOpen((o) => !o);
+        }}
       >
         <span className="share-btn-icon">{icons.share}</span>
         <span className="share-btn-label">Share</span>

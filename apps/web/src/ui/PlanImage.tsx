@@ -20,6 +20,7 @@ import {
 } from '../assets';
 import { useEditor } from '../editor';
 import { currentLevel, useLevel, useProject, useStore } from '../store';
+import { track } from '../telemetry';
 import { icons } from './icons';
 
 /**
@@ -29,6 +30,7 @@ import { icons } from './icons';
 export async function uploadPlanImage(file: File): Promise<void> {
   if (useStore.getState().role === 'viewer') return;
   const projectId = useStore.getState().editor.doc.id;
+  track('upload-plan');
   const { width, height, blob } = await prepareUpload(file);
   const key = keyOfHash(await hashBlob(blob));
   // A PDF can take a moment to render; don't put it on a different plan opened meanwhile.

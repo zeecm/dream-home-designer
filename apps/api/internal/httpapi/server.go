@@ -56,6 +56,9 @@ func New(s store.Store, log *slog.Logger, opts ...Option) *Server {
 	srv.mux.HandleFunc("GET /projects/{id}/share", srv.getShare)
 	srv.mux.HandleFunc("PUT /projects/{id}/share", srv.putShare)
 	srv.mux.HandleFunc("POST /projects/{id}/claim", srv.claim)
+	// In production the edge Worker answers this itself (logs and Analytics Engine); here
+	// it is logged, so local development and tests see the same API.
+	srv.mux.HandleFunc("POST /telemetry", srv.telemetry)
 	srv.mux.HandleFunc("GET /projects/{id}/versions", srv.versions)
 	srv.mux.HandleFunc("GET /projects/{id}/versions/{version}", srv.version)
 	return srv
@@ -101,6 +104,12 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(rec.Doc)
+}
+
+func (s *Server) telemetry(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 8192))
+	s.log.Info("telemetry", "body", string(body))
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // history is the store's version history, after checking the caller may edit the project

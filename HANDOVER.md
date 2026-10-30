@@ -544,6 +544,16 @@ ticks off as it happens (a picture, a "Calibrate plan image" step this session o
 a room, a walk), one at a time with a button for its tool; it ends with "That's the basics"
 or when closed, and is remembered per project in this browser.
 
+**Errors and usage (Phase 5, no third party):** the app posts to `/api/telemetry`
+(`telemetry.ts`, sendBeacon): unhandled errors and ErrorBoundary catches (message, stack,
+path; ten a visit), and usage events once a visit each (`open-sample`, `new-plan`,
+`upload-plan`, `calibrate`, `first-wall`, `first-room`, `walk`, `furnish`, `renovation`,
+`share`, `download`, `restore-version`). The edge Worker answers it itself: errors to its
+logs (Workers observability), events to Analytics Engine (`dhd_events`, `dhd_events_preview`;
+event, detail, country). No project ids, plan content or personal data. Query:
+`curl -X POST https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/analytics_engine/sql -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --data "SELECT blob1 AS event, SUM(_sample_interval) AS n FROM dhd_events WHERE timestamp > NOW() - INTERVAL '7' DAY GROUP BY event"`.
+The Go API logs it locally (`POST /telemetry`, 204).
+
 **Walk-through link:** Share offers `?p=<id>&walk=1`, which opens the plan straight into a
 walk (once; the parameter is then dropped from the address).
 
@@ -645,9 +655,14 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
 - **Walls use one material for both faces.** `materialLeft` covers both, and per-side materials
   come in Phase 3.
 - **No `project_versions` history yet.** It comes with accounts in Phase 4, on D1.
-- **Flaky phone e2e:** `mobile.spec.ts` sometimes loses the drawing bar's Add tap when the
-  run is slow (failing runs take twice as long). Seen before and after the renovation work;
-  CI hasn't hit it.
+- **Flaky phone e2e:** the first test in `mobile.spec.ts` still fails about one run in four
+  locally (CI retries once): the Add tap or the finger-drawn room doesn't land when the run
+  is slow. Four real causes were found and fixed on the way: Add was `disabled` until the
+  typing re-rendered (a quick tap was dropped); a busy page merges a quick drag's moves into
+  the lift (the plan and the walk now play the lift's position as a last move); and the orbit
+  controls left `touch-action: auto` on the 3D canvas, so a phone cancelled sideways swipes
+  in walk mode (the owner's "can't look around without moving"). Swipe-to-look turns half a
+  circle per screen width on touch.
 - **Wall tool snapping:** it snaps hard to door and window ends, so a wall drawn across a room
   past a door can come out slanted (seen in acceptance round 9).
 - **Corner dimension lines** for walls that run into the room draw inside it; fine at plan scale,

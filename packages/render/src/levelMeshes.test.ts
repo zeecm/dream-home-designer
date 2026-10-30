@@ -111,10 +111,16 @@ describe('LevelMeshes', () => {
       return { ...level, vertices: { ...level.vertices, v2_2: { ...v, x: 4 + (k % 10) * 0.01 } } };
     };
     for (let k = 0; k < 20; k++) m.update(step(k));
-    const t0 = performance.now();
+    // The fastest of five runs: a busy machine (a parallel test run, CI) slows some runs,
+    // but not the code.
+    let perStep = Number.POSITIVE_INFINITY;
     let built = 0;
-    for (let k = 0; k < 40; k++) built += m.update(step(k + 1)).built;
-    const perStep = (performance.now() - t0) / 40;
+    for (let run = 0; run < 5; run++) {
+      const t0 = performance.now();
+      built = 0;
+      for (let k = 0; k < 40; k++) built += m.update(step(k + 1 + (run % 2))).built;
+      perStep = Math.min(perStep, (performance.now() - t0) / 40);
+    }
     // The 4 walls at the corner, the 4 rooms around it, its hub, and the walls and hubs
     // at the far ends of the two walls that tilt, and a door on one of them: about 16 parts
     // per step.

@@ -283,7 +283,8 @@ export function useWallTool(ctx: ToolContext): ToolController {
                   e.preventDefault();
                   // Read the field itself: a tap can land before the typing re-rendered.
                   const field = e.currentTarget.elements.namedItem('length');
-                  addTyped(field instanceof HTMLInputElement ? field.value : typed);
+                  const value = field instanceof HTMLInputElement ? field.value : typed;
+                  if (value.trim()) addTyped(value);
                 }}
               >
                 <span className="draw-bar-row">
@@ -300,7 +301,9 @@ export function useWallTool(ctx: ToolContext): ToolController {
                       setError(null);
                     }}
                   />
-                  <button type="submit" className="btn" disabled={!typed}>
+                  {/* Never disabled: a tap right after typing can come before the re-render
+                      that would enable it, and a disabled button drops the tap. */}
+                  <button type="submit" className="btn" aria-disabled={!typed}>
                     Add
                   </button>
                   <button

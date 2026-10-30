@@ -298,7 +298,8 @@ select {
   padding: 0 8px;
   font-size: var(--fs-small);
 }
-.btn:disabled {
+.btn:disabled,
+.btn[aria-disabled="true"] {
   opacity: 0.5;
   cursor: default;
 }
@@ -1932,9 +1933,10 @@ h3.field-label {
   }
 }
 
-/* Dragging to look while walking must reach the 3D view, not scroll or zoom the page. */
+/* Dragging to look while walking must reach the 3D view, not scroll or zoom the page. The
+   orbit controls leave an inline touch-action behind, hence !important. */
 .app-walking canvas {
-  touch-action: none;
+  touch-action: none !important;
 }
 
 /* ---------------------------------------------------------------- paint swatches */

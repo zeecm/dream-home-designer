@@ -8,6 +8,61 @@ export interface Env {
   R2_BUCKET: string;
   R2_ACCESS_KEY: string;
   R2_SECRET_KEY: string;
+  /** Workers Analytics Engine: one data point per usage event (no personal data). */
+  EVENTS?: AnalyticsEngineDataset;
+}
+
+/** The usage events the app may send: the steps of a first plan, and the big features. */
+export const EVENT_NAMES = new Set([
+  'open-sample',
+  'new-plan',
+  'upload-plan',
+  'calibrate',
+  'first-wall',
+  'first-room',
+  'walk',
+  'furnish',
+  'renovation',
+  'share',
+  'download',
+  'restore-version',
+]);
+
+/**
+ * Telemetry from the app, kept here rather than in the API: errors go to the Worker's logs
+ * (observability), usage events to Analytics Engine. Neither carries project ids, plan
+ * content or anything about the person.
+ */
+export async function telemetry(request: Request, env: Env): Promise<Response> {
+  const text = await request.text();
+  if (text.length > 8192) return json({ error: 'too large' }, 413);
+  let body: Record<string, unknown>;
+  try {
+    body = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return json({ error: 'not JSON' }, 400);
+  }
+  const str = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : '');
+  if (body.kind === 'error') {
+    console.error(
+      JSON.stringify({
+        clientError: str(body.message, 500),
+        stack: str(body.stack, 2000),
+        path: str(body.path, 200),
+        build: str(body.build, 40),
+        ua: str(request.headers.get('User-Agent'), 200),
+      }),
+    );
+    return new Response(null, { status: 204 });
+  }
+  if (body.kind === 'event') {
+    const name = str(body.name, 40);
+    if (!EVENT_NAMES.has(name)) return json({ error: 'unknown event' }, 400);
+    const country = (request as { cf?: { country?: string } }).cf?.country ?? '';
+    env.EVENTS?.writeDataPoint({ blobs: [name, str(body.detail, 40), country], indexes: [name] });
+    return new Response(null, { status: 204 });
+  }
+  return json({ error: 'unknown kind' }, 400);
 }
 
 /**
@@ -62,6 +117,7 @@ export default {
       }
     }
 
+    if (request.method === 'POST' && url.pathname === '/telemetry') return telemetry(request, env);
     return getContainer(env.API).fetch(new Request(url, request));
   },
 } satisfies ExportedHandler<Env>;
