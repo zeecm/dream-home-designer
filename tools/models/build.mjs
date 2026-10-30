@@ -31,8 +31,11 @@ const root = join(here, '..', '..');
 const outDir = join(root, 'apps/web/public/models');
 const kindsFile = join(root, 'packages/core/src/modelKinds.generated.ts');
 const cacheDir = join(root, 'tools/models/.cache');
-/** Above this many triangles a model is simplified; furniture needn't be finer in a flat. */
-const MAX_TRIANGLES = 40_000;
+/**
+ * Above this many triangles a model is simplified: a furnished flat holds dozens of pieces,
+ * and a phone has to draw them all every frame.
+ */
+const MAX_TRIANGLES = 12_000;
 
 const catalogue = JSON.parse(await readFile(join(here, 'catalogue.json'), 'utf8'));
 const only = process.argv.slice(2);
@@ -75,6 +78,25 @@ async function build(entry) {
     .registerDependencies({ 'meshopt.encoder': MeshoptEncoder });
   const doc = await io.read(await download(entry.polyhaven));
   await doc.transform(dedup(), flatten(), joinMeshes(), weld(), prune());
+  // Glass that refracts (transmission) makes three.js draw the whole scene twice a frame:
+  // plain see-through glass looks the same at this size.
+  for (const ext of doc.getRoot().listExtensionsUsed()) {
+    const name = ext.extensionName;
+    if (name !== 'KHR_materials_transmission' && name !== 'KHR_materials_volume') continue;
+    for (const m of doc.getRoot().listMaterials()) {
+      if (!m.getExtension(name)) continue;
+      m.setExtension(name, null);
+      const [r, g, b] = m.getBaseColorFactor();
+      m.setAlphaMode('BLEND').setBaseColorFactor([r, g, b, 0.3]);
+    }
+    ext.dispose();
+  }
+  // A lamp's shade or bulb glows, as the box-built lamps' shades do.
+  if (entry.glow) {
+    for (const m of doc.getRoot().listMaterials()) {
+      if (m.getName().includes(entry.glow)) m.setEmissiveFactor([1, 0.9, 0.75]);
+    }
+  }
   const before = triangles(doc);
   const max = entry.maxTriangles ?? MAX_TRIANGLES;
   if (before > max) {
@@ -82,7 +104,7 @@ async function build(entry) {
       simplify({
         simplifier: MeshoptSimplifier,
         ratio: max / before,
-        error: entry.simplifyError ?? 0.001,
+        error: entry.simplifyError ?? 0.01,
       }),
     );
   }
@@ -147,7 +169,7 @@ for (const f of await readdir(outDir)) {
 
 const kinds = catalogue
   .filter((e) => built[e.id])
-  .map(({ polyhaven, turn, maxTriangles, simplifyError, ...e }) => ({
+  .map(({ polyhaven, turn, maxTriangles, simplifyError, glow, ...e }) => ({
     ...e,
     model: built[e.id].file,
     size: built[e.id].size,

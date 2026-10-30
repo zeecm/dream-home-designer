@@ -18,6 +18,8 @@ export class ModelLibrary implements ModelSource {
   private readonly loaded = new Map<string, THREE.Object3D>();
   private readonly loading = new Set<string>();
   private readonly failed = new Set<string>();
+  /** Tries so far per file: a dropped connection gets two more, after 5 and 30 seconds. */
+  private readonly tries = new Map<string, number>();
   private readonly listeners = new Set<() => void>();
   private readonly loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 
@@ -46,8 +48,15 @@ export class ModelLibrary implements ModelSource {
       (gltf) => {
         gltf.scene.traverse((o) => {
           if (o instanceof THREE.Mesh) {
-            o.castShadow = true;
+            // Kept cheap to draw, since a furnished flat holds dozens of these: only big
+            // pieces cast shadows, and only leaves and glass (cut-out or see-through) are
+            // drawn from both sides.
+            o.geometry.computeBoundingSphere();
+            o.castShadow = (o.geometry.boundingSphere?.radius ?? 0) > 0.5;
             o.receiveShadow = true;
+            for (const m of [o.material].flat() as THREE.Material[]) {
+              if (!m.transparent && m.alphaTest === 0) m.side = THREE.FrontSide;
+            }
             o.userData.shared = true;
           }
         });
@@ -56,9 +65,20 @@ export class ModelLibrary implements ModelSource {
         for (const fn of this.listeners) fn();
       },
       () => {
-        // Missing or broken: the stand-in box stays, rather than retrying every frame.
         this.loading.delete(file);
+        const n = (this.tries.get(file) ?? 0) + 1;
+        this.tries.set(file, n);
+        // Missing or broken: the stand-in box stays, retried twice, never every frame.
         this.failed.add(file);
+        if (n <= 2) {
+          setTimeout(
+            () => {
+              this.failed.delete(file);
+              this.load(file);
+            },
+            n === 1 ? 5_000 : 30_000,
+          );
+        }
       },
     );
   }

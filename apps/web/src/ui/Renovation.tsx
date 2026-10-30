@@ -14,8 +14,6 @@ export function useRenovationDiff(): RenovationDiff | null {
   return useMemo(() => (before && after ? renovationDiff(before, after) : null), [before, after]);
 }
 
-const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-
 /** One line for the bar: what's hacked and what's built. */
 export function diffLine(d: RenovationDiff): string {
   const parts: string[] = [];
@@ -26,14 +24,22 @@ export function diffLine(d: RenovationDiff): string {
   return parts.length ? parts.join(' · ') : 'No changes yet';
 }
 
-/** "1 door or window added, 2 removed", or '' for none (a moved one is both). */
+/**
+ * "1 opening changed, 1 added", or '' for none: doors, windows and plain openings, where one
+ * moved or resized (the same one in both versions) is changed, not added and removed.
+ */
 function openingsText(d: RenovationDiff): string {
-  const added = d.openingsAdded.length;
-  const removed = d.openingsRemoved.length;
-  if (!added && !removed) return '';
-  const what = (n: number) => count(n, 'door or window', 'doors or windows');
-  if (added && removed) return `${what(added)} added, ${removed} removed`;
-  return added ? `${what(added)} added` : `${what(removed)} removed`;
+  const changed = d.openingsAdded.filter((id) => d.openingsRemoved.includes(id)).length;
+  const added = d.openingsAdded.length - changed;
+  const removed = d.openingsRemoved.length - changed;
+  const parts = [
+    changed && `${changed} changed`,
+    added && `${added} added`,
+    removed && `${removed} removed`,
+  ].filter(Boolean);
+  if (!parts.length) return '';
+  const n = changed || added || removed;
+  return `${n === 1 ? 'Opening' : 'Openings'}: ${parts.join(', ')}`;
 }
 
 /**
@@ -51,7 +57,11 @@ export function RenovationBar() {
       <Segmented
         label="Version"
         value={variant}
-        onChange={setVariant}
+        onChange={(v) => {
+          // An Undo offered for the other version would undo out of sight.
+          useStore.setState({ toast: null });
+          setVariant(v);
+        }}
         options={[
           { value: 'before', label: 'Before', title: 'The flat as it is' },
           { value: 'after', label: 'After', title: 'The flat as renovated' },
@@ -161,7 +171,7 @@ export function RenovationSection() {
           <dd className="num">{formatLength(diff.builtLength)}</dd>
         </div>
         <div>
-          <dt>Doors and windows</dt>
+          <dt>Doors, windows, openings</dt>
           <dd>{openingsText(diff) || 'No change'}</dd>
         </div>
         <div>

@@ -81,7 +81,7 @@ export const MODEL_KINDS: ModelKind[] = [
     name: 'TV console, slatted',
     category: 'Living',
     againstWall: true,
-    model: 'tv-console-slatted.d9d843603f.glb',
+    model: 'tv-console-slatted.f553625caa.glb',
     size: {
       w: 2.44,
       d: 0.52,
@@ -105,7 +105,7 @@ export const MODEL_KINDS: ModelKind[] = [
     id: 'dining-chair-upholstered',
     name: 'Dining chair, upholstered',
     category: 'Dining',
-    model: 'dining-chair-upholstered.6d62e5089b.glb',
+    model: 'dining-chair-upholstered.738ce82ad6.glb',
     size: {
       w: 0.434,
       d: 0.576,
@@ -131,7 +131,7 @@ export const MODEL_KINDS: ModelKind[] = [
     name: 'Shelf with drawers',
     category: 'Storage',
     againstWall: true,
-    model: 'shelf-with-drawers.1aa1a3c650.glb',
+    model: 'shelf-with-drawers.f49d1db87b.glb',
     size: {
       w: 1.141,
       d: 0.488,
@@ -163,7 +163,7 @@ export const MODEL_KINDS: ModelKind[] = [
       color: '#ffe0b0',
       candela: 25,
     },
-    model: 'desk-lamp.c3d1a76f3c.glb',
+    model: 'desk-lamp.6168f70cee.glb',
     size: {
       w: 0.202,
       d: 0.614,
@@ -182,7 +182,7 @@ export const MODEL_KINDS: ModelKind[] = [
       color: '#fff1dc',
       candela: 70,
     },
-    model: 'globe-pendant.31452fe799.glb',
+    model: 'globe-pendant.610d18e6d3.glb',
     size: {
       w: 0.432,
       d: 0.432,
@@ -196,7 +196,7 @@ export const MODEL_KINDS: ModelKind[] = [
     category: 'Lighting',
     ceiling: true,
     walkThrough: true,
-    model: 'ceiling-fan.4da61a216f.glb',
+    model: 'ceiling-fan.02a12cfa39.glb',
     size: {
       w: 1.463,
       d: 1.463,
@@ -235,7 +235,7 @@ export const MODEL_KINDS: ModelKind[] = [
     elevation: 1.7,
     againstWall: true,
     walkThrough: true,
-    model: 'wall-clock.d7b34cb636.glb',
+    model: 'wall-clock.059748d1a7.glb',
     size: {
       w: 0.32,
       d: 0.047,
@@ -248,7 +248,7 @@ export const MODEL_KINDS: ModelKind[] = [
     name: 'Air-con compressors',
     category: 'Decor',
     againstWall: true,
-    model: 'aircon-compressors.27b11f8a91.glb',
+    model: 'aircon-compressors.999b3551a5.glb',
     size: {
       w: 1.8,
       d: 0.374,

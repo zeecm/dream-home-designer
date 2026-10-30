@@ -536,6 +536,12 @@ Rebuild a few with `pnpm --filter @dhd/models build <id…>` (`built.json` remem
 not in the build) with Vite, renders every catalogue piece through `LevelMeshes` and the
 model library, and writes 96 px WebPs to `apps/web/public/models/thumbs/`; the catalogue
 shows them. Re-run it after changing the catalogue.
+Kept cheap to draw (acceptance round 10 measured 0.66 fps in software rendering with all 19
+placed, now about 3.3): the pipeline drops refracting glass (`KHR_materials_transmission`,
+which makes three.js draw the scene twice a frame) for plain transparent glass and caps
+models at 12k triangles; `ModelLibrary` draws opaque materials front-side only and lets only
+pieces over 0.5 m radius cast shadows. Lamp models' shades glow (`glow` in the catalogue);
+a model that fails to load is retried after 5 and 30 seconds.
 **Next:** more models (Sketchfab CC0 needs an API key).
 
 **Getting started (Phase 5):** a new blank plan gets a guide bar over the stage (`ui/Guide.tsx`,

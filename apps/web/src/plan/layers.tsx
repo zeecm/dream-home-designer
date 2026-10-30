@@ -125,9 +125,12 @@ export const PlanShapes = memo(function PlanShapes({
                 className="item item-overhead"
               >
                 <circle cx={x} cy={y} r={r} />
-                <path
-                  d={`M${x - k} ${y - k}L${x + k} ${y + k}M${x - k} ${y + k}L${x + k} ${y - k}`}
-                />
+                {/* The cross marks a light; a ceiling fan is just its circle. */}
+                {kind.light && (
+                  <path
+                    d={`M${x - k} ${y - k}L${x + k} ${y + k}M${x - k} ${y + k}L${x + k} ${y - k}`}
+                  />
+                )}
               </g>
             );
           }
