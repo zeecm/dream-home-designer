@@ -2106,6 +2106,10 @@ h3.field-label {
   .topbar .segmented button {
     padding: 0 10px;
   }
+  /* Two views side by side are too cramped this short. */
+  .topbar .segmented button:nth-child(2) {
+    display: none;
+  }
   .project-name {
     font-size: var(--fs-body);
     max-width: 26vw;

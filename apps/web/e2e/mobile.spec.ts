@@ -310,3 +310,33 @@ test('on a phone: a placed piece resizes and turns by finger on its handles', as
   expect(turned.x + turned.width / 2 - centre.x).toBeGreaterThan(25);
   expect(Math.abs(turned.y + turned.height / 2 - centre.y)).toBeLessThan(6);
 });
+
+test('on a phone: a small piece moves under the finger, however close its handles', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.evaluate(() => document.fonts.ready);
+  await page.getByRole('button', { name: /^Furniture/ }).tap();
+  await page
+    .getByRole('button', { name: /^Dining chair\b/ })
+    .first()
+    .tap();
+  const room = await page.locator('[data-hit="room:rm_living-and-dining"]').boundingBox();
+  if (!room) throw new Error('no room');
+  await page.touchscreen.tap(room.x + room.width * 0.5, room.y + room.height * 0.5);
+  const items = page.locator('[data-hit^="item:"]');
+  await expect(items).toHaveCount(1);
+  const a = await items.first().boundingBox();
+  if (!a) throw new Error('no piece');
+  const width = await page.getByLabel('Width').inputValue();
+  const f = await finger(page, { x: a.x + a.width / 2, y: a.y + a.height / 2 });
+  await f.moveTo({ x: a.x + a.width / 2 + 30, y: a.y + a.height / 2 + 20 });
+  // Moving, not resizing: no size label under the finger.
+  await expect(page.locator('.handle-length')).toHaveCount(0);
+  await f.lift();
+  const b = await items.first().boundingBox();
+  expect((b?.x ?? 0) - a.x).toBeGreaterThan(20);
+  await expect(page.getByLabel('Width')).toHaveValue(width);
+  await expect(items).toHaveCount(1);
+});

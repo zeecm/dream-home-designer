@@ -214,3 +214,61 @@ test('handles: a small selected piece is still moved by dragging its body', asyn
   expect((b?.x ?? 0) - a.x).toBeGreaterThan(60);
   await expect(page.getByLabel('Width')).toHaveValue(width);
 });
+
+test('handles: Escape takes a drag back; a tap on the turn handle adds nothing; a piece on a wall keeps its back there', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await page.getByRole('button', { name: /^Furniture/ }).click();
+  await page
+    .getByRole('button', { name: /^Coffee table/ })
+    .first()
+    .click();
+  const room = await page.locator('[data-hit="room:rm_living-and-dining"]').boundingBox();
+  if (!room) throw new Error('no room');
+  await page.mouse.click(room.x + room.width * 0.5, room.y + room.height * 0.5);
+  const items = page.locator('[data-hit^="item:"]');
+  await expect(items).toHaveCount(1);
+  const width = page.getByLabel('Width');
+  const before = await width.inputValue();
+
+  // Escape mid-drag: the size goes back, and moving on changes nothing.
+  const c = await page.locator('.size-handle').nth(2).boundingBox();
+  if (!c) throw new Error('no corner');
+  await page.mouse.move(c.x + c.width / 2, c.y + c.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(c.x + 50, c.y + 40, { steps: 6 });
+  await expect(width).not.toHaveValue(before);
+  await page.keyboard.press('Escape');
+  await expect(width).toHaveValue(before);
+  await page.mouse.move(c.x + 90, c.y + 70, { steps: 4 });
+  await page.mouse.up();
+  await expect(width).toHaveValue(before);
+
+  // A click right on the turn handle is for the handle: no second table.
+  const t = await page.locator('.turn-handle').boundingBox();
+  if (!t) throw new Error('no turn handle');
+  await page.mouse.click(t.x + t.width / 2, t.y + t.height / 2);
+  await expect(items).toHaveCount(1);
+
+  // A TV console against the top wall: its back corner widens it along the wall only.
+  await page
+    .getByRole('button', { name: /^TV console/ })
+    .first()
+    .click();
+  await page.mouse.click(room.x + room.width * 0.5, room.y + 25);
+  await expect(items).toHaveCount(2);
+  const depth = page.getByLabel('Depth');
+  const d0 = await depth.inputValue();
+  const w0 = await width.inputValue();
+  const back = await page.locator('.size-handle').nth(1).boundingBox();
+  if (!back) throw new Error('no back corner');
+  await page.mouse.move(back.x + back.width / 2, back.y + back.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(back.x + 40, back.y - 50, { steps: 8 });
+  await page.mouse.up();
+  await expect(width).not.toHaveValue(w0);
+  await expect(depth).toHaveValue(d0);
+});

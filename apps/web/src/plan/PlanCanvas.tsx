@@ -23,6 +23,7 @@ import {
   type PlanPointer,
   type ToolContext,
   type ToolController,
+  onDrawnHandle,
   useMeasureTool,
   useSelectTool,
 } from './tools';
@@ -57,6 +58,8 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
   const routed = useRef(false);
   /** A press on a handle (not on the piece): a place if it never moves, a resize if it does. */
   const onHandle = useRef<{ start: PlanPointer; moved: boolean } | null>(null);
+  /** The pointer is over a placed piece or its handles: no ghost of a new one there. */
+  const overOwn = useRef(false);
   /**
    * A placing tool that also moves what it placed: a press on an existing piece of its kind
    * goes to Select for that gesture (a drag moves it, a tap selects it), instead of adding
@@ -77,6 +80,7 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
         return routed.current ? select.down(p) : own.down(p);
       },
       move: (p, dragging, from) => {
+        if (!dragging) overOwn.current = onOwn(p);
         const h = onHandle.current;
         if (
           h &&
@@ -93,15 +97,17 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
         if (!routed.current) return own.up(p);
         routed.current = false;
         select.up(p);
-        if (h && !h.moved) {
+        if (h && !h.moved && !(ctx && onDrawnHandle(ctx, h.start))) {
           own.down(h.start);
           own.up(p);
         }
       },
+      // Mid-drag on a piece or a handle, Escape and the rest go to Select's drag.
+      key: (e) => (routed.current && select.key(e)) || own.key(e),
       overlay: (o) =>
         kind === 'item' ? (
           <>
-            {own.overlay(o)}
+            {!overOwn.current && !routed.current && own.overlay(o)}
             {select.overlay(o)}
           </>
         ) : (
@@ -121,6 +127,41 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
     furniture: placing(useFurnitureTool(ctx), 'item'),
   };
   return tools[tool];
+}
+
+/**
+ * Fingers on the screen anywhere, not only on the plan: a pinch whose other finger landed
+ * on a bar beside the plan is still a pinch, never a tap. `multi` holds until all lift.
+ */
+const screenTouch = { down: new Set<number>(), multi: false };
+if (typeof window !== 'undefined') {
+  window.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (e.pointerType !== 'touch') return;
+      // The first finger on the screen: forget any whose lift never arrived.
+      if (e.isPrimary) {
+        screenTouch.down.clear();
+        screenTouch.multi = false;
+      }
+      screenTouch.down.add(e.pointerId);
+      if (screenTouch.down.size > 1) screenTouch.multi = true;
+    },
+    { capture: true },
+  );
+  // Seen in the capture phase (nothing can stop it there); `multi` is reset only after the
+  // plan's own handlers have seen the last lift.
+  const lift = (e: PointerEvent) => {
+    if (e.pointerType !== 'touch') return;
+    screenTouch.down.delete(e.pointerId);
+    if (screenTouch.down.size === 0) {
+      setTimeout(() => {
+        if (screenTouch.down.size === 0) screenTouch.multi = false;
+      });
+    }
+  };
+  window.addEventListener('pointerup', lift, { capture: true });
+  window.addEventListener('pointercancel', lift, { capture: true });
 }
 
 export function PlanCanvas() {
@@ -350,6 +391,12 @@ export function PlanCanvas() {
       return;
     }
     if (!t || !ctx) return;
+    // Another finger was down somewhere: a pinch begun off the plan, not a tap or a drag.
+    if (screenTouch.multi) {
+      if (t.claimed) active.up(t.start);
+      else active.touchCancel?.();
+      return;
+    }
     const end = pointer(e);
     if (t.claimed) {
       active.up(end);

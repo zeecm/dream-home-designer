@@ -144,6 +144,8 @@ type Drag =
       id: string;
       /** The opposite corner, where it was when the drag began: it stays put. */
       anchor: Vec2;
+      /** A back corner of a piece against a wall: its back stays on the wall (this depth). */
+      keepDepth?: number;
       start: Vec2;
       moved: boolean;
       key: string;
@@ -165,11 +167,33 @@ function itemHandles(ctx: ToolContext, it: Item) {
   const mid = { x: ((fr?.x ?? 0) + (fl?.x ?? 0)) / 2, y: ((fr?.y ?? 0) + (fl?.y ?? 0)) / 2 };
   const c = worldToScreen(ctx.view, ctx.size, { x: it.position.x, y: it.position.z });
   const n = Math.hypot(mid.x - c.x, mid.y - c.y) || 1;
-  const turn = {
-    x: mid.x + ((mid.x - c.x) / n) * TURN_HANDLE_GAP,
-    y: mid.y + ((mid.y - c.y) / n) * TURN_HANDLE_GAP,
-  };
-  return { corners, mid, turn };
+  const out = { x: (mid.x - c.x) / n, y: (mid.y - c.y) / n };
+  const turn = { x: mid.x + out.x * TURN_HANDLE_GAP, y: mid.y + out.y * TURN_HANDLE_GAP };
+  // The size, shown while resizing, behind the piece: clear of the turn handle in front.
+  const back = { x: 2 * c.x - mid.x, y: 2 * c.y - mid.y };
+  const label = { x: back.x - out.x * 28, y: back.y - out.y * 28 };
+  return { corners, mid, turn, label };
+}
+
+/** A piece's shorter side on screen (px). */
+const shortSide = (corners: Vec2[]) => {
+  const [a, b, c] = corners;
+  if (!a || !b || !c) return 0;
+  return Math.min(Math.hypot(b.x - a.x, b.y - a.y), Math.hypot(c.x - b.x, c.y - b.y));
+};
+
+/**
+ * True when a press lands on a selected piece's drawn handle (not merely within reach): a
+ * tap there in Furniture is meant for the handle, so it places nothing.
+ */
+export function onDrawnHandle(ctx: ToolContext, p: PlanPointer): boolean {
+  const sel = useEditor.getState().selection;
+  const it = sel?.kind === 'item' ? ctx.level.items[sel.id] : undefined;
+  if (!it) return false;
+  const h = itemHandles(ctx, it);
+  const near = (q: Vec2 | undefined, r: number) =>
+    !!q && Math.hypot(q.x - p.screen.x, q.y - p.screen.y) <= r;
+  return near(h.turn, 11) || h.corners.some((q) => near(q, HANDLE_SIZE * 0.75));
 }
 
 interface NudgeRun {
@@ -235,7 +259,10 @@ export function useSelectTool(ctx: ToolContext): ToolController {
     const dist = (q: Vec2 | undefined) =>
       q ? Math.hypot(q.x - p.screen.x, q.y - p.screen.y) : Number.POSITIVE_INFINITY;
     if (dist(h.turn) <= HANDLE_REACH) return { id: sel.id, corner: 'turn' };
-    const reach = hit?.kind === 'item' ? HANDLE_SIZE * 0.75 : HANDLE_REACH;
+    // On the piece itself, a corner counts only on its drawn square, and on a piece small
+    // on screen only right at the corner, so the middle of its body is still there to drag.
+    const onPiece = hit?.kind === 'item';
+    const reach = onPiece ? Math.min(HANDLE_SIZE * 0.75, shortSide(h.corners) / 3) : HANDLE_REACH;
     const i = h.corners.findIndex((q) => dist(q) <= reach);
     return i < 0 ? null : { id: sel.id, corner: i };
   };
@@ -258,8 +285,12 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         const it = ctx.level.items[handle.id];
         const anchor =
           it && handle.corner !== 'turn' ? itemFootprint(it)[(handle.corner + 2) % 4] : undefined;
+        const keepDepth =
+          it?.flags.snapWall && (handle.corner === 0 || handle.corner === 1)
+            ? itemSize(it).d
+            : undefined;
         drag.current = anchor
-          ? { kind: 'resize', id: handle.id, anchor, start: p.screen, moved: false, key }
+          ? { kind: 'resize', id: handle.id, anchor, keepDepth, start: p.screen, moved: false, key }
           : { kind: 'rotate', id: handle.id, start: p.screen, moved: false, key };
         return true;
       }
@@ -341,9 +372,10 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         const ly = -v.x * s + v.y * c;
         const step = p.alt ? 0.001 : 0.01;
         const w = Math.max(0.1, Math.round(Math.abs(lx) / step) * step);
-        const dd = Math.max(0.1, Math.round(Math.abs(ly) / step) * step);
+        const dd = d.keepDepth ?? Math.max(0.1, Math.round(Math.abs(ly) / step) * step);
         const hx = (Math.sign(lx) || 1) * (w / 2);
-        const hy = (Math.sign(ly) || 1) * (dd / 2);
+        // Against a wall, the back corner moves only along it: the back stays on the wall.
+        const hy = d.keepDepth ? -dd / 2 : (Math.sign(ly) || 1) * (dd / 2);
         const centre = { x: opp.x + hx * c - hy * s, y: opp.y + hx * s + hy * c };
         ctx.dispatch(
           updateItem(levelId, d.id, {
@@ -396,6 +428,14 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       }
     },
     key: (e) => {
+      // Escape mid-drag on a handle takes the drag back; the rest of it does nothing.
+      const d = drag.current;
+      if (e.key === 'Escape' && (d?.kind === 'resize' || d?.kind === 'rotate')) {
+        drag.current = null;
+        if (d.moved) useStore.getState().undo();
+        redraw((n) => n + 1);
+        return true;
+      }
       const arrow = ARROWS[e.key];
       if (!arrow) settleRun();
       const sel = useEditor.getState().selection;
@@ -509,7 +549,7 @@ export function useSelectTool(ctx: ToolContext): ToolController {
             />
           ))}
           {resizing && (
-            <g transform={`translate(${h.mid.x} ${h.mid.y + 26})`} className="handle-length">
+            <g transform={`translate(${h.label.x} ${h.label.y})`} className="handle-length">
               <rect x={-52} y={-11} width={104} height={22} rx={4} />
               <text textAnchor="middle" y={4} className="num">
                 {`${formatLength(size.w)} × ${formatLength(size.d)}`}
