@@ -298,16 +298,23 @@ owner's plan):**
   in localStorage (`keys.ts`) and sends `Authorization: Bearer …`.
 - **Roles:** `GET /projects/{id}` reports `X-Role`:
   - `owner`: edit, share and delete;
-  - `editor`: edit, through the edit link `?p=<id>&k=<key>`;
+  - `editor`: edit, through the edit link `?p=<id>#k=<key>` (the key is in the fragment, so it
+    stays out of server logs and Referer headers; older `&k=` links still work);
   - `viewer`: the plain link;
   - `open`: a project from before sharing.
   Writes (PUT, image PUT and DELETE) need owner, editor or open; DELETE of a project needs
   owner or open.
 - **Sharing endpoints:** `GET`/`PUT /projects/{id}/share` (owner only) turn the edit link on or
   off, or reset its key so old edit links stop working.
-- **Claiming:** `POST /projects/{id}/claim` makes the caller the owner of an `open` project. The
-  web app claims automatically when a browser opens an open project that is already in its
-  recent list.
+- **Claiming:** `POST /projects/{id}/claim` makes the caller the owner of an `open` project.
+  The web app only claims when asked: the Share menu of an open project says anyone with its
+  link can edit it and offers "Make me the owner". (Claiming automatically from the recent list
+  let anyone who had opened the link take it from its creator.) If someone does take a plan,
+  the remedy is deleting `access/<id>.json` in R2 by hand, which makes it open again.
+- **Recovery copies:** each save copies the version it replaces to `previous/<id>.json`, and a
+  delete first copies the project to `deleted/<id>.json` (images are not kept). Lifecycle rules
+  on both buckets (`expire-previous`, `expire-deleted`) expire them after 30 days. To restore,
+  copy the object back to `projects/<id>.json` with wrangler.
 - **Web:**
   - a Share menu in the top bar;
   - a view-only banner with "Make my own copy";
@@ -343,11 +350,21 @@ owner's plan):**
   - draggable calibration points;
   - room deletion;
   - auto-zoom to a PDF's drawing.
+- **Also fixed after a review:**
+  - a cancelled touch (a back swipe) acts on nothing;
+  - panning in Select doesn't select the room under the finger;
+  - the wall bar's Undo only takes back the chain's own wall;
+  - a typed length aims along the last wall unless the pointer has moved since.
 
-**Sample flat:** `sampleFlatProject` (core fixtures) is a 96 m² HDB-style 4-room flat with a
-service yard, kitchen, household shelter, two bathrooms, three bedrooms and an L-shaped
-living and dining room. It is built with the editor's own commands, then given readable ids
-(`w_bedroom-2_corridor`). `hdb4room` stays as the test fixture.
+**Sample flat:** `sampleFlatProject` (core fixtures) is the owner's own plan: the published HDB
+3-room Type 4 (Blk 39A), traced from `public/samples/hdb-3room-type4.pdf`. It has 9 rooms and
+69 m² to centre lines, matching the published 69 m² gross; the dry kitchen is marked off from
+the living room by two room boundaries. It is built with the editor's own commands, then given
+readable ids (`w_bedroom_main-bedroom`). It comes with its plan image already scaled under it:
+`public/samples/hdb-3room-type4.png`, a 16-grey crop of the PDF keyed by its hash
+(`SAMPLE_PLAN_KEY`). The web app fetches bundled images from `/samples` (`BUNDLED_ASSETS` in
+`assets.ts`) and uploads them to each sample copy like any plan image; a unit test checks the
+file still matches its key. `hdb4room` stays as the test fixture.
 
 **Plan images on the server (built):** `PUT /projects/{id}/image` stores one PNG, JPEG or WebP
 of up to 10 MB per project, checked by sniffing the content, and returns its SHA-256.
@@ -381,8 +398,9 @@ browser that has them.
 ## 6. Next
 
 **Finish Phase 1**, in order:
-1. **Public-deployment safety:** sharing is done (see §4). Still open: a previous-version copy
-   on PUT and DELETE, and a limit or lifecycle rule on stored projects.
+1. **Public-deployment safety:** sharing and recovery copies are done (see §4). Still open: a
+   cap on how many projects one visitor can create (the Worker's per-IP write limit is the only
+   brake today).
 2. **Room matching by overlap:** rooms are matched across edits by label point and corners. Matching
    by overlapping area would be sturdier for large reshapes.
 
@@ -404,9 +422,15 @@ browser that has them.
 - **Mini-map:** a small plan in the corner while walking shows where you are and which way you
   face (`walk/MiniMap.tsx`).
 - **Next:**
-  - door leaves;
-  - head bob and footstep feel, kept subtle;
-  - remembering the last walk position.
+  - footstep sound, kept subtle;
+  - opening and closing doors by walking up to them.
+- **Built since:**
+  - door leaves in 3D (`doorLeaf` in core): open square to the wall on the swing side as the
+    plan symbol shows, and solid to the walker; doors to the outside (`outsideOpenings`) are
+    shown shut;
+  - a gentle head bob (none with reduced motion);
+  - the next walk resumes where this browser last stood in that project, unless the plan
+    changed under that spot (`walk/pose.ts`, localStorage).
 
 `LevelMeshes` already gives one mesh per wall, with `userData.wallId`. The plan doc has the
 algorithm notes and the checklists for Phases 3 to 5.
