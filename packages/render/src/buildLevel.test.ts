@@ -1,4 +1,4 @@
-import { hdb4RoomLevel } from '@dhd/core';
+import { hdb4RoomLevel, roomPolygon } from '@dhd/core';
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { buildLevel } from './buildLevel';
@@ -34,5 +34,36 @@ describe('buildLevel', () => {
     expect(box.max.x).toBeCloseTo(11);
     expect(box.min.z).toBeCloseTo(4.5);
     expect(box.max.z).toBeCloseTo(8.5);
+  });
+
+  it('every floor covers exactly its room polygon and faces up', () => {
+    for (const room of Object.values(level.rooms)) {
+      const pts = roomPolygon(level, room);
+      const floor = group.getObjectByName(`floor:${room.id}`) as THREE.Mesh;
+      const box = new THREE.Box3().setFromObject(floor);
+      expect(box.min.x, room.id).toBeCloseTo(Math.min(...pts.map((p) => p.x)));
+      expect(box.max.x, room.id).toBeCloseTo(Math.max(...pts.map((p) => p.x)));
+      expect(box.min.z, room.id).toBeCloseTo(Math.min(...pts.map((p) => p.y)));
+      expect(box.max.z, room.id).toBeCloseTo(Math.max(...pts.map((p) => p.y)));
+      const normals = floor.geometry.getAttribute('normal');
+      for (let i = 0; i < normals.count; i++) expect(normals.getY(i), room.id).toBeCloseTo(1);
+    }
+  });
+
+  it('ceilings sit at ceiling height over the floor and face down', () => {
+    const withCeilings = buildLevel(level, { materials: new MaterialCache(), ceilings: true });
+    for (const room of Object.values(level.rooms)) {
+      const floor = withCeilings.getObjectByName(`floor:${room.id}`) as THREE.Mesh;
+      const ceil = withCeilings.getObjectByName(`ceiling:${room.id}`) as THREE.Mesh;
+      const fb = new THREE.Box3().setFromObject(floor);
+      const cb = new THREE.Box3().setFromObject(ceil);
+      expect(cb.min.x, room.id).toBeCloseTo(fb.min.x);
+      expect(cb.max.x, room.id).toBeCloseTo(fb.max.x);
+      expect(cb.min.z, room.id).toBeCloseTo(fb.min.z);
+      expect(cb.max.z, room.id).toBeCloseTo(fb.max.z);
+      expect(cb.min.y, room.id).toBeCloseTo(room.ceilingHeight ?? level.ceilingHeight);
+      const normals = ceil.geometry.getAttribute('normal');
+      for (let i = 0; i < normals.count; i++) expect(normals.getY(i), room.id).toBeCloseTo(-1);
+    }
   });
 });
