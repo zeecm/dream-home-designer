@@ -574,6 +574,30 @@ select {
   top: 12px;
   right: 12px;
 }
+.minimap {
+  position: absolute;
+  right: 12px;
+  bottom: 40px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  pointer-events: none;
+}
+.minimap-room {
+  fill: var(--accent-soft);
+}
+.minimap-wall {
+  fill: var(--text);
+}
+.minimap-view {
+  fill: var(--accent);
+  opacity: 0.35;
+}
+.minimap-you {
+  fill: var(--accent);
+  stroke: #ffffff;
+  stroke-width: 1.5;
+}
 .joystick {
   position: absolute;
   left: 24px;

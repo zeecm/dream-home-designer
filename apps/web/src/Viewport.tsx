@@ -6,7 +6,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useEditor } from './editor';
 import { useProject } from './store';
 import { Joystick } from './walk/Joystick';
-import { WalkControls } from './walk/WalkControls';
+import { MiniMap } from './walk/MiniMap';
+import { WalkControls, type WalkPose } from './walk/WalkControls';
 
 const materials = new MaterialCache();
 const FOV = 40;
@@ -84,6 +85,11 @@ export function Viewport() {
   const walking = useEditor((s) => !!s.walking);
   const { startWalk, stopWalk } = useEditor.getState();
   const stick = useRef<Vec2>({ x: 0, y: 0 });
+  const pose = useRef<WalkPose | null>(null);
+  // Leaving a walk forgets where it was, so the next one starts at the plan's start point.
+  useEffect(() => {
+    if (!walking) pose.current = null;
+  }, [walking]);
   // Frame the plan when the view mounts (once per project), not on every edit; the
   // parent remounts this component when another project opens.
   // biome-ignore lint/correctness/useExhaustiveDependencies: frame once walls exist, not on every edit
@@ -121,7 +127,7 @@ export function Viewport() {
         </mesh>
         <LevelMesh ceilings={walking} />
         {walking && level ? (
-          <WalkControls level={level} stick={stick} />
+          <WalkControls level={level} stick={stick} pose={pose} />
         ) : (
           <>
             <CameraRig frame={frame} />
@@ -140,6 +146,7 @@ export function Viewport() {
           <button type="button" className="btn viewport-action" onClick={stopWalk}>
             Leave walk
           </button>
+          {level && <MiniMap level={level} pose={pose} />}
           {coarsePointer() && <Joystick stick={stick} />}
           <p className="viewport-hint">
             {coarsePointer()

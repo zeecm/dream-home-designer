@@ -7,6 +7,13 @@ import { useEditor } from '../editor';
 /** Joystick input, each axis -1..1: x strafes right, y walks forward. */
 export type StickInput = MutableRefObject<Vec2>;
 
+/** Where the walker is and which way they face (plan space; yaw from +x towards +y). */
+export interface WalkPose {
+  at: Vec2;
+  yaw: number;
+  pitch: number;
+}
+
 const WALK_SPEED = 1.4; // m/s, an ordinary walk
 const RUN_SPEED = 3;
 const LOOK_SPEED = 0.0025; // radians per pixel
@@ -27,10 +34,18 @@ const isTyping = (t: EventTarget | null) =>
  * mouse look under pointer lock (click the view), or drag to look. Collision is the plan's
  * walls in 2D (`walk` in core), so doors and openings are the way through. Esc leaves.
  */
-export function WalkControls({ level, stick }: { level: Level; stick: StickInput }) {
+export function WalkControls({
+  level,
+  stick,
+  pose,
+}: {
+  level: Level;
+  stick: StickInput;
+  /** Shared with the mini-map, which reads it every frame. */
+  pose: MutableRefObject<WalkPose | null>;
+}) {
   const { camera, gl } = useThree();
   const segments = useMemo(() => collisionSegments(level), [level]);
-  const pose = useRef<{ at: Vec2; yaw: number; pitch: number } | null>(null);
   if (!pose.current) {
     const start = walkStart(level);
     pose.current = { at: start?.at ?? { x: 0, y: 0 }, yaw: start?.heading ?? 0, pitch: 0 };
@@ -120,7 +135,7 @@ export function WalkControls({ level, stick }: { level: Level; stick: StickInput
       el.removeEventListener('pointercancel', onUp);
       if (document.pointerLockElement === el) document.exitPointerLock();
     };
-  }, [gl]);
+  }, [gl, pose]);
 
   // A soft light carried at head height: near walls read brighter than far ones, which gives
   // the rooms depth that flat ambient light doesn't.

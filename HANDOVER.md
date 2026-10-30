@@ -334,10 +334,11 @@ browser that has them.
   and room boundaries never block. This replaces the planned three-mesh-bvh capsule, because a
   single floor needs no 3D collision and this one is unit-tested. Revisit it if stairs or
   furniture collision arrive.
+- **Mini-map:** a small plan in the corner while walking shows where you are and which way you
+  face (`walk/MiniMap.tsx`).
 - **Next:**
-  - better indoor lighting (the walls read flat);
   - door leaves;
-  - a mini-map with your position;
+  - stopping the walker from leaving through the front door into empty space;
   - head bob and footstep feel, kept subtle;
   - remembering the last walk position.
 
