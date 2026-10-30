@@ -8,6 +8,10 @@ describe('parseLength', () => {
     expect(parseLength('250cm')).toBe(2.5);
     expect(parseLength('2,500 mm')).toBe(2.5);
     expect(parseLength('.9')).toBe(0.9);
+    // bare numbers off a plan are millimetres
+    expect(parseLength('900')).toBe(0.9);
+    expect(parseLength('10275')).toBe(10.275);
+    expect(parseLength('12')).toBe(12);
   });
 
   it('rejects anything else', () => {

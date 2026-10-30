@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { clickImage, floorArea, newBlankPlan, waitSaved } from './helpers';
+import { clickImage, floorArea, imagePoint, newBlankPlan, waitSaved } from './helpers';
 
 // The bundled sample plan is 1100 x 940 px at 80 px/m with the flat's centre lines from
 // (110, 110) to (990, 790); its 11000 mm dimension runs from x 110 to 990 at y 50.
@@ -11,9 +11,18 @@ test('trace a plan image: upload, set scale, draw walls, reload', async ({ page 
 
   await clickImage(page, 110, 50);
   await clickImage(page, 990, 50);
-  await page.keyboard.type('11000mm');
+  const before = await imagePoint(page, 110, 50);
+  // A bare number off the plan is millimetres.
+  await page.keyboard.type('11000');
   await page.keyboard.press('Enter');
   await expect(page.getByText('1 m on the plan = 80 image px')).toBeVisible();
+  // Setting the scale doesn't move the drawing on screen.
+  const after = await imagePoint(page, 110, 50);
+  expect(Math.abs(after.x - before.x)).toBeLessThan(1);
+  expect(Math.abs(after.y - before.y)).toBeLessThan(1);
+  const far = await imagePoint(page, 990, 790);
+  const box = await page.locator('svg.plan-svg').boundingBox();
+  expect(far.x).toBeLessThan((box?.x ?? 0) + (box?.width ?? 0));
   await expect(page.locator('.tool[aria-pressed="true"]')).toContainText('Wall');
 
   await page.getByRole('button', { name: 'Fit plan' }).click();

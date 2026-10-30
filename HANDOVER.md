@@ -146,8 +146,27 @@ the sample's misplaced master door. All of these are fixed.
 **Independent UX review, round 1, found:** onboarding, typed lengths breaking geometry, guidance,
 hit targets and the 3D pane's behaviour. Fixed or addressed.
 
-**Round 2:** the Phase 1 gate (tracing the real HDB PDF) and a code and architecture review were
-running when this was written. Read their findings in the PR or session before Phase 2.
+**Round 2, Phase 1 gate (passed):** an independent agent traced the real HDB 3-room Type 4 PDF
+from upload to rooms on the live preview.
+- **Calibration:** within 0.1%.
+- **Rooms:** all 8 detected.
+- **Area:** internal 66.1 m² against HDB's 66 m²; 68.6 m² against 69 m² with the A/C ledge.
+- **3D and reload:** both correct.
+- **Effort:** about 150 actions, roughly 8 to 10 minutes for a person, which is borderline. Fixed
+  since:
+  - bare numbers are read as millimetres;
+  - Set scale keeps the drawing in place;
+  - wall chains end when they join existing walls;
+  - the phone layout no longer overflows.
+
+**Round 2, code review:** every confirmed bug is fixed. The fixes cover:
+- settling corners after moves (merge, split, crossings);
+- sliver walls next to corners;
+- re-clamping openings;
+- the save races;
+- not forgetting projects when the server is unreachable;
+- repairing and migrating documents on load;
+- API hardening.
 
 ## 5. Owner to-dos
 
@@ -175,7 +194,17 @@ running when this was written. Read their findings in the PR or session before P
    connected wall lengths in the Corner inspector.
 4. **Keyboard access to plan objects:** focusable canvas, arrow keys to cycle objects, nudging.
 5. **Plan images on the server:** upload them to R2 through the API so they work on every device.
-6. **A realistic sample:** replace the simple sample flat with a realistic HDB 4-room layout
+6. **Open-plan boundaries:** a room boundary that isn't a wall (dry kitchen vs living, for
+   example), probably `Wall.kind: 'boundary'` drawn dashed and never extruded. This is a schema bump.
+7. **Faster tracing:**
+   - door and window size presets (HDB: 0.7, 0.8, 0.9 m);
+   - renaming a room by typing straight after selecting it;
+   - room labels that avoid door swings.
+8. **Rooms inside rooms:** subtract them as holes. Match rooms by overlapping area rather than
+   by label point.
+9. **Public-deployment safety:** a write token separate from the share link, a previous-version
+   copy on PUT and DELETE, and a limit or lifecycle rule on stored projects.
+10. **A realistic sample:** replace the simple sample flat with a realistic HDB 4-room layout
    (bathrooms, shelter, service yard). Keep `hdb4room` for tests.
 
 **Phase 2, first-person walkthrough:**

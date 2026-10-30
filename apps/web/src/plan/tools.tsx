@@ -51,7 +51,7 @@ export interface ToolController {
 export const TOOL_HINTS: Record<Tool, string> = {
   select:
     'Click to select. Drag a corner or a door to move it. Double-click a wall to add a corner.',
-  wall: 'Click to place corners; type a length for an exact wall. Enter or double-click finishes.',
+  wall: 'Click to place corners; type a length for an exact wall. Joining an existing corner or wall, Enter or a double-click finishes.',
   room: 'Click two opposite corners to draw a rectangular room. Esc cancels.',
   door: 'Click a wall to add a door.',
   window: 'Click a wall to add a window.',

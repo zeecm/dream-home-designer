@@ -66,7 +66,7 @@ export function LengthField({
     }
     const v = parseLength(draft);
     if (v === null) {
-      setError('Enter a length such as 2.5 m, 250 cm or 2500 mm.');
+      setError('Enter a length such as 2.5 m, 250 cm, 2500 mm or just 2500.');
       return;
     }
     if (v < min || v > max) {

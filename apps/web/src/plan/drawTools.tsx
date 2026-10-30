@@ -72,24 +72,44 @@ export function useWallTool(ctx: ToolContext): ToolController {
           from: fromPos ?? undefined,
         });
 
+  /** Corners this chain created or started from, so returning to them doesn't end it. */
+  const chain = useRef(new Set<string>());
   const finish = () => {
     setFrom(null);
     setFirst(null);
     setTyped('');
     setError(null);
+    chain.current = new Set();
   };
+
+  // A new thickness starts a new chain (it is how people switch to inner walls).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reacts to thickness only
+  useEffect(() => {
+    setFrom(null);
+    setFirst(null);
+    chain.current = new Set();
+  }, [thickness]);
 
   const commit = (end: WallEnd) => {
     if (!from) return;
     try {
+      const existed = new Set(Object.keys(ctx.level.vertices));
       const r = drawWall(ctx.level, from, end, { thickness });
       ctx.dispatch(r.command);
       setError(null);
+      // The chain ends where it joins what is already drawn: back at its first corner,
+      // on an existing corner, or on an existing wall. Free clicks keep it going.
       const closed = 'vertexId' in end && end.vertexId === first;
-      if (closed) {
+      const joined =
+        ('vertexId' in end && existed.has(end.vertexId) && !chain.current.has(end.vertexId)) ||
+        ('wallId' in end && !!end.wallId) ||
+        (existed.has(r.endVertexId) && !chain.current.has(r.endVertexId));
+      if (closed || joined) {
         finish();
         return;
       }
+      chain.current.add(r.startVertexId);
+      chain.current.add(r.endVertexId);
       setFirst((f) => f ?? r.startVertexId);
       setFrom({ vertexId: r.endVertexId });
     } catch (e) {
@@ -108,6 +128,7 @@ export function useWallTool(ctx: ToolContext): ToolController {
       if (!from) {
         setFrom(endFor(s));
         setFirst(s.vertexId ?? null);
+        chain.current = new Set(s.vertexId ? [s.vertexId] : []);
         return true;
       }
       commit(endFor(s));
@@ -319,8 +340,26 @@ export function useCalibrateTool(ctx: ToolContext): ToolController {
       setError('Type the real length, e.g. 4.5 m or 4500 mm, then press Enter.');
       return;
     }
+    const factor = len / Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    if (factor > 100 || factor < 0.01) {
+      setError(
+        `That would change the scale ${factor > 1 ? 'up' : 'down'} more than 100×. Check the length and its unit, then press Enter.`,
+      );
+      return;
+    }
     try {
       ctx.dispatch(calibrateUnderlay(p1, p2, len));
+      // The image grew or shrank about the first point; scale the view the same way so
+      // the drawing stays exactly where it was on screen.
+      const v = ctx.view;
+      useEditor.getState().setView(
+        {
+          cx: p1.x + factor * (v.cx - p1.x),
+          cy: p1.y + factor * (v.cy - p1.y),
+          zoom: v.zoom / factor,
+        },
+        true,
+      );
       setPoints([]);
       setTyped('');
       setError(null);

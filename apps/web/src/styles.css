@@ -1038,7 +1038,26 @@ select {
     display: none;
   }
   .topbar .segmented button {
-    padding: 0 10px;
+    padding: 0 8px;
+  }
+  .topbar {
+    gap: 6px;
+    padding: 0 6px;
+  }
+  .topbar .icon-btn {
+    width: 28px;
+  }
+  .sample-banner {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 8px 6px 12px;
+  }
+  .sample-banner .btn {
+    white-space: nowrap;
+  }
+  .tool-list {
+    overflow-x: auto;
+    padding-right: 8px;
   }
   .workspace {
     grid-template-columns: 1fr;

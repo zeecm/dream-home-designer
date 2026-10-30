@@ -48,8 +48,26 @@ export interface EditorState {
   reset: () => void;
 }
 
-const initialViewMode = (): ViewMode =>
-  typeof window !== 'undefined' && window.innerWidth < 900 ? 'plan' : 'split';
+const VIEW_KEY = 'dhd:view';
+
+/** The last view mode used in this browser, or a sensible default for the screen. */
+const initialViewMode = (): ViewMode => {
+  try {
+    const saved = window.localStorage.getItem(VIEW_KEY);
+    if (saved === 'plan' || saved === 'split' || saved === '3d') return saved;
+  } catch {
+    // storage disabled
+  }
+  return typeof window !== 'undefined' && window.innerWidth < 900 ? 'plan' : 'split';
+};
+
+const rememberViewMode = (m: ViewMode) => {
+  try {
+    window.localStorage.setItem(VIEW_KEY, m);
+  } catch {
+    // storage disabled
+  }
+};
 
 export const useEditor = create<EditorState>((set) => ({
   tool: 'select',
@@ -65,7 +83,10 @@ export const useEditor = create<EditorState>((set) => ({
   select: (selection) => set({ selection }),
   setHover: (hover) => set({ hover }),
   setView: (view, byUser) => set(byUser ? { view, viewAdjusted: true } : { view }),
-  setViewMode: (viewMode) => set({ viewMode, fitRequested: true, viewAdjusted: false }),
+  setViewMode: (viewMode) => {
+    rememberViewMode(viewMode);
+    set({ viewMode, fitRequested: true, viewAdjusted: false });
+  },
   requestFit: () => set({ fitRequested: true, viewAdjusted: false }),
   fitDone: () => set({ fitRequested: false }),
   reset: () =>
