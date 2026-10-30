@@ -9,4 +9,6 @@ export * from './plan';
 export * from './rooms';
 export * from './snap';
 export * from './underlay';
+export * from './topology';
+export * from './migrate';
 export { hdb4RoomLevel, hdb4RoomProject } from './fixtures/hdb4room';

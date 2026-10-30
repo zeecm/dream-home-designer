@@ -144,6 +144,20 @@ export function snapPoint(level: Level, p: Vec2, opts: SnapOptions): SnapResult 
       onWall = { wallId: w.id, point: pr.point, d: pr.distance };
     }
   }
+  // A point on a wall right next to one of its corners is that corner: no sliver walls.
+  if (onWall) {
+    const w = level.walls[onWall.wallId];
+    for (const id of w ? [w.a, w.b] : []) {
+      const v = level.vertices[id];
+      if (
+        v &&
+        !opts.excludeVertices?.has(id) &&
+        Math.hypot(v.x - onWall.point.x, v.y - onWall.point.y) <= tol
+      ) {
+        return { point: { x: v.x, y: v.y }, kind: 'vertex', vertexId: id };
+      }
+    }
+  }
   if (onWall) {
     return {
       point: { x: q(onWall.point.x), y: q(onWall.point.y) },
@@ -162,4 +176,54 @@ export function snapPoint(level: Level, p: Vec2, opts: SnapOptions): SnapResult 
     };
   }
   return { point: p, kind: 'free' };
+}
+
+/**
+ * Where a dragged corner should land: an existing corner or wall if one is close,
+ * otherwise square to its neighbouring walls (where two right-angle guides cross, both
+ * walls stay square), otherwise the grid.
+ */
+export function snapCorner(
+  level: Level,
+  vertexId: string,
+  p: Vec2,
+  opts: { tolerance: number; grid?: number },
+): Vec2 {
+  const own = new Set(
+    Object.values(level.walls)
+      .filter((w) => w.a === vertexId || w.b === vertexId)
+      .map((w) => w.id),
+  );
+  const step = opts.grid ?? 0.05;
+  const base = {
+    tolerance: opts.tolerance,
+    grid: step,
+    excludeVertices: new Set([vertexId]),
+    excludeWalls: own,
+  };
+  const plain = snapPoint(level, p, base);
+  if (plain.kind === 'vertex' || plain.kind === 'wall') return plain.point;
+  const guides: { from: Vec2; angle: number }[] = [];
+  for (const w of Object.values(level.walls)) {
+    if (!own.has(w.id)) continue;
+    const other = level.vertices[w.a === vertexId ? w.b : w.a];
+    if (!other) continue;
+    const s = snapPoint(level, p, { ...base, from: other, grid: 0 });
+    if (s.kind === 'angle' && s.angle !== undefined) guides.push({ from: other, angle: s.angle });
+  }
+  const [g1, g2] = guides;
+  if (g1 && g2 && Math.abs(Math.sin(g1.angle - g2.angle)) > 0.1) {
+    const d1 = { x: Math.cos(g1.angle), y: Math.sin(g1.angle) };
+    const d2 = { x: Math.cos(g2.angle), y: Math.sin(g2.angle) };
+    const den = d1.x * d2.y - d1.y * d2.x;
+    const t = ((g2.from.x - g1.from.x) * d2.y - (g2.from.y - g1.from.y) * d2.x) / den;
+    const x = { x: q(g1.from.x + d1.x * t), y: q(g1.from.y + d1.y * t) };
+    if (Math.hypot(x.x - p.x, x.y - p.y) <= opts.tolerance * 2) return x;
+  }
+  if (g1) {
+    const d = { x: Math.cos(g1.angle), y: Math.sin(g1.angle) };
+    const t = Math.round(((p.x - g1.from.x) * d.x + (p.y - g1.from.y) * d.y) / step) * step;
+    return { x: q(g1.from.x + d.x * t), y: q(g1.from.y + d.y * t) };
+  }
+  return plain.point;
 }

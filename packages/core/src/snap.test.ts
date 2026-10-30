@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hdb4RoomLevel } from './fixtures/hdb4room';
-import { projectOnSegment, segmentIntersection, snapPoint } from './snap';
+import { projectOnSegment, segmentIntersection, snapCorner, snapPoint } from './snap';
 
 const l = hdb4RoomLevel();
 
@@ -66,5 +66,26 @@ describe('snapPoint', () => {
   it('can exclude the corner being dragged', () => {
     const s = snapPoint(l, { x: 5.02, y: 4.5 }, { ...opts, excludeVertices: new Set(['v9']) });
     expect(s.kind).not.toBe('vertex');
+  });
+});
+
+describe('snapCorner', () => {
+  it('keeps both walls square when dragged near their right-angle crossing', () => {
+    // v4 (11, 8.5) joins the right wall (from v3 above) and the back wall (from v5 left).
+    const p = snapCorner(l, 'v4', { x: 11.12, y: 8.37 }, { tolerance: 0.15 });
+    expect(p).toEqual({ x: 11, y: 8.5 });
+  });
+
+  it('slides along one square guide when only one applies', () => {
+    const p = snapCorner(l, 'v4', { x: 11.03, y: 10.02 }, { tolerance: 0.15 });
+    expect(p.x).toBeCloseTo(11);
+    expect(p.y).toBeCloseTo(10);
+  });
+
+  it('prefers a nearby corner of another wall', () => {
+    expect(snapCorner(l, 'v4', { x: 7.05, y: 8.45 }, { tolerance: 0.15 })).toEqual({
+      x: 7,
+      y: 8.5,
+    });
   });
 });

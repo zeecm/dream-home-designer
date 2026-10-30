@@ -7,7 +7,7 @@
 //	R2_BUCKET      bucket name (STORE=r2)
 //	R2_ACCESS_KEY  R2 S3 access key id (STORE=r2)
 //	R2_SECRET_KEY  R2 S3 secret (STORE=r2)
-//	LIST_PROJECTS  set to "off" to disable GET /projects on a public deployment
+//	LIST_PROJECTS  set to "on" to enable GET /projects (off by default: no auth yet)
 package main
 
 import (
@@ -61,8 +61,8 @@ func run(log *slog.Logger) error {
 	}
 
 	var opts []httpapi.Option
-	if os.Getenv("LIST_PROJECTS") == "off" {
-		opts = append(opts, httpapi.WithoutListing())
+	if os.Getenv("LIST_PROJECTS") == "on" {
+		opts = append(opts, httpapi.WithListing())
 	}
 
 	srv := &http.Server{

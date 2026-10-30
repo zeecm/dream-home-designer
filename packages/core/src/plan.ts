@@ -1,5 +1,5 @@
 import { type Footprints, type WallFootprint, footprintSpans, wallFootprints } from './footprints';
-import { openingsOnWall } from './geometry';
+import { clampOpeningT, openingsOnWall } from './geometry';
 import type { Level, Opening, OpeningKind, Vec2, Wall } from './schema';
 
 /**
@@ -100,10 +100,12 @@ export function planGeometry(level: Level, footprints = wallFootprints(level)): 
     let cursor = 0;
     const solid = (s: number, e: number) => {
       if (e - s < 1e-9) return;
-      const l0 = s === 0 ? f.left[0] : s;
-      const l1 = e === f.length ? f.left[1] : e;
-      const r0 = s === 0 ? f.right[0] : s;
-      const r1 = e === f.length ? f.right[1] : e;
+      // Same rule as the 3D extrusion: a side whose mitres overshoot collapses to a point,
+      // so a very short, thick wall never draws a folded outline.
+      const span = (from: number, to: number): [number, number] =>
+        to > from ? [from, to] : [(from + to) / 2, (from + to) / 2];
+      const [l0, l1] = span(s === 0 ? f.left[0] : s, e === f.length ? f.left[1] : e);
+      const [r0, r1] = span(s === 0 ? f.right[0] : s, e === f.length ? f.right[1] : e);
       pieces.push({
         wallId: wall.id,
         polygon: [
@@ -165,4 +167,53 @@ export function doorSwing(f: WallFrame, o: Opening): DoorSwing {
   const v1 = { x: leafEnd.x - hinge.x, y: leafEnd.y - hinge.y };
   const v2 = { x: arcEnd.x - hinge.x, y: arcEnd.y - hinge.y };
   return { hinge, leafEnd, arcEnd, radius, sweep: v1.x * v2.y - v1.y * v2.x > 0 ? 1 : 0 };
+}
+
+export interface OpeningPlacement {
+  wallId: string;
+  /** Centre along the wall, clamped so the opening fits. */
+  t: number;
+  width: number;
+  /** +1 if the point is on the wall's left (+n) side, -1 on its right. */
+  side: 1 | -1;
+  /** True if the point is nearer the wall's start (vertex a). */
+  nearA: boolean;
+  /** False if the wall is too short for even a narrow opening. */
+  fits: boolean;
+}
+
+/**
+ * Where an opening of `width` would go for a pointer at `p`: on the nearest wall within
+ * `tolerance` of its face, centred under the pointer and kept on the wall.
+ */
+export function placeOpening(
+  geom: PlanGeometry,
+  p: Vec2,
+  width: number,
+  tolerance: number,
+): OpeningPlacement | null {
+  let best: (OpeningPlacement & { d: number }) | null = null;
+  for (const f of Object.values(geom.frames)) {
+    const b = { x: f.a.x + f.d.x * f.length, y: f.a.y + f.d.y * f.length };
+    const dx = b.x - f.a.x;
+    const dy = b.y - f.a.y;
+    const raw = ((p.x - f.a.x) * dx + (p.y - f.a.y) * dy) / (f.length * f.length);
+    const t = Math.min(1, Math.max(0, raw));
+    const foot = { x: f.a.x + dx * t, y: f.a.y + dy * t };
+    const d = Math.hypot(p.x - foot.x, p.y - foot.y);
+    if (d > tolerance + f.half || (best && d >= best.d)) continue;
+    const w = Math.min(width, f.length - 0.1);
+    best = {
+      wallId: f.wall.id,
+      t: clampOpeningT(f.length, w, t),
+      width: w,
+      side: (p.x - foot.x) * f.n.x + (p.y - foot.y) * f.n.y >= 0 ? 1 : -1,
+      nearA: t < 0.5,
+      fits: w >= 0.4,
+      d,
+    };
+  }
+  if (!best) return null;
+  const { d: _, ...placement } = best;
+  return placement;
 }

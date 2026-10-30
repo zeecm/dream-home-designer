@@ -31,7 +31,9 @@ export type SyncStatus =
   | { kind: 'dirty' }
   | { kind: 'saving' }
   | { kind: 'conflict'; serverVersion: number }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string }
+  /** The server couldn't be reached to open `id`; nothing is forgotten, and Retry tries again. */
+  | { kind: 'unreachable'; id: string };
 
 interface State {
   backend: Backend | null;
@@ -45,30 +47,52 @@ interface State {
   dismissNotice: () => void;
   /** A short confirmation after a destructive edit, offering Undo. */
   toast: { text: string; at: number } | null;
-  /** Resolves a save conflict: reload the server's version, or overwrite it with ours. */
-  resolveConflict: (keep: 'theirs' | 'mine') => Promise<void>;
   dispatch: (cmd: Command, opts?: DispatchOptions) => void;
   undo: () => void;
   redo: () => void;
   load: (id: string) => Promise<void>;
+  /** Probes the server again and reopens the plan that couldn't be reached. */
+  retry: () => Promise<void>;
   /** Creates a blank project, stores it and opens it. */
   createProject: (name?: string) => Promise<void>;
   /** Opens a fresh copy of the reference plan, so every visitor edits their own. */
   openSample: () => Promise<void>;
   save: () => Promise<void>;
+  /** Resolves a save conflict: reload the server's version, or overwrite it with ours. */
+  resolveConflict: (keep: 'theirs' | 'mine') => Promise<void>;
 }
 
 const AUTOSAVE_MS = 2000;
+const RETRY_MAX_MS = 30_000;
+
 let autosaveTimer: ReturnType<typeof setTimeout> | undefined;
+let retryTimer: ReturnType<typeof setTimeout> | undefined;
+let retries = 0;
+/** The save in flight, if any; only one runs at a time. */
+let inflight: Promise<void> | null = null;
+/** Set when the document changed (or a save was asked for) while a save was in flight. */
+let saveAgain = false;
+
 let backendPromise: Promise<Backend> | undefined;
+let usingFallback = false;
+let probedAt = 0;
 
 const localNotice =
   'The server can’t be reached right now, so this plan is saved in this browser only.';
 
-/** Probes the API once; without one, projects live in this browser. */
-function resolveBackend(): Promise<Backend> {
-  // A sleeping API container takes a few seconds to wake, so be patient here.
-  backendPromise ??= apiAvailable(20_000).then((ok) => (ok ? remoteBackend : localBackend()));
+/**
+ * Probes the API (once, unless the last probe failed over a minute ago or `fresh` is set).
+ * Without an API, projects live in this browser.
+ */
+function resolveBackend(fresh = false): Promise<Backend> {
+  if (fresh || (usingFallback && Date.now() - probedAt > 60_000)) backendPromise = undefined;
+  backendPromise ??= (async () => {
+    probedAt = Date.now();
+    // A sleeping API container takes a few seconds to wake, so be patient here.
+    const ok = await apiAvailable(20_000);
+    usingFallback = !ok;
+    return ok ? remoteBackend : localBackend();
+  })();
   return backendPromise;
 }
 
@@ -105,16 +129,21 @@ const VALID_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 /** Commands that remove things get an Undo toast. */
 const DESTRUCTIVE = /^Delete /;
 
+/** States in which the open document may be edited. */
+const EDITABLE = new Set<SyncStatus['kind']>(['saved', 'dirty', 'saving', 'conflict', 'error']);
+
 export const useStore = create<State>((set, get) => {
   const commit = (editor: EditorDoc) => {
     set({ editor, canUndo: canUndo(editor), canRedo: canRedo(editor) });
     if (get().sync.kind === 'conflict') return;
-    set({ sync: { kind: 'dirty' } });
+    if (get().sync.kind !== 'saving') set({ sync: { kind: 'dirty' } });
     clearTimeout(autosaveTimer);
     autosaveTimer = setTimeout(() => void get().save(), AUTOSAVE_MS);
   };
 
   const open = (doc: Project) => {
+    clearTimeout(retryTimer);
+    retries = 0;
     set({
       editor: { doc, history: emptyHistory() },
       sync: { kind: 'saved', version: doc.version },
@@ -125,10 +154,13 @@ export const useStore = create<State>((set, get) => {
     rememberProject(doc.id);
   };
 
-  /** Saves pending edits before switching away from the open project. */
+  /** Finishes any save in flight and saves pending edits before leaving the open project. */
   const flush = async () => {
     clearTimeout(autosaveTimer);
+    clearTimeout(retryTimer);
+    while (inflight) await inflight;
     if (get().sync.kind === 'dirty') await get().save();
+    while (inflight) await inflight;
   };
 
   const createFrom = async (doc: Project) => {
@@ -156,6 +188,8 @@ export const useStore = create<State>((set, get) => {
     toast: null,
 
     dispatch: (cmd, opts) => {
+      // Nothing is edited until a real project is open (not while loading or unreachable).
+      if (!EDITABLE.has(get().sync.kind)) return;
       const next = coreDispatch(get().editor, cmd, opts);
       if (next === get().editor) return;
       commit(next);
@@ -165,6 +199,135 @@ export const useStore = create<State>((set, get) => {
           toast: { text: `${what[0]?.toUpperCase()}${what.slice(1)} deleted`, at: Date.now() },
         });
       }
+    },
+    undo: () => {
+      if (!EDITABLE.has(get().sync.kind)) return;
+      const next = coreUndo(get().editor);
+      if (next !== get().editor) commit(next);
+    },
+    redo: () => {
+      if (!EDITABLE.has(get().sync.kind)) return;
+      const next = coreRedo(get().editor);
+      if (next !== get().editor) commit(next);
+    },
+
+    load: async (id) => {
+      if (!VALID_ID.test(id)) {
+        set({
+          notice:
+            'That link doesn’t point to a plan, so a fresh copy of the sample opened instead.',
+        });
+        return get().openSample();
+      }
+      if (get().editor.doc.id !== id) await flush();
+      set({ sync: { kind: 'loading' } });
+      try {
+        const backend = await resolveBackend();
+        set({ backend });
+        try {
+          open(await backend.get(id));
+          if (backend.kind === 'local' && usingFallback && !get().notice)
+            set({ notice: localNotice });
+          return;
+        } catch (e) {
+          if (!(e instanceof NotFoundError)) throw e;
+        }
+        if (backend.kind === 'local' && usingFallback) {
+          // The server may well have it; never forget a plan because we couldn't reach it.
+          set({ sync: { kind: 'unreachable', id } });
+          return;
+        }
+        // Created in this browser while the server was down? Then it is only here.
+        try {
+          const local = localBackend();
+          const doc = await local.get(id);
+          set({
+            backend: local,
+            notice:
+              'This plan was saved in this browser while the server was unreachable, so it is only here.',
+          });
+          open(doc);
+          return;
+        } catch {
+          // not here either
+        }
+        set({
+          recent: forgetRecent(id),
+          notice: 'That project isn’t saved here, so a fresh copy of the sample opened instead.',
+        });
+        return get().openSample();
+      } catch (e) {
+        set({ sync: { kind: 'error', message: errorMessage('Could not open the project', e) } });
+      }
+    },
+
+    retry: async () => {
+      const s = get().sync;
+      await resolveBackend(true);
+      if (s.kind === 'unreachable') return get().load(s.id);
+      if (s.kind === 'error') return get().save();
+    },
+
+    createProject: async (name) => {
+      await createFrom(blankProject(name));
+      // A blank plan is drawn in the plan view; 3D has nothing to show yet.
+      useEditor.getState().setViewMode('plan');
+    },
+    openSample: () => createFrom({ ...hdb4RoomProject(newId('prj')), name: '4-room HDB (sample)' }),
+
+    save: () => {
+      clearTimeout(autosaveTimer);
+      clearTimeout(retryTimer);
+      if (inflight) {
+        saveAgain = true;
+        return inflight;
+      }
+      const backend = get().backend;
+      const kind = get().sync.kind;
+      if (!backend || kind === 'conflict' || kind === 'loading' || kind === 'unreachable') {
+        return Promise.resolve();
+      }
+      const sent = get().editor.doc;
+      set({ sync: { kind: 'saving' } });
+      inflight = (async () => {
+        try {
+          const version = await backend.save(sent);
+          retries = 0;
+          const live = get().editor;
+          if (live.doc.id !== sent.id) return; // another project opened meanwhile
+          set({ editor: { ...live, doc: { ...live.doc, version } } });
+          const changedSince = live.doc !== sent;
+          set({ sync: changedSince ? { kind: 'dirty' } : { kind: 'saved', version } });
+          if (changedSince) saveAgain = true;
+          if (sent.name !== get().recent.find((r) => r.id === sent.id)?.name) {
+            set({ recent: rememberRecent(sent) });
+          }
+        } catch (e) {
+          if (get().editor.doc.id !== sent.id) return;
+          if (e instanceof ConflictError) {
+            set({ sync: { kind: 'conflict', serverVersion: e.serverVersion } });
+            return;
+          }
+          // Rate limits, a waking server or a dropped connection: try again, backing off.
+          const delay = Math.min(RETRY_MAX_MS, 2000 * 2 ** retries++);
+          set({
+            sync: {
+              kind: 'error',
+              message: `${(e as Error).message}. Retrying in ${Math.round(delay / 1000)} s.`,
+            },
+          });
+          retryTimer = setTimeout(() => {
+            if (get().editor.doc.id === sent.id && get().sync.kind === 'error') void get().save();
+          }, delay);
+        }
+      })().finally(() => {
+        inflight = null;
+        if (saveAgain) {
+          saveAgain = false;
+          if (get().sync.kind === 'dirty') void get().save();
+        }
+      });
+      return inflight;
     },
 
     resolveConflict: async (keep) => {
@@ -183,78 +346,6 @@ export const useStore = create<State>((set, get) => {
         set({ sync: { kind: 'error', message: errorMessage('Could not save', e) } });
       }
     },
-    undo: () => {
-      const next = coreUndo(get().editor);
-      if (next !== get().editor) commit(next);
-    },
-    redo: () => {
-      const next = coreRedo(get().editor);
-      if (next !== get().editor) commit(next);
-    },
-
-    load: async (id) => {
-      if (!VALID_ID.test(id)) {
-        set({
-          notice:
-            'That link doesn’t point to a plan, so a fresh copy of the sample opened instead.',
-        });
-        return get().openSample();
-      }
-      if (get().editor.doc.id !== id) await flush();
-      clearTimeout(autosaveTimer);
-      set({ sync: { kind: 'loading' } });
-      try {
-        const backend = await resolveBackend();
-        set({ backend });
-        if (backend.kind === 'local' && !get().notice) {
-          set({ notice: localNotice });
-        }
-        open(await backend.get(id));
-      } catch (e) {
-        if (e instanceof NotFoundError) {
-          // A stale link, or a project saved in another browser.
-          set({
-            recent: forgetRecent(id),
-            notice: 'That project isn’t saved here, so a fresh copy of the sample opened instead.',
-          });
-          return get().openSample();
-        }
-        set({ sync: { kind: 'error', message: errorMessage('Could not open the project', e) } });
-      }
-    },
-
-    createProject: async (name) => {
-      await createFrom(blankProject(name));
-      // A blank plan is drawn in the plan view; 3D has nothing to show yet.
-      useEditor.getState().setViewMode('plan');
-    },
-    openSample: () => createFrom({ ...hdb4RoomProject(newId('prj')), name: '4-room HDB (sample)' }),
-
-    save: async () => {
-      clearTimeout(autosaveTimer);
-      const backend = get().backend;
-      if (!backend) return;
-      const sent = get().editor.doc;
-      set({ sync: { kind: 'saving' } });
-      try {
-        const version = await backend.save(sent);
-        // Stamp the new version onto the live doc without touching undo history.
-        const live = get().editor;
-        set({ editor: { ...live, doc: { ...live.doc, version } } });
-        const changedSince = live.doc !== sent;
-        set({ sync: changedSince ? { kind: 'dirty' } : { kind: 'saved', version } });
-        if (changedSince) autosaveTimer = setTimeout(() => void get().save(), AUTOSAVE_MS);
-        if (sent.name !== get().recent.find((r) => r.id === sent.id)?.name) {
-          set({ recent: rememberRecent(sent) });
-        }
-      } catch (e) {
-        if (e instanceof ConflictError) {
-          set({ sync: { kind: 'conflict', serverVersion: e.serverVersion } });
-        } else {
-          set({ sync: { kind: 'error', message: (e as Error).message } });
-        }
-      }
-    },
   };
 });
 
@@ -269,9 +360,7 @@ window.addEventListener('pagehide', () => {
 window.addEventListener('beforeunload', (e) => {
   const { sync, backend } = useStore.getState();
   const unsaved = ['dirty', 'saving', 'conflict', 'error'].includes(sync.kind);
-  if (backend?.kind === 'remote' && unsaved) {
-    e.preventDefault();
-  }
+  if (backend?.kind === 'remote' && unsaved) e.preventDefault();
 });
 
 export const useProject = () => useStore((s) => s.editor.doc);

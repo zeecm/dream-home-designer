@@ -8,6 +8,7 @@ import {
   roomArea,
   setCeilingHeight,
   setWallLength,
+  settleVertex,
   updateOpening,
   updateRoom,
   updateWall,
@@ -201,7 +202,12 @@ function VertexInspector({ level, id }: { level: Level; id: string }) {
   const v = level.vertices[id];
   if (!v) return null;
   const walls = Object.values(level.walls).filter((w) => w.a === id || w.b === id).length;
-  const move = (x: number, y: number) => dispatch(moveVertex(level.id, id, { x, y }));
+  const move = (x: number, y: number) => {
+    const key = `move:${id}:${Date.now()}`;
+    dispatch(moveVertex(level.id, id, { x, y }), { coalesceKey: key });
+    const moved = useStore.getState().editor.doc.levels[0];
+    if (moved) dispatch(settleVertex(moved, id), { coalesceKey: key });
+  };
   return (
     <>
       <Header title="Corner" onClose={clear} />

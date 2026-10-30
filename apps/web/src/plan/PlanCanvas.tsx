@@ -65,8 +65,13 @@ export function PlanCanvas() {
   const project = useProject();
   const level = project.levels[0];
   const dispatch = useStore((s) => s.dispatch);
-  const { tool, selection, hover, view, fitRequested } = useEditor();
-  const { setView, fitDone, setPointer, requestFit } = useEditor.getState();
+  // Narrow selectors: the canvas re-renders for these, not for every editor change.
+  const tool = useEditor((s) => s.tool);
+  const selection = useEditor((s) => s.selection);
+  const hover = useEditor((s) => s.hover);
+  const view = useEditor((s) => s.view);
+  const fitRequested = useEditor((s) => s.fitRequested);
+  const { setView, fitDone, requestFit } = useEditor.getState();
 
   const geom = useMemo(() => (level ? planGeometry(level) : null), [level]);
   const underlay = project.underlay;
@@ -152,7 +157,6 @@ export function PlanCanvas() {
   };
   const onPointerMove = (e: React.PointerEvent) => {
     const p = pointer(e);
-    setPointer(p.world);
     if (pan.current) {
       setView(panBy(v, p.screen.x - pan.current.x, p.screen.y - pan.current.y), true);
       pan.current = p.screen;
@@ -260,7 +264,7 @@ export function PlanCanvas() {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerLeave={() => setPointer(null)}
+        onPointerCancel={onPointerUp}
         onContextMenu={(e) => e.preventDefault()}
       >
         <defs>

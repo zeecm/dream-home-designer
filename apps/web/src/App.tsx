@@ -62,6 +62,7 @@ function Notice() {
   const dismiss = useStore((s) => s.dismissNotice);
   const sync = useStore((s) => s.sync);
   const resolve = useStore((s) => s.resolveConflict);
+  const retry = useStore((s) => s.retry);
   if (sync.kind === 'conflict') {
     return (
       <output className="notice notice-error">
@@ -77,7 +78,21 @@ function Notice() {
       </output>
     );
   }
-  const text = notice ?? (sync.kind === 'error' ? sync.message : null);
+  if (sync.kind === 'unreachable' || (sync.kind === 'error' && !notice)) {
+    return (
+      <output className="notice notice-error">
+        <span>
+          {sync.kind === 'unreachable'
+            ? 'The server can’t be reached, so this plan can’t be opened right now. Nothing has been lost.'
+            : sync.message}
+        </span>
+        <button type="button" className="btn btn-small" onClick={() => void retry()}>
+          Try again
+        </button>
+      </output>
+    );
+  }
+  const text = notice;
   if (!text) return null;
   return (
     <output className={`notice${sync.kind === 'error' && !notice ? ' notice-error' : ''}`}>

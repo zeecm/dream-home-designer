@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { hdb4RoomLevel } from './fixtures/hdb4room';
 import { signedArea } from './geometry';
-import { doorSwing, framePoint, planGeometry } from './plan';
+import { doorSwing, framePoint, placeOpening, planGeometry } from './plan';
 
 const area = (p: { x: number; y: number }[]) => Math.abs(signedArea(p));
 
@@ -54,5 +54,23 @@ describe('doorSwing', () => {
     // maths terms (negative cross), so sweep 0.
     expect(s.sweep).toBe(0);
     expect(framePoint(door.frame, 0, 0)).toEqual({ x: 7, y: 4.5 });
+  });
+});
+
+describe('placeOpening', () => {
+  const g = planGeometry(hdb4RoomLevel());
+  it('centres on the pointer on the nearest wall and records the side', () => {
+    // Just inside the kitchen, under the front wall (y = 0) at x = 8.
+    const p = placeOpening(g, { x: 8, y: 0.2 }, 1.2, 0.3)!;
+    expect(p.wallId).toBe('w_front_r');
+    expect(p.t * 6).toBeCloseTo(3); // 8 m is 3 m along the 6 m wall from x = 5
+    expect(p.side).toBe(1); // +n of a +x wall is +y, into the flat
+    expect(p.fits).toBe(true);
+  });
+
+  it('keeps the opening on the wall near its end and finds nothing far away', () => {
+    const p = placeOpening(g, { x: 10.95, y: 0.1 }, 1.2, 0.3)!;
+    expect(p.t * 6 + p.width / 2).toBeLessThanOrEqual(6 + 1e-9);
+    expect(placeOpening(g, { x: 20, y: 20 }, 1.2, 0.3)).toBeNull();
   });
 });

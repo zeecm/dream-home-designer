@@ -15,7 +15,7 @@ import (
 
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	ts := httptest.NewServer(New(store.NewMemory(), slog.New(slog.NewTextHandler(io.Discard, nil))))
+	ts := httptest.NewServer(New(store.NewMemory(), slog.New(slog.NewTextHandler(io.Discard, nil)), WithListing()))
 	t.Cleanup(ts.Close)
 	return ts
 }
@@ -179,5 +179,18 @@ func TestWithoutListingHidesTheProjectList(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode != http.StatusMethodNotAllowed && res.StatusCode != http.StatusNotFound {
 		t.Fatalf("GET /projects = %d, want 404 or 405", res.StatusCode)
+	}
+}
+
+func TestDeleteRejectsUnsafeIDs(t *testing.T) {
+	ts := newTestServer(t)
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/projects/..%2F..%2Fassets%2Fx", nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("DELETE with a traversal id = %d, want 400", res.StatusCode)
 	}
 }

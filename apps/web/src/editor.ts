@@ -1,4 +1,3 @@
-import type { Vec2 } from '@dhd/core';
 import { create } from 'zustand';
 import type { View } from './plan/view';
 
@@ -34,8 +33,6 @@ export interface EditorState {
   fitRequested: boolean;
   /** True once the user pans or zooms; until then the plan refits when its pane resizes. */
   viewAdjusted: boolean;
-  /** World position of the pointer over the plan, for the status line. */
-  pointer: Vec2 | null;
   /** Thickness for walls the Wall tool draws, in metres. */
   wallThickness: number;
   setWallThickness: (t: number) => void;
@@ -47,7 +44,6 @@ export interface EditorState {
   setViewMode: (m: ViewMode) => void;
   requestFit: () => void;
   fitDone: () => void;
-  setPointer: (p: Vec2 | null) => void;
   /** Called when another project opens. */
   reset: () => void;
 }
@@ -63,7 +59,6 @@ export const useEditor = create<EditorState>((set) => ({
   viewMode: initialViewMode(),
   fitRequested: true,
   viewAdjusted: false,
-  pointer: null,
   wallThickness: 0.1,
   setWallThickness: (wallThickness) => set({ wallThickness }),
   setTool: (tool) => set({ tool, hover: null }),
@@ -73,7 +68,6 @@ export const useEditor = create<EditorState>((set) => ({
   setViewMode: (viewMode) => set({ viewMode, fitRequested: true, viewAdjusted: false }),
   requestFit: () => set({ fitRequested: true, viewAdjusted: false }),
   fitDone: () => set({ fitRequested: false }),
-  setPointer: (pointer) => set({ pointer }),
   reset: () =>
     set({ tool: 'select', selection: null, hover: null, fitRequested: true, viewAdjusted: false }),
 }));

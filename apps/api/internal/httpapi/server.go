@@ -30,8 +30,11 @@ type options struct{ noList bool }
 // this so a project is reachable only by its unguessable id.
 func WithoutListing() Option { return func(o *options) { o.noList = true } }
 
+// WithListing enables GET /projects (off by default; for local development).
+func WithListing() Option { return func(o *options) { o.noList = false } }
+
 func New(s store.Store, log *slog.Logger, opts ...Option) *Server {
-	var o options
+	o := options{noList: true}
 	for _, opt := range opts {
 		opt(&o)
 	}
@@ -130,7 +133,12 @@ func (s *Server) update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) remove(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.Delete(r.Context(), r.PathValue("id")); err != nil {
+	id := r.PathValue("id")
+	if !project.ValidID(id) {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	if err := s.store.Delete(r.Context(), id); err != nil {
 		s.fail(w, err)
 		return
 	}

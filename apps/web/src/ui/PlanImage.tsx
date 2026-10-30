@@ -14,7 +14,10 @@ import { icons } from './icons';
 
 /** Stores an uploaded plan locally and puts it under the plan, centred in view. */
 export async function uploadPlanImage(file: File): Promise<void> {
+  const projectId = useStore.getState().editor.doc.id;
   const { width, height, blob } = await prepareUpload(file);
+  // A PDF can take a moment to render; don't put it on a different plan opened meanwhile.
+  if (useStore.getState().editor.doc.id !== projectId) return;
   const key = `img_${newId('it').slice(3)}`;
   await putAsset(key, blob);
   const view = useEditor.getState().view;

@@ -6,6 +6,7 @@ import { newId } from './ids';
 import { syncRooms } from './rooms';
 import { type Level, Opening, type Project, Room, type Vec2, Wall } from './schema';
 import { projectOnSegment, segmentIntersection } from './snap';
+import { endCapture, reclampOpenings, splitWallAt } from './topology';
 
 function level(draft: Draft<Project>, levelId: string): Draft<Level> {
   const lvl = draft.levels.find((l) => l.id === levelId);
@@ -26,10 +27,12 @@ export function moveVertex(levelId: string, vertexId: string, to: Vec2): Command
   return {
     label: 'Move corner',
     recipe: (d) => {
-      const v = level(d, levelId).vertices[vertexId];
+      const lvl = level(d, levelId);
+      const v = lvl.vertices[vertexId];
       if (!v) throw new Error(`vertex ${vertexId} not found`);
       v.x = to.x;
       v.y = to.y;
+      reclampOpenings(lvl);
     },
   };
 }
@@ -241,6 +244,7 @@ export function setWallLength(
         v.x += delta.x;
         v.y += delta.y;
       }
+      reclampOpenings(lvl);
     },
   };
 }
@@ -286,12 +290,18 @@ export function updateOpening(levelId: string, openingId: string, patch: Opening
       const a = wall && lvl.vertices[wall.a];
       const b = wall && lvl.vertices[wall.b];
       if (!a || !b) throw new Error(`opening ${openingId} is on a missing wall`);
+      const length = Math.hypot(b.x - a.x, b.y - a.y);
+      if (p.width !== undefined && p.width > length + 1e-9) {
+        throw new Error(
+          `an opening ${p.width} m wide does not fit on a ${length.toFixed(2)} m wall`,
+        );
+      }
       Object.assign(o, p);
       if ('swing' in patch && patch.swing === undefined) delete o.swing;
       if (o.kind !== 'door') delete o.swing;
       else o.swing ??= 'leftIn';
       if (o.kind !== 'window') o.sill = 0;
-      o.t = clampOpeningT(Math.hypot(b.x - a.x, b.y - a.y), o.width, o.t);
+      o.t = clampOpeningT(length, o.width, o.t);
     },
   };
 }
@@ -334,46 +344,33 @@ function splitWallDraft(
   const a = w && lvl.vertices[w.a];
   const b = w && lvl.vertices[w.b];
   if (!w || !a || !b) throw new Error(`wall ${wallId} not found`);
-  const pr = projectOnSegment(at, a, b);
-  const t = Math.min(1 - 1e-6, Math.max(1e-6, pr.t));
-  const length = Math.hypot(b.x - a.x, b.y - a.y);
-  const us = t * length;
-  const oldA = w.a;
-  const oldB = w.b;
-
+  const t = Math.min(1 - 1e-6, Math.max(1e-6, projectOnSegment(at, a, b).t));
   lvl.vertices[vertexId] = { id: vertexId, x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-  lvl.walls[newWallId] = { ...w, id: newWallId, a: vertexId, b: oldB };
-  w.b = vertexId;
-
-  for (const o of Object.values(lvl.openings)) {
-    if (o.wallId !== wallId) continue;
-    const u = o.t * length;
-    if (u <= us) {
-      o.t = clampOpeningT(us, o.width, u / us);
-    } else {
-      o.wallId = newWallId;
-      o.t = clampOpeningT(length - us, o.width, (u - us) / (length - us));
-    }
-  }
-
-  for (const room of Object.values(lvl.rooms)) {
-    const n = room.loop.length;
-    for (let i = 0; i < n; i++) {
-      const p = room.loop[i];
-      const q = room.loop[(i + 1) % n];
-      if ((p === oldA && q === oldB) || (p === oldB && q === oldA)) {
-        room.loop.splice(i + 1, 0, vertexId);
-        break;
-      }
-    }
-  }
+  splitWallAt(lvl, wallId, vertexId, newWallId);
 }
 
 export function splitWall(
   levelId: string,
   wallId: string,
   at: Vec2,
+  snapshot?: Level,
 ): { command: Command; vertexId: string; wallId: string } {
+  // Next to a corner, the corner itself is the split point: no sliver walls.
+  const w = snapshot?.walls[wallId];
+  const a = w && snapshot?.vertices[w.a];
+  const b = w && snapshot?.vertices[w.b];
+  if (w && a && b) {
+    const u = projectOnSegment(at, a, b).t * Math.hypot(b.x - a.x, b.y - a.y);
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const cap = endCapture(w.thickness);
+    if (u < cap || len - u < cap) {
+      return {
+        vertexId: u < cap ? w.a : w.b,
+        wallId,
+        command: { label: 'Split wall', recipe: () => {} },
+      };
+    }
+  }
   const vertexId = newId('v');
   const newWallId = newId('w');
   return {
@@ -408,7 +405,17 @@ const EPS = 1e-6;
  * connects to it, so the new wall joins the graph instead of overlapping it.
  */
 function attach(snapshot: Level, e: WallEnd): WallEnd {
-  if ('vertexId' in e || e.wallId) return e;
+  if ('vertexId' in e) return e;
+  if (e.wallId) {
+    const w = snapshot.walls[e.wallId];
+    const a = w && snapshot.vertices[w.a];
+    const b = w && snapshot.vertices[w.b];
+    if (!w || !a || !b) return { point: e.point };
+    const cap = endCapture(w.thickness);
+    if (Math.hypot(e.point.x - a.x, e.point.y - a.y) < cap) return { vertexId: w.a };
+    if (Math.hypot(e.point.x - b.x, e.point.y - b.y) < cap) return { vertexId: w.b };
+    return e;
+  }
   for (const v of Object.values(snapshot.vertices)) {
     if (Math.hypot(v.x - e.point.x, v.y - e.point.y) < 1e-4) return { vertexId: v.id };
   }

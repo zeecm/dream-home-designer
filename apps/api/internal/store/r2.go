@@ -231,7 +231,11 @@ func (s *R2) put(ctx context.Context, rec Record, cond http.Header) error {
 // do sends a signed request and maps 404 and 412 to ErrNotFound and errPrecondition.
 // The caller closes the body of a successful response.
 func (s *R2) do(ctx context.Context, method, key string, query url.Values, h http.Header, body []byte) (*http.Response, error) {
-	u, err := url.Parse(s.Endpoint + "/" + s.Bucket + "/" + key)
+	segs := strings.Split(key, "/")
+	for i, seg := range segs {
+		segs[i] = url.PathEscape(seg)
+	}
+	u, err := url.Parse(s.Endpoint + "/" + url.PathEscape(s.Bucket) + "/" + strings.Join(segs, "/"))
 	if err != nil {
 		return nil, err
 	}

@@ -232,7 +232,7 @@ export function WallDimension({ geom, view, size, wallId }: ScreenProps & { wall
 }
 
 /** Corner handles in screen pixels; every corner is grabbable, the relevant ones are shown. */
-export function VertexHandles({
+export const VertexHandles = memo(function VertexHandles({
   level,
   view,
   size,
@@ -261,4 +261,4 @@ export function VertexHandles({
       })}
     </g>
   );
-}
+});

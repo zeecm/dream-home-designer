@@ -1,5 +1,6 @@
 import {
   type OpeningKind,
+  type OpeningPlacement,
   type SnapResult,
   type Vec2,
   type WallEnd,
@@ -7,7 +8,7 @@ import {
   calibrateUnderlay,
   clampOpeningT,
   drawWall,
-  projectOnSegment,
+  placeOpening,
   snapPoint,
 } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
@@ -42,6 +43,15 @@ export function useWallTool(ctx: ToolContext): ToolController {
   const thickness = useEditor((s) => s.wallThickness);
   const tool = useEditor((s) => s.tool);
   const fromPos = from ? posOf(ctx, from) : null;
+
+  // Undo can remove the corner the chain is drawing from; start over rather than fail.
+  useEffect(() => {
+    if (from && !fromPos) {
+      setFrom(null);
+      setFirst(null);
+      setTyped('');
+    }
+  }, [from, fromPos]);
 
   // Leaving the tool abandons the chain in progress.
   useEffect(() => {
@@ -221,16 +231,7 @@ const OPENING_DEFAULTS: Record<OpeningKind, { width: number; height: number; sil
   passage: { width: 1.0, height: 2.1, sill: 0 },
 };
 
-interface Placement {
-  wallId: string;
-  t: number;
-  width: number;
-  /** +1 if the pointer is on the wall's left side. */
-  side: 1 | -1;
-  /** True if the hinge should go at the end nearer vertex a. */
-  nearA: boolean;
-  fits: boolean;
-}
+type Placement = OpeningPlacement;
 
 /** Places a door, window or passage on the wall under the pointer. */
 export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolController {
@@ -239,28 +240,8 @@ export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolControl
   keep.current = place;
   const def = OPENING_DEFAULTS[kind];
 
-  const find = (p: PlanPointer): Placement | null => {
-    let best: (Placement & { d: number }) | null = null;
-    const tol = Math.max(0.3, 14 / ctx.view.zoom);
-    for (const f of Object.values(ctx.geom.frames)) {
-      const b = { x: f.a.x + f.d.x * f.length, y: f.a.y + f.d.y * f.length };
-      const pr = projectOnSegment(p.world, f.a, b);
-      if (pr.distance > tol + f.half || (best && pr.distance >= best.d)) continue;
-      const width = Math.min(def.width, f.length - 0.1);
-      const side =
-        (p.world.x - pr.point.x) * f.n.x + (p.world.y - pr.point.y) * f.n.y >= 0 ? 1 : -1;
-      best = {
-        wallId: f.wall.id,
-        t: clampOpeningT(f.length, width, pr.t),
-        width,
-        side,
-        nearA: pr.t < 0.5,
-        fits: width >= 0.4,
-        d: pr.distance,
-      };
-    }
-    return best;
-  };
+  const find = (p: PlanPointer): Placement | null =>
+    placeOpening(ctx.geom, p.world, def.width, Math.max(0.3, 14 / ctx.view.zoom));
 
   return {
     cursor: 'copy',
@@ -476,6 +457,10 @@ export function useRoomTool(ctx: ToolContext): ToolController {
       }
       setError(null);
     } catch (e) {
+      // All four walls or none: take back the ones already added.
+      const key0 = key;
+      const past = useStore.getState().editor.history.past;
+      if (past[past.length - 1]?.coalesceKey === key0) useStore.getState().undo();
       setError((e as Error).message);
     }
   };

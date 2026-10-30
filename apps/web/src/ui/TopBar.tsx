@@ -19,6 +19,8 @@ function syncText(s: SyncStatus, local: boolean): { text: string; tone: 'neutral
       return { text: `Changed elsewhere (v${s.serverVersion})`, tone: 'negative' };
     case 'error':
       return { text: 'Not saved', tone: 'negative' };
+    case 'unreachable':
+      return { text: 'Offline', tone: 'negative' };
   }
 }
 

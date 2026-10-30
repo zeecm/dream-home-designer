@@ -1,4 +1,7 @@
-import { type Project, parseProject } from '@dhd/core';
+import { type Project, loadProject } from '@dhd/core';
+
+/** Migrates, validates and repairs a document read from storage. */
+const parseProject = (input: unknown): Project => loadProject(input).project;
 
 /** Where projects live: the Go API, or this browser's localStorage when no API answers. */
 export interface Backend {

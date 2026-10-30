@@ -8,12 +8,14 @@ import {
   deleteVertex,
   deleteWall,
   moveVertex,
-  snapPoint,
+  settleVertex,
+  snapCorner,
   splitWall,
   updateOpening,
 } from '@dhd/core';
 import { type ReactNode, useRef, useState } from 'react';
 import { type Selection, type Tool, useEditor } from '../editor';
+import { useStore } from '../store';
 import { formatLength } from '../units';
 import { type Size, type View, worldToScreen } from './view';
 
@@ -85,47 +87,6 @@ export function nearestVertex(
   return best;
 }
 
-/**
- * Where a dragged corner should land: an existing corner or wall if one is close,
- * otherwise square to its neighbouring walls (where two right-angle guides cross, both
- * walls stay square), otherwise the 5 cm grid.
- */
-function snapCorner(ctx: ToolContext, id: string, own: Set<string>, p: Vec2): Vec2 {
-  const base = {
-    tolerance: snapTolerance(ctx),
-    grid: 0.05,
-    excludeVertices: new Set([id]),
-    excludeWalls: own,
-  };
-  const plain = snapPoint(ctx.level, p, base);
-  if (plain.kind === 'vertex' || plain.kind === 'wall') return plain.point;
-  const guides: { from: Vec2; angle: number }[] = [];
-  for (const w of Object.values(ctx.level.walls)) {
-    if (w.a !== id && w.b !== id) continue;
-    const other = ctx.level.vertices[w.a === id ? w.b : w.a];
-    if (!other) continue;
-    const s = snapPoint(ctx.level, p, { ...base, from: other, grid: 0 });
-    if (s.kind === 'angle' && s.angle !== undefined) guides.push({ from: other, angle: s.angle });
-  }
-  const [g1, g2] = guides;
-  if (g1 && g2 && Math.abs(Math.sin(g1.angle - g2.angle)) > 0.1) {
-    const d1 = { x: Math.cos(g1.angle), y: Math.sin(g1.angle) };
-    const d2 = { x: Math.cos(g2.angle), y: Math.sin(g2.angle) };
-    const den = d1.x * d2.y - d1.y * d2.x;
-    const t = ((g2.from.x - g1.from.x) * d2.y - (g2.from.y - g1.from.y) * d2.x) / den;
-    const x = { x: g1.from.x + d1.x * t, y: g1.from.y + d1.y * t };
-    if (Math.hypot(x.x - p.x, x.y - p.y) <= base.tolerance * 2) return x;
-  }
-  if (g1) {
-    const d = { x: Math.cos(g1.angle), y: Math.sin(g1.angle) };
-    const t = (p.x - g1.from.x) * d.x + (p.y - g1.from.y) * d.y;
-    const step = 0.05;
-    const tt = Math.round(t / step) * step;
-    return { x: g1.from.x + d.x * tt, y: g1.from.y + d.y * tt };
-  }
-  return plain.point;
-}
-
 type Drag =
   | { kind: 'vertex'; id: string; start: Vec2; moved: boolean; key: string }
   | { kind: 'opening'; id: string; wallId: string; start: Vec2; moved: boolean; key: string };
@@ -144,7 +105,7 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         return false;
       }
       if (h.kind === 'wall' && p.clicks === 2) {
-        const r = splitWall(levelId, h.id, p.world);
+        const r = splitWall(levelId, h.id, p.world, ctx.level);
         ctx.dispatch(r.command);
         select({ kind: 'vertex', id: r.vertexId });
         return true;
@@ -178,12 +139,9 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       if (!d.moved && Math.hypot(p.screen.x - d.start.x, p.screen.y - d.start.y) < 3) return;
       d.moved = true;
       if (d.kind === 'vertex') {
-        const own = new Set(
-          Object.values(ctx.level.walls)
-            .filter((w) => w.a === d.id || w.b === d.id)
-            .map((w) => w.id),
-        );
-        const to = p.alt ? p.world : snapCorner(ctx, d.id, own, p.world);
+        const to = p.alt
+          ? p.world
+          : snapCorner(ctx.level, d.id, p.world, { tolerance: snapTolerance(ctx), grid: 0.05 });
         ctx.dispatch(moveVertex(levelId, d.id, to), { coalesceKey: d.key });
       } else {
         const f = ctx.geom.frames[d.wallId];
@@ -195,7 +153,13 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       }
     },
     up: () => {
+      const d = drag.current;
       drag.current = null;
+      if (d?.kind === 'vertex' && d.moved) {
+        // Merge, split and re-detect rooms once, at the end of the drag, in the same undo step.
+        const level = useStore.getState().editor.doc.levels[0];
+        if (level) ctx.dispatch(settleVertex(level, d.id), { coalesceKey: d.key });
+      }
     },
     key: (e) => {
       const sel = useEditor.getState().selection;

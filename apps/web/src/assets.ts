@@ -8,13 +8,27 @@ import { useEffect, useState } from 'react';
 const DB = 'dhd-assets';
 const STORE = 'blobs';
 
+let connection: Promise<IDBDatabase> | undefined;
+
+/** One shared connection; it closes itself if a newer tab needs to upgrade the database. */
 function db(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  connection ??= new Promise((resolve, reject) => {
     const req = indexedDB.open(DB, 1);
     req.onupgradeneeded = () => req.result.createObjectStore(STORE);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const d = req.result;
+      d.onversionchange = () => {
+        d.close();
+        connection = undefined;
+      };
+      resolve(d);
+    };
+    req.onerror = () => {
+      connection = undefined;
+      reject(req.error);
+    };
   });
+  return connection;
 }
 
 async function tx<T>(
