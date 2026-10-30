@@ -277,6 +277,20 @@ versions 1 and 2.
 - **Wording:** a wall with the same room on both sides is announced "in" that room.
 - **Phone width:** the last 2 px of sideways overflow is gone.
 
+**Round 5 code review (fixed):**
+- **Jamb snapping:** it now happens in `snapPoint`, so only the point being drawn moves and the
+  preview shows it. `splitWallAt` no longer moves a shared corner, which bent walls.
+- **Inspector fields:** they commit through the latest values for their object (the panels are
+  keyed per object). A commit during unmount is guarded. A top-level `ErrorBoundary` replaces a
+  blank page with a Reload screen.
+- **Smaller fixes:**
+  - The thumb stick is released when a walk ends.
+  - Remove deletes the server image only if the plan really lost it.
+  - Image sync runs only while the plan can be edited.
+  - Walk keys leave a focused `<select>` alone.
+  - The file store reads older `<id>.bin` images.
+  - A busy image GET returns 503.
+
 **Sample flat:** `sampleFlatProject` (core fixtures) is a 96 m² HDB-style 4-room flat with a
 service yard, kitchen, household shelter, two bathrooms, three bedrooms and an L-shaped
 living and dining room. It is built with the editor's own commands, then given readable ids

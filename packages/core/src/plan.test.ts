@@ -8,6 +8,7 @@ import { type EditorDoc, dispatch, emptyHistory } from './history';
 import { loadProject } from './migrate';
 import { doorSwing, framePoint, placeOpening, planGeometry } from './plan';
 import { type Level, SCHEMA_VERSION, type Vec2, type Wall, isBoundary } from './schema';
+import { snapPoint } from './snap';
 
 const area = (p: { x: number; y: number }[]) => Math.abs(signedArea(p));
 
@@ -183,7 +184,12 @@ describe('boundaries meeting walls (review round 4)', () => {
       sill: 0.9,
     });
     r.apply(op.command);
-    r.draw({ x: 3.2, y: 2 }, { x: 3.2, y: 0 }, { kind: 'boundary' });
+    // The drawing snap moves an end inside the window to its nearer jamb (x = 4)...
+    const end = snapPoint(r.lvl(), { x: 3.2, y: 0 }, { tolerance: 0.15 });
+    expect(end.kind).toBe('wall');
+    expect(end.point.x).toBeCloseTo(4);
+    r.draw({ x: 4, y: 2 }, end.point, { kind: 'boundary' });
+    // ...so the window stays where it was, whole.
     const at = centre(r.lvl(), op.openingId);
     expect(at.x).toBeCloseTo(3);
     expect(r.lvl().openings[op.openingId]?.width).toBeCloseTo(2);
@@ -191,6 +197,27 @@ describe('boundaries meeting walls (review round 4)', () => {
     expect(Object.values(r.lvl().vertices).some((v) => Math.abs(v.x - 4) < 1e-9 && v.y === 0)).toBe(
       true,
     );
+  });
+
+  it('a split that still lands inside an opening keeps the corner where it was put', () => {
+    // A straight wall crossing a door: no corner may move, or the drawn wall would bend.
+    const r = room();
+    r.draw({ x: 4, y: 0 }, { x: 4, y: 4 });
+    const p = placeOpening(planGeometry(r.lvl()), { x: 4.1, y: 2 }, 0.9, 0.3);
+    r.apply(
+      addOpening(r.lvl().id, {
+        wallId: p?.wallId as string,
+        kind: 'door',
+        t: p?.t as number,
+        width: 0.9,
+        height: 2.1,
+        sill: 0,
+      }).command,
+    );
+    r.draw({ x: 1, y: 2.1 }, { x: 7, y: 2.1 });
+    for (const v of Object.values(r.lvl().vertices)) {
+      if (Math.abs(v.x - 4) < 1e-9 && v.y > 0 && v.y < 4) expect(v.y).toBeCloseTo(2.1);
+    }
   });
 
   it('drawing a wall along a boundary turns it into a wall', () => {

@@ -28,21 +28,10 @@ export function splitWallAt(l: Mut, wallId: string, vertexId: string, newWallId:
   const v = l.vertices[vertexId];
   if (!w || !a || !b || !v) throw new Error(`cannot split wall ${wallId}`);
   const length = dist(a, b);
-  let us = projectOnSegment(v, a, b).t * length;
-  // A split inside a door or window would shove the opening off its place: move the corner
-  // to the opening's nearer jamb instead, if that leaves both parts a real length.
-  for (const o of Object.values(l.openings)) {
-    if (o.wallId !== wallId) continue;
-    const u0 = o.t * length - o.width / 2;
-    const u1 = o.t * length + o.width / 2;
-    if (us <= u0 + 1e-6 || us >= u1 - 1e-6) continue;
-    const edge = us - u0 < u1 - us ? u0 : u1;
-    if (edge < 0.05 || edge > length - 0.05) continue;
-    us = edge;
-    v.x = a.x + ((b.x - a.x) * us) / length;
-    v.y = a.y + ((b.y - a.y) * us) / length;
-    break;
-  }
+  // Snapping keeps drawn walls off openings (`snapPoint` moves a point inside one to its
+  // jamb). A split that still lands inside one keeps the opening on the part holding its
+  // centre; moving the corner here instead would bend every wall that meets it.
+  const us = projectOnSegment(v, a, b).t * length;
   const oldA = w.a;
   const oldB = w.b;
   l.walls[newWallId] = { ...w, id: newWallId, a: vertexId, b: oldB };

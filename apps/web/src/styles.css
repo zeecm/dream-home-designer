@@ -574,6 +574,22 @@ select {
   top: 12px;
   right: 12px;
 }
+.crash {
+  display: grid;
+  place-content: center;
+  gap: 12px;
+  min-height: 100vh;
+  padding: 24px;
+  text-align: center;
+  background: var(--ground);
+  color: var(--muted);
+}
+.crash-title {
+  color: var(--text);
+  font-size: var(--fs-title);
+  font-weight: 600;
+  margin: 0;
+}
 .minimap {
   position: absolute;
   right: 12px;

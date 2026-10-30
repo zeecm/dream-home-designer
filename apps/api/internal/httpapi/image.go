@@ -96,6 +96,7 @@ func (s *Server) getImage(w http.ResponseWriter, r *http.Request) {
 	case imageReads <- struct{}{}:
 		defer func() { <-imageReads }()
 	case <-r.Context().Done():
+		writeError(w, http.StatusServiceUnavailable, "busy, try again")
 		return
 	}
 	info, body, err := imgs.OpenImage(r.Context(), id)

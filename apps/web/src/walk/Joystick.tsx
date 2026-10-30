@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { StickInput } from './WalkControls';
 
 const RADIUS = 48;
@@ -8,6 +8,13 @@ export function Joystick({ stick }: { stick: StickInput }) {
   const base = useRef<HTMLDivElement>(null);
   const [knob, setKnob] = useState({ x: 0, y: 0 });
   const active = useRef<number | null>(null);
+  // Leaving mid-gesture never delivers the pointerup: let go of the stick on the way out.
+  useEffect(
+    () => () => {
+      stick.current = { x: 0, y: 0 };
+    },
+    [stick],
+  );
 
   const update = (e: React.PointerEvent) => {
     const b = base.current?.getBoundingClientRect();

@@ -160,7 +160,7 @@ export function snapPoint(level: Level, p: Vec2, opts: SnapOptions): SnapResult 
   }
   if (onWall) {
     return {
-      point: { x: q(onWall.point.x), y: q(onWall.point.y) },
+      point: jambSnap(level, onWall.wallId, onWall.point),
       kind: 'wall',
       wallId: onWall.wallId,
     };
@@ -226,4 +226,35 @@ export function snapCorner(
     return { x: q(g1.from.x + d.x * t), y: q(g1.from.y + d.y * t) };
   }
   return plain.point;
+}
+
+/**
+ * A point on a wall that falls inside a door or window moves to the opening's nearer jamb,
+ * so a wall drawn to it meets the wall beside the opening instead of splitting it (which
+ * would have to shove the opening aside). Only the point being drawn moves, and the drawing
+ * preview shows where it went.
+ */
+function jambSnap(level: Level, wallId: string, p: Vec2): Vec2 {
+  const w = level.walls[wallId];
+  const a = w && level.vertices[w.a];
+  const b = w && level.vertices[w.b];
+  const at = { x: q(p.x), y: q(p.y) };
+  if (!a || !b) return at;
+  const length = Math.hypot(b.x - a.x, b.y - a.y);
+  if (length < 1e-9) return at;
+  const u = projectOnSegment(p, a, b).t * length;
+  for (const o of Object.values(level.openings)) {
+    if (o.wallId !== wallId) continue;
+    const u0 = o.t * length - o.width / 2;
+    const u1 = o.t * length + o.width / 2;
+    if (u <= u0 + 1e-6 || u >= u1 - 1e-6) continue;
+    // The nearer jamb, unless it is the wall's own end; then the other one.
+    const jambs = (u - u0 < u1 - u ? [u0, u1] : [u1, u0]).filter(
+      (j) => j > 0.05 && j < length - 0.05,
+    );
+    const j = jambs[0];
+    if (j === undefined) return at;
+    return { x: q(a.x + ((b.x - a.x) * j) / length), y: q(a.y + ((b.y - a.y) * j) / length) };
+  }
+  return at;
 }

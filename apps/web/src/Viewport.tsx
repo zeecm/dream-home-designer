@@ -88,7 +88,10 @@ export function Viewport() {
   const pose = useRef<WalkPose | null>(null);
   // Leaving a walk forgets where it was, so the next one starts at the plan's start point.
   useEffect(() => {
-    if (!walking) pose.current = null;
+    if (!walking) {
+      pose.current = null;
+      stick.current = { x: 0, y: 0 }; // a thumb still on the stick when the walk ended
+    }
   }, [walking]);
   // Frame the plan when the view mounts (once per project), not on every edit; the
   // parent remounts this component when another project opens.

@@ -41,16 +41,18 @@ interface LengthFieldProps {
  * restores the current value. Out-of-range input is refused with a reason.
  */
 /**
- * The text of a field being edited, pinned to what it was editing. The first keystroke
- * records `target` (the commit callback and the values it checks against), so if the
- * selection changes before the field loses focus (a click on another wall), the edit still
- * lands on the object it was typed for, and the field then shows the new selection.
+ * The text of a field being edited. While an edit is open the field keeps the typed text;
+ * `take` hands it over with the latest `target` (the commit callback and the values it
+ * checks against). The inspector mounts fresh fields for each object, so the latest target
+ * is always the object the text was typed for, with its current values.
  */
 function useEdit<T>(shown: string, target: T) {
   const [text, setText] = useState(shown);
-  const session = useRef<{ draft: string; target: T } | null>(null);
+  const session = useRef<{ draft: string } | null>(null);
   const latest = useRef(shown);
   latest.current = shown;
+  const current = useRef(target);
+  current.current = target;
   useEffect(() => {
     if (!session.current) setText(shown);
   }, [shown]);
@@ -58,18 +60,18 @@ function useEdit<T>(shown: string, target: T) {
     draft: text,
     editing: () => session.current !== null,
     type: (draft: string) => {
-      session.current = { draft, target: session.current?.target ?? target };
+      session.current = { draft };
       setText(draft);
     },
     /** Ends the edit, returning what was typed and for what; null if nothing was typed. */
-    take: () => {
+    take: (): { draft: string; target: T } | null => {
       const s = session.current;
       session.current = null;
-      return s;
+      return s ? { draft: s.draft, target: current.current } : null;
     },
     /** Keeps an edit open (after a refused value) so it can be corrected. */
-    keep: (s: { draft: string; target: T }) => {
-      session.current = s;
+    keep: (s: { draft: string }) => {
+      session.current = { draft: s.draft };
     },
     /** Shows the current selection's value again. */
     reset: () => {
@@ -136,7 +138,16 @@ export function LengthField({
   // An input removed while focused gets no blur: commit what was typed as it goes.
   const commitRef = useRef(commit);
   commitRef.current = commit;
-  useEffect(() => () => commitRef.current(true), []);
+  useEffect(
+    () => () => {
+      try {
+        commitRef.current(true);
+      } catch {
+        // the object went away with the field (merged, deleted): nothing to change
+      }
+    },
+    [],
+  );
 
   return (
     <Field label={label} hint={error ?? hint}>
@@ -210,7 +221,16 @@ export function TextField({
   // An input removed while focused gets no blur: commit what was typed as it goes.
   const commitRef = useRef(commit);
   commitRef.current = commit;
-  useEffect(() => () => commitRef.current(true), []);
+  useEffect(
+    () => () => {
+      try {
+        commitRef.current(true);
+      } catch {
+        // the object went away with the field (merged, deleted): nothing to change
+      }
+    },
+    [],
+  );
   return (
     <Field label={label}>
       {(id) => (

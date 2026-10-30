@@ -83,9 +83,11 @@ export function syncPlanImage(): Promise<void> {
 }
 
 async function syncOnce(projectId: string): Promise<void> {
-  const { backend, editor } = useStore.getState();
+  const { backend, editor, sync } = useStore.getState();
   const key = editor.doc.underlay?.assetKey;
   if (editor.doc.id !== projectId || !key || !backend?.putImage || !backend.hasImage) return;
+  // Only for a plan that is open for editing: a re-key couldn't be recorded otherwise.
+  if (!['saved', 'dirty', 'saving'].includes(sync.kind)) return;
   const tag = `${projectId}|${key}`;
   if (synced.get(projectId) === key || refused.has(tag)) return;
   try {
@@ -321,8 +323,9 @@ export function PlanImagePanel() {
           className="btn btn-small btn-danger"
           onClick={() => {
             dispatch(setUnderlay(null));
-            // The server's copy goes too; undo uploads it again from this browser.
-            void deleteServerImage();
+            // The server's copy goes too (undo uploads it again from this browser), but only
+            // if the plan really lost it: nothing changes while the plan can't be edited.
+            if (!useStore.getState().editor.doc.underlay) void deleteServerImage();
           }}
         >
           Remove

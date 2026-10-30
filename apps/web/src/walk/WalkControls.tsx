@@ -27,7 +27,8 @@ const RIGHT = new Set(['KeyD', 'ArrowRight']);
 const MOVE_KEYS = new Set([...FORWARD, ...BACK, ...LEFT, ...RIGHT, 'ShiftLeft', 'ShiftRight']);
 
 const isTyping = (t: EventTarget | null) =>
-  t instanceof HTMLElement && (t.isContentEditable || ['INPUT', 'TEXTAREA'].includes(t.tagName));
+  t instanceof HTMLElement &&
+  (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName));
 
 /**
  * First-person controls: WASD or the arrow keys (Shift to run) or the touch stick to move;

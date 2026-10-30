@@ -137,6 +137,10 @@ func fileImages(dir string, into map[string]Image) (func(id string, img *Image) 
 		}
 		data, err := os.ReadFile(binOf(id, meta.Hash))
 		if errors.Is(err, os.ErrNotExist) {
+			// Stores written before images were named by hash kept <id>.bin.
+			data, err = os.ReadFile(filepath.Join(imgDir, id+".bin"))
+		}
+		if errors.Is(err, os.ErrNotExist) {
 			continue // a half-written image: as if there were none
 		}
 		if err != nil {
@@ -144,12 +148,13 @@ func fileImages(dir string, into map[string]Image) (func(id string, img *Image) 
 		}
 		into[id] = Image{Hash: meta.Hash, ContentType: meta.ContentType, Data: data}
 	}
-	// removeOthers deletes every <id>.*.bin except keep.
+	// removeOthers deletes every <id>.*.bin (and an older <id>.bin) except keep.
 	removeOthers := func(id, keep string) error {
 		olds, err := filepath.Glob(filepath.Join(imgDir, id+".*.bin"))
 		if err != nil {
 			return err
 		}
+		olds = append(olds, filepath.Join(imgDir, id+".bin"))
 		for _, p := range olds {
 			if p == keep {
 				continue
