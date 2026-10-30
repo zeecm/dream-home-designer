@@ -38,6 +38,13 @@ export const icons = {
       <path d="M2.5 8h4" />
     </Icon>
   ),
+  furniture: (
+    <Icon>
+      <path d="M3 7.5V6a1.5 1.5 0 0 1 1.5-1.5h7A1.5 1.5 0 0 1 13 6v1.5" />
+      <path d="M2.5 7.5h11v3.5h-11z" />
+      <path d="M3.5 11v1.5M12.5 11v1.5" />
+    </Icon>
+  ),
   door: (
     <Icon>
       <path d="M2.5 13.5h3M10.5 13.5h3" />

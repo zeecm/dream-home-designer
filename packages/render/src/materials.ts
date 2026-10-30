@@ -10,6 +10,16 @@ const palette: Record<string, { color: string; roughness: number }> = {
   'wood-walnut': { color: '#7a5233', roughness: 0.65 },
   'tile-grey': { color: '#b8b8b4', roughness: 0.4 },
   door: { color: '#c9b08a', roughness: 0.6 },
+  'furniture-wood': { color: '#b98c5f', roughness: 0.6 },
+  'furniture-wood-dark': { color: '#5b4030', roughness: 0.6 },
+  'furniture-fabric': { color: '#7d8590', roughness: 0.95 },
+  'furniture-fabric-light': { color: '#ddd7cb', roughness: 0.95 },
+  'furniture-white': { color: '#f2f0eb', roughness: 0.5 },
+  'furniture-charcoal': { color: '#34373b', roughness: 0.5 },
+  'furniture-metal': { color: '#b9bec4', roughness: 0.35 },
+  'furniture-glass': { color: '#22272b', roughness: 0.1 },
+  'furniture-ceramic': { color: '#fbfbf9', roughness: 0.2 },
+  'furniture-leaf': { color: '#5d8a4e', roughness: 0.8 },
 };
 const fallback = { color: '#ff00ff', roughness: 1 };
 

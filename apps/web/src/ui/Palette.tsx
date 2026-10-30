@@ -1,5 +1,5 @@
-import type { OpeningKind } from '@dhd/core';
-import { type ReactNode, useEffect, useRef } from 'react';
+import { FURNITURE, type OpeningKind } from '@dhd/core';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { type Tool, useEditor } from '../editor';
 import { TOOL_HINTS } from '../plan/tools';
 import { OPENING_PRESETS, type Preset, THICKNESS_PRESETS } from '../presets';
@@ -22,6 +22,7 @@ export const TOOLS: ToolDef[] = [
   { id: 'door', label: 'Door', key: 'D', icon: icons.door },
   { id: 'window', label: 'Window', key: 'N', icon: icons.window },
   { id: 'passage', label: 'Opening', key: 'O', icon: icons.passage },
+  { id: 'furniture', label: 'Furniture', key: 'I', icon: icons.furniture },
   { id: 'measure', label: 'Measure', key: 'M', icon: icons.measure },
   { id: 'calibrate', label: 'Set scale', key: 'C', icon: icons.calibrate },
 ];
@@ -88,6 +89,7 @@ export function ToolOptions({ tool, idPrefix = '' }: { tool: Tool; idPrefix?: st
       />
     );
   }
+  if (tool === 'furniture') return <Catalogue idPrefix={idPrefix} />;
   if (tool === 'door' || tool === 'window' || tool === 'passage') {
     return (
       <Choices
@@ -100,6 +102,54 @@ export function ToolOptions({ tool, idPrefix = '' }: { tool: Tool; idPrefix?: st
     );
   }
   return null;
+}
+
+/** The furniture to place, by room, with a filter. */
+function Catalogue({ idPrefix }: { idPrefix: string }) {
+  const picked = useEditor((s) => s.furnitureKind);
+  const pick = useEditor.getState().setFurnitureKind;
+  const [filter, setFilter] = useState('');
+  const q = filter.trim().toLowerCase();
+  const shown = FURNITURE.filter(
+    (k) => !q || k.name.toLowerCase().includes(q) || k.category.toLowerCase().includes(q),
+  );
+  const groups = [...new Set(shown.map((k) => k.category))];
+  const cm = (m: number) => Math.round(m * 100);
+  return (
+    <section className="tool-options catalogue" aria-labelledby={`${idPrefix}catalogue`}>
+      <h3 id={`${idPrefix}catalogue`} className="panel-heading">
+        Pick a piece
+      </h3>
+      <input
+        className="input"
+        type="search"
+        placeholder="Find, e.g. bed or sofa"
+        aria-label="Find furniture"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+      />
+      {groups.map((g) => (
+        <div key={g} className="catalogue-group">
+          <p className="catalogue-heading">{g}</p>
+          <ul className="choice-list">
+            {shown
+              .filter((k) => k.category === g)
+              .map((k) => (
+                <li key={k.id}>
+                  <button type="button" aria-pressed={picked === k.id} onClick={() => pick(k.id)}>
+                    <span>{k.name}</span>
+                    <span className="choice-note num">
+                      {cm(k.size.w)} × {cm(k.size.d)}
+                    </span>
+                  </button>
+                </li>
+              ))}
+          </ul>
+        </div>
+      ))}
+      {shown.length === 0 && <p className="field-hint">Nothing called that yet.</p>}
+    </section>
+  );
 }
 
 /**

@@ -1117,6 +1117,55 @@ select {
   fill: var(--negative);
   stroke: var(--negative);
 }
+.ghost-item {
+  fill: var(--accent);
+  fill-opacity: 0.12;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+}
+.ghost-item-front {
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+.ghost-item-label {
+  fill: var(--text);
+  font-size: var(--fs-small);
+  font-weight: 500;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+}
+
+/* Furniture on the plan: a quiet outline with its front edge drawn heavier. */
+.item polygon {
+  fill: var(--surface);
+  fill-opacity: 0.85;
+  stroke: var(--muted);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+.item .item-front {
+  stroke: var(--text);
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+.item:hover polygon {
+  stroke: var(--accent);
+}
+
+.catalogue .input {
+  margin-bottom: 4px;
+}
+.catalogue-group + .catalogue-group {
+  margin-top: 6px;
+}
+.catalogue-heading {
+  margin: 6px 0 2px;
+  font-size: var(--fs-small);
+  color: var(--muted);
+  font-weight: 500;
+}
 
 /* ---------------------------------------------------------------- inspector */
 
@@ -1395,7 +1444,7 @@ select {
     justify-content: start;
   }
   .tool {
-    width: 44px;
+    width: 38px;
     height: 44px;
   }
   .inspector {

@@ -4,13 +4,18 @@ import {
   type Level,
   type PlanGeometry,
   type Vec2,
+  deleteItem,
   deleteOpening,
   deleteVertex,
   deleteWall,
+  furnitureKind,
+  itemSize,
   moveVertex,
+  placeFurniture,
   settleVertex,
   snapCorner,
   splitWall,
+  updateItem,
   updateOpening,
 } from '@dhd/core';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
@@ -69,6 +74,8 @@ export const TOOL_HINTS: Record<Tool, string> = {
   window: 'Pick a width, then tap or click a wall to add a window.',
   passage: 'Pick a width, then tap or click a wall to add an opening.',
   measure: 'Tap both ends, or drag between them, to measure.',
+  furniture:
+    'Pick a piece, then tap or click to place it. Near a wall it backs onto it. R turns it; Esc goes back to Select.',
   calibrate:
     'Tap both ends of a length you know on the plan image, or drag along it, then enter the real length.',
 };
@@ -109,6 +116,7 @@ const ARROWS: Record<string, Vec2> = {
 
 type Drag =
   | { kind: 'vertex'; id: string; start: Vec2; moved: boolean; key: string }
+  | { kind: 'item'; id: string; start: Vec2; grab: Vec2; moved: boolean; key: string }
   | { kind: 'opening'; id: string; wallId: string; start: Vec2; moved: boolean; key: string };
 
 interface NudgeRun {
@@ -188,6 +196,18 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       const key = `drag:${h.id}:${Date.now()}`;
       if (h.kind === 'vertex') {
         drag.current = { kind: 'vertex', id: h.id, start: p.screen, moved: false, key };
+      } else if (h.kind === 'item') {
+        const it = ctx.level.items[h.id];
+        // Where on the piece it was picked up, so it doesn't jump to centre on the pointer.
+        if (it)
+          drag.current = {
+            kind: 'item',
+            id: h.id,
+            start: p.screen,
+            grab: { x: p.world.x - it.position.x, y: p.world.y - it.position.z },
+            moved: false,
+            key,
+          };
       } else if (h.kind === 'opening') {
         const o = ctx.level.openings[h.id];
         if (o)
@@ -215,6 +235,23 @@ export function useSelectTool(ctx: ToolContext): ToolController {
           ? p.world
           : snapCorner(ctx.level, d.id, p.world, { tolerance: snapTolerance(ctx), grid: 0.05 });
         ctx.dispatch(moveVertex(levelId, d.id, to), { coalesceKey: d.key });
+      } else if (d.kind === 'item') {
+        const it = ctx.level.items[d.id];
+        const kind = it && furnitureKind(it.assetId);
+        if (!it) return;
+        const want = gridSnap({ x: p.world.x - d.grab.x, y: p.world.y - d.grab.y }, 0.05, p.alt);
+        // A piece that stands against a wall backs onto one it's dragged near.
+        const spot =
+          kind && it.flags.snapWall && !p.alt
+            ? placeFurniture(ctx.geom, kind, want, it.rotationY, itemSize(it, kind))
+            : { at: want, rotation: it.rotationY };
+        ctx.dispatch(
+          updateItem(levelId, d.id, {
+            position: { x: spot.at.x, z: spot.at.y },
+            rotationY: spot.rotation,
+          }),
+          { coalesceKey: d.key },
+        );
       } else {
         const f = ctx.geom.frames[d.wallId];
         if (!f) return;
@@ -286,15 +323,24 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         r.timer = window.setTimeout(settleRun, NUDGE_SETTLE_MS);
         return true;
       }
+      if ((e.key === 'r' || e.key === 'R') && sel?.kind === 'item' && !e.ctrlKey && !e.metaKey) {
+        const it = live().items[sel.id];
+        if (!it) return false;
+        const quarter = (e.shiftKey ? -1 : 1) * (Math.PI / 2);
+        ctx.dispatch(updateItem(levelId, sel.id, { rotationY: it.rotationY + quarter }));
+        return true;
+      }
       if ((e.key === 'Delete' || e.key === 'Backspace') && sel) {
         const cmd =
-          sel.kind === 'wall'
-            ? deleteWall(levelId, sel.id, ctx.level)
-            : sel.kind === 'opening'
-              ? deleteOpening(levelId, sel.id)
-              : sel.kind === 'vertex'
-                ? deleteVertex(levelId, sel.id)
-                : null;
+          sel.kind === 'item'
+            ? deleteItem(levelId, sel.id)
+            : sel.kind === 'wall'
+              ? deleteWall(levelId, sel.id, ctx.level)
+              : sel.kind === 'opening'
+                ? deleteOpening(levelId, sel.id)
+                : sel.kind === 'vertex'
+                  ? deleteVertex(levelId, sel.id)
+                  : null;
         if (!cmd) return false;
         ctx.dispatch(cmd);
         select(null);

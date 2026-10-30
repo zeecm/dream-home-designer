@@ -2,20 +2,23 @@ import {
   type Command,
   type Level,
   type Vec2,
+  furnitureKind,
   isBoundary,
+  itemSize,
   moveVertex,
   placeLabel,
   pointInPolygon,
   roomArea,
   roomShape,
   roomShapes,
+  updateItem,
   updateOpening,
   wallLine,
 } from '@dhd/core';
 import type { Selection } from '../editor';
 import { formatArea, formatLength } from '../units';
 
-const KIND_ORDER: Selection['kind'][] = ['room', 'wall', 'opening', 'vertex'];
+const KIND_ORDER: Selection['kind'][] = ['room', 'item', 'wall', 'opening', 'vertex'];
 
 /** Where an object sits on the plan, for ordering and for scrolling it into view. */
 export function objectPoint(level: Level, sel: Selection): Vec2 | null {
@@ -37,6 +40,10 @@ export function objectPoint(level: Level, sel: Selection): Vec2 | null {
       const l = wallLine(level, w);
       return { x: l.a.x + (l.b.x - l.a.x) * o.t, y: l.a.y + (l.b.y - l.a.y) * o.t };
     }
+    case 'item': {
+      const it = level.items[sel.id];
+      return it ? { x: it.position.x, y: it.position.z } : null;
+    }
     case 'room': {
       const r = level.rooms[sel.id];
       const shape = r && roomShape(level, r);
@@ -54,6 +61,7 @@ export function objectPoint(level: Level, sel: Selection): Vec2 | null {
 export function planObjects(level: Level): Selection[] {
   const all: Selection[] = [
     ...Object.keys(level.rooms).map((id) => ({ kind: 'room' as const, id })),
+    ...Object.keys(level.items).map((id) => ({ kind: 'item' as const, id })),
     ...Object.keys(level.walls).map((id) => ({ kind: 'wall' as const, id })),
     ...Object.keys(level.openings).map((id) => ({ kind: 'opening' as const, id })),
     ...Object.keys(level.vertices).map((id) => ({ kind: 'vertex' as const, id })),
@@ -128,6 +136,12 @@ export function describe(level: Level, sel: Selection | null): string {
             : '';
       return `${what}${where}, ${formatLength(wallLine(level, w).length)} long`;
     }
+    case 'item': {
+      const it = level.items[sel.id];
+      if (!it) return '';
+      const { w, d } = itemSize(it);
+      return `${furnitureKind(it.assetId)?.name ?? 'Furniture'}, ${formatLength(w)} by ${formatLength(d)}`;
+    }
     case 'opening': {
       const o = level.openings[sel.id];
       if (!o) return '';
@@ -167,6 +181,12 @@ export function nudge(level: Level, sel: Selection, delta: Vec2): Command[] {
       if (Math.abs(along) < 1e-9) return [];
       const t = Math.min(1, Math.max(0, o.t + along / l.length));
       return [updateOpening(level.id, sel.id, { t })];
+    }
+    case 'item': {
+      const it = level.items[sel.id];
+      if (!it) return [];
+      const position = { x: it.position.x + delta.x, z: it.position.z + delta.y };
+      return [updateItem(level.id, sel.id, { position })];
     }
     case 'room':
       return [];

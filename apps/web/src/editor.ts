@@ -15,13 +15,15 @@ export type Tool =
   | 'window'
   | 'passage'
   | 'measure'
-  | 'calibrate';
+  | 'calibrate'
+  | 'furniture';
 
 export type Selection =
   | { kind: 'vertex'; id: string }
   | { kind: 'wall'; id: string }
   | { kind: 'opening'; id: string }
-  | { kind: 'room'; id: string };
+  | { kind: 'room'; id: string }
+  | { kind: 'item'; id: string };
 
 export type ViewMode = 'plan' | 'split' | '3d';
 
@@ -41,6 +43,9 @@ export interface EditorState {
   /** Width for new doors, windows and openings, in metres. */
   openingWidths: Record<OpeningKind, number>;
   setOpeningWidth: (kind: OpeningKind, width: number) => void;
+  /** The catalogue piece the Furniture tool places. */
+  furnitureKind: string;
+  setFurnitureKind: (id: string) => void;
   /** Bumped to focus the selected room's name field. */
   renameToken: number;
   requestRename: () => void;
@@ -101,6 +106,8 @@ export const useEditor = create<EditorState>((set) => ({
   openingWidths: { ...DEFAULT_OPENING_WIDTH },
   setOpeningWidth: (kind, width) =>
     set((s) => ({ openingWidths: { ...s.openingWidths, [kind]: width } })),
+  furnitureKind: 'sofa-3',
+  setFurnitureKind: (furnitureKind) => set({ furnitureKind }),
   renameToken: 0,
   requestRename: () => set((s) => ({ renameToken: s.renameToken + 1 })),
   setTool: (tool) => set({ tool, hover: null }),

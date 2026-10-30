@@ -7,6 +7,7 @@ import { useProject, useStore } from '../store';
 import { uploadPlanImage, usePlanImage, useUploadPicker } from '../ui/PlanImage';
 import { icons } from '../ui/icons';
 import { useCalibrateTool, useOpeningTool, useRoomTool, useWallTool } from './drawTools';
+import { useFurnitureTool } from './furnitureTool';
 import { describe } from './keyboard';
 import {
   PlanHighlights,
@@ -57,6 +58,7 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
     window: useOpeningTool(ctx, 'window'),
     passage: useOpeningTool(ctx, 'passage'),
     calibrate: useCalibrateTool(ctx),
+    furniture: useFurnitureTool(ctx),
   };
   return tools[tool];
 }
@@ -247,7 +249,8 @@ export function PlanCanvas() {
         // Dragging a corner or a door moves it; dragging anything else pans the plan,
         // without selecting what the finger started on.
         const kind = t.start.hit?.kind;
-        t.claimed = (kind === 'vertex' || kind === 'opening') && active.down(t.start);
+        t.claimed =
+          (kind === 'vertex' || kind === 'opening' || kind === 'item') && active.down(t.start);
         if (!t.claimed) pan.current = t.start.screen;
       } else if (active.grabs?.(t.start)) {
         t.claimed = active.down(t.start);

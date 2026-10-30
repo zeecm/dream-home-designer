@@ -5,6 +5,8 @@ import {
   type Vec2,
   doorSwing,
   framePoint,
+  furnitureKind,
+  itemFootprint,
   placeLabel,
   roomArea,
   roomShape,
@@ -98,6 +100,24 @@ export const PlanShapes = memo(function PlanShapes({
           />
         ))}
       </g>
+      <g className="items">
+        {Object.values(level.items).map((item) => {
+          const f = itemFootprint(item);
+          const kind = furnitureKind(item.assetId);
+          return (
+            <g
+              key={item.id}
+              data-hit={hit({ kind: 'item', id: item.id })}
+              pointerEvents={pe}
+              className={`item item-${(kind?.category ?? 'other').toLowerCase()}`}
+            >
+              <polygon points={pts(f)} />
+              {/* The front edge, drawn heavier, shows which way the piece faces. */}
+              <line className="item-front" x1={f[3]?.x} y1={f[3]?.y} x2={f[2]?.x} y2={f[2]?.y} />
+            </g>
+          );
+        })}
+      </g>
       <g className="openings">
         {geom.openings.map((o) => {
           const f = o.frame;
@@ -175,6 +195,10 @@ export function PlanHighlights({
     if (s.kind === 'opening') {
       const o = geom.openings.find((x) => x.opening.id === s.id);
       return o ? <polygon className={cls} points={pts(o.polygon)} /> : null;
+    }
+    if (s.kind === 'item') {
+      const it = level.items[s.id];
+      return it ? <polygon className={cls} points={pts(itemFootprint(it))} /> : null;
     }
     if (s.kind === 'room') {
       const r = level.rooms[s.id];

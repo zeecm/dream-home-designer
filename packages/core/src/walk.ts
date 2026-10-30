@@ -1,3 +1,4 @@
+import { itemFootprint } from './furniture';
 import { pointInPolygon, signedArea } from './geometry';
 import { type PlanGeometry, doorLeaf, planGeometry } from './plan';
 import { roomShapes } from './rooms';
@@ -60,6 +61,10 @@ export function collisionSegments(level: Level, geom: PlanGeometry = planGeometr
   for (const o of geom.openings) {
     if (o.kind === 'window' || outside.has(o.opening.id)) ring(o.polygon);
     else if (o.kind === 'door') ring(doorLeaf(o.frame, o.opening, true));
+  }
+  // Furniture standing on the floor is in the way; a rug or a wall cabinet isn't.
+  for (const item of Object.values(level.items)) {
+    if (item.flags.collidable && item.position.y < 1) ring(itemFootprint(item));
   }
   return out;
 }

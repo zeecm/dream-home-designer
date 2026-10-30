@@ -1,4 +1,6 @@
 import {
+  type FurnitureMaterial,
+  type Item,
   type Level,
   type Opening,
   type RoomShape,
@@ -6,6 +8,7 @@ import {
   type WallFrame,
   doorLeaf,
   framePoint,
+  furnitureKind,
   isBoundary,
   openingsOnWall,
   outsideOpenings,
@@ -149,6 +152,22 @@ export class LevelMeshes {
       );
     }
 
+    for (const item of Object.values(level.items)) {
+      const { position: p, scale: k } = item;
+      const key = [
+        item.assetId,
+        r(p.x),
+        r(p.y),
+        r(p.z),
+        r(item.rotationY),
+        r(k.x),
+        r(k.y),
+        r(k.z),
+        r(level.elevation),
+      ].join('/');
+      put(`item:${item.id}`, key, () => this.buildItem(item, level.elevation));
+    }
+
     for (const [id, part] of this.parts) {
       if (seen.has(id)) continue;
       this.drop(part);
@@ -228,6 +247,40 @@ export class LevelMeshes {
       const mesh = new THREE.Mesh(glassGeom, this.materials.glass);
       mesh.name = `glass:${f.wall.id}`;
       mesh.renderOrder = 1;
+      out.push(mesh);
+    }
+    return out;
+  }
+
+  /** A piece of furniture: its catalogue boxes, scaled, one merged mesh per material. */
+  private buildItem(item: Item, elevation: number): THREE.Mesh[] {
+    const kind = furnitureKind(item.assetId);
+    if (!kind) return [];
+    const k = item.scale;
+    const byMaterial = new Map<FurnitureMaterial, THREE.BufferGeometry[]>();
+    for (const part of kind.parts) {
+      // Item axes (x across, y back to front, z up) to the mesh's (x, z, y).
+      const [x0, y0, z0] = part.min;
+      const [x1, y1, z1] = part.max;
+      const g = new THREE.BoxGeometry((x1 - x0) * k.x, (z1 - z0) * k.y, (y1 - y0) * k.z);
+      g.translate(((x0 + x1) / 2) * k.x, ((z0 + z1) / 2) * k.y, ((y0 + y1) / 2) * k.z);
+      const list = byMaterial.get(part.material) ?? [];
+      list.push(g);
+      byMaterial.set(part.material, list);
+    }
+    const out: THREE.Mesh[] = [];
+    for (const [material, geoms] of byMaterial) {
+      const merged = mergeGeometries(geoms);
+      for (const g of geoms) g.dispose();
+      if (!merged) continue;
+      const mesh = new THREE.Mesh(merged, this.materials.get(`furniture-${material}`));
+      mesh.name = `item:${item.id}`;
+      mesh.position.set(item.position.x, elevation + item.position.y, item.position.z);
+      // Plan rotation r turns item x towards plan (cos r, sin r): about +Y that is -r.
+      mesh.rotation.y = -item.rotationY;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData = { kind: 'item', itemId: item.id };
       out.push(mesh);
     }
     return out;

@@ -427,6 +427,22 @@ browser that has them.
 2. **Domain:** point it at the Pages project. The `/api` routing comes with it.
 3. **Merge** the open PR when happy.
 
+**Furniture (Phase 3, first cut):** `core/furniture.ts` holds a catalogue of 27 pieces built
+from boxes (beds in single, super single, queen and king; wardrobe, bedside table, desk;
+sofa, armchair, coffee table, TV console, TV, rug, floor lamp; dining tables and chair;
+kitchen base, sink, hob and wall cabinets, fridge, washing machine; toilet, vanity; shoe
+cabinet, bookshelf; potted plant), sized as they come in Singapore flats. Items use the
+existing schema (`assetId` is the catalogue id; `scale` stretches the default size;
+`position.y` is height above the floor). `placeFurniture` backs a piece that stands
+against a wall onto the nearest wall face within 35 cm, facing into the room. Commands:
+`addItem`, `updateItem`, `deleteItem`. Render builds one merged mesh per material per item;
+the walk collides with items standing on the floor (not rugs or wall cabinets). Web: the
+Furniture tool (I) with a catalogue and filter in the tool options, a preview that follows
+the pointer, R to turn; in Select, drag (with the wall snap), R / Shift+R, arrows, Delete;
+the details panel sets width, depth, height, height above the floor, and turns.
+Poly Haven (CC0, reachable from here) has about 136 indoor models for later; Kenney is
+blocked by the network proxy and Sketchfab needs an API key.
+
 ## 6. Next
 
 **Finish Phase 1**, in order:

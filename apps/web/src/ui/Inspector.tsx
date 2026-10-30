@@ -1,17 +1,22 @@
 import {
+  type ItemPatch,
   type Level,
   type Opening,
   cornerSpot,
+  deleteItem,
   deleteOpening,
   deleteVertex,
   deleteWall,
+  furnitureKind,
   isBoundary,
+  itemSize,
   moveVertex,
   roomArea,
   setCeilingHeight,
   setWallLength,
   settleVertex,
   splitWall,
+  updateItem,
   updateOpening,
   updateRoom,
   updateWall,
@@ -65,6 +70,8 @@ export function Inspector() {
     body = <VertexInspector key={key} level={level} id={selection.id} />;
   } else if (selection?.kind === 'opening' && level.openings[selection.id]) {
     body = <OpeningInspector key={key} level={level} id={selection.id} />;
+  } else if (selection?.kind === 'item' && level.items[selection.id]) {
+    body = <ItemInspector key={key} level={level} id={selection.id} />;
   } else if (selection?.kind === 'room' && level.rooms[selection.id]) {
     body = <RoomInspector key={key} level={level} id={selection.id} />;
   }
@@ -382,6 +389,76 @@ export function direction(dx: number, dy: number): string {
   const deg = (Math.atan2(-dy, dx) * 180) / Math.PI;
   const names = ['right', 'up-right', 'up', 'up-left', 'left', 'down-left', 'down', 'down-right'];
   return names[(Math.round(deg / 45) + 8) % 8] ?? 'right';
+}
+
+function ItemInspector({ level, id }: { level: Level; id: string }) {
+  const dispatch = useStore((s) => s.dispatch);
+  const it = level.items[id];
+  if (!it) return null;
+  const kind = furnitureKind(it.assetId);
+  const size = itemSize(it, kind);
+  const base = kind?.size ?? size;
+  const set = (patch: ItemPatch) => dispatch(updateItem(level.id, id, patch));
+  const turn = (q: number) => set({ rotationY: it.rotationY + (q * Math.PI) / 2 });
+  return (
+    <>
+      <Header title={kind?.name ?? 'Furniture'} onClose={clear} />
+      <LengthField
+        label="Width"
+        value={size.w}
+        min={0.05}
+        max={10}
+        onCommit={(v) => v !== undefined && set({ scale: { x: v / base.w } })}
+      />
+      <LengthField
+        label="Depth"
+        value={size.d}
+        min={0.05}
+        max={10}
+        onCommit={(v) => v !== undefined && set({ scale: { z: v / base.d } })}
+      />
+      <LengthField
+        label="Height"
+        value={size.h}
+        min={0.01}
+        max={level.ceilingHeight}
+        onCommit={(v) => v !== undefined && set({ scale: { y: v / base.h } })}
+      />
+      <LengthField
+        label="Above the floor"
+        value={it.position.y}
+        min={0}
+        max={level.ceilingHeight}
+        hint="Wall cabinets and a TV on a console sit above the floor."
+        onCommit={(v) => v !== undefined && set({ position: { y: v } })}
+      />
+      <div className="field">
+        <span className="field-label" aria-hidden="true">
+          Turn
+        </span>
+        <span className="button-row">
+          <button
+            type="button"
+            className="btn"
+            onClick={() => turn(-1)}
+            title="Turn left (Shift+R)"
+          >
+            ↺ 90°
+          </button>
+          <button type="button" className="btn" onClick={() => turn(1)} title="Turn right (R)">
+            ↻ 90°
+          </button>
+        </span>
+      </div>
+      <DeleteButton
+        label="Delete"
+        onClick={() => {
+          dispatch(deleteItem(level.id, id));
+          clear();
+        }}
+      />
+    </>
+  );
 }
 
 function OpeningInspector({ level, id }: { level: Level; id: string }) {

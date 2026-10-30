@@ -3,14 +3,16 @@ import {
   dispatch,
   emptyHistory,
   emptyLevel,
+  furnitureKind,
   hdb4RoomLevel,
   hdb4RoomProject,
   moveVertex,
+  newItem,
   outsideOpenings,
   planGeometry,
 } from '@dhd/core';
 import type * as THREE from 'three';
-import { Vector3 } from 'three';
+import { Box3, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import { LevelMeshes } from './levelMeshes';
 import { MaterialCache } from './materials';
@@ -215,5 +217,26 @@ describe('rooms inside rooms', () => {
       meshes.group.getObjectByName(`floor:${id}`) as THREE.Mesh | undefined;
     expect(floorArea(floor('rm_o') as THREE.Mesh)).toBeCloseTo(35);
     expect(floorArea(floor('rm_i') as THREE.Mesh)).toBeCloseTo(1);
+  });
+});
+
+describe('furniture', () => {
+  it('builds each piece once, and rebuilds only the one that moved', () => {
+    const l = hdb4RoomLevel();
+    const sofa = newItem('it_sofa', furnitureKind('sofa-3')!, { x: 3, y: 3 });
+    const bed = newItem('it_bed', furnitureKind('bed-queen')!, { x: 9, y: 2 });
+    const m = new LevelMeshes(new MaterialCache());
+    m.update({ ...l, items: { it_sofa: sofa, it_bed: bed } });
+    expect(m.group.getObjectByName('item:it_sofa')).toBeDefined();
+    const moved = { ...sofa, position: { ...sofa.position, x: 3.5 } };
+    const stats = m.update({ ...l, items: { it_sofa: moved, it_bed: bed } });
+    expect(stats.built).toBe(1);
+    // Turned a quarter, the 2.1 m sofa runs along world z.
+    m.update({ ...l, items: { it_sofa: { ...moved, rotationY: Math.PI / 2 }, it_bed: bed } });
+    const box = new Box3();
+    for (const o of m.group.children.filter((c) => c.name === 'item:it_sofa'))
+      box.expandByObject(o);
+    expect(box.max.z - box.min.z).toBeCloseTo(2.1, 1);
+    expect(box.max.x - box.min.x).toBeCloseTo(0.9, 1);
   });
 });
