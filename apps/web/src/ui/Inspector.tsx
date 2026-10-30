@@ -10,12 +10,13 @@ import {
   setCeilingHeight,
   setWallLength,
   settleVertex,
+  splitWall,
   updateOpening,
   updateRoom,
   updateWall,
   wallLine,
 } from '@dhd/core';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../editor';
 import { OPENING_PRESETS, ROOM_NAMES } from '../presets';
 import { useProject, useStore } from '../store';
@@ -46,6 +47,12 @@ export function Inspector() {
   const key = selection ? `${selection.kind}:${selection.id}` : undefined;
   // biome-ignore lint/correctness/useExhaustiveDependencies: another object or tool decides afresh
   useEffect(() => setUserOpen(null), [key, tool]);
+  // Another tool or object starts the panel at its top, with its toggle in view.
+  const panel = useRef<HTMLElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on another object or tool
+  useEffect(() => {
+    if (panel.current) panel.current.scrollTop = 0;
+  }, [key, tool]);
   const open = userOpen ?? (!!selection || tool !== 'select');
   if (!level) return null;
   let body = <PlanSummary level={level} />;
@@ -59,7 +66,11 @@ export function Inspector() {
     body = <RoomInspector key={key} level={level} id={selection.id} />;
   }
   return (
-    <aside className={`panel inspector${open ? '' : ' inspector-folded'}`} aria-label="Details">
+    <aside
+      ref={panel}
+      className={`panel inspector${open ? '' : ' inspector-folded'}`}
+      aria-label="Details"
+    >
       <button
         type="button"
         className="inspector-toggle"
@@ -240,6 +251,23 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
           deleted with it.
         </p>
       )}
+      <button
+        type="button"
+        className="btn"
+        title="Or double-click the wall where the corner should go"
+        onClick={() => {
+          const a = level.vertices[wall.a];
+          const b = level.vertices[wall.b];
+          if (!a || !b) return;
+          const r = splitWall(level.id, id, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, level);
+          dispatch(r.command);
+          // The new corner, selected so it can be dragged or nudged into place.
+          useEditor.getState().select({ kind: 'vertex', id: r.vertexId });
+        }}
+      >
+        {icons.split}
+        Add a corner in the middle
+      </button>
       <DeleteButton
         label={boundary ? 'Delete boundary' : 'Delete wall'}
         onClick={() => {

@@ -15,6 +15,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { newWallOptions, useEditor } from '../editor';
 import { useStore } from '../store';
+import { useUploadPicker } from '../ui/PlanImage';
 import { formatLength, parseLength } from '../units';
 import { type PlanPointer, type ToolContext, type ToolController, snapTolerance } from './tools';
 import { worldToScreen } from './view';
@@ -35,12 +36,25 @@ const posOf = (ctx: ToolContext, e: WallEnd): Vec2 | null => {
  * number sets the next wall's length along the current direction. Clicking the chain's
  * first corner closes it; Enter, a double-click or Esc finishes.
  */
+type Turn = 'left' | 'straight' | 'right';
+const TURNS: { id: Turn; label: string }[] = [
+  { id: 'left', label: '↰ Left' },
+  { id: 'straight', label: '↑ Straight' },
+  { id: 'right', label: 'Right ↱' },
+];
+
+/** A direction turned a quarter left or right, as seen on screen (plan y points down). */
+const turnFrom = (d: Vec2, t: Turn): Vec2 =>
+  t === 'right' ? { x: -d.y, y: d.x } : t === 'left' ? { x: d.y, y: -d.x } : d;
+
 export function useWallTool(ctx: ToolContext): ToolController {
   const [from, setFrom] = useState<WallEnd | null>(null);
   const [first, setFirst] = useState<string | null>(null);
   const [snap, setSnap] = useState<SnapResult | null>(null);
   const [typed, setTyped] = useState('');
   const [error, setError] = useState<string | null>(null);
+  /** Which way a typed length goes, picked on the drawing bar; null aims at the pointer. */
+  const [turn, setTurn] = useState<Turn | null>(null);
   const thickness = useEditor((s) => s.wallThickness);
   const tool = useEditor((s) => s.tool);
   const fromPos = from ? posOf(ctx, from) : null;
@@ -58,6 +72,7 @@ export function useWallTool(ctx: ToolContext): ToolController {
     setTyped('');
     setError(null);
     setSnap(null);
+    setTurn(null);
     chain.current = new Set();
     steps.current = [];
   };
@@ -126,21 +141,31 @@ export function useWallTool(ctx: ToolContext): ToolController {
     }
   };
 
-  /** Adds the next wall at the typed length, towards the pointer (or on along the last wall). */
-  const addTyped = () => {
-    const len = parseLength(typed);
-    if (!fromPos || !len || len <= 0) {
-      setError('Enter a length such as 3200 (mm) or 3.2 m.');
-      return;
-    }
+  /**
+   * Where a wall of the typed length would end: turned as picked on the drawing bar, else
+   * towards the pointer if it has moved since the last wall, else straight on.
+   */
+  const typedEnd = (text: string): Vec2 | null => {
+    const len = parseLength(text);
+    if (!fromPos || !len || len <= 0) return null;
+    let d = turnFrom(lastDir.current, turn ?? 'straight');
     const target = snap?.point;
-    let d = lastDir.current;
-    if (target) {
+    if (turn === null && target) {
       const n = Math.hypot(target.x - fromPos.x, target.y - fromPos.y);
       if (n > 0.05) d = { x: (target.x - fromPos.x) / n, y: (target.y - fromPos.y) / n };
     }
+    return { x: fromPos.x + d.x * len, y: fromPos.y + d.y * len };
+  };
+
+  /** Adds the next wall at the typed length. */
+  const addTyped = (text = typed) => {
+    const end = typedEnd(text);
+    if (!end) {
+      setError('Enter a length such as 3200 (mm) or 3.2 m.');
+      return;
+    }
     setTyped('');
-    commit({ point: { x: fromPos.x + d.x * len, y: fromPos.y + d.y * len } });
+    commit({ point: end });
   };
 
   /**
@@ -216,20 +241,24 @@ export function useWallTool(ctx: ToolContext): ToolController {
       return false;
     },
     overlay: ({ view, size }) => {
-      const at = snap?.point;
+      // A typed length previews where it will go; otherwise the wall follows the pointer.
+      const planned = typed ? typedEnd(typed) : null;
+      const at = planned ?? snap?.point;
       const s1 = at && worldToScreen(view, size, at);
       const s0 = fromPos && worldToScreen(view, size, fromPos);
       const len = fromPos && at ? Math.hypot(at.x - fromPos.x, at.y - fromPos.y) : 0;
+      // A second row, once a length is typed: which way it goes, and any problem.
+      const more = !!typed || !!error;
       return (
         <g className="draw-overlay" pointerEvents="none">
           {from && (
-            // While a chain is open: an exact length, take back the last wall, or finish.
-            // Buttons and a real field, so it all works without a keyboard.
+            // While a chain is open: an exact length and which way it turns, take back the
+            // last wall, or finish. Buttons and a real field, so it all works without a keyboard.
             <foreignObject
               x={8}
               y={8}
               width={Math.max(0, size.width - 16)}
-              height={56}
+              height={more ? 104 : 56}
               pointerEvents="auto"
             >
               <form
@@ -239,32 +268,62 @@ export function useWallTool(ctx: ToolContext): ToolController {
                 onPointerUp={(e) => e.stopPropagation()}
                 onSubmit={(e) => {
                   e.preventDefault();
-                  addTyped();
+                  // Read the field itself: a tap can land before the typing re-rendered.
+                  const field = e.currentTarget.elements.namedItem('length');
+                  addTyped(field instanceof HTMLInputElement ? field.value : typed);
                 }}
               >
-                <input
-                  className="input num"
-                  inputMode="decimal"
-                  autoComplete="off"
-                  aria-label="Next wall length"
-                  placeholder="Length, e.g. 3200"
-                  value={typed}
-                  onChange={(e) => setTyped(e.target.value)}
-                />
-                <button type="submit" className="btn" disabled={!typed}>
-                  Add
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={steps.current.length === 0}
-                  onClick={undoLast}
-                >
-                  Undo
-                </button>
-                <button type="button" className="btn btn-primary" onClick={finish}>
-                  Done
-                </button>
+                <span className="draw-bar-row">
+                  <input
+                    name="length"
+                    className="input num"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    aria-label="Next wall length"
+                    placeholder="Length, e.g. 3200"
+                    value={typed}
+                    onChange={(e) => {
+                      setTyped(e.target.value);
+                      setError(null);
+                    }}
+                  />
+                  <button type="submit" className="btn" disabled={!typed}>
+                    Add
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={steps.current.length === 0}
+                    onClick={undoLast}
+                  >
+                    Undo
+                  </button>
+                  <button type="button" className="btn btn-primary" onClick={finish}>
+                    Done
+                  </button>
+                </span>
+                {more && (
+                  <span className="draw-bar-row">
+                    {error ? (
+                      <span className="draw-bar-error" role="alert">
+                        {error}
+                      </span>
+                    ) : (
+                      <fieldset className="segmented" aria-label="Direction">
+                        {TURNS.map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            aria-pressed={(turn ?? (snap ? null : 'straight')) === t.id}
+                            onClick={() => setTurn(t.id)}
+                          >
+                            {t.label}
+                          </button>
+                        ))}
+                      </fieldset>
+                    )}
+                  </span>
+                )}
               </form>
             </foreignObject>
           )}
@@ -296,7 +355,7 @@ export function useWallTool(ctx: ToolContext): ToolController {
               </g>
             </>
           )}
-          {s1 && <SnapMarker snap={snap} at={s1} />}
+          {s1 && !planned && <SnapMarker snap={snap} at={s1} />}
           {s1 && error && (
             <g transform={`translate(${Math.min(s1.x + 14, size.width - 270)} ${s1.y + 22})`}>
               <rect
@@ -361,6 +420,8 @@ export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolControl
     placeOpening(ctx.geom, p.world, width, tolerance());
   // Over a room boundary there's nothing to place into; say so instead of showing nothing.
   const [onBoundary, setOnBoundary] = useState<Vec2 | null>(null);
+  /** Where a tap found no wall, to say so. */
+  const [missed, setMissed] = useState<Vec2 | null>(null);
   const boundaryNear = (p: PlanPointer) =>
     ctx.geom.boundaries.some((id) => {
       const f = ctx.geom.frames[id];
@@ -374,7 +435,15 @@ export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolControl
     cursor: 'copy',
     down: (p) => {
       const at = find(p);
-      if (!at?.fits) return true;
+      if (!at?.fits) {
+        // Say why where it was tried: a tap has no hover preview to show it beforehand.
+        setPlace(at);
+        setOnBoundary(!at && boundaryNear(p) ? p.screen : null);
+        setMissed(!at && !boundaryNear(p) ? p.screen : null);
+        return true;
+      }
+      setPlace(null);
+      setMissed(null);
       const r = addOpening(ctx.level.id, {
         wallId: at.wallId,
         kind,
@@ -394,18 +463,22 @@ export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolControl
       const at = find(p);
       setPlace(at);
       setOnBoundary(!at && boundaryNear(p) ? p.screen : null);
+      setMissed(null);
     },
     up: () => {},
     key: () => false,
     overlay: ({ view, size }) => {
       const at = keep.current;
       const f = at && ctx.geom.frames[at.wallId];
-      if (onBoundary && !at) {
-        const why = 'A room boundary takes no doors or windows';
+      const note = (onBoundary ?? missed) && !at ? (onBoundary ?? missed) : null;
+      if (note) {
+        const why = onBoundary
+          ? 'A room boundary takes no doors or windows'
+          : `Tap or click on a wall to add ${kind === 'passage' ? 'an opening' : `a ${kind}`}`;
         return (
           <g
             pointerEvents="none"
-            transform={`translate(${onBoundary.x + 14} ${onBoundary.y + 22})`}
+            transform={`translate(${Math.min(note.x + 14, size.width - why.length * 7 - 24)} ${note.y + 22})`}
           >
             <rect
               x={0}
@@ -438,7 +511,7 @@ export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolControl
         ? null
         : at.width < 0.4
           ? 'This wall is too short'
-          : 'Overlaps an opening';
+          : `No room for a ${Math.round(width * 1000)} mm ${kind === 'passage' ? 'opening' : kind} here`;
       const tip = corners[0];
       return (
         <g pointerEvents="none">
@@ -477,6 +550,24 @@ export function useCalibrateTool(ctx: ToolContext): ToolController {
   const [typed, setTyped] = useState('');
   const [error, setError] = useState<string | null>(null);
   const tool = useEditor((s) => s.tool);
+  /** The end being dragged to adjust it, once both are placed. */
+  const grab = useRef<number | null>(null);
+  const endAt = (p: PlanPointer): number | null => {
+    if (points.length < 2) return null;
+    let best: number | null = null;
+    let bestD = 24; // screen px: a fingertip's reach
+    points.forEach((q, i) => {
+      const s = worldToScreen(ctx.view, ctx.size, q);
+      const d = Math.hypot(s.x - p.screen.x, s.y - p.screen.y);
+      if (d < bestD) {
+        best = i;
+        bestD = d;
+      }
+    });
+    return best;
+  };
+  const moveEnd = (i: number, to: Vec2) =>
+    setPoints((prev) => prev.map((q, k) => (k === i ? to : q)));
   useEffect(() => {
     if (tool !== 'calibrate') {
       setPoints([]);
@@ -485,9 +576,10 @@ export function useCalibrateTool(ctx: ToolContext): ToolController {
     }
   }, [tool]);
 
-  const apply = () => {
+  const upload = useUploadPicker();
+  const apply = (text = typed) => {
     const [p1, p2] = points;
-    const len = parseLength(typed);
+    const len = parseLength(text);
     if (!p1 || !p2) return;
     if (!len || len <= 0) {
       setError('Enter the real length, e.g. 4500 (mm) or 4.5 m.');
@@ -524,19 +616,31 @@ export function useCalibrateTool(ctx: ToolContext): ToolController {
 
   return {
     cursor: 'crosshair',
+    grabs: (p) => endAt(p) !== null,
     // A finger dragged along the dimension line marks both ends at once.
     touchDrag: (a, b) => {
-      setPoints(points.length === 1 && points[0] ? [points[0], b.world] : [a.world, b.world]);
+      setPoints([a.world, b.world]);
       setError(null);
     },
     down: (p) => {
+      // Both ends placed: pressing on one drags it; anywhere else starts over.
+      const end = endAt(p);
+      if (end !== null) {
+        grab.current = end;
+        return true;
+      }
       if (points.length >= 2) setPoints([p.world]);
       else setPoints((prev) => [...prev, p.world]);
       setError(null);
       return true;
     },
-    move: (p) => setCursor(p.world),
-    up: () => {},
+    move: (p, dragging) => {
+      setCursor(p.world);
+      if (dragging && grab.current !== null) moveEnd(grab.current, p.world);
+    },
+    up: () => {
+      grab.current = null;
+    },
     key: (e) => {
       if (points.length === 2 && /^[0-9.,]$|^m$|^c$/i.test(e.key)) {
         setTyped((t) => t + e.key);
@@ -561,19 +665,63 @@ export function useCalibrateTool(ctx: ToolContext): ToolController {
       const a = points[0];
       const b = points[1] ?? cursor;
       const step = !ctx.level || points.length === 0 ? 1 : points.length === 1 ? 1 : 2;
-      const banner = !useStoreUnderlay()
-        ? 'Set scale needs a plan image. Upload one from the Plan image panel first.'
-        : points.length < 2
-          ? `Set scale ${step}/2 · Tap or click both ends of a length you know, or drag along it (${points.length}/2).`
-          : 'Set scale 2/2 · Type its real length and press Enter (e.g. 4.5 m or 4500 mm).';
-      const asking = points.length === 2;
-      return (
-        <g pointerEvents="none">
+      if (!useStoreUnderlay()) {
+        // Nothing to scale yet: the way to get a plan image, right here.
+        return (
           <foreignObject
             x={12}
             y={12}
             width={Math.max(0, size.width - 24)}
-            height={asking ? 96 : 40}
+            height={120}
+            pointerEvents="auto"
+          >
+            <div
+              className="draw-bar"
+              onPointerDown={(e) => e.stopPropagation()}
+              onPointerUp={(e) => e.stopPropagation()}
+            >
+              <span>Set scale needs a plan image of your floor plan.</span>
+              <span className="draw-bar-row">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={upload.open}
+                  disabled={upload.busy}
+                >
+                  {upload.busy ? 'Reading…' : 'Upload floor plan'}
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => upload.sample('hdb')}
+                  disabled={upload.busy}
+                >
+                  HDB plan (PDF)
+                </button>
+              </span>
+              {upload.error && <span className="error-text">{upload.error}</span>}
+              {upload.picker}
+            </div>
+          </foreignObject>
+        );
+      }
+      const banner =
+        points.length < 2
+          ? `Set scale ${step}/2 · Tap or click both ends of a length you know, or drag along it (${points.length}/2).`
+          : 'Set scale 2/2 · Type its real length and press Enter (e.g. 4.5 m or 4500 mm).';
+      const asking = points.length === 2;
+      // The length card goes on the side away from the line, so the marked ends stay in view.
+      const lineY =
+        a && b ? (worldToScreen(view, size, a).y + worldToScreen(view, size, b).y) / 2 : 0;
+      const cardH = asking ? 96 : 40;
+      const cardY = asking && lineY < size.height / 2 ? size.height - cardH - 12 : 12;
+      return (
+        <g pointerEvents="none">
+          <foreignObject
+            x={12}
+            y={cardY}
+            width={Math.max(0, size.width - 24)}
+            height={cardH}
             pointerEvents={asking ? 'auto' : 'none'}
           >
             {asking ? (
@@ -583,15 +731,18 @@ export function useCalibrateTool(ctx: ToolContext): ToolController {
                 onPointerDown={(e) => e.stopPropagation()}
                 onSubmit={(e) => {
                   e.preventDefault();
-                  apply();
+                  // Read the field itself: a tap can land before the typing re-rendered.
+                  const field = e.currentTarget.elements.namedItem('length');
+                  apply(field instanceof HTMLInputElement ? field.value : typed);
                 }}
               >
                 <label htmlFor="calibrate-length">
-                  {error ?? 'Set scale 2/2 · How long is it really?'}
+                  {error ?? 'Set scale 2/2 · How long is it really? Drag an end to adjust it.'}
                 </label>
                 <span className="canvas-form-row">
                   <input
                     id="calibrate-length"
+                    name="length"
                     className="input num"
                     inputMode="decimal"
                     autoComplete="off"
@@ -619,8 +770,8 @@ export function useCalibrateTool(ctx: ToolContext): ToolController {
           {a && b && (
             <g className="measure">
               <line {...seg(view, size, a, b)} />
-              <circle {...dot(view, size, a)} r={4} />
-              <circle {...dot(view, size, b)} r={4} />
+              <circle {...dot(view, size, a)} r={points.length === 2 ? 6 : 4} />
+              <circle {...dot(view, size, b)} r={points.length === 2 ? 6 : 4} />
             </g>
           )}
         </g>
@@ -700,9 +851,10 @@ export function useRoomTool(ctx: ToolContext): ToolController {
 
   return {
     cursor: 'crosshair',
-    // A finger dragged corner to corner draws the room in one go.
+    // A finger dragged corner to corner draws the room in one go, from where it went down
+    // (not from a corner an earlier stray tap left waiting).
     touchDrag: (a, b) => {
-      build(start ?? snapAt(a), snapAt(b).point);
+      build(snapAt(a), snapAt(b).point);
       setStart(null);
     },
     down: (p) => {
@@ -728,11 +880,38 @@ export function useRoomTool(ctx: ToolContext): ToolController {
     overlay: ({ view, size }) => {
       const at = snap?.point;
       const s1 = at && worldToScreen(view, size, at);
-      if (!s1) return null;
-      if (!start || !at) {
+      // With a corner waiting (a phone has no pointer to preview with), say so and offer a
+      // way out; a problem shows here too, since there may be no pointer to show it by.
+      const notice = (error || start) && (
+        <foreignObject x={8} y={8} width={Math.max(0, size.width - 16)} height={52}>
+          <div className="draw-bar draw-bar-notice">
+            <span
+              className={error ? 'draw-bar-error' : undefined}
+              role={error ? 'alert' : undefined}
+            >
+              {error ?? 'First corner set. Tap or click the opposite corner.'}
+            </span>
+            {start && (
+              <button
+                type="button"
+                className="btn"
+                onPointerDown={(e) => e.stopPropagation()}
+                onPointerUp={(e) => e.stopPropagation()}
+                onClick={() => setStart(null)}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        </foreignObject>
+      );
+      const corner = start && worldToScreen(view, size, start.point);
+      if (!start || !at || !s1) {
         return (
           <g className="draw-overlay" pointerEvents="none">
-            <SnapMarker snap={snap} at={s1} />
+            {corner && <circle className="pending-corner" cx={corner.x} cy={corner.y} r={6} />}
+            {s1 && <SnapMarker snap={snap} at={s1} />}
+            <g pointerEvents="auto">{notice}</g>
           </g>
         );
       }
@@ -757,14 +936,7 @@ export function useRoomTool(ctx: ToolContext): ToolController {
             </text>
           </g>
           <SnapMarker snap={snap} at={s1} />
-          {error && (
-            <g transform={`translate(${s1.x + 14} ${s1.y + 22})`}>
-              <rect x={0} y={-14} width={300} height={22} rx={4} className="typed error" />
-              <text x={8} y={2}>
-                {error}
-              </text>
-            </g>
-          )}
+          <g pointerEvents="auto">{notice}</g>
         </g>
       );
     },

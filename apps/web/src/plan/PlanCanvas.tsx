@@ -228,6 +228,8 @@ export function PlanCanvas() {
         const kind = t.start.hit?.kind;
         t.claimed = (kind === 'vertex' || kind === 'opening') && active.down(t.start);
         if (!t.claimed) pan.current = t.start.screen;
+      } else if (active.grabs?.(t.start)) {
+        t.claimed = active.down(t.start);
       }
     }
     if (pan.current) {
@@ -530,18 +532,25 @@ export function PlanCanvas() {
               Draw walls
             </button>
           </div>
-          <p className="field-hint">
-            Or drop a JPG, PNG or PDF here, or{' '}
+          <p className="field-hint">Or drop a JPG, PNG or PDF here, or try a sample:</p>
+          <div className="button-row">
             <button
               type="button"
-              className="link-btn"
+              className="btn btn-small"
               onClick={() => upload.sample('drawn')}
               disabled={upload.busy}
             >
-              try the sample plan
+              Simple drawn plan
             </button>
-            .
-          </p>
+            <button
+              type="button"
+              className="btn btn-small"
+              onClick={() => upload.sample('hdb')}
+              disabled={upload.busy}
+            >
+              HDB plan (PDF)
+            </button>
+          </div>
           {upload.error && <p className="field-hint error-text">{upload.error}</p>}
           {upload.picker}
         </div>

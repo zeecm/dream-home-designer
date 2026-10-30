@@ -1,5 +1,5 @@
 import type { OpeningKind } from '@dhd/core';
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect, useRef } from 'react';
 import { type Tool, useEditor } from '../editor';
 import { TOOL_HINTS } from '../plan/tools';
 import { OPENING_PRESETS, type Preset, THICKNESS_PRESETS } from '../presets';
@@ -39,12 +39,21 @@ function Choices({
   value: number;
   onPick: (v: number) => void;
 }) {
+  // Where the chips scroll sideways (phones), keep the picked one in view.
+  const list = useRef<HTMLUListElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on a new pick
+  useEffect(() => {
+    const ul = list.current;
+    const on = ul?.querySelector<HTMLElement>('[aria-pressed="true"]');
+    if (!ul || !on || ul.scrollWidth <= ul.clientWidth) return;
+    ul.scrollLeft = on.offsetLeft - ul.offsetLeft - (ul.clientWidth - on.offsetWidth) / 2;
+  }, [value]);
   return (
     <section className="tool-options" aria-labelledby={id}>
       <h3 id={id} className="panel-heading">
         {title}
       </h3>
-      <ul className="choice-list">
+      <ul className="choice-list" ref={list}>
         {presets.map((t) => (
           <li key={t.value}>
             <button type="button" aria-pressed={value === t.value} onClick={() => onPick(t.value)}>

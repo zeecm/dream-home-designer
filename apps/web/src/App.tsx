@@ -155,6 +155,21 @@ function SampleBanner() {
   );
 }
 
+/**
+ * While another plan opens, the one on screen is covered: edits to it would be lost, and a
+ * few seconds with no sign of progress read as a dead button.
+ */
+function LoadingVeil() {
+  const loading = useStore((s) => s.sync.kind === 'loading');
+  if (!loading) return null;
+  return (
+    <output className="loading-veil">
+      <span className="loading-dot" aria-hidden="true" />
+      Opening plan…
+    </output>
+  );
+}
+
 function Toast() {
   const toast = useStore((s) => s.toast);
   const undo = useStore((s) => s.undo);
@@ -216,6 +231,7 @@ export function App() {
           <div className="stage-views">
             {viewMode !== '3d' && <PlanCanvas />}
             {viewMode !== 'plan' && <Viewport key={projectId} />}
+            <LoadingVeil />
           </div>
         </main>
         <Inspector />

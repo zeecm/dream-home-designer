@@ -53,6 +53,11 @@ export interface ToolController {
    * end); without this, the drag acts as a tap where the finger lifted.
    */
   touchDrag?: (start: PlanPointer, end: PlanPointer) => void;
+  /**
+   * Whether a touch drag starting at `p` grabs something the tool lets you drag (a scale
+   * line's end), so the drag goes to down, move and up as with a mouse instead.
+   */
+  grabs?: (p: PlanPointer) => boolean;
 }
 
 export const TOOL_HINTS: Record<Tool, string> = {

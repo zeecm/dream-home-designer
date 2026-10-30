@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { shareLink } from '../keys';
 import { useProject, useStore } from '../store';
+import { icons } from './icons';
 
 function CopyField({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
@@ -169,11 +170,13 @@ export function ShareMenu() {
     <div className="menu-anchor" ref={ref}>
       <button
         type="button"
-        className="btn btn-small"
+        className="btn btn-small share-btn"
         aria-expanded={open}
+        aria-label="Share"
         onClick={() => setOpen((o) => !o)}
       >
-        Share
+        <span className="share-btn-icon">{icons.share}</span>
+        <span className="share-btn-label">Share</span>
       </button>
       {open && (
         <section className="menu share-menu" aria-label="Share this plan">

@@ -344,12 +344,24 @@ owner's plan):**
 - **Testing:** `e2e/mobile.spec.ts` drives a phone with touch events only. Earlier acceptance
   rounds used keyboard events a phone can't send, which is how the Set scale and menu bugs got
   through; every mobile check now uses fingers only.
+- **Round 2 fixes (from a second fingers-only audit):**
+  - the wall bar's typed length can turn the corner: Left, Straight or Right (sticky, so a
+    rectangle is three taps), with a preview of where it will go;
+  - Set scale ends can be dragged to adjust them (`ToolController.grabs` hands a touch that
+    starts on one to down/move/up), and the length card sits on the side away from the line;
+  - a drag in Room or Set scale starts where the finger went down, and a waiting first room
+    corner shows with Cancel;
+  - an uploaded plan opens framed on its drawing, not the page (`inkBounds`);
+  - Set scale with no image, and the empty plan, offer Upload and the HDB PDF sample directly;
+  - a pinch outside the plan no longer zooms the page (`touch-action`, iOS `gesturestart`);
+  - the top bar and the tool row fit a 390 px phone (Share is an icon; only Fit in the
+    plan corner on touch screens);
+  - opening another plan veils the old one; a door tap that can't place says why; the wall
+    details have "Add a corner in the middle".
 - **Still open:**
   - landscape phones get the desktop layout;
   - placing points on lift with a magnifier;
-  - draggable calibration points;
-  - room deletion;
-  - auto-zoom to a PDF's drawing.
+  - room deletion.
 - **Also fixed after a review:**
   - a cancelled touch (a back swipe) acts on nothing;
   - panning in Select doesn't select the room under the finger;

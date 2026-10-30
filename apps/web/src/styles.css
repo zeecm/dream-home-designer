@@ -129,6 +129,9 @@ select {
   display: grid;
   grid-template-rows: 44px 1fr;
   height: 100%;
+  /* An app, not a page: panels scroll, but a pinch never zooms the whole UI. The plan and
+     the 3D view take pinches themselves. */
+  touch-action: pan-x pan-y;
 }
 
 .topbar {
@@ -525,6 +528,7 @@ select {
   background: var(--plan-well);
 }
 .stage-views {
+  position: relative;
   flex: 1;
   display: grid;
   min-height: 0;
@@ -909,12 +913,18 @@ select {
     overflow: visible;
     clip: auto;
   }
+  /* One row of chips that scrolls sideways, so the panel stays short. */
   .tool-panel .choice-list {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
     gap: 6px;
+    scrollbar-width: none;
   }
   .tool-panel .choice-list button {
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
     min-height: 40px;
     border: 1px solid var(--border);
     border-radius: var(--radius-control);
@@ -932,6 +942,7 @@ select {
 }
 .draw-bar {
   display: flex;
+  flex-direction: column;
   gap: 6px;
   padding: 6px;
   background: var(--surface);
@@ -947,6 +958,36 @@ select {
 }
 .draw-bar .btn {
   flex: none;
+}
+.draw-bar-row {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+.draw-bar .segmented {
+  display: flex;
+  flex: 1;
+}
+.draw-bar .segmented button {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 36px;
+}
+.draw-bar-notice {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--fs-small);
+}
+.pending-corner {
+  fill: var(--accent);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.draw-bar-error {
+  align-self: center;
+  color: var(--negative);
+  font-size: var(--fs-small);
 }
 .inspector-body {
   display: flex;
@@ -1008,9 +1049,10 @@ select {
 .plan-empty p {
   margin: 0;
 }
-/* Clicks between the card's controls reach the canvas. */
+/* Clicks and pinches between the card's controls reach the canvas. */
 .plan-empty {
   pointer-events: none;
+  touch-action: none;
 }
 .plan-empty button {
   pointer-events: auto;
@@ -1278,7 +1320,14 @@ select {
   }
   .project-name {
     font-size: var(--fs-body);
-    max-width: 30vw;
+    max-width: 24vw;
+  }
+  /* Share is an icon on phones, so the view switch keeps its room. */
+  .share-btn-label {
+    display: none;
+  }
+  .share-btn {
+    padding: 0 10px;
   }
   .topbar-left,
   .topbar-right {
@@ -1308,7 +1357,6 @@ select {
   }
   .tool-list {
     overflow-x: auto;
-    padding-right: 8px;
   }
   .workspace {
     grid-template-columns: 1fr;
@@ -1345,7 +1393,7 @@ select {
     justify-content: start;
   }
   .tool {
-    width: 48px;
+    width: 44px;
     height: 44px;
   }
   .inspector {
@@ -1428,5 +1476,52 @@ select {
   .plan-corner button {
     width: 44px;
     height: 44px;
+  }
+  /* Pinch zooms; only Fit stays, so the corner hides less of the plan. */
+  .plan-corner-br button:not([aria-label^="Fit"]) {
+    display: none;
+  }
+}
+.share-btn-icon {
+  display: none;
+}
+@media (max-width: 720px) {
+  .share-btn-icon {
+    display: inline-flex;
+  }
+}
+
+/* ---------------------------------------------------------------- loading */
+
+.loading-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  color: var(--muted);
+  font-weight: 500;
+}
+.loading-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: loading-pulse 1s ease-in-out infinite alternate;
+}
+@keyframes loading-pulse {
+  from {
+    opacity: 0.25;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .loading-dot {
+    animation: none;
   }
 }

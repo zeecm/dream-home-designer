@@ -5,7 +5,7 @@ import { clickImage, floorArea, imagePoint, newBlankPlan, waitSaved } from './he
 // (110, 110) to (990, 790); its 11000 mm dimension runs from x 110 to 990 at y 50.
 test('trace a plan image: upload, set scale, draw walls, reload', async ({ page, browser }) => {
   await newBlankPlan(page);
-  await page.getByRole('button', { name: 'try the sample plan' }).click();
+  await page.getByRole('button', { name: 'Simple drawn plan' }).click();
   await expect(page.locator('image.underlay')).toBeVisible();
   await expect(page.locator('.canvas-banner')).toContainText('Set scale 1/2');
 
