@@ -15,6 +15,7 @@ export interface ToolDef {
 export const TOOLS: ToolDef[] = [
   { id: 'select', label: 'Select', key: 'V', icon: icons.select },
   { id: 'wall', label: 'Wall', key: 'W', icon: icons.wall },
+  { id: 'room', label: 'Room', key: 'R', icon: icons.room },
   { id: 'door', label: 'Door', key: 'D', icon: icons.door },
   { id: 'window', label: 'Window', key: 'N', icon: icons.window },
   { id: 'passage', label: 'Opening', key: 'O', icon: icons.passage },
@@ -53,6 +54,7 @@ function WallOptions() {
 export function Palette() {
   const tool = useEditor((s) => s.tool);
   const setTool = useEditor((s) => s.setTool);
+  const only3d = useEditor((s) => s.viewMode === '3d');
   return (
     <nav className="panel palette" aria-label="Tools">
       <h2 className="panel-heading">Tools</h2>
@@ -63,6 +65,7 @@ export function Palette() {
               type="button"
               className="tool"
               aria-pressed={tool === t.id}
+              disabled={only3d}
               onClick={() => setTool(t.id)}
               title={`${t.label} (${t.key})`}
             >
@@ -73,9 +76,11 @@ export function Palette() {
           </li>
         ))}
       </ul>
-      {tool === 'wall' && <WallOptions />}
+      {(tool === 'wall' || tool === 'room') && <WallOptions />}
       <PlanImagePanel />
-      <p className="tool-hint">{TOOL_HINTS[tool]}</p>
+      <p className="tool-hint">
+        {only3d ? 'Switch to Plan or Split to draw and edit.' : TOOL_HINTS[tool]}
+      </p>
     </nav>
   );
 }

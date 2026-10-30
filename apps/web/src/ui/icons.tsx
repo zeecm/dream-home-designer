@@ -32,6 +32,12 @@ export const icons = {
       <path d="M5 13.5v-8.5h8.5" />
     </Icon>
   ),
+  room: (
+    <Icon>
+      <rect x="2.5" y="3.5" width="11" height="9" />
+      <path d="M2.5 8h4" />
+    </Icon>
+  ),
   door: (
     <Icon>
       <path d="M2.5 13.5h3M10.5 13.5h3" />

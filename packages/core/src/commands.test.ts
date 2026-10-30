@@ -9,7 +9,7 @@ import {
   updateWall,
 } from './commands';
 import { hdb4RoomProject } from './fixtures/hdb4room';
-import { clampOpeningT, wallLine } from './geometry';
+import { clampOpeningT, roomArea, wallLine } from './geometry';
 import { type EditorDoc, dispatch, emptyHistory, undo } from './history';
 import { Project } from './schema';
 
@@ -40,10 +40,25 @@ describe('updateWall', () => {
 });
 
 describe('setWallLength', () => {
-  it('moves vertex b along the wall direction', () => {
-    const s = dispatch(fresh(), setWallLength(L, 'w_mid_3', 3)); // v9 (5,4.5) -> v10 (7,4.5)
+  it('end mode moves only vertex b along the wall', () => {
+    const s = dispatch(fresh(), setWallLength(L, 'w_mid_3', 3, 'end')); // v9 (5,4.5) -> v10 (7,4.5)
     expect(lvl(s).vertices.v10).toMatchObject({ x: 8, y: 4.5 });
     expect(wallLine(lvl(s), lvl(s).walls.w_mid_3!).length).toBeCloseTo(3);
+  });
+
+  it('push mode slides the far wall so square corners stay square', () => {
+    // Master bedroom's top wall v10 (7,4.5) -> v3 (11,4.5): 4 m -> 3.5 m.
+    const s = dispatch(fresh(), setWallLength(L, 'w_mid_4', 3.5));
+    const l = lvl(s);
+    expect(l.vertices.v3).toMatchObject({ x: 10.5, y: 4.5 });
+    expect(l.vertices.v2).toMatchObject({ x: 10.5, y: 0 }); // up the right wall
+    expect(l.vertices.v4).toMatchObject({ x: 10.5, y: 8.5 }); // down the right wall
+    for (const w of Object.values(l.walls)) {
+      const a = l.vertices[w.a]!;
+      const b = l.vertices[w.b]!;
+      expect(a.x === b.x || a.y === b.y, w.id).toBe(true);
+    }
+    expect(roomArea(l, l.rooms.rm_master!)).toBeCloseTo(14);
   });
 });
 
@@ -60,9 +75,9 @@ describe('updateRoom', () => {
 
 describe('updateOpening', () => {
   it('clamps t so the opening stays on the wall', () => {
-    // w_mid_3 is 2 m long; a 0.9 m door can centre no closer than 0.45 m to an end.
+    // w_mid_4 is 4 m long; a 0.9 m door can centre no closer than 0.45 m to an end.
     const s = dispatch(fresh(), updateOpening(L, 'op_master', { t: 0.99 }));
-    expect(lvl(s).openings.op_master?.t).toBeCloseTo(1 - 0.45 / 2);
+    expect(lvl(s).openings.op_master?.t).toBeCloseTo(1 - 0.45 / 4);
   });
 
   it('switching a door to a window drops the swing; back to a door restores one', () => {
@@ -102,7 +117,7 @@ describe('deleteVertex', () => {
     expect(l.vertices.v10).toBeUndefined();
     for (const w of Object.values(l.walls)) expect([w.a, w.b]).not.toContain('v10');
     expect(l.rooms.rm_master).toBeUndefined();
-    expect(l.openings.op_master).toBeUndefined(); // it sat on w_mid_3 (v9 -> v10)
+    expect(l.openings.op_master).toBeUndefined(); // it sat on w_mid_4 (v10 -> v3)
     expect(s.history.past).toHaveLength(1);
     expect(undo(s).doc).toEqual(s0.doc);
   });

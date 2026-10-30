@@ -196,8 +196,18 @@ export function updateWall(levelId: string, wallId: string, patch: WallPatch): C
   };
 }
 
-/** Moves vertex b along the wall so the wall has the given centre-line length. */
-export function setWallLength(levelId: string, wallId: string, newLength: number): Command {
+/**
+ * Gives the wall a new centre-line length by moving its end corner (b) along the wall.
+ * In "push" mode (the default) walls meeting that corner at a right angle move with it,
+ * so the wall at the far end slides parallel to itself and a square plan stays square.
+ * In "end" mode only the corner moves.
+ */
+export function setWallLength(
+  levelId: string,
+  wallId: string,
+  newLength: number,
+  mode: 'push' | 'end' = 'push',
+): Command {
   if (!(newLength > 0)) throw new Error('length must be positive');
   return {
     label: 'Change wall length',
@@ -210,8 +220,27 @@ export function setWallLength(levelId: string, wallId: string, newLength: number
       if (!a || !b) throw new Error(`wall ${wallId} references a missing vertex`);
       const len = Math.hypot(b.x - a.x, b.y - a.y);
       if (len < 1e-9) throw new Error('wall has zero length');
-      b.x = a.x + ((b.x - a.x) / len) * newLength;
-      b.y = a.y + ((b.y - a.y) / len) * newLength;
+      const dir = { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
+      const delta = { x: dir.x * (newLength - len), y: dir.y * (newLength - len) };
+
+      const moved = new Set([w.b]);
+      if (mode === 'push') {
+        for (const other of Object.values(lvl.walls)) {
+          if (other.id === wallId || (other.a !== w.b && other.b !== w.b)) continue;
+          const farId = other.a === w.b ? other.b : other.a;
+          const far = lvl.vertices[farId];
+          if (!far || farId === w.a) continue;
+          const ol = Math.hypot(far.x - b.x, far.y - b.y);
+          const cos = ol > 1e-9 ? ((far.x - b.x) * dir.x + (far.y - b.y) * dir.y) / ol : 1;
+          if (Math.abs(cos) < 0.05) moved.add(farId);
+        }
+      }
+      for (const id of moved) {
+        const v = lvl.vertices[id];
+        if (!v) continue;
+        v.x += delta.x;
+        v.y += delta.y;
+      }
     },
   };
 }

@@ -42,6 +42,10 @@ interface State {
   /** A one-off message for the user, e.g. why a different project opened. */
   notice: string | null;
   dismissNotice: () => void;
+  /** A short confirmation after a destructive edit, offering Undo. */
+  toast: { text: string; at: number } | null;
+  /** Resolves a save conflict: reload the server's version, or overwrite it with ours. */
+  resolveConflict: (keep: 'theirs' | 'mine') => Promise<void>;
   dispatch: (cmd: Command, opts?: DispatchOptions) => void;
   undo: () => void;
   redo: () => void;
@@ -57,10 +61,13 @@ const AUTOSAVE_MS = 2000;
 let autosaveTimer: ReturnType<typeof setTimeout> | undefined;
 let backendPromise: Promise<Backend> | undefined;
 
+const localNotice =
+  'The server can’t be reached right now, so this plan is saved in this browser only.';
+
 /** Probes the API once; without one, projects live in this browser. */
 function resolveBackend(): Promise<Backend> {
   // A sleeping API container takes a few seconds to wake, so be patient here.
-  backendPromise ??= apiAvailable(10_000).then((ok) => (ok ? remoteBackend : localBackend()));
+  backendPromise ??= apiAvailable(20_000).then((ok) => (ok ? remoteBackend : localBackend()));
   return backendPromise;
 }
 
@@ -90,6 +97,12 @@ export function initialProjectId(): string | null {
 }
 
 const errorMessage = (prefix: string, e: unknown) => `${prefix}: ${(e as Error).message}`;
+
+/** The API's id rule; anything else can't be a project of ours. */
+const VALID_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+/** Commands that remove things get an Undo toast. */
+const DESTRUCTIVE = /^Delete /;
 
 export const useStore = create<State>((set, get) => {
   const commit = (editor: EditorDoc) => {
@@ -123,6 +136,7 @@ export const useStore = create<State>((set, get) => {
     try {
       const backend = await resolveBackend();
       set({ backend });
+      if (backend.kind === 'local' && !get().notice) set({ notice: localNotice });
       open(await backend.create(doc));
     } catch (e) {
       set({ sync: { kind: 'error', message: errorMessage('Could not create a project', e) } });
@@ -138,10 +152,35 @@ export const useStore = create<State>((set, get) => {
     recent: recentProjects(),
     notice: null,
     dismissNotice: () => set({ notice: null }),
+    toast: null,
 
     dispatch: (cmd, opts) => {
       const next = coreDispatch(get().editor, cmd, opts);
-      if (next !== get().editor) commit(next);
+      if (next === get().editor) return;
+      commit(next);
+      if (DESTRUCTIVE.test(cmd.label)) {
+        const what = cmd.label.replace('Delete ', '');
+        set({
+          toast: { text: `${what[0]?.toUpperCase()}${what.slice(1)} deleted`, at: Date.now() },
+        });
+      }
+    },
+
+    resolveConflict: async (keep) => {
+      const { backend, editor } = get();
+      if (!backend) return;
+      if (keep === 'theirs') return get().load(editor.doc.id);
+      try {
+        const server = await backend.get(editor.doc.id);
+        // Re-base our document on the server's version, then save over it.
+        set({
+          editor: { ...editor, doc: { ...editor.doc, version: server.version } },
+          sync: { kind: 'dirty' },
+        });
+        await get().save();
+      } catch (e) {
+        set({ sync: { kind: 'error', message: errorMessage('Could not save', e) } });
+      }
     },
     undo: () => {
       const next = coreUndo(get().editor);
@@ -153,12 +192,22 @@ export const useStore = create<State>((set, get) => {
     },
 
     load: async (id) => {
+      if (!VALID_ID.test(id)) {
+        set({
+          notice:
+            'That link doesn’t point to a plan, so a fresh copy of the sample opened instead.',
+        });
+        return get().openSample();
+      }
       if (get().editor.doc.id !== id) await flush();
       clearTimeout(autosaveTimer);
       set({ sync: { kind: 'loading' } });
       try {
         const backend = await resolveBackend();
         set({ backend });
+        if (backend.kind === 'local' && !get().notice) {
+          set({ notice: localNotice });
+        }
         open(await backend.get(id));
       } catch (e) {
         if (e instanceof NotFoundError) {
@@ -173,7 +222,12 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
-    createProject: (name) => createFrom(blankProject(name)),
+    createProject: async (name) => {
+      await createFrom(blankProject(name));
+      // A blank plan is drawn in the plan view; 3D has nothing to show yet.
+      const { useEditor } = await import('./editor');
+      useEditor.getState().setViewMode('plan');
+    },
     openSample: () => createFrom({ ...hdb4RoomProject(newId('prj')), name: '4-room HDB (sample)' }),
 
     save: async () => {
@@ -214,7 +268,8 @@ window.addEventListener('pagehide', () => {
 });
 window.addEventListener('beforeunload', (e) => {
   const { sync, backend } = useStore.getState();
-  if (backend?.kind === 'remote' && (sync.kind === 'dirty' || sync.kind === 'saving')) {
+  const unsaved = ['dirty', 'saving', 'conflict', 'error'].includes(sync.kind);
+  if (backend?.kind === 'remote' && unsaved) {
     e.preventDefault();
   }
 });

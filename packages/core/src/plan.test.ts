@@ -33,7 +33,7 @@ describe('planGeometry', () => {
 describe('doorSwing', () => {
   const level = hdb4RoomLevel();
   const g = planGeometry(level);
-  const door = g.openings.find((o) => o.opening.id === 'op_master')!; // on w_mid_3, v9 -> v10, +x
+  const door = g.openings.find((o) => o.opening.id === 'op_master')!; // on w_mid_4, v10 -> v3, +x
 
   it('hinges on the chosen jamb and opens a quarter circle to the chosen side', () => {
     for (const swing of ['leftIn', 'leftOut', 'rightIn', 'rightOut'] as const) {
@@ -43,7 +43,7 @@ describe('doorSwing', () => {
       const side = swing.endsWith('In') ? 1 : -1;
       // The wall runs along +x with left normal +y, so In opens to +y.
       expect(Math.sign(s.leafEnd.y - 4.5)).toBe(side);
-      const hingeX = swing.startsWith('left') ? 5.55 : 6.45;
+      const hingeX = swing.startsWith('left') ? 7.35 : 8.25;
       expect(s.hinge.x).toBeCloseTo(hingeX);
     }
   });
@@ -53,6 +53,6 @@ describe('doorSwing', () => {
     // leaf points +y from the hinge, the far jamb is +x: rotating +y to +x is clockwise in
     // maths terms (negative cross), so sweep 0.
     expect(s.sweep).toBe(0);
-    expect(framePoint(door.frame, 0, 0)).toEqual({ x: 5, y: 4.5 });
+    expect(framePoint(door.frame, 0, 0)).toEqual({ x: 7, y: 4.5 });
   });
 });

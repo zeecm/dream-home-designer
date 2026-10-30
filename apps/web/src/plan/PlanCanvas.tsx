@@ -5,7 +5,7 @@ import { type Tool, useEditor } from '../editor';
 import { useProject, useStore } from '../store';
 import { uploadPlanImage, useUploadPicker } from '../ui/PlanImage';
 import { icons } from '../ui/icons';
-import { useCalibrateTool, useOpeningTool, useWallTool } from './drawTools';
+import { useCalibrateTool, useOpeningTool, useRoomTool, useWallTool } from './drawTools';
 import {
   PlanHighlights,
   PlanShapes,
@@ -50,6 +50,7 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
     select: useSelectTool(ctx),
     measure: useMeasureTool(ctx),
     wall: useWallTool(ctx),
+    room: useRoomTool(ctx),
     door: useOpeningTool(ctx, 'door'),
     window: useOpeningTool(ctx, 'window'),
     passage: useOpeningTool(ctx, 'passage'),
@@ -74,8 +75,11 @@ export function PlanCanvas() {
   const [dropping, setDropping] = useState(false);
   const v = view ?? { cx: 0, cy: 0, zoom: 50 };
 
+  const viewAdjusted = useEditor((s) => s.viewAdjusted);
+  // Fit on request, and keep fitting while the pane resizes until the user pans or zooms.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refit on size, request or image, not on every edit
   useEffect(() => {
-    if (!fitRequested || !level || size.width === 0) return;
+    if ((!fitRequested && viewAdjusted) || !level || size.width === 0) return;
     let b = levelBounds(level);
     if (!b && underlay && image.status === 'ready') {
       const corners = [
@@ -91,7 +95,7 @@ export function PlanCanvas() {
     }
     setView(fitBounds(b, size));
     fitDone();
-  }, [fitRequested, level, size, setView, fitDone, underlay, image]);
+  }, [fitRequested, viewAdjusted, size, image.status, setView, fitDone]);
 
   const ctx: ToolContext | null = level && geom ? { level, geom, view: v, size, dispatch } : null;
   const active = useTool(tool, ctx ?? ({} as ToolContext));
@@ -150,7 +154,7 @@ export function PlanCanvas() {
     const p = pointer(e);
     setPointer(p.world);
     if (pan.current) {
-      setView(panBy(v, p.screen.x - pan.current.x, p.screen.y - pan.current.y));
+      setView(panBy(v, p.screen.x - pan.current.x, p.screen.y - pan.current.y), true);
       pan.current = p.screen;
       return;
     }
@@ -177,8 +181,8 @@ export function PlanCanvas() {
       const cur = useEditor.getState().view ?? v;
       const trackpadPan =
         !e.ctrlKey && (e.deltaX !== 0 || (e.deltaMode === 0 && !Number.isInteger(e.deltaY)));
-      if (trackpadPan) setView(panBy(cur, -e.deltaX, -e.deltaY));
-      else setView(zoomAt(cur, size, at, Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015))));
+      if (trackpadPan) setView(panBy(cur, -e.deltaX, -e.deltaY), true);
+      else setView(zoomAt(cur, size, at, Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015))), true);
     };
     svg.addEventListener('wheel', onWheel, { passive: false });
     return () => svg.removeEventListener('wheel', onWheel);
@@ -309,19 +313,47 @@ export function PlanCanvas() {
           level={level}
           view={v}
           size={size}
-          shown={tool === 'wall' ? 'all' : shownVertices}
+          shown={tool === 'wall' || tool === 'room' ? 'all' : shownVertices}
           interactive={tool === 'select'}
         />
         {active.overlay(ctx)}
       </svg>
 
-      {empty && (
+      {empty && !underlay && (
         <div className="plan-empty">
-          <p className="plan-empty-title">This plan has no walls yet.</p>
-          <p>
-            Press W, then click corner to corner to draw walls. Rooms appear as walls close around
-            them.
+          <p className="plan-empty-title">Start your plan</p>
+          <p>Trace over a picture of your floor plan, or draw walls straight away.</p>
+          <div className="button-row">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={upload.open}
+              disabled={upload.busy}
+            >
+              {upload.busy ? 'Reading…' : 'Upload floor plan'}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => useEditor.getState().setTool('wall')}
+            >
+              Draw walls
+            </button>
+          </div>
+          <p className="field-hint">
+            Or drop a JPG, PNG or PDF here, or{' '}
+            <button
+              type="button"
+              className="link-btn"
+              onClick={() => upload.sample('drawn')}
+              disabled={upload.busy}
+            >
+              try the sample plan
+            </button>
+            .
           </p>
+          {upload.error && <p className="field-hint error-text">{upload.error}</p>}
+          {upload.picker}
         </div>
       )}
 
@@ -332,7 +364,7 @@ export function PlanCanvas() {
           aria-label="Zoom out"
           title="Zoom out"
           onClick={() =>
-            setView(zoomAt(v, size, { x: size.width / 2, y: size.height / 2 }, 1 / 1.25))
+            setView(zoomAt(v, size, { x: size.width / 2, y: size.height / 2 }, 1 / 1.25), true)
           }
         >
           {icons.minus}
@@ -351,7 +383,9 @@ export function PlanCanvas() {
           className="icon-btn"
           aria-label="Zoom in"
           title="Zoom in"
-          onClick={() => setView(zoomAt(v, size, { x: size.width / 2, y: size.height / 2 }, 1.25))}
+          onClick={() =>
+            setView(zoomAt(v, size, { x: size.width / 2, y: size.height / 2 }, 1.25), true)
+          }
         >
           {icons.plus}
         </button>

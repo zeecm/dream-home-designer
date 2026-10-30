@@ -101,6 +101,10 @@ function DoorSymbol({ geom }: { geom: PlanGeometry['openings'][number] }) {
   const s = doorSwing(geom.frame, geom.opening);
   return (
     <>
+      <path
+        className="door-hit"
+        d={`M ${s.hinge.x} ${s.hinge.y} L ${s.leafEnd.x} ${s.leafEnd.y} A ${s.radius} ${s.radius} 0 0 ${s.sweep} ${s.arcEnd.x} ${s.arcEnd.y} Z`}
+      />
       <line className="door-leaf" x1={s.hinge.x} y1={s.hinge.y} x2={s.leafEnd.x} y2={s.leafEnd.y} />
       <path
         className="door-arc"
@@ -171,21 +175,25 @@ export const RoomLabels = memo(function RoomLabels({ level, view, size }: Screen
         const w = (Math.max(...xs) - Math.min(...xs)) * view.zoom;
         const h = (Math.max(...ys) - Math.min(...ys)) * view.zoom;
         const area = formatArea(roomArea(level, r));
-        // Rough advance widths of the label face at 14px semibold and 13px regular.
-        const nameFits = r.name.length * 7.6 <= w - 12 && h >= 40;
-        const areaFits = area.length * 6.8 <= w - 12 && h >= 22;
-        if (!areaFits) return null;
+        // Rough advance widths of the label face at 14px semibold and 13px regular. The
+        // name matters more than the area, so the area goes first, then the name shortens.
+        const room = w - 12;
+        let name = r.name;
+        while (name.length > 3 && name.length * 7.6 > room) name = `${name.slice(0, -2)}…`;
+        const nameFits = name.length * 7.6 <= room && h >= 22;
+        const areaFits = nameFits && area.length * 6.8 <= room && h >= 40;
+        if (!nameFits) return null;
         const c = worldToScreen(view, size, labelPoint(poly));
         return (
           <g key={r.id} transform={`translate(${c.x} ${c.y})`}>
-            {nameFits && (
-              <text className="room-name" textAnchor="middle" y={-3}>
-                {r.name}
+            <text className="room-name" textAnchor="middle" y={areaFits ? -3 : 5}>
+              {name}
+            </text>
+            {areaFits && (
+              <text className="room-area num" textAnchor="middle" y={14}>
+                {area}
               </text>
             )}
-            <text className="room-area num" textAnchor="middle" y={nameFits ? 14 : 5}>
-              {area}
-            </text>
           </g>
         );
       })}

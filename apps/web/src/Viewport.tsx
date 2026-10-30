@@ -2,7 +2,7 @@ import { type Level, levelBounds } from '@dhd/core';
 import { MaterialCache, buildLevel, disposeGroup } from '@dhd/render';
 import { OrbitControls } from '@react-three/drei';
 import { Canvas, useThree } from '@react-three/fiber';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useProject } from './store';
 
 const materials = new MaterialCache();
@@ -52,18 +52,40 @@ function CameraRig({ frame }: { frame: Frame }) {
   return null;
 }
 
+function usePrefersDark() {
+  const query = '(prefers-color-scheme: dark)';
+  const [dark, setDark] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const m = window.matchMedia(query);
+    const on = () => setDark(m.matches);
+    m.addEventListener('change', on);
+    return () => m.removeEventListener('change', on);
+  }, []);
+  return dark;
+}
+
 export function Viewport() {
   const level = useProject().levels[0];
+  const hasWalls = !!level && Object.keys(level.walls).length > 0;
+  const dark = usePrefersDark();
   // Frame the plan when the view mounts (once per project), not on every edit; the
   // parent remounts this component when another project opens.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: deliberately computed once
-  const frame = useMemo(() => frameOf(level), []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: frame once walls exist, not on every edit
+  const frame = useMemo(() => frameOf(level), [hasWalls]);
+
+  if (!hasWalls) {
+    return (
+      <div className="viewport viewport-empty" data-testid="viewport-wrap">
+        <p>The 3D view appears as soon as you draw a wall.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="viewport" data-testid="viewport-wrap">
       <Canvas shadows camera={{ fov: FOV, near: 0.05, far: 500 }} data-testid="viewport">
-        <color attach="background" args={['#f4f6f8']} />
-        <hemisphereLight args={['#ffffff', '#dfe3e6', 1.5]} />
+        <color attach="background" args={[dark ? '#0a0a0a' : '#f4f6f8']} />
+        <hemisphereLight args={['#ffffff', dark ? '#3a3d40' : '#dfe3e6', 1.5]} />
         <directionalLight
           position={[frame.x + 8, 16, frame.z + 10]}
           intensity={1.8}
@@ -77,7 +99,7 @@ export function Viewport() {
         />
         <mesh rotation-x={-Math.PI / 2} position={[frame.x, -0.01, frame.z]} receiveShadow>
           <planeGeometry args={[200, 200]} />
-          <meshStandardMaterial color="#eef1f3" />
+          <meshStandardMaterial color={dark ? '#1a1c1e' : '#eef1f3'} />
         </mesh>
         <LevelMesh />
         <CameraRig frame={frame} />
@@ -89,6 +111,7 @@ export function Viewport() {
           maxDistance={80}
         />
       </Canvas>
+      <p className="viewport-hint">Drag to orbit · right-drag to pan · scroll to zoom</p>
     </div>
   );
 }

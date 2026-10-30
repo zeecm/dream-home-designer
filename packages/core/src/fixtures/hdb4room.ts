@@ -80,7 +80,7 @@ const openings: Opening[] = [
   },
   door('op_bed3', 'w_mid_1', 0.7),
   door('op_bed2', 'w_mid_2', 0.5),
-  door('op_master', 'w_mid_3', 0.5),
+  door('op_master', 'w_mid_4', 0.2),
   window_('op_win_living', 'w_left_f', 0.5, 2.0),
   window_('op_win_kitchen', 'w_front_r', 0.6, 1.8),
   window_('op_win_bed3', 'w_back_l', 0.5, 1.4),

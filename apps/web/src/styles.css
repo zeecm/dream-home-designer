@@ -310,6 +310,14 @@ select {
 .slider input {
   accent-color: var(--accent);
 }
+.rotation-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 2px;
+}
 .rotation-value {
   min-width: 36px;
   text-align: center;
@@ -506,6 +514,60 @@ select {
   border-left: 1px solid var(--border);
 }
 
+.sample-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 8px 8px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-small);
+}
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 8px 14px;
+  border-radius: var(--radius-card);
+  background: var(--text);
+  color: var(--surface);
+  font-size: var(--fs-small);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+.toast .link-btn {
+  color: inherit;
+  font-weight: 600;
+}
+.viewport-empty {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: var(--fs-small);
+  padding: 16px;
+  text-align: center;
+}
+.viewport-hint {
+  position: absolute;
+  left: 16px;
+  bottom: 12px;
+  margin: 0;
+  font-size: var(--fs-small);
+  color: var(--muted);
+  pointer-events: none;
+}
+.muted {
+  color: var(--muted);
+}
+.tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 .notice {
   display: flex;
   align-items: center;
@@ -572,6 +634,15 @@ select {
 }
 .wall {
   fill: var(--wall);
+  /* A wider invisible edge makes thin walls easy to hit. */
+  stroke: transparent;
+  stroke-width: 12px;
+}
+.hub {
+  stroke: none;
+}
+.door-hit {
+  fill: transparent;
 }
 .gap {
   fill: transparent;
@@ -595,7 +666,8 @@ select {
   stroke-width: 1;
 }
 .hover {
-  fill: var(--accent-soft);
+  fill: var(--accent);
+  fill-opacity: 0.4;
   stroke: var(--accent);
   stroke-width: 1;
 }
@@ -761,6 +833,13 @@ select {
 }
 .snap-dot {
   fill: var(--accent);
+}
+.ghost-room {
+  fill: var(--accent);
+  fill-opacity: 0.08;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
 }
 .ghost-opening {
   fill: var(--accent);
@@ -935,9 +1014,14 @@ select {
     grid-template-rows: 48px 1fr auto;
   }
   .brand-name,
-  .topbar .pill,
   .topbar-divider {
     display: none;
+  }
+  .topbar .pill {
+    max-width: 22vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0 6px;
   }
   .project-name {
     font-size: var(--fs-body);

@@ -50,6 +50,7 @@ export const TOOL_HINTS: Record<Tool, string> = {
   select:
     'Click to select. Drag a corner or a door to move it. Double-click a wall to add a corner.',
   wall: 'Click to place corners; type a length for an exact wall. Enter or double-click finishes.',
+  room: 'Click two opposite corners to draw a rectangular room. Esc cancels.',
   door: 'Click a wall to add a door.',
   window: 'Click a wall to add a window.',
   passage: 'Click a wall to add an opening.',
@@ -84,6 +85,47 @@ export function nearestVertex(
   return best;
 }
 
+/**
+ * Where a dragged corner should land: an existing corner or wall if one is close,
+ * otherwise square to its neighbouring walls (where two right-angle guides cross, both
+ * walls stay square), otherwise the 5 cm grid.
+ */
+function snapCorner(ctx: ToolContext, id: string, own: Set<string>, p: Vec2): Vec2 {
+  const base = {
+    tolerance: snapTolerance(ctx),
+    grid: 0.05,
+    excludeVertices: new Set([id]),
+    excludeWalls: own,
+  };
+  const plain = snapPoint(ctx.level, p, base);
+  if (plain.kind === 'vertex' || plain.kind === 'wall') return plain.point;
+  const guides: { from: Vec2; angle: number }[] = [];
+  for (const w of Object.values(ctx.level.walls)) {
+    if (w.a !== id && w.b !== id) continue;
+    const other = ctx.level.vertices[w.a === id ? w.b : w.a];
+    if (!other) continue;
+    const s = snapPoint(ctx.level, p, { ...base, from: other, grid: 0 });
+    if (s.kind === 'angle' && s.angle !== undefined) guides.push({ from: other, angle: s.angle });
+  }
+  const [g1, g2] = guides;
+  if (g1 && g2 && Math.abs(Math.sin(g1.angle - g2.angle)) > 0.1) {
+    const d1 = { x: Math.cos(g1.angle), y: Math.sin(g1.angle) };
+    const d2 = { x: Math.cos(g2.angle), y: Math.sin(g2.angle) };
+    const den = d1.x * d2.y - d1.y * d2.x;
+    const t = ((g2.from.x - g1.from.x) * d2.y - (g2.from.y - g1.from.y) * d2.x) / den;
+    const x = { x: g1.from.x + d1.x * t, y: g1.from.y + d1.y * t };
+    if (Math.hypot(x.x - p.x, x.y - p.y) <= base.tolerance * 2) return x;
+  }
+  if (g1) {
+    const d = { x: Math.cos(g1.angle), y: Math.sin(g1.angle) };
+    const t = (p.x - g1.from.x) * d.x + (p.y - g1.from.y) * d.y;
+    const step = 0.05;
+    const tt = Math.round(t / step) * step;
+    return { x: g1.from.x + d.x * tt, y: g1.from.y + d.y * tt };
+  }
+  return plain.point;
+}
+
 type Drag =
   | { kind: 'vertex'; id: string; start: Vec2; moved: boolean; key: string }
   | { kind: 'opening'; id: string; wallId: string; start: Vec2; moved: boolean; key: string };
@@ -108,6 +150,8 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         return true;
       }
       select(h);
+      // Rooms and walls select on press, but dragging from them pans (rooms cover the plan).
+      if (h.kind === 'room' || h.kind === 'wall') return false;
       const key = `drag:${h.id}:${Date.now()}`;
       if (h.kind === 'vertex') {
         drag.current = { kind: 'vertex', id: h.id, start: p.screen, moved: false, key };
@@ -139,14 +183,7 @@ export function useSelectTool(ctx: ToolContext): ToolController {
             .filter((w) => w.a === d.id || w.b === d.id)
             .map((w) => w.id),
         );
-        const to = p.alt
-          ? p.world
-          : snapPoint(ctx.level, p.world, {
-              tolerance: snapTolerance(ctx),
-              grid: 0.05,
-              excludeVertices: new Set([d.id]),
-              excludeWalls: own,
-            }).point;
+        const to = p.alt ? p.world : snapCorner(ctx, d.id, own, p.world);
         ctx.dispatch(moveVertex(levelId, d.id, to), { coalesceKey: d.key });
       } else {
         const f = ctx.geom.frames[d.wallId];

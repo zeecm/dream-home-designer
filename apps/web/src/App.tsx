@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Viewport } from './Viewport';
 import { type Tool, type ViewMode, useEditor } from './editor';
 import { PlanCanvas } from './plan/PlanCanvas';
@@ -61,6 +61,22 @@ function Notice() {
   const notice = useStore((s) => s.notice);
   const dismiss = useStore((s) => s.dismissNotice);
   const sync = useStore((s) => s.sync);
+  const resolve = useStore((s) => s.resolveConflict);
+  if (sync.kind === 'conflict') {
+    return (
+      <output className="notice notice-error">
+        <span>This plan was changed in another tab or device. Your latest edits aren’t saved.</span>
+        <span className="button-row">
+          <button type="button" className="btn btn-small" onClick={() => void resolve('theirs')}>
+            Load the latest
+          </button>
+          <button type="button" className="btn btn-small" onClick={() => void resolve('mine')}>
+            Keep mine
+          </button>
+        </span>
+      </output>
+    );
+  }
   const text = notice ?? (sync.kind === 'error' ? sync.message : null);
   if (!text) return null;
   return (
@@ -71,6 +87,53 @@ function Notice() {
           {icons.close}
         </button>
       )}
+    </output>
+  );
+}
+
+/** Shown while the visitor is in a copy of the sample, so it's clear how to start their own. */
+function SampleBanner() {
+  const name = useProject().name;
+  const { createProject } = useStore.getState();
+  if (!name.endsWith('(sample)')) return null;
+  return (
+    <div className="sample-banner">
+      <span>You’re exploring a sample flat. Edits are saved to your own copy.</span>
+      <button
+        type="button"
+        className="btn btn-small btn-primary"
+        onClick={() => void createProject()}
+      >
+        Start your own plan
+      </button>
+    </div>
+  );
+}
+
+function Toast() {
+  const toast = useStore((s) => s.toast);
+  const undo = useStore((s) => s.undo);
+  const [shown, setShown] = useState<number | null>(null);
+  useEffect(() => {
+    if (!toast) return;
+    setShown(toast.at);
+    const t = setTimeout(() => setShown(null), 5000);
+    return () => clearTimeout(t);
+  }, [toast]);
+  if (!toast || shown !== toast.at) return null;
+  return (
+    <output className="toast">
+      <span>{toast.text}</span>
+      <button
+        type="button"
+        className="link-btn"
+        onClick={() => {
+          undo();
+          setShown(null);
+        }}
+      >
+        Undo
+      </button>
     </output>
   );
 }
@@ -99,7 +162,9 @@ export function App() {
       <div className="workspace">
         <Palette />
         <main className={`panel stage stage-${viewMode}`}>
+          <SampleBanner />
           <Notice />
+          <Toast />
           <div className="stage-views">
             {viewMode !== '3d' && <PlanCanvas />}
             {viewMode !== 'plan' && <Viewport key={projectId} />}

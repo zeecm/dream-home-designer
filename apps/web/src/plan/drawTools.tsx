@@ -435,3 +435,115 @@ const dot = (
   const s = worldToScreen(view, size, p);
   return { cx: s.x, cy: s.y };
 };
+
+/** Draws a rectangular room from two opposite corners: four walls, one undo step. */
+export function useRoomTool(ctx: ToolContext): ToolController {
+  const [start, setStart] = useState<SnapResult | null>(null);
+  const [snap, setSnap] = useState<SnapResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const thickness = useEditor((s) => s.wallThickness);
+  const tool = useEditor((s) => s.tool);
+  useEffect(() => {
+    if (tool !== 'room') setStart(null);
+  }, [tool]);
+
+  const snapAt = (p: PlanPointer): SnapResult =>
+    p.alt
+      ? { point: p.world, kind: 'free' }
+      : snapPoint(ctx.level, p.world, { tolerance: snapTolerance(ctx), grid: 0.1 });
+
+  const build = (a: SnapResult, b: Vec2) => {
+    const w = Math.abs(b.x - a.point.x);
+    const h = Math.abs(b.y - a.point.y);
+    if (w < 0.3 || h < 0.3) {
+      setError('A room needs to be at least 0.3 m on each side.');
+      return;
+    }
+    const corners: Vec2[] = [a.point, { x: b.x, y: a.point.y }, b, { x: a.point.x, y: b.y }];
+    const key = `room:${Date.now()}`;
+    let from: WallEnd = endFor(a);
+    let first: string | null = null;
+    try {
+      for (let i = 1; i <= 4; i++) {
+        const level = useStore.getState().editor.doc.levels[0];
+        if (!level) return;
+        const to: WallEnd =
+          i === 4 && first ? { vertexId: first } : { point: corners[i % 4] as Vec2 };
+        const r = drawWall(level, from, to, { thickness });
+        ctx.dispatch(r.command, { coalesceKey: key });
+        first ??= r.startVertexId;
+        from = { vertexId: r.endVertexId };
+      }
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  return {
+    cursor: 'crosshair',
+    down: (p) => {
+      const s = snapAt(p);
+      if (!start) {
+        setStart(s);
+        setError(null);
+      } else {
+        build(start, s.point);
+        setStart(null);
+      }
+      return true;
+    },
+    move: (p) => setSnap(snapAt(p)),
+    up: () => {},
+    key: (e) => {
+      if (e.key === 'Escape' && start) {
+        setStart(null);
+        return true;
+      }
+      return false;
+    },
+    overlay: ({ view, size }) => {
+      const at = snap?.point;
+      const s1 = at && worldToScreen(view, size, at);
+      if (!s1) return null;
+      if (!start || !at) {
+        return (
+          <g className="draw-overlay" pointerEvents="none">
+            <SnapMarker snap={snap} at={s1} />
+          </g>
+        );
+      }
+      const s0 = worldToScreen(view, size, start.point);
+      const x = Math.min(s0.x, s1.x);
+      const y = Math.min(s0.y, s1.y);
+      const w = Math.abs(at.x - start.point.x);
+      const h = Math.abs(at.y - start.point.y);
+      return (
+        <g className="draw-overlay" pointerEvents="none">
+          <rect
+            className="ghost-room"
+            x={x}
+            y={y}
+            width={Math.abs(s1.x - s0.x)}
+            height={Math.abs(s1.y - s0.y)}
+          />
+          <g transform={`translate(${(s0.x + s1.x) / 2} ${Math.min(s0.y, s1.y) - 18})`}>
+            <rect x={-58} y={-11} width={116} height={22} rx={4} />
+            <text textAnchor="middle" y={4} className="num">
+              {`${w.toFixed(2)} × ${h.toFixed(2)} m`}
+            </text>
+          </g>
+          <SnapMarker snap={snap} at={s1} />
+          {error && (
+            <g transform={`translate(${s1.x + 14} ${s1.y + 22})`}>
+              <rect x={0} y={-14} width={300} height={22} rx={4} className="typed error" />
+              <text x={8} y={2}>
+                {error}
+              </text>
+            </g>
+          )}
+        </g>
+      );
+    },
+  };
+}

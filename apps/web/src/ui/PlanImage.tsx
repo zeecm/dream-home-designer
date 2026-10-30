@@ -24,12 +24,18 @@ export async function uploadPlanImage(file: File): Promise<void> {
   useEditor.getState().setTool('calibrate');
 }
 
-/** The bundled sample plan, for trying the tracing flow without a plan of your own. */
-export async function loadSamplePlanImage(): Promise<void> {
-  const res = await fetch('/samples/sample-4room-plan.png');
+/** Bundled plans for trying the tracing flow without a plan of your own. */
+const SAMPLES = {
+  drawn: { path: '/samples/sample-4room-plan.png', type: 'image/png' },
+  hdb: { path: '/samples/hdb-3room-type4.pdf', type: 'application/pdf' },
+} as const;
+
+export async function loadSamplePlanImage(which: keyof typeof SAMPLES = 'drawn'): Promise<void> {
+  const { path, type } = SAMPLES[which];
+  const res = await fetch(path);
   if (!res.ok) throw new Error('The sample plan could not be loaded.');
   const blob = await res.blob();
-  await uploadPlanImage(new File([blob], 'sample-4room-plan.png', { type: 'image/png' }));
+  await uploadPlanImage(new File([blob], path.split('/').pop() ?? 'sample', { type }));
 }
 
 export function useUploadPicker() {
@@ -54,17 +60,21 @@ export function useUploadPicker() {
       }}
     />
   );
-  const sample = () => {
+  const sample = (which: keyof typeof SAMPLES = 'drawn') => {
     setBusy(true);
     setError(null);
-    loadSamplePlanImage()
+    loadSamplePlanImage(which)
       .catch((err: Error) => setError(err.message))
       .finally(() => setBusy(false));
   };
   return { picker, open: () => input.current?.click(), sample, error, busy };
 }
 
-const deg = (r: number) => Math.round((r * 180) / Math.PI);
+/** Whole degrees, or two decimals once quarter-degree nudges are in play. */
+const deg = (r: number) => {
+  const d = Math.round(((r * 180) / Math.PI) * 100) / 100;
+  return Number.isInteger(d) ? d.toFixed(0) : d.toFixed(2);
+};
 
 export function PlanImagePanel() {
   const underlay = useProject().underlay;
@@ -84,9 +94,22 @@ export function PlanImagePanel() {
           {busy ? 'Reading…' : 'Upload floor plan'}
         </button>
         <p className="field-hint">JPG, PNG or the first page of a PDF, up to 25 MB.</p>
-        <button type="button" className="link-btn" onClick={sample} disabled={busy}>
-          No plan to hand? Try the sample plan
-        </button>
+        <p className="field-hint">
+          No plan to hand? Try{' '}
+          <button
+            type="button"
+            className="link-btn"
+            onClick={() => sample('drawn')}
+            disabled={busy}
+          >
+            a simple sample
+          </button>{' '}
+          or{' '}
+          <button type="button" className="link-btn" onClick={() => sample('hdb')} disabled={busy}>
+            a real HDB 3-room plan (PDF)
+          </button>
+          .
+        </p>
         {error && <p className="field-hint error-text">{error}</p>}
         {picker}
       </section>
@@ -127,39 +150,43 @@ export function PlanImagePanel() {
       </label>
       <div className="slider">
         <span>Rotation</span>
-        <div className="button-row">
+        <div className="rotation-row">
           <button
             type="button"
-            className="btn btn-small"
+            className="icon-btn"
             onClick={() => rotate(-Math.PI / 2)}
-            aria-label="Rotate 90° left"
+            aria-label="Rotate 90° anticlockwise"
+            title="Rotate 90° anticlockwise"
           >
-            ⟲ 90°
+            ⟲
           </button>
           <button
             type="button"
-            className="btn btn-small"
+            className="icon-btn"
             onClick={() => rotate(-Math.PI / 720)}
-            aria-label="Rotate a quarter degree left"
+            aria-label="Nudge anticlockwise"
+            title="Nudge ¼° anticlockwise"
           >
-            −
+            {icons.minus}
           </button>
           <span className="num rotation-value">{deg(underlay.rotation)}°</span>
           <button
             type="button"
-            className="btn btn-small"
+            className="icon-btn"
             onClick={() => rotate(Math.PI / 720)}
-            aria-label="Rotate a quarter degree right"
+            aria-label="Nudge clockwise"
+            title="Nudge ¼° clockwise"
           >
-            +
+            {icons.plus}
           </button>
           <button
             type="button"
-            className="btn btn-small"
+            className="icon-btn"
             onClick={() => rotate(Math.PI / 2)}
-            aria-label="Rotate 90° right"
+            aria-label="Rotate 90° clockwise"
+            title="Rotate 90° clockwise"
           >
-            90° ⟳
+            ⟳
           </button>
         </div>
       </div>

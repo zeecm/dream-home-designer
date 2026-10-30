@@ -89,7 +89,7 @@ function ProjectMenu() {
       <button
         type="button"
         className="brand"
-        aria-haspopup="menu"
+        aria-label="Projects"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
@@ -98,18 +98,18 @@ function ProjectMenu() {
         {icons.chevronDown}
       </button>
       {open && (
-        <div className="menu" role="menu">
-          <button type="button" role="menuitem" onClick={run(() => createProject())}>
+        <div className="menu">
+          <button type="button" onClick={run(() => createProject())}>
             New blank plan
           </button>
-          <button type="button" role="menuitem" onClick={run(openSample)}>
+          <button type="button" onClick={run(openSample)}>
             New copy of the sample flat
           </button>
           {others.length > 0 && (
             <>
               <p className="menu-label">Recent plans</p>
               {others.map((r) => (
-                <button key={r.id} type="button" role="menuitem" onClick={run(() => load(r.id))}>
+                <button key={r.id} type="button" onClick={run(() => load(r.id))}>
                   {r.name}
                 </button>
               ))}
@@ -140,7 +140,14 @@ export function TopBar() {
         <span
           className={`pill pill-${status.tone}`}
           data-testid="sync"
-          title={sync.kind === 'error' ? sync.message : undefined}
+          data-version={sync.kind === 'saved' ? sync.version : undefined}
+          title={
+            sync.kind === 'error'
+              ? sync.message
+              : sync.kind === 'saved'
+                ? `Version ${sync.version}${local ? ', stored in this browser' : ', stored on the server'}`
+                : undefined
+          }
         >
           {status.text}
         </span>

@@ -85,7 +85,8 @@ function PlanSummary({ level }: { level: Level }) {
   const rooms = Object.values(level.rooms)
     .map((r) => ({ room: r, area: roomArea(level, r) }))
     .sort((a, b) => b.area - a.area);
-  const total = rooms.reduce((s, r) => s + Number(r.area.toFixed(1)), 0);
+  // The true total, rounded once; the rounded room figures may differ from it by 0.1.
+  const total = rooms.reduce((s, r) => s + r.area, 0);
   const walls = Object.keys(level.walls).length;
   const openings = Object.values(level.openings);
   const count = (k: Opening['kind']) => openings.filter((o) => o.kind === k).length;
@@ -113,7 +114,9 @@ function PlanSummary({ level }: { level: Level }) {
         )}
         <p className="total">
           <span>Floor area</span>
-          <span className="num total-figure">{rooms.length ? formatArea(total) : '—'}</span>
+          <span className={`num total-figure${rooms.length ? '' : ' muted'}`}>
+            {formatArea(total)}
+          </span>
         </p>
       </section>
       <dl className="facts">
@@ -155,7 +158,7 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
         value={length}
         min={0.05}
         max={50}
-        hint="Moves the wall's end corner along the wall."
+        hint="The far end moves; walls square to it move with it."
         onCommit={(v) => v !== undefined && dispatch(setWallLength(level.id, id, v))}
       />
       <LengthField
@@ -169,7 +172,7 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
       <LengthField
         label="Height"
         value={wall.height}
-        placeholder={`${formatLength(level.ceilingHeight)} (ceiling)`}
+        placeholder={`Auto · ${formatLength(level.ceilingHeight)}`}
         min={0.1}
         max={6}
         allowEmpty
@@ -359,7 +362,7 @@ function RoomInspector({ level, id }: { level: Level; id: string }) {
       <LengthField
         label="Ceiling height"
         value={room.ceilingHeight}
-        placeholder={`${formatLength(level.ceilingHeight)} (whole flat)`}
+        placeholder={`Auto · ${formatLength(level.ceilingHeight)}`}
         min={1.8}
         max={6}
         allowEmpty
