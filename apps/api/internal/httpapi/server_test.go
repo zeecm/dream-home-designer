@@ -2,13 +2,16 @@ package httpapi
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -288,6 +291,78 @@ func TestPlanImage(t *testing.T) {
 	do(t, "DELETE", ts.URL+"/projects/prj_a", nil, nil)
 	if res, _ := do(t, "GET", ts.URL+"/projects/prj_a/image/"+hash, nil, nil); res.StatusCode != http.StatusNotFound {
 		t.Fatalf("image after delete: %d", res.StatusCode)
+	}
+}
+
+// tinyGLB is a binary glTF 2.0 with only a JSON chunk: enough for the header check.
+func tinyGLB(extra string) []byte {
+	js := []byte(`{"asset":{"version":"2.0"}` + extra + `}`)
+	for len(js)%4 != 0 {
+		js = append(js, ' ')
+	}
+	out := make([]byte, 20, 20+len(js))
+	copy(out, "glTF")
+	binary.LittleEndian.PutUint32(out[4:], 2)
+	binary.LittleEndian.PutUint32(out[8:], uint32(20+len(js)))
+	binary.LittleEndian.PutUint32(out[12:], uint32(len(js)))
+	copy(out[16:], "JSON")
+	return append(out, js...)
+}
+
+func TestModels(t *testing.T) {
+	ts := newTestServer(t)
+	glb := tinyGLB("")
+	if res, _ := do(t, "PUT", ts.URL+"/projects/prj_m/models", glb, nil); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("model for a missing project: %d", res.StatusCode)
+	}
+	do(t, "POST", ts.URL+"/projects", doc("prj_m", "Flat", 0), nil)
+
+	if res, _ := do(t, "PUT", ts.URL+"/projects/prj_m/models", tinyPNG, nil); res.StatusCode != http.StatusUnsupportedMediaType {
+		t.Fatalf("non-glb upload: %d", res.StatusCode)
+	}
+	short := glb[:len(glb)-4] // its header says longer than it is
+	if res, _ := do(t, "PUT", ts.URL+"/projects/prj_m/models", short, nil); res.StatusCode != http.StatusUnsupportedMediaType {
+		t.Fatalf("truncated glb: %d", res.StatusCode)
+	}
+	res, body := do(t, "PUT", ts.URL+"/projects/prj_m/models", glb, nil)
+	hash, _ := body["hash"].(string)
+	if res.StatusCode != http.StatusOK || len(hash) != 64 {
+		t.Fatalf("upload: %d %v", res.StatusCode, body)
+	}
+	// The same file again is the same model.
+	if _, body := do(t, "PUT", ts.URL+"/projects/prj_m/models", glb, nil); body["hash"] != hash {
+		t.Fatalf("re-upload: %v", body)
+	}
+
+	get, err := http.Get(ts.URL + "/projects/prj_m/models/" + hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(get.Body)
+	get.Body.Close()
+	if get.StatusCode != http.StatusOK || !bytes.Equal(got, glb) ||
+		get.Header.Get("Content-Type") != "model/gltf-binary" ||
+		get.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("get: %d %v", get.StatusCode, get.Header)
+	}
+	stale := strings.Repeat("0", 64)
+	if res, _ := do(t, "GET", ts.URL+"/projects/prj_m/models/"+stale, nil, nil); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown hash: %d", res.StatusCode)
+	}
+
+	// A project holds at most MaxModelsPerProject models.
+	for i := 1; i < MaxModelsPerProject; i++ {
+		if res, _ := do(t, "PUT", ts.URL+"/projects/prj_m/models", tinyGLB(fmt.Sprintf(`,"n":%d`, i)), nil); res.StatusCode != http.StatusOK {
+			t.Fatalf("model %d: %d", i, res.StatusCode)
+		}
+	}
+	if res, _ := do(t, "PUT", ts.URL+"/projects/prj_m/models", tinyGLB(`,"n":-1`), nil); res.StatusCode != http.StatusConflict {
+		t.Fatalf("one too many: %d", res.StatusCode)
+	}
+
+	do(t, "DELETE", ts.URL+"/projects/prj_m", nil, nil)
+	if res, _ := do(t, "GET", ts.URL+"/projects/prj_m/models/"+hash, nil, nil); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("model after delete: %d", res.StatusCode)
 	}
 }
 

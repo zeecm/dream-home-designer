@@ -217,6 +217,7 @@ func (s *R2) Delete(ctx context.Context, id string) error {
 	}
 	res.Body.Close()
 	_ = s.DeleteImage(ctx, id)
+	_ = s.DeleteModels(ctx, id)
 	_ = s.DeleteAccess(ctx, id)
 	return nil
 }

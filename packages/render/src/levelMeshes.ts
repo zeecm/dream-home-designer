@@ -332,7 +332,14 @@ export class LevelMeshes {
       g.add(model);
       g.name = `item:${item.id}`;
       // Model x is the width, y the height and z the depth, front +z, as the item's axes.
-      g.scale.set(k.x, k.y, k.z);
+      // An uploaded model is fitted to its catalogue size (it may be in centimetres).
+      const n = this.opts.models?.natural?.(kind.model ?? '');
+      const fit = (size: number, own: number | undefined) => (own && own > 1e-6 ? size / own : 1);
+      g.scale.set(
+        k.x * fit(kind.size.w, n?.x),
+        k.y * fit(kind.size.h, n?.y),
+        k.z * fit(kind.size.d, n?.z),
+      );
       g.position.set(item.position.x, elevation + item.position.y, item.position.z);
       g.rotation.y = -item.rotationY;
       g.userData = { kind: 'item', itemId: item.id };

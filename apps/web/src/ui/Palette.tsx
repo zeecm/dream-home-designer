@@ -1,6 +1,7 @@
-import { FURNITURE, type OpeningKind } from '@dhd/core';
+import { FURNITURE, type FurnitureKind, type OpeningKind, customKind } from '@dhd/core';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { type Tool, useEditor } from '../editor';
+import { addModelFile } from '../models';
 import { TOOL_HINTS } from '../plan/tools';
 import { OPENING_PRESETS, type Preset, THICKNESS_PRESETS } from '../presets';
 import { useStore } from '../store';
@@ -111,15 +112,30 @@ function Catalogue({ idPrefix }: { idPrefix: string }) {
   const [filter, setFilter] = useState('');
   const q = filter.trim().toLowerCase();
   // The piece that is armed stays in view, so a filter never hides what a tap will place.
-  const shown = FURNITURE.filter(
-    (k) =>
-      !q ||
-      k.id === picked ||
-      k.name.toLowerCase().includes(q) ||
-      k.category.toLowerCase().includes(q),
-  );
+  const matches = (k: FurnitureKind) =>
+    !q ||
+    k.id === picked ||
+    k.name.toLowerCase().includes(q) ||
+    k.category.toLowerCase().includes(q);
+  const shown = FURNITURE.filter(matches);
+  const models = useStore((s) => s.editor.doc.models);
+  const viewer = useStore((s) => s.role === 'viewer');
+  const own = Object.values(models ?? {})
+    .map(customKind)
+    .filter((k) => matches(k) || (q && 'your models'.includes(q)));
   const groups = [...new Set(shown.map((k) => k.category))];
   const cm = (m: number) => Math.round(m * 100);
+  const piece = (k: FurnitureKind, thumb: ReactNode) => (
+    <li key={k.id}>
+      <button type="button" aria-pressed={picked === k.id} onClick={() => pick(k.id)}>
+        {thumb}
+        <span className="catalogue-name">{k.name}</span>
+        <span className="choice-note num">
+          {cm(k.size.w)} × {cm(k.size.d)}
+        </span>
+      </button>
+    </li>
+  );
   return (
     <section className="tool-options catalogue" aria-labelledby={`${idPrefix}catalogue`}>
       <h3 id={`${idPrefix}catalogue`} className="panel-heading">
@@ -134,31 +150,44 @@ function Catalogue({ idPrefix }: { idPrefix: string }) {
         onChange={(e) => setFilter(e.target.value)}
       />
       <div className="catalogue-list">
+        <div className="catalogue-group">
+          <p className="catalogue-heading">Your models</p>
+          <ul className="choice-list">
+            {own.map((k) =>
+              piece(
+                k,
+                <span className="catalogue-thumb catalogue-thumb-own" aria-hidden="true">
+                  <CubeIcon />
+                </span>,
+              ),
+            )}
+            {!viewer && (
+              <li>
+                <UploadModel />
+              </li>
+            )}
+          </ul>
+        </div>
         {groups.map((g) => (
           <div key={g} className="catalogue-group">
             <p className="catalogue-heading">{g}</p>
             <ul className="choice-list">
               {shown
                 .filter((k) => k.category === g)
-                .map((k) => (
-                  <li key={k.id}>
-                    <button type="button" aria-pressed={picked === k.id} onClick={() => pick(k.id)}>
-                      {/* Rendered by tools/models/thumbs.mjs from the 3D view's own pieces. */}
-                      <img
-                        className="catalogue-thumb"
-                        src={`/models/thumbs/${k.id}.webp`}
-                        alt=""
-                        width={36}
-                        height={36}
-                        loading="lazy"
-                      />
-                      <span className="catalogue-name">{k.name}</span>
-                      <span className="choice-note num">
-                        {cm(k.size.w)} × {cm(k.size.d)}
-                      </span>
-                    </button>
-                  </li>
-                ))}
+                .map((k) =>
+                  piece(
+                    k,
+                    // Rendered by tools/models/thumbs.mjs from the 3D view's own pieces.
+                    <img
+                      className="catalogue-thumb"
+                      src={`/models/thumbs/${k.id}.webp`}
+                      alt=""
+                      width={36}
+                      height={36}
+                      loading="lazy"
+                    />,
+                  ),
+                )}
             </ul>
           </div>
         ))}
@@ -167,6 +196,56 @@ function Catalogue({ idPrefix }: { idPrefix: string }) {
         <p className="field-hint">Nothing called that yet.</p>
       )}
     </section>
+  );
+}
+
+/** A furniture model of your own (.glb): picked from the device, then placed like any piece. */
+function UploadModel() {
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <>
+      <button type="button" disabled={busy} onClick={() => input.current?.click()}>
+        <span className="catalogue-thumb catalogue-thumb-own" aria-hidden="true">
+          +
+        </span>
+        <span className="catalogue-name">{busy ? 'Reading the model…' : 'Upload a model'}</span>
+        <span className="choice-note">.glb, up to 20 MB</span>
+      </button>
+      <input
+        ref={input}
+        type="file"
+        accept=".glb,model/gltf-binary"
+        hidden
+        aria-label="Model file"
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (!file) return;
+          setBusy(true);
+          const problem = await addModelFile(file).catch(() => 'That model couldn’t be added.');
+          setBusy(false);
+          if (problem) useStore.setState({ notice: problem });
+        }}
+      />
+    </>
+  );
+}
+
+function CubeIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+    >
+      <path d="M12 3 20 7.5v9L12 21l-8-4.5v-9L12 3Z" />
+      <path d="M4 7.5 12 12l8-4.5M12 12v9" />
+    </svg>
   );
 }
 

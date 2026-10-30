@@ -27,6 +27,10 @@ export interface Backend {
   getImage?(id: string, hash: string): Promise<Blob>;
   hasImage?(id: string, hash: string): Promise<boolean>;
   deleteImage?(id: string): Promise<void>;
+  /** Stores an uploaded furniture model (GLB) with the project; returns its SHA-256. */
+  putModel?(id: string, blob: Blob): Promise<string>;
+  /** A model the project holds, by its SHA-256; NotFoundError if it has none such. */
+  getModel?(id: string, hash: string): Promise<Blob>;
   /** What this browser may do with the project, as the server last said. */
   role?(id: string): Role;
   /** The edit-link key, or null while the plan's links are view-only (owner only). */
@@ -155,6 +159,22 @@ export const remoteBackend: Backend = {
   },
   async deleteImage(id) {
     await check(await fetch(url(id, '/image'), { method: 'DELETE', headers: authHeaders(id) }));
+  },
+  async putModel(id, blob) {
+    const res = await check(
+      await fetch(url(id, '/models'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'model/gltf-binary', ...authHeaders(id) },
+        body: blob,
+      }),
+    );
+    return ((await res.json()) as { hash: string }).hash;
+  },
+  async getModel(id, hash) {
+    const res = await fetch(url(id, `/models/${hash}`));
+    if (res.status === 404) throw new NotFoundError('model not found');
+    if (!res.ok) throw new Error(`the model could not be fetched (${res.status})`);
+    return res.blob();
   },
   role: (id) => roles.get(id) ?? 'viewer',
   async getShare(id) {

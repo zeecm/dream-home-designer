@@ -16,6 +16,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useEditor } from './editor';
 import { registerScene3d } from './exports';
+import { fetchUploaded } from './models';
 import { useLevel, useProject } from './store';
 import { Joystick } from './walk/Joystick';
 import { MiniMap } from './walk/MiniMap';
@@ -24,7 +25,7 @@ import { loadWalkPose, saveWalkPose } from './walk/pose';
 
 const materials = new MaterialCache();
 /** The furniture models, fetched once each for the session (Pages serves /models). */
-const models = new ModelLibrary('/models/');
+const models = new ModelLibrary('/models/', fetchUploaded);
 const FOV = 40;
 
 /**

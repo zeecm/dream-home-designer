@@ -17,7 +17,10 @@ type Memory struct {
 	onWrite func(rec Record, deleted bool) error
 	images  map[string]Image
 	// onImage persists an image change (nil deletes) while the lock is held.
-	onImage  func(id string, img *Image) error
+	onImage func(id string, img *Image) error
+	models  map[string]map[string][]byte
+	// onModel persists a model (nil data deletes the project's models) while the lock is held.
+	onModel  func(id, hash string, data []byte) error
 	access   map[string]Access
 	onAccess func(id string, a *Access) error
 	// history keeps, per project, the versions saves replaced (not persisted).
@@ -33,6 +36,7 @@ func NewMemory() *Memory {
 	return &Memory{
 		records: map[string]Record{},
 		images:  map[string]Image{},
+		models:  map[string]map[string][]byte{},
 		access:  map[string]Access{},
 		now:     time.Now,
 	}
@@ -146,6 +150,7 @@ func (m *Memory) Delete(_ context.Context, id string) error {
 	delete(m.records, id)
 	delete(m.history, id)
 	_ = m.deleteImage(id)
+	_ = m.deleteModels(id)
 	if _, ok := m.access[id]; ok {
 		_ = m.putAccess(id, nil)
 	}

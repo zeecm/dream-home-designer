@@ -7,6 +7,7 @@ import {
   addItem,
   cornerSpot,
   deleteItem,
+  deleteModel,
   deleteOpening,
   deleteRoom,
   deleteVertex,
@@ -15,6 +16,7 @@ import {
   furnitureKind,
   isBoundary,
   itemSize,
+  modelUses,
   moveVertex,
   newId,
   roomArea,
@@ -26,6 +28,7 @@ import {
   siteOf,
   splitWall,
   updateItem,
+  updateModel,
   updateOpening,
   updateRoom,
   updateWall,
@@ -634,7 +637,36 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
           clear();
         }}
       />
+      <OwnModel id={it.assetId} />
     </>
+  );
+}
+
+/** For a piece made from a model uploaded to this plan: the model's name, and taking it out. */
+function OwnModel({ id }: { id: string }) {
+  const dispatch = useStore((s) => s.dispatch);
+  const project = useProject();
+  const model = project.models?.[id];
+  if (!model) return null;
+  const uses = modelUses(project, id);
+  return (
+    <section className="stack" aria-labelledby="own-model-h">
+      <h3 id="own-model-h" className="section-title">
+        Your model
+      </h3>
+      <TextField
+        label="Model name"
+        value={model.name}
+        onCommit={(name) => dispatch(updateModel(id, { name }))}
+      />
+      <DeleteButton
+        label={uses > 1 ? `Remove model and its ${uses} pieces` : 'Remove model'}
+        onClick={() => {
+          dispatch(deleteModel(id));
+          clear();
+        }}
+      />
+    </section>
   );
 }
 

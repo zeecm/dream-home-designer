@@ -7,14 +7,21 @@ import { sampleFlatProject } from './fixtures/sampleFlat';
 import {
   FURNITURE,
   addItem,
+  addModel,
+  customModelFile,
   deleteItem,
+  deleteModel,
   duplicateOf,
   furnitureKind,
   itemFootprint,
   itemLights,
+  itemSize,
+  modelUses,
   newItem,
   placeFurniture,
+  setProjectModels,
   updateItem,
+  updateModel,
 } from './furniture';
 import { dispatch, emptyHistory, undo } from './history';
 import { planGeometry } from './plan';
@@ -111,6 +118,51 @@ describe('item commands', () => {
     const L = s.doc.levels[0]!.id;
     s = dispatch(s, addItem(L, newItem('it_1', kind('desk'), { x: 1, y: 1 })));
     expect(() => dispatch(s, updateItem(L, 'it_1', { scale: { y: 0 } }))).toThrow();
+  });
+});
+
+describe('uploaded models', () => {
+  const model = {
+    id: 'mdl_1',
+    name: 'Grandma’s armchair',
+    hash: 'a'.repeat(64),
+    category: 'Living',
+    size: { w: 0.8, d: 0.9, h: 1 },
+  };
+
+  it('join the catalogue while their project is open, and leave with it', () => {
+    setProjectModels({ [model.id]: model });
+    const k = furnitureKind('mdl_1');
+    expect(k?.name).toBe('Grandma’s armchair');
+    expect(k?.model).toBe(customModelFile(model.hash));
+    expect(k?.size).toEqual(model.size);
+    expect(k?.category).toBe('Living');
+    // A category this version doesn't know files it under Decor.
+    setProjectModels({ [model.id]: { ...model, category: 'Garage' } });
+    expect(furnitureKind('mdl_1')?.category).toBe('Decor');
+    setProjectModels(undefined);
+    expect(furnitureKind('mdl_1')).toBeUndefined();
+  });
+
+  it('add, rename and delete with their pieces, each one undo step', () => {
+    let s = { doc: blankProject('t', 'prj_t'), history: emptyHistory() };
+    const L = s.doc.levels[0]!.id;
+    s = dispatch(s, addModel(model));
+    expect(() => Project.parse(s.doc)).not.toThrow();
+    setProjectModels(s.doc.models);
+    s = dispatch(s, addItem(L, newItem('it_1', kind('mdl_1'), { x: 1, y: 1 })));
+    s = dispatch(s, addItem(L, newItem('it_2', kind('sofa-3'), { x: 3, y: 1 })));
+    expect(itemSize(s.doc.levels[0]!.items.it_1!).w).toBeCloseTo(0.8);
+    expect(modelUses(s.doc, 'mdl_1')).toBe(1);
+    s = dispatch(s, updateModel('mdl_1', { name: '  Armchair  ', category: 'Bedroom' }));
+    expect(s.doc.models?.mdl_1).toMatchObject({ name: 'Armchair', category: 'Bedroom' });
+    s = dispatch(s, deleteModel('mdl_1'));
+    expect(s.doc.models?.mdl_1).toBeUndefined();
+    expect(Object.keys(s.doc.levels[0]!.items)).toEqual(['it_2']);
+    s = undo(s);
+    expect(s.doc.models?.mdl_1?.name).toBe('Armchair');
+    expect(s.doc.levels[0]!.items.it_1).toBeDefined();
+    setProjectModels(undefined);
   });
 });
 

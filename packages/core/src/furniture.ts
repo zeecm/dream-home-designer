@@ -3,7 +3,7 @@ import type { Command } from './history';
 import { draftLevel } from './levels';
 import { MODEL_KINDS } from './modelKinds.generated';
 import type { PlanGeometry } from './plan';
-import type { Item, Level, Project, Vec2, Vec3 } from './schema';
+import type { CustomModel, Item, Level, Project, Vec2, Vec3 } from './schema';
 
 /**
  * The furniture catalogue: pieces built from boxes, sized as they commonly come in a
@@ -46,6 +46,18 @@ export type FurnitureCategory =
   | 'Storage'
   | 'Lighting'
   | 'Decor';
+
+/** The catalogue's categories, in the order the palette lists them. */
+export const CATEGORIES: FurnitureCategory[] = [
+  'Bedroom',
+  'Living',
+  'Dining',
+  'Kitchen',
+  'Bathroom',
+  'Storage',
+  'Lighting',
+  'Decor',
+];
 
 export interface FurnitureKind {
   id: string;
@@ -390,8 +402,43 @@ FURNITURE.push(...MODEL_KINDS.map(fromModel));
 
 const byId = new Map(FURNITURE.map((k) => [k.id, k]));
 
+/** The open project's uploaded models, as catalogue entries (see `setProjectModels`). */
+const custom = new Map<string, FurnitureKind>();
+
+/** The `model` of an uploaded model's entry: its content key, which the app resolves. */
+export const customModelFile = (hash: string) => `sha256:${hash}`;
+
+/** An uploaded model's catalogue entry, with a stand-in box of its size. */
+export function customKind(m: CustomModel): FurnitureKind {
+  const { w, d, h } = m.size;
+  return {
+    id: m.id,
+    name: m.name,
+    category: (CATEGORIES.includes(m.category as FurnitureCategory)
+      ? m.category
+      : 'Decor') as FurnitureCategory,
+    size: m.size,
+    model: customModelFile(m.hash),
+    parts: [box(-w / 2, w / 2, -d / 2, d / 2, 0, h, 'placeholder')],
+  };
+}
+
+/**
+ * Puts a project's uploaded models in the catalogue, replacing the last project's. The app
+ * calls it whenever the open project's `models` change, before anything is drawn from them.
+ * Their ids are unique, so an entry left from another project never matches an item.
+ */
+export function setProjectModels(models: Project['models']) {
+  custom.clear();
+  for (const m of Object.values(models ?? {})) custom.set(m.id, customKind(m));
+}
+
+/** The open project's uploaded models, in the order they were added. */
+export const projectKinds = (): FurnitureKind[] => [...custom.values()];
+
 /** The catalogue entry an item was made from, if this version of the app knows it. */
-export const furnitureKind = (assetId: string): FurnitureKind | undefined => byId.get(assetId);
+export const furnitureKind = (assetId: string): FurnitureKind | undefined =>
+  byId.get(assetId) ?? custom.get(assetId);
 
 /** An item's actual size: its kind's size times its scale. */
 export function itemSize(item: Item, kind = furnitureKind(item.assetId)) {
@@ -604,6 +651,64 @@ export function updateItem(levelId: string, itemId: string, patch: ItemPatch): C
       }
     },
   };
+}
+
+/** Adds an uploaded model to the project's catalogue. The caller makes its id. */
+export function addModel(model: CustomModel): Command {
+  return {
+    label: `Add model ${model.name}`,
+    recipe: (d) => {
+      d.models ??= {};
+      d.models[model.id] = structuredClone(model);
+    },
+  };
+}
+
+/** Renames an uploaded model or moves it to another category. */
+export function updateModel(
+  id: string,
+  patch: Partial<Pick<CustomModel, 'name' | 'category'>>,
+): Command {
+  return {
+    label: 'Edit model',
+    recipe: (d) => {
+      const m = d.models?.[id];
+      if (!m) throw new Error(`model ${id} not found`);
+      if (patch.name !== undefined) {
+        const name = patch.name.trim().slice(0, 80);
+        if (name) m.name = name;
+      }
+      if (patch.category !== undefined) m.category = patch.category;
+    },
+  };
+}
+
+/**
+ * Takes an uploaded model out of the project, with every piece made from it (in both the
+ * flat as it is and the renovation), in one undo step.
+ */
+export function deleteModel(id: string): Command {
+  return {
+    label: 'Delete model',
+    recipe: (d) => {
+      if (!d.models?.[id]) throw new Error(`model ${id} not found`);
+      delete d.models[id];
+      for (const level of [...d.levels, ...(d.renovation?.levels ?? [])]) {
+        for (const it of Object.values(level.items)) {
+          if (it.assetId === id) delete level.items[it.id];
+        }
+      }
+    },
+  };
+}
+
+/** How many pieces in the project (both variants) are made from a model. */
+export function modelUses(p: Pick<Project, 'levels' | 'renovation'>, id: string): number {
+  let n = 0;
+  for (const level of [...p.levels, ...(p.renovation?.levels ?? [])]) {
+    for (const it of Object.values(level.items)) if (it.assetId === id) n++;
+  }
+  return n;
 }
 
 /** `name` (e.g. "queen bed") goes in the undo label and the Undo toast. */

@@ -7,7 +7,17 @@ export interface ModelSource {
   /** A copy of the model (sharing its geometry and materials), or null while it loads. */
   get(file: string): THREE.Object3D | null;
   has(file: string): boolean;
+  /**
+   * An uploaded model's own size once loaded (width x, height y, depth z), which the scene
+   * fits to its catalogue size; undefined for the catalogue's models, built to size.
+   */
+  natural?(file: string): THREE.Vector3 | undefined;
 }
+
+/** Fetches an uploaded model's bytes by its content key (`sha256:<hex>`). */
+export type ModelFetch = (key: string) => Promise<ArrayBuffer>;
+
+const UPLOADED = 'sha256:';
 
 /**
  * Loads each catalogue model once (GLB, meshopt-compressed) from `base` and hands out
@@ -22,8 +32,17 @@ export class ModelLibrary implements ModelSource {
   private readonly tries = new Map<string, number>();
   private readonly listeners = new Set<() => void>();
   private readonly loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+  private readonly sizes = new Map<string, THREE.Vector3>();
 
-  constructor(private readonly base: string) {}
+  /** `fetchUploaded` gets uploaded models' bytes; without it they stay as boxes. */
+  constructor(
+    private readonly base: string,
+    private readonly fetchUploaded?: ModelFetch,
+  ) {}
+
+  natural(file: string): THREE.Vector3 | undefined {
+    return this.sizes.get(file);
+  }
 
   get(file: string): THREE.Object3D | null {
     const model = this.loaded.get(file);
@@ -42,11 +61,29 @@ export class ModelLibrary implements ModelSource {
     return () => this.listeners.delete(fn);
   }
 
+  /** The model's scene: a catalogue file from `base`, or an uploaded one, centred. */
+  private async scene(file: string): Promise<THREE.Object3D> {
+    if (!file.startsWith(UPLOADED)) return (await this.loader.loadAsync(this.base + file)).scene;
+    if (!this.fetchUploaded) throw new Error('uploaded models are not available here');
+    const gltf = await this.loader.parseAsync(await this.fetchUploaded(file), '');
+    // Made anywhere, by anyone: centred on its footprint with its base on the floor, as the
+    // catalogue's models are built, and its size kept so the scene can fit it.
+    const box = new THREE.Box3().setFromObject(gltf.scene);
+    const root = new THREE.Group();
+    if (!box.isEmpty()) {
+      const c = box.getCenter(new THREE.Vector3());
+      gltf.scene.position.sub(new THREE.Vector3(c.x, box.min.y, c.z));
+      this.sizes.set(file, box.getSize(new THREE.Vector3()));
+    }
+    root.add(gltf.scene);
+    return root;
+  }
+
   private load(file: string) {
     this.loading.add(file);
-    this.loader.loadAsync(this.base + file).then(
-      (gltf) => {
-        gltf.scene.traverse((o) => {
+    this.scene(file).then(
+      (scene) => {
+        scene.traverse((o) => {
           if (o instanceof THREE.Mesh) {
             // Kept cheap to draw, since a furnished flat holds dozens of these: only big
             // pieces cast shadows, and only leaves and glass (cut-out or see-through) are
@@ -61,7 +98,7 @@ export class ModelLibrary implements ModelSource {
           }
         });
         this.loading.delete(file);
-        this.loaded.set(file, gltf.scene);
+        this.loaded.set(file, scene);
         for (const fn of this.listeners) fn();
       },
       () => {

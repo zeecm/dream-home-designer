@@ -3,6 +3,7 @@ import { Viewport } from './Viewport';
 import { keepWithAccount, pullFromAccount, useAccount } from './account';
 import { type Tool, type ViewMode, useEditor } from './editor';
 import { absorbLinkKey } from './keys';
+import { useModelSync } from './models';
 import { PlanCanvas } from './plan/PlanCanvas';
 import { initialProjectId, useProject, useStore } from './store';
 import { Guide } from './ui/Guide';
@@ -216,6 +217,7 @@ export function App() {
   const walking = useEditor((s) => !!s.walking);
   const variant = useEditor((s) => s.variant);
   useShortcuts();
+  useModelSync();
 
   useEffect(() => {
     // StrictMode runs effects twice in dev; only start once.

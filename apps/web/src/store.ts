@@ -14,6 +14,7 @@ import {
   loadProject,
   newId,
   sampleFlatProject,
+  setProjectModels,
   touchedVariant,
   variantLevels,
 } from '@dhd/core';
@@ -532,6 +533,17 @@ export const useStore = create<State>((set, get) => {
  * Local saves are synchronous under the hood, so flushing on pagehide keeps the last
  * edit. For the API, warn instead: a request started during unload may not finish.
  */
+// The open project's uploaded models join the catalogue as soon as its document changes,
+// before anything renders from it (this listener was subscribed before any component's).
+let shownModels: Project['models'] | null = null;
+const followModels = (doc: Project) => {
+  if (doc.models === shownModels) return;
+  shownModels = doc.models;
+  setProjectModels(doc.models);
+};
+followModels(useStore.getState().editor.doc);
+useStore.subscribe((s) => followModels(s.editor.doc));
+
 window.addEventListener('pagehide', () => {
   const { sync, backend, save } = useStore.getState();
   if (sync.kind === 'dirty' && backend?.kind === 'local') void save();

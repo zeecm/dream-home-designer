@@ -24,6 +24,8 @@ const MIGRATIONS: Record<number, (doc: Record<string, unknown>) => Record<string
   3: (doc) => doc,
   // 5 adds the optional Project.renovation (the "after" of a before/after pair).
   4: (doc) => doc,
+  // 6 adds the optional Project.models (furniture models uploaded to the project).
+  5: (doc) => doc,
 };
 
 export function migrate(input: unknown): unknown {

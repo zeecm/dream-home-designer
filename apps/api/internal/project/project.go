@@ -13,7 +13,7 @@ import (
 )
 
 // SchemaVersion must match SCHEMA_VERSION in packages/core/src/schema.ts.
-const SchemaVersion = 5
+const SchemaVersion = 6
 
 // MaxDocBytes caps a single project document. The reference plan is ~15 kB, and plan
 // images are stored separately, so 512 KB leaves plenty of room.

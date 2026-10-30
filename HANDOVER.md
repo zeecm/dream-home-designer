@@ -410,9 +410,27 @@ without it fetches it from the server. Other formats and very large photos are r
 JPEG first. Older `img_…` keys are uploaded and re-keyed the next time their plan opens in the
 browser that has them.
 
+**Your own models (schema 6):** the Furniture catalogue's "Your models" group uploads a
+binary glTF (`.glb`, up to 20 MB, 40 per plan). `Project.models` (optional) holds each one's
+name, SHA-256, category and size; items made from it have its id (`mdl_…`) as `assetId`.
+Core keeps the open project's models in a registry (`setProjectModels`; `furnitureKind`
+falls back to it), which the web store refreshes whenever the document changes (`store.ts`).
+The size is measured on upload (`modelFiles.ts`: a model over 20 m is read as centimetres,
+over 2 km as millimetres); render's `ModelLibrary` centres the model on load and the scene
+fits it to that size. The GLB is kept in IndexedDB under `sha256:<hash>` and copied to the
+API in the background (`models.ts`, `syncModels`); a browser without it fetches it from
+`GET /projects/{id}/models/{hash}` (no key needed, immutable, sandboxed, as plan images).
+The API stores them per project (memory, file `models/<id>/<hash>.glb`, R2
+`models/<id>/<hash>`) and deletes them with the project. The details panel's "Your model"
+renames a model or removes it with every piece made from it (one undo step). Not yet:
+models no longer in the document stay on the server until the project is deleted.
+
 ## 5. Owner to-dos
 
-0. **Before merging:** the production API must accept schema 4 (deployed with this branch).
+0. **Before merging:** the production API must accept schema 6 and serve uploaded models
+   (`/projects/{id}/models`). The preview API has it (30 Oct); the production deploy
+   (`pnpm --filter @dhd/edge run deploy`) was held back for the owner's go-ahead.
+   Earlier: the production API must accept schema 4 (deployed with this branch).
    Earlier note: the production API must accept schema 2. It was deployed from this branch
    at the same time as the preview, and it still accepts version-1 documents from `main`.
 
