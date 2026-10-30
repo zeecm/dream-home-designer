@@ -1,11 +1,10 @@
 import { produceWithPatches } from 'immer';
 import { describe, expect, it } from 'vitest';
-import { deleteWall, drawWall, splitWall } from './commands';
-import { emptyLevel } from './factory';
+import { deleteWall, drawWall, splitWall, updateRoom } from './commands';
+import { blankProject, emptyLevel } from './factory';
 import { hdb4RoomLevel, hdb4RoomProject } from './fixtures/hdb4room';
-import { roomArea } from './geometry';
 import { type EditorDoc, dispatch, emptyHistory, undo } from './history';
-import { detectFaces, syncRooms } from './rooms';
+import { detectFaces, roomArea, roomShape, syncRooms } from './rooms';
 import { Project } from './schema';
 
 const L = 'lvl_ground';
@@ -172,5 +171,68 @@ describe('splitWall and deleteWall keep rooms consistent', () => {
     const s = dispatch(fresh(), deleteWall(L, 'w_bed2_master'));
     expect(names(s)).toEqual(['Bedroom 3', 'Kitchen', 'Living', 'Master bedroom'].sort());
     expect(totalArea(s)).toBeCloseTo(93.5, 9);
+  });
+});
+
+describe('rooms inside rooms', () => {
+  const rect = (s: EditorDoc, x0: number, y0: number, x1: number, y1: number): EditorDoc => {
+    const corners = [
+      { x: x0, y: y0 },
+      { x: x1, y: y0 },
+      { x: x1, y: y1 },
+      { x: x0, y: y1 },
+    ];
+    let out = s;
+    for (let i = 0; i < 4; i++) {
+      const a = corners[i]!;
+      const b = corners[(i + 1) % 4]!;
+      out = dispatch(out, drawWall(lvl(out), { point: a }, { point: b }).command);
+    }
+    return out;
+  };
+  const start = (): EditorDoc => {
+    let s: EditorDoc = { doc: blankProject('t', 'prj_t'), history: emptyHistory() };
+    s = rect(s, 0, 0, 6, 6);
+    const id = Object.keys(lvl(s).rooms)[0]!;
+    return dispatch(s, updateRoom(L, id, { name: 'Living' }));
+  };
+  const byName = (s: EditorDoc, name: string) =>
+    Object.values(lvl(s).rooms).find((r) => r.name === name)!;
+
+  it('subtracts a free-standing enclosure from the room around it', () => {
+    const s = rect(start(), 2.5, 2.5, 3.5, 3.5);
+    expect(Object.keys(lvl(s).rooms)).toHaveLength(2);
+    const living = byName(s, 'Living');
+    expect(roomArea(lvl(s), living)).toBeCloseTo(35);
+    expect(roomShape(lvl(s), living).holes).toHaveLength(1);
+    expect(totalArea(s)).toBeCloseTo(36);
+  });
+
+  it('keeps the outer name when the enclosure covers its centre', () => {
+    const s = rect(start(), 2, 2, 4, 4);
+    expect(byName(s, 'Living')).toBeDefined();
+    expect(roomArea(lvl(s), byName(s, 'Living'))).toBeCloseTo(32);
+  });
+
+  it('gives the area back when the enclosure opens up', () => {
+    let s = rect(start(), 2.5, 2.5, 3.5, 3.5);
+    const inner = Object.values(lvl(s).rooms).find((r) => r.name !== 'Living')!;
+    const wall = Object.values(lvl(s).walls).find(
+      (w) => inner.loop.includes(w.a) && inner.loop.includes(w.b),
+    )!;
+    s = dispatch(s, deleteWall(L, wall.id));
+    expect(Object.keys(lvl(s).rooms)).toHaveLength(1);
+    expect(roomArea(lvl(s), byName(s, 'Living'))).toBeCloseTo(36);
+  });
+
+  it('nests: an enclosure inside the inner room is its hole, not the outer one', () => {
+    let s = rect(start(), 1, 1, 5, 5);
+    s = rect(s, 2.5, 2.5, 3.5, 3.5);
+    const areas = Object.values(lvl(s).rooms)
+      .map((r) => roomArea(lvl(s), r))
+      .sort((a, b) => a - b);
+    expect(areas[0]).toBeCloseTo(1);
+    expect(areas[1]).toBeCloseTo(15);
+    expect(areas[2]).toBeCloseTo(20);
   });
 });

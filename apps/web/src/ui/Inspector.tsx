@@ -15,6 +15,7 @@ import {
   wallLine,
 } from '@dhd/core';
 import { useEditor } from '../editor';
+import { OPENING_PRESETS, ROOM_NAMES } from '../presets';
 import { useProject, useStore } from '../store';
 import { formatArea, formatLength } from '../units';
 import { LengthField, Segmented, SelectField, TextField } from './fields';
@@ -201,12 +202,20 @@ function VertexInspector({ level, id }: { level: Level; id: string }) {
   const dispatch = useStore((s) => s.dispatch);
   const v = level.vertices[id];
   if (!v) return null;
-  const walls = Object.values(level.walls).filter((w) => w.a === id || w.b === id).length;
+  const walls = Object.values(level.walls).filter((w) => w.a === id || w.b === id);
+  const settle = (key: string) => {
+    const moved = useStore.getState().editor.doc.levels[0];
+    if (moved) dispatch(settleVertex(moved, id), { coalesceKey: key });
+  };
   const move = (x: number, y: number) => {
     const key = `move:${id}:${Date.now()}`;
     dispatch(moveVertex(level.id, id, { x, y }), { coalesceKey: key });
-    const moved = useStore.getState().editor.doc.levels[0];
-    if (moved) dispatch(settleVertex(moved, id), { coalesceKey: key });
+    settle(key);
+  };
+  const setLength = (wallId: string, length: number) => {
+    const key = `length:${id}:${Date.now()}`;
+    dispatch(setWallLength(level.id, wallId, length, 'end', id), { coalesceKey: key });
+    settle(key);
   };
   return (
     <>
@@ -227,10 +236,28 @@ function VertexInspector({ level, id }: { level: Level; id: string }) {
           onCommit={(y) => y !== undefined && move(v.x, y)}
         />
       </div>
-      <p className="note">
-        {walls === 1 ? '1 wall meets' : `${walls} walls meet`} here. Dragging the corner moves them
-        all.
-      </p>
+      {walls.length > 0 && (
+        <section className="stack" aria-labelledby="corner-walls-h">
+          <h3 id="corner-walls-h" className="section-title">
+            Walls from this corner
+          </h3>
+          {walls.map((w) => {
+            const far = level.vertices[w.a === id ? w.b : w.a];
+            if (!far) return null;
+            return (
+              <LengthField
+                key={w.id}
+                label={`Wall ${direction(far.x - v.x, far.y - v.y)}`}
+                value={Math.hypot(far.x - v.x, far.y - v.y)}
+                min={0.05}
+                max={50}
+                onCommit={(len) => len !== undefined && setLength(w.id, len)}
+              />
+            );
+          })}
+          <p className="note">A new length moves this corner along that wall.</p>
+        </section>
+      )}
       <DeleteButton
         label="Delete corner and its walls"
         onClick={() => {
@@ -240,6 +267,13 @@ function VertexInspector({ level, id }: { level: Level; id: string }) {
       />
     </>
   );
+}
+
+/** Where a wall heads on screen: plan +y points down the screen. */
+export function direction(dx: number, dy: number): string {
+  const deg = (Math.atan2(-dy, dx) * 180) / Math.PI;
+  const names = ['right', 'up-right', 'up', 'up-left', 'left', 'down-left', 'down', 'down-right'];
+  return names[(Math.round(deg / 45) + 8) % 8] ?? 'right';
 }
 
 function OpeningInspector({ level, id }: { level: Level; id: string }) {
@@ -279,6 +313,14 @@ function OpeningInspector({ level, id }: { level: Level; id: string }) {
         min={0.3}
         max={length}
         onCommit={(v) => v !== undefined && set({ width: v })}
+      />
+      <Segmented
+        label="Common widths"
+        value={String(o.width)}
+        options={OPENING_PRESETS[o.kind]
+          .filter((p) => p.value <= length + 1e-9)
+          .map((p) => ({ value: String(p.value), label: p.label, title: p.note }))}
+        onChange={(w) => set({ width: Number(w) })}
       />
       <LengthField
         label="Height"
@@ -345,6 +387,7 @@ function OpeningInspector({ level, id }: { level: Level; id: string }) {
 
 function RoomInspector({ level, id }: { level: Level; id: string }) {
   const dispatch = useStore((s) => s.dispatch);
+  const renameToken = useEditor((s) => s.renameToken);
   const room = level.rooms[id];
   if (!room) return null;
   return (
@@ -353,6 +396,8 @@ function RoomInspector({ level, id }: { level: Level; id: string }) {
       <TextField
         label="Name"
         value={room.name}
+        suggestions={ROOM_NAMES}
+        focusToken={renameToken}
         onCommit={(name) => dispatch(updateRoom(level.id, id, { name }))}
       />
       <p className="total">

@@ -1,19 +1,28 @@
 import {
   type Level,
   type PlanGeometry,
+  type RoomShape,
   type Vec2,
   doorSwing,
   framePoint,
-  labelPoint,
+  placeLabel,
   roomArea,
-  roomPolygon,
+  roomShape,
+  roomShapes,
+  swingZone,
 } from '@dhd/core';
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import type { Selection } from '../editor';
 import { formatArea, formatLength } from '../units';
 import { type Size, type View, worldToScreen } from './view';
 
 export const pts = (poly: readonly Vec2[]) => poly.map((p) => `${p.x},${p.y}`).join(' ');
+/** An SVG path for a room's outline and holes; draw it with fill-rule evenodd. */
+const shapePath = (s: RoomShape) =>
+  [s.outer, ...s.holes]
+    .filter((ring) => ring.length >= 3)
+    .map((ring) => `M ${pts(ring)} Z`)
+    .join(' ');
 const hit = (s: Selection) => `${s.kind}:${s.id}`;
 
 export function parseHit(target: EventTarget | null): Selection | null {
@@ -40,10 +49,11 @@ export const PlanShapes = memo(function PlanShapes({
     <g>
       <g className="rooms">
         {Object.values(level.rooms).map((r) => (
-          <polygon
+          <path
             key={r.id}
             className={`room floor-${r.floorMaterial}`}
-            points={pts(roomPolygon(level, r))}
+            d={shapePath(roomShape(level, r))}
+            fillRule="evenodd"
             data-hit={hit({ kind: 'room', id: r.id })}
             pointerEvents={pe}
           />
@@ -142,7 +152,11 @@ export function PlanHighlights({
     if (s.kind === 'room') {
       const r = level.rooms[s.id];
       return r ? (
-        <polygon className={`${cls} room-outline`} points={pts(roomPolygon(level, r))} />
+        <path
+          className={`${cls} room-outline`}
+          d={shapePath(roomShape(level, r))}
+          fillRule="evenodd"
+        />
       ) : null;
     }
     return null;
@@ -165,33 +179,63 @@ interface ScreenProps {
 }
 
 /** Room names and areas, set in screen pixels so they stay legible at any zoom. */
-export const RoomLabels = memo(function RoomLabels({ level, view, size }: ScreenProps) {
+interface RoomLabel {
+  id: string;
+  name: string;
+  area: string | null;
+  at: Vec2;
+}
+
+/** Fits each room's name (and area, if there is space) at this zoom, clear of door swings. */
+function roomLabels(level: Level, geom: PlanGeometry, zoom: number): RoomLabel[] {
+  const swings = geom.openings
+    .filter((o) => o.kind === 'door')
+    .map((o) => swingZone(doorSwing(o.frame, o.opening)));
+  const out: RoomLabel[] = [];
+  const shapes = roomShapes(level);
+  for (const r of Object.values(level.rooms)) {
+    const shape = shapes.get(r.id);
+    const poly = shape?.outer ?? [];
+    if (!shape || poly.length < 3) continue;
+    const xs = poly.map((p) => p.x);
+    const ys = poly.map((p) => p.y);
+    const w = (Math.max(...xs) - Math.min(...xs)) * zoom;
+    const h = (Math.max(...ys) - Math.min(...ys)) * zoom;
+    const area = formatArea(roomArea(level, r));
+    // Rough advance widths of the label face at 14px semibold and 13px regular. The
+    // name matters more than the area, so the area goes first, then the name shortens.
+    const room = w - 12;
+    let name = r.name;
+    while (name.length > 3 && name.length * 7.6 > room) name = `${name.slice(0, -2)}…`;
+    const nameFits = name.length * 7.6 <= room && h >= 22;
+    const areaFits = nameFits && area.length * 6.8 <= room && h >= 40;
+    if (!nameFits) continue;
+    const halfPx = {
+      x: Math.max(name.length * 7.6, areaFits ? area.length * 6.8 : 0) / 2 + 4,
+      y: areaFits ? 20 : 10,
+    };
+    const half = { x: halfPx.x / zoom, y: halfPx.y / zoom };
+    const at = placeLabel(poly, half, swings, shape.holes);
+    out.push({ id: r.id, name, area: areaFits ? area : null, at });
+  }
+  return out;
+}
+
+export const RoomLabels = memo(function RoomLabels({ level, geom, view, size }: ScreenProps) {
+  // Placement depends on zoom, not on panning, so a pan reuses it.
+  const labels = useMemo(() => roomLabels(level, geom, view.zoom), [level, geom, view.zoom]);
   return (
     <g className="room-labels" pointerEvents="none">
-      {Object.values(level.rooms).map((r) => {
-        const poly = roomPolygon(level, r);
-        const xs = poly.map((p) => p.x);
-        const ys = poly.map((p) => p.y);
-        const w = (Math.max(...xs) - Math.min(...xs)) * view.zoom;
-        const h = (Math.max(...ys) - Math.min(...ys)) * view.zoom;
-        const area = formatArea(roomArea(level, r));
-        // Rough advance widths of the label face at 14px semibold and 13px regular. The
-        // name matters more than the area, so the area goes first, then the name shortens.
-        const room = w - 12;
-        let name = r.name;
-        while (name.length > 3 && name.length * 7.6 > room) name = `${name.slice(0, -2)}…`;
-        const nameFits = name.length * 7.6 <= room && h >= 22;
-        const areaFits = nameFits && area.length * 6.8 <= room && h >= 40;
-        if (!nameFits) return null;
-        const c = worldToScreen(view, size, labelPoint(poly));
+      {labels.map((l) => {
+        const c = worldToScreen(view, size, l.at);
         return (
-          <g key={r.id} transform={`translate(${c.x} ${c.y})`}>
-            <text className="room-name" textAnchor="middle" y={areaFits ? -3 : 5}>
-              {name}
+          <g key={l.id} transform={`translate(${c.x} ${c.y})`}>
+            <text className="room-name" textAnchor="middle" y={l.area ? -3 : 5}>
+              {l.name}
             </text>
-            {areaFits && (
+            {l.area && (
               <text className="room-area num" textAnchor="middle" y={14}>
-                {area}
+                {l.area}
               </text>
             )}
           </g>

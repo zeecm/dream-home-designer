@@ -1,5 +1,7 @@
+import type { OpeningKind } from '@dhd/core';
 import { create } from 'zustand';
 import type { View } from './plan/view';
+import { DEFAULT_OPENING_WIDTH } from './presets';
 
 /**
  * Editor state that is never saved with the project: the active tool, the selection,
@@ -36,6 +38,12 @@ export interface EditorState {
   /** Thickness for walls the Wall tool draws, in metres. */
   wallThickness: number;
   setWallThickness: (t: number) => void;
+  /** Width for new doors, windows and openings, in metres. */
+  openingWidths: Record<OpeningKind, number>;
+  setOpeningWidth: (kind: OpeningKind, width: number) => void;
+  /** Bumped to focus the selected room's name field. */
+  renameToken: number;
+  requestRename: () => void;
   setTool: (tool: Tool) => void;
   select: (s: Selection | null) => void;
   setHover: (s: Selection | null) => void;
@@ -79,6 +87,11 @@ export const useEditor = create<EditorState>((set) => ({
   viewAdjusted: false,
   wallThickness: 0.1,
   setWallThickness: (wallThickness) => set({ wallThickness }),
+  openingWidths: { ...DEFAULT_OPENING_WIDTH },
+  setOpeningWidth: (kind, width) =>
+    set((s) => ({ openingWidths: { ...s.openingWidths, [kind]: width } })),
+  renameToken: 0,
+  requestRename: () => set((s) => ({ renameToken: s.renameToken + 1 })),
   setTool: (tool) => set({ tool, hover: null }),
   select: (selection) => set({ selection }),
   setHover: (hover) => set({ hover }),

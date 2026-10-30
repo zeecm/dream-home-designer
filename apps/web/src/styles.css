@@ -349,6 +349,7 @@ select {
 .segmented button {
   height: 28px;
   padding: 0 12px;
+  white-space: nowrap;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
   background: transparent;
@@ -605,6 +606,15 @@ select {
   display: block;
   touch-action: none;
   user-select: none;
+}
+/* The canvas takes focus on every click, so its ring shows only when Tab brought focus in. */
+.plan-svg:focus,
+.plan-svg:focus-visible {
+  outline: none;
+}
+.plan-svg[data-ring] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .plan-svg * {
   vector-effect: non-scaling-stroke;
@@ -873,6 +883,13 @@ select {
   margin: 0;
   font-size: var(--fs-title);
   font-weight: 600;
+}
+.stack {
+  display: grid;
+  gap: 12px;
+}
+.stack > .section-title {
+  margin: 0;
 }
 .section-title {
   margin: 0 0 6px;

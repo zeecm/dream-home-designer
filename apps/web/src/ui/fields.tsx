@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId, useState } from 'react';
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { formatLength, parseLength } from '../units';
 
 interface FieldProps {
@@ -108,14 +108,30 @@ export function LengthField({
 export function TextField({
   label,
   value,
+  suggestions,
+  focusToken = 0,
   onCommit,
 }: {
   label: string;
   value: string;
+  /** Offered as the user types (a native datalist). */
+  suggestions?: string[];
+  /** Each change focuses the field and selects its text. */
+  focusToken?: number;
   onCommit: (v: string) => void;
 }) {
   const [draft, setDraft] = useState(value);
+  const input = useRef<HTMLInputElement>(null);
+  const listId = useId();
   useEffect(() => setDraft(value), [value]);
+  // Focus on a new request only, not on mount with a token left over from an earlier one.
+  const seenToken = useRef(focusToken);
+  useEffect(() => {
+    if (focusToken === seenToken.current) return;
+    seenToken.current = focusToken;
+    input.current?.focus();
+    input.current?.select();
+  }, [focusToken]);
   const commit = () => {
     const v = draft.trim();
     if (v && v !== value) onCommit(v);
@@ -124,20 +140,32 @@ export function TextField({
   return (
     <Field label={label}>
       {(id) => (
-        <input
-          id={id}
-          className="input"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') e.currentTarget.blur();
-            if (e.key === 'Escape') {
-              setDraft(value);
-              e.currentTarget.blur();
-            }
-          }}
-        />
+        <>
+          <input
+            id={id}
+            ref={input}
+            className="input"
+            value={draft}
+            list={suggestions ? listId : undefined}
+            autoComplete="off"
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur();
+              if (e.key === 'Escape') {
+                setDraft(value);
+                e.currentTarget.blur();
+              }
+            }}
+          />
+          {suggestions && (
+            <datalist id={listId}>
+              {suggestions.map((s) => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+          )}
+        </>
       )}
     </Field>
   );

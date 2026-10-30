@@ -1,6 +1,8 @@
+import type { OpeningKind } from '@dhd/core';
 import type { ReactNode } from 'react';
 import { type Tool, useEditor } from '../editor';
 import { TOOL_HINTS } from '../plan/tools';
+import { OPENING_PRESETS, type Preset, THICKNESS_PRESETS } from '../presets';
 import { PlanImagePanel } from './PlanImage';
 import { icons } from './icons';
 
@@ -23,24 +25,28 @@ export const TOOLS: ToolDef[] = [
   { id: 'calibrate', label: 'Set scale', key: 'C', icon: icons.calibrate },
 ];
 
-const THICKNESSES = [
-  { value: 0.1, label: '100 mm', note: 'inside walls' },
-  { value: 0.15, label: '150 mm', note: '' },
-  { value: 0.2, label: '200 mm', note: 'outer walls' },
-];
-
-function WallOptions() {
-  const thickness = useEditor((s) => s.wallThickness);
-  const set = useEditor((s) => s.setWallThickness);
+function Choices({
+  id,
+  title,
+  presets,
+  value,
+  onPick,
+}: {
+  id: string;
+  title: string;
+  presets: Preset[];
+  value: number;
+  onPick: (v: number) => void;
+}) {
   return (
-    <section className="tool-options" aria-labelledby="wall-opts">
-      <h3 id="wall-opts" className="panel-heading">
-        New walls
+    <section className="tool-options" aria-labelledby={id}>
+      <h3 id={id} className="panel-heading">
+        {title}
       </h3>
       <ul className="choice-list">
-        {THICKNESSES.map((t) => (
+        {presets.map((t) => (
           <li key={t.value}>
-            <button type="button" aria-pressed={thickness === t.value} onClick={() => set(t.value)}>
+            <button type="button" aria-pressed={value === t.value} onClick={() => onPick(t.value)}>
               <span className="num">{t.label}</span>
               {t.note && <span className="choice-note">{t.note}</span>}
             </button>
@@ -49,6 +55,41 @@ function WallOptions() {
       </ul>
     </section>
   );
+}
+
+const OPENING_TITLES: Record<OpeningKind, string> = {
+  door: 'Door width',
+  window: 'Window width',
+  passage: 'Opening width',
+};
+
+function ToolOptions({ tool }: { tool: Tool }) {
+  const thickness = useEditor((s) => s.wallThickness);
+  const widths = useEditor((s) => s.openingWidths);
+  const { setWallThickness, setOpeningWidth } = useEditor.getState();
+  if (tool === 'wall' || tool === 'room') {
+    return (
+      <Choices
+        id="wall-opts"
+        title="New walls"
+        presets={THICKNESS_PRESETS}
+        value={thickness}
+        onPick={setWallThickness}
+      />
+    );
+  }
+  if (tool === 'door' || tool === 'window' || tool === 'passage') {
+    return (
+      <Choices
+        id="opening-opts"
+        title={OPENING_TITLES[tool]}
+        presets={OPENING_PRESETS[tool]}
+        value={widths[tool]}
+        onPick={(w) => setOpeningWidth(tool, w)}
+      />
+    );
+  }
+  return null;
 }
 
 export function Palette() {
@@ -76,7 +117,7 @@ export function Palette() {
           </li>
         ))}
       </ul>
-      {(tool === 'wall' || tool === 'room') && <WallOptions />}
+      <ToolOptions tool={tool} />
       <PlanImagePanel />
       <p className="tool-hint">
         {only3d ? 'Switch to Plan or Split to draw and edit.' : TOOL_HINTS[tool]}

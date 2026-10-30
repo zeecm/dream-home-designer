@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fitBounds, gridStep, panBy, screenToWorld, worldToScreen, zoomAt } from './view';
+import { fitBounds, gridStep, panBy, reveal, screenToWorld, worldToScreen, zoomAt } from './view';
 
 const size = { width: 800, height: 600 };
 
@@ -40,5 +40,16 @@ describe('plan view', () => {
     expect(gridStep(200)).toEqual({ minor: 0.1, major: 1 });
     expect(gridStep(40)).toEqual({ minor: 0.5, major: 2.5 });
     expect(gridStep(15)).toEqual({ minor: 1, major: 5 });
+  });
+});
+
+describe('reveal', () => {
+  const size = { width: 400, height: 300 };
+  const v = { cx: 0, cy: 0, zoom: 50 };
+  it('keeps the view when the point is already visible', () => {
+    expect(reveal(v, size, { x: 1, y: 1 })).toBe(v);
+  });
+  it('centres on a point outside the view', () => {
+    expect(reveal(v, size, { x: 10, y: -2 })).toEqual({ cx: 10, cy: -2, zoom: 50 });
   });
 });

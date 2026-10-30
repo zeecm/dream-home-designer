@@ -53,3 +53,11 @@ export function gridStep(zoom: number, minPx = 12): { minor: number; major: numb
   }
   return { minor: 10, major: 50 };
 }
+
+/** The view, re-centred on `p` if `p` is within `margin` pixels of the edge or beyond it. */
+export function reveal(v: View, size: Size, p: Vec2, margin = 48): View {
+  const s = worldToScreen(v, size, p);
+  const inside =
+    s.x >= margin && s.y >= margin && s.x <= size.width - margin && s.y <= size.height - margin;
+  return inside ? v : { ...v, cx: p.x, cy: p.y };
+}

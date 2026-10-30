@@ -9,8 +9,9 @@ import {
   updateWall,
 } from './commands';
 import { hdb4RoomProject } from './fixtures/hdb4room';
-import { clampOpeningT, roomArea, wallLine } from './geometry';
+import { clampOpeningT, wallLine } from './geometry';
 import { type EditorDoc, dispatch, emptyHistory, undo } from './history';
+import { roomArea } from './rooms';
 import { Project } from './schema';
 
 const L = 'lvl_ground';
@@ -44,6 +45,16 @@ describe('setWallLength', () => {
     const s = dispatch(fresh(), setWallLength(L, 'w_mid_3', 3, 'end')); // v9 (5,4.5) -> v10 (7,4.5)
     expect(lvl(s).vertices.v10).toMatchObject({ x: 8, y: 4.5 });
     expect(wallLine(lvl(s), lvl(s).walls.w_mid_3!).length).toBeCloseTo(3);
+  });
+
+  it('end mode can move the a end instead', () => {
+    const s = dispatch(fresh(), setWallLength(L, 'w_mid_3', 3, 'end', 'v9'));
+    expect(lvl(s).vertices.v9).toMatchObject({ x: 4, y: 4.5 });
+    expect(lvl(s).vertices.v10).toMatchObject({ x: 7, y: 4.5 });
+  });
+
+  it('rejects a moving vertex that is not on the wall', () => {
+    expect(() => dispatch(fresh(), setWallLength(L, 'w_mid_3', 3, 'end', 'v1'))).toThrow();
   });
 
   it('push mode slides the far wall so square corners stay square', () => {

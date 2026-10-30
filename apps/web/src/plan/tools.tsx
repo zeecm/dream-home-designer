@@ -17,7 +17,8 @@ import { type ReactNode, useRef, useState } from 'react';
 import { type Selection, type Tool, useEditor } from '../editor';
 import { useStore } from '../store';
 import { formatLength } from '../units';
-import { type Size, type View, worldToScreen } from './view';
+import { cycle, movedVertices, nudge, objectPoint, planObjects } from './keyboard';
+import { type Size, type View, panBy, reveal, worldToScreen } from './view';
 
 export interface PlanPointer {
   world: Vec2;
@@ -50,12 +51,12 @@ export interface ToolController {
 
 export const TOOL_HINTS: Record<Tool, string> = {
   select:
-    'Click to select. Drag a corner or a door to move it. Double-click a wall to add a corner.',
+    'Click to select; Tab and the arrow keys work too. Double-click a wall to add a corner, or a room to rename it.',
   wall: 'Click to place corners; type a length for an exact wall. Joining an existing corner or wall, Enter or a double-click finishes.',
   room: 'Click two opposite corners to draw a rectangular room. Esc cancels.',
-  door: 'Click a wall to add a door.',
-  window: 'Click a wall to add a window.',
-  passage: 'Click a wall to add an opening.',
+  door: 'Pick a width, then click a wall to add a door.',
+  window: 'Pick a width, then click a wall to add a window.',
+  passage: 'Pick a width, then click a wall to add an opening.',
   measure: 'Click two points to measure. Esc clears.',
   calibrate: 'Click two points on the plan image, then type the real distance.',
 };
@@ -87,6 +88,13 @@ export function nearestVertex(
   return best;
 }
 
+const ARROWS: Record<string, Vec2> = {
+  ArrowLeft: { x: -1, y: 0 },
+  ArrowRight: { x: 1, y: 0 },
+  ArrowUp: { x: 0, y: -1 },
+  ArrowDown: { x: 0, y: 1 },
+};
+
 type Drag =
   | { kind: 'vertex'; id: string; start: Vec2; moved: boolean; key: string }
   | { kind: 'opening'; id: string; wallId: string; start: Vec2; moved: boolean; key: string };
@@ -111,6 +119,10 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         return true;
       }
       select(h);
+      if (h.kind === 'room' && p.clicks === 2) {
+        useEditor.getState().requestRename();
+        return true;
+      }
       // Rooms and walls select on press, but dragging from them pans (rooms cover the plan).
       if (h.kind === 'room' || h.kind === 'wall') return false;
       const key = `drag:${h.id}:${Date.now()}`;
@@ -163,6 +175,42 @@ export function useSelectTool(ctx: ToolContext): ToolController {
     },
     key: (e) => {
       const sel = useEditor.getState().selection;
+      const onCanvas = e.target instanceof SVGSVGElement;
+      // Tab walks through the plan's objects while the canvas has focus; past the last one it
+      // lets focus move on, so the canvas never traps the keyboard.
+      if (e.key === 'Tab' && onCanvas && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        const next = cycle(planObjects(ctx.level), sel, e.shiftKey);
+        select(next);
+        if (!next) return false;
+        const at = objectPoint(ctx.level, next);
+        if (at) useEditor.getState().setView(reveal(ctx.view, ctx.size, at), true);
+        return true;
+      }
+      if ((e.key === 'Enter' || e.key === 'F2') && onCanvas && sel?.kind === 'room') {
+        useEditor.getState().requestRename();
+        return true;
+      }
+      const arrow = ARROWS[e.key];
+      if (arrow && (onCanvas || e.target === document.body) && !e.ctrlKey && !e.metaKey) {
+        // Read the live document: key repeat can outrun React's re-render.
+        const live = () => useStore.getState().editor.doc.levels[0] ?? ctx.level;
+        // 1 cm per press, 10 cm with Shift; a run of nudges is one undo step.
+        const step = e.shiftKey ? 0.1 : 0.01;
+        const cmds = sel ? nudge(live(), sel, { x: arrow.x * step, y: arrow.y * step }) : [];
+        if (sel && cmds.length > 0) {
+          const key = `nudge:${sel.id}`;
+          const moved = movedVertices(live(), sel);
+          for (const cmd of cmds) ctx.dispatch(cmd, { coalesceKey: key });
+          for (const id of moved) {
+            const level = live();
+            if (level.vertices[id]) ctx.dispatch(settleVertex(level, id), { coalesceKey: key });
+          }
+        } else {
+          const px = e.shiftKey ? 200 : 40;
+          useEditor.getState().setView(panBy(ctx.view, -arrow.x * px, -arrow.y * px), true);
+        }
+        return true;
+      }
       if ((e.key === 'Delete' || e.key === 'Backspace') && sel) {
         const cmd =
           sel.kind === 'wall'

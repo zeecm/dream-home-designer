@@ -210,14 +210,20 @@ export function setWallLength(
   wallId: string,
   newLength: number,
   mode: 'push' | 'end' = 'push',
+  /** The end that moves (a vertex id of the wall); defaults to the wall's `b` end. */
+  moving?: string,
 ): Command {
   if (!(newLength > 0)) throw new Error('length must be positive');
   return {
     label: 'Change wall length',
     recipe: (d) => {
       const lvl = level(d, levelId);
-      const w = lvl.walls[wallId];
-      if (!w) throw new Error(`wall ${wallId} not found`);
+      const wall = lvl.walls[wallId];
+      if (!wall) throw new Error(`wall ${wallId} not found`);
+      if (moving !== undefined && moving !== wall.a && moving !== wall.b)
+        throw new Error(`vertex ${moving} is not an end of wall ${wallId}`);
+      // Orient the wall so `b` is the end that moves.
+      const w = moving === wall.a ? { a: wall.b, b: wall.a } : { a: wall.a, b: wall.b };
       const a = lvl.vertices[w.a];
       const b = lvl.vertices[w.b];
       if (!a || !b) throw new Error(`wall ${wallId} references a missing vertex`);

@@ -135,8 +135,8 @@ Writes are rate-limited per IP at the Worker (60/min). IDs must match `^[a-z0-9]
 - **Plan and 3D:** walls have mitred corners in both views, and the 3D rebuild is incremental.
 
 **Tests:**
-- 78 core and 10 render unit tests, plus 11 web unit tests.
-- A 5-test end-to-end suite.
+- 102 core and 11 render unit tests, plus 19 web unit tests.
+- A 6-test end-to-end suite.
 - Go tests, including a store contract test that has passed against live R2.
 
 **Independent acceptance testing, round 1, found:** cropped Split view, the Esc handling in
@@ -168,6 +168,21 @@ from upload to rooms on the live preview.
 - repairing and migrating documents on load;
 - API hardening.
 
+**Backlog batch A (built):**
+- **Corners:** dragging a corner onto another merges them (part of the round-2 fixes). A selected
+  or dragged corner shows live lengths on all its walls, and the Corner inspector edits each one,
+  moving the corner along that wall (`setWallLength(…, 'end', vertexId)`).
+- **Keyboard:** the plan canvas is focusable. In Select, Tab and Shift+Tab walk rooms, walls,
+  openings and corners in reading order, and leave the canvas past either end. Arrows nudge 1 cm
+  (10 cm with Shift), sliding doors along their wall, and pan when nothing movable is selected.
+  The selection is announced in a live region (`apps/web/src/plan/keyboard.ts`).
+- **Faster tracing:** door, window and opening width presets in the palette and the inspector
+  (HDB 700/800/900 mm doors). Double-click a room, or press Enter or F2 on it, to rename it, with
+  common names suggested. Room labels move clear of door swings and holes (`placeLabel`).
+- **Rooms inside rooms:** a group of walls standing free inside a room is a hole in it
+  (`roomShapes`): its area is subtracted, the floor and ceiling are cut, the plan fill skips it,
+  and room matching ignores points inside holes.
+
 ## 5. Owner to-dos
 
 1. **Connect the API Worker to Git (one time, in the dashboard).** The Builds API refuses the
@@ -187,25 +202,15 @@ from upload to rooms on the live preview.
 ## 6. Next
 
 **Finish Phase 1**, in order:
-1. Act on round-2 findings, especially friction tracing the real HDB plan. Gate target: a real
-   plan traced in under 10 minutes, with internal area within 3% of HDB's stated 66 m².
-2. **Merge corners:** a corner dragged onto another corner should merge them (not built yet).
-3. **Live lengths during corner drags:** show live lengths on connected walls, and offer the
-   connected wall lengths in the Corner inspector.
-4. **Keyboard access to plan objects:** focusable canvas, arrow keys to cycle objects, nudging.
-5. **Plan images on the server:** upload them to R2 through the API so they work on every device.
-6. **Open-plan boundaries:** a room boundary that isn't a wall (dry kitchen vs living, for
+1. **Plan images on the server:** upload them to R2 through the API so they work on every device.
+2. **Open-plan boundaries:** a room boundary that isn't a wall (dry kitchen vs living, for
    example), probably `Wall.kind: 'boundary'` drawn dashed and never extruded. This is a schema bump.
-7. **Faster tracing:**
-   - door and window size presets (HDB: 0.7, 0.8, 0.9 m);
-   - renaming a room by typing straight after selecting it;
-   - room labels that avoid door swings.
-8. **Rooms inside rooms:** subtract them as holes. Match rooms by overlapping area rather than
-   by label point.
-9. **Public-deployment safety:** a write token separate from the share link, a previous-version
+3. **Public-deployment safety:** a write token separate from the share link, a previous-version
    copy on PUT and DELETE, and a limit or lifecycle rule on stored projects.
-10. **A realistic sample:** replace the simple sample flat with a realistic HDB 4-room layout
+4. **A realistic sample:** replace the simple sample flat with a realistic HDB 4-room layout
    (bathrooms, shelter, service yard). Keep `hdb4room` for tests.
+5. **Room matching by overlap:** rooms are matched across edits by label point and corners. Matching
+   by overlapping area would be sturdier for large reshapes.
 
 **Phase 2, first-person walkthrough:**
 - PointerLockControls.
@@ -268,6 +273,5 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
 - **Walls use one material for both faces.** `materialLeft` covers both, and per-side materials
   come in Phase 3.
 - **No `project_versions` history yet.** It's planned with Postgres.
-- **Moving a corner can make walls cross without splitting them.** Rooms are only re-detected by
-  commands that change topology.
-- **Room detection ignores holes.** A room inside another room isn't subtracted from it.
+- **Corner dimension lines** for walls that run into the room draw inside it; fine at plan scale,
+  busy on short walls.

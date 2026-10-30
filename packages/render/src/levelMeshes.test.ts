@@ -7,6 +7,7 @@ import {
   hdb4RoomProject,
   moveVertex,
 } from '@dhd/core';
+import type * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { LevelMeshes } from './levelMeshes';
 import { MaterialCache } from './materials';
@@ -112,5 +113,67 @@ describe('LevelMeshes', () => {
     // at the far ends of the two walls that tilt: about 15 of 119 parts per step.
     expect(built / 40).toBeLessThanOrEqual(16);
     expect(perStep).toBeLessThan(5);
+  });
+});
+
+describe('rooms inside rooms', () => {
+  /** Area of a mesh's triangles projected on the floor plane. */
+  const floorArea = (m: THREE.Mesh) => {
+    const pos = m.geometry.getAttribute('position');
+    const g = m.geometry.index;
+    const n = g ? g.count : pos.count;
+    const at = (i: number) => (g ? g.getX(i) : i);
+    let area = 0;
+    for (let i = 0; i < n; i += 3) {
+      const [a, b, c] = [at(i), at(i + 1), at(i + 2)];
+      const ax = pos.getX(a);
+      const az = pos.getZ(a);
+      area += Math.abs(
+        ((pos.getX(b) - ax) * (pos.getZ(c) - az) - (pos.getZ(b) - az) * (pos.getX(c) - ax)) / 2,
+      );
+    }
+    return area;
+  };
+
+  it('cuts the inner room out of the outer floor and floors the inner room', () => {
+    const l = emptyLevel();
+    const square = (p: string, x0: number, x1: number) => {
+      const ids = [
+        [x0, x0],
+        [x1, x0],
+        [x1, x1],
+        [x0, x1],
+      ].map(([x, y], i) => {
+        const id = `${p}${i}`;
+        l.vertices[id] = { id, x: x as number, y: y as number };
+        return id;
+      });
+      ids.forEach((a, i) => {
+        const b = ids[(i + 1) % 4] as string;
+        l.walls[`${a}${b}`] = {
+          id: `${a}${b}`,
+          a,
+          b,
+          thickness: 0.1,
+          materialLeft: 'paint-white',
+          materialRight: 'paint-white',
+        };
+      });
+      l.rooms[`rm_${p}`] = {
+        id: `rm_${p}`,
+        name: p,
+        loop: ids,
+        floorMaterial: 'wood-oak',
+        ceilingMaterial: 'paint-white',
+      };
+    };
+    square('o', 0, 6);
+    square('i', 2.5, 3.5);
+    const meshes = new LevelMeshes(new MaterialCache());
+    meshes.update(l);
+    const floor = (id: string) =>
+      meshes.group.getObjectByName(`floor:${id}`) as THREE.Mesh | undefined;
+    expect(floorArea(floor('rm_o') as THREE.Mesh)).toBeCloseTo(35);
+    expect(floorArea(floor('rm_i') as THREE.Mesh)).toBeCloseTo(1);
   });
 });

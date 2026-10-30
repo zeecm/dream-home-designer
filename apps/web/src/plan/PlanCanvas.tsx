@@ -6,6 +6,7 @@ import { useProject, useStore } from '../store';
 import { uploadPlanImage, useUploadPicker } from '../ui/PlanImage';
 import { icons } from '../ui/icons';
 import { useCalibrateTool, useOpeningTool, useRoomTool, useWallTool } from './drawTools';
+import { describe } from './keyboard';
 import {
   PlanHighlights,
   PlanShapes,
@@ -78,6 +79,9 @@ export function PlanCanvas() {
   const image = useAsset(underlay?.assetKey);
   const upload = useUploadPicker();
   const [dropping, setDropping] = useState(false);
+  // Focus ring on the canvas: shown when Tab moved focus here, hidden on the next click.
+  const [ring, setRing] = useState(false);
+  const lastTab = useRef(0);
   const v = view ?? { cx: 0, cy: 0, zoom: 50 };
 
   const viewAdjusted = useEditor((s) => s.viewAdjusted);
@@ -139,6 +143,7 @@ export function PlanCanvas() {
   // Pointer events don't reliably carry a click count, so detect double-clicks here.
   const lastDown = useRef({ t: 0, x: 0, y: 0 });
   const onPointerDown = (e: React.PointerEvent) => {
+    setRing(false);
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
     const now = performance.now();
     const prev = lastDown.current;
@@ -195,6 +200,7 @@ export function PlanCanvas() {
   // ---- keys: Space pans; the rest goes to the tool first
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
+      if (e.key === 'Tab') lastTab.current = Date.now();
       if (isTyping(e.target)) return;
       if (e.code === 'Space') {
         space.current = true;
@@ -261,6 +267,12 @@ export function PlanCanvas() {
         style={{ cursor }}
         role="application"
         aria-label="Floor plan"
+        aria-describedby="plan-keys"
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: role="application" takes keyboard input
+        tabIndex={0}
+        data-ring={ring || undefined}
+        onFocus={() => setRing(Date.now() - lastTab.current < 500)}
+        onBlur={() => setRing(false)}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -313,6 +325,19 @@ export function PlanCanvas() {
         {selection?.kind === 'wall' && (
           <WallDimension level={level} geom={geom} view={v} size={size} wallId={selection.id} />
         )}
+        {selection?.kind === 'vertex' &&
+          Object.values(level.walls)
+            .filter((w) => w.a === selection.id || w.b === selection.id)
+            .map((w) => (
+              <WallDimension
+                key={w.id}
+                level={level}
+                geom={geom}
+                view={v}
+                size={size}
+                wallId={w.id}
+              />
+            ))}
         <VertexHandles
           level={level}
           view={v}
@@ -322,6 +347,14 @@ export function PlanCanvas() {
         />
         {active.overlay(ctx)}
       </svg>
+
+      <p id="plan-keys" className="visually-hidden">
+        In Select, Tab moves through rooms, walls, openings and corners. Arrow keys nudge the
+        selection by 1 cm, or 10 cm with Shift, and pan the plan when nothing is selected.
+      </p>
+      <p className="visually-hidden" aria-live="polite">
+        {describe(level, selection)}
+      </p>
 
       {empty && !underlay && (
         <div className="plan-empty">

@@ -3,13 +3,14 @@ import { hdb4RoomLevel, hdb4RoomProject } from './fixtures/hdb4room';
 import {
   labelPoint,
   levelBounds,
+  placeLabel,
   pointInPolygon,
   polygonCentroid,
-  roomArea,
   signedArea,
   wallLine,
   wallPieces,
 } from './geometry';
+import { roomArea } from './rooms';
 import type { Opening } from './schema';
 import { Project } from './schema';
 
@@ -164,5 +165,39 @@ describe('polygon helpers', () => {
     expect(pointInPolygon(polygonCentroid(thin), thin)).toBe(false);
     expect(pointInPolygon(labelPoint(thin), thin)).toBe(true);
     expect(pointInPolygon(labelPoint(L), L)).toBe(true);
+  });
+});
+
+describe('placeLabel', () => {
+  const square = [
+    { x: 0, y: 0 },
+    { x: 4, y: 0 },
+    { x: 4, y: 4 },
+    { x: 0, y: 4 },
+  ];
+  const half = { x: 0.6, y: 0.25 };
+
+  it('uses the centre when nothing is in the way', () => {
+    expect(placeLabel(square, half)).toEqual({ x: 2, y: 2 });
+  });
+
+  it('moves clear of a door swing over the centre', () => {
+    const swing = { c: { x: 2, y: 1.6 }, r: 0.9 };
+    const p = placeLabel(square, half, [swing]);
+    expect(pointInPolygon(p, square)).toBe(true);
+    // The whole box clears the circle and stays inside the room.
+    for (const sx of [-1, 1]) {
+      for (const sy of [-1, 1]) {
+        const q = { x: p.x + sx * half.x, y: p.y + sy * half.y };
+        expect(Math.hypot(q.x - 2, q.y - 1.6)).toBeGreaterThanOrEqual(0.9 - 1e-9);
+        expect(pointInPolygon(q, square)).toBe(true);
+      }
+    }
+  });
+
+  it('falls back to the roomiest spot when nothing fits', () => {
+    const tiny = square.map((v) => ({ x: v.x / 4, y: v.y / 4 }));
+    const p = placeLabel(tiny, half);
+    expect(pointInPolygon(p, tiny)).toBe(true);
   });
 });

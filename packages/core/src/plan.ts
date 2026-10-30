@@ -1,5 +1,5 @@
 import { type Footprints, type WallFootprint, footprintSpans, wallFootprints } from './footprints';
-import { clampOpeningT, openingsOnWall } from './geometry';
+import { type Circle, clampOpeningT, openingsOnWall } from './geometry';
 import type { Level, Opening, OpeningKind, Vec2, Wall } from './schema';
 
 /**
@@ -167,6 +167,14 @@ export function doorSwing(f: WallFrame, o: Opening): DoorSwing {
   const v1 = { x: leafEnd.x - hinge.x, y: leafEnd.y - hinge.y };
   const v2 = { x: arcEnd.x - hinge.x, y: arcEnd.y - hinge.y };
   return { hinge, leafEnd, arcEnd, radius, sweep: v1.x * v2.y - v1.y * v2.x > 0 ? 1 : 0 };
+}
+
+/** A circle covering the quarter disc a door leaf sweeps, for keeping labels clear of it. */
+export function swingZone(s: DoorSwing): Circle {
+  return {
+    c: { x: (s.leafEnd.x + s.arcEnd.x) / 2, y: (s.leafEnd.y + s.arcEnd.y) / 2 },
+    r: s.radius * Math.SQRT1_2,
+  };
 }
 
 export interface OpeningPlacement {

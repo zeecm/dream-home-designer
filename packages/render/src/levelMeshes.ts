@@ -1,11 +1,12 @@
 import {
   type Level,
   type Opening,
+  type RoomShape,
   type Vec2,
   type WallFrame,
   framePoint,
   openingsOnWall,
-  roomPolygon,
+  roomShapes,
   wallFootprints,
   wallFrame,
   wallPieces,
@@ -108,19 +109,17 @@ export class LevelMeshes {
       });
     }
 
+    const shapes = roomShapes(level);
     for (const room of Object.values(level.rooms)) {
-      let pts: Vec2[];
-      try {
-        pts = roomPolygon(level, room);
-      } catch {
-        continue; // a loop that references a missing corner draws nothing
-      }
+      const shape = shapes.get(room.id);
+      if (!shape) continue; // a loop that references a missing corner draws nothing
       const ceilingY = level.elevation + (room.ceilingHeight ?? level.ceilingHeight);
-      const key = `${pointsKey(pts)}/${room.floorMaterial}/${room.ceilingMaterial}/${r(level.elevation)}/${r(ceilingY)}/${!!this.opts.ceilings}`;
+      const outline = [shape.outer, ...shape.holes].map(pointsKey).join('|');
+      const key = `${outline}/${room.floorMaterial}/${room.ceilingMaterial}/${r(level.elevation)}/${r(ceilingY)}/${!!this.opts.ceilings}`;
       put(`room:${room.id}`, key, () =>
         this.buildRoom(
           room.id,
-          pts,
+          shape,
           level.elevation,
           ceilingY,
           room.floorMaterial,
@@ -215,17 +214,22 @@ export class LevelMeshes {
 
   private buildRoom(
     id: string,
-    pts: Vec2[],
+    shape: RoomShape,
     elevation: number,
     ceilingY: number,
     floorMaterial: string,
     ceilingMaterial: string,
   ): THREE.Mesh[] {
+    const toShape = (flip: number) => {
+      const s = new THREE.Shape(shape.outer.map((p) => new THREE.Vector2(p.x, flip * p.y)));
+      for (const h of shape.holes) {
+        s.holes.push(new THREE.Path(h.map((p) => new THREE.Vector2(p.x, flip * p.y))));
+      }
+      return s;
+    };
     // Shape lives in XY; rotating -90° about X sends shape (x, y) to world (x, 0, -y),
     // so negate y to land plan y on world +z.
-    const floorGeom = new THREE.ShapeGeometry(
-      new THREE.Shape(pts.map((p) => new THREE.Vector2(p.x, -p.y))),
-    );
+    const floorGeom = new THREE.ShapeGeometry(toShape(-1));
     floorGeom.rotateX(-Math.PI / 2);
     const floor = new THREE.Mesh(floorGeom, this.materials.get(floorMaterial));
     floor.name = `floor:${id}`;
@@ -235,9 +239,7 @@ export class LevelMeshes {
     const out = [floor];
     if (this.opts.ceilings) {
       // +90° about X sends (x, y) to (x, 0, y) and turns the face normal downwards.
-      const ceilGeom = new THREE.ShapeGeometry(
-        new THREE.Shape(pts.map((p) => new THREE.Vector2(p.x, p.y))),
-      );
+      const ceilGeom = new THREE.ShapeGeometry(toShape(1));
       ceilGeom.rotateX(Math.PI / 2);
       const ceil = new THREE.Mesh(ceilGeom, this.materials.get(ceilingMaterial));
       ceil.name = `ceiling:${id}`;

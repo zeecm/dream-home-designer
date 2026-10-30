@@ -246,10 +246,10 @@ function SnapMarker({ snap, at }: { snap: SnapResult | null; at: Vec2 }) {
   }
 }
 
-const OPENING_DEFAULTS: Record<OpeningKind, { width: number; height: number; sill: number }> = {
-  door: { width: 0.9, height: 2.1, sill: 0 },
-  window: { width: 1.2, height: 1.2, sill: 0.9 },
-  passage: { width: 1.0, height: 2.1, sill: 0 },
+const OPENING_DEFAULTS: Record<OpeningKind, { height: number; sill: number }> = {
+  door: { height: 2.1, sill: 0 },
+  window: { height: 1.2, sill: 0.9 },
+  passage: { height: 2.1, sill: 0 },
 };
 
 type Placement = OpeningPlacement;
@@ -260,9 +260,10 @@ export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolControl
   const keep = useRef(place);
   keep.current = place;
   const def = OPENING_DEFAULTS[kind];
+  const width = useEditor((s) => s.openingWidths[kind]);
 
   const find = (p: PlanPointer): Placement | null =>
-    placeOpening(ctx.geom, p.world, def.width, Math.max(0.3, 14 / ctx.view.zoom));
+    placeOpening(ctx.geom, p.world, width, Math.max(0.3, 14 / ctx.view.zoom));
 
   return {
     cursor: 'copy',

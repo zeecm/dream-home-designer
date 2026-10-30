@@ -1,5 +1,5 @@
-import type { Draft } from 'immer';
-import { labelPoint, pointInPolygon, signedArea } from './geometry';
+import { type Draft, isDraft } from 'immer';
+import { placeLabel, pointInPolygon, signedArea } from './geometry';
 import type { Level, Room, Vec2 } from './schema';
 
 /** Faces smaller than this are slivers between nearly coincident walls, not rooms. */
@@ -17,6 +17,14 @@ type LevelLike = Pick<Level, 'vertices' | 'walls'>;
  * (positive area); each component's outer boundary winds the other way and is dropped.
  */
 export function detectFaces(level: LevelLike): string[][] {
+  return traceFaces(level).faces;
+}
+
+/**
+ * The bounded faces (counter-clockwise) and, for each connected group of walls that encloses
+ * anything, its outer boundary (clockwise), as loops of vertex ids.
+ */
+function traceFaces(level: LevelLike): { faces: string[][]; outers: string[][] } {
   const adj = new Map<string, Set<string>>();
   const link = (a: string, b: string) => {
     if (!adj.has(a)) adj.set(a, new Set());
@@ -58,6 +66,7 @@ export function detectFaces(level: LevelLike): string[][] {
 
   const seen = new Set<string>();
   const faces: string[][] = [];
+  const outers: string[][] = [];
   for (const [u, ns] of sorted) {
     for (const v of ns) {
       if (seen.has(`${u}>${v}`)) continue;
@@ -73,10 +82,88 @@ export function detectFaces(level: LevelLike): string[][] {
         a = b;
         b = next;
       }
-      if (signedArea(loop.map(pos)) > MIN_ROOM_AREA) faces.push(loop);
+      const area = signedArea(loop.map(pos));
+      if (area > MIN_ROOM_AREA) faces.push(loop);
+      else if (area < -MIN_ROOM_AREA) outers.push(loop);
     }
   }
-  return faces;
+  return { faces, outers };
+}
+
+/**
+ * Which outer boundaries are holes in which faces: a group of walls standing free inside a
+ * room (a shelter or a column not touching the room's walls) is a hole in the smallest face
+ * around it. Returns, per face index, the boundaries it loses.
+ */
+function assignHoles(
+  faces: readonly string[][],
+  outers: readonly string[][],
+  pos: (id: string) => Vec2,
+): Map<number, string[][]> {
+  const polys = faces.map((loop) => loop.map(pos));
+  const areas = polys.map((p) => Math.abs(signedArea(p)));
+  const holes = new Map<number, string[][]>();
+  for (const outer of outers) {
+    const ids = new Set(outer);
+    const pts = outer.map(pos);
+    let best = -1;
+    faces.forEach((loop, fi) => {
+      if (loop.some((id) => ids.has(id))) return; // the same group of walls
+      const poly = polys[fi] as Vec2[];
+      if (!pts.every((p) => pointInPolygon(p, poly))) return;
+      if (best < 0 || (areas[fi] as number) < (areas[best] as number)) best = fi;
+    });
+    if (best >= 0) holes.set(best, [...(holes.get(best) ?? []), outer]);
+  }
+  return holes;
+}
+
+export interface RoomShape {
+  outer: Vec2[];
+  /** Free-standing enclosures inside the room, which are not part of its floor. */
+  holes: Vec2[][];
+}
+
+const shapeCache = new WeakMap<object, Map<string, RoomShape>>();
+
+/**
+ * Every room's outline and holes. Cached per level object, so call it freely on immutable
+ * levels; a draft inside a recipe is measured afresh each time.
+ */
+export function roomShapes(level: Level): Map<string, RoomShape> {
+  const cached = !isDraft(level) && shapeCache.get(level);
+  if (cached) return cached;
+  const pos = (id: string) => {
+    const v = level.vertices[id];
+    if (!v) throw new Error(`missing vertex ${id}`);
+    return { x: v.x, y: v.y };
+  };
+  const rooms = Object.values(level.rooms).filter((r) => r.loop.every((id) => level.vertices[id]));
+  const { outers } = traceFaces(level);
+  const holes = assignHoles(
+    rooms.map((r) => r.loop),
+    outers,
+    pos,
+  );
+  const out = new Map<string, RoomShape>();
+  rooms.forEach((r, i) => {
+    out.set(r.id, { outer: r.loop.map(pos), holes: (holes.get(i) ?? []).map((h) => h.map(pos)) });
+  });
+  if (!isDraft(level)) shapeCache.set(level, out);
+  return out;
+}
+
+/** The room's outline and holes; an empty shape if its loop references a missing corner. */
+export function roomShape(level: Level, room: Room): RoomShape {
+  return roomShapes(level).get(room.id) ?? { outer: [], holes: [] };
+}
+
+/** Floor area in m², measured to wall centre lines, less any free-standing enclosures. */
+export function roomArea(level: Level, room: Room): number {
+  const s = roomShape(level, room);
+  return (
+    Math.abs(signedArea(s.outer)) - s.holes.reduce((sum, h) => sum + Math.abs(signedArea(h)), 0)
+  );
 }
 
 /** FNV-1a, base 36: a stable id from a room's corners so recipes stay deterministic. */
@@ -111,30 +198,41 @@ function nextRoomName(rooms: Iterable<Room>): string {
  * Call this inside a command's recipe after changing walls, so undo restores both.
  */
 export function syncRooms(lvl: Draft<Level>): void {
-  const faces = detectFaces(lvl);
-  const old = Object.values(lvl.rooms).map((room) => {
-    const poly: Vec2[] = [];
-    for (const id of room.loop) {
-      const v = lvl.vertices[id];
-      if (v) poly.push({ x: v.x, y: v.y });
-    }
+  const traced = traceFaces(lvl);
+  const faces = traced.faces;
+  const pos = (id: string) => lvl.vertices[id] as Vec2;
+  const faceHoles = assignHoles(faces, traced.outers, pos);
+  const oldRooms = Object.values(lvl.rooms).filter((r) => r.loop.every((id) => lvl.vertices[id]));
+  const oldHoles = assignHoles(
+    oldRooms.map((r) => r.loop),
+    traced.outers,
+    pos,
+  );
+  const old = oldRooms.map((room, ri) => {
+    const poly = room.loop.map(pos);
+    const holes = (oldHoles.get(ri) ?? []).map((h) => h.map(pos));
     return {
       room,
       corners: new Set(room.loop),
-      label: poly.length >= 3 ? labelPoint(poly) : null,
-      area: poly.length >= 3 ? Math.abs(signedArea(poly)) : 0,
+      // A point inside the room's floor, never inside an enclosure standing in it.
+      label: placeLabel(poly, { x: 0, y: 0 }, [], holes),
+      area: Math.abs(signedArea(poly)) - holes.reduce((s, h) => s + Math.abs(signedArea(h)), 0),
     };
   });
 
   type Match = { face: number; room: number; score: number };
   const candidates: Match[] = [];
   faces.forEach((loop, fi) => {
-    const poly = loop.map((id) => lvl.vertices[id] as Vec2);
-    const faceArea = Math.abs(signedArea(poly));
+    const poly = loop.map(pos);
+    const holes = (faceHoles.get(fi) ?? []).map((h) => h.map(pos));
+    const faceArea =
+      Math.abs(signedArea(poly)) - holes.reduce((s, h) => s + Math.abs(signedArea(h)), 0);
+    const contains = (p: Vec2) =>
+      pointInPolygon(p, poly) && !holes.some((h) => pointInPolygon(p, h));
     old.forEach((o, ri) => {
       const shared = loop.filter((id) => o.corners.has(id)).length;
       const jaccard = shared / (loop.length + o.corners.size - shared);
-      const inside = !!o.label && pointInPolygon(o.label, poly);
+      const inside = contains(o.label);
       if (!inside && jaccard < 0.6) return;
       const coverage = Math.min(o.area, faceArea) / Math.max(o.area, faceArea, 1e-9);
       candidates.push({
