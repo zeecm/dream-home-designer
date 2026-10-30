@@ -44,3 +44,23 @@ test('furnish: place a bed against a wall, turn it, resize it, delete and undo',
   await expect(page.getByRole('button', { name: 'Walk through' })).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test('paint each side of a wall, and pick a floor finish', async ({ page }) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await page.locator('[data-hit="wall:w_bedroom_main-bedroom"]').first().click({ force: true });
+  const sage = page.getByRole('button', { name: 'Paint, Main bedroom side: Sage' });
+  await sage.click();
+  await expect(sage).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Paint, Bedroom side: White' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await page.keyboard.press('Escape');
+  await page.locator('[data-hit="room:rm_main-bedroom"]').click({ force: true });
+  await page.getByLabel('Floor', { exact: true }).selectOption('marble');
+  await expect(page.getByLabel('Floor', { exact: true })).toHaveValue('marble');
+  await page.keyboard.press('Control+z');
+  await expect(page.getByLabel('Floor', { exact: true })).toHaveValue('wood-walnut');
+});

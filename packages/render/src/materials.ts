@@ -1,3 +1,4 @@
+import { FLOOR_FINISHES, PAINTS } from '@dhd/core';
 import * as THREE from 'three';
 
 /**
@@ -5,10 +6,9 @@ import * as THREE from 'three';
  * textures from the catalogue manifest without changing any ids in saved projects.
  */
 const palette: Record<string, { color: string; roughness: number }> = {
-  'paint-white': { color: '#f2efe9', roughness: 0.9 },
-  'wood-oak': { color: '#c49a6c', roughness: 0.7 },
-  'wood-walnut': { color: '#7a5233', roughness: 0.65 },
-  'tile-grey': { color: '#b8b8b4', roughness: 0.4 },
+  ...Object.fromEntries(
+    [...FLOOR_FINISHES, ...PAINTS].map((f) => [f.id, { color: f.color, roughness: f.roughness }]),
+  ),
   door: { color: '#c9b08a', roughness: 0.6 },
   'furniture-wood': { color: '#b98c5f', roughness: 0.6 },
   'furniture-wood-dark': { color: '#5b4030', roughness: 0.6 },

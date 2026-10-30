@@ -15,3 +15,4 @@ export { hdb4RoomLevel, hdb4RoomProject } from './fixtures/hdb4room';
 export { SAMPLE_PLAN_KEY, sampleFlatProject } from './fixtures/sampleFlat';
 export * from './walk';
 export * from './furniture';
+export * from './finishes';

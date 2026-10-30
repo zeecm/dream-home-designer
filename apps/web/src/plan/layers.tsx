@@ -4,6 +4,7 @@ import {
   type RoomShape,
   type Vec2,
   doorSwing,
+  finish,
   framePoint,
   furnitureKind,
   itemFootprint,
@@ -54,6 +55,10 @@ export const PlanShapes = memo(function PlanShapes({
           <path
             key={r.id}
             className={`room floor-${r.floorMaterial}`}
+            // A light tint of the floor's own colour, over the plan's paper.
+            style={{
+              fill: `color-mix(in srgb, ${finish(r.floorMaterial)?.color ?? '#ffffff'} 22%, var(--surface))`,
+            }}
             d={shapePath(roomShape(level, r))}
             fillRule="evenodd"
             data-hit={hit({ kind: 'room', id: r.id })}

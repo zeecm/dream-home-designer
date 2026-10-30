@@ -440,6 +440,12 @@ the walk collides with items standing on the floor (not rugs or wall cabinets). 
 Furniture tool (I) with a catalogue and filter in the tool options, a preview that follows
 the pointer, R to turn; in Select, drag (with the wall snap), R / Shift+R, arrows, Delete;
 the details panel sets width, depth, height, height above the floor, and turns.
+**Finishes:** `core/finishes.ts` lists floor finishes (oak, walnut, ash vinyl, grey and white
+tile, marble, polished concrete, grey carpet, plain) and eight wall paints, with colours the
+plan (a light tint) and the 3D view share. Each side of a wall takes its own paint: the
+render regroups a wall's triangles by facing (`bySide`), ends and tops stay white. The wall
+details name each side by the room it faces.
+
 Poly Haven (CC0, reachable from here) has about 136 indoor models for later; Kenney is
 blocked by the network proxy and Sketchfab needs an API key.
 

@@ -1,7 +1,9 @@
 import {
+  FLOOR_FINISHES,
   type ItemPatch,
   type Level,
   type Opening,
+  PAINTS,
   cornerSpot,
   deleteItem,
   deleteOpening,
@@ -24,6 +26,7 @@ import {
 } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../editor';
+import { roomsBeside } from '../plan/keyboard';
 import { OPENING_PRESETS, ROOM_NAMES } from '../presets';
 import { useProject, useStore } from '../store';
 import { formatArea, formatLength } from '../units';
@@ -31,12 +34,38 @@ import { ToolPanel } from './Palette';
 import { LengthField, Segmented, SelectField, TextField } from './fields';
 import { icons } from './icons';
 
-const FLOORS = [
-  { value: 'wood-oak', label: 'Oak' },
-  { value: 'wood-walnut', label: 'Walnut' },
-  { value: 'tile-grey', label: 'Grey tile' },
-  { value: 'paint-white', label: 'Plain' },
-];
+const FLOORS = FLOOR_FINISHES.map((f) => ({ value: f.id, label: f.name }));
+
+/** A row of paint swatches for one side of a wall. */
+function PaintField({
+  label,
+  value,
+  onPick,
+}: {
+  label: string;
+  value: string;
+  onPick: (id: string) => void;
+}) {
+  return (
+    <div className="field">
+      <span className="field-label">{label}</span>
+      <span className="swatches">
+        {PAINTS.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            className="swatch"
+            style={{ background: p.color }}
+            aria-label={`${label}: ${p.name}`}
+            title={p.name}
+            aria-pressed={value === p.id}
+            onClick={() => onPick(p.id)}
+          />
+        ))}
+      </span>
+    </div>
+  );
+}
 
 const THICKNESS_HINT = 'HDB walls are usually 0.10 m inside and 0.20 m on the outside.';
 
@@ -236,6 +265,7 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
       {!boundary && (
         <>
           <Segmented
+            fill
             label="On its line"
             value={wall.side ?? 'centre'}
             options={[
@@ -247,6 +277,7 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
               dispatch(updateWall(level.id, id, { side: v === 'centre' ? undefined : v }))
             }
           />
+          <WallPaint level={level} id={id} />
           <LengthField
             label="Thickness"
             value={wall.thickness}
@@ -299,6 +330,34 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
           dispatch(deleteWall(level.id, id, level));
           clear();
         }}
+      />
+    </>
+  );
+}
+
+/** Paint for each side of a wall, each named by the room it faces. */
+function WallPaint({ level, id }: { level: Level; id: string }) {
+  const dispatch = useStore((s) => s.dispatch);
+  const wall = level.walls[id];
+  if (!wall) return null;
+  const [left, right] = roomsBeside(level, id);
+  const label = (room: string | null | undefined, other: string | null | undefined) =>
+    room ? `Paint, ${room} side` : other ? 'Paint, outside' : 'Paint';
+  return (
+    <>
+      <PaintField
+        label={label(left, right)}
+        value={wall.materialLeft}
+        onPick={(m) => dispatch(updateWall(level.id, id, { materialLeft: m }))}
+      />
+      <PaintField
+        label={
+          label(right, left) === label(left, right)
+            ? `${label(right, left)} (other side)`
+            : label(right, left)
+        }
+        value={wall.materialRight}
+        onPick={(m) => dispatch(updateWall(level.id, id, { materialRight: m }))}
       />
     </>
   );

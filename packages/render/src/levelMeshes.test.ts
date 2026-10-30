@@ -240,3 +240,25 @@ describe('furniture', () => {
     expect(box.max.x - box.min.x).toBeCloseTo(0.9, 1);
   });
 });
+
+describe('wall paint', () => {
+  it('paints each side of a wall on its own, with white ends and top', () => {
+    const l = hdb4RoomLevel();
+    const [id, w] = Object.entries(l.walls)[0]!;
+    const m = new LevelMeshes(new MaterialCache());
+    m.update({
+      ...l,
+      walls: { ...l.walls, [id]: { ...w, materialLeft: 'paint-sage', materialRight: 'paint-sky' } },
+    });
+    const mesh = m.group.getObjectByName(`wall:${id}`) as THREE.Mesh;
+    const mats = mesh.material as THREE.MeshStandardMaterial[];
+    expect(mats.map((x) => `#${x.color.getHexString()}`)).toEqual([
+      '#bccab3',
+      '#c6d7e4',
+      '#f2efe9',
+    ]);
+    const groups = mesh.geometry.groups;
+    expect(groups.map((g) => g.materialIndex)).toEqual([0, 1, 2]);
+    for (const g of groups) expect(g.count).toBeGreaterThan(0);
+  });
+});

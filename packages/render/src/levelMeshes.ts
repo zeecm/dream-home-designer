@@ -39,6 +39,50 @@ export interface UpdateStats {
 }
 
 const r = (n: number) => Math.round(n * 1e6) / 1e6;
+
+/**
+ * Regroups a wall's triangles by which way they face: group 0 its left side (along `left`),
+ * group 1 its right side, group 2 everything else.
+ */
+function bySide(g: THREE.BufferGeometry, left: THREE.Vector3): THREE.BufferGeometry {
+  const src = g.index ? g.toNonIndexed() : g;
+  const pos = src.getAttribute('position');
+  const names = Object.keys(src.attributes);
+  const tris: number[][] = [[], [], []];
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  for (let t = 0; t < pos.count / 3; t++) {
+    a.fromBufferAttribute(pos, t * 3);
+    b.fromBufferAttribute(pos, t * 3 + 1);
+    c.fromBufferAttribute(pos, t * 3 + 2);
+    const n = b.sub(a).cross(c.sub(a)).normalize();
+    const k = n.dot(left);
+    (tris[k > 0.9 ? 0 : k < -0.9 ? 1 : 2] as number[]).push(t);
+  }
+  const out = new THREE.BufferGeometry();
+  const order = tris.flat();
+  for (const name of names) {
+    const attr = src.getAttribute(name);
+    const size = attr.itemSize;
+    const data = new Float32Array(order.length * 3 * size);
+    order.forEach((t, i) => {
+      for (let v = 0; v < 3; v++) {
+        for (let e = 0; e < size; e++) {
+          data[(i * 3 + v) * size + e] = attr.getComponent(t * 3 + v, e);
+        }
+      }
+    });
+    out.setAttribute(name, new THREE.BufferAttribute(data, size));
+  }
+  let start = 0;
+  tris.forEach((list, i) => {
+    out.addGroup(start * 3, list.length * 3, i);
+    start += list.length;
+  });
+  if (src !== g) src.dispose();
+  return out;
+}
 const pointsKey = (pts: readonly Vec2[]) => pts.map((p) => `${r(p.x)},${r(p.y)}`).join(';');
 
 /**
@@ -98,6 +142,7 @@ export class LevelMeshes {
         r(height),
         r(level.elevation),
         wall.materialLeft,
+        wall.materialRight,
         openings.map((o) => [o.kind, r(o.t), r(o.width), r(o.height), r(o.sill)].join()).join('|'),
       ].join('/');
       put(`wall:${wall.id}`, key, () => this.buildWall(f, height, level.elevation, openings));
@@ -218,7 +263,14 @@ export class LevelMeshes {
     const merged = pieces.length ? mergeGeometries(pieces) : null;
     for (const g of pieces) g.dispose();
     if (merged) {
-      const mesh = new THREE.Mesh(merged, this.materials.get(f.wall.materialLeft));
+      // Each side takes its own paint; ends, tops and reveals stay white.
+      const sided = bySide(merged, new THREE.Vector3(f.n.x, 0, f.n.y));
+      merged.dispose();
+      const mesh = new THREE.Mesh(sided, [
+        this.materials.get(f.wall.materialLeft),
+        this.materials.get(f.wall.materialRight),
+        this.materials.get('paint-white'),
+      ]);
       mesh.name = `wall:${f.wall.id}`;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
