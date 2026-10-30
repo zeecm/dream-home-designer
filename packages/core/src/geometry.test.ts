@@ -27,7 +27,8 @@ describe('fixture', () => {
       expect(l.vertices[w.b], w.id).toBeDefined();
     }
     for (const o of Object.values(l.openings)) expect(l.walls[o.wallId], o.id).toBeDefined();
-    for (const r of Object.values(l.rooms)) for (const v of r.loop) expect(l.vertices[v]).toBeDefined();
+    for (const r of Object.values(l.rooms))
+      for (const v of r.loop) expect(l.vertices[v]).toBeDefined();
   });
 
   it('room areas add up to the flat', () => {

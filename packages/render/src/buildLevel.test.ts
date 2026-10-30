@@ -11,11 +11,7 @@ describe('buildLevel', () => {
   it('merges walls into one mesh per material, plus glass and one floor per room', () => {
     const names = group.children.map((c) => c.name).sort();
     expect(names).toEqual(
-      [
-        'walls:paint-white',
-        'glass',
-        ...Object.keys(level.rooms).map((id) => `floor:${id}`),
-      ].sort(),
+      ['walls:paint-white', 'glass', ...Object.keys(level.rooms).map((id) => `floor:${id}`)].sort(),
     );
   });
 

@@ -140,7 +140,11 @@ export function App() {
           <button type="button" onClick={() => void save()} disabled={sync.kind === 'offline'}>
             Save
           </button>
-          <button type="button" onClick={() => void load(PROJECT_ID)} title="Discard local state and reload from the server">
+          <button
+            type="button"
+            onClick={() => void load(PROJECT_ID)}
+            title="Discard local state and reload from the server"
+          >
             Reload
           </button>
           <span className={`sync sync-${sync.kind}`} data-testid="sync">

@@ -65,7 +65,11 @@ export interface WallPiece {
  * between openings, plus a lintel above and (for windows) a sill wall below each one.
  * This avoids CSG entirely for v1, where every opening is rectangular.
  */
-export function wallPieces(wallLength: number, height: number, openings: readonly Opening[]): WallPiece[] {
+export function wallPieces(
+  wallLength: number,
+  height: number,
+  openings: readonly Opening[],
+): WallPiece[] {
   const holes = openings
     .map((o) => {
       const c = o.t * wallLength;

@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { addWall, deleteWall, moveVertex, renameProject, setWallThickness } from './commands';
 import { hdb4RoomProject } from './fixtures/hdb4room';
-import { type EditorDoc, HISTORY_LIMIT, canRedo, canUndo, dispatch, emptyHistory, redo, undo } from './history';
+import {
+  type EditorDoc,
+  HISTORY_LIMIT,
+  canRedo,
+  canUndo,
+  dispatch,
+  emptyHistory,
+  redo,
+  undo,
+} from './history';
 import { Project } from './schema';
 
 const L = 'lvl_ground';
