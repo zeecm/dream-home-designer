@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { forgetRecent, isSample, recentProjects, rememberRecent } from './recent';
+import { adoptKept, forgetRecent, isSample, recentProjects, rememberRecent } from './recent';
 
 class MemoryStorage implements Storage {
   private m = new Map<string, string>();
@@ -44,5 +44,16 @@ describe('recent plans', () => {
     expect(isSample({ id: 'y', name: '3-room HDB (copy)', openedAt: '' })).toBe(false);
     // A newer entry says, whatever its name.
     expect(isSample({ id: 'z', name: 'Mine (sample)', openedAt: '', sample: false })).toBe(false);
+  });
+
+  it('adds the plans kept with an account, by when they were kept, once', () => {
+    const st = new MemoryStorage();
+    rememberRecent({ id: 'here', name: 'Here' }, st);
+    const kept = [
+      { id: 'here', name: 'Here', sample: false, updatedAt: 0 },
+      { id: 'old', name: 'Old', sample: false, updatedAt: Date.UTC(2020, 0, 1) },
+    ];
+    expect(adoptKept(kept, st).map((r) => r.id)).toEqual(['here', 'old']);
+    expect(adoptKept(kept, st)).toHaveLength(2);
   });
 });

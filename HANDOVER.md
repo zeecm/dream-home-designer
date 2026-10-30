@@ -428,7 +428,14 @@ browser that has them.
 
    Until it's connected, deploy the API by hand (§8). The web app already deploys through Pages'
    Git integration.
-2. **Domain:** point it at the Pages project. The `/api` routing comes with it.
+2. **Domain:** point it at the Pages project. The `/api` routing comes with it. (Also what
+   email sign-in links would need, later.)
+2b. **Google sign-in:** create the OAuth client (Web application; origins
+   `https://dream-home-designer.pages.dev`, the branch preview and `http://localhost:5173`;
+   redirect URIs the same origins plus `/api/auth/google/callback`), send the client id, and
+   add the secrets `GOOGLE_CLIENT_SECRET` and `KEYS_SECRET` (a long random string, e.g.
+   `openssl rand -base64 32`) to dhd-api and dhd-api-preview (Workers & Pages → Settings →
+   Variables and Secrets). This session isn't allowed to write secrets.
 3. **Merge** the open PR when happy.
 
 **Furniture (Phase 3, first cut):** `core/furniture.ts` holds a catalogue of 27 pieces built
@@ -543,6 +550,21 @@ models at 12k triangles; `ModelLibrary` draws opaque materials front-side only a
 pieces over 0.5 m radius cast shadows. Lamp models' shades glow (`glow` in the catalogue);
 a model that fails to load is retried after 5 and 30 seconds.
 **Next:** more models (Sketchfab CC0 needs an API key).
+
+**Accounts (Phase 4, Google sign-in on D1; built, off until the owner's Google client is
+set):** the edge Worker answers `/api/auth/*` and `/api/me/*` (`apps/edge/src/auth.ts`):
+Google's OAuth code flow with PKCE and a signed, short-lived state cookie; a 30-day
+`dhd_session` cookie (HttpOnly, Secure, SameSite=Lax; only its SHA-256 stored); and the plans
+a person keeps (`user_projects`), with their owner and edit keys sealed by AES-GCM under
+`KEYS_SECRET`. D1: `dhd-auth` and `dhd-auth-preview` (`apps/edge/migrations`, applied with
+`wrangler d1 migrations apply <db> --remote [--env preview]`). Sign-in starts only from an
+origin matching `AUTH_ORIGINS`. In the app (`account.ts`): a Sign in button when the server
+says sign-in is on; once signed in, every plan opened (not view-only) is kept with the
+account and the account's plans (and keys) join this browser's list, so another device opens
+them as owner; deleting a plan forgets it there too. **To switch it on:** set
+`GOOGLE_CLIENT_ID` in `apps/edge/wrangler.jsonc` (both environments) and redeploy, and the
+secrets `GOOGLE_CLIENT_SECRET` and `KEYS_SECRET` (any long random string) on dhd-api and
+dhd-api-preview (see §5).
 
 **Getting started (Phase 5):** a new blank plan gets a guide bar over the stage (`ui/Guide.tsx`,
 `guide.ts`): add a floor plan, set its scale, draw walls round a room, walk through. Each step

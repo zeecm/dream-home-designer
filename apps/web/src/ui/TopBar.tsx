@@ -1,5 +1,6 @@
 import { renameProject } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
+import { signInUrl, useAccount } from '../account';
 import { type ViewMode, useEditor } from '../editor';
 import {
   download3dImage,
@@ -185,6 +186,74 @@ function ProjectMenu() {
   );
 }
 
+/**
+ * Sign in with Google, or who is signed in with a way out. Shown only once the server says
+ * sign-in is set up.
+ */
+function AccountButton() {
+  const enabled = useAccount((s) => s.enabled);
+  const user = useAccount((s) => s.user);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (
+        e instanceof KeyboardEvent ? e.key === 'Escape' : !ref.current?.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('keydown', close);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      window.removeEventListener('keydown', close);
+    };
+  }, [open]);
+  if (!enabled) return null;
+  if (!user) {
+    return (
+      <a className="btn btn-small account-btn" href={signInUrl()} title="Sign in with Google">
+        <span className="account-btn-icon">{icons.user}</span>
+        <span className="account-btn-text">Sign in</span>
+      </a>
+    );
+  }
+  return (
+    <div className="menu-anchor" ref={ref}>
+      <button
+        type="button"
+        className="icon-btn account-avatar"
+        aria-label={`Signed in as ${user.email}`}
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {(user.name || user.email).slice(0, 1).toUpperCase()}
+      </button>
+      {open && (
+        <div className="menu menu-right">
+          <p className="menu-label">
+            Signed in as
+            <br />
+            <strong>{user.email}</strong>
+          </p>
+          <p className="menu-note">Your plans are kept with your account, on any device.</p>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              void useAccount.getState().signOut();
+            }}
+          >
+            Sign out
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TopBar() {
   const sync = useStore((s) => s.sync);
   const local = useStore((s) => s.backend?.kind === 'local');
@@ -217,6 +286,7 @@ export function TopBar() {
         </span>
       </div>
       <div className="topbar-right">
+        <AccountButton />
         <ShareMenu />
         <button
           type="button"

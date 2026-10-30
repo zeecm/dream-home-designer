@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Viewport } from './Viewport';
+import { keepWithAccount, pullFromAccount, useAccount } from './account';
 import { type Tool, type ViewMode, useEditor } from './editor';
 import { absorbLinkKey } from './keys';
 import { PlanCanvas } from './plan/PlanCanvas';
@@ -70,6 +71,13 @@ function useShortcuts() {
 }
 
 let started = false;
+
+const SIGN_IN_PROBLEMS: Record<string, string> = {
+  cancelled: 'Sign-in was cancelled.',
+  expired: 'That sign-in took too long or was opened twice. Please try again.',
+  unverified: 'Google hasn’t verified that email address yet.',
+  failed: 'Signing in with Google didn’t work. Please try again.',
+};
 
 function Notice() {
   const notice = useStore((s) => s.notice);
@@ -214,6 +222,26 @@ export function App() {
     if (started) return;
     started = true;
     absorbLinkKey(); // an edit link's key, kept for its plan and taken out of the address
+    // Back from signing in: say if it didn't work, and tidy the address.
+    const url = new URL(window.location.href);
+    const signin = url.searchParams.get('signin');
+    if (signin) {
+      url.searchParams.delete('signin');
+      window.history.replaceState(null, '', url);
+      useStore.setState({ notice: SIGN_IN_PROBLEMS[signin] ?? SIGN_IN_PROBLEMS.failed ?? null });
+    }
+    // Signed in, the plans kept with the account join this browser's list (keys too).
+    void useAccount
+      .getState()
+      .load()
+      .then(pullFromAccount)
+      .then((list) => {
+        if (!list) return;
+        useStore.setState({ recent: list });
+        // The plan open now, if it opened before the account answered.
+        const s = useStore.getState();
+        if (s.sync.kind === 'saved' && s.role !== 'viewer') keepWithAccount(s.editor.doc);
+      });
     const id = initialProjectId();
     const { load, openSample } = useStore.getState();
     void (id ? load(id) : openSample());

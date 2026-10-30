@@ -19,6 +19,7 @@ import {
 } from '@dhd/core';
 import type { Patch } from 'immer';
 import { create } from 'zustand';
+import { forgetWithAccount, keepWithAccount } from './account';
 import {
   type Backend,
   ConflictError,
@@ -226,6 +227,8 @@ export const useStore = create<State>((set, get) => {
       recent: role === 'viewer' ? get().recent : rememberRecent(doc, undefined, sample),
     });
     rememberProject(doc.id);
+    // Signed in, the plan is kept with the account, keys and all, for the person's other devices.
+    if (role !== 'viewer') keepWithAccount({ id: doc.id, name: doc.name, sample });
     // A plan with a renovation opens on it: that is the version being worked on.
     useEditor.getState().setVariant(doc.renovation ? 'after' : 'before');
   };
@@ -405,6 +408,7 @@ export const useStore = create<State>((set, get) => {
           }
         }
         set({ recent: forgetRecent(r.id) });
+        forgetWithAccount(r.id);
       }
       return failed;
     },
@@ -465,6 +469,7 @@ export const useStore = create<State>((set, get) => {
           if (changedSince) saveAgain = true;
           if (sent.name !== get().recent.find((r) => r.id === sent.id)?.name) {
             set({ recent: rememberRecent(sent) });
+            keepWithAccount({ id: sent.id, name: sent.name });
           }
         } catch (e) {
           if (get().editor.doc.id !== sent.id) return;

@@ -417,6 +417,40 @@ select {
 .menu button:hover {
   background: var(--active);
 }
+.menu-right {
+  left: auto;
+  right: 0;
+}
+.menu-note {
+  margin: 0 10px 6px;
+  font-size: var(--fs-small);
+  color: var(--muted);
+  max-width: 220px;
+}
+.account-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  color: inherit;
+}
+.account-btn-icon {
+  display: none;
+}
+.account-avatar {
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+@media (max-width: 720px) {
+  .account-btn-text {
+    display: none;
+  }
+  .account-btn-icon {
+    display: inline-flex;
+  }
+}
 .menu-rule {
   margin: 6px 4px;
   border: 0;
