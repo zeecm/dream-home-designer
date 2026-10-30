@@ -19,6 +19,8 @@ const MIGRATIONS: Record<number, (doc: Record<string, unknown>) => Record<string
   1: (doc) => doc,
   // 3 adds the optional Wall.side; every version-2 wall stays centred on its line.
   2: (doc) => doc,
+  // 4 adds the optional Project.site; without one, north is up and the sun is Singapore's.
+  3: (doc) => doc,
 };
 
 export function migrate(input: unknown): unknown {

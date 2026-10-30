@@ -1,7 +1,7 @@
 import type { Draft } from 'immer';
 import type { Command } from './history';
 import type { PlanGeometry } from './plan';
-import type { Item, Level, Project, Vec2 } from './schema';
+import type { Item, Level, Project, Vec2, Vec3 } from './schema';
 
 /**
  * The furniture catalogue: pieces built from boxes, sized as they commonly come in a
@@ -23,7 +23,9 @@ export type FurnitureMaterial =
   | 'metal'
   | 'glass'
   | 'ceramic'
-  | 'leaf';
+  | 'leaf'
+  /** A lit shade or diffuser: it glows. */
+  | 'lamp';
 
 export interface FurniturePart {
   min: [number, number, number];
@@ -38,6 +40,7 @@ export type FurnitureCategory =
   | 'Kitchen'
   | 'Bathroom'
   | 'Storage'
+  | 'Lighting'
   | 'Decor';
 
 export interface FurnitureKind {
@@ -52,6 +55,10 @@ export interface FurnitureKind {
   walkThrough?: boolean;
   /** Placed back to a wall when dropped near one. */
   againstWall?: boolean;
+  /** Hangs from the ceiling: placed with its top at the ceiling, not on the floor. */
+  ceiling?: boolean;
+  /** A lamp: where its bulb is (item axes, at scale 1), its colour and brightness. */
+  light?: { at: [number, number, number]; color: string; candela: number };
   parts: FurniturePart[];
 }
 
@@ -208,17 +215,6 @@ export const FURNITURE: FurnitureKind[] = [
     walkThrough: true,
     parts: [box(-1, 1, -0.7, 0.7, 0, 0.01, 'fabric-light')],
   },
-  {
-    id: 'floor-lamp',
-    name: 'Floor lamp',
-    category: 'Living',
-    size: { w: 0.4, d: 0.4, h: 1.6 },
-    parts: [
-      box(-0.15, 0.15, -0.15, 0.15, 0, 0.03, 'metal'),
-      box(-0.015, 0.015, -0.015, 0.015, 0.03, 1.35, 'metal'),
-      box(-0.2, 0.2, -0.2, 0.2, 1.35, 1.6, 'fabric-light'),
-    ],
-  },
   // Dining
   table('dining-4', 'Dining table, 4 seats', 1.4, 0.8, 0.75),
   table('dining-6', 'Dining table, 6 seats', 1.8, 0.9, 0.75),
@@ -301,6 +297,57 @@ export const FURNITURE: FurnitureKind[] = [
       ...[0, 0.45, 0.9, 1.35, 1.78].map((z) => box(-0.38, 0.38, -0.13, 0.15, z, z + 0.02, 'wood')),
     ],
   },
+  // Lighting
+  {
+    id: 'floor-lamp',
+    name: 'Floor lamp',
+    category: 'Lighting',
+    size: { w: 0.4, d: 0.4, h: 1.6 },
+    light: { at: [0, 0, 1.45], color: '#ffd9a8', candela: 40 },
+    parts: [
+      box(-0.15, 0.15, -0.15, 0.15, 0, 0.03, 'metal'),
+      box(-0.015, 0.015, -0.015, 0.015, 0.03, 1.35, 'metal'),
+      box(-0.2, 0.2, -0.2, 0.2, 1.35, 1.6, 'lamp'),
+    ],
+  },
+  {
+    id: 'table-lamp',
+    name: 'Table lamp',
+    category: 'Lighting',
+    size: { w: 0.3, d: 0.3, h: 0.45 },
+    // On a bedside table or desk: lift it in its details for a taller one.
+    elevation: 0.5,
+    walkThrough: true,
+    light: { at: [0, 0, 0.32], color: '#ffd9a8', candela: 25 },
+    parts: [
+      box(-0.08, 0.08, -0.08, 0.08, 0, 0.02, 'ceramic'),
+      box(-0.03, 0.03, -0.03, 0.03, 0.02, 0.22, 'ceramic'),
+      box(-0.15, 0.15, -0.15, 0.15, 0.22, 0.45, 'lamp'),
+    ],
+  },
+  {
+    id: 'ceiling-light',
+    name: 'Ceiling light',
+    category: 'Lighting',
+    size: { w: 0.45, d: 0.45, h: 0.08 },
+    ceiling: true,
+    walkThrough: true,
+    light: { at: [0, 0, -0.1], color: '#fff1dc', candela: 120 },
+    parts: [box(-0.225, 0.225, -0.225, 0.225, 0, 0.08, 'lamp')],
+  },
+  {
+    id: 'pendant',
+    name: 'Pendant light',
+    category: 'Lighting',
+    size: { w: 0.35, d: 0.35, h: 0.9 },
+    ceiling: true,
+    walkThrough: true,
+    light: { at: [0, 0, 0.05], color: '#ffd9a8', candela: 60 },
+    parts: [
+      box(-0.005, 0.005, -0.005, 0.005, 0.2, 0.9, 'charcoal'),
+      box(-0.175, 0.175, -0.175, 0.175, 0, 0.2, 'lamp'),
+    ],
+  },
   // Decor
   {
     id: 'plant',
@@ -342,12 +389,22 @@ export function itemFootprint(item: Item, kind = furnitureKind(item.assetId)): V
   }));
 }
 
-/** A new item of `kind` at plan point `at`, turned by `rotation`. */
-export function newItem(id: string, kind: FurnitureKind, at: Vec2, rotation = 0): Item {
+/**
+ * A new item of `kind` at plan point `at`, turned by `rotation`. A ceiling light hangs
+ * from `ceilingHeight`.
+ */
+export function newItem(
+  id: string,
+  kind: FurnitureKind,
+  at: Vec2,
+  rotation = 0,
+  ceilingHeight = 2.7,
+): Item {
+  const y = kind.ceiling ? Math.max(0, ceilingHeight - kind.size.h) : (kind.elevation ?? 0);
   return {
     id,
     assetId: kind.id,
-    position: { x: at.x, y: kind.elevation ?? 0, z: at.y },
+    position: { x: at.x, y, z: at.y },
     rotationY: rotation,
     scale: { x: 1, y: 1, z: 1 },
     flags: { snapWall: !!kind.againstWall, collidable: !kind.walkThrough },
@@ -517,4 +574,37 @@ export function deleteItem(levelId: string, itemId: string, name = 'furniture'):
       delete lvl(d, levelId).items[itemId];
     },
   };
+}
+
+/** A lamp's light in world space (y up, z = plan y), with the item it belongs to. */
+export interface ItemLight {
+  itemId: string;
+  position: Vec3;
+  color: string;
+  candela: number;
+}
+
+/** Every lamp on the level, with its bulb where the item puts it (moved, turned, scaled). */
+export function itemLights(level: Level, elevation = level.elevation): ItemLight[] {
+  const out: ItemLight[] = [];
+  for (const item of Object.values(level.items)) {
+    const light = furnitureKind(item.assetId)?.light;
+    if (!light) continue;
+    const [lx, ly, lz] = light.at;
+    const x = lx * item.scale.x;
+    const y = ly * item.scale.z;
+    const c = Math.cos(item.rotationY);
+    const s = Math.sin(item.rotationY);
+    out.push({
+      itemId: item.id,
+      position: {
+        x: item.position.x + x * c - y * s,
+        y: elevation + item.position.y + lz * item.scale.y,
+        z: item.position.z + x * s + y * c,
+      },
+      color: light.color,
+      candela: light.candela,
+    });
+  }
+  return out;
 }

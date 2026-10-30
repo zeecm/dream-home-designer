@@ -1,8 +1,19 @@
-import { type Level, type Vec2, levelBounds } from '@dhd/core';
+import {
+  type Level,
+  type Vec2,
+  dayOfYear,
+  daylight,
+  itemLights,
+  levelBounds,
+  siteOf,
+  sunDirection,
+  sunPosition,
+} from '@dhd/core';
 import { LevelMeshes, MaterialCache } from '@dhd/render';
 import { OrbitControls } from '@react-three/drei';
-import { Canvas, useThree } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import * as THREE from 'three';
 import { useEditor } from './editor';
 import { useProject } from './store';
 import { Joystick } from './walk/Joystick';
@@ -76,17 +87,115 @@ function usePrefersDark() {
   return dark;
 }
 
+/** Lit lamps at once: each one costs every material a light in its shader. */
+const MAX_LAMPS = 8;
+/** Catalogue candela to this scene's light units (daylight here is about 2, not 10,000 lux). */
+const LAMP_SCALE = 0.05;
+
+/**
+ * The lamps nearest the camera, up to MAX_LAMPS, re-chosen twice a second as it moves.
+ * The number of lights changes only when lamps are added or removed, so shaders aren't
+ * rebuilt as you walk.
+ */
+function Lamps({ level }: { level: Level }) {
+  const lamps = useMemo(() => itemLights(level), [level]);
+  const count = Math.min(MAX_LAMPS, lamps.length);
+  const refs = useRef<(THREE.PointLight | null)[]>([]);
+  const last = useRef(-1);
+  const place = (camera: THREE.Camera) => {
+    const nearest = [...lamps]
+      .map((l) => ({
+        l,
+        d: camera.position.distanceToSquared(
+          new THREE.Vector3(l.position.x, l.position.y, l.position.z),
+        ),
+      }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, MAX_LAMPS);
+    nearest.forEach(({ l }, i) => {
+      const light = refs.current[i];
+      if (!light) return;
+      light.position.set(l.position.x, l.position.y, l.position.z);
+      light.color.set(l.color);
+      light.intensity = l.candela * LAMP_SCALE;
+    });
+  };
+  useFrame(({ camera, clock }) => {
+    const t = clock.elapsedTime;
+    if (t - last.current < 0.5) return;
+    last.current = t;
+    place(camera);
+  });
+  // A lamp just added or moved shows at once, not on the next half-second.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on new lamps
+  useEffect(() => {
+    last.current = -1;
+  }, [lamps]);
+  return (
+    <>
+      {Array.from({ length: count }, (_, i) => (
+        <pointLight
+          // biome-ignore lint/suspicious/noArrayIndexKey: a fixed pool of lights
+          key={i}
+          ref={(l) => {
+            refs.current[i] = l;
+          }}
+          decay={2}
+          // Fades out by here, so a lamp doesn't light the whole block through walls.
+          distance={7}
+          intensity={0}
+        />
+      ))}
+    </>
+  );
+}
+
+const lerpColor = (a: string, b: string, t: number) =>
+  `#${new THREE.Color(a).lerp(new THREE.Color(b), t).getHexString()}`;
+
+/** 7.5 → "7:30 am". */
+export function clockTime(h: number): string {
+  const mins = Math.round(h * 60) % (24 * 60);
+  const hh = Math.floor(mins / 60);
+  const mm = mins % 60;
+  const h12 = hh % 12 === 0 ? 12 : hh % 12;
+  return `${h12}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'am' : 'pm'}`;
+}
+
+/** The time of day the 3D view is lit for. */
+function SunControl() {
+  const hour = useEditor((s) => s.sunHour);
+  const setHour = useEditor((s) => s.setSunHour);
+  return (
+    <label className="sun-control">
+      <span className="sun-control-label">
+        Time <span className="num">{clockTime(hour)}</span>
+      </span>
+      <input
+        type="range"
+        min={6}
+        max={22}
+        step={0.25}
+        value={hour}
+        aria-valuetext={clockTime(hour)}
+        onChange={(e) => setHour(Number(e.target.value))}
+      />
+    </label>
+  );
+}
+
 const coarsePointer = () => window.matchMedia('(pointer: coarse)').matches;
 
 export function Viewport() {
-  const level = useProject().levels[0];
+  const project = useProject();
+  const level = project.levels[0];
   const hasWalls = !!level && Object.keys(level.walls).length > 0;
   const hasRooms = !!level && Object.keys(level.rooms).length > 0;
   const dark = usePrefersDark();
   const walking = useEditor((s) => !!s.walking);
   const { startWalk, stopWalk } = useEditor.getState();
   const stick = useRef<Vec2>({ x: 0, y: 0 });
-  const projectId = useProject().id;
+  const projectId = project.id;
   const pose = useRef<WalkPose | null>(null);
   // Leaving a walk forgets the pose here (WalkControls hands it to saveWalkPose as it goes).
   useEffect(() => {
@@ -99,6 +208,20 @@ export function Viewport() {
   // parent remounts this component when another project opens.
   // biome-ignore lint/correctness/useExhaustiveDependencies: frame once walls exist, not on every edit
   const frame = useMemo(() => frameOf(level), [hasWalls]);
+  const site = siteOf(project);
+  const hour = useEditor((s) => s.sunHour);
+  const day = useMemo(() => dayOfYear(new Date()), []);
+  const sun = sunPosition(site, day, hour);
+  const dir = sunDirection(site, sun);
+  const light = daylight(sun);
+  const reach = frame.radius * 3;
+  const sunTarget = useMemo(() => new THREE.Object3D(), []);
+  // Low sun is warm; night is a dim blue sky with the lamps doing the work.
+  const sunColor = lerpColor('#ffb066', '#fff6ea', Math.min(1, Math.max(0, sun.altitude / 25)));
+  const sky = lerpColor('#3a4a6b', '#ffffff', light);
+  const background = dark
+    ? lerpColor('#05070b', '#0a0a0a', light)
+    : lerpColor('#1b2230', '#f4f6f8', light);
 
   if (!hasWalls) {
     return (
@@ -111,21 +234,32 @@ export function Viewport() {
   return (
     <div className="viewport" data-testid="viewport-wrap">
       <Canvas shadows camera={{ fov: FOV, near: 0.05, far: 500 }} data-testid="viewport">
-        <color attach="background" args={[dark ? '#0a0a0a' : '#f4f6f8']} />
-        <hemisphereLight args={['#ffffff', dark ? '#3a3d40' : '#dfe3e6', walking ? 2.2 : 1.5]} />
+        <color attach="background" args={[background]} />
+        <hemisphereLight
+          args={[
+            sky,
+            dark ? '#3a3d40' : '#dfe3e6',
+            walking ? 0.3 + 1.9 * light : 0.3 + 1.2 * light,
+          ]}
+        />
         {/* Under the ceilings the sun can't reach; even light keeps rooms readable. */}
-        {walking && <ambientLight intensity={0.35} />}
+        {walking && <ambientLight intensity={0.08 + 0.27 * light} />}
+        <primitive object={sunTarget} position={[frame.x, 0, frame.z]} />
         <directionalLight
-          castShadow={!walking}
-          position={[frame.x + 8, 16, frame.z + 10]}
-          intensity={1.8}
+          castShadow={!walking && sun.altitude > 0}
+          target={sunTarget}
+          position={[frame.x + dir.x * reach, Math.max(0, dir.y) * reach, frame.z + dir.z * reach]}
+          color={sunColor}
+          intensity={sun.altitude > 0 ? 2 * light : 0}
           shadow-mapSize={[2048, 2048]}
           shadow-bias={-0.0005}
           shadow-camera-left={-frame.radius * 1.5}
           shadow-camera-right={frame.radius * 1.5}
           shadow-camera-top={frame.radius * 1.5}
           shadow-camera-bottom={-frame.radius * 1.5}
+          shadow-camera-far={reach * 2.5}
         />
+        {level && <Lamps level={level} />}
         <mesh rotation-x={-Math.PI / 2} position={[frame.x, -0.01, frame.z]} receiveShadow>
           <planeGeometry args={[200, 200]} />
           <meshStandardMaterial color={dark ? '#1a1c1e' : '#eef1f3'} />
@@ -152,6 +286,7 @@ export function Viewport() {
           </>
         )}
       </Canvas>
+      <SunControl />
       {walking ? (
         <>
           <button type="button" className="btn viewport-action" onClick={stopWalk}>

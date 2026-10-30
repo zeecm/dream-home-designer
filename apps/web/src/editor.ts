@@ -49,6 +49,9 @@ export interface EditorState {
   /** Bumped to focus the selected room's name field. */
   renameToken: number;
   requestRename: () => void;
+  /** Bumped to open the plan details at which way the plan faces (the plan's compass). */
+  directionToken: number;
+  revealDirection: () => void;
   setTool: (tool: Tool) => void;
   select: (s: Selection | null) => void;
   setHover: (s: Selection | null) => void;
@@ -63,6 +66,9 @@ export interface EditorState {
   walking: { returnTo: ViewMode } | null;
   startWalk: () => void;
   stopWalk: () => void;
+  /** The 3D view's time of day, in hours on the site's clock (not saved with the plan). */
+  sunHour: number;
+  setSunHour: (h: number) => void;
 }
 
 const VIEW_KEY = 'dhd:view';
@@ -110,6 +116,9 @@ export const useEditor = create<EditorState>((set) => ({
   setFurnitureKind: (furnitureKind) => set({ furnitureKind }),
   renameToken: 0,
   requestRename: () => set((s) => ({ renameToken: s.renameToken + 1 })),
+  directionToken: 0,
+  revealDirection: () =>
+    set((s) => ({ selection: null, tool: 'select', directionToken: s.directionToken + 1 })),
   setTool: (tool) => set({ tool, hover: null }),
   select: (selection) => set({ selection }),
   setHover: (hover) => set({ hover }),
@@ -119,6 +128,8 @@ export const useEditor = create<EditorState>((set) => ({
     set({ viewMode, fitRequested: true, viewAdjusted: false, walking: null });
   },
   walking: null,
+  sunHour: 15,
+  setSunHour: (sunHour) => set({ sunHour }),
   // Walking takes the whole stage (and isn't remembered as the view mode).
   startWalk: () => set((s) => ({ walking: { returnTo: s.viewMode }, viewMode: '3d' })),
   stopWalk: () => set((s) => (s.walking ? { viewMode: s.walking.returnTo, walking: null } : {})),

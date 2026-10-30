@@ -15,8 +15,10 @@ import {
   moveVertex,
   roomArea,
   setCeilingHeight,
+  setSite,
   setWallLength,
   settleVertex,
+  siteOf,
   splitWall,
   updateItem,
   updateOpening,
@@ -30,6 +32,7 @@ import { roomsBeside } from '../plan/keyboard';
 import { OPENING_PRESETS, ROOM_NAMES } from '../presets';
 import { useProject, useStore } from '../store';
 import { formatArea, formatLength } from '../units';
+import { COMPASS_POINTS, Compass, describeFacing, northForFacing, planFacing } from './Compass';
 import { ToolPanel } from './Palette';
 import { LengthField, Segmented, SelectField, TextField } from './fields';
 import { icons } from './icons';
@@ -90,6 +93,17 @@ export function Inspector() {
   useEffect(() => {
     if (panel.current) panel.current.scrollTop = 0;
   }, [key, tool]);
+  // The plan's compass opens the details at which way the plan faces.
+  const directionToken = useEditor((s) => s.directionToken);
+  useEffect(() => {
+    if (!directionToken) return;
+    setUserOpen(true);
+    requestAnimationFrame(() => {
+      const section = document.getElementById('facing-h')?.parentElement;
+      section?.scrollIntoView({ block: 'nearest' });
+      section?.querySelector<HTMLElement>('[aria-pressed="true"], input')?.focus();
+    });
+  }, [directionToken]);
   const open = userOpen ?? (!!selection || tool !== 'select');
   if (!level) return null;
   let body = <PlanSummary level={level} />;
@@ -220,7 +234,56 @@ function PlanSummary({ level }: { level: Level }) {
         max={6}
         onCommit={(v) => v !== undefined && dispatch(setCeilingHeight(level.id, v))}
       />
+      <NorthField />
     </>
+  );
+}
+
+/**
+ * Which way the plan faces: a compass point for the top of the plan, then fine-tuned to the
+ * degree. It sets where the sun comes from in 3D.
+ */
+function NorthField() {
+  const dispatch = useStore((s) => s.dispatch);
+  const north = siteOf(useProject()).north;
+  const facing = planFacing(north);
+  const set = (deg: number) =>
+    dispatch(setSite({ north: northForFacing(deg) }), { coalesceKey: 'north' });
+  const exact = facing % 45 === 0 ? COMPASS_POINTS[facing / 45]?.abbr : undefined;
+  return (
+    <section className="field" aria-labelledby="facing-h">
+      <h3 id="facing-h" className="field-label">
+        Top of the plan faces
+      </h3>
+      <div className="north-row">
+        <Compass north={north} />
+        <Segmented
+          label="Top of the plan faces"
+          fill
+          value={exact ?? ''}
+          options={COMPASS_POINTS.map((p, i) => ({
+            value: p.abbr,
+            label: p.abbr,
+            title: `${p.name[0]?.toUpperCase()}${p.name.slice(1)} (${i * 45}°)`,
+          }))}
+          onChange={(abbr) => set(COMPASS_POINTS.findIndex((p) => p.abbr === abbr) * 45)}
+        />
+      </div>
+      <div className="north-row">
+        <input
+          type="range"
+          min={0}
+          max={359}
+          step={1}
+          value={facing}
+          aria-label="Fine turn, in degrees"
+          aria-valuetext={describeFacing(north)}
+          onChange={(e) => set(Number(e.target.value))}
+        />
+        <span className="num north-deg">{facing}°</span>
+      </div>
+      <p className="field-hint">{describeFacing(north)}. The 3D view's sun follows it.</p>
+    </section>
   );
 }
 

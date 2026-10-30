@@ -4,7 +4,17 @@ import { clampOpeningT } from './geometry';
 import type { Command } from './history';
 import { newId } from './ids';
 import { syncRooms } from './rooms';
-import { type Level, Opening, type Project, Room, type Vec2, Wall, isBoundary } from './schema';
+import {
+  DEFAULT_SITE,
+  type Level,
+  Opening,
+  type Project,
+  Room,
+  type Site,
+  type Vec2,
+  Wall,
+  isBoundary,
+} from './schema';
 import { projectOnSegment, segmentIntersection } from './snap';
 import { endCapture, reclampOpenings, splitWallAt } from './topology';
 
@@ -19,6 +29,22 @@ export function renameProject(name: string): Command {
     label: 'Rename project',
     recipe: (d) => {
       d.name = name;
+    },
+  };
+}
+
+/** Changes where the home stands: north's direction on the plan, or the place. */
+export function setSite(patch: Partial<Site>): Command {
+  if (patch.latitude !== undefined && !(Math.abs(patch.latitude) <= 90)) {
+    throw new Error('latitude out of range');
+  }
+  const turn = 2 * Math.PI;
+  return {
+    label: 'north' in patch ? 'Turn north' : 'Change location',
+    recipe: (d) => {
+      const next = { ...(d.site ?? DEFAULT_SITE), ...patch };
+      next.north = ((next.north % turn) + turn) % turn;
+      d.site = next;
     },
   };
 }

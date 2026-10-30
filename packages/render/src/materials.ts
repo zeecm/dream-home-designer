@@ -5,7 +5,7 @@ import * as THREE from 'three';
  * Phase 0 palette: flat colours keyed by material id. Phase 3 swaps these for PBR
  * textures from the catalogue manifest without changing any ids in saved projects.
  */
-const palette: Record<string, { color: string; roughness: number }> = {
+const palette: Record<string, { color: string; roughness: number; emissive?: string }> = {
   ...Object.fromEntries(
     [...FLOOR_FINISHES, ...PAINTS].map((f) => [f.id, { color: f.color, roughness: f.roughness }]),
   ),
@@ -20,8 +20,10 @@ const palette: Record<string, { color: string; roughness: number }> = {
   'furniture-glass': { color: '#22272b', roughness: 0.1 },
   'furniture-ceramic': { color: '#fbfbf9', roughness: 0.2 },
   'furniture-leaf': { color: '#5d8a4e', roughness: 0.8 },
+  // A lit shade: it glows whatever falls on it.
+  'furniture-lamp': { color: '#fff4e0', roughness: 0.9, emissive: '#ffe2b8' },
 };
-const fallback = { color: '#ff00ff', roughness: 1 };
+const fallback: (typeof palette)[string] = { color: '#ff00ff', roughness: 1 };
 
 export class MaterialCache {
   private cache = new Map<string, THREE.Material>();
@@ -37,7 +39,11 @@ export class MaterialCache {
     let m = this.cache.get(id);
     if (!m) {
       const p = palette[id] ?? fallback;
-      m = new THREE.MeshStandardMaterial({ color: p.color, roughness: p.roughness });
+      m = new THREE.MeshStandardMaterial({
+        color: p.color,
+        roughness: p.roughness,
+        emissive: p.emissive ?? '#000000',
+      });
       m.name = id;
       this.cache.set(id, m);
     }

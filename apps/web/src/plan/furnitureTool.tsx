@@ -37,7 +37,9 @@ export function useFurnitureTool(ctx: ToolContext): ToolController {
       const spot = place(p);
       if (!kind || !spot) return true;
       const id = newId('it');
-      ctx.dispatch(addItem(ctx.level.id, newItem(id, kind, spot.at, spot.rotation)));
+      ctx.dispatch(
+        addItem(ctx.level.id, newItem(id, kind, spot.at, spot.rotation, ctx.level.ceilingHeight)),
+      );
       useEditor.getState().select({ kind: 'item', id });
       // No preview over the piece just placed; the next pointer move brings it back.
       setAt(null);

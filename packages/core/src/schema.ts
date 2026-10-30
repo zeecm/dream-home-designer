@@ -126,7 +126,24 @@ export const Underlay = z.object({
 });
 export type Underlay = z.infer<typeof Underlay>;
 
-export const SCHEMA_VERSION = 3;
+/**
+ * Where the home stands, for the sun. `north` is the bearing of north from the plan's up
+ * direction, in radians clockwise: 0 when north is up the plan, π/2 when it points to the
+ * plan's right. `latitude` and `longitude` are in degrees (+ north, + east), and
+ * `utcOffset` is the clock's hours ahead of UTC, so times of day read as on a wall clock.
+ */
+export const Site = z.object({
+  north: z.number(),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  utcOffset: z.number().min(-12).max(14),
+});
+export type Site = z.infer<typeof Site>;
+
+/** Singapore, with north up the plan: what a project without a site gets. */
+export const DEFAULT_SITE: Site = { north: 0, latitude: 1.35, longitude: 103.82, utcOffset: 8 };
+
+export const SCHEMA_VERSION = 4;
 
 export const Project = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
@@ -136,6 +153,8 @@ export const Project = z.object({
   name: z.string().min(1),
   units: z.literal('m'),
   underlay: Underlay.nullable(),
+  /** Absent means DEFAULT_SITE. */
+  site: Site.optional(),
   levels: z.array(Level).min(1),
 });
 export type Project = z.infer<typeof Project>;

@@ -110,6 +110,27 @@ export const PlanShapes = memo(function PlanShapes({
         {Object.values(level.items).map((item) => {
           const f = itemFootprint(item);
           const kind = furnitureKind(item.assetId);
+          if (kind?.ceiling) {
+            // Overhead: the usual light-fitting symbol, a circle with a cross, so it reads as
+            // above the room and doesn't hide what stands under it.
+            const { w, d } = itemSize(item);
+            const r = Math.min(w, d) / 2;
+            const k = r * Math.SQRT1_2;
+            const { x, z: y } = item.position;
+            return (
+              <g
+                key={item.id}
+                data-hit={hit({ kind: 'item', id: item.id })}
+                pointerEvents={pe}
+                className="item item-overhead"
+              >
+                <circle cx={x} cy={y} r={r} />
+                <path
+                  d={`M${x - k} ${y - k}L${x + k} ${y + k}M${x - k} ${y + k}L${x + k} ${y - k}`}
+                />
+              </g>
+            );
+          }
           return (
             <g
               key={item.id}

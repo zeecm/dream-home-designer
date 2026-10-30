@@ -410,7 +410,8 @@ browser that has them.
 
 ## 5. Owner to-dos
 
-0. **Before merging:** the production API must accept schema 2. It was deployed from this branch
+0. **Before merging:** the production API must accept schema 4 (deployed with this branch).
+   Earlier note: the production API must accept schema 2. It was deployed from this branch
    at the same time as the preview, and it still accepts version-1 documents from `main`.
 
 1. **Connect the API Worker to Git (one time, in the dashboard).** The Builds API refuses the
@@ -453,6 +454,20 @@ tile, marble, polished concrete, grey carpet, plain) and eight wall paints, with
 plan (a light tint) and the 3D view share. Each side of a wall takes its own paint: the
 render regroups a wall's triangles by facing (`bySide`), ends and tops stay white. The wall
 details name each side by the room it faces.
+
+**Lighting (schema 4):** `Project.site` (optional; absent = `DEFAULT_SITE`, Singapore with
+north up the plan) holds `north` (radians clockwise from plan-up), latitude, longitude and UTC
+offset. `core/sun.ts` gives the sun's altitude and compass bearing for a day and clock hour
+(NOAA low-precision formulas, tested against Singapore and London), its world direction, and
+a 0–1 `daylight`. The 3D view's sun, sky, background and fill light follow a Time slider
+(6 am–10 pm, today's date; view state, not saved). The plan details set which way the top of
+the plan faces (N … NW, then a 1° slider; `setSite`), and a compass on the plan (Select tool
+only) shows north and opens that setting. Lamps: floor and table lamps, ceiling and pendant
+lights (category Lighting; ceiling ones hang from the level's ceiling height and draw as a
+circle-and-cross). `itemLights` places each bulb; the view lights the 8 nearest the camera
+with unshadowed point lights fading out by 7 m, so some light leaks through walls.
+**Still open:** latitude and place aren't editable in the UI; ceiling lights don't follow a
+later ceiling-height change; lamps are always on.
 
 Poly Haven (CC0, reachable from here) has about 136 indoor models for later; Kenney is
 blocked by the network proxy and Sketchfab needs an API key.

@@ -4,6 +4,7 @@ import {
   deleteVertex,
   drawWall,
   setCeilingHeight,
+  setSite,
   setWallLength,
   updateOpening,
   updateRoom,
@@ -162,5 +163,20 @@ describe('one-sided walls and boundaries', () => {
     expect(w?.kind).toBeUndefined();
     expect(w?.thickness).toBe(0.1);
     expect(w?.side).toBe('left');
+  });
+});
+
+describe('setSite', () => {
+  it('turns north from the default site, wraps it to one turn, and undoes', () => {
+    let s: EditorDoc = { doc: blankProject('p1', 'Test'), history: emptyHistory() };
+    expect(s.doc.site).toBeUndefined();
+    s = dispatch(s, setSite({ north: -Math.PI / 2 }));
+    expect(s.doc.site?.north).toBeCloseTo((3 * Math.PI) / 2);
+    expect(s.doc.site?.latitude).toBe(1.35);
+    expect(s.history.past.at(-1)?.label).toBe('Turn north');
+    s = undo(s);
+    expect(s.doc.site).toBeUndefined();
+    expect(Project.parse(dispatch(s, setSite({ latitude: 51.5 })).doc).site?.latitude).toBe(51.5);
+    expect(() => setSite({ latitude: 95 })).toThrow();
   });
 });

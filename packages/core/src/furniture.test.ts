@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { drawWall } from './commands';
 import { blankProject } from './factory';
+import { hdb4RoomLevel } from './fixtures/hdb4room';
 import { sampleFlatProject } from './fixtures/sampleFlat';
 import {
   FURNITURE,
@@ -8,6 +9,7 @@ import {
   deleteItem,
   furnitureKind,
   itemFootprint,
+  itemLights,
   newItem,
   placeFurniture,
   updateItem,
@@ -160,5 +162,46 @@ describe('placeFurniture in a corner', () => {
     const p = placeFurniture(geom, kind('desk'), { x: 6.0, y: 2.6 }, 0);
     expect(p.at.y).toBeGreaterThan(2.156);
     expect(p.at.y).toBeLessThan(3.048);
+  });
+});
+
+describe('lamps', () => {
+  const level = () => structuredClone(hdb4RoomLevel());
+
+  it('hangs a ceiling light from the ceiling and stands a floor lamp on the floor', () => {
+    const ceiling = furnitureKind('ceiling-light');
+    const floor = furnitureKind('floor-lamp');
+    if (!ceiling || !floor) throw new Error('missing kinds');
+    const c = newItem('c', ceiling, { x: 1, y: 1 }, 0, 2.6);
+    expect(c.position.y + ceiling.size.h).toBeCloseTo(2.6);
+    expect(newItem('f', floor, { x: 1, y: 1 }).position.y).toBe(0);
+  });
+
+  it('puts each lamp’s light where its bulb is, moved, turned and scaled with it', () => {
+    const lvl = level();
+    const lamp = furnitureKind('floor-lamp');
+    if (!lamp) throw new Error('missing kind');
+    const item = newItem('lamp1', lamp, { x: 2, y: 3 }, Math.PI / 2);
+    item.scale.y = 2;
+    lvl.items[item.id] = item;
+    lvl.items.sofa = newItem('sofa', furnitureKind('sofa-3') ?? lamp, { x: 0, y: 0 });
+    const lights = itemLights(lvl, 0);
+    expect(lights).toHaveLength(1);
+    const [l] = lights;
+    expect(l?.itemId).toBe('lamp1');
+    expect(l?.position.x).toBeCloseTo(2);
+    expect(l?.position.z).toBeCloseTo(3);
+    expect(l?.position.y).toBeCloseTo(2.9);
+  });
+
+  it('every lamp kind has its bulb inside its own box', () => {
+    for (const k of FURNITURE.filter((f) => f.light)) {
+      const [x, y, z] = k.light?.at ?? [0, 0, 0];
+      expect(Math.abs(x)).toBeLessThanOrEqual(k.size.w / 2);
+      expect(Math.abs(y)).toBeLessThanOrEqual(k.size.d / 2);
+      // A ceiling light shines from just under its diffuser.
+      expect(z).toBeGreaterThanOrEqual(k.ceiling ? -0.15 : 0);
+      expect(z).toBeLessThanOrEqual(k.size.h);
+    }
   });
 });

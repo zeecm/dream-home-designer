@@ -1,9 +1,10 @@
-import { levelBounds, planGeometry, underlayToWorld } from '@dhd/core';
+import { levelBounds, planGeometry, siteOf, underlayToWorld } from '@dhd/core';
 import type { Vec2 } from '@dhd/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type PixelBox, inkBounds } from '../assets';
 import { type Tool, useEditor } from '../editor';
 import { useProject, useStore } from '../store';
+import { Compass, describeNorth } from '../ui/Compass';
 import { uploadPlanImage, usePlanImage, useUploadPicker } from '../ui/PlanImage';
 import { icons } from '../ui/icons';
 import { useCalibrateTool, useOpeningTool, useRoomTool, useWallTool } from './drawTools';
@@ -422,6 +423,7 @@ export function PlanCanvas() {
   }
   const cursor = panning ? 'grabbing' : hover && tool === 'select' ? 'pointer' : active.cursor;
   const empty = Object.keys(level.walls).length === 0;
+  const north = siteOf(project).north;
 
   return (
     <div
@@ -589,6 +591,18 @@ export function PlanCanvas() {
         </div>
       )}
 
+      {/* Only in Select: the drawing tools' bars and notices take the top of the plan. */}
+      {!empty && tool === 'select' && (
+        <button
+          type="button"
+          className="plan-compass"
+          aria-label={`${describeNorth(north)}. Set which way the plan faces`}
+          title="Which way the plan faces"
+          onClick={() => useEditor.getState().revealDirection()}
+        >
+          <Compass north={north} size={36} />
+        </button>
+      )}
       <div className="plan-corner plan-corner-br">
         <button
           type="button"
