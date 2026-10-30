@@ -13,7 +13,6 @@ const opened = (iso: string) =>
 export function PlansDialog({ onClose }: { onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   const recent = useStore((s) => s.recent);
-  const backend = useStore((s) => s.backend);
   const currentId = useProject().id;
   const { load, deletePlans } = useStore.getState();
   // The row asking "Delete?", or 'all' for Clear all.
@@ -28,9 +27,9 @@ export function PlansDialog({ onClose }: { onClose: () => void }) {
   const close = () => ref.current?.close();
 
   const removable = recent.filter((r) => !isSample(r));
-  const owned = removable.filter((r) => ownsPlan(backend, r.id));
+  const owned = removable.filter((r) => ownsPlan(r.id));
   const shared = removable.length - owned.length;
-  const verb = (id: string) => (ownsPlan(backend, id) ? 'Delete' : 'Remove');
+  const verb = (id: string) => (ownsPlan(id) ? 'Delete' : 'Remove');
 
   const run = async (ids: string[], what: string) => {
     setBusy(true);
@@ -80,7 +79,7 @@ export function PlansDialog({ onClose }: { onClose: () => void }) {
                 <span className="plan-list-meta">
                   {[
                     here && 'Open now',
-                    sample ? 'Sample' : !ownsPlan(backend, r.id) && 'Shared with you',
+                    sample ? 'Sample' : !ownsPlan(r.id) && 'Shared with you',
                     `opened ${opened(r.openedAt)}`,
                   ]
                     .filter(Boolean)

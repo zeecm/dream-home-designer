@@ -34,10 +34,15 @@ describe('recent plans', () => {
     expect(a && isSample(a)).toBe(true);
     expect(b && isSample(b)).toBe(false);
     expect(forgetRecent('b', st).map((r) => r.id)).toEqual(['a']);
+    // A plan someone names "(sample)" is still theirs to delete.
+    const [c] = rememberRecent({ id: 'c', name: 'Draft (sample)' }, st);
+    expect(c && isSample(c)).toBe(false);
   });
 
   it('knows sample copies from before the flag by their name', () => {
     expect(isSample({ id: 'x', name: '3-room HDB (sample)', openedAt: '' })).toBe(true);
     expect(isSample({ id: 'y', name: '3-room HDB (copy)', openedAt: '' })).toBe(false);
+    // A newer entry says, whatever its name.
+    expect(isSample({ id: 'z', name: 'Mine (sample)', openedAt: '', sample: false })).toBe(false);
   });
 });

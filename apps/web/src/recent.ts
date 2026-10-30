@@ -10,8 +10,11 @@ export interface RecentProject {
   sample?: boolean;
 }
 
-/** Sample copies stay; older ones are known by the name the sample comes with. */
-export const isSample = (r: RecentProject) => !!r.sample || / \(sample\)$/.test(r.name);
+/**
+ * Sample copies stay. Entries from before the flag (no `sample` at all) are known by the name
+ * the sample comes with; newer ones always say.
+ */
+export const isSample = (r: RecentProject) => r.sample ?? / \(sample\)$/.test(r.name);
 
 const KEY = 'dhd:recent';
 const MAX = 20;
@@ -33,8 +36,13 @@ export function rememberRecent(
 ): RecentProject[] {
   const earlier = recentProjects(storage);
   const was = earlier.find((r) => r.id === p.id);
-  const entry: RecentProject = { id: p.id, name: p.name, openedAt: new Date().toISOString() };
-  if (sample || was?.sample) entry.sample = true;
+  const entry: RecentProject = {
+    id: p.id,
+    name: p.name,
+    openedAt: new Date().toISOString(),
+    // Kept from earlier entries, including a sample known by its name before the flag.
+    sample: sample || (was ? isSample(was) : false),
+  };
   const list = [entry, ...earlier.filter((r) => r.id !== p.id)].slice(0, MAX);
   try {
     storage.setItem(KEY, JSON.stringify(list));

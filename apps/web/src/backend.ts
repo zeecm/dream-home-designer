@@ -193,6 +193,15 @@ interface LocalRecord {
  * Mirrors the API's semantics (versions, 409 on a stale save) so the store treats both
  * backends the same, including two tabs editing the same project.
  */
+/** Whether a plan is kept in this browser's own storage (made while the server was away). */
+export function storedLocally(id: string, storage: Storage = window.localStorage): boolean {
+  try {
+    return storage.getItem(KEY + id) !== null;
+  } catch {
+    return false;
+  }
+}
+
 export function localBackend(storage: Storage = window.localStorage): Backend {
   const read = (id: string): LocalRecord | null => {
     const raw = storage.getItem(KEY + id);

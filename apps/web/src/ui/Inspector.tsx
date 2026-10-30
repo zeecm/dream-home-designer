@@ -247,8 +247,10 @@ function NorthField() {
   const dispatch = useStore((s) => s.dispatch);
   const north = siteOf(useProject()).north;
   const facing = planFacing(north);
-  const set = (deg: number) =>
-    dispatch(setSite({ north: northForFacing(deg) }), { coalesceKey: 'north' });
+  // One undo step per pick, or per drag of the slider (its key is set as the drag starts).
+  const drag = useRef('');
+  const set = (deg: number, coalesceKey?: string) =>
+    dispatch(setSite({ north: northForFacing(deg) }), { coalesceKey });
   const exact = facing % 45 === 0 ? COMPASS_POINTS[facing / 45]?.abbr : undefined;
   return (
     <section className="field" aria-labelledby="facing-h">
@@ -278,7 +280,13 @@ function NorthField() {
           value={facing}
           aria-label="Fine turn, in degrees"
           aria-valuetext={describeFacing(north)}
-          onChange={(e) => set(Number(e.target.value))}
+          onPointerDown={() => {
+            drag.current = `north:${Date.now()}`;
+          }}
+          onKeyDown={() => {
+            drag.current = `north:${Date.now()}`;
+          }}
+          onChange={(e) => set(Number(e.target.value), drag.current || undefined)}
         />
         <span className="num north-deg">{facing}°</span>
       </div>

@@ -23,6 +23,7 @@ import {
   apiAvailable,
   localBackend,
   remoteBackend,
+  storedLocally,
 } from './backend';
 import { useEditor } from './editor';
 import { keysFor } from './keys';
@@ -157,10 +158,10 @@ const VALID_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 /**
  * Whether this browser may delete a plan rather than just take it off its list: it holds
- * the owner key, or the plan lives only in this browser.
+ * the plan's owner key, or the plan lives only in this browser. Decided per plan, not by
+ * where the open plan happens to be stored.
  */
-export const ownsPlan = (backend: Backend | null, id: string) =>
-  backend?.kind === 'local' || !!keysFor(id).owner;
+export const ownsPlan = (id: string) => !!keysFor(id).owner || storedLocally(id);
 
 /** Commands that remove things get an Undo toast. */
 const DESTRUCTIVE = /^Delete /;
@@ -330,18 +331,18 @@ export const useStore = create<State>((set, get) => {
         const next = get().recent.find((r) => !gone.has(r.id));
         if (next) await get().load(next.id);
         else await get().openSample();
+        // Couldn't get off it (the server is away): delete nothing rather than the open plan.
+        if (gone.has(get().editor.doc.id)) return doomed.map((r) => r.name);
       }
-      const backend = get().backend ?? (await resolveBackend());
       const failed: string[] = [];
       for (const r of doomed) {
-        if (ownsPlan(backend, r.id)) {
-          try {
-            await backend.remove(r.id);
-          } catch (e) {
-            if (!(e instanceof NotFoundError)) {
-              failed.push(r.name);
-              continue;
-            }
+        try {
+          if (keysFor(r.id).owner) await remoteBackend.remove(r.id);
+          if (storedLocally(r.id)) await localBackend().remove(r.id);
+        } catch (e) {
+          if (!(e instanceof NotFoundError)) {
+            failed.push(r.name);
+            continue;
           }
         }
         set({ recent: forgetRecent(r.id) });
