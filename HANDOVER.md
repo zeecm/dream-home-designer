@@ -488,6 +488,25 @@ walking; `loadProject` gives a renovation level that clashes with the plan's id 
 **Not yet:** a side-by-side 3D compare; listing changes room by room; applying an edit to
 both versions at once (a trace fix in "before" shows as built wall in the after).
 
+**Downloads (Phase 4):** the project menu's Download section (`exports.ts`): the plan as a
+PNG (the plan SVG cloned with its computed styles inlined, handles and grid removed, the plan
+image inlined as data, drawn at 3× on a canvas), Print (the same picture on its own page;
+the print dialog saves a PDF), the 3D view as a PNG (drawn on demand through `Capture` in the
+Viewport and read at once), the 3D model as GLB (`GLTFExporter` on the level group, models
+included) and the project file (JSON). "Open a project file…" loads one through
+`loadProject` as a new plan. A download that needs the plan or 3D shows it for a moment and
+puts the view back.
+
+**Version history (Phase 4, before accounts):** the API lists and serves the copies R2 already
+keeps of each version a save replaced (`GET /projects/{id}/versions`, `…/versions/{n}`;
+`store.HistoryStore`, in R2 and memory; not for view-only links). Autosave makes a version
+every few seconds, so `historyPoints` offers the end of each editing session (a version that
+stayed current 5 minutes or more), up to 20, newest first. "Version history…" restores one
+with `restoreVersion`, one undoable step. Copies expire after 30 days (the bucket rule).
+
+**Duplicate:** Ctrl/Cmd+D or the details' Duplicate sets a copy one width along the piece
+(`duplicateOf`), selected.
+
 **Your plans:** the project menu's "Manage your plans…" opens a dialog listing this
 browser's plans (the recent list, up to 20): open one, delete one (with an inline confirm), or
 Clear all. Plans this browser owns (owner key, or a local-only plan: `ownsPlan`) are deleted
@@ -512,7 +531,15 @@ shrinks textures to 512 px WebP, compresses with meshopt, and writes
 to `FURNITURE` with a stand-in box (`placeholder`); render's `ModelLibrary` loads each GLB
 once and `LevelMeshes` swaps the box for a copy when it arrives (copies share geometry, marked
 `userData.shared`). No modern beds or TVs on Poly Haven, so those stay box-built.
-**Next:** catalogue thumbnails; more models (Sketchfab CC0 needs an API key).
+Rebuild a few with `pnpm --filter @dhd/models build <id…>` (`built.json` remembers the rest).
+**Thumbnails:** `pnpm --filter @dhd/models thumbs` serves `apps/web/thumbs.html` (dev only,
+not in the build) with Vite, renders every catalogue piece through `LevelMeshes` and the
+model library, and writes 96 px WebPs to `apps/web/public/models/thumbs/`; the catalogue
+shows them. Re-run it after changing the catalogue.
+**Next:** more models (Sketchfab CC0 needs an API key).
+
+**Walk-through link:** Share offers `?p=<id>&walk=1`, which opens the plan straight into a
+walk (once; the parameter is then dropped from the address).
 
 Poly Haven (CC0, reachable from here) has about 136 indoor models for later; Kenney is
 blocked by the network proxy and Sketchfab needs an API key.

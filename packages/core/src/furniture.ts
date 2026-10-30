@@ -562,6 +562,23 @@ export function addItem(levelId: string, item: Item): Command {
   };
 }
 
+/**
+ * A copy of `item` beside it: one width (and a 5 cm gap) along its own width, as you would
+ * set out a row of chairs. The caller makes the id; addItem stores it.
+ */
+export function duplicateOf(item: Item, id: string): Item {
+  const step = itemSize(item).w + 0.05;
+  return {
+    ...structuredClone(item),
+    id,
+    position: {
+      ...item.position,
+      x: item.position.x + Math.cos(item.rotationY) * step,
+      z: item.position.z + Math.sin(item.rotationY) * step,
+    },
+  };
+}
+
 export type ItemPatch = Partial<Pick<Item, 'rotationY'>> & {
   position?: Partial<Item['position']>;
   scale?: Partial<Item['scale']>;

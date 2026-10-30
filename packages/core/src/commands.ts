@@ -31,6 +31,23 @@ export function renameProject(name: string): Command {
   };
 }
 
+/**
+ * Puts the plan back as it was in `from` (an earlier saved version of the same project):
+ * its levels, renovation, plan image, site and name. One undoable step.
+ */
+export function restoreVersion(from: Project): Command {
+  return {
+    label: 'Restore an earlier version',
+    recipe: (d) => {
+      d.name = from.name;
+      d.levels = structuredClone(from.levels);
+      d.renovation = from.renovation && structuredClone(from.renovation);
+      d.underlay = from.underlay && structuredClone(from.underlay);
+      d.site = from.site && { ...from.site };
+    },
+  };
+}
+
 /** Changes where the home stands: north's direction on the plan, or the place. */
 export function setSite(patch: Partial<Site>): Command {
   if (patch.latitude !== undefined && !(Math.abs(patch.latitude) <= 90)) {

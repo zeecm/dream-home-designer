@@ -1,0 +1,154 @@
+{
+  "chesterfield-sofa": {
+    "file": "chesterfield-sofa.eeda15f892.glb",
+    "size": {
+      "w": 1.807,
+      "d": 0.818,
+      "h": 0.709
+    }
+  },
+  "armchair-wood-leather": {
+    "file": "armchair-wood-leather.a06e44387e.glb",
+    "size": {
+      "w": 0.82,
+      "d": 0.987,
+      "h": 1.023
+    }
+  },
+  "lounge-chair": {
+    "file": "lounge-chair.e99e004c54.glb",
+    "size": {
+      "w": 1.009,
+      "d": 1.19,
+      "h": 1.169
+    }
+  },
+  "coffee-table-wood-stone": {
+    "file": "coffee-table-wood-stone.e75c25cb55.glb",
+    "size": {
+      "w": 1.202,
+      "d": 0.6,
+      "h": 0.39
+    }
+  },
+  "coffee-table-marble": {
+    "file": "coffee-table-marble.55af6e8fa3.glb",
+    "size": {
+      "w": 1.301,
+      "d": 1.301,
+      "h": 0.491
+    }
+  },
+  "side-table-two-tier": {
+    "file": "side-table-two-tier.87a5699987.glb",
+    "size": {
+      "w": 0.55,
+      "d": 0.45,
+      "h": 0.551
+    }
+  },
+  "tv-console-slatted": {
+    "file": "tv-console-slatted.d9d843603f.glb",
+    "size": {
+      "w": 2.44,
+      "d": 0.52,
+      "h": 0.68
+    }
+  },
+  "wooden-table": {
+    "file": "wooden-table.fed0335f16.glb",
+    "size": {
+      "w": 1.134,
+      "d": 0.706,
+      "h": 0.8
+    }
+  },
+  "dining-chair-upholstered": {
+    "file": "dining-chair-upholstered.6d62e5089b.glb",
+    "size": {
+      "w": 0.434,
+      "d": 0.576,
+      "h": 0.973
+    }
+  },
+  "nightstand-painted": {
+    "file": "nightstand-painted.e2207cbe61.glb",
+    "size": {
+      "w": 0.505,
+      "d": 0.509,
+      "h": 0.616
+    }
+  },
+  "shelf-with-drawers": {
+    "file": "shelf-with-drawers.1aa1a3c650.glb",
+    "size": {
+      "w": 1.141,
+      "d": 0.488,
+      "h": 1.881
+    }
+  },
+  "cube-bookcase": {
+    "file": "cube-bookcase.4da1a596b4.glb",
+    "size": {
+      "w": 1.078,
+      "d": 0.372,
+      "h": 1.556
+    }
+  },
+  "desk-lamp": {
+    "file": "desk-lamp.c3d1a76f3c.glb",
+    "size": {
+      "w": 0.202,
+      "d": 0.614,
+      "h": 0.893
+    }
+  },
+  "globe-pendant": {
+    "file": "globe-pendant.31452fe799.glb",
+    "size": {
+      "w": 0.432,
+      "d": 0.432,
+      "h": 0.952
+    }
+  },
+  "ceiling-fan": {
+    "file": "ceiling-fan.4da61a216f.glb",
+    "size": {
+      "w": 1.463,
+      "d": 1.463,
+      "h": 0.516
+    }
+  },
+  "potted-ficus": {
+    "file": "potted-ficus.1e04295121.glb",
+    "size": {
+      "w": 0.587,
+      "d": 0.634,
+      "h": 1.336
+    }
+  },
+  "potted-elephant-ear": {
+    "file": "potted-elephant-ear.b3302f7cb4.glb",
+    "size": {
+      "w": 0.701,
+      "d": 0.656,
+      "h": 0.84
+    }
+  },
+  "wall-clock": {
+    "file": "wall-clock.d7b34cb636.glb",
+    "size": {
+      "w": 0.32,
+      "d": 0.047,
+      "h": 0.32
+    }
+  },
+  "aircon-compressors": {
+    "file": "aircon-compressors.27b11f8a91.glb",
+    "size": {
+      "w": 1.8,
+      "d": 0.374,
+      "h": 0.928
+    }
+  }
+}

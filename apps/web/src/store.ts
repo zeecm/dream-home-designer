@@ -11,6 +11,7 @@ import {
   redo as coreRedo,
   undo as coreUndo,
   emptyHistory,
+  loadProject,
   newId,
   sampleFlatProject,
   touchedVariant,
@@ -71,6 +72,8 @@ interface State {
   role: Role;
   /** Opens a copy of the open project as a new plan of this browser's own. */
   copyProject: () => Promise<void>;
+  /** Opens a project file (from Download → Project file) as a new plan of this browser's. */
+  importProject: (text: string) => Promise<void>;
   /**
    * Makes this browser the owner of a plan from before sharing (role `open`). Asked for, not
    * automatic: anyone with such a plan's link could otherwise take it from its creator.
@@ -172,6 +175,7 @@ export const ownsPlan = (id: string) => !!keysFor(id).owner || storedLocally(id)
 function toastFor(label: string): string | null {
   if (label === 'Discard the renovation') return 'Renovation discarded';
   if (label === 'Make the renovation the plan') return 'The renovation is now the plan';
+  if (label === 'Restore an earlier version') return 'Earlier version restored';
   if (!label.startsWith('Delete ')) return null;
   const what = label.slice('Delete '.length);
   return `${what[0]?.toUpperCase()}${what.slice(1)} deleted`;
@@ -389,6 +393,16 @@ export const useStore = create<State>((set, get) => {
       // Not claimed: someone else got there first, so this browser can only look.
       if (get().editor.doc.id === id) set({ role: claimed ? 'owner' : 'viewer' });
       return claimed;
+    },
+    importProject: async (text) => {
+      let project: Project;
+      try {
+        project = loadProject(JSON.parse(text)).project;
+      } catch (e) {
+        set({ notice: errorMessage('That file isn’t a Dream Home project', e) });
+        return;
+      }
+      await createFrom({ ...project, id: newId('prj'), version: 0 });
     },
     copyProject: async () => {
       const doc = get().editor.doc;

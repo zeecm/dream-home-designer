@@ -4,13 +4,16 @@ import {
   type Level,
   type PlanGeometry,
   type Vec2,
+  addItem,
   deleteItem,
   deleteOpening,
   deleteVertex,
   deleteWall,
+  duplicateOf,
   furnitureKind,
   itemSize,
   moveVertex,
+  newId,
   placeFurniture,
   settleVertex,
   snapCorner,
@@ -331,6 +334,15 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         if (at) useEditor.getState().setView(reveal(ctx.view, ctx.size, at), true);
         window.clearTimeout(r.timer);
         r.timer = window.setTimeout(settleRun, NUDGE_SETTLE_MS);
+        return true;
+      }
+      // Ctrl/Cmd+D: a copy beside the selected piece, selected to place it.
+      if ((e.key === 'd' || e.key === 'D') && (e.ctrlKey || e.metaKey) && sel?.kind === 'item') {
+        const it = live().items[sel.id];
+        if (!it) return false;
+        const copy = duplicateOf(it, newId('it'));
+        ctx.dispatch(addItem(levelId, copy));
+        select({ kind: 'item', id: copy.id });
         return true;
       }
       if ((e.key === 'r' || e.key === 'R') && sel?.kind === 'item' && !e.ctrlKey && !e.metaKey) {

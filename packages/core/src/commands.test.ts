@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   deleteOpening,
   deleteVertex,
+  deleteWall,
   drawWall,
+  renameProject,
+  restoreVersion,
   setCeilingHeight,
   setSite,
   setWallLength,
@@ -178,5 +181,19 @@ describe('setSite', () => {
     expect(s.doc.site).toBeUndefined();
     expect(Project.parse(dispatch(s, setSite({ latitude: 51.5 })).doc).site?.latitude).toBe(51.5);
     expect(() => setSite({ latitude: 95 })).toThrow();
+  });
+});
+
+describe('restoreVersion', () => {
+  it('puts back an earlier version in one undoable step, keeping id and version', () => {
+    const old = hdb4RoomProject();
+    let s: EditorDoc = { doc: { ...hdb4RoomProject(), version: 7 }, history: emptyHistory() };
+    s = dispatch(s, deleteWall(L, 'w_living_kitchen'));
+    s = dispatch(s, renameProject('Changed'));
+    s = dispatch(s, restoreVersion(old));
+    expect(s.doc.levels[0]?.walls.w_living_kitchen).toBeDefined();
+    expect(s.doc.name).toBe(old.name);
+    expect(s.doc.version).toBe(7);
+    expect(undo(s).doc.name).toBe('Changed');
   });
 });

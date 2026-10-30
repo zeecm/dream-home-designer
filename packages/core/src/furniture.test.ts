@@ -8,6 +8,7 @@ import {
   FURNITURE,
   addItem,
   deleteItem,
+  duplicateOf,
   furnitureKind,
   itemFootprint,
   itemLights,
@@ -237,5 +238,19 @@ describe('model kinds', () => {
       expect(k.source).toMatch(/^https:\/\/polyhaven\.com\/a\//);
     }
     expect(new Set(FURNITURE.map((k) => k.id)).size).toBe(FURNITURE.length);
+  });
+});
+
+describe('duplicateOf', () => {
+  it('sets the copy beside the original, along its width, turned the same', () => {
+    const chair = newItem('a', furnitureKind('dining-chair')!, { x: 1, y: 2 }, Math.PI / 2);
+    const copy = duplicateOf(chair, 'b');
+    expect(copy.id).toBe('b');
+    expect(copy.rotationY).toBe(chair.rotationY);
+    // Turned a quarter, its width runs along plan y.
+    expect(copy.position.x).toBeCloseTo(1);
+    expect(copy.position.z).toBeCloseTo(2 + 0.45 + 0.05);
+    expect(copy.scale).toEqual(chair.scale);
+    expect(copy.scale).not.toBe(chair.scale);
   });
 });

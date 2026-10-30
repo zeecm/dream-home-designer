@@ -40,3 +40,13 @@ test('walk through the flat in first person, then leave with Esc', async ({ page
   expect(again.y).toBeCloseTo(left.y, 3);
   expect(errors).toEqual([]);
 });
+
+test('a walk-through link opens straight into a walk', async ({ page }) => {
+  await page.goto('/');
+  await waitSaved(page);
+  const id = new URL(page.url()).searchParams.get('p');
+  await page.goto(`/?p=${id}&walk=1`);
+  await expect(page.getByRole('button', { name: 'Leave walk' })).toBeVisible({ timeout: 30_000 });
+  // Taken out of the address, so a later plan opened here doesn't start walking too.
+  expect(new URL(page.url()).searchParams.get('walk')).toBeNull();
+});

@@ -126,18 +126,17 @@ async function build(entry) {
 }
 
 await mkdir(outDir, { recursive: true });
-const previous = await readFile(kindsFile, 'utf8').catch(() => '');
-const built = {};
+// What earlier builds made (file and size per id), so building a few ids keeps the rest.
+const builtFile = join(here, 'built.json');
+const built = JSON.parse(await readFile(builtFile, 'utf8').catch(() => '{}'));
 for (const entry of catalogue) {
-  if (only.length && !only.includes(entry.id)) {
-    const m = previous.match(
-      new RegExp(`"id": "${entry.id}"[\\s\\S]*?"model": "([^"]+)"[\\s\\S]*?"size": (\\{[^}]+\\})`),
-    );
-    if (m) built[entry.id] = { file: m[1], size: JSON.parse(m[2]) };
-    continue;
-  }
+  if (only.length && !only.includes(entry.id)) continue;
   built[entry.id] = await build(entry);
 }
+for (const id of Object.keys(built)) {
+  if (!catalogue.some((e) => e.id === id)) delete built[id];
+}
+await writeFile(builtFile, `${JSON.stringify(built, null, 2)}\n`);
 
 // Drop GLBs no entry uses any more (older builds of a model).
 const { readdir } = await import('node:fs/promises');

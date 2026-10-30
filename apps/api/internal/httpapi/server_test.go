@@ -377,3 +377,37 @@ func TestSharing(t *testing.T) {
 		t.Fatalf("claimed role: %q", r.Header.Get("X-Role"))
 	}
 }
+
+func TestVersionHistory(t *testing.T) {
+	ts := newTestServer(t)
+	do(t, "POST", ts.URL+"/projects", doc("prj_h", "One", 0), nil)
+	do(t, "PUT", ts.URL+"/projects/prj_h", doc("prj_h", "Two", 1), map[string]string{"If-Match": `"1"`})
+	do(t, "PUT", ts.URL+"/projects/prj_h", doc("prj_h", "Three", 2), map[string]string{"If-Match": `"2"`})
+
+	res, out := do(t, "GET", ts.URL+"/projects/prj_h/versions", nil, nil)
+	vs, _ := out["versions"].([]any)
+	if res.StatusCode != http.StatusOK || len(vs) != 2 {
+		t.Fatalf("versions: %d %v", res.StatusCode, out)
+	}
+	first, _ := vs[0].(map[string]any)
+	if first["version"] != float64(1) || first["replacedAt"] == "" {
+		t.Fatalf("first version: %v", first)
+	}
+	res, got := do(t, "GET", ts.URL+"/projects/prj_h/versions/1", nil, nil)
+	if res.StatusCode != http.StatusOK || got["name"] != "One" {
+		t.Fatalf("version 1: %d %v", res.StatusCode, got)
+	}
+	if r, _ := do(t, "GET", ts.URL+"/projects/prj_h/versions/9", nil, nil); r.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing version: %d", r.StatusCode)
+	}
+	if r, _ := do(t, "GET", ts.URL+"/projects/prj_h/versions/x", nil, nil); r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad version: %d", r.StatusCode)
+	}
+	// A view-only link doesn't see past versions.
+	if r, _ := do(t, "GET", ts.URL+"/projects/prj_h/versions", nil, map[string]string{"Authorization": ""}); r.StatusCode != http.StatusForbidden {
+		t.Fatalf("viewer versions: %d", r.StatusCode)
+	}
+	if r, _ := do(t, "GET", ts.URL+"/projects/prj_nope/versions", nil, nil); r.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing project: %d", r.StatusCode)
+	}
+}

@@ -221,6 +221,60 @@ func (s *R2) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// Versions lists the versions saves replaced (the recovery copies), oldest first.
+func (s *R2) Versions(ctx context.Context, id string) ([]Version, error) {
+	prefix := "previous/" + id + "/"
+	var out []Version
+	token := ""
+	for {
+		q := url.Values{"list-type": {"2"}, "prefix": {prefix}, "max-keys": {"1000"}}
+		if token != "" {
+			q.Set("continuation-token", token)
+		}
+		res, err := s.do(ctx, http.MethodGet, "", q, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		var page struct {
+			Contents []struct {
+				Key          string
+				LastModified time.Time
+			}
+			IsTruncated           bool
+			NextContinuationToken string
+		}
+		err = xml.NewDecoder(res.Body).Decode(&page)
+		res.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("r2 list versions: %w", err)
+		}
+		for _, c := range page.Contents {
+			v, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(c.Key, prefix), ".json"))
+			if err != nil {
+				continue
+			}
+			// The copy is made as the next save replaces it, so its time is the replacement's.
+			out = append(out, Version{Version: v, ReplacedAt: c.LastModified})
+		}
+		if !page.IsTruncated || len(out) >= 5000 {
+			break
+		}
+		token = page.NextContinuationToken
+	}
+	slices.SortFunc(out, func(a, b Version) int { return a.Version - b.Version })
+	return out, nil
+}
+
+// GetVersion returns a version a save replaced, or ErrNotFound once it has expired.
+func (s *R2) GetVersion(ctx context.Context, id string, version int) ([]byte, error) {
+	res, err := s.do(ctx, http.MethodGet, previousKey(id, version), nil, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	return io.ReadAll(res.Body)
+}
+
 var errPrecondition = errors.New("precondition failed")
 
 // Recovery copies: each version a save replaced, and deleted projects with their access

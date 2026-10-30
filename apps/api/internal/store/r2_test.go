@@ -44,9 +44,10 @@ type fakeS3 struct {
 }
 
 type fakeObject struct {
-	body []byte
-	meta http.Header
-	etag string
+	body     []byte
+	meta     http.Header
+	etag     string
+	modified time.Time
 }
 
 func newFakeS3(t *testing.T) (*fakeS3, *httptest.Server) {
@@ -76,14 +77,17 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	obj, exists := f.objects[key]
 	switch {
 	case r.Method == http.MethodGet && key == "":
-		type content struct{ Key string }
+		type content struct {
+			Key          string
+			LastModified time.Time
+		}
 		var out struct {
 			XMLName  xml.Name `xml:"ListBucketResult"`
 			Contents []content
 		}
 		for k := range f.objects {
 			if strings.HasPrefix(k, r.URL.Query().Get("prefix")) {
-				out.Contents = append(out.Contents, content{Key: k})
+				out.Contents = append(out.Contents, content{Key: k, LastModified: f.objects[k].modified})
 			}
 		}
 		_ = xml.NewEncoder(w).Encode(out)
@@ -112,6 +116,7 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.writes++
+		from.modified = time.Now().UTC()
 		f.objects[key] = from
 	case r.Method == http.MethodPut:
 		if r.Header.Get("If-None-Match") == "*" && exists {
@@ -131,7 +136,7 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.writes++
 		sum := md5.Sum(append(body, byte(f.writes)))
-		f.objects[key] = fakeObject{body: body, meta: meta, etag: `"` + hex.EncodeToString(sum[:]) + `"`}
+		f.objects[key] = fakeObject{body: body, meta: meta, etag: `"` + hex.EncodeToString(sum[:]) + `"`, modified: time.Now().UTC()}
 	case r.Method == http.MethodDelete && f.failDelete != "" && strings.HasPrefix(key, f.failDelete):
 		http.Error(w, "InternalError", http.StatusInternalServerError)
 	case r.Method == http.MethodDelete:
@@ -217,6 +222,35 @@ func TestR2KeepsThePreviousVersionAndDeletedProjects(t *testing.T) {
 	}
 	if _, err := s.Get(ctx, "prj_a"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("deleted project still there: %v", err)
+	}
+}
+
+func TestR2ListsAndReturnsReplacedVersions(t *testing.T) {
+	_, srv := newFakeS3(t)
+	s := NewR2(srv.URL, "bucket", "test", "secret")
+	ctx := context.Background()
+	if err := s.Create(ctx, Record{ID: "prj_h", Name: "Flat", Doc: []byte(`{"v":1}`)}); err != nil {
+		t.Fatal(err)
+	}
+	for v := 1; v <= 11; v++ {
+		body := []byte(`{"v":` + strconv.Itoa(v+1) + `}`)
+		if _, err := s.Update(ctx, "prj_h", v, "Flat", func(int) ([]byte, error) { return body, nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	vs, err := s.Versions(ctx, "prj_h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Numeric order, not the keys' string order (10 after 9, not after 1).
+	if len(vs) != 11 || vs[0].Version != 1 || vs[9].Version != 10 || vs[10].ReplacedAt.IsZero() {
+		t.Fatalf("versions: %+v", vs)
+	}
+	if doc, err := s.GetVersion(ctx, "prj_h", 3); err != nil || string(doc) != `{"v":3}` {
+		t.Fatalf("version 3: %q %v", doc, err)
+	}
+	if _, err := s.GetVersion(ctx, "prj_h", 99); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing version: %v", err)
 	}
 }
 

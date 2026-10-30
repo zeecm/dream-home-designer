@@ -65,3 +65,26 @@ test('paint each side of a wall, and pick a floor finish', async ({ page }) => {
   await page.keyboard.press('Control+z');
   await expect(page.getByLabel('Floor', { exact: true })).toHaveValue('wood-walnut');
 });
+
+test('duplicate a piece beside itself, from the details or with Ctrl+D', async ({ page }) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await page.getByRole('button', { name: /^Furniture/ }).click();
+  await page
+    .getByRole('button', { name: /^Dining chair\b/ })
+    .first()
+    .click();
+  const room = await page.locator('[data-hit="room:rm_living-and-dining"]').boundingBox();
+  if (!room) throw new Error('no room');
+  await page.mouse.click(room.x + room.width * 0.5, room.y + room.height * 0.5);
+  const items = page.locator('[data-hit^="item:"]');
+  await expect(items).toHaveCount(1);
+  await page.getByRole('button', { name: 'Duplicate' }).click();
+  await expect(items).toHaveCount(2);
+  await page.locator('svg.plan-svg').focus();
+  await page.keyboard.press('Control+d');
+  await expect(items).toHaveCount(3);
+  await page.keyboard.press('Control+z');
+  await expect(items).toHaveCount(2);
+});

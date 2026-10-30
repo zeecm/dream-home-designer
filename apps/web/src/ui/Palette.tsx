@@ -143,7 +143,16 @@ function Catalogue({ idPrefix }: { idPrefix: string }) {
                 .map((k) => (
                   <li key={k.id}>
                     <button type="button" aria-pressed={picked === k.id} onClick={() => pick(k.id)}>
-                      <span>{k.name}</span>
+                      {/* Rendered by tools/models/thumbs.mjs from the 3D view's own pieces. */}
+                      <img
+                        className="catalogue-thumb"
+                        src={`/models/thumbs/${k.id}.webp`}
+                        alt=""
+                        width={36}
+                        height={36}
+                        loading="lazy"
+                      />
+                      <span className="catalogue-name">{k.name}</span>
                       <span className="choice-note num">
                         {cm(k.size.w)} × {cm(k.size.d)}
                       </span>

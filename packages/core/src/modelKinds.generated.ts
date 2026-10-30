@@ -8,13 +8,13 @@ export const MODEL_KINDS: ModelKind[] = [
     name: 'Chesterfield sofa',
     category: 'Living',
     againstWall: true,
-    model: 'chesterfield-sofa.c95213fd77.glb',
+    model: 'chesterfield-sofa.eeda15f892.glb',
     size: {
-      w: 1.571,
-      d: 0.658,
-      h: 0.797,
+      w: 1.807,
+      d: 0.818,
+      h: 0.709,
     },
-    source: 'https://polyhaven.com/a/Sofa_01',
+    source: 'https://polyhaven.com/a/sofa_02',
   },
   {
     id: 'armchair-wood-leather',

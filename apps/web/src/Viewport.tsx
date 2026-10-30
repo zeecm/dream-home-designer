@@ -15,6 +15,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useEditor } from './editor';
+import { registerScene3d } from './exports';
 import { useLevel, useProject } from './store';
 import { Joystick } from './walk/Joystick';
 import { MiniMap } from './walk/MiniMap';
@@ -190,6 +191,20 @@ function SunControl() {
   );
 }
 
+/** Lets the downloads draw this view on demand and reach the level's meshes. */
+function Capture() {
+  const { gl, scene, camera } = useThree();
+  useEffect(() => {
+    registerScene3d({
+      render: () => gl.render(scene, camera),
+      canvas: gl.domElement,
+      level: () => scene.getObjectByName('level'),
+    });
+    return () => registerScene3d(null);
+  }, [gl, scene, camera]);
+  return null;
+}
+
 const coarsePointer = () => window.matchMedia('(pointer: coarse)').matches;
 
 export function Viewport() {
@@ -267,6 +282,7 @@ export function Viewport() {
           shadow-camera-far={reach * 2.5}
         />
         {level && <Lamps level={level} />}
+        <Capture />
         <mesh rotation-x={-Math.PI / 2} position={[frame.x, -0.01, frame.z]} receiveShadow>
           <planeGeometry args={[200, 200]} />
           <meshStandardMaterial color={dark ? '#1a1c1e' : '#eef1f3'} />

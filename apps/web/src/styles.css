@@ -392,6 +392,8 @@ select {
   left: 0;
   z-index: 20;
   min-width: 240px;
+  max-height: calc(100dvh - 72px);
+  overflow-y: auto;
   padding: 6px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1464,6 +1466,25 @@ h3.field-label {
 }
 .catalogue-group + .catalogue-group {
   margin-top: 6px;
+}
+.catalogue .choice-list button {
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
+  height: auto;
+  min-height: 44px;
+  padding: 4px 8px 4px 4px;
+  text-align: left;
+}
+.catalogue-thumb {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}
+.catalogue-name {
+  flex: 1;
+  min-width: 0;
 }
 .catalogue-heading {
   margin: 6px 0 2px;

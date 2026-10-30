@@ -4,15 +4,18 @@ import {
   type Level,
   type Opening,
   PAINTS,
+  addItem,
   cornerSpot,
   deleteItem,
   deleteOpening,
   deleteVertex,
   deleteWall,
+  duplicateOf,
   furnitureKind,
   isBoundary,
   itemSize,
   moveVertex,
+  newId,
   roomArea,
   setCeilingHeight,
   setSite,
@@ -610,6 +613,18 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
           </button>
         </span>
       </div>
+      <button
+        type="button"
+        className="btn"
+        title="Duplicate (Ctrl+D)"
+        onClick={() => {
+          const copy = duplicateOf(it, newId('it'));
+          dispatch(addItem(level.id, copy));
+          useEditor.getState().select({ kind: 'item', id: copy.id });
+        }}
+      >
+        Duplicate
+      </button>
       <DeleteButton
         label="Delete"
         onClick={() => {

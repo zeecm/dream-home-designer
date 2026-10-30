@@ -218,6 +218,18 @@ export function App() {
     void (id ? load(id) : openSample());
   }, []);
 
+  // A walk-through link (?walk=1) starts walking once its plan has opened, once.
+  const opened = useStore((s) => s.sync.kind === 'saved');
+  const hasRooms = useStore((s) => Object.keys(s.editor.doc.levels[0]?.rooms ?? {}).length > 0);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (!opened || url.searchParams.get('walk') !== '1') return;
+    if (url.searchParams.get('p') !== projectId) return;
+    url.searchParams.delete('walk');
+    window.history.replaceState(null, '', url);
+    if (hasRooms) useEditor.getState().startWalk();
+  }, [opened, projectId, hasRooms]);
+
   // A different project starts with a clean editor and a fitted view.
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the open project changes
   useEffect(() => useEditor.getState().reset(), [projectId]);

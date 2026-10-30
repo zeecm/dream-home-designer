@@ -56,6 +56,8 @@ func New(s store.Store, log *slog.Logger, opts ...Option) *Server {
 	srv.mux.HandleFunc("GET /projects/{id}/share", srv.getShare)
 	srv.mux.HandleFunc("PUT /projects/{id}/share", srv.putShare)
 	srv.mux.HandleFunc("POST /projects/{id}/claim", srv.claim)
+	srv.mux.HandleFunc("GET /projects/{id}/versions", srv.versions)
+	srv.mux.HandleFunc("GET /projects/{id}/versions/{version}", srv.version)
 	return srv
 }
 
@@ -99,6 +101,66 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(rec.Doc)
+}
+
+// history is the store's version history, after checking the caller may edit the project
+// (a view-only link doesn't see past versions). nil means the response is written.
+func (s *Server) history(w http.ResponseWriter, r *http.Request) (store.HistoryStore, string) {
+	id := r.PathValue("id")
+	if !project.ValidID(id) {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return nil, ""
+	}
+	h, ok := s.store.(store.HistoryStore)
+	if !ok {
+		writeError(w, http.StatusNotFound, "this server keeps no version history")
+		return nil, ""
+	}
+	if _, err := s.store.Get(r.Context(), id); err != nil {
+		s.fail(w, err)
+		return nil, ""
+	}
+	if !s.allow(w, r, id, func(r Role) bool { return r != RoleViewer }) {
+		return nil, ""
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	return h, id
+}
+
+func (s *Server) versions(w http.ResponseWriter, r *http.Request) {
+	h, id := s.history(w, r)
+	if h == nil {
+		return
+	}
+	vs, err := h.Versions(r.Context(), id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if vs == nil {
+		vs = []store.Version{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"versions": vs})
+}
+
+func (s *Server) version(w http.ResponseWriter, r *http.Request) {
+	h, id := s.history(w, r)
+	if h == nil {
+		return
+	}
+	v, err := strconv.Atoi(r.PathValue("version"))
+	if err != nil || v < 1 {
+		writeError(w, http.StatusBadRequest, "invalid version")
+		return
+	}
+	doc, err := h.GetVersion(r.Context(), id, v)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(doc)
 }
 
 func (s *Server) create(w http.ResponseWriter, r *http.Request) {

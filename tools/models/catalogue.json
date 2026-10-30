@@ -1,6 +1,6 @@
 [
   {
-    "polyhaven": "Sofa_01",
+    "polyhaven": "sofa_02",
     "id": "chesterfield-sofa",
     "name": "Chesterfield sofa",
     "category": "Living",
@@ -85,7 +85,11 @@
     "category": "Lighting",
     "elevation": 0.75,
     "walkThrough": true,
-    "light": { "at": [0, 0.15, 0.7], "color": "#ffe0b0", "candela": 25 }
+    "light": {
+      "at": [0, 0.15, 0.7],
+      "color": "#ffe0b0",
+      "candela": 25
+    }
   },
   {
     "polyhaven": "modern_ceiling_lamp_01",
@@ -94,7 +98,11 @@
     "category": "Lighting",
     "ceiling": true,
     "walkThrough": true,
-    "light": { "at": [0, 0, 0.12], "color": "#fff1dc", "candela": 70 }
+    "light": {
+      "at": [0, 0, 0.12],
+      "color": "#fff1dc",
+      "candela": 70
+    }
   },
   {
     "polyhaven": "ceiling_fan",

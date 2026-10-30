@@ -34,6 +34,15 @@ export interface Backend {
   setShare?(id: string, edit: boolean, reset?: boolean): Promise<string | null>;
   /** Becomes the owner of a project from before sharing; false if it has one. */
   claim?(id: string): Promise<boolean>;
+  /** The versions saves replaced, oldest first (remote only; kept for 30 days). */
+  versions?(id: string): Promise<SavedVersion[]>;
+  getVersion?(id: string, version: number): Promise<Project>;
+}
+
+export interface SavedVersion {
+  version: number;
+  /** When the next save replaced it: the last moment the plan looked like this. */
+  replacedAt: string;
 }
 
 /** Roles the server reported, by project id. */
@@ -93,6 +102,16 @@ export const remoteBackend: Backend = {
   async get(id) {
     const res = await check(await fetch(url(id), { headers: authHeaders(id) }));
     readRole(id, res);
+    return parseProject(await res.json());
+  },
+  async versions(id) {
+    const res = await check(await fetch(url(id, '/versions'), { headers: authHeaders(id) }));
+    return ((await res.json()) as { versions: SavedVersion[] }).versions;
+  },
+  async getVersion(id, version) {
+    const res = await check(
+      await fetch(url(id, `/versions/${version}`), { headers: authHeaders(id) }),
+    );
     return parseProject(await res.json());
   },
   async create(doc) {

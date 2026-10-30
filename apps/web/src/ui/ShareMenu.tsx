@@ -111,6 +111,8 @@ function ShareBody() {
     <>
       <CopyField label="View-only link" value={shareLink(id)} />
       <p className="note">Anyone with this link can look around and walk through the plan.</p>
+      <CopyField label="Walk-through link" value={shareLink(id, null, true)} />
+      <p className="note">The same, but it opens straight into a walk, on a phone too.</p>
       {owner && (
         <>
           <label className="check-row">
