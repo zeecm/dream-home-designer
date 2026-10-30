@@ -58,9 +58,11 @@ test('on a phone: the menu opens, walls and rooms draw by finger, pinch never dr
   await page.getByRole('button', { name: /Right/ }).tap();
   await page.getByRole('button', { name: 'Add', exact: true }).tap();
   await expect(walls).toHaveText('3');
-  const boxes = await page.locator('[data-hit^="wall:"]').evaluateAll((els) =>
-    els.map((e) => (e as SVGGraphicsElement).getBBox()).map((b) => b.height / b.width),
-  );
+  const boxes = await page
+    .locator('[data-hit^="wall:"]')
+    .evaluateAll((els) =>
+      els.map((e) => (e as SVGGraphicsElement).getBBox()).map((b) => b.height / b.width),
+    );
   expect(boxes.filter((r) => r > 3)).toHaveLength(1);
   await page.getByRole('button', { name: 'Done' }).tap();
   await expect(page.getByRole('button', { name: 'Done' })).toHaveCount(0);
