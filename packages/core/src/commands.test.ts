@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   deleteOpening,
+  deleteRoom,
   deleteVertex,
   deleteWall,
   drawWall,
   renameProject,
   restoreVersion,
+  roomOwnWalls,
   setCeilingHeight,
   setSite,
   setWallLength,
@@ -195,5 +197,28 @@ describe('restoreVersion', () => {
     expect(s.doc.name).toBe(old.name);
     expect(s.doc.version).toBe(7);
     expect(undo(s).doc.name).toBe('Changed');
+  });
+});
+
+describe('deleteRoom', () => {
+  it('takes down the walls only it has, keeping the ones a neighbour shares', () => {
+    let s: EditorDoc = { doc: hdb4RoomProject(), history: emptyHistory() };
+    const lvl = s.doc.levels[0];
+    if (!lvl) throw new Error('no level');
+    const rooms = Object.values(lvl.rooms);
+    // The room with the most walls to itself: a corner bedroom.
+    const target = rooms
+      .map((r) => ({ r, own: roomOwnWalls(lvl, r.id).length }))
+      .sort((a, b) => b.own - a.own)[0];
+    if (!target) throw new Error('no rooms');
+    expect(target.own).toBeGreaterThan(0);
+    const before = Object.keys(lvl.walls).length;
+    s = dispatch(s, deleteRoom(L, target.r.id, lvl));
+    const after = s.doc.levels[0];
+    expect(after?.rooms[target.r.id]).toBeUndefined();
+    expect(Object.keys(after?.walls ?? {}).length).toBe(before - target.own);
+    // Every other room is still there.
+    expect(Object.keys(after?.rooms ?? {}).length).toBe(rooms.length - 1);
+    expect(undo(s).doc.levels[0]?.rooms[target.r.id]).toBeDefined();
   });
 });

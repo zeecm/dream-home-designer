@@ -53,16 +53,42 @@ const isTyping = (t: EventTarget | null) =>
 
 function useTool(tool: Tool, ctx: ToolContext): ToolController {
   // Every tool hook runs every render so hook order never changes.
+  const select = useSelectTool(ctx);
+  const routed = useRef(false);
+  /**
+   * A placing tool that also moves what it placed: a press on an existing piece of its kind
+   * goes to Select for that gesture (a drag moves it, a tap selects it), instead of adding
+   * another one beside it.
+   */
+  const placing = (own: ToolController, kind: 'item' | 'opening'): ToolController => {
+    const onOwn = (p: PlanPointer) => p.hit?.kind === kind;
+    return {
+      ...own,
+      grabs: (p) => onOwn(p) || (own.grabs?.(p) ?? false),
+      down: (p) => {
+        routed.current = onOwn(p);
+        return routed.current ? select.down(p) : own.down(p);
+      },
+      move: (p, dragging, from) =>
+        routed.current && dragging ? select.move(p, dragging) : own.move(p, dragging, from),
+      up: (p) => {
+        if (routed.current) {
+          routed.current = false;
+          select.up(p);
+        } else own.up(p);
+      },
+    };
+  };
   const tools: Record<Tool, ToolController> = {
-    select: useSelectTool(ctx),
+    select,
     measure: useMeasureTool(ctx),
     wall: useWallTool(ctx),
     room: useRoomTool(ctx),
-    door: useOpeningTool(ctx, 'door'),
-    window: useOpeningTool(ctx, 'window'),
-    passage: useOpeningTool(ctx, 'passage'),
+    door: placing(useOpeningTool(ctx, 'door'), 'opening'),
+    window: placing(useOpeningTool(ctx, 'window'), 'opening'),
+    passage: placing(useOpeningTool(ctx, 'passage'), 'opening'),
     calibrate: useCalibrateTool(ctx),
-    furniture: useFurnitureTool(ctx),
+    furniture: placing(useFurnitureTool(ctx), 'item'),
   };
   return tools[tool];
 }
@@ -509,7 +535,19 @@ export function PlanCanvas() {
               preserveAspectRatio="none"
             />
           )}
-          <PlanShapes level={level} geom={geom} interactive={tool === 'select'} />
+          <PlanShapes
+            level={level}
+            geom={geom}
+            interactive={
+              tool === 'select'
+                ? true
+                : tool === 'furniture'
+                  ? 'items'
+                  : tool === 'door' || tool === 'window' || tool === 'passage'
+                    ? 'openings'
+                    : false
+            }
+          />
           <RenovationMarks />
           <PlanHighlights
             level={level}

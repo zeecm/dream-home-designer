@@ -582,6 +582,24 @@ event, detail, country). No project ids, plan content or personal data. Query:
 `curl -X POST https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/analytics_engine/sql -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --data "SELECT blob1 AS event, SUM(_sample_interval) AS n FROM dhd_events WHERE timestamp > NOW() - INTERVAL '7' DAY GROUP BY event"`.
 The Go API logs it locally (`POST /telemetry`, 204).
 
+**Drawing and editing, acceptance round 11 (fingers first, mid-gesture checks):**
+- Every drag draws from where it began, with a mouse as with a finger (a press is resolved on
+  release: a click places a corner, a drag draws the wall or room); the wall, room, scale
+  line and measurement all preview mid-drag.
+- `useCornerHandles` (drawTools): the corners of the wall or room just drawn are handles; a
+  press drags the corner (live lengths, snapped, settled, one undo step), a tap on a wall end
+  carries on drawing from it. The drawing bar's Undo also takes back an end dragged.
+- A tapped first corner shows as a marker. Measure ends can be dragged; a tap starts afresh.
+- In the Door/Window/Opening and Furniture tools, a press on an existing piece of that kind
+  goes to Select for the gesture (a drag moves it), via `placing()` in `PlanCanvas`.
+- Delete room (`deleteRoom`, `roomOwnWalls`): takes down the walls only it has; a room whose
+  walls are all shared says to delete one of them instead.
+- Corners are 32 px targets on touch screens; the scale bar lets drags through; a swipe in a
+  walk moves the scene with the finger; the guide is worded for phones too, keeps a fixed
+  height, and step 1 offers "Draw instead".
+- **Not yet (from the round):** handles on a selected piece of furniture (resize, rotate);
+  dragging a whole wall or room; distances to neighbours while dragging a door; a magnifier.
+
 **Wall tool on phones:** a finger drag previews the first wall (and a room, in Room) from where
 it went down (`ToolController.move`'s `dragFrom`); the last wall's ends show as handles, and a
 finger on one drags that corner (`grabs`; snapped, settled, one undo step) instead of drawing.

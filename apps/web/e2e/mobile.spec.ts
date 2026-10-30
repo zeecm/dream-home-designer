@@ -238,12 +238,22 @@ test('on a phone: the first wall shows under the finger, and its ends can be dra
   await expect(walls).toHaveText('1');
   const moved = await handles.nth(1).boundingBox();
   expect((moved?.x ?? 0) - end.x).toBeGreaterThan(40);
-  // One undo puts it back.
-  await page.getByRole('button', { name: 'Undo', exact: true }).first().tap();
+  // The drawing bar's Undo takes the adjustment back (and the bar stays).
+  await page.locator('.draw-bar').getByRole('button', { name: 'Undo', exact: true }).tap();
   await expect
     .poll(async () => (await handles.nth(1).boundingBox())?.x ?? 0)
     .toBeLessThan(end.x + 5);
   await expect(walls).toHaveText('1');
+
+  await expect(page.locator('.draw-bar')).toBeVisible();
+
+  // A tap on the far end carries on drawing from it: the next tap adds a wall from there.
+  const far = await handles.nth(1).boundingBox();
+  if (!far) throw new Error('no end handle');
+  await page.touchscreen.tap(far.x + far.width / 2, far.y + far.height / 2);
+  r = await planBox(page);
+  await page.touchscreen.tap(far.x + far.width / 2, r.y + r.height * 0.85);
+  await expect(walls).toHaveText('2');
 
   // A room previews mid-drag too.
   await page.getByRole('button', { name: 'Done' }).tap();
@@ -253,5 +263,5 @@ test('on a phone: the first wall shows under the finger, and its ends can be dra
   await h.moveTo({ x: r.x + r.width * 0.5, y: r.y + r.height * 0.4 });
   await expect(page.locator('.ghost-room')).toBeVisible();
   await h.lift();
-  await expect(walls).toHaveText('5');
+  await expect(walls).toHaveText('6');
 });

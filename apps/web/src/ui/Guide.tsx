@@ -28,6 +28,7 @@ export function Guide() {
   const { setTool, startWalk } = useEditor.getState();
   const [on, setOn] = useState(() => isGuided(id));
   const [walked, setWalked] = useState(() => hasWalked(id));
+  const [skipped, setSkipped] = useState(false);
   useEffect(() => {
     setOn(isGuided(id));
     setWalked(hasWalked(id));
@@ -46,7 +47,14 @@ export function Guide() {
     {
       title: 'Add your floor plan',
       how: 'Upload a photo, scan or PDF of it to trace over, or skip this and draw.',
-      done: !!underlay || walls > 0,
+      done: !!underlay || walls > 0 || skipped,
+      action: {
+        label: 'Draw instead',
+        run: () => {
+          setSkipped(true);
+          setTool('wall');
+        },
+      },
     },
     {
       title: 'Set its scale',
@@ -57,13 +65,13 @@ export function Guide() {
     },
     {
       title: 'Draw the walls around a room',
-      how: 'Pick Wall and click corner to corner; close the loop and a room appears.',
+      how: 'Drag from corner to corner, or tap or click each corner; close the loop and a room appears.',
       done: rooms > 0,
       action: { label: 'Draw walls', run: () => setTool('wall') },
     },
     {
       title: 'Walk through it',
-      how: 'See it in 3D from the inside: WASD or the thumb stick to walk.',
+      how: 'See it from the inside: walk with the thumb stick or WASD, and drag to look around.',
       done: walked,
       action: { label: 'Walk through', run: startWalk },
     },

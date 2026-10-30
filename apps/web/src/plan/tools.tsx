@@ -387,19 +387,55 @@ export function useSelectTool(ctx: ToolContext): ToolController {
 export function useMeasureTool(ctx: ToolContext): ToolController {
   const [points, setPoints] = useState<Vec2[]>([]);
   const [cursor, setCursor] = useState<Vec2 | null>(null);
+  /** Where a finger drag measuring anew began, to show the line before the finger lifts. */
+  const [dragFrom, setDragFrom] = useState<Vec2 | null>(null);
+  /** The end of the last measurement a finger is dragging. */
+  const grab = useRef<number | null>(null);
   const snap = (p: PlanPointer) =>
     (p.alt ? null : nearestVertex(ctx, p.world, 10)?.at) ?? gridSnap(p.world, 0.01, p.alt);
+  const endAt = (p: PlanPointer) => {
+    if (points.length < 2) return null;
+    const i = points.findIndex((q) => {
+      const s = worldToScreen(ctx.view, ctx.size, q);
+      return Math.hypot(s.x - p.screen.x, s.y - p.screen.y) <= 22;
+    });
+    return i < 0 ? null : i;
+  };
 
   return {
     cursor: 'crosshair',
-    touchDrag: (a, b) => setPoints([snap(a), snap(b)]),
+    // A finger on an end of the last measurement moves that end.
+    grabs: (p) => {
+      grab.current = endAt(p);
+      return grab.current !== null;
+    },
+    touchDrag: (a, b) => {
+      setPoints([snap(a), snap(b)]);
+      setDragFrom(null);
+      setCursor(null);
+    },
+    touchCancel: () => setDragFrom(null),
     down: (p) => {
+      if (grab.current !== null) return true;
       const at = snap(p);
+      // No stale pointer position: on a phone the next point is the next tap.
+      setCursor(null);
       setPoints((prev) => (prev.length >= 2 ? [at] : [...prev, at]));
       return true;
     },
-    move: (p) => setCursor(snap(p)),
-    up: () => {},
+    move: (p, dragging, from) => {
+      const g = grab.current;
+      if (g !== null && dragging) {
+        const at = snap(p);
+        setPoints((prev) => prev.map((q, i) => (i === g ? at : q)));
+        return;
+      }
+      setDragFrom(from ? snap(from) : null);
+      setCursor(snap(p));
+    },
+    up: () => {
+      grab.current = null;
+    },
     key: (e) => {
       if (e.key === 'Escape' && points.length > 0) {
         setPoints([]);
@@ -408,8 +444,9 @@ export function useMeasureTool(ctx: ToolContext): ToolController {
       return false;
     },
     overlay: ({ view, size }) => {
-      const a = points[0];
-      const b = points[1] ?? cursor;
+      // A finger drag in progress measures from where it began; otherwise the points so far.
+      const a = dragFrom ?? points[0];
+      const b = dragFrom ? cursor : (points[1] ?? cursor);
       if (!a || !b) return null;
       const s0 = worldToScreen(view, size, a);
       const s1 = worldToScreen(view, size, b);

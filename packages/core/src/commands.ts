@@ -177,6 +177,39 @@ export function deleteWall(levelId: string, wallId: string, snapshot?: Level): C
   };
 }
 
+/** The walls along a room's outline that no other room shares: what deleting it removes. */
+export function roomOwnWalls(level: Level, roomId: string): string[] {
+  const room = level.rooms[roomId];
+  if (!room) return [];
+  const edge = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  const edges = (loop: string[]) =>
+    loop.map((v, i) => edge(v, loop[(i + 1) % loop.length] as string));
+  const shared = new Set(
+    Object.values(level.rooms)
+      .filter((r) => r.id !== roomId)
+      .flatMap((r) => edges(r.loop)),
+  );
+  const mine = new Set(edges(room.loop).filter((e) => !shared.has(e)));
+  return Object.values(level.walls)
+    .filter((w) => mine.has(edge(w.a, w.b)))
+    .map((w) => w.id);
+}
+
+/**
+ * Deletes a room: the walls around it that no other room shares (and their doors and
+ * windows), in one undo step. Walls it shares with a neighbour stay, so the neighbour does.
+ */
+export function deleteRoom(levelId: string, roomId: string, snapshot: Level): Command {
+  const walls = roomOwnWalls(snapshot, roomId);
+  const name = snapshot.rooms[roomId]?.name ?? 'room';
+  return {
+    label: `Delete ${name.toLowerCase()}`,
+    recipe: (d) => {
+      for (const id of walls) deleteWall(levelId, id).recipe(d);
+    },
+  };
+}
+
 /** Deletes a corner and every wall that meets it, in one undo step. */
 export function deleteVertex(levelId: string, vertexId: string): Command {
   return {

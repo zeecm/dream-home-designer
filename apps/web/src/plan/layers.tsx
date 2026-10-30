@@ -46,9 +46,15 @@ export const PlanShapes = memo(function PlanShapes({
 }: {
   level: Level;
   geom: PlanGeometry;
-  interactive: boolean;
+  /**
+   * What can be pointed at: everything (Select), or only the pieces a placing tool can also
+   * move (furniture in Furniture; doors, windows and openings in their tools).
+   */
+  interactive: boolean | 'items' | 'openings';
 }) {
-  const pe = interactive ? undefined : 'none';
+  const pe = interactive === true ? undefined : 'none';
+  const peItems = interactive === true || interactive === 'items' ? undefined : 'none';
+  const peOpenings = interactive === true || interactive === 'openings' ? undefined : 'none';
   return (
     <g>
       <g className="rooms">
@@ -121,7 +127,7 @@ export const PlanShapes = memo(function PlanShapes({
               <g
                 key={item.id}
                 data-hit={hit({ kind: 'item', id: item.id })}
-                pointerEvents={pe}
+                pointerEvents={peItems}
                 className="item item-overhead"
               >
                 <circle cx={x} cy={y} r={r} />
@@ -138,7 +144,7 @@ export const PlanShapes = memo(function PlanShapes({
             <g
               key={item.id}
               data-hit={hit({ kind: 'item', id: item.id })}
-              pointerEvents={pe}
+              pointerEvents={peItems}
               className={`item item-${(kind?.category ?? 'other').toLowerCase()}`}
             >
               <polygon points={pts(f)} />
@@ -154,7 +160,7 @@ export const PlanShapes = memo(function PlanShapes({
           const [u0, u1] = o.span;
           const sel = { kind: 'opening', id: o.opening.id } as const;
           return (
-            <g key={o.opening.id} data-hit={hit(sel)} pointerEvents={pe}>
+            <g key={o.opening.id} data-hit={hit(sel)} pointerEvents={peOpenings}>
               <polygon className={`gap gap-${o.kind}`} points={pts(o.polygon)} />
               {o.kind === 'window' && (
                 <>

@@ -707,6 +707,12 @@ select {
 .guide-text {
   flex: 1;
   min-width: 0;
+  /* Two lines whatever the step, so the plan below doesn't jump as the guide moves on. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.6em;
 }
 .app-walking .guide:not(.guide-done) {
   display: none;
@@ -1139,6 +1145,12 @@ input[type="range"] {
 .vertex-hit {
   fill: transparent;
 }
+/* A fingertip, not a mouse pointer: corners are bigger targets on touch screens. */
+@media (pointer: coarse) {
+  .vertex-hit {
+    r: 16px;
+  }
+}
 
 .plan-corner {
   position: absolute;
@@ -1212,6 +1224,8 @@ h3.field-label {
   bottom: 16px;
 }
 .scale-bar {
+  /* A label, not a control: drags that start on it reach the plan. */
+  pointer-events: none;
   align-items: center;
   gap: 8px;
   font-size: var(--fs-small);
@@ -1444,6 +1458,14 @@ h3.field-label {
 }
 .typed.error {
   stroke: var(--negative);
+}
+.handle-length rect {
+  fill: var(--surface);
+  stroke: var(--accent);
+}
+.handle-length text {
+  fill: var(--text);
+  font-size: var(--fs-small);
 }
 .end-handle {
   fill: var(--surface);

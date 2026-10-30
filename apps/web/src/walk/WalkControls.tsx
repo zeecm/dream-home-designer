@@ -127,6 +127,16 @@ export function WalkControls({
     // A finger turns by the screen, not by the pixel: a swipe across the view is half a turn,
     // so a phone can look all round in two swipes, standing still.
     const touchSpeed = () => Math.PI / Math.max(200, el.clientWidth);
+    /**
+     * A drag's turn: a finger moves the scene with it, as in Street View (drag left, look
+     * right); a mouse drag turns the way it moves, as in a game.
+     */
+    const turn = (d: { x: number; y: number; touch: boolean }, e: PointerEvent) => {
+      const dx = e.clientX - d.x;
+      const dy = e.clientY - d.y;
+      if (d.touch) look(-dx, -dy, touchSpeed());
+      else look(dx, dy, LOOK_SPEED);
+    };
     let drag: { id: number; x: number; y: number; touch: boolean } | null = null;
     const onDown = (e: PointerEvent) => {
       if (e.pointerType === 'mouse' && !document.pointerLockElement) {
@@ -149,14 +159,14 @@ export function WalkControls({
         return;
       }
       if (!drag || drag.id !== e.pointerId) return;
-      look(e.clientX - drag.x, e.clientY - drag.y, drag.touch ? touchSpeed() : LOOK_SPEED);
+      turn(drag, e);
       drag = { ...drag, x: e.clientX, y: e.clientY };
     };
     const onUp = (e: PointerEvent) => {
       if (drag?.id !== e.pointerId) return;
       // A busy page can merge a quick swipe's moves into the lift: count its last stretch too.
       if (document.pointerLockElement !== el) {
-        look(e.clientX - drag.x, e.clientY - drag.y, drag.touch ? touchSpeed() : LOOK_SPEED);
+        turn(drag, e);
       }
       drag = null;
     };

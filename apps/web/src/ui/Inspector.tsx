@@ -8,6 +8,7 @@ import {
   cornerSpot,
   deleteItem,
   deleteOpening,
+  deleteRoom,
   deleteVertex,
   deleteWall,
   duplicateOf,
@@ -17,6 +18,7 @@ import {
   moveVertex,
   newId,
   roomArea,
+  roomOwnWalls,
   setCeilingHeight,
   setSite,
   setWallLength,
@@ -791,6 +793,20 @@ function RoomInspector({ level, id }: { level: Level; id: string }) {
         hint="Leave empty to use the flat's ceiling height."
         onCommit={(v) => dispatch(updateRoom(level.id, id, { ceilingHeight: v }))}
       />
+      {roomOwnWalls(level, id).length > 0 ? (
+        <DeleteButton
+          label="Delete room"
+          onClick={() => {
+            dispatch(deleteRoom(level.id, id, level));
+            clear();
+          }}
+        />
+      ) : (
+        <p className="field-hint">
+          Every wall of this room is shared with another room. Delete one of them to join the two
+          rooms.
+        </p>
+      )}
     </>
   );
 }
