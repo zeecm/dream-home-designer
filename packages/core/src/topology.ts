@@ -2,6 +2,7 @@ import type { Draft } from 'immer';
 import { clampOpeningT } from './geometry';
 import type { Command } from './history';
 import { newId } from './ids';
+import { draftLevel } from './levels';
 import { syncRooms } from './rooms';
 import { type Level, type Vec2, isBoundary } from './schema';
 import { projectOnSegment, segmentIntersection } from './snap';
@@ -192,9 +193,7 @@ export function settleVertex(level: Level, vertexId: string): Command {
   return {
     label: 'Move corner',
     recipe: (d) => {
-      const lvl = d.levels.find((x) => x.id === level.id);
-      if (!lvl) throw new Error(`level ${level.id} not found`);
-      applyLevel(lvl, l);
+      applyLevel(draftLevel(d, level.id), l);
     },
   };
 }

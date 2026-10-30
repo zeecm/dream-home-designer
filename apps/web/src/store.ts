@@ -2,6 +2,7 @@ import {
   type Command,
   type DispatchOptions,
   type EditorDoc,
+  type Level,
   type Project,
   blankProject,
   canRedo,
@@ -12,6 +13,7 @@ import {
   emptyHistory,
   newId,
   sampleFlatProject,
+  variantLevels,
 } from '@dhd/core';
 import { create } from 'zustand';
 import {
@@ -164,8 +166,14 @@ const VALID_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
  */
 export const ownsPlan = (id: string) => !!keysFor(id).owner || storedLocally(id);
 
-/** Commands that remove things get an Undo toast. */
-const DESTRUCTIVE = /^Delete /;
+/** Commands that remove things get an Undo toast; this is its text, or null for none. */
+function toastFor(label: string): string | null {
+  if (label === 'Discard the renovation') return 'Renovation discarded';
+  if (label === 'Make the renovation the plan') return 'The renovation is now the plan';
+  if (!label.startsWith('Delete ')) return null;
+  const what = label.slice('Delete '.length);
+  return `${what[0]?.toUpperCase()}${what.slice(1)} deleted`;
+}
 
 /** States in which the open document may be edited. */
 const EDITABLE = new Set<SyncStatus['kind']>(['saved', 'dirty', 'saving', 'conflict', 'error']);
@@ -198,6 +206,8 @@ export const useStore = create<State>((set, get) => {
       recent: role === 'viewer' ? get().recent : rememberRecent(doc, undefined, sample),
     });
     rememberProject(doc.id);
+    // A plan with a renovation opens on it: that is the version being worked on.
+    useEditor.getState().setVariant(doc.renovation ? 'after' : 'before');
   };
 
   /** Finishes any save in flight and saves pending edits before leaving the open project. */
@@ -246,12 +256,8 @@ export const useStore = create<State>((set, get) => {
       const next = coreDispatch(get().editor, cmd, opts);
       if (next === get().editor) return;
       commit(next);
-      if (DESTRUCTIVE.test(cmd.label)) {
-        const what = cmd.label.replace('Delete ', '');
-        set({
-          toast: { text: `${what[0]?.toUpperCase()}${what.slice(1)} deleted`, at: Date.now() },
-        });
-      }
+      const text = toastFor(cmd.label);
+      if (text) set({ toast: { text, at: Date.now() } });
     },
     undo: () => {
       if (!canEdit(get())) return;
@@ -476,3 +482,13 @@ window.addEventListener('beforeunload', (e) => {
 });
 
 export const useProject = () => useStore((s) => s.editor.doc);
+
+/** The level shown and edited: the plan's, or its renovation's when viewing "after". */
+export function useLevel(): Level | undefined {
+  const variant = useEditor((s) => s.variant);
+  return useStore((s) => variantLevels(s.editor.doc, variant)[0]);
+}
+
+/** useLevel outside React, as it is now. */
+export const currentLevel = (): Level | undefined =>
+  variantLevels(useStore.getState().editor.doc, useEditor.getState().variant)[0];

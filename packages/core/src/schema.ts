@@ -143,7 +143,15 @@ export type Site = z.infer<typeof Site>;
 /** Singapore, with north up the plan: what a project without a site gets. */
 export const DEFAULT_SITE: Site = { north: 0, latitude: 1.35, longitude: 103.82, utcOffset: 8 };
 
-export const SCHEMA_VERSION = 4;
+/**
+ * A renovation: the same flat as it is planned to be. It starts as a copy of the project's
+ * levels with the same element ids (each level's id gets AFTER_SUFFIX), so the two can be
+ * compared wall by wall.
+ */
+export const Renovation = z.object({ levels: z.array(Level).min(1) });
+export type Renovation = z.infer<typeof Renovation>;
+
+export const SCHEMA_VERSION = 5;
 
 export const Project = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
@@ -155,6 +163,8 @@ export const Project = z.object({
   underlay: Underlay.nullable(),
   /** Absent means DEFAULT_SITE. */
   site: Site.optional(),
+  /** The flat as it is in `levels`; with a renovation, as it will be here. */
+  renovation: Renovation.optional(),
   levels: z.array(Level).min(1),
 });
 export type Project = z.infer<typeof Project>;

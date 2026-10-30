@@ -30,10 +30,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../editor';
 import { roomsBeside } from '../plan/keyboard';
 import { OPENING_PRESETS, ROOM_NAMES } from '../presets';
-import { useProject, useStore } from '../store';
+import { currentLevel, useLevel, useProject, useStore } from '../store';
 import { formatArea, formatLength } from '../units';
 import { COMPASS_POINTS, Compass, describeFacing, northForFacing, planFacing } from './Compass';
 import { ToolPanel } from './Palette';
+import { RenovationSection } from './Renovation';
 import { LengthField, Segmented, SelectField, TextField } from './fields';
 import { icons } from './icons';
 
@@ -73,7 +74,7 @@ function PaintField({
 const THICKNESS_HINT = 'HDB walls are usually 0.10 m inside and 0.20 m on the outside.';
 
 export function Inspector() {
-  const level = useProject().levels[0];
+  const level = useLevel();
   const selection = useEditor((s) => s.selection);
   const tool = useEditor((s) => s.tool);
   const viewer = useStore((s) => s.role === 'viewer');
@@ -243,6 +244,7 @@ function PlanSummary({ level }: { level: Level }) {
         onCommit={(v) => v !== undefined && dispatch(setCeilingHeight(level.id, v))}
       />
       <NorthField />
+      <RenovationSection />
     </>
   );
 }
@@ -397,7 +399,7 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
           const r = splitWall(level.id, id, corner, level);
           dispatch(r.command);
           // The new corner, selected so it can be dragged or nudged into place.
-          if (useStore.getState().editor.doc.levels[0]?.vertices[r.vertexId]) {
+          if (currentLevel()?.vertices[r.vertexId]) {
             useEditor.getState().select({ kind: 'vertex', id: r.vertexId });
           }
         }}
@@ -450,7 +452,7 @@ function VertexInspector({ level, id }: { level: Level; id: string }) {
   if (!v) return null;
   const walls = Object.values(level.walls).filter((w) => w.a === id || w.b === id);
   const settle = (key: string) => {
-    const moved = useStore.getState().editor.doc.levels[0];
+    const moved = currentLevel();
     if (moved) dispatch(settleVertex(moved, id), { coalesceKey: key });
   };
   const move = (x: number, y: number) => {

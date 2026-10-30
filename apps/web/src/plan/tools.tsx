@@ -20,7 +20,7 @@ import {
 } from '@dhd/core';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { type Selection, type Tool, useEditor } from '../editor';
-import { useStore } from '../store';
+import { currentLevel, useStore } from '../store';
 import { formatLength } from '../units';
 import { cycle, movedVertices, nudge, objectPoint, planObjects } from './keyboard';
 import { type Size, type View, panBy, reveal, worldToScreen } from './view';
@@ -145,7 +145,7 @@ export function useSelectTool(ctx: ToolContext): ToolController {
   const latest = useRef(ctx);
   latest.current = ctx;
   const run = useRef<NudgeRun | null>(null);
-  const live = () => useStore.getState().editor.doc.levels[0] ?? latest.current.level;
+  const live = () => currentLevel() ?? latest.current.level;
 
   /**
    * Ends a run of nudges: merges or splits where the moved corners came to rest, once, like
@@ -276,7 +276,7 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       drag.current = null;
       if (d?.kind === 'vertex' && d.moved) {
         // Merge, split and re-detect rooms once, at the end of the drag, in the same undo step.
-        const level = useStore.getState().editor.doc.levels[0];
+        const level = currentLevel();
         if (level) ctx.dispatch(settleVertex(level, d.id), { coalesceKey: d.key });
       }
     },

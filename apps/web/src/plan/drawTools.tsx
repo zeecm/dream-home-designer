@@ -14,7 +14,7 @@ import {
 } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { newWallOptions, useEditor } from '../editor';
-import { useStore } from '../store';
+import { currentLevel, useStore } from '../store';
 import { useUploadPicker } from '../ui/PlanImage';
 import { formatLength, parseLength } from '../units';
 import { type PlanPointer, type ToolContext, type ToolController, snapTolerance } from './tools';
@@ -106,7 +106,7 @@ export function useWallTool(ctx: ToolContext): ToolController {
   const commit = (end: WallEnd, start: WallEnd | null = from) => {
     if (!start) return;
     try {
-      const level = useStore.getState().editor.doc.levels[0] ?? ctx.level;
+      const level = currentLevel() ?? ctx.level;
       const existed = new Set(Object.keys(level.vertices));
       const r = drawWall(level, start, end, newWallOptions(thickness));
       ctx.dispatch(r.command);
@@ -115,7 +115,7 @@ export function useWallTool(ctx: ToolContext): ToolController {
       setSnap(null);
       const past = useStore.getState().editor.history.past;
       steps.current.push({ start: r.startVertexId, entry: past[past.length - 1] });
-      const after = useStore.getState().editor.doc.levels[0];
+      const after = currentLevel();
       const a = after?.vertices[r.startVertexId];
       const b = after?.vertices[r.endVertexId];
       if (a && b && Math.hypot(b.x - a.x, b.y - a.y) > 1e-9) {
@@ -167,7 +167,7 @@ export function useWallTool(ctx: ToolContext): ToolController {
     }
     setTyped('');
     // Landing on a corner (closing the outline, say) joins it, which also ends the chain.
-    const level = useStore.getState().editor.doc.levels[0] ?? ctx.level;
+    const level = currentLevel() ?? ctx.level;
     const onto = Object.values(level.vertices).find(
       (v) => Math.hypot(v.x - end.x, v.y - end.y) < 0.02,
     );
@@ -192,7 +192,7 @@ export function useWallTool(ctx: ToolContext): ToolController {
       return;
     }
     useStore.getState().undo();
-    const level = useStore.getState().editor.doc.levels[0];
+    const level = currentLevel();
     if (level?.vertices[step.start]) setFrom({ vertexId: step.start });
     else finish();
   };
@@ -858,7 +858,7 @@ export function useRoomTool(ctx: ToolContext): ToolController {
     let first: string | null = null;
     try {
       for (let i = 1; i <= 4; i++) {
-        const level = useStore.getState().editor.doc.levels[0];
+        const level = currentLevel();
         if (!level) return;
         const to: WallEnd =
           i === 4 && first ? { vertexId: first } : { point: corners[i % 4] as Vec2 };

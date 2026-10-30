@@ -4,6 +4,7 @@ import { furnitureKind } from './furniture';
 import { clampOpeningT } from './geometry';
 import type { Command } from './history';
 import { newId } from './ids';
+import { draftLevel } from './levels';
 import { syncRooms } from './rooms';
 import {
   DEFAULT_SITE,
@@ -19,11 +20,7 @@ import {
 import { projectOnSegment, segmentIntersection } from './snap';
 import { endCapture, reclampOpenings, splitWallAt } from './topology';
 
-function level(draft: Draft<Project>, levelId: string): Draft<Level> {
-  const lvl = draft.levels.find((l) => l.id === levelId);
-  if (!lvl) throw new Error(`level ${levelId} not found`);
-  return lvl;
-}
+const level = draftLevel;
 
 export function renameProject(name: string): Command {
   return {

@@ -469,6 +469,19 @@ only) shows north and opens that setting. Lamps: floor and table lamps, ceiling 
 lights (category Lighting; ceiling ones hang from the level's ceiling height and draw as a
 circle-and-cross). `itemLights` places each bulb; the view lights the 8 nearest the camera
 with unshadowed point lights fading out by 7 m, so some light leaks through walls.
+**Before and after (schema 5):** `Project.renovation` holds a second copy of the levels,
+"after"; `levels` stays the flat as it is. `startRenovation` copies every level with the same
+element ids (the level id gets `AFTER_SUFFIX`, `~after`), so every existing command edits
+either version through `draftLevel`/`findLevel`. The web's `variant` (editor store) picks
+which version the plan, 3D and walk show and edit (`useLevel`, `currentLevel`); a plan with
+a renovation opens on "after". `renovationDiff` compares the two by where walls run, not by
+id: a wall split or redrawn in place is unchanged, a moved or thickened one is hacked and
+rebuilt. The plan marks hacked wall (red hatch; a dashed outline in "after") and new wall
+(accent; an outline in "before"); a bar above the stage switches versions and sums the
+changes; the plan details show the totals and "Make it the plan" (`endRenovation('after')`)
+or "Discard the renovation", both undoable with a toast. The plan image, north and site are
+shared. **Not yet:** a side-by-side 3D compare, and listing what changed room by room.
+
 **Your plans:** the project menu's "Manage your plans…" opens a dialog listing this
 browser's plans (the recent list, up to 20): open one, delete one (with an inline confirm), or
 Clear all. Plans this browser owns (owner key, or a local-only plan: `ownsPlan`) are deleted

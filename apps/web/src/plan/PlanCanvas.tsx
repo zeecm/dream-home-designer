@@ -3,9 +3,10 @@ import type { Vec2 } from '@dhd/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type PixelBox, inkBounds } from '../assets';
 import { type Tool, useEditor } from '../editor';
-import { useProject, useStore } from '../store';
+import { currentLevel, useLevel, useProject, useStore } from '../store';
 import { Compass, describeNorth } from '../ui/Compass';
 import { uploadPlanImage, usePlanImage, useUploadPicker } from '../ui/PlanImage';
+import { RenovationMarks } from '../ui/Renovation';
 import { icons } from '../ui/icons';
 import { useCalibrateTool, useOpeningTool, useRoomTool, useWallTool } from './drawTools';
 import { useFurnitureTool } from './furnitureTool';
@@ -70,7 +71,7 @@ export function PlanCanvas() {
   const [wrapRef, size] = useElementSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
   const project = useProject();
-  const level = project.levels[0];
+  const level = useLevel();
   const dispatch = useStore((s) => s.dispatch);
   // Narrow selectors: the canvas re-renders for these, not for every editor change.
   const tool = useEditor((s) => s.tool);
@@ -504,6 +505,7 @@ export function PlanCanvas() {
             />
           )}
           <PlanShapes level={level} geom={geom} interactive={tool === 'select'} />
+          <RenovationMarks />
           <PlanHighlights
             level={level}
             geom={geom}

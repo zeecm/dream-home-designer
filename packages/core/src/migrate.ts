@@ -1,4 +1,4 @@
-import { type Project, SCHEMA_VERSION, parseProject } from './schema';
+import { type Level, type Project, SCHEMA_VERSION, parseProject } from './schema';
 import { repairLevel } from './topology';
 
 /** Thrown for a document written by a newer version of the app than this one. */
@@ -21,6 +21,8 @@ const MIGRATIONS: Record<number, (doc: Record<string, unknown>) => Record<string
   2: (doc) => doc,
   // 4 adds the optional Project.site; without one, north is up and the sun is Singapore's.
   3: (doc) => doc,
+  // 5 adds the optional Project.renovation (the "after" of a before/after pair).
+  4: (doc) => doc,
 };
 
 export function migrate(input: unknown): unknown {
@@ -44,10 +46,15 @@ export function migrate(input: unknown): unknown {
 export function loadProject(input: unknown): { project: Project; fixes: string[] } {
   const project = parseProject(migrate(input));
   const fixes: string[] = [];
-  const levels = project.levels.map((l) => {
+  const repair = (l: Level) => {
     const r = repairLevel(l);
     fixes.push(...r.fixes);
     return r.level;
-  });
-  return { project: fixes.length ? { ...project, levels } : project, fixes };
+  };
+  const levels = project.levels.map(repair);
+  const renovation = project.renovation && { levels: project.renovation.levels.map(repair) };
+  return {
+    project: fixes.length ? { ...project, levels, ...(renovation ? { renovation } : {}) } : project,
+    fixes,
+  };
 }

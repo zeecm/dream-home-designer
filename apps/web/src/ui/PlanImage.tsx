@@ -19,7 +19,7 @@ import {
   useAsset,
 } from '../assets';
 import { useEditor } from '../editor';
-import { useProject, useStore } from '../store';
+import { currentLevel, useLevel, useProject, useStore } from '../store';
 import { icons } from './icons';
 
 /**
@@ -38,7 +38,7 @@ export async function uploadPlanImage(file: File): Promise<void> {
   const centre = view ? { x: view.cx, y: view.cy } : { x: 0, y: 0 };
   useStore.getState().dispatch(setUnderlay(placeUnderlay(key, { width, height }, centre)));
   // On a plan with no walls yet, frame the new image's drawing, not the page around it.
-  const walls = useStore.getState().editor.doc.levels[0]?.walls ?? {};
+  const walls = currentLevel()?.walls ?? {};
   if (Object.keys(walls).length === 0) useEditor.getState().requestFit();
   // Straight into calibration: the image's scale is only a guess until then.
   useEditor.getState().setTool('calibrate');

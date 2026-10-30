@@ -1,5 +1,6 @@
 import type { Draft } from 'immer';
 import type { Command } from './history';
+import { draftLevel } from './levels';
 import type { PlanGeometry } from './plan';
 import type { Item, Level, Project, Vec2, Vec3 } from './schema';
 
@@ -522,11 +523,7 @@ function clipSlab(poly: Vec2[], y0: number, y1: number): Vec2[] {
   );
 }
 
-function lvl(d: Draft<Project>, levelId: string): Draft<Level> {
-  const l = d.levels.find((x) => x.id === levelId);
-  if (!l) throw new Error(`level ${levelId} not found`);
-  return l;
-}
+const lvl = draftLevel;
 
 /** Adds a piece of furniture. The caller makes the item (and its id) beforehand. */
 export function addItem(levelId: string, item: Item): Command {

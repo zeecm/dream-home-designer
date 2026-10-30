@@ -15,7 +15,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useEditor } from './editor';
-import { useProject } from './store';
+import { useLevel, useProject } from './store';
 import { Joystick } from './walk/Joystick';
 import { MiniMap } from './walk/MiniMap';
 import { WalkControls, type WalkPose } from './walk/WalkControls';
@@ -29,7 +29,7 @@ const FOV = 40;
  * puts the ceilings on (the orbit view leaves them off to see in).
  */
 function LevelMesh({ ceilings }: { ceilings: boolean }) {
-  const level = useProject().levels[0];
+  const level = useLevel();
   const meshes = useMemo(() => new LevelMeshes(materials, { ceilings }), [ceilings]);
   useEffect(() => () => meshes.dispose(), [meshes]);
   useLayoutEffect(() => {
@@ -188,7 +188,7 @@ const coarsePointer = () => window.matchMedia('(pointer: coarse)').matches;
 
 export function Viewport() {
   const project = useProject();
-  const level = project.levels[0];
+  const level = useLevel();
   const hasWalls = !!level && Object.keys(level.walls).length > 0;
   const hasRooms = !!level && Object.keys(level.rooms).length > 0;
   const dark = usePrefersDark();

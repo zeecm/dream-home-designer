@@ -6,6 +6,7 @@ import { PlanCanvas } from './plan/PlanCanvas';
 import { initialProjectId, useProject, useStore } from './store';
 import { Inspector } from './ui/Inspector';
 import { Palette, TOOLS } from './ui/Palette';
+import { RenovationBar } from './ui/Renovation';
 import { TopBar } from './ui/TopBar';
 import { icons } from './ui/icons';
 
@@ -227,6 +228,7 @@ export function App() {
         <Palette />
         <main className={`panel stage stage-${viewMode}`}>
           <SampleBanner />
+          <RenovationBar />
           <ViewOnlyBanner />
           <Notice />
           <Toast />

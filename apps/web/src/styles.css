@@ -652,6 +652,92 @@ select {
   border-bottom: 1px solid var(--border);
   font-size: var(--fs-small);
 }
+/* ---------------------------------------------------------------- renovation */
+
+.reno-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+.reno-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.reno-key {
+  display: inline-block;
+  flex: none;
+  width: 12px;
+  height: 8px;
+  border-radius: 2px;
+}
+.reno-key-hack {
+  background: repeating-linear-gradient(45deg, var(--negative) 0 2px, transparent 2px 4px);
+  outline: 1px solid var(--negative);
+}
+.reno-key-new {
+  background: var(--accent);
+}
+.reno-hatch-line {
+  stroke: var(--negative);
+  stroke-width: 0.03;
+}
+.reno-hack {
+  fill: url(#reno-hatch);
+  stroke: var(--negative);
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+}
+/* After: the hacked wall is gone, so only its outline remains, dashed. */
+.reno-after .reno-hack {
+  fill-opacity: 0.6;
+  stroke-dasharray: 4 3;
+}
+.reno-new {
+  fill: var(--accent);
+  fill-opacity: 0.75;
+  stroke: var(--accent);
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+}
+/* Before: where new wall will stand, as an outline. */
+.reno-before .reno-new {
+  fill-opacity: 0.12;
+  stroke-dasharray: 4 3;
+}
+.reno-section {
+  display: grid;
+  gap: 8px;
+}
+.reno-facts {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+.reno-facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.reno-facts dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+.reno-facts dd {
+  margin: 0;
+}
+
 .toast {
   position: absolute;
   left: 50%;
