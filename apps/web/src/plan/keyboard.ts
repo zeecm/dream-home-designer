@@ -116,7 +116,12 @@ export function describe(level: Level, sel: Selection | null): string {
       if (!w) return '';
       const what = isBoundary(w) ? 'Room boundary' : 'Wall';
       const rooms = roomsBeside(level, sel.id);
-      const where = rooms.length ? ` between ${rooms.join(' and ')}` : '';
+      const where =
+        rooms.length === 2
+          ? ` between ${rooms.join(' and ')}`
+          : rooms.length === 1
+            ? ` between ${rooms[0]} and outside`
+            : '';
       return `${what}${where}, ${formatLength(wallLine(level, w).length)} long`;
     }
     case 'opening': {

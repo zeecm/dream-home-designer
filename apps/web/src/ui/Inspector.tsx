@@ -90,7 +90,7 @@ function PlanSummary({ level }: { level: Level }) {
     .sort((a, b) => b.area - a.area);
   // The true total, rounded once; the rounded room figures may differ from it by 0.1.
   const total = rooms.reduce((s, r) => s + r.area, 0);
-  const walls = Object.keys(level.walls).length;
+  const walls = Object.values(level.walls).filter((w) => !isBoundary(w)).length;
   const openings = Object.values(level.openings);
   const count = (k: Opening['kind']) => openings.filter((o) => o.kind === k).length;
 
@@ -218,7 +218,7 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
       <DeleteButton
         label={boundary ? 'Delete boundary' : 'Delete wall'}
         onClick={() => {
-          dispatch(deleteWall(level.id, id));
+          dispatch(deleteWall(level.id, id, level));
           clear();
         }}
       />

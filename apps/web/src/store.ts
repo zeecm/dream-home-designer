@@ -33,7 +33,12 @@ export type SyncStatus =
   | { kind: 'conflict'; serverVersion: number }
   | { kind: 'error'; message: string }
   /** The server couldn't be reached to open `id`; nothing is forgotten, and Retry tries again. */
-  | { kind: 'unreachable'; id: string };
+  | { kind: 'unreachable'; id: string }
+  /**
+   * `id` could not be opened (a newer format, a bad document, a server error). The editor
+   * still holds whatever was open before, which must not be edited or saved in its place.
+   */
+  | { kind: 'failed'; id: string; message: string };
 
 interface State {
   backend: Backend | null;
@@ -257,14 +262,16 @@ export const useStore = create<State>((set, get) => {
         });
         return get().openSample();
       } catch (e) {
-        set({ sync: { kind: 'error', message: errorMessage('Could not open the project', e) } });
+        set({
+          sync: { kind: 'failed', id, message: errorMessage('Could not open the project', e) },
+        });
       }
     },
 
     retry: async () => {
       const s = get().sync;
       await resolveBackend(true);
-      if (s.kind === 'unreachable') return get().load(s.id);
+      if (s.kind === 'unreachable' || s.kind === 'failed') return get().load(s.id);
       if (s.kind === 'error') return get().save();
     },
 
@@ -284,7 +291,13 @@ export const useStore = create<State>((set, get) => {
       }
       const backend = get().backend;
       const kind = get().sync.kind;
-      if (!backend || kind === 'conflict' || kind === 'loading' || kind === 'unreachable') {
+      if (
+        !backend ||
+        kind === 'conflict' ||
+        kind === 'loading' ||
+        kind === 'unreachable' ||
+        kind === 'failed'
+      ) {
         return Promise.resolve();
       }
       const sent = get().editor.doc;

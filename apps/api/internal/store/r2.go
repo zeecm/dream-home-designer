@@ -191,7 +191,7 @@ func (s *R2) Delete(ctx context.Context, id string) error {
 	if _, err := s.head(ctx, id); err != nil {
 		return err
 	}
-	if err := s.deleteImage(ctx, id); err != nil {
+	if err := s.DeleteImage(ctx, id); err != nil {
 		return err
 	}
 	res, err := s.do(ctx, http.MethodDelete, objectKey(id), nil, nil, nil)

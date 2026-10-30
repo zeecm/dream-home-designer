@@ -74,7 +74,7 @@ func TestFileStoreKeepsImagesAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	img, err := reopened.GetImage(ctx, "prj_a")
+	img, err := readImage(ctx, reopened, "prj_a")
 	if err != nil || img.Hash != "h1" || img.ContentType != "image/png" || string(img.Data) != "png" {
 		t.Fatalf("image after reopen: %+v %v", img, err)
 	}
@@ -85,7 +85,7 @@ func TestFileStoreKeepsImagesAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := again.GetImage(ctx, "prj_a"); !errors.Is(err, ErrNoImage) {
+	if _, err := readImage(ctx, again, "prj_a"); !errors.Is(err, ErrNoImage) {
 		t.Fatalf("image after delete and reopen: %v", err)
 	}
 }

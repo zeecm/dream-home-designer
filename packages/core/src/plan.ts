@@ -231,13 +231,19 @@ export function placeOpening(
     const d = Math.hypot(p.x - foot.x, p.y - foot.y);
     if (d > tolerance + f.half || (best && d >= best.d)) continue;
     const w = Math.min(width, f.length - 0.1);
+    const ct = clampOpeningT(f.length, w, t);
+    // Openings can't overlap: two doors in one gap would draw and build as nonsense.
+    const [c0, c1] = [ct * f.length - w / 2, ct * f.length + w / 2];
+    const clear = !geom.openings.some(
+      (o) => o.wallId === f.wall.id && o.span[0] < c1 - 1e-6 && o.span[1] > c0 + 1e-6,
+    );
     best = {
       wallId: f.wall.id,
-      t: clampOpeningT(f.length, w, t),
+      t: ct,
       width: w,
       side: (p.x - foot.x) * f.n.x + (p.y - foot.y) * f.n.y >= 0 ? 1 : -1,
       nearA: t < 0.5,
-      fits: w >= 0.4,
+      fits: w >= 0.4 && clear,
       d,
     };
   }

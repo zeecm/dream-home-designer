@@ -8,8 +8,9 @@ export const BARE_MM_FROM = 50;
  */
 export function parseLength(input: string): number | null {
   let s = input.trim().toLowerCase();
-  // "10,275" groups thousands; any other single comma is a decimal comma ("3,5" is 3.5).
-  if (/^-?\d{1,3}(,\d{3})+(\.\d+)?\s*[a-z]*$/.test(s)) s = s.replace(/,/g, '');
+  // "10,275" or "2,500 mm" groups thousands (a whole number of millimetres); any other single
+  // comma is a decimal comma: "3,5", "0,040" and "2,450 m" are 3.5, 0.04 and 2.45.
+  if (/^-?[1-9]\d{0,2}(,\d{3})+\s*(mm)?$/.test(s)) s = s.replace(/,/g, '');
   else if ((s.match(/,/g) ?? []).length === 1 && !s.includes('.')) s = s.replace(',', '.');
   const m = s.match(/^(-?\d*\.?\d+)\s*(mm|cm|m)?$/);
   if (!m) return null;

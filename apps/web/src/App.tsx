@@ -79,7 +79,7 @@ function Notice() {
       </output>
     );
   }
-  if (sync.kind === 'unreachable' || (sync.kind === 'error' && !notice)) {
+  if (sync.kind === 'unreachable' || sync.kind === 'failed' || (sync.kind === 'error' && !notice)) {
     return (
       <output className="notice notice-error">
         <span>

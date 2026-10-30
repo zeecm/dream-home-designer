@@ -65,3 +65,22 @@ test('a wall can become a room boundary: rooms stay, the wall goes from 3D', asy
   await page.keyboard.press('Control+z');
   await expect(page.locator('line.boundary')).toHaveCount(0);
 });
+
+test('an edit lands on the object it was typed for, even after clicking another', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await page.locator('[data-hit="room:rm_kitchen"]').click({ force: true });
+  const name = page.getByLabel('Name', { exact: true });
+  await name.fill('Pantry');
+  // Click another room without pressing Enter: the rename still belongs to the kitchen.
+  await page.locator('[data-hit="room:rm_bedroom-2"]').click({ force: true });
+  await expect(name).toHaveValue('Bedroom 2');
+  await page.keyboard.press('Escape');
+  const rooms = page.locator('.room-list-name');
+  await expect(rooms.filter({ hasText: 'Pantry' })).toHaveCount(1);
+  await expect(rooms.filter({ hasText: 'Bedroom 2' })).toHaveCount(1);
+  await expect(rooms.filter({ hasText: 'Kitchen' })).toHaveCount(0);
+});

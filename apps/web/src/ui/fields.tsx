@@ -40,6 +40,45 @@ interface LengthFieldProps {
  * A length in metres that accepts mm, cm or m. Commits on Enter or blur; Escape
  * restores the current value. Out-of-range input is refused with a reason.
  */
+/**
+ * The text of a field being edited, pinned to what it was editing. The first keystroke
+ * records `target` (the commit callback and the values it checks against), so if the
+ * selection changes before the field loses focus (a click on another wall), the edit still
+ * lands on the object it was typed for, and the field then shows the new selection.
+ */
+function useEdit<T>(shown: string, target: T) {
+  const [text, setText] = useState(shown);
+  const session = useRef<{ draft: string; target: T } | null>(null);
+  const latest = useRef(shown);
+  latest.current = shown;
+  useEffect(() => {
+    if (!session.current) setText(shown);
+  }, [shown]);
+  return {
+    draft: text,
+    editing: () => session.current !== null,
+    type: (draft: string) => {
+      session.current = { draft, target: session.current?.target ?? target };
+      setText(draft);
+    },
+    /** Ends the edit, returning what was typed and for what; null if nothing was typed. */
+    take: () => {
+      const s = session.current;
+      session.current = null;
+      return s;
+    },
+    /** Keeps an edit open (after a refused value) so it can be corrected. */
+    keep: (s: { draft: string; target: T }) => {
+      session.current = s;
+    },
+    /** Shows the current selection's value again. */
+    reset: () => {
+      session.current = null;
+      setText(latest.current);
+    },
+  };
+}
+
 export function LengthField({
   label,
   value,
@@ -51,37 +90,44 @@ export function LengthField({
   onCommit,
 }: LengthFieldProps) {
   const shown = value === undefined ? '' : formatLength(value);
-  const [draft, setDraft] = useState(shown);
+  const edit = useEdit(shown, { value, min, max, allowEmpty, onCommit });
   const [error, setError] = useState<string | null>(null);
   // Escape blurs the field; the blur that follows must not commit what was typed.
   const cancelled = useRef(false);
+  // A new value from outside (another selection, undo) clears an old complaint.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the shown value changes
   useEffect(() => {
-    setDraft(shown);
-    setError(null);
+    if (!edit.editing()) setError(null);
   }, [shown]);
 
   const commit = () => {
     if (cancelled.current) {
       cancelled.current = false;
+      edit.reset();
       return;
     }
-    if (draft.trim() === '' && allowEmpty) {
-      if (value !== undefined) onCommit(undefined);
+    const s = edit.take();
+    if (!s) return; // nothing typed
+    const t = s.target;
+    if (s.draft.trim() === '' && t.allowEmpty) {
+      if (t.value !== undefined) t.onCommit(undefined);
       setError(null);
+      edit.reset();
       return;
     }
-    const v = parseLength(draft);
-    if (v === null) {
-      setError('Enter a length such as 2.5 m, 250 cm, 2500 mm or just 2500.');
-      return;
-    }
-    if (v < min || v > max) {
-      setError(`Between ${formatLength(min)} and ${formatLength(max)}.`);
+    const v = parseLength(s.draft);
+    if (v === null || v < t.min || v > t.max) {
+      setError(
+        v === null
+          ? 'Enter a length such as 2.5 m, 250 cm, 2500 mm or just 2500.'
+          : `Between ${formatLength(t.min)} and ${formatLength(t.max)}.`,
+      );
+      edit.keep(s);
       return;
     }
     setError(null);
-    if (value === undefined || Math.abs(v - value) > 1e-9) onCommit(v);
-    else setDraft(shown);
+    if (t.value === undefined || Math.abs(v - t.value) > 1e-9) t.onCommit(v);
+    edit.reset();
   };
 
   return (
@@ -91,17 +137,16 @@ export function LengthField({
           id={id}
           className={`input num${error ? ' invalid' : ''}`}
           inputMode="decimal"
-          value={draft}
+          value={edit.draft}
           placeholder={placeholder}
           aria-invalid={!!error}
           aria-describedby={describedBy}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => edit.type(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => {
             if (e.key === 'Enter') e.currentTarget.blur();
             if (e.key === 'Escape') {
               cancelled.current = true;
-              setDraft(shown);
               setError(null);
               e.currentTarget.blur();
             }
@@ -130,10 +175,9 @@ export function TextField({
   onDone?: () => void;
   onCommit: (v: string) => void;
 }) {
-  const [draft, setDraft] = useState(value);
+  const edit = useEdit(value, { value, onCommit });
   const input = useRef<HTMLInputElement>(null);
   const listId = useId();
-  useEffect(() => setDraft(value), [value]);
   // Focus on a new request only, not on mount with a token left over from an earlier one.
   const seenToken = useRef(focusToken);
   const requested = useRef(false);
@@ -146,14 +190,14 @@ export function TextField({
     input.current?.select();
   }, [focusToken]);
   const commit = () => {
+    const s = edit.take();
     if (cancelled.current) {
       cancelled.current = false;
-      setDraft(value);
-      return;
+    } else if (s) {
+      const v = s.draft.trim();
+      if (v && v !== s.target.value) s.target.onCommit(v);
     }
-    const v = draft.trim();
-    if (v && v !== value) onCommit(v);
-    else setDraft(value);
+    edit.reset();
   };
   return (
     <Field label={label}>
@@ -163,10 +207,10 @@ export function TextField({
             id={id}
             ref={input}
             className="input"
-            value={draft}
+            value={edit.draft}
             list={suggestions ? listId : undefined}
             autoComplete="off"
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => edit.type(e.target.value)}
             onBlur={() => {
               commit();
               requested.current = false;

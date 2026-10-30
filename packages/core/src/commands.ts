@@ -106,9 +106,12 @@ export function setWallThickness(levelId: string, wallId: string, thickness: num
  * Deletes the wall, its openings and any vertex left unused, then re-detects rooms: two
  * rooms the wall divided merge into one (keeping the larger one's name).
  */
-export function deleteWall(levelId: string, wallId: string): Command {
+/** `snapshot` (optional) names the undo step after what it deletes: a wall or a boundary. */
+export function deleteWall(levelId: string, wallId: string, snapshot?: Level): Command {
+  const w = snapshot?.walls[wallId];
+  const what = w && isBoundary(w) ? 'boundary' : 'wall';
   return {
-    label: 'Delete wall',
+    label: `Delete ${what}`,
     recipe: (d) => {
       const lvl = level(d, levelId);
       const wall = lvl.walls[wallId];
@@ -570,10 +573,18 @@ export function drawWall(
         const a = chain[i] as string;
         const b = chain[i + 1] as string;
         const id = wallIds[i] as string;
-        const exists = Object.values(lvl.walls).some(
+        const existing = Object.values(lvl.walls).find(
           (w) => (w.a === a && w.b === b) || (w.a === b && w.b === a),
         );
-        if (a === b || exists) continue;
+        if (a === b) continue;
+        if (existing) {
+          // Tracing a wall over a boundary turns the boundary into that wall.
+          if (isBoundary(existing) && opts.kind !== 'boundary') {
+            delete existing.kind;
+            existing.thickness = opts.thickness ?? 0.1;
+          }
+          continue;
+        }
         lvl.walls[id] = {
           id,
           a,

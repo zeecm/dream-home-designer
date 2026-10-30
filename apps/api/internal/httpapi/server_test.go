@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -239,6 +240,17 @@ func TestPlanImage(t *testing.T) {
 		t.Fatalf("oversized: %d", res.StatusCode)
 	}
 
+	head, _ := do(t, "HEAD", ts.URL+"/projects/prj_a/image/"+hash, nil, nil)
+	if head.StatusCode != http.StatusOK || head.Header.Get("Content-Length") != strconv.Itoa(len(tinyPNG)) {
+		t.Fatalf("head: %d %v", head.StatusCode, head.Header)
+	}
+	if res, _ := do(t, "DELETE", ts.URL+"/projects/prj_a/image", nil, nil); res.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete image: %d", res.StatusCode)
+	}
+	if res, _ := do(t, "GET", ts.URL+"/projects/prj_a/image/"+hash, nil, nil); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("image after its delete: %d", res.StatusCode)
+	}
+	do(t, "PUT", ts.URL+"/projects/prj_a/image", tinyPNG, nil)
 	do(t, "DELETE", ts.URL+"/projects/prj_a", nil, nil)
 	if res, _ := do(t, "GET", ts.URL+"/projects/prj_a/image/"+hash, nil, nil); res.StatusCode != http.StatusNotFound {
 		t.Fatalf("image after delete: %d", res.StatusCode)

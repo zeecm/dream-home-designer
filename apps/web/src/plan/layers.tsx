@@ -231,11 +231,13 @@ function roomLabels(level: Level, geom: PlanGeometry, zoom: number): RoomLabel[]
     const area = formatArea(roomArea(level, r));
     // Rough advance widths of the label face at 14px semibold and 13px regular. The
     // name matters more than the area, so the area goes first, then the name shortens.
-    const room = w - 12;
+    // Room inside the walls: centre lines less up to 0.1 m of wall on each side.
+    const wallPx = 0.2 * zoom;
+    const room = w - 12 - wallPx;
     let name = r.name;
     while (name.length > 3 && name.length * 7.6 > room) name = `${name.slice(0, -2)}…`;
-    const nameFits = name.length * 7.6 <= room && h >= 22;
-    const areaFits = nameFits && area.length * 6.8 <= room && h >= 40;
+    const nameFits = name.length * 7.6 <= room && h - wallPx >= 22;
+    const areaFits = nameFits && area.length * 6.8 <= room && h - wallPx >= 40;
     if (!nameFits) continue;
     const halfPx = {
       x: Math.max(name.length * 7.6, areaFits ? area.length * 6.8 : 0) / 2 + 4,

@@ -114,6 +114,10 @@ export function useAsset(key: string | undefined, remote?: RemoteImage): AssetSt
   fetchRemote.current = remote;
   const hasRemote = !!remote;
   const shown = useRef<string | undefined>(undefined);
+  // A miss on the server may be an upload still on its way: try again a few times.
+  const [attempt, setAttempt] = useState(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: key, a server becoming known, retries
+  useEffect(() => setAttempt(0), [key]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: retry once a server is known
   useEffect(() => {
     if (!key) {
@@ -123,15 +127,20 @@ export function useAsset(key: string | undefined, remote?: RemoteImage): AssetSt
     let live = true;
     // Keep showing this key's image while a server becoming known re-runs the effect.
     setState((s) => (s.status === 'ready' && shown.current === key ? s : { status: 'loading' }));
+    let timer: ReturnType<typeof setTimeout> | undefined;
     void loadAsset(key, fetchRemote.current).then((img) => {
       if (!live) return;
       shown.current = img ? key : undefined;
       setState(img ? { status: 'ready', ...img } : { status: 'missing' });
+      if (!img && fetchRemote.current && attempt < 3) {
+        timer = setTimeout(() => setAttempt((a) => a + 1), 5000);
+      }
     });
     return () => {
       live = false;
+      clearTimeout(timer);
     };
-  }, [key, hasRemote]);
+  }, [key, hasRemote, attempt]);
   return state;
 }
 
@@ -167,8 +176,29 @@ export async function prepareUpload(
   }
 }
 
-async function reencode(url: string, width: number, height: number) {
-  const f = Math.min(1, REENCODE_PX / Math.max(width, height));
+/**
+ * The image as the server will take it: PNG, JPEG or WebP up to 10 MB. Anything else is
+ * redrawn as JPEG, smaller each try, until it fits. `factor` is new pixels per old pixel.
+ */
+export async function normalizeForServer(blob: Blob): Promise<{ blob: Blob; factor: number }> {
+  if (SERVER_TYPES.includes(blob.type) && blob.size <= SERVER_MAX_BYTES) return { blob, factor: 1 };
+  const url = URL.createObjectURL(blob);
+  try {
+    const { width, height } = await measure(url);
+    let maxPx = REENCODE_PX;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const out = await reencode(url, width, height, maxPx);
+      if (out.blob.size <= SERVER_MAX_BYTES) return { blob: out.blob, factor: out.width / width };
+      maxPx = Math.round(maxPx * 0.7);
+    }
+    throw new Error('413 the image is still over 10 MB');
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function reencode(url: string, width: number, height: number, maxPx = REENCODE_PX) {
+  const f = Math.min(1, maxPx / Math.max(width, height));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(width * f));
   canvas.height = Math.max(1, Math.round(height * f));

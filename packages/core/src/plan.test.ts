@@ -66,10 +66,10 @@ describe('doorSwing', () => {
 describe('placeOpening', () => {
   const g = planGeometry(hdb4RoomLevel());
   it('centres on the pointer on the nearest wall and records the side', () => {
-    // Just inside the kitchen, under the front wall (y = 0) at x = 8.
-    const p = placeOpening(g, { x: 8, y: 0.2 }, 1.2, 0.3)!;
+    // Just inside the kitchen, under the front wall (y = 0) at x = 6.5, clear of its window.
+    const p = placeOpening(g, { x: 6.5, y: 0.2 }, 1.2, 0.3)!;
     expect(p.wallId).toBe('w_front_r');
-    expect(p.t * 6).toBeCloseTo(3); // 8 m is 3 m along the 6 m wall from x = 5
+    expect(p.t * 6).toBeCloseTo(1.5); // 6.5 m is 1.5 m along the 6 m wall from x = 5
     expect(p.side).toBe(1); // +n of a +x wall is +y, into the flat
     expect(p.fits).toBe(true);
   });
@@ -138,5 +138,78 @@ describe('room boundaries', () => {
     const { project } = loadProject(JSON.parse(JSON.stringify(v1)));
     expect(project.schemaVersion).toBe(SCHEMA_VERSION);
     expect(project.levels[0]?.walls).toEqual(hdb4RoomProject().levels[0]?.walls);
+  });
+});
+
+describe('boundaries meeting walls (review round 4)', () => {
+  const room = () => {
+    let s: EditorDoc = { doc: blankProject('t', 'prj_t'), history: emptyHistory() };
+    const lvl = () => s.doc.levels[0] as Level;
+    const draw = (a: Vec2, b: Vec2, opts: { kind?: 'boundary'; thickness?: number } = {}) => {
+      s = dispatch(s, drawWall(lvl(), { point: a }, { point: b }, opts).command);
+    };
+    const c = [
+      { x: 0, y: 0 },
+      { x: 6, y: 0 },
+      { x: 6, y: 4 },
+      { x: 0, y: 4 },
+    ];
+    for (let i = 0; i < 4; i++) draw(c[i] as Vec2, c[(i + 1) % 4] as Vec2, { thickness: 0.2 });
+    return {
+      lvl,
+      draw,
+      apply: (cmd: Parameters<typeof dispatch>[1]) => {
+        s = dispatch(s, cmd);
+      },
+    };
+  };
+  const centre = (l: Level, id: string) => {
+    const o = l.openings[id] as { wallId: string; t: number };
+    const w = l.walls[o.wallId] as Wall;
+    const a = l.vertices[w.a] as Vec2;
+    const b = l.vertices[w.b] as Vec2;
+    return { x: a.x + (b.x - a.x) * o.t, y: a.y + (b.y - a.y) * o.t };
+  };
+
+  it('ending on a window snaps to its jamb instead of moving the window', () => {
+    const r = room();
+    const p = placeOpening(planGeometry(r.lvl()), { x: 3, y: 0.1 }, 2, 0.3);
+    const op = addOpening(r.lvl().id, {
+      wallId: p?.wallId as string,
+      kind: 'window',
+      t: p?.t as number,
+      width: 2,
+      height: 1.2,
+      sill: 0.9,
+    });
+    r.apply(op.command);
+    r.draw({ x: 3.2, y: 2 }, { x: 3.2, y: 0 }, { kind: 'boundary' });
+    const at = centre(r.lvl(), op.openingId);
+    expect(at.x).toBeCloseTo(3);
+    expect(r.lvl().openings[op.openingId]?.width).toBeCloseTo(2);
+    // The boundary met the facade at the window's right jamb.
+    expect(Object.values(r.lvl().vertices).some((v) => Math.abs(v.x - 4) < 1e-9 && v.y === 0)).toBe(
+      true,
+    );
+  });
+
+  it('drawing a wall along a boundary turns it into a wall', () => {
+    const r = room();
+    r.draw({ x: 3, y: 0 }, { x: 3, y: 4 }, { kind: 'boundary' });
+    const b = Object.values(r.lvl().walls).find((w) => isBoundary(w)) as Wall;
+    r.draw({ x: 3, y: 0 }, { x: 3, y: 4 }, { thickness: 0.1 });
+    expect(r.lvl().walls[b.id]?.kind).toBeUndefined();
+    expect(Object.values(r.lvl().walls).filter((w) => isBoundary(w))).toHaveLength(0);
+  });
+});
+
+describe('placeOpening overlap', () => {
+  it('does not fit where another opening already is', () => {
+    const l = hdb4RoomLevel();
+    const geom = planGeometry(l);
+    const o = geom.openings[0];
+    if (!o) throw new Error('fixture');
+    const mid = framePoint(o.frame, (o.span[0] + o.span[1]) / 2, 0);
+    expect(placeOpening(geom, mid, 0.9, 0.3)?.fits).toBe(false);
   });
 });

@@ -1089,13 +1089,23 @@ select {
 @media (max-width: 720px) {
   .app {
     grid-template-rows: 48px 1fr auto;
+    overflow-x: hidden;
+  }
+  /* Nothing may push the page wider than the phone: the name and status give way first. */
+  .workspace > .panel,
+  .topbar-left,
+  .topbar-right {
+    min-width: 0;
+  }
+  .topbar-left {
+    overflow: hidden;
   }
   .brand-name,
   .topbar-divider {
     display: none;
   }
   .topbar .pill {
-    max-width: 22vw;
+    max-width: 18vw;
     overflow: hidden;
     text-overflow: ellipsis;
     padding: 0 6px;

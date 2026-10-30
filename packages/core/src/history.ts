@@ -38,11 +38,17 @@ export function emptyHistory(): History {
 
 export interface DispatchOptions {
   coalesceKey?: string;
+  /**
+   * False for bookkeeping the user didn't do (renaming a stored file, say): the change is
+   * kept but is not an undo step, and the redo stack stays.
+   */
+  record?: boolean;
 }
 
 export function dispatch(state: EditorDoc, cmd: Command, opts: DispatchOptions = {}): EditorDoc {
   const [doc, patches, inverse] = produceWithPatches(state.doc, cmd.recipe);
   if (patches.length === 0) return state;
+  if (opts.record === false) return { doc, history: state.history };
 
   const past = state.history.past.slice();
   const last = past[past.length - 1];

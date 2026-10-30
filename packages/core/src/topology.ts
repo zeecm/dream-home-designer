@@ -3,7 +3,7 @@ import { clampOpeningT } from './geometry';
 import type { Command } from './history';
 import { newId } from './ids';
 import { syncRooms } from './rooms';
-import type { Level, Vec2 } from './schema';
+import { type Level, type Vec2, isBoundary } from './schema';
 import { projectOnSegment, segmentIntersection } from './snap';
 
 type Mut = Level | Draft<Level>;
@@ -28,7 +28,21 @@ export function splitWallAt(l: Mut, wallId: string, vertexId: string, newWallId:
   const v = l.vertices[vertexId];
   if (!w || !a || !b || !v) throw new Error(`cannot split wall ${wallId}`);
   const length = dist(a, b);
-  const us = projectOnSegment(v, a, b).t * length;
+  let us = projectOnSegment(v, a, b).t * length;
+  // A split inside a door or window would shove the opening off its place: move the corner
+  // to the opening's nearer jamb instead, if that leaves both parts a real length.
+  for (const o of Object.values(l.openings)) {
+    if (o.wallId !== wallId) continue;
+    const u0 = o.t * length - o.width / 2;
+    const u1 = o.t * length + o.width / 2;
+    if (us <= u0 + 1e-6 || us >= u1 - 1e-6) continue;
+    const edge = us - u0 < u1 - us ? u0 : u1;
+    if (edge < 0.05 || edge > length - 0.05) continue;
+    us = edge;
+    v.x = a.x + ((b.x - a.x) * us) / length;
+    v.y = a.y + ((b.y - a.y) * us) / length;
+    break;
+  }
   const oldA = w.a;
   const oldB = w.b;
   l.walls[newWallId] = { ...w, id: newWallId, a: vertexId, b: oldB };
@@ -73,18 +87,35 @@ export function reclampOpenings(l: Mut): void {
 const sameEnds = (p: { a: string; b: string }, q: { a: string; b: string }) =>
   (p.a === q.a && p.b === q.b) || (p.a === q.b && p.b === q.a);
 
-/** Re-points every wall from `from` to `into`, dropping walls that collapse or duplicate. */
+/** Walls before boundaries, so where two coincide the wall is the one kept. */
+const wallsFirst = <W extends { kind?: string }>(walls: W[]) =>
+  [...walls].sort((p, q) => (p.kind === 'boundary' ? 1 : 0) - (q.kind === 'boundary' ? 1 : 0));
+
+/**
+ * Re-points every wall from `from` to `into`, dropping walls that collapse or duplicate.
+ * Of two that coincide, a wall outlives a boundary, and a dropped wall's openings move to
+ * the one kept.
+ */
 export function mergeVertex(l: Mut, from: string, into: string): void {
   if (from === into) return;
   for (const w of Object.values(l.walls)) {
     if (w.a === from) w.a = into;
     if (w.b === from) w.b = into;
   }
-  const kept: { a: string; b: string }[] = [];
-  for (const w of Object.values(l.walls)) {
-    if (w.a === w.b || kept.some((k) => sameEnds(k, w))) {
+  const kept: { id: string; a: string; b: string }[] = [];
+  for (const w of wallsFirst(Object.values(l.walls))) {
+    const twin = kept.find((k) => sameEnds(k, w));
+    if (w.a === w.b || twin) {
       delete l.walls[w.id];
-      for (const o of Object.values(l.openings)) if (o.wallId === w.id) delete l.openings[o.id];
+      for (const o of Object.values(l.openings)) {
+        if (o.wallId !== w.id) continue;
+        if (twin && !isBoundary(l.walls[twin.id] ?? {})) {
+          o.wallId = twin.id;
+          if (twin.a !== w.a) o.t = 1 - o.t; // the twin runs the other way
+        } else {
+          delete l.openings[o.id];
+        }
+      }
     } else {
       kept.push(w);
     }
@@ -188,7 +219,7 @@ export function repairLevel(level: Level): { level: Level; fixes: string[] } {
   const fixes: string[] = [];
   const l = structuredClone(level) as Level;
   const kept: { a: string; b: string }[] = [];
-  for (const w of Object.values(l.walls)) {
+  for (const w of wallsFirst(Object.values(l.walls))) {
     const a = l.vertices[w.a];
     const b = l.vertices[w.b];
     if (!a || !b || w.a === w.b || dist(a, b) < 1e-9 || kept.some((k) => sameEnds(k, w))) {

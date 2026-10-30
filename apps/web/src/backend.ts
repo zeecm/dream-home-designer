@@ -18,6 +18,7 @@ export interface Backend {
   /** Rejects with NotFoundError unless the project's image has this hash. */
   getImage?(id: string, hash: string): Promise<Blob>;
   hasImage?(id: string, hash: string): Promise<boolean>;
+  deleteImage?(id: string): Promise<void>;
 }
 
 export interface ProjectSummary {
@@ -102,6 +103,11 @@ export const remoteBackend: Backend = {
       throw new Error(`the plan image could not be fetched (${res.status})`);
     }
     return res.blob();
+  },
+  async deleteImage(id) {
+    await check(
+      await fetch(`${BASE}/projects/${encodeURIComponent(id)}/image`, { method: 'DELETE' }),
+    );
   },
   async hasImage(id, hash) {
     const res = await fetch(imageUrl(id, hash), { method: 'HEAD' });

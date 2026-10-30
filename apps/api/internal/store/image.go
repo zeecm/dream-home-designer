@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -24,10 +26,21 @@ type Image struct {
 	Data        []byte
 }
 
+// ImageInfo describes a stored image without its bytes.
+type ImageInfo struct {
+	Hash        string
+	ContentType string
+	Size        int64
+}
+
 // ImageStore keeps one plan image per project. Deleting a project deletes its image.
+// Reads come in two steps, so a request for a stale hash, or a HEAD, never pulls the bytes.
 type ImageStore interface {
 	PutImage(ctx context.Context, id string, img Image) error
-	GetImage(ctx context.Context, id string) (Image, error)
+	ImageInfo(ctx context.Context, id string) (ImageInfo, error)
+	// OpenImage streams the image; the caller closes the reader.
+	OpenImage(ctx context.Context, id string) (ImageInfo, io.ReadCloser, error)
+	DeleteImage(ctx context.Context, id string) error
 }
 
 // ---------------------------------------------------------------- memory and file
@@ -48,15 +61,33 @@ func (m *Memory) PutImage(_ context.Context, id string, img Image) error {
 	return nil
 }
 
-func (m *Memory) GetImage(_ context.Context, id string) (Image, error) {
+func (m *Memory) ImageInfo(_ context.Context, id string) (ImageInfo, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	img, ok := m.images[id]
 	if !ok {
-		return Image{}, ErrNoImage
+		return ImageInfo{}, ErrNoImage
 	}
-	img.Data = slices.Clone(img.Data)
-	return img, nil
+	return ImageInfo{Hash: img.Hash, ContentType: img.ContentType, Size: int64(len(img.Data))}, nil
+}
+
+// OpenImage reads the stored bytes in place: PutImage stores a private copy that is never
+// modified, only replaced.
+func (m *Memory) OpenImage(ctx context.Context, id string) (ImageInfo, io.ReadCloser, error) {
+	m.mu.RLock()
+	img, ok := m.images[id]
+	m.mu.RUnlock()
+	if !ok {
+		return ImageInfo{}, nil, ErrNoImage
+	}
+	info := ImageInfo{Hash: img.Hash, ContentType: img.ContentType, Size: int64(len(img.Data))}
+	return info, io.NopCloser(bytes.NewReader(img.Data)), nil
+}
+
+func (m *Memory) DeleteImage(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.deleteImage(id)
 }
 
 // deleteImage must be called with the lock held.
@@ -78,8 +109,9 @@ type imageMeta struct {
 	ContentType string `json:"contentType"`
 }
 
-// fileImages loads dir/images and returns the hook that keeps it in step with the store:
-// each image is <id>.bin with its hash and type in <id>.meta.json.
+// fileImages loads dir/images and returns the hook that keeps it in step with the store.
+// Each image is <id>.<hash>.bin, named by <id>.meta.json. The bytes are written before the
+// meta that points at them, so a crash in between leaves the previous image whole.
 func fileImages(dir string, into map[string]Image) (func(id string, img *Image) error, error) {
 	imgDir := filepath.Join(dir, "images")
 	if err := os.MkdirAll(imgDir, 0o755); err != nil {
@@ -89,6 +121,7 @@ func fileImages(dir string, into map[string]Image) (func(id string, img *Image) 
 	if err != nil {
 		return nil, err
 	}
+	binOf := func(id, hash string) string { return filepath.Join(imgDir, id+"."+hash+".bin") }
 	for _, e := range entries {
 		id, ok := strings.CutSuffix(e.Name(), ".meta.json")
 		if !ok {
@@ -102,23 +135,40 @@ func fileImages(dir string, into map[string]Image) (func(id string, img *Image) 
 		if err := json.Unmarshal(b, &meta); err != nil {
 			return nil, err
 		}
-		data, err := os.ReadFile(filepath.Join(imgDir, id+".bin"))
+		data, err := os.ReadFile(binOf(id, meta.Hash))
+		if errors.Is(err, os.ErrNotExist) {
+			continue // a half-written image: as if there were none
+		}
 		if err != nil {
 			return nil, err
 		}
 		into[id] = Image{Hash: meta.Hash, ContentType: meta.ContentType, Data: data}
 	}
+	// removeOthers deletes every <id>.*.bin except keep.
+	removeOthers := func(id, keep string) error {
+		olds, err := filepath.Glob(filepath.Join(imgDir, id+".*.bin"))
+		if err != nil {
+			return err
+		}
+		for _, p := range olds {
+			if p == keep {
+				continue
+			}
+			if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		}
+		return nil
+	}
 	return func(id string, img *Image) error {
-		bin := filepath.Join(imgDir, id+".bin")
 		meta := filepath.Join(imgDir, id+".meta.json")
 		if img == nil {
-			for _, p := range []string{meta, bin} {
-				if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-					return err
-				}
+			if err := os.Remove(meta); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
 			}
-			return nil
+			return removeOthers(id, "")
 		}
+		bin := binOf(id, img.Hash)
 		if err := writeAtomic(imgDir, bin, img.Data); err != nil {
 			return err
 		}
@@ -126,7 +176,10 @@ func fileImages(dir string, into map[string]Image) (func(id string, img *Image) 
 		if err != nil {
 			return err
 		}
-		return writeAtomic(imgDir, meta, b)
+		if err := writeAtomic(imgDir, meta, b); err != nil {
+			return err
+		}
+		return removeOthers(id, bin)
 	}, nil
 }
 
@@ -174,23 +227,35 @@ func (s *R2) PutImage(ctx context.Context, id string, img Image) error {
 	return nil
 }
 
-func (s *R2) GetImage(ctx context.Context, id string) (Image, error) {
-	res, err := s.do(ctx, http.MethodGet, imageKey(id), nil, nil, nil)
-	if errors.Is(err, ErrNotFound) {
-		return Image{}, ErrNoImage
-	}
-	if err != nil {
-		return Image{}, err
-	}
-	defer res.Body.Close()
-	data, err := io.ReadAll(res.Body)
-	if err != nil {
-		return Image{}, err
-	}
-	return Image{Hash: res.Header.Get(metaHash), ContentType: res.Header.Get(metaType), Data: data}, nil
+func imageInfoFrom(h http.Header) ImageInfo {
+	size, _ := strconv.ParseInt(h.Get("Content-Length"), 10, 64)
+	return ImageInfo{Hash: h.Get(metaHash), ContentType: h.Get(metaType), Size: size}
 }
 
-func (s *R2) deleteImage(ctx context.Context, id string) error {
+func (s *R2) ImageInfo(ctx context.Context, id string) (ImageInfo, error) {
+	res, err := s.do(ctx, http.MethodHead, imageKey(id), nil, nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return ImageInfo{}, ErrNoImage
+	}
+	if err != nil {
+		return ImageInfo{}, err
+	}
+	res.Body.Close()
+	return imageInfoFrom(res.Header), nil
+}
+
+func (s *R2) OpenImage(ctx context.Context, id string) (ImageInfo, io.ReadCloser, error) {
+	res, err := s.do(ctx, http.MethodGet, imageKey(id), nil, nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return ImageInfo{}, nil, ErrNoImage
+	}
+	if err != nil {
+		return ImageInfo{}, nil, err
+	}
+	return imageInfoFrom(res.Header), res.Body, nil
+}
+
+func (s *R2) DeleteImage(ctx context.Context, id string) error {
 	res, err := s.do(ctx, http.MethodDelete, imageKey(id), nil, nil, nil)
 	if errors.Is(err, ErrNotFound) {
 		return nil

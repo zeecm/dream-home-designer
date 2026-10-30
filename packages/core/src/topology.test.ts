@@ -7,7 +7,7 @@ import { NewerSchemaError, loadProject } from './migrate';
 import { roomArea } from './rooms';
 import { Project } from './schema';
 import { snapPoint } from './snap';
-import { repairLevel, settleVertex } from './topology';
+import { mergeVertex, repairLevel, settleVertex } from './topology';
 
 const L = 'lvl_ground';
 const lvl = (s: EditorDoc) => s.doc.levels[0]!;
@@ -153,5 +153,33 @@ describe('loading documents', () => {
     expect(repairLevel(doc.levels[0]!).fixes).toEqual([]);
     expect(loadProject(doc).project).toEqual(doc);
     expect(() => loadProject({ ...doc, schemaVersion: 99 })).toThrow(NewerSchemaError);
+  });
+});
+
+describe('mergeVertex with boundaries', () => {
+  it('keeps the wall, and its openings, when a boundary coincides with it', () => {
+    const l = emptyLevel();
+    for (const [id, x, y] of [
+      ['x', 0, 0],
+      ['p', 3, 0],
+      ['q', 3, 0.0001],
+    ] as const) {
+      l.vertices[id] = { id, x, y };
+    }
+    const base = { thickness: 0.2, materialLeft: 'paint-white', materialRight: 'paint-white' };
+    l.walls.bnd = { ...base, id: 'bnd', a: 'x', b: 'p', kind: 'boundary' };
+    l.walls.wal = { ...base, id: 'wal', a: 'x', b: 'q' };
+    l.openings.win = {
+      id: 'win',
+      wallId: 'wal',
+      kind: 'window',
+      t: 0.5,
+      width: 1,
+      height: 1.2,
+      sill: 0.9,
+    };
+    mergeVertex(l, 'p', 'q');
+    expect(Object.keys(l.walls)).toEqual(['wal']);
+    expect(l.openings.win?.wallId).toBe('wal');
   });
 });

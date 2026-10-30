@@ -3,10 +3,33 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"testing"
 )
 
 func errorsAs(err error, target any) bool { return errors.As(err, target) }
+
+// readImage reads a whole image through the two-step API and checks they agree.
+func readImage(ctx context.Context, s ImageStore, id string) (Image, error) {
+	info, err := s.ImageInfo(ctx, id)
+	if err != nil {
+		return Image{}, err
+	}
+	got, body, err := s.OpenImage(ctx, id)
+	if err != nil {
+		return Image{}, err
+	}
+	defer body.Close()
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return Image{}, err
+	}
+	if got.Hash != info.Hash || int64(len(data)) != info.Size {
+		return Image{}, fmt.Errorf("info %+v does not match the image read (%s, %d bytes)", info, got.Hash, len(data))
+	}
+	return Image{Hash: got.Hash, ContentType: got.ContentType, Data: data}, nil
+}
 
 func TestMemoryStoreContract(t *testing.T) {
 	runContract(t, func(*testing.T) Store { return NewMemory() })
@@ -69,13 +92,13 @@ func runContract(t *testing.T, newStore func(t *testing.T) Store) {
 		if err := s.Create(ctx, Record{ID: "prj_i", Name: "I", Doc: []byte(`{}`)}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := imgs.GetImage(ctx, "prj_i"); !errors.Is(err, ErrNoImage) {
+		if _, err := readImage(ctx, imgs, "prj_i"); !errors.Is(err, ErrNoImage) {
 			t.Fatalf("get before put: %v", err)
 		}
 		if err := imgs.PutImage(ctx, "prj_i", img); err != nil {
 			t.Fatal(err)
 		}
-		got, err := imgs.GetImage(ctx, "prj_i")
+		got, err := readImage(ctx, imgs, "prj_i")
 		if err != nil || got.Hash != "abc" || got.ContentType != "image/png" || string(got.Data) != string(img.Data) {
 			t.Fatalf("get: %+v %v", got, err)
 		}
@@ -83,13 +106,22 @@ func runContract(t *testing.T, newStore func(t *testing.T) Store) {
 		if err := imgs.PutImage(ctx, "prj_i", next); err != nil {
 			t.Fatal(err)
 		}
-		if got, _ := imgs.GetImage(ctx, "prj_i"); got.Hash != "def" || string(got.Data) != "jpeg" {
+		if got, _ := readImage(ctx, imgs, "prj_i"); got.Hash != "def" || string(got.Data) != "jpeg" {
 			t.Fatalf("replace: %+v", got)
+		}
+		if err := imgs.DeleteImage(ctx, "prj_i"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := imgs.ImageInfo(ctx, "prj_i"); !errors.Is(err, ErrNoImage) {
+			t.Fatalf("image after DeleteImage: %v", err)
+		}
+		if err := imgs.PutImage(ctx, "prj_i", img); err != nil {
+			t.Fatal(err)
 		}
 		if err := s.Delete(ctx, "prj_i"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := imgs.GetImage(ctx, "prj_i"); !errors.Is(err, ErrNoImage) {
+		if _, err := readImage(ctx, imgs, "prj_i"); !errors.Is(err, ErrNoImage) {
 			t.Fatalf("image outlived its project: %v", err)
 		}
 	})

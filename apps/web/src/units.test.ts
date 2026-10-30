@@ -20,6 +20,10 @@ describe('parseLength', () => {
     expect(parseLength('10,275')).toBe(10.275);
     expect(parseLength('3,500')).toBe(3.5);
     expect(parseLength('1,2,3')).toBeNull();
+    expect(parseLength('0,040')).toBe(0.04);
+    expect(parseLength('2,450 m')).toBe(2.45);
+    expect(parseLength('1,250 cm')).toBe(1.25 / 100);
+    expect(parseLength('10,275 mm')).toBe(10.275);
   });
 
   it('rejects anything else', () => {

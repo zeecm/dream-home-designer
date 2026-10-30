@@ -267,6 +267,9 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         }
         const r = run.current;
         for (const cmd of cmds) ctx.dispatch(cmd, { coalesceKey: r.key });
+        // Keep what's being nudged on screen.
+        const at = objectPoint(live(), sel);
+        if (at) useEditor.getState().setView(reveal(ctx.view, ctx.size, at), true);
         window.clearTimeout(r.timer);
         r.timer = window.setTimeout(settleRun, NUDGE_SETTLE_MS);
         return true;
@@ -274,7 +277,7 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       if ((e.key === 'Delete' || e.key === 'Backspace') && sel) {
         const cmd =
           sel.kind === 'wall'
-            ? deleteWall(levelId, sel.id)
+            ? deleteWall(levelId, sel.id, ctx.level)
             : sel.kind === 'opening'
               ? deleteOpening(levelId, sel.id)
               : sel.kind === 'vertex'

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 
 	"github.com/zeecm/dream-home-designer/apps/api/internal/project"
 	"github.com/zeecm/dream-home-designer/apps/api/internal/store"
@@ -34,8 +35,13 @@ func (s *Server) putImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxImageBytes))
-	if err != nil {
+	var tooBig *http.MaxBytesError
+	if errors.As(err, &tooBig) {
 		writeError(w, http.StatusRequestEntityTooLarge, "image larger than 10 MB")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "the upload did not arrive in full")
 		return
 	}
 	kind := http.DetectContentType(data)
@@ -52,8 +58,14 @@ func (s *Server) putImage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"hash": hash})
 }
 
+// imageReads caps concurrent image downloads, so a burst of requests can't hold many
+// 10 MB bodies at once on a small container.
+var imageReads = make(chan struct{}, 4)
+
 // getImage serves the plan image if it is still the one the caller's document names.
-// The hash in the URL makes the response immutable, so browsers and the CDN cache it.
+// The hash is checked against stored metadata first, so a stale hash or a HEAD never
+// reads the bytes; a GET streams them. The hash in the URL makes the response immutable,
+// so browsers and the CDN cache it.
 func (s *Server) getImage(w http.ResponseWriter, r *http.Request) {
 	imgs, ok := s.store.(store.ImageStore)
 	if !ok {
@@ -66,8 +78,8 @@ func (s *Server) getImage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid project id or image hash")
 		return
 	}
-	img, err := imgs.GetImage(r.Context(), id)
-	if errors.Is(err, store.ErrNoImage) || (err == nil && img.Hash != hash) {
+	info, err := imgs.ImageInfo(r.Context(), id)
+	if errors.Is(err, store.ErrNoImage) || (err == nil && info.Hash != hash) {
 		writeError(w, http.StatusNotFound, "image not found")
 		return
 	}
@@ -75,12 +87,62 @@ func (s *Server) getImage(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	if r.Method == http.MethodHead {
+		imageHeaders(w, info)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	select {
+	case imageReads <- struct{}{}:
+		defer func() { <-imageReads }()
+	case <-r.Context().Done():
+		return
+	}
+	info, body, err := imgs.OpenImage(r.Context(), id)
+	if errors.Is(err, store.ErrNoImage) || (err == nil && info.Hash != hash) {
+		if body != nil {
+			body.Close()
+		}
+		writeError(w, http.StatusNotFound, "image not found") // replaced since the check
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer body.Close()
+	imageHeaders(w, info)
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, body)
+}
+
+func imageHeaders(w http.ResponseWriter, info store.ImageInfo) {
 	h := w.Header()
-	h.Set("Content-Type", img.ContentType)
+	h.Set("Content-Type", info.ContentType)
+	if info.Size > 0 {
+		h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
+	}
 	h.Set("Cache-Control", "public, max-age=31536000, immutable")
-	h.Set("ETag", `"`+img.Hash+`"`)
+	h.Set("ETag", `"`+info.Hash+`"`)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(img.Data)
+}
+
+// deleteImage removes the project's plan image (the plan's image was removed).
+func (s *Server) deleteImage(w http.ResponseWriter, r *http.Request) {
+	imgs, ok := s.store.(store.ImageStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "this server does not store plan images")
+		return
+	}
+	id := r.PathValue("id")
+	if !project.ValidID(id) {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	if err := imgs.DeleteImage(r.Context(), id); err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -92,6 +93,7 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header()[k] = v
 		}
 		w.Header().Set("ETag", obj.etag)
+		w.Header().Set("Content-Length", strconv.Itoa(len(obj.body)))
 		if r.Method == http.MethodGet {
 			_, _ = w.Write(obj.body)
 		}

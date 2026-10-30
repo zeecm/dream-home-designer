@@ -21,6 +21,8 @@ function syncText(s: SyncStatus, local: boolean): { text: string; tone: 'neutral
       return { text: 'Not saved', tone: 'negative' };
     case 'unreachable':
       return { text: 'Offline', tone: 'negative' };
+    case 'failed':
+      return { text: 'Not opened', tone: 'negative' };
   }
 }
 
@@ -141,7 +143,7 @@ export function TopBar() {
           data-testid="sync"
           data-version={sync.kind === 'saved' ? sync.version : undefined}
           title={
-            sync.kind === 'error'
+            sync.kind === 'error' || sync.kind === 'failed'
               ? sync.message
               : sync.kind === 'saved'
                 ? `Version ${sync.version}${local ? ', stored in this browser' : ', stored on the server'}`

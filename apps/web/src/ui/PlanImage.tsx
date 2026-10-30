@@ -12,6 +12,7 @@ import {
   hashBlob,
   hashOfKey,
   keyOfHash,
+  normalizeForServer,
   prepareUpload,
   putAsset,
   useAsset,
@@ -39,45 +40,77 @@ export async function uploadPlanImage(file: File): Promise<void> {
   void syncPlanImage();
 }
 
-const SERVER_MAX_BYTES = 10 * 1024 * 1024;
-const synced = new Set<string>();
+/** Per project: the image key the server is known to hold. */
+const synced = new Map<string, string>();
+/** Per project: the sync queue, so uploads never overlap and the last image wins. */
+const queues = new Map<string, Promise<void>>();
+/** `project|key` pairs the server can't take (format or size), noticed once a session. */
+const refused = new Set<string>();
+
+/** Server statuses that won't change on a retry: too large, or not an image it accepts. */
+const permanent = (e: unknown) => e instanceof Error && /^(413|415) /.test(e.message);
+
+/** Forgets what the server holds for a project whose image was removed there. */
+export function forgetSyncedImage(projectId: string) {
+  synced.delete(projectId);
+}
 
 /**
  * Makes sure the server has the open project's plan image, uploading it from this browser
- * if not. An image from before server storage (an `img_…` key) is moved to its hash key
- * first. Runs once per project and image in a session; a failure is retried next time.
+ * if not. Images the server can't take as they are (older uploads in other formats, very
+ * large photos or PDF renders) are re-encoded first and re-keyed by their new hash, with
+ * the scale adjusted so calibration holds; that re-key is not an undo step. Runs one at a
+ * time per project, and checks again if the image changed meanwhile.
  */
-export async function syncPlanImage(): Promise<void> {
+export function syncPlanImage(): Promise<void> {
+  const id = useStore.getState().editor.doc.id;
+  const next = (queues.get(id) ?? Promise.resolve()).then(() => syncOnce(id)).catch(() => {});
+  queues.set(id, next);
+  return next;
+}
+
+async function syncOnce(projectId: string): Promise<void> {
   const { backend, editor } = useStore.getState();
-  const doc = editor.doc;
-  const key = doc.underlay?.assetKey;
-  if (!key || !backend?.putImage || !backend.hasImage) return;
-  const tag = `${doc.id}|${key}`;
-  if (synced.has(tag)) return;
-  synced.add(tag);
+  const key = editor.doc.underlay?.assetKey;
+  if (editor.doc.id !== projectId || !key || !backend?.putImage || !backend.hasImage) return;
+  const tag = `${projectId}|${key}`;
+  if (synced.get(projectId) === key || refused.has(tag)) return;
   try {
-    const blob = await getAsset(key);
-    if (!blob) return; // not in this browser: nothing to upload from here
-    if (blob.size > SERVER_MAX_BYTES) throw new Error('too large');
-    const hash = hashOfKey(key) ?? (await hashBlob(blob));
-    if (!(await backend.hasImage(doc.id, hash))) await backend.putImage(doc.id, blob);
-    if (!hashOfKey(key)) {
-      // Re-key the older image so other browsers can fetch it by hash.
-      const next = keyOfHash(hash);
-      await putAsset(next, blob);
+    const local = await getAsset(key);
+    if (!local) return; // not in this browser: nothing to upload from here
+    const hash = hashOfKey(key);
+    if (hash && (await backend.hasImage(projectId, hash))) {
+      synced.set(projectId, key);
+      return;
+    }
+    const { blob, factor } = await normalizeForServer(local);
+    const sentHash = blob === local && hash ? hash : await hashBlob(blob);
+    await backend.putImage(projectId, blob);
+    let held = key;
+    if (sentHash !== hash) {
+      held = keyOfHash(sentHash);
+      await putAsset(held, blob);
       const now = useStore.getState().editor.doc;
-      if (now.id === doc.id && now.underlay?.assetKey === key) {
-        useStore.getState().dispatch(setUnderlay({ ...now.underlay, assetKey: next }));
+      if (now.id === projectId && now.underlay?.assetKey === key) {
+        const underlay = { ...now.underlay, assetKey: held, scale: now.underlay.scale / factor };
+        useStore.getState().dispatch(setUnderlay(underlay), { record: false });
       }
     }
-  } catch {
-    synced.delete(tag);
-    if (useStore.getState().editor.doc.id === doc.id) {
-      useStore.setState({
-        notice:
-          'The plan image couldn’t be copied to the server, so it shows only in this browser for now.',
-      });
-    }
+    synced.set(projectId, held);
+  } catch (e) {
+    if (useStore.getState().editor.doc.id !== projectId) return;
+    if (permanent(e)) refused.add(tag);
+    useStore.setState({
+      notice: permanent(e)
+        ? 'The server couldn’t take this plan image, so it shows only in this browser. Try a smaller JPG or PNG.'
+        : 'The plan image couldn’t be copied to the server yet, so it shows only in this browser for now.',
+    });
+    return;
+  }
+  // Replaced or undone while this ran: catch up.
+  const now = useStore.getState().editor.doc;
+  if (now.id === projectId && now.underlay && now.underlay.assetKey !== synced.get(projectId)) {
+    void syncPlanImage();
   }
 }
 
@@ -273,7 +306,13 @@ export function PlanImagePanel() {
         <button
           type="button"
           className="btn btn-small btn-danger"
-          onClick={() => dispatch(setUnderlay(null))}
+          onClick={() => {
+            dispatch(setUnderlay(null));
+            // The server's copy goes too; undo uploads it again from this browser.
+            const { backend, editor } = useStore.getState();
+            forgetSyncedImage(editor.doc.id);
+            void backend?.deleteImage?.(editor.doc.id).catch(() => {});
+          }}
         >
           Remove
         </button>

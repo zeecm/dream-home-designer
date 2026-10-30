@@ -135,8 +135,8 @@ Writes are rate-limited per IP at the Worker (60/min). IDs must match `^[a-z0-9]
 - **Plan and 3D:** walls have mitred corners in both views, and the 3D rebuild is incremental.
 
 **Tests:**
-- 119 core and 12 render unit tests, plus 22 web unit tests.
-- An 8-test end-to-end suite.
+- 124 core and 12 render unit tests, plus 22 web unit tests.
+- A 9-test end-to-end suite.
 - Go tests, including a store contract test that has passed against live R2.
 
 **Independent acceptance testing, round 1, found:** cropped Split view, the Esc handling in
@@ -212,6 +212,49 @@ versions 1 and 2.
 - **Wall announcements:** they name the rooms on either side.
 - **Open:** the phone palette hides the width presets, and the 390 px layout scrolls 2 px
   sideways.
+
+**Round 4 (fixed):**
+- **Inspector edits (high):** an edit made in the inspector used to land on the next object
+  clicked. Fields now pin an edit to the object it was typed for (`useEdit` in
+  `ui/fields.tsx`).
+- **Topology:**
+  - A wall or boundary that ends on a door or window snaps to the nearer jamb instead of
+    moving the opening.
+  - Where a wall and a boundary coincide, the wall is kept, and a dropped wall's openings move
+    to its twin.
+  - Tracing a wall over a boundary turns it into a wall.
+  - Overlapping openings are refused.
+- **Plan images:**
+  - The API checks the hash from metadata before reading any bytes, answers HEAD from metadata,
+    and streams GETs with at most 4 in flight. The Pages Function caches image responses at
+    the edge.
+  - The file store writes `<id>.<hash>.bin` before its meta.
+  - Upload errors are 413 only when the image really is too large, and uploads have 2-minute
+    timeouts.
+  - `DELETE /projects/{id}/image` runs when the plan image is removed.
+  - The client syncs one upload at a time per project, and catches up if the image changed
+    meanwhile.
+  - Images the server can't take are re-encoded and re-keyed, with the scale adjusted. The
+    re-key is not an undo step (`DispatchOptions.record: false`).
+  - Missing images are retried a few times.
+- **Opening failures:** a project that fails to open is now `sync: failed`. It isn't editable,
+  and Retry reopens it.
+- **Smaller fixes:**
+  - "0,040" is read as 0.04 m.
+  - Boundaries say "boundary" in toasts and aren't counted as walls.
+  - Outer walls are announced as "… and outside".
+  - Nudging keeps the object in view.
+  - Labels allow for wall thickness.
+  - The 390 px layout no longer scrolls sideways.
+- **Open:**
+  - A corner moved onto a collinear wall can overlap it without splitting at the T it passes.
+  - Two rooms with different ceiling heights at a boundary leave an unfilled step in 3D.
+  - The API doesn't refuse a PUT that lowers `schemaVersion`.
+  - The edge cache can still serve a deleted image by its exact hash URL.
+  - The door, window and opening tools give no cue when hovering a boundary.
+  - The phone palette hides the width presets.
+  - Labels are truncated in Split view at default zoom.
+  - Dimension labels can cover room labels.
 
 **Sample flat:** `sampleFlatProject` (core fixtures) is a 96 m² HDB-style 4-room flat with a
 service yard, kitchen, household shelter, two bathrooms, three bedrooms and an L-shaped

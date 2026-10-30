@@ -69,8 +69,9 @@ func run(log *slog.Logger) error {
 		Addr:              addr,
 		Handler:           httpapi.New(st, log, opts...),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		// Long enough for a 10 MB plan image on a slow uplink, and to stream it back.
+		ReadTimeout:  2 * time.Minute,
+		WriteTimeout: 2 * time.Minute,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

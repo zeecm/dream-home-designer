@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { addWall, deleteWall, moveVertex, renameProject, setWallThickness } from './commands';
+import {
+  addWall,
+  deleteWall,
+  moveVertex,
+  renameProject,
+  setCeilingHeight,
+  setWallThickness,
+} from './commands';
 import { hdb4RoomProject } from './fixtures/hdb4room';
 import {
   type EditorDoc,
@@ -131,5 +138,15 @@ describe('commands', () => {
     expect(() => Project.parse(s.doc)).not.toThrow();
     s = undo(undo(s));
     expect(() => Project.parse(s.doc)).not.toThrow();
+  });
+});
+
+describe('unrecorded changes', () => {
+  it('change the document without adding an undo step', () => {
+    const s0: EditorDoc = { doc: hdb4RoomProject(), history: emptyHistory() };
+    const s1 = dispatch(s0, setCeilingHeight(L, 2.4));
+    const s2 = dispatch(s1, renameProject('Quiet'), { record: false });
+    expect(s2.doc.name).toBe('Quiet');
+    expect(s2.history).toBe(s1.history);
   });
 });
