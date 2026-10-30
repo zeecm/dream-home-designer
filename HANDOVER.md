@@ -135,7 +135,7 @@ Writes are rate-limited per IP at the Worker (60/min). IDs must match `^[a-z0-9]
 - **Plan and 3D:** walls have mitred corners in both views, and the 3D rebuild is incremental.
 
 **Tests:**
-- 110 core and 11 render unit tests, plus 21 web unit tests.
+- 108 core and 11 render unit tests, plus 21 web unit tests.
 - A 6-test end-to-end suite.
 - Go tests, including a store contract test that has passed against live R2.
 
