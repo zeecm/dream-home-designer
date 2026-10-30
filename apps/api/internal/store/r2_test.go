@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -99,6 +100,19 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			_, _ = w.Write(obj.body)
 		}
+	case r.Method == http.MethodPut && r.Header.Get("X-Amz-Copy-Source") != "":
+		src := strings.SplitN(strings.TrimPrefix(r.Header.Get("X-Amz-Copy-Source"), "/"), "/", 2)
+		from, ok := f.objects[src[len(src)-1]]
+		if !ok {
+			http.Error(w, "NoSuchKey", http.StatusNotFound)
+			return
+		}
+		if m := r.Header.Get("X-Amz-Copy-Source-If-Match"); m != "" && m != from.etag {
+			w.WriteHeader(http.StatusPreconditionFailed)
+			return
+		}
+		f.writes++
+		f.objects[key] = from
 	case r.Method == http.MethodPut:
 		if r.Header.Get("If-None-Match") == "*" && exists {
 			w.WriteHeader(http.StatusPreconditionFailed)
@@ -173,6 +187,30 @@ func TestR2FailedDeleteKeepsTheOwner(t *testing.T) {
 	}
 	if a, err := s.GetAccess(ctx, "prj_a"); err != nil || a.OwnerHash != "h" {
 		t.Fatalf("access after a failed delete: %+v %v", a, err)
+	}
+}
+
+func TestR2KeepsThePreviousVersionAndDeletedProjects(t *testing.T) {
+	f, srv := newFakeS3(t)
+	s := NewR2(srv.URL, "bucket", "test", "secret")
+	ctx := context.Background()
+	if err := s.Create(ctx, Record{ID: "prj_a", Name: "Flat", Doc: []byte(`{"v":1}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Update(ctx, "prj_a", 1, "Flat", func(int) ([]byte, error) { return []byte(`{"v":2}`), nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(f.objects[previousKey("prj_a")].body); got != `{"v":1}` {
+		t.Fatalf("previous version: %q", got)
+	}
+	if err := s.Delete(ctx, "prj_a"); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(f.objects[deletedKey("prj_a")].body); got != `{"v":2}` {
+		t.Fatalf("deleted copy: %q", got)
+	}
+	if _, err := s.Get(ctx, "prj_a"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted project still there: %v", err)
 	}
 }
 

@@ -172,6 +172,9 @@ func (s *R2) Update(ctx context.Context, id string, expected int, name string, b
 	if err != nil {
 		return 0, err
 	}
+	// Keep the version being replaced, so a bad save (or a vandal with an edit link) can be
+	// undone by hand. Best effort: a failed copy doesn't block the save.
+	_ = s.copy(ctx, objectKey(id), previousKey(id), m.etag)
 	err = s.put(ctx, Record{ID: id, Name: name, Version: next, Doc: doc}, http.Header{"If-Match": {m.etag}})
 	if errors.Is(err, errPrecondition) {
 		// Someone else wrote between our HEAD and PUT; report what's there now.
@@ -188,7 +191,13 @@ func (s *R2) Update(ctx context.Context, id string, expected int, name string, b
 }
 
 func (s *R2) Delete(ctx context.Context, id string) error {
-	if _, err := s.head(ctx, id); err != nil {
+	m, err := s.head(ctx, id)
+	if err != nil {
+		return err
+	}
+	// A deleted project is kept for a while (the bucket's lifecycle rule expires it), so a
+	// delete can be undone by hand. No copy, no delete.
+	if err := s.copy(ctx, objectKey(id), deletedKey(id), m.etag); err != nil {
 		return err
 	}
 	// The project goes first: if a later step fails, a leftover image or access record is
@@ -204,6 +213,26 @@ func (s *R2) Delete(ctx context.Context, id string) error {
 }
 
 var errPrecondition = errors.New("precondition failed")
+
+// Recovery copies: the version a save replaced, and deleted projects. The bucket's
+// lifecycle rule expires both prefixes (see HANDOVER), so they never pile up.
+func previousKey(id string) string { return "previous/" + id + ".json" }
+func deletedKey(id string) string  { return "deleted/" + id + ".json" }
+
+// copy copies an object within the bucket on the server side, only if it is still the
+// version with etag `match`.
+func (s *R2) copy(ctx context.Context, from, to, match string) error {
+	h := http.Header{
+		"X-Amz-Copy-Source":          {"/" + url.PathEscape(s.Bucket) + "/" + from},
+		"X-Amz-Copy-Source-If-Match": {match},
+	}
+	res, err := s.do(ctx, http.MethodPut, to, nil, h, nil)
+	if err != nil {
+		return err
+	}
+	res.Body.Close()
+	return nil
+}
 
 func (s *R2) head(ctx context.Context, id string) (objectMeta, error) {
 	res, err := s.do(ctx, http.MethodHead, objectKey(id), nil, nil, nil)
