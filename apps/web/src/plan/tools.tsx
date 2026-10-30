@@ -8,6 +8,8 @@ import {
   deleteVertex,
   deleteWall,
   moveVertex,
+  snapPoint,
+  splitWall,
   updateOpening,
 } from '@dhd/core';
 import { type ReactNode, useRef, useState } from 'react';
@@ -21,6 +23,8 @@ export interface PlanPointer {
   hit: Selection | null;
   shift: boolean;
   alt: boolean;
+  /** 2 on the second click of a double-click. */
+  clicks: number;
 }
 
 export interface ToolContext {
@@ -43,8 +47,9 @@ export interface ToolController {
 }
 
 export const TOOL_HINTS: Record<Tool, string> = {
-  select: 'Click to select. Drag a corner or a door to move it. Drag empty space to pan.',
-  wall: 'Click to place corners. Enter or double-click to finish, Esc to cancel.',
+  select:
+    'Click to select. Drag a corner or a door to move it. Double-click a wall to add a corner.',
+  wall: 'Click to place corners; type a length for an exact wall. Enter or double-click finishes.',
   door: 'Click a wall to add a door.',
   window: 'Click a wall to add a window.',
   passage: 'Click a wall to add an opening.',
@@ -55,6 +60,9 @@ export const TOOL_HINTS: Record<Tool, string> = {
 /** Rounds to a grid step unless Alt is held. */
 export const gridSnap = (p: Vec2, step: number, off: boolean): Vec2 =>
   off ? p : { x: Math.round(p.x / step) * step, y: Math.round(p.y / step) * step };
+
+/** Capture distance: 0.15 m, or 10 screen pixels when zoomed out further than that. */
+export const snapTolerance = (ctx: ToolContext) => Math.max(0.15, 10 / ctx.view.zoom);
 
 /** The nearest corner within `px` screen pixels, if any. */
 export function nearestVertex(
@@ -93,6 +101,12 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         select(null);
         return false;
       }
+      if (h.kind === 'wall' && p.clicks === 2) {
+        const r = splitWall(levelId, h.id, p.world);
+        ctx.dispatch(r.command);
+        select({ kind: 'vertex', id: r.vertexId });
+        return true;
+      }
       select(h);
       const key = `drag:${h.id}:${Date.now()}`;
       if (h.kind === 'vertex') {
@@ -120,8 +134,19 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       if (!d.moved && Math.hypot(p.screen.x - d.start.x, p.screen.y - d.start.y) < 3) return;
       d.moved = true;
       if (d.kind === 'vertex') {
-        const near = p.alt ? null : nearestVertex(ctx, p.world, 10, d.id);
-        const to = near?.at ?? gridSnap(p.world, 0.05, p.alt);
+        const own = new Set(
+          Object.values(ctx.level.walls)
+            .filter((w) => w.a === d.id || w.b === d.id)
+            .map((w) => w.id),
+        );
+        const to = p.alt
+          ? p.world
+          : snapPoint(ctx.level, p.world, {
+              tolerance: snapTolerance(ctx),
+              grid: 0.05,
+              excludeVertices: new Set([d.id]),
+              excludeWalls: own,
+            }).point;
         ctx.dispatch(moveVertex(levelId, d.id, to), { coalesceKey: d.key });
       } else {
         const f = ctx.geom.frames[d.wallId];

@@ -395,6 +395,45 @@ select {
   text-align: center;
 }
 
+.tool-options {
+  margin-top: 16px;
+}
+.choice-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.choice-list button {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  cursor: pointer;
+}
+.choice-list button:hover {
+  background: var(--raised);
+}
+.choice-list button[aria-pressed="true"] {
+  background: var(--active);
+  font-weight: 500;
+}
+.choice-note {
+  color: var(--muted);
+  font-size: var(--fs-small);
+}
+.tool-hint {
+  margin: 16px 4px 0;
+  font-size: var(--fs-small);
+  line-height: 16px;
+  color: var(--muted);
+}
+
 /* ---------------------------------------------------------------- stage */
 
 .stage {
@@ -613,6 +652,52 @@ select {
   margin-bottom: 4px !important;
 }
 
+.guide {
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  opacity: 0.6;
+}
+.ghost-wall {
+  stroke: var(--accent);
+  stroke-opacity: 0.45;
+  stroke-linecap: square;
+}
+.draw-overlay rect:not(.snap-marker):not(.typed) {
+  fill: var(--surface);
+  stroke: var(--accent);
+}
+.draw-overlay text {
+  font-size: var(--fs-small);
+  font-weight: 500;
+  fill: var(--accent);
+}
+.typed {
+  fill: var(--surface);
+  stroke: var(--control);
+}
+.typed.error {
+  stroke: var(--negative);
+}
+.snap-marker {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.snap-dot {
+  fill: var(--accent);
+}
+.ghost-opening {
+  fill: var(--accent);
+  fill-opacity: 0.35;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+.ghost-opening.invalid {
+  fill: var(--negative);
+  stroke: var(--negative);
+}
+
 /* ---------------------------------------------------------------- inspector */
 
 .inspector {
@@ -752,7 +837,9 @@ select {
   }
   .panel-heading,
   .tool-label,
-  .tool-key {
+  .tool-key,
+  .tool-hint,
+  .tool-options {
     position: absolute;
     width: 1px;
     height: 1px;

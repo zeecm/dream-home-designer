@@ -17,6 +17,7 @@ const VIEW_KEYS: Record<string, ViewMode> = { '1': 'plan', '2': 'split', '3': '3
 function useShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return; // the active tool already handled it
       const { undo, redo, save } = useStore.getState();
       const ed = useEditor.getState();
       const mod = e.metaKey || e.ctrlKey;
@@ -39,8 +40,8 @@ function useShortcuts() {
       } else if (k === 'f') {
         ed.requestFit();
       } else if (e.key === 'Escape') {
-        // Tools handle their own Escape first (the canvas listener runs before this one
-        // only when a tool claims it); otherwise clear the selection, then the tool.
+        // A tool with work in progress handles Escape itself; otherwise clear the
+        // selection, then return to Select.
         if (ed.selection) ed.select(null);
         else if (ed.tool !== 'select') ed.setTool('select');
         else return;

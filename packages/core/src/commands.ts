@@ -3,7 +3,9 @@ import type { z } from 'zod';
 import { clampOpeningT } from './geometry';
 import type { Command } from './history';
 import { newId } from './ids';
+import { syncRooms } from './rooms';
 import { type Level, Opening, type Project, Room, type Vec2, Wall } from './schema';
+import { projectOnSegment, segmentIntersection } from './snap';
 
 function level(draft: Draft<Project>, levelId: string): Draft<Level> {
   const lvl = draft.levels.find((l) => l.id === levelId);
@@ -96,7 +98,10 @@ export function setWallThickness(levelId: string, wallId: string, thickness: num
   };
 }
 
-/** Deletes the wall, its openings, any vertex left unused, and rooms that lose a corner. */
+/**
+ * Deletes the wall, its openings and any vertex left unused, then re-detects rooms: two
+ * rooms the wall divided merge into one (keeping the larger one's name).
+ */
 export function deleteWall(levelId: string, wallId: string): Command {
   return {
     label: 'Delete wall',
@@ -116,12 +121,9 @@ export function deleteWall(levelId: string, wallId: string): Command {
         stillUsed.add(w.b);
       }
       for (const vid of [wall.a, wall.b]) {
-        if (stillUsed.has(vid)) continue;
-        delete lvl.vertices[vid];
-        for (const room of Object.values(lvl.rooms)) {
-          if (room.loop.includes(vid)) delete lvl.rooms[room.id];
-        }
+        if (!stillUsed.has(vid)) delete lvl.vertices[vid];
       }
+      syncRooms(lvl);
     },
   };
 }
@@ -135,12 +137,8 @@ export function deleteVertex(levelId: string, vertexId: string): Command {
       for (const w of Object.values(lvl.walls)) {
         if (w.a === vertexId || w.b === vertexId) deleteWall(levelId, w.id).recipe(d);
       }
-      if (lvl.vertices[vertexId]) {
-        delete lvl.vertices[vertexId];
-        for (const room of Object.values(lvl.rooms)) {
-          if (room.loop.includes(vertexId)) delete lvl.rooms[room.id];
-        }
-      }
+      delete lvl.vertices[vertexId];
+      syncRooms(lvl);
     },
   };
 }
@@ -285,5 +283,262 @@ export function setCeilingHeight(levelId: string, height: number): Command {
     recipe: (d) => {
       level(d, levelId).ceilingHeight = height;
     },
+  };
+}
+
+// ------------------------------------------------------------------ splitting and drawing
+
+/**
+ * In a recipe: puts a new corner on a wall at the point nearest `at`. The wall keeps its
+ * id from a to the new corner; a new wall (same thickness, height and materials) runs on
+ * to the old b. Openings move to whichever part holds their centre, and room loops that
+ * ran along the wall gain the corner.
+ */
+function splitWallDraft(
+  lvl: Draft<Level>,
+  wallId: string,
+  at: Vec2,
+  vertexId: string,
+  newWallId: string,
+): void {
+  const w = lvl.walls[wallId];
+  const a = w && lvl.vertices[w.a];
+  const b = w && lvl.vertices[w.b];
+  if (!w || !a || !b) throw new Error(`wall ${wallId} not found`);
+  const pr = projectOnSegment(at, a, b);
+  const t = Math.min(1 - 1e-6, Math.max(1e-6, pr.t));
+  const length = Math.hypot(b.x - a.x, b.y - a.y);
+  const us = t * length;
+  const oldA = w.a;
+  const oldB = w.b;
+
+  lvl.vertices[vertexId] = { id: vertexId, x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+  lvl.walls[newWallId] = { ...w, id: newWallId, a: vertexId, b: oldB };
+  w.b = vertexId;
+
+  for (const o of Object.values(lvl.openings)) {
+    if (o.wallId !== wallId) continue;
+    const u = o.t * length;
+    if (u <= us) {
+      o.t = clampOpeningT(us, o.width, u / us);
+    } else {
+      o.wallId = newWallId;
+      o.t = clampOpeningT(length - us, o.width, (u - us) / (length - us));
+    }
+  }
+
+  for (const room of Object.values(lvl.rooms)) {
+    const n = room.loop.length;
+    for (let i = 0; i < n; i++) {
+      const p = room.loop[i];
+      const q = room.loop[(i + 1) % n];
+      if ((p === oldA && q === oldB) || (p === oldB && q === oldA)) {
+        room.loop.splice(i + 1, 0, vertexId);
+        break;
+      }
+    }
+  }
+}
+
+export function splitWall(
+  levelId: string,
+  wallId: string,
+  at: Vec2,
+): { command: Command; vertexId: string; wallId: string } {
+  const vertexId = newId('v');
+  const newWallId = newId('w');
+  return {
+    vertexId,
+    wallId: newWallId,
+    command: {
+      label: 'Split wall',
+      recipe: (d) => {
+        const lvl = level(d, levelId);
+        splitWallDraft(lvl, wallId, at, vertexId, newWallId);
+        syncRooms(lvl);
+      },
+    },
+  };
+}
+
+/** Where a drawn wall starts or ends: an existing corner, a point on a wall, or open floor. */
+export type WallEnd = { vertexId: string } | { point: Vec2; wallId?: string };
+
+export interface DrawWallResult {
+  command: Command;
+  /** The new walls, in order from start to end (more than one if it crossed walls). */
+  wallIds: string[];
+  startVertexId: string;
+  endVertexId: string;
+}
+
+const EPS = 1e-6;
+
+/**
+ * A free end that lands exactly on an existing corner or wall (a typed length, say)
+ * connects to it, so the new wall joins the graph instead of overlapping it.
+ */
+function attach(snapshot: Level, e: WallEnd): WallEnd {
+  if ('vertexId' in e || e.wallId) return e;
+  for (const v of Object.values(snapshot.vertices)) {
+    if (Math.hypot(v.x - e.point.x, v.y - e.point.y) < 1e-4) return { vertexId: v.id };
+  }
+  for (const w of Object.values(snapshot.walls)) {
+    const a = snapshot.vertices[w.a];
+    const b = snapshot.vertices[w.b];
+    if (!a || !b) continue;
+    const pr = projectOnSegment(e.point, a, b);
+    if (pr.distance < 1e-4 && pr.t > EPS && pr.t < 1 - EPS)
+      return { point: pr.point, wallId: w.id };
+  }
+  return e;
+}
+
+/**
+ * Adds one straight wall from `start` to `end`, planned against `snapshot` (the level as
+ * the user sees it). Every wall it starts on, ends on or crosses is split so all walls
+ * meet at shared corners; it chains through any corner it passes over; rooms are then
+ * re-detected. All ids are generated here, before the recipe runs.
+ */
+export function drawWall(
+  snapshot: Level,
+  rawStart: WallEnd,
+  rawEnd: WallEnd,
+  opts: { thickness?: number; height?: number } = {},
+): DrawWallResult {
+  const levelId = snapshot.id;
+  const start = attach(snapshot, rawStart);
+  const end = attach(snapshot, rawEnd);
+  const posOf = (e: WallEnd): Vec2 => {
+    if ('vertexId' in e) {
+      const v = snapshot.vertices[e.vertexId];
+      if (!v) throw new Error(`vertex ${e.vertexId} not found`);
+      return { x: v.x, y: v.y };
+    }
+    return e.point;
+  };
+  const pa = posOf(start);
+  const pb = posOf(end);
+  const length = Math.hypot(pb.x - pa.x, pb.y - pa.y);
+  if (length < 0.01) throw new Error('a wall must be at least 1 cm long');
+
+  const touching = new Set<string>();
+  for (const e of [start, end]) {
+    if ('vertexId' in e) {
+      for (const w of Object.values(snapshot.walls)) {
+        if (w.a === e.vertexId || w.b === e.vertexId) touching.add(w.id);
+      }
+    } else if (e.wallId) {
+      touching.add(e.wallId);
+    }
+  }
+  const endVertices = new Set([start, end].flatMap((e) => ('vertexId' in e ? [e.vertexId] : [])));
+
+  // Stops along the new wall, by fraction t: corners it passes and walls it crosses.
+  type Stop = { t: number; vertexId: string } | { t: number; split: { wallId: string; at: Vec2 } };
+  const stops: Stop[] = [];
+  const addStop = (s: Stop) => {
+    if (s.t <= EPS || s.t >= 1 - EPS) return;
+    if (stops.some((x) => Math.abs(x.t - s.t) * length < 1e-4)) return;
+    stops.push(s);
+  };
+  for (const v of Object.values(snapshot.vertices)) {
+    if (endVertices.has(v.id)) continue;
+    const pr = projectOnSegment(v, pa, pb);
+    if (pr.distance < 1e-4) addStop({ t: pr.t, vertexId: v.id });
+  }
+  for (const w of Object.values(snapshot.walls)) {
+    if (touching.has(w.id)) continue;
+    const a = snapshot.vertices[w.a];
+    const b = snapshot.vertices[w.b];
+    if (!a || !b) continue;
+    const x = segmentIntersection(pa, pb, a, b);
+    if (!x) continue;
+    const wallLen = Math.hypot(b.x - a.x, b.y - a.y);
+    if (x.u * wallLen < 1e-4 || (1 - x.u) * wallLen < 1e-4) continue; // at its corner: handled above
+    addStop({ t: x.t, split: { wallId: w.id, at: x.point } });
+  }
+  stops.sort((p, q) => p.t - q.t);
+
+  // Pre-generate every id the recipe will use.
+  const endIds = (e: WallEnd) =>
+    'vertexId' in e
+      ? { vertexId: e.vertexId, splitWallId: undefined as string | undefined }
+      : { vertexId: newId('v'), splitWallId: e.wallId ? newId('w') : undefined };
+  const startIds = endIds(start);
+  const endIdsResolved = endIds(end);
+  const stopIds = stops.map((s) =>
+    'vertexId' in s ? { vertexId: s.vertexId } : { vertexId: newId('v'), splitWallId: newId('w') },
+  );
+  const chain = [startIds.vertexId, ...stopIds.map((s) => s.vertexId), endIdsResolved.vertexId];
+  const wallIds = chain.slice(1).map(() => newId('w'));
+
+  const command: Command = {
+    label: 'Draw wall',
+    recipe: (d) => {
+      const lvl = level(d, levelId);
+      // Which current wall now holds a point of an original wall split earlier in this recipe.
+      const family = new Map<string, string[]>();
+      const holder = (wallId: string, at: Vec2): string => {
+        for (const id of [wallId, ...(family.get(wallId) ?? [])]) {
+          const w = lvl.walls[id];
+          const a = w && lvl.vertices[w.a];
+          const b = w && lvl.vertices[w.b];
+          if (!a || !b) continue;
+          const pr = projectOnSegment(at, a, b);
+          if (pr.distance < 1e-4 && pr.t > EPS && pr.t < 1 - EPS) return id;
+        }
+        throw new Error(`no part of wall ${wallId} passes through the point`);
+      };
+      const split = (wallId: string, at: Vec2, vertexId: string, newWallId: string) => {
+        splitWallDraft(lvl, holder(wallId, at), at, vertexId, newWallId);
+        family.set(wallId, [...(family.get(wallId) ?? []), newWallId]);
+      };
+      const resolve = (e: WallEnd, ids: { vertexId: string; splitWallId?: string }) => {
+        if ('vertexId' in e) {
+          if (!lvl.vertices[e.vertexId]) throw new Error(`vertex ${e.vertexId} not found`);
+        } else if (e.wallId && ids.splitWallId) {
+          split(e.wallId, e.point, ids.vertexId, ids.splitWallId);
+        } else {
+          lvl.vertices[ids.vertexId] = { id: ids.vertexId, x: e.point.x, y: e.point.y };
+        }
+      };
+
+      resolve(start, startIds);
+      stops.forEach((s, i) => {
+        const ids = stopIds[i];
+        if ('split' in s && ids && 'splitWallId' in ids && ids.splitWallId) {
+          split(s.split.wallId, s.split.at, ids.vertexId, ids.splitWallId);
+        }
+      });
+      resolve(end, endIdsResolved);
+
+      for (let i = 0; i + 1 < chain.length; i++) {
+        const a = chain[i] as string;
+        const b = chain[i + 1] as string;
+        const id = wallIds[i] as string;
+        const exists = Object.values(lvl.walls).some(
+          (w) => (w.a === a && w.b === b) || (w.a === b && w.b === a),
+        );
+        if (a === b || exists) continue;
+        lvl.walls[id] = {
+          id,
+          a,
+          b,
+          thickness: opts.thickness ?? 0.1,
+          height: opts.height,
+          materialLeft: 'paint-white',
+          materialRight: 'paint-white',
+        };
+        if (opts.height === undefined) delete lvl.walls[id]?.height;
+      }
+      syncRooms(lvl);
+    },
+  };
+  return {
+    command,
+    wallIds,
+    startVertexId: startIds.vertexId,
+    endVertexId: endIdsResolved.vertexId,
   };
 }

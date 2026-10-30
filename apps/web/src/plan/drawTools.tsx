@@ -1,0 +1,311 @@
+import {
+  type OpeningKind,
+  type SnapResult,
+  type Vec2,
+  type WallEnd,
+  addOpening,
+  clampOpeningT,
+  drawWall,
+  projectOnSegment,
+  snapPoint,
+} from '@dhd/core';
+import { useEffect, useRef, useState } from 'react';
+import { useEditor } from '../editor';
+import { formatLength, parseLength } from '../units';
+import { type PlanPointer, type ToolContext, type ToolController, snapTolerance } from './tools';
+import { worldToScreen } from './view';
+
+const endFor = (s: SnapResult): WallEnd =>
+  s.vertexId ? { vertexId: s.vertexId } : { point: s.point, wallId: s.wallId };
+
+const posOf = (ctx: ToolContext, e: WallEnd): Vec2 | null => {
+  if ('vertexId' in e) {
+    const v = ctx.level.vertices[e.vertexId];
+    return v ? { x: v.x, y: v.y } : null;
+  }
+  return e.point;
+};
+
+/**
+ * Draws walls corner by corner. Each click commits one wall (one undo step). Typing a
+ * number sets the next wall's length along the current direction. Clicking the chain's
+ * first corner closes it; Enter, a double-click or Esc finishes.
+ */
+export function useWallTool(ctx: ToolContext): ToolController {
+  const [from, setFrom] = useState<WallEnd | null>(null);
+  const [first, setFirst] = useState<string | null>(null);
+  const [snap, setSnap] = useState<SnapResult | null>(null);
+  const [typed, setTyped] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const thickness = useEditor((s) => s.wallThickness);
+  const tool = useEditor((s) => s.tool);
+  const fromPos = from ? posOf(ctx, from) : null;
+
+  // Leaving the tool abandons the chain in progress.
+  useEffect(() => {
+    if (tool !== 'wall') {
+      setFrom(null);
+      setFirst(null);
+      setTyped('');
+      setSnap(null);
+    }
+  }, [tool]);
+
+  const snapAt = (p: PlanPointer): SnapResult =>
+    p.alt
+      ? { point: p.world, kind: 'free' }
+      : snapPoint(ctx.level, p.world, {
+          tolerance: snapTolerance(ctx),
+          grid: 0.1,
+          from: fromPos ?? undefined,
+        });
+
+  const finish = () => {
+    setFrom(null);
+    setFirst(null);
+    setTyped('');
+    setError(null);
+  };
+
+  const commit = (end: WallEnd) => {
+    if (!from) return;
+    try {
+      const r = drawWall(ctx.level, from, end, { thickness });
+      ctx.dispatch(r.command);
+      setError(null);
+      const closed = 'vertexId' in end && end.vertexId === first;
+      if (closed) {
+        finish();
+        return;
+      }
+      setFirst((f) => f ?? r.startVertexId);
+      setFrom({ vertexId: r.endVertexId });
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  return {
+    cursor: 'crosshair',
+    down: (p) => {
+      const s = snapAt(p);
+      if (p.clicks === 2) {
+        finish();
+        return true;
+      }
+      if (!from) {
+        setFrom(endFor(s));
+        setFirst(s.vertexId ?? null);
+        return true;
+      }
+      commit(endFor(s));
+      return true;
+    },
+    move: (p) => setSnap(snapAt(p)),
+    up: () => {},
+    key: (e) => {
+      if (from && /^[0-9.,]$|^m$|^c$/i.test(e.key)) {
+        setTyped((t) => t + e.key);
+        return true;
+      }
+      if (from && e.key === 'Backspace' && typed) {
+        setTyped((t) => t.slice(0, -1));
+        return true;
+      }
+      if (e.key === 'Enter' && from) {
+        const len = typed ? parseLength(typed) : null;
+        if (typed && fromPos && len && len > 0) {
+          const target = snap?.point ?? { x: fromPos.x + 1, y: fromPos.y };
+          let dx = target.x - fromPos.x;
+          let dy = target.y - fromPos.y;
+          const n = Math.hypot(dx, dy) || 1;
+          dx /= n;
+          dy /= n;
+          if (n < 1e-9) dx = 1;
+          setTyped('');
+          commit({ point: { x: fromPos.x + dx * len, y: fromPos.y + dy * len } });
+        } else {
+          finish();
+        }
+        return true;
+      }
+      if (e.key === 'Escape' && from) {
+        finish();
+        return true;
+      }
+      return false;
+    },
+    overlay: ({ view, size }) => {
+      const at = snap?.point;
+      const s1 = at && worldToScreen(view, size, at);
+      const s0 = fromPos && worldToScreen(view, size, fromPos);
+      const len = fromPos && at ? Math.hypot(at.x - fromPos.x, at.y - fromPos.y) : 0;
+      return (
+        <g className="draw-overlay" pointerEvents="none">
+          {s0 && s1 && (
+            <>
+              {snap?.angle !== undefined && (
+                <line
+                  className="guide"
+                  x1={s0.x - Math.cos(snap.angle) * 2000}
+                  y1={s0.y - Math.sin(snap.angle) * 2000}
+                  x2={s0.x + Math.cos(snap.angle) * 2000}
+                  y2={s0.y + Math.sin(snap.angle) * 2000}
+                />
+              )}
+              <line
+                className="ghost-wall"
+                x1={s0.x}
+                y1={s0.y}
+                x2={s1.x}
+                y2={s1.y}
+                strokeWidth={Math.max(2, thickness * view.zoom)}
+              />
+              <g transform={`translate(${(s0.x + s1.x) / 2} ${(s0.y + s1.y) / 2 - 18})`}>
+                <rect x={-34} y={-11} width={68} height={22} rx={4} />
+                <text textAnchor="middle" y={4} className="num">
+                  {formatLength(len)}
+                </text>
+              </g>
+            </>
+          )}
+          {s1 && <SnapMarker snap={snap} at={s1} />}
+          {s1 && (typed || error) && (
+            <g transform={`translate(${s1.x + 14} ${s1.y + 22})`}>
+              <rect
+                x={0}
+                y={-14}
+                width={error ? 260 : 120}
+                height={22}
+                rx={4}
+                className={error ? 'typed error' : 'typed'}
+              />
+              <text x={8} y={2}>
+                {error ?? `Length: ${typed} ⏎`}
+              </text>
+            </g>
+          )}
+        </g>
+      );
+    },
+  };
+}
+
+function SnapMarker({ snap, at }: { snap: SnapResult | null; at: Vec2 }) {
+  if (!snap) return null;
+  switch (snap.kind) {
+    case 'vertex':
+      return <circle className="snap-marker" cx={at.x} cy={at.y} r={6} />;
+    case 'wall':
+    case 'intersection':
+      return (
+        <rect
+          className="snap-marker"
+          x={at.x - 5}
+          y={at.y - 5}
+          width={10}
+          height={10}
+          transform={`rotate(45 ${at.x} ${at.y})`}
+        />
+      );
+    default:
+      return <circle className="snap-dot" cx={at.x} cy={at.y} r={2.5} />;
+  }
+}
+
+const OPENING_DEFAULTS: Record<OpeningKind, { width: number; height: number; sill: number }> = {
+  door: { width: 0.9, height: 2.1, sill: 0 },
+  window: { width: 1.2, height: 1.2, sill: 0.9 },
+  passage: { width: 1.0, height: 2.1, sill: 0 },
+};
+
+interface Placement {
+  wallId: string;
+  t: number;
+  width: number;
+  /** +1 if the pointer is on the wall's left side. */
+  side: 1 | -1;
+  /** True if the hinge should go at the end nearer vertex a. */
+  nearA: boolean;
+  fits: boolean;
+}
+
+/** Places a door, window or passage on the wall under the pointer. */
+export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolController {
+  const [place, setPlace] = useState<Placement | null>(null);
+  const keep = useRef(place);
+  keep.current = place;
+  const def = OPENING_DEFAULTS[kind];
+
+  const find = (p: PlanPointer): Placement | null => {
+    let best: (Placement & { d: number }) | null = null;
+    const tol = Math.max(0.3, 14 / ctx.view.zoom);
+    for (const f of Object.values(ctx.geom.frames)) {
+      const b = { x: f.a.x + f.d.x * f.length, y: f.a.y + f.d.y * f.length };
+      const pr = projectOnSegment(p.world, f.a, b);
+      if (pr.distance > tol + f.half || (best && pr.distance >= best.d)) continue;
+      const width = Math.min(def.width, f.length - 0.1);
+      const side =
+        (p.world.x - pr.point.x) * f.n.x + (p.world.y - pr.point.y) * f.n.y >= 0 ? 1 : -1;
+      best = {
+        wallId: f.wall.id,
+        t: clampOpeningT(f.length, width, pr.t),
+        width,
+        side,
+        nearA: pr.t < 0.5,
+        fits: width >= 0.4,
+        d: pr.distance,
+      };
+    }
+    return best;
+  };
+
+  return {
+    cursor: 'copy',
+    down: (p) => {
+      const at = find(p);
+      if (!at?.fits) return true;
+      const r = addOpening(ctx.level.id, {
+        wallId: at.wallId,
+        kind,
+        t: at.t,
+        width: at.width,
+        height: def.height,
+        sill: def.sill,
+        ...(kind === 'door'
+          ? { swing: `${at.nearA ? 'left' : 'right'}${at.side > 0 ? 'In' : 'Out'}` as const }
+          : {}),
+      });
+      ctx.dispatch(r.command);
+      useEditor.getState().select({ kind: 'opening', id: r.openingId });
+      return true;
+    },
+    move: (p) => setPlace(find(p)),
+    up: () => {},
+    key: () => false,
+    overlay: ({ view, size }) => {
+      const at = keep.current;
+      const f = at && ctx.geom.frames[at.wallId];
+      if (!at || !f) return null;
+      const c = at.t * f.length;
+      const corners = [
+        [c - at.width / 2, 1],
+        [c + at.width / 2, 1],
+        [c + at.width / 2, -1],
+        [c - at.width / 2, -1],
+      ].map(([u, side]) =>
+        worldToScreen(view, size, {
+          x: f.a.x + f.d.x * (u as number) + f.n.x * (f.half + 0.02) * (side as number),
+          y: f.a.y + f.d.y * (u as number) + f.n.y * (f.half + 0.02) * (side as number),
+        }),
+      );
+      return (
+        <polygon
+          className={at.fits ? 'ghost-opening' : 'ghost-opening invalid'}
+          points={corners.map((p) => `${p.x},${p.y}`).join(' ')}
+          pointerEvents="none"
+        />
+      );
+    },
+  };
+}

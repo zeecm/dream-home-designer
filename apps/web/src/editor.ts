@@ -26,6 +26,9 @@ export interface EditorState {
   fitRequested: boolean;
   /** World position of the pointer over the plan, for the status line. */
   pointer: Vec2 | null;
+  /** Thickness for walls the Wall tool draws, in metres. */
+  wallThickness: number;
+  setWallThickness: (t: number) => void;
   setTool: (tool: Tool) => void;
   select: (s: Selection | null) => void;
   setHover: (s: Selection | null) => void;
@@ -49,6 +52,8 @@ export const useEditor = create<EditorState>((set) => ({
   viewMode: initialViewMode(),
   fitRequested: true,
   pointer: null,
+  wallThickness: 0.1,
+  setWallThickness: (wallThickness) => set({ wallThickness }),
   setTool: (tool) => set({ tool, hover: null }),
   select: (selection) => set({ selection }),
   setHover: (hover) => set({ hover }),

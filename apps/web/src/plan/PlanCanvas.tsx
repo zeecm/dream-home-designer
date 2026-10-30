@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type Tool, useEditor } from '../editor';
 import { useProject, useStore } from '../store';
 import { icons } from '../ui/icons';
+import { useOpeningTool, useWallTool } from './drawTools';
 import {
   PlanHighlights,
   PlanShapes,
@@ -43,9 +44,16 @@ const isTyping = (t: EventTarget | null) =>
 
 function useTool(tool: Tool, ctx: ToolContext): ToolController {
   // Every tool hook runs every render so hook order never changes.
-  const select = useSelectTool(ctx);
-  const measure = useMeasureTool(ctx);
-  return tool === 'measure' ? measure : select;
+  const tools: Record<Tool, ToolController> = {
+    select: useSelectTool(ctx),
+    measure: useMeasureTool(ctx),
+    wall: useWallTool(ctx),
+    door: useOpeningTool(ctx, 'door'),
+    window: useOpeningTool(ctx, 'window'),
+    passage: useOpeningTool(ctx, 'passage'),
+    calibrate: useSelectTool(ctx),
+  };
+  return tools[tool];
 }
 
 export function PlanCanvas() {
@@ -76,13 +84,16 @@ export function PlanCanvas() {
   const [panning, setPanning] = useState(false);
 
   const pointer = useCallback(
-    (e: {
-      clientX: number;
-      clientY: number;
-      shiftKey: boolean;
-      altKey: boolean;
-      target: EventTarget | null;
-    }): PlanPointer => {
+    (
+      e: {
+        clientX: number;
+        clientY: number;
+        shiftKey: boolean;
+        altKey: boolean;
+        target: EventTarget | null;
+      },
+      clicks = 1,
+    ): PlanPointer => {
       const r = svgRef.current?.getBoundingClientRect();
       const screen = { x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0) };
       return {
@@ -91,14 +102,24 @@ export function PlanCanvas() {
         hit: parseHit(e.target),
         shift: e.shiftKey,
         alt: e.altKey,
+        clicks,
       };
     },
     [v, size],
   );
 
+  // Pointer events don't reliably carry a click count, so detect double-clicks here.
+  const lastDown = useRef({ t: 0, x: 0, y: 0 });
   const onPointerDown = (e: React.PointerEvent) => {
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
-    const p = pointer(e);
+    const now = performance.now();
+    const prev = lastDown.current;
+    const double =
+      e.button === 0 &&
+      now - prev.t < 350 &&
+      Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < 6;
+    lastDown.current = double ? { t: 0, x: 0, y: 0 } : { t: now, x: e.clientX, y: e.clientY };
+    const p = pointer(e, double ? 2 : 1);
     if (e.button === 1 || e.button === 2 || space.current || !ctx || !active.down(p)) {
       pan.current = p.screen;
       setPanning(true);
@@ -144,7 +165,7 @@ export function PlanCanvas() {
     return () => svg.removeEventListener('wheel', onWheel);
   }, [v, size, setView]);
 
-  // ---- keys: Space pans; the rest goes to the tool
+  // ---- keys: Space pans; the rest goes to the tool first
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (isTyping(e.target)) return;
@@ -158,10 +179,12 @@ export function PlanCanvas() {
     const up = (e: KeyboardEvent) => {
       if (e.code === 'Space') space.current = false;
     };
-    window.addEventListener('keydown', down);
+    // Capture phase: the active tool sees keys before the app's shortcuts, so typing a
+    // wall length like "2.5m" never switches views or tools.
+    window.addEventListener('keydown', down, true);
     window.addEventListener('keyup', up);
     return () => {
-      window.removeEventListener('keydown', down);
+      window.removeEventListener('keydown', down, true);
       window.removeEventListener('keyup', up);
     };
   });
@@ -237,7 +260,7 @@ export function PlanCanvas() {
           level={level}
           view={v}
           size={size}
-          shown={shownVertices}
+          shown={tool === 'wall' ? 'all' : shownVertices}
           interactive={tool === 'select'}
         />
         {active.overlay(ctx)}
@@ -246,7 +269,10 @@ export function PlanCanvas() {
       {empty && (
         <div className="plan-empty">
           <p className="plan-empty-title">This plan has no walls yet.</p>
-          <p>Upload your floor plan to trace over it, or draw walls straight away.</p>
+          <p>
+            Press W, then click corner to corner to draw walls. Rooms appear as walls close around
+            them.
+          </p>
         </div>
       )}
 

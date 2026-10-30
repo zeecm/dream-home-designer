@@ -6,4 +6,6 @@ export * from './geometry';
 export * from './factory';
 export * from './footprints';
 export * from './plan';
+export * from './rooms';
+export * from './snap';
 export { hdb4RoomLevel, hdb4RoomProject } from './fixtures/hdb4room';
