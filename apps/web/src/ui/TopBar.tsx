@@ -10,10 +10,7 @@ function syncText(s: SyncStatus, local: boolean): { text: string; tone: 'neutral
     case 'loading':
       return { text: 'Opening…', tone: 'neutral' };
     case 'saved':
-      return {
-        text: local ? `Saved in this browser · v${s.version}` : `Saved · v${s.version}`,
-        tone: 'neutral',
-      };
+      return { text: local ? 'Saved in this browser' : 'Saved', tone: 'neutral' };
     case 'dirty':
       return { text: 'Unsaved changes', tone: 'neutral' };
     case 'saving':

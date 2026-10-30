@@ -10,3 +10,5 @@ apps/api/bin/
 apps/api/data/
 .taste-skill/
 .wrangler/
+test-results/
+playwright-report/

@@ -1,18 +1,22 @@
 import { type Level, levelBounds } from '@dhd/core';
-import { MaterialCache, buildLevel, disposeGroup } from '@dhd/render';
+import { LevelMeshes, MaterialCache } from '@dhd/render';
 import { OrbitControls } from '@react-three/drei';
 import { Canvas, useThree } from '@react-three/fiber';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useProject } from './store';
 
 const materials = new MaterialCache();
 const FOV = 40;
 
+/** Keeps one incremental mesh set per project; each edit rebuilds only what changed. */
 function LevelMesh() {
   const level = useProject().levels[0];
-  const group = useMemo(() => (level ? buildLevel(level, { materials }) : null), [level]);
-  useEffect(() => () => void (group && disposeGroup(group)), [group]);
-  return group ? <primitive object={group} /> : null;
+  const meshes = useMemo(() => new LevelMeshes(materials), []);
+  useEffect(() => () => meshes.dispose(), [meshes]);
+  useLayoutEffect(() => {
+    if (level) meshes.update(level);
+  }, [level, meshes]);
+  return <primitive object={meshes.group} />;
 }
 
 interface Frame {

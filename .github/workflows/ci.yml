@@ -20,6 +20,18 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm --filter @dhd/web build
+      # End-to-end: the production build against the Go API (in-memory store).
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+      - run: pnpm --filter @dhd/web exec playwright install --with-deps chromium
+      - run: pnpm --filter @dhd/web e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          retention-days: 7
 
   api:
     runs-on: ubuntu-latest

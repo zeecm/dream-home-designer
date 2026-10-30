@@ -8,16 +8,21 @@ describe('buildLevel', () => {
   const level = hdb4RoomLevel();
   const group = buildLevel(level, { materials: new MaterialCache() });
 
-  it('merges walls into one mesh per material, plus glass and one floor per room', () => {
-    const names = group.children.map((c) => c.name).sort();
-    expect(names).toEqual(
-      ['walls:paint-white', 'glass', ...Object.keys(level.rooms).map((id) => `floor:${id}`)].sort(),
+  it('has a mesh per wall, glass per window wall and a floor per room', () => {
+    const names = new Set(group.children.map((c) => c.name));
+    for (const id of Object.keys(level.walls)) expect(names, id).toContain(`wall:${id}`);
+    for (const id of Object.keys(level.rooms)) expect(names, id).toContain(`floor:${id}`);
+    const windowWalls = new Set(
+      Object.values(level.openings)
+        .filter((o) => o.kind === 'window')
+        .map((o) => o.wallId),
     );
+    for (const id of windowWalls) expect(names, id).toContain(`glass:${id}`);
   });
 
   it('walls span the plan footprint and ceiling height', () => {
-    const walls = group.getObjectByName('walls:paint-white') as THREE.Mesh;
-    const box = new THREE.Box3().setFromObject(walls);
+    const box = new THREE.Box3();
+    for (const c of group.children) if (/^(wall|hub):/.test(c.name)) box.expandByObject(c);
     // exterior walls are 0.2 thick and centred on the outline, so extend 0.1 past it
     expect(box.min.x).toBeCloseTo(-0.1);
     expect(box.max.x).toBeCloseTo(11.1);

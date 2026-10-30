@@ -22,6 +22,7 @@ import {
   localBackend,
   remoteBackend,
 } from './backend';
+import { useEditor } from './editor';
 import { type RecentProject, forgetRecent, recentProjects, rememberRecent } from './recent';
 
 export type SyncStatus =
@@ -225,7 +226,6 @@ export const useStore = create<State>((set, get) => {
     createProject: async (name) => {
       await createFrom(blankProject(name));
       // A blank plan is drawn in the plan view; 3D has nothing to show yet.
-      const { useEditor } = await import('./editor');
       useEditor.getState().setViewMode('plan');
     },
     openSample: () => createFrom({ ...hdb4RoomProject(newId('prj')), name: '4-room HDB (sample)' }),
