@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { emptyLevel } from './factory';
 import { hdb4RoomLevel } from './fixtures/hdb4room';
 import { MITER_LIMIT, footprintPolygon, footprintSpans, wallFootprints } from './footprints';
-import { signedArea } from './geometry';
+import { pointInPolygon, signedArea } from './geometry';
 import { wallFrame } from './plan';
 import type { Level, Vec2, Wall } from './schema';
 
@@ -193,5 +193,22 @@ describe('walls to one side of their line', () => {
     const frame = wallFrame(l, l.walls.w as Wall, fp);
     expect(frame?.a.y).toBeCloseTo(0.15, 9);
     expect(frame?.half).toBeCloseTo(0.15, 9);
+  });
+});
+
+describe('junction hubs with one-sided walls', () => {
+  it('fill only the gap where a wall thins and a third wall meets on the flush side', () => {
+    const l = makeLevel({ w: [-2, 0], v: [0, 0], e: [2, 0], s: [0, -2] }, [
+      ['thick', 'w', 'v', 0.3],
+      ['thin', 'v', 'e', 0.1],
+      ['stem', 'v', 's', 0.1],
+    ]);
+    l.walls.thick!.side = 'left';
+    l.walls.thin!.side = 'left';
+    const f = wallFootprints(l);
+    const hub = f.hubs.find((h) => h.vertexId === 'v');
+    // Nothing past the thin wall's room-side face (y = 0.1) on its side of the junction.
+    expect(hub).toBeDefined();
+    expect(pointInPolygon({ x: 0.01, y: 0.2 }, hub?.polygon ?? [])).toBe(false);
   });
 });

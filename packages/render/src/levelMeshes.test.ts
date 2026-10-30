@@ -14,6 +14,7 @@ import {
 import type * as THREE from 'three';
 import { Box3, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
+import { extrudePolygon } from './extrude';
 import { LevelMeshes } from './levelMeshes';
 import { MaterialCache } from './materials';
 
@@ -260,5 +261,40 @@ describe('wall paint', () => {
     const groups = mesh.geometry.groups;
     expect(groups.map((g) => g.materialIndex)).toEqual([0, 1, 2]);
     for (const g of groups) expect(g.count).toBeGreaterThan(0);
+  });
+});
+
+describe('extrudePolygon', () => {
+  it('fills a concave outline exactly, its sides facing out', () => {
+    // An L: area 3, made of 0..2 × 0..1 and 0..1 × 1..2.
+    const l = [
+      { x: 0, y: 0 },
+      { x: 2, y: 0 },
+      { x: 2, y: 1 },
+      { x: 1, y: 1 },
+      { x: 1, y: 2 },
+      { x: 0, y: 2 },
+    ];
+    for (const poly of [l, [...l].reverse()]) {
+      const g = extrudePolygon(poly, 0, 1);
+      const pos = g.getAttribute('position');
+      let top = 0;
+      const a = new Vector3();
+      const b = new Vector3();
+      const c = new Vector3();
+      for (let t = 0; t < pos.count / 3; t++) {
+        a.fromBufferAttribute(pos, t * 3);
+        b.fromBufferAttribute(pos, t * 3 + 1);
+        c.fromBufferAttribute(pos, t * 3 + 2);
+        const n = b.clone().sub(a).cross(c.clone().sub(a));
+        if (n.y > 1e-9) top += n.y / 2;
+        // The side face along the inner corner's edge x = 1 (y 1..2) faces +x.
+        const mid = a.clone().add(b).add(c).divideScalar(3);
+        if (Math.abs(n.y) < 1e-9 && Math.abs(mid.x - 1) < 1e-9 && mid.z > 1) {
+          expect(n.x).toBeGreaterThan(0);
+        }
+      }
+      expect(top).toBeCloseTo(3);
+    }
   });
 });

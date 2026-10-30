@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { drawWall } from './commands';
 import { blankProject } from './factory';
 import { sampleFlatProject } from './fixtures/sampleFlat';
 import {
@@ -14,6 +15,7 @@ import {
 import { dispatch, emptyHistory, undo } from './history';
 import { planGeometry } from './plan';
 import { Project } from './schema';
+import { insideFurniture, walkStart } from './walk';
 
 const kind = (id: string) => {
   const k = furnitureKind(id);
@@ -105,5 +107,30 @@ describe('item commands', () => {
     const L = s.doc.levels[0]!.id;
     s = dispatch(s, addItem(L, newItem('it_1', kind('desk'), { x: 1, y: 1 })));
     expect(() => dispatch(s, updateItem(L, 'it_1', { scale: { y: 0 } }))).toThrow();
+  });
+});
+
+describe('furniture and the walk', () => {
+  it('never starts a walk inside a piece of furniture', () => {
+    let s = { doc: blankProject('t', 'prj_t'), history: emptyHistory() };
+    const lvl = () => s.doc.levels[0]!;
+    const pts: [number, number][] = [
+      [0, 0],
+      [3, 0],
+      [3, 3.2],
+      [0, 3.2],
+    ];
+    for (let i = 0; i < 4; i++) {
+      const [ax, ay] = pts[i]!;
+      const [bx, by] = pts[(i + 1) % 4]!;
+      s = dispatch(
+        s,
+        drawWall(lvl(), { point: { x: ax, y: ay } }, { point: { x: bx, y: by } }).command,
+      );
+    }
+    s = dispatch(s, addItem(lvl().id, newItem('it_bed', kind('bed-king'), { x: 1.5, y: 1.6 })));
+    const start = walkStart(lvl());
+    expect(start).not.toBeNull();
+    expect(insideFurniture(lvl(), start!.at)).toBe(false);
   });
 });

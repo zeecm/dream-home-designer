@@ -124,6 +124,14 @@ export function walk(
  * room to stand, looking along the room's longer side. `heading` is the angle in plan space
  * (radians from +x towards +y).
  */
+/** Whether `p` is within a piece of furniture the walker can't pass. */
+export function insideFurniture(level: Level, p: Vec2): boolean {
+  return Object.values(level.items).some(
+    (item) =>
+      item.flags.collidable && item.position.y < 1 && pointInPolygon(p, itemFootprint(item)),
+  );
+}
+
 export function walkStart(level: Level): { at: Vec2; heading: number } | null {
   const shapes = roomShapes(level);
   let best: { area: number; outer: Vec2[]; holes: Vec2[][] } | null = null;
@@ -145,6 +153,7 @@ export function walkStart(level: Level): { at: Vec2; heading: number } | null {
     for (let j = 1; j < n; j++) {
       const p = { x: x0 + ((x1 - x0) * i) / n, y: y0 + ((y1 - y0) * j) / n };
       if (!pointInPolygon(p, best.outer) || best.holes.some((h) => pointInPolygon(p, h))) continue;
+      if (insideFurniture(level, p)) continue; // the middle of a bed is clear of walls, too
       let d = Number.POSITIVE_INFINITY;
       for (const s of segments) {
         const c = closestOnSegment(p, s);

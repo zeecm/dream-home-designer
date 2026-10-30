@@ -106,7 +106,9 @@ export function wallFootprints(level: Level): Footprints {
       const pSide = offset(v, perp(p.e), p.ccwW);
       const qSide = offset(v, perp(q.e), -q.cwW);
       const corner = intersect(pSide, p.e, qSide, q.e);
-      const limit = (MITER_LIMIT * Math.max(p.ccwW + p.cwW, q.ccwW + q.cwW)) / 2;
+      // Measured from the faces being joined: a one-sided wall's face lies its whole
+      // thickness off the line, so this mitres it as far as a centred wall of that width.
+      const limit = MITER_LIMIT * Math.max(p.ccwW, q.cwW);
       if (corner && Math.hypot(corner.x - v.x, corner.y - v.y) <= limit) {
         p.ccw = corner;
         q.cw = corner;
@@ -115,13 +117,25 @@ export function wallFootprints(level: Level): Footprints {
         q.cw = qSide;
       }
     }
-    // Whatever the wall ends leave uncovered lies within the hull of the junction point and
-    // the end corners (exactly so for T and X junctions; a bevel's hull overlaps the walls,
-    // which is harmless). Mitred two-wall corners give a degenerate hull and no hub.
+    // Whatever the wall ends leave uncovered is the polygon through their end corners in
+    // turn around the junction (it may be concave where one-sided walls of different
+    // thickness meet). Mitred two-wall corners leave nothing, so no hub.
     if (k >= 3 || list.some((end) => !samePoint(end.ccw, nextOf(list, end).cw))) {
-      const hull = convexHull([v, ...list.flatMap((end) => [end.cw as Vec2, end.ccw as Vec2])]);
-      if (hull.length >= 3 && Math.abs(polygonArea(hull)) > 1e-8) {
-        hubs.push({ vertexId: vid, polygon: hull });
+      const ring: Vec2[] = [];
+      for (const end of list) {
+        for (const p of [end.cw as Vec2, end.ccw as Vec2]) {
+          const last = ring[ring.length - 1];
+          if (!last || !samePoint(last, p)) ring.push(p);
+        }
+      }
+      while (ring.length > 1 && samePoint(ring[0], ring[ring.length - 1])) ring.pop();
+      // Where walls overlap (a sharp corner squared off), the corners don't run in turn
+      // around the junction; their hull with the junction point covers the gap instead.
+      const hub = aroundOnce(v, ring)
+        ? ring
+        : convexHull([v, ...list.flatMap((end) => [end.cw as Vec2, end.ccw as Vec2])]);
+      if (hub.length >= 3 && Math.abs(polygonArea(hub)) > 1e-8) {
+        hubs.push({ vertexId: vid, polygon: hub });
       }
     }
   }
@@ -135,6 +149,27 @@ export function wallFootprints(level: Level): Footprints {
     walls[w.id] = { wallId: w.id, aL: endA.ccw, aR: endA.cw, bR: endB.ccw, bL: endB.cw };
   }
   return { walls, hubs };
+}
+
+/** Whether `ring` winds once counter-clockwise around `v` without turning back. */
+function aroundOnce(v: Vec2, ring: readonly Vec2[]): boolean {
+  let total = 0;
+  let prev: number | null = null;
+  // A ring through v (a face on the line) only sweeps half way round it.
+  const throughV = ring.some((p) => Math.hypot(p.x - v.x, p.y - v.y) < 1e-9);
+  for (const p of [...ring, ring[0] as Vec2]) {
+    if (Math.hypot(p.x - v.x, p.y - v.y) < 1e-9) continue;
+    const a = Math.atan2(p.y - v.y, p.x - v.x);
+    if (prev !== null) {
+      let d = a - prev;
+      while (d <= -Math.PI) d += 2 * Math.PI;
+      while (d > Math.PI) d -= 2 * Math.PI;
+      if (d < -1e-9) return false;
+      total += d;
+    }
+    prev = a;
+  }
+  return throughV ? total <= 2 * Math.PI + 1e-6 : Math.abs(total - 2 * Math.PI) < 1e-6;
 }
 
 const samePoint = (p?: Vec2, q?: Vec2) =>

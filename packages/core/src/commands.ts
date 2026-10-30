@@ -207,6 +207,7 @@ export function updateWall(levelId: string, wallId: string, patch: WallPatch): C
       if ('side' in patch && patch.side === undefined) delete w.side; // centred on its line
       if (w.kind === 'wall') delete w.kind; // absent means a wall
       if (w.kind === 'boundary') {
+        delete w.side; // a line has no faces to put to one side
         // A boundary has nothing to put a door or window in.
         const lvl = level(d, levelId);
         for (const o of Object.values(lvl.openings))
@@ -585,6 +586,11 @@ export function drawWall(
           if (isBoundary(existing) && opts.kind !== 'boundary') {
             delete existing.kind;
             existing.thickness = opts.thickness ?? 0.1;
+            // The side asked for, seen along the existing wall's own direction.
+            const flip = existing.a === b && existing.b === a;
+            const side = opts.side && flip ? (opts.side === 'left' ? 'right' : 'left') : opts.side;
+            if (side) existing.side = side;
+            else delete existing.side;
           }
           continue;
         }

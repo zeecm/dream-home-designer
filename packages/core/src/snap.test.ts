@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { emptyLevel } from './factory';
 import { hdb4RoomLevel } from './fixtures/hdb4room';
 import { sampleFlatProject } from './fixtures/sampleFlat';
 import { wallLine } from './geometry';
@@ -98,6 +99,21 @@ describe('cornerSpot', () => {
     const line = wallLine(l, l.walls[id]!);
     return projectOnSegment(p, line.a, line.b).t * line.length;
   };
+
+  it('is null on a wall too short and thick to take a corner', () => {
+    const lvl = emptyLevel();
+    lvl.vertices.a = { id: 'a', x: 0, y: 0 };
+    lvl.vertices.b = { id: 'b', x: 0.28, y: 0 };
+    lvl.walls.w = {
+      id: 'w',
+      a: 'a',
+      b: 'b',
+      thickness: 0.3,
+      materialLeft: 'paint-white',
+      materialRight: 'paint-white',
+    };
+    expect(cornerSpot(lvl, 'w')).toBeNull();
+  });
 
   it('is the middle of a wall with nothing there', () => {
     const p = cornerSpot(l, 'w_bath-wc-1_bath-wc-2');

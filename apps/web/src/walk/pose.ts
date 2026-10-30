@@ -1,4 +1,4 @@
-import { type Level, pointInPolygon, roomShapes } from '@dhd/core';
+import { type Level, insideFurniture, pointInPolygon, roomShapes } from '@dhd/core';
 import type { WalkPose } from './WalkControls';
 
 /**
@@ -26,7 +26,8 @@ export function loadWalkPose(projectId: string, level: Level): WalkPose | null {
     const inside = [...roomShapes(level).values()].some(
       (s) => pointInPolygon(p.at, s.outer) && !s.holes.some((h) => pointInPolygon(p.at, h)),
     );
-    return inside ? p : null;
+    // Not inside a bed or table placed there since: the walker couldn't get out.
+    return inside && !insideFurniture(level, p.at) ? p : null;
   } catch {
     return null;
   }

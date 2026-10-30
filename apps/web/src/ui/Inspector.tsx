@@ -456,7 +456,8 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
   if (!it) return null;
   const kind = furnitureKind(it.assetId);
   const size = itemSize(it, kind);
-  const base = kind?.size ?? size;
+  // What scale 1 measures: the catalogue size, or itemSize's stand-in for an unknown piece.
+  const base = kind?.size ?? { w: 0.5, d: 0.5, h: 0.5 };
   const set = (patch: ItemPatch) => dispatch(updateItem(level.id, id, patch));
   const turn = (q: number) => set({ rotationY: it.rotationY + (q * Math.PI) / 2 });
   return (

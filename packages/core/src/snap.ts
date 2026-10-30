@@ -246,7 +246,9 @@ export function cornerSpot(level: Level, wallId: string): Vec2 | null {
       u > o.t * length - o.width / 2 + 1e-6 &&
       u < o.t * length + o.width / 2 - 1e-6,
   );
-  return inside || u < 0.05 || u > length - 0.05 ? null : p;
+  // splitWall makes no corner this close to an end (it uses the end instead): endCapture.
+  const margin = Math.max(0.05, w.thickness / 2);
+  return inside || u < margin || u > length - margin ? null : p;
 }
 
 /**

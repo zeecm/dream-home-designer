@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   deleteOpening,
   deleteVertex,
+  drawWall,
   setCeilingHeight,
   setWallLength,
   updateOpening,
   updateRoom,
   updateWall,
 } from './commands';
+import { blankProject } from './factory';
 import { hdb4RoomProject } from './fixtures/hdb4room';
 import { clampOpeningT, wallLine } from './geometry';
 import { type EditorDoc, dispatch, emptyHistory, undo } from './history';
@@ -131,5 +133,34 @@ describe('deleteVertex', () => {
     expect(l.openings.op_master).toBeUndefined(); // it sat on w_mid_4 (v10 -> v3)
     expect(s.history.past).toHaveLength(1);
     expect(undo(s).doc).toEqual(s0.doc);
+  });
+});
+
+describe('one-sided walls and boundaries', () => {
+  it('a wall turned into a boundary loses its side, and tracing over it takes the side asked for', () => {
+    let s = { doc: blankProject('t', 'prj_t'), history: emptyHistory() };
+    const lvl = () => s.doc.levels[0]!;
+    const r = drawWall(
+      lvl(),
+      { point: { x: 0, y: 0 } },
+      { point: { x: 3, y: 0 } },
+      { thickness: 0.3, side: 'left' },
+    );
+    s = dispatch(s, r.command);
+    const id = r.wallIds[0]!;
+    s = dispatch(s, updateWall(lvl().id, id, { kind: 'boundary' }));
+    expect(lvl().walls[id]?.side).toBeUndefined();
+    // Traced back the other way, asking for its right: the stored wall's own left.
+    const t = drawWall(
+      lvl(),
+      { point: { x: 3, y: 0 } },
+      { point: { x: 0, y: 0 } },
+      { thickness: 0.1, side: 'right' },
+    );
+    s = dispatch(s, t.command);
+    const w = lvl().walls[id];
+    expect(w?.kind).toBeUndefined();
+    expect(w?.thickness).toBe(0.1);
+    expect(w?.side).toBe('left');
   });
 });

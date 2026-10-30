@@ -481,7 +481,10 @@ export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolControl
       setPlace(at);
       setOnBoundary(!at && boundaryNear(p) ? p.screen : null);
       setMissed(null);
-      setNarrowed(null);
+      // The "narrowed" note stays until the pointer moves well away from it.
+      setNarrowed((n) =>
+        n && Math.hypot(p.screen.x - n.at.x, p.screen.y - n.at.y) < 60 ? n : null,
+      );
     },
     up: () => {},
     key: () => false,

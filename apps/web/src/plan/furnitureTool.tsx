@@ -1,4 +1,12 @@
-import { addItem, furnitureKind, itemFootprint, newId, newItem, placeFurniture } from '@dhd/core';
+import {
+  addItem,
+  deleteItem,
+  furnitureKind,
+  itemFootprint,
+  newId,
+  newItem,
+  placeFurniture,
+} from '@dhd/core';
 import { useState } from 'react';
 import { useEditor } from '../editor';
 import { formatLength } from '../units';
@@ -36,6 +44,18 @@ export function useFurnitureTool(ctx: ToolContext): ToolController {
     key: (e) => {
       if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.metaKey) {
         setTurn((t) => t + (e.shiftKey ? -1 : 1) * (Math.PI / 2));
+        return true;
+      }
+      const sel = useEditor.getState().selection;
+      // The piece just placed (still selected) can go again straight away.
+      if ((e.key === 'Delete' || e.key === 'Backspace') && sel?.kind === 'item') {
+        ctx.dispatch(deleteItem(ctx.level.id, sel.id));
+        useEditor.getState().select(null);
+        return true;
+      }
+      if (e.key === 'Escape') {
+        useEditor.getState().select(null);
+        useEditor.getState().setTool('select');
         return true;
       }
       return false;
