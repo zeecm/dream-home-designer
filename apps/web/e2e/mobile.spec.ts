@@ -24,11 +24,25 @@ async function touches(page: Page, frames: { x: number; y: number }[][]) {
   await page.waitForTimeout(100);
 }
 
-/** Where the plan is now: the bars above it (drawing, getting started) change its place. */
+/**
+ * Where the plan is now, once it has stopped moving: the bars above it (drawing, getting
+ * started) and the details panel below change its place and size as you go, and a slow run
+ * lays them out late.
+ */
 async function planBox(page: Page) {
-  const box = await page.locator('svg.plan-svg').boundingBox();
-  if (!box) throw new Error('no plan');
-  return box;
+  const at = async () => {
+    const box = await page.locator('svg.plan-svg').boundingBox();
+    if (!box) throw new Error('no plan');
+    return box;
+  };
+  let last = await at();
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(100);
+    const now = await at();
+    if (JSON.stringify(now) === JSON.stringify(last)) return now;
+    last = now;
+  }
+  return last;
 }
 
 const line = (a: { x: number; y: number }, b: { x: number; y: number }, n = 10) =>

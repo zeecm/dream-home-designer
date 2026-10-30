@@ -38,10 +38,16 @@ export function panBy(v: View, dxScreen: number, dyScreen: number): View {
 }
 
 /** A view that shows `b` with `padding` pixels to spare on every side. */
+/**
+ * The least a fit shows, in metres each way: a first wall or two is framed in room-sized
+ * space, rather than zoomed in until a 2 m wall fills a phone.
+ */
+export const MIN_FIT_SPAN = 6;
+
 export function fitBounds(b: Bounds | null, size: Size, padding = 48): View {
   if (!b || size.width <= 0 || size.height <= 0) return { cx: 0, cy: 0, zoom: 50 };
-  const w = Math.max(b.max.x - b.min.x, 1);
-  const h = Math.max(b.max.y - b.min.y, 1);
+  const w = Math.max(b.max.x - b.min.x, MIN_FIT_SPAN);
+  const h = Math.max(b.max.y - b.min.y, MIN_FIT_SPAN);
   const zoom = clampZoom(Math.min((size.width - 2 * padding) / w, (size.height - 2 * padding) / h));
   return { cx: (b.min.x + b.max.x) / 2, cy: (b.min.y + b.max.y) / 2, zoom };
 }
