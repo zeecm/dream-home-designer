@@ -69,4 +69,11 @@ test('a real HDB plan PDF renders as the plan image', async ({ page }) => {
     .locator('image.underlay')
     .evaluate((el) => [el.getAttribute('width'), el.getAttribute('height')]);
   expect(Number(size[1])).toBe(3000);
+  // The view frames the drawing, not the whole page: the page runs past the pane.
+  const pane = await page.getByTestId('plan').boundingBox();
+  await expect(async () => {
+    const img = await page.locator('image.underlay').boundingBox();
+    expect((img?.height ?? 0) / (pane?.height ?? 1)).toBeGreaterThan(1.2);
+  }).toPass();
+  await page.screenshot({ path: test.info().outputPath('pdf-framed.png') });
 });

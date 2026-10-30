@@ -37,6 +37,8 @@ export async function uploadPlanImage(file: File): Promise<void> {
   const view = useEditor.getState().view;
   const centre = view ? { x: view.cx, y: view.cy } : { x: 0, y: 0 };
   useStore.getState().dispatch(setUnderlay(placeUnderlay(key, { width, height }, centre)));
+  // Frame the new image's drawing (on a plan with no walls yet), not the page around it.
+  useEditor.getState().requestFit();
   // Straight into calibration: the image's scale is only a guess until then.
   useEditor.getState().setTool('calibrate');
   void syncPlanImage();

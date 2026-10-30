@@ -1,6 +1,7 @@
 import { levelBounds, planGeometry, underlayToWorld } from '@dhd/core';
 import type { Vec2 } from '@dhd/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type PixelBox, inkBounds } from '../assets';
 import { type Tool, useEditor } from '../editor';
 import { useProject, useStore } from '../store';
 import { uploadPlanImage, usePlanImage, useUploadPicker } from '../ui/PlanImage';
@@ -77,6 +78,18 @@ export function PlanCanvas() {
   const geom = useMemo(() => (level ? planGeometry(level) : null), [level]);
   const underlay = project.underlay;
   const image = usePlanImage();
+  const imageUrl = image.status === 'ready' ? image.url : null;
+  const [ink, setInk] = useState<PixelBox | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: measured once per image
+  useEffect(() => {
+    setInk(null);
+    if (image.status !== 'ready') return;
+    let live = true;
+    void inkBounds(image).then((b) => live && setInk(b));
+    return () => {
+      live = false;
+    };
+  }, [imageUrl]);
   const upload = useUploadPicker();
   const [dropping, setDropping] = useState(false);
   // Focus ring on the canvas: shown when Tab moved focus here, hidden on the next click.
@@ -92,11 +105,13 @@ export function PlanCanvas() {
     if ((!fitRequested && viewAdjusted) || !level || size.width === 0) return;
     let b = levelBounds(level);
     if (!b && underlay && image.status === 'ready') {
+      // Frame the drawing, not the whole page around it.
+      const box = ink ?? { x0: 0, y0: 0, x1: image.width, y1: image.height };
       const corners = [
-        { x: 0, y: 0 },
-        { x: image.width, y: 0 },
-        { x: image.width, y: image.height },
-        { x: 0, y: image.height },
+        { x: box.x0, y: box.y0 },
+        { x: box.x1, y: box.y0 },
+        { x: box.x1, y: box.y1 },
+        { x: box.x0, y: box.y1 },
       ].map((p) => underlayToWorld(underlay, p));
       b = {
         min: { x: Math.min(...corners.map((c) => c.x)), y: Math.min(...corners.map((c) => c.y)) },
@@ -105,7 +120,7 @@ export function PlanCanvas() {
     }
     setView(fitBounds(b, size));
     fitDone();
-  }, [fitRequested, viewAdjusted, size, image.status, setView, fitDone]);
+  }, [fitRequested, viewAdjusted, size, image.status, ink, setView, fitDone]);
 
   const ctx: ToolContext | null = level && geom ? { level, geom, view: v, size, dispatch } : null;
   const active = useTool(tool, ctx ?? ({} as ToolContext));

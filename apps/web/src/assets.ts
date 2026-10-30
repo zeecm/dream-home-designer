@@ -121,6 +121,101 @@ export function loadAsset(key: string, remote?: RemoteImage): Promise<LoadedImag
   return p;
 }
 
+/** A rectangle in image pixels. */
+export interface PixelBox {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/**
+ * Where the drawing is on a plan image: ink (pixels darker than paper) is gathered into
+ * cells, touching cells into blocks, and the block covering the largest area wins. A floor
+ * plan's lines and dimensions join into one block, while titles, notes and a legend stand
+ * apart, so this frames the plan rather than the page. Null if the image can't be read.
+ */
+export function inkBounds(img: LoadedImage): Promise<PixelBox | null> {
+  return new Promise((resolve) => {
+    const el = new Image();
+    el.onerror = () => resolve(null);
+    el.onload = () => {
+      const k = Math.min(1, 800 / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * k));
+      const h = Math.max(1, Math.round(img.height * k));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const g = canvas.getContext('2d', { willReadFrequently: true });
+      if (!g) return resolve(null);
+      g.drawImage(el, 0, 0, w, h);
+      resolve(drawingBox(g.getImageData(0, 0, w, h), 12, 1 / k));
+    };
+    el.src = img.url;
+  });
+}
+
+/** The largest block of inked `cell`-pixel cells in `image`, scaled by `scale`. */
+export function drawingBox(
+  image: { width: number; height: number; data: ArrayLike<number> },
+  cell: number,
+  scale: number,
+): PixelBox | null {
+  const { width: w, height: h, data } = image;
+  const cw = Math.ceil(w / cell);
+  const ch = Math.ceil(h / cell);
+  const inked = new Uint8Array(cw * ch);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      const lum =
+        0.3 * (data[i] ?? 255) + 0.59 * (data[i + 1] ?? 255) + 0.11 * (data[i + 2] ?? 255);
+      if ((data[i + 3] ?? 0) > 128 && lum < 230) {
+        inked[Math.floor(y / cell) * cw + Math.floor(x / cell)] = 1;
+      }
+    }
+  }
+  const seen = new Uint8Array(cw * ch);
+  let best: { area: number; box: [number, number, number, number] } | null = null;
+  for (let start = 0; start < inked.length; start++) {
+    if (!inked[start] || seen[start]) continue;
+    seen[start] = 1;
+    const stack = [start];
+    let [x0, y0, x1, y1] = [cw, ch, 0, 0];
+    while (stack.length) {
+      const c = stack.pop() as number;
+      const cx = c % cw;
+      const cy = (c - cx) / cw;
+      x0 = Math.min(x0, cx);
+      y0 = Math.min(y0, cy);
+      x1 = Math.max(x1, cx);
+      y1 = Math.max(y1, cy);
+      const next = [
+        cx > 0 ? c - 1 : -1,
+        cx < cw - 1 ? c + 1 : -1,
+        cy > 0 ? c - cw : -1,
+        cy < ch - 1 ? c + cw : -1,
+      ];
+      for (const n of next) {
+        if (n >= 0 && inked[n] && !seen[n]) {
+          seen[n] = 1;
+          stack.push(n);
+        }
+      }
+    }
+    const area = (x1 - x0 + 1) * (y1 - y0 + 1);
+    if (!best || area > best.area) best = { area, box: [x0, y0, x1 + 1, y1 + 1] };
+  }
+  if (!best) return null;
+  const [x0, y0, x1, y1] = best.box.map((v) => v * cell * scale) as [
+    number,
+    number,
+    number,
+    number,
+  ];
+  return { x0, y0, x1, y1 };
+}
+
 export type AssetState =
   | { status: 'none' }
   | { status: 'loading' }
