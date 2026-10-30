@@ -378,6 +378,11 @@ select {
 .menu-anchor {
   position: relative;
 }
+/* The top bar's menus open over the stage below it. */
+.topbar {
+  position: relative;
+  z-index: 30;
+}
 .menu {
   position: absolute;
   top: calc(100% + 4px);
@@ -884,6 +889,20 @@ select {
   font-weight: 500;
   line-height: 18px;
 }
+.canvas-form {
+  display: grid;
+  gap: 6px;
+  max-width: 360px;
+}
+.canvas-form-row {
+  display: flex;
+  gap: 6px;
+}
+.canvas-form .input {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+}
 .plan-empty {
   position: absolute;
   inset: 50% auto auto 50%;
@@ -1141,9 +1160,7 @@ select {
   .topbar-right {
     min-width: 0;
   }
-  .topbar-left {
-    overflow: hidden;
-  }
+  /* Not overflow: hidden here, or the project menu that drops from it is clipped away. */
   .brand-name,
   .topbar-divider {
     display: none;

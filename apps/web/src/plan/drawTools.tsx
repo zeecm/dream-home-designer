@@ -468,25 +468,61 @@ export function useCalibrateTool(ctx: ToolContext): ToolController {
         : points.length < 2
           ? `Set scale ${step}/2 · Click both ends of a wall whose length you know (${points.length}/2 clicked).`
           : 'Set scale 2/2 · Type its real length and press Enter (e.g. 4.5 m or 4500 mm).';
+      const asking = points.length === 2;
       return (
         <g pointerEvents="none">
-          <foreignObject x={12} y={12} width={Math.max(0, size.width - 24)} height={40}>
-            <div className="canvas-banner">{error ?? banner}</div>
+          <foreignObject
+            x={12}
+            y={12}
+            width={Math.max(0, size.width - 24)}
+            height={asking ? 96 : 40}
+            pointerEvents={asking ? 'auto' : 'none'}
+          >
+            {asking ? (
+              // A real field, so phones show a number pad; typing anywhere works too.
+              <form
+                className="canvas-banner canvas-form"
+                onPointerDown={(e) => e.stopPropagation()}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  apply();
+                }}
+              >
+                <label htmlFor="calibrate-length">
+                  {error ?? 'Set scale 2/2 · How long is it really?'}
+                </label>
+                <span className="canvas-form-row">
+                  <input
+                    id="calibrate-length"
+                    className="input num"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    placeholder="e.g. 4500 mm or 4.5 m"
+                    // biome-ignore lint/a11y/noAutofocus: the next step is typing this length
+                    autoFocus
+                    value={typed}
+                    onChange={(e) => setTyped(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        setPoints([]);
+                        setTyped('');
+                      }
+                    }}
+                  />
+                  <button type="submit" className="btn btn-primary">
+                    Set scale
+                  </button>
+                </span>
+              </form>
+            ) : (
+              <div className="canvas-banner">{error ?? banner}</div>
+            )}
           </foreignObject>
           {a && b && (
             <g className="measure">
               <line {...seg(view, size, a, b)} />
               <circle {...dot(view, size, a)} r={4} />
               <circle {...dot(view, size, b)} r={4} />
-            </g>
-          )}
-          {points.length === 2 && b && (
-            <g
-              transform={`translate(${worldToScreen(view, size, b).x + 14} ${worldToScreen(view, size, b).y + 22})`}
-              className="draw-overlay"
-            >
-              <rect x={0} y={-14} width={150} height={22} rx={4} className="typed" />
-              <text x={8} y={2}>{`Real length: ${typed || '…'}`}</text>
             </g>
           )}
         </g>
