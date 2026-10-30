@@ -9,6 +9,7 @@ const palette: Record<string, { color: string; roughness: number }> = {
   'wood-oak': { color: '#c49a6c', roughness: 0.7 },
   'wood-walnut': { color: '#7a5233', roughness: 0.65 },
   'tile-grey': { color: '#b8b8b4', roughness: 0.4 },
+  door: { color: '#c9b08a', roughness: 0.6 },
 };
 const fallback = { color: '#ff00ff', roughness: 1 };
 

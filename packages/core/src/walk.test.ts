@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { addOpening, drawWall } from './commands';
 import { blankProject } from './factory';
 import { type EditorDoc, dispatch, emptyHistory } from './history';
-import { placeOpening, planGeometry } from './plan';
+import { doorLeaf, placeOpening, planGeometry } from './plan';
 import type { Level, OpeningKind, Vec2 } from './schema';
 import { WALKER_RADIUS, collisionSegments, rayDistance, walk, walkStart } from './walk';
 
@@ -60,6 +60,18 @@ describe('walk', () => {
     }
     const segs = collisionSegments(twoRooms({ kind: 'window', width: 1.2 }));
     expect(walk(segs, { x: 2, y: 2 }, { x: 4, y: 0 }).x).toBeLessThan(4);
+  });
+
+  it('bumps into an open door leaf', () => {
+    const level = twoRooms({ kind: 'door', width: 0.8 });
+    const door = planGeometry(level).openings[0]!;
+    const leaf = doorLeaf(door.frame, door.opening, true);
+    // Walk along the wall on the leaf's side, towards it.
+    const ys = leaf.map((p) => p.y);
+    const leafY = Math.min(...ys);
+    const x = (Math.min(...leaf.map((p) => p.x)) + Math.max(...leaf.map((p) => p.x))) / 2;
+    const p = walk(collisionSegments(level), { x, y: 0.5 }, { x: 0, y: 2 });
+    expect(p.y).toBeCloseTo(leafY - WALKER_RADIUS, 5);
   });
 
   it('does not let the walker out through a door to the outside', () => {

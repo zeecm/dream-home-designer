@@ -8,6 +8,7 @@ import { useProject } from './store';
 import { Joystick } from './walk/Joystick';
 import { MiniMap } from './walk/MiniMap';
 import { WalkControls, type WalkPose } from './walk/WalkControls';
+import { loadWalkPose, saveWalkPose } from './walk/pose';
 
 const materials = new MaterialCache();
 const FOV = 40;
@@ -85,10 +86,13 @@ export function Viewport() {
   const walking = useEditor((s) => !!s.walking);
   const { startWalk, stopWalk } = useEditor.getState();
   const stick = useRef<Vec2>({ x: 0, y: 0 });
+  const projectId = useProject().id;
   const pose = useRef<WalkPose | null>(null);
-  // Leaving a walk forgets where it was, so the next one starts at the plan's start point.
+  // Leaving a walk remembers where it was for this project; the next one picks up there.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on leaving a walk only
   useEffect(() => {
     if (!walking) {
+      if (pose.current) saveWalkPose(projectId, pose.current);
       pose.current = null;
       stick.current = { x: 0, y: 0 }; // a thumb still on the stick when the walk ended
     }
@@ -130,7 +134,12 @@ export function Viewport() {
         </mesh>
         <LevelMesh ceilings={walking} />
         {walking && level ? (
-          <WalkControls level={level} stick={stick} pose={pose} />
+          <WalkControls
+            level={level}
+            stick={stick}
+            pose={pose}
+            initial={() => loadWalkPose(projectId, level)}
+          />
         ) : (
           <>
             <CameraRig frame={frame} />

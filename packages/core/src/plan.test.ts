@@ -6,7 +6,14 @@ import { wallFootprints } from './footprints';
 import { signedArea } from './geometry';
 import { type EditorDoc, dispatch, emptyHistory } from './history';
 import { loadProject } from './migrate';
-import { doorSwing, framePoint, placeOpening, planGeometry } from './plan';
+import {
+  DOOR_LEAF_THICKNESS,
+  doorLeaf,
+  doorSwing,
+  framePoint,
+  placeOpening,
+  planGeometry,
+} from './plan';
 import { type Level, SCHEMA_VERSION, type Vec2, type Wall, isBoundary } from './schema';
 import { snapPoint } from './snap';
 
@@ -61,6 +68,32 @@ describe('doorSwing', () => {
     // maths terms (negative cross), so sweep 0.
     expect(s.sweep).toBe(0);
     expect(framePoint(door.frame, 0, 0)).toEqual({ x: 7, y: 4.5 });
+  });
+});
+
+describe('doorLeaf', () => {
+  const door = planGeometry(hdb4RoomLevel()).openings.find((o) => o.opening.id === 'op_master')!;
+
+  it('stands open square to the wall from the hinge, as the plan symbol shows it', () => {
+    for (const swing of ['leftIn', 'leftOut', 'rightIn', 'rightOut'] as const) {
+      const o = { ...door.opening, swing };
+      const s = doorSwing(door.frame, o);
+      const [h, end, , back] = doorLeaf(door.frame, o, true) as Vec2[];
+      expect(h).toEqual(s.hinge);
+      expect(end).toEqual(s.leafEnd);
+      // Its thickness lies inside the doorway, towards the far jamb.
+      expect(Math.hypot(back!.x - h!.x, back!.y - h!.y)).toBeCloseTo(DOOR_LEAF_THICKNESS);
+      expect(Math.abs(back!.x - s.arcEnd.x)).toBeLessThan(Math.abs(h!.x - s.arcEnd.x));
+    }
+  });
+
+  it('shuts across the middle of the wall', () => {
+    const leaf = doorLeaf(door.frame, door.opening, false);
+    const ys = leaf.map((p) => p.y);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(DOOR_LEAF_THICKNESS);
+    expect((Math.max(...ys) + Math.min(...ys)) / 2).toBeCloseTo(4.5);
+    const xs = leaf.map((p) => p.x);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(0.9);
   });
 });
 

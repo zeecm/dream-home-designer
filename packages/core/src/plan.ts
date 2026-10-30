@@ -188,6 +188,37 @@ export function doorSwing(f: WallFrame, o: Opening): DoorSwing {
   return { hinge, leafEnd, arcEnd, radius, sweep: v1.x * v2.y - v1.y * v2.x > 0 ? 1 : 0 };
 }
 
+/** How thick a door leaf is drawn and built. */
+export const DOOR_LEAF_THICKNESS = 0.04;
+
+/**
+ * A door's leaf in plan: standing open, square to the wall on its swing side as the plan
+ * symbol draws it, or shut across the middle of the opening.
+ */
+export function doorLeaf(f: WallFrame, o: Opening, open: boolean): Vec2[] {
+  const th = DOOR_LEAF_THICKNESS;
+  const [u0, u1] = openingSpan(f, o);
+  if (!open) {
+    const mid = { ...f, half: th / 2 };
+    return [
+      framePoint(mid, u0, 1),
+      framePoint(mid, u1, 1),
+      framePoint(mid, u1, -1),
+      framePoint(mid, u0, -1),
+    ];
+  }
+  const s = doorSwing(f, o);
+  // The leaf's thickness lies towards the far jamb, so it stays inside the doorway's line.
+  const k = (o.swing ?? 'leftIn').startsWith('left') ? th : -th;
+  const t = { x: f.d.x * k, y: f.d.y * k };
+  return [
+    s.hinge,
+    s.leafEnd,
+    { x: s.leafEnd.x + t.x, y: s.leafEnd.y + t.y },
+    { x: s.hinge.x + t.x, y: s.hinge.y + t.y },
+  ];
+}
+
 /** A circle covering the quarter disc a door leaf sweeps, for keeping labels clear of it. */
 export function swingZone(s: DoorSwing): Circle {
   return {

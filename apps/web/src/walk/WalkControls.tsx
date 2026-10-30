@@ -19,6 +19,9 @@ const RUN_SPEED = 3;
 const LOOK_SPEED = 0.0025; // radians per pixel
 const MAX_PITCH = 1.3;
 const WALK_FOV = 70;
+/** Head bob: up and down once per step of this length, by this much. */
+const STEP_LENGTH = 0.7;
+const BOB_HEIGHT = 0.02;
 
 const FORWARD = new Set(['KeyW', 'ArrowUp']);
 const BACK = new Set(['KeyS', 'ArrowDown']);
@@ -39,17 +42,24 @@ export function WalkControls({
   level,
   stick,
   pose,
+  initial,
 }: {
   level: Level;
   stick: StickInput;
   /** Shared with the mini-map, which reads it every frame. */
   pose: MutableRefObject<WalkPose | null>;
+  /** Where to start (the last walk's spot), or null for the plan's start point. */
+  initial?: () => WalkPose | null;
 }) {
   const { camera, gl } = useThree();
   const segments = useMemo(() => collisionSegments(level), [level]);
   if (!pose.current) {
     const start = walkStart(level);
-    pose.current = { at: start?.at ?? { x: 0, y: 0 }, yaw: start?.heading ?? 0, pitch: 0 };
+    pose.current = initial?.() ?? {
+      at: start?.at ?? { x: 0, y: 0 },
+      yaw: start?.heading ?? 0,
+      pitch: 0,
+    };
   }
   const keys = useRef(new Set<string>());
 
@@ -141,6 +151,11 @@ export function WalkControls({
   // A soft light carried at head height: near walls read brighter than far ones, which gives
   // the rooms depth that flat ambient light doesn't.
   const lamp = useRef<PointLight>(null);
+  const bob = useRef({ phase: 0, amp: 0 });
+  const reducedMotion = useMemo(
+    () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
+    [],
+  );
 
   useFrame((_, dt) => {
     const p = pose.current;
@@ -164,8 +179,15 @@ export function WalkControls({
       y: (f.y * forward + r.y * strafe) * step,
     };
     // Walking with no input still settles the walker if an edit moved a wall onto it.
+    const was = p.at;
     p.at = walk(segments, p.at, delta);
-    const eye = level.elevation + EYE_HEIGHT;
+    // A gentle head bob with each step, easing in and out as walking starts and stops.
+    const moved = Math.hypot(p.at.x - was.x, p.at.y - was.y);
+    const b = bob.current;
+    b.phase += (moved / STEP_LENGTH) * Math.PI;
+    const target = moved > 1e-4 && !reducedMotion ? BOB_HEIGHT : 0;
+    b.amp += (target - b.amp) * Math.min(1, dt * 8);
+    const eye = level.elevation + EYE_HEIGHT + Math.sin(b.phase) * b.amp;
     camera.position.set(p.at.x, eye, p.at.y);
     lamp.current?.position.set(p.at.x, eye + 0.3, p.at.y);
     camera.lookAt(

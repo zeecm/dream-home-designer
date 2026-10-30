@@ -4,9 +4,11 @@ import {
   type RoomShape,
   type Vec2,
   type WallFrame,
+  doorLeaf,
   framePoint,
   isBoundary,
   openingsOnWall,
+  outsideOpenings,
   roomShapes,
   wallFootprints,
   wallFrame,
@@ -37,10 +39,10 @@ const r = (n: number) => Math.round(n * 1e6) / 1e6;
 const pointsKey = (pts: readonly Vec2[]) => pts.map((p) => `${r(p.x)},${r(p.y)}`).join(';');
 
 /**
- * The 3D meshes of one level, rebuilt incrementally. Every wall, junction hub, floor and
- * ceiling is its own mesh, cached under a key made of everything that shapes it (for a
- * wall: its mitred outline, height, openings and material). `update` rebuilds only the
- * parts whose key changed, so dragging a corner touches the few walls that meet there.
+ * The 3D meshes of one level, rebuilt incrementally. Every wall, junction hub, door leaf,
+ * floor and ceiling is its own mesh, cached under a key made of everything that shapes it
+ * (for a wall: its mitred outline, height, openings and material). `update` rebuilds only
+ * the parts whose key changed, so dragging a corner touches the few walls that meet there.
  */
 export class LevelMeshes {
   readonly group = new THREE.Group();
@@ -72,6 +74,8 @@ export class LevelMeshes {
 
     const footprints = wallFootprints(level);
     const hubHeight = new Map<string, number>();
+    // Doors to the outside are shown shut; the rest stand open, as the plan draws them.
+    const outside = outsideOpenings(level);
 
     for (const wall of Object.values(level.walls)) {
       if (isBoundary(wall)) continue; // a room edge, not something built
@@ -94,6 +98,21 @@ export class LevelMeshes {
         openings.map((o) => [o.kind, r(o.t), r(o.width), r(o.height), r(o.sill)].join()).join('|'),
       ].join('/');
       put(`wall:${wall.id}`, key, () => this.buildWall(f, height, level.elevation, openings));
+      for (const o of openings) {
+        if (o.kind !== 'door') continue;
+        const leaf = doorLeaf(f, o, !outside.has(o.id));
+        const top = level.elevation + Math.min(o.height, height);
+        put(`door:${o.id}`, `${pointsKey(leaf)}/${r(level.elevation)}/${r(top)}`, () => {
+          const mesh = new THREE.Mesh(
+            extrudePolygon(leaf, level.elevation, top),
+            this.materials.get('door'),
+          );
+          mesh.name = `door:${o.id}`;
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          return [mesh];
+        });
+      }
     }
 
     for (const hub of footprints.hubs) {

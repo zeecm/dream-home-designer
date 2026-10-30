@@ -1,12 +1,13 @@
 import { pointInPolygon, signedArea } from './geometry';
-import { type PlanGeometry, planGeometry } from './plan';
+import { type PlanGeometry, doorLeaf, planGeometry } from './plan';
 import { roomShapes } from './rooms';
 import type { Level, Vec2 } from './schema';
 
 /**
  * First-person walking, in plan space. The walker is a circle on the floor; walls are the
  * edges of the plan's solid wall pieces and junction hubs. Door and passage gaps are open
- * (the pieces already leave them out); windows are closed again with their own outline.
+ * (the pieces already leave them out), though a door's open leaf is solid; windows, and
+ * doors to the outside, are closed again with their own outline.
  * Room boundaries have no pieces, so they never block.
  */
 export interface Segment {
@@ -17,6 +18,29 @@ export interface Segment {
 /** A person, roughly: shoulder radius and eye height, in metres. */
 export const WALKER_RADIUS = 0.2;
 export const EYE_HEIGHT = 1.6;
+
+/**
+ * Doors and openings that lead outside the flat (the front door): a room on one side only.
+ * Walking stops at them, and their doors are shown shut.
+ */
+export function outsideOpenings(level: Level, geom: PlanGeometry = planGeometry(level)) {
+  const shapes = [...roomShapes(level).values()];
+  const inRoom = (p: Vec2) =>
+    shapes.some((s) => pointInPolygon(p, s.outer) && !s.holes.some((h) => pointInPolygon(p, h)));
+  const out = new Set<string>();
+  for (const o of geom.openings) {
+    if (o.kind === 'window') continue;
+    const f = o.frame;
+    const u = (o.span[0] + o.span[1]) / 2;
+    const off = f.half + 0.1;
+    const side = (k: number) => ({
+      x: f.a.x + f.d.x * u + f.n.x * off * k,
+      y: f.a.y + f.d.y * u + f.n.y * off * k,
+    });
+    if (!inRoom(side(1)) || !inRoom(side(-1))) out.add(o.opening.id);
+  }
+  return out;
+}
 
 export function collisionSegments(level: Level, geom: PlanGeometry = planGeometry(level)) {
   const out: Segment[] = [];
@@ -30,23 +54,12 @@ export function collisionSegments(level: Level, geom: PlanGeometry = planGeometr
   for (const p of geom.pieces) ring(p.polygon);
   for (const h of geom.footprints.hubs) ring(h.polygon);
   // Windows are closed; so are doors and openings that lead outside (the front door),
-  // since there is nothing out there to walk into.
-  const shapes = [...roomShapes(level).values()];
-  const inRoom = (p: Vec2) =>
-    shapes.some((s) => pointInPolygon(p, s.outer) && !s.holes.some((h) => pointInPolygon(p, h)));
+  // since there is nothing out there to walk into. Other doors stand open, and their
+  // leaves are solid.
+  const outside = outsideOpenings(level, geom);
   for (const o of geom.openings) {
-    if (o.kind === 'window') {
-      ring(o.polygon);
-      continue;
-    }
-    const f = o.frame;
-    const u = (o.span[0] + o.span[1]) / 2;
-    const off = f.half + 0.1;
-    const side = (k: number) => ({
-      x: f.a.x + f.d.x * u + f.n.x * off * k,
-      y: f.a.y + f.d.y * u + f.n.y * off * k,
-    });
-    if (!inRoom(side(1)) || !inRoom(side(-1))) ring(o.polygon);
+    if (o.kind === 'window' || outside.has(o.opening.id)) ring(o.polygon);
+    else if (o.kind === 'door') ring(doorLeaf(o.frame, o.opening, true));
   }
   return out;
 }

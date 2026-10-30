@@ -20,5 +20,20 @@ test('walk through the flat in first person, then leave with Esc', async ({ page
   await expect(page.getByRole('button', { name: 'Walk through' })).toBeVisible();
   // Back to the view it started from.
   await expect(page.getByTestId('plan')).toBeVisible();
+
+  // The next walk picks up where this one stopped.
+  const spot = () =>
+    page.evaluate(() => {
+      const id = new URL(location.href).searchParams.get('p');
+      return JSON.parse(localStorage.getItem(`dhd:walk:${id}`) ?? 'null')?.at;
+    });
+  const left = await spot();
+  expect(left).toBeTruthy();
+  await page.getByRole('button', { name: 'Walk through' }).click();
+  await expect(page.getByRole('button', { name: 'Leave walk' })).toBeVisible();
+  await page.getByRole('button', { name: 'Leave walk' }).click();
+  const again = await spot();
+  expect(again.x).toBeCloseTo(left.x, 3);
+  expect(again.y).toBeCloseTo(left.y, 3);
   expect(errors).toEqual([]);
 });

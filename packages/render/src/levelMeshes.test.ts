@@ -6,8 +6,11 @@ import {
   hdb4RoomLevel,
   hdb4RoomProject,
   moveVertex,
+  outsideOpenings,
+  planGeometry,
 } from '@dhd/core';
 import type * as THREE from 'three';
+import { Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import { LevelMeshes } from './levelMeshes';
 import { MaterialCache } from './materials';
@@ -77,9 +80,9 @@ describe('LevelMeshes', () => {
     const stats = m.update(s.doc.levels[0]!);
     // v10 slides along its horizontal walls, so those two change length; the Bedroom 2 /
     // Master wall tilts, which also moves the T-junction mitres at its far end (v5) on the
-    // two back walls. That is 5 walls, the hubs at v10 and v5, and the 3 rooms touching v10:
-    // 10 parts out of 28.
-    expect(stats.built).toBe(10);
+    // two back walls. That is 5 walls, the master bedroom door on one of them, the hubs at
+    // v10 and v5, and the 3 rooms touching v10: 11 parts.
+    expect(stats.built).toBe(11);
     expect(stats.removed).toBe(0);
     expect(m.group.getObjectByName('wall:w_mid_1')).toBeDefined();
   });
@@ -110,9 +113,33 @@ describe('LevelMeshes', () => {
     for (let k = 0; k < 40; k++) built += m.update(step(k + 1)).built;
     const perStep = (performance.now() - t0) / 40;
     // The 4 walls at the corner, the 4 rooms around it, its hub, and the walls and hubs
-    // at the far ends of the two walls that tilt: about 15 of 119 parts per step.
-    expect(built / 40).toBeLessThanOrEqual(16);
+    // at the far ends of the two walls that tilt, and a door on one of them: about 16 parts
+    // per step.
+    expect(built / 40).toBeLessThanOrEqual(17);
     expect(perStep).toBeLessThan(5);
+  });
+});
+
+describe('door leaves', () => {
+  it('stand open inside, and the front door is shut in its wall', () => {
+    const m = new LevelMeshes(new MaterialCache());
+    const l = hdb4RoomLevel();
+    m.update(l);
+    const doors = Object.values(l.openings).filter((o) => o.kind === 'door');
+    expect(doors.length).toBeGreaterThan(1);
+    for (const o of doors) expect(m.group.getObjectByName(`door:${o.id}`), o.id).toBeDefined();
+    const front = outsideOpenings(l);
+    expect(front.size).toBe(1);
+    // A shut leaf sits on the wall's centre line; an open one stands a half width off it.
+    const g = planGeometry(l);
+    for (const o of doors) {
+      const f = g.frames[o.wallId]!;
+      const geom = (m.group.getObjectByName(`door:${o.id}`) as THREE.Mesh).geometry;
+      geom.computeBoundingBox();
+      const c = geom.boundingBox!.getCenter(new Vector3());
+      const off = Math.abs((c.x - f.a.x) * f.n.x + (c.z - f.a.y) * f.n.y);
+      expect(off, o.id).toBeCloseTo(front.has(o.id) ? 0 : f.half + o.width / 2, 2);
+    }
   });
 });
 
