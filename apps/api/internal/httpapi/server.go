@@ -21,12 +21,27 @@ type Server struct {
 	mux   *http.ServeMux
 }
 
-func New(s store.Store, log *slog.Logger) *Server {
+// Option configures a Server.
+type Option func(*options)
+
+type options struct{ noList bool }
+
+// WithoutListing disables GET /projects. Until there is auth, a public deployment uses
+// this so a project is reachable only by its unguessable id.
+func WithoutListing() Option { return func(o *options) { o.noList = true } }
+
+func New(s store.Store, log *slog.Logger, opts ...Option) *Server {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	srv := &Server{store: s, log: log, mux: http.NewServeMux()}
 	srv.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	srv.mux.HandleFunc("GET /projects", srv.list)
+	if !o.noList {
+		srv.mux.HandleFunc("GET /projects", srv.list)
+	}
 	srv.mux.HandleFunc("POST /projects", srv.create)
 	srv.mux.HandleFunc("GET /projects/{id}", srv.get)
 	srv.mux.HandleFunc("PUT /projects/{id}", srv.update)

@@ -1,0 +1,50 @@
+// Deploy: pnpm --filter @dhd/edge deploy (production) or deploy:preview.
+// Secrets per environment: R2_ACCESS_KEY, R2_SECRET_KEY (bucket-scoped R2 S3 credentials).
+{
+  "name": "dhd-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "account_id": "4b562836b582b9cd6065c491c8e1af7a",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "containers": [
+    {
+      "class_name": "ApiContainer",
+      "image": "../api/Dockerfile",
+      "instance_type": "lite",
+      "max_instances": 2
+    }
+  ],
+  "durable_objects": { "bindings": [{ "name": "API", "class_name": "ApiContainer" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ApiContainer"] }],
+  "ratelimits": [
+    { "name": "WRITE_LIMIT", "namespace_id": "2001", "simple": { "limit": 60, "period": 60 } }
+  ],
+  "vars": {
+    "R2_ENDPOINT": "https://4b562836b582b9cd6065c491c8e1af7a.r2.cloudflarestorage.com",
+    "R2_BUCKET": "dhd-projects"
+  },
+  "env": {
+    "preview": {
+      "name": "dhd-api-preview",
+      "workers_dev": true,
+      "containers": [
+        {
+          "class_name": "ApiContainer",
+          "image": "../api/Dockerfile",
+          "instance_type": "lite",
+          "max_instances": 1
+        }
+      ],
+      "durable_objects": { "bindings": [{ "name": "API", "class_name": "ApiContainer" }] },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ApiContainer"] }],
+      "ratelimits": [
+        { "name": "WRITE_LIMIT", "namespace_id": "2002", "simple": { "limit": 60, "period": 60 } }
+      ],
+      "vars": {
+        "R2_ENDPOINT": "https://4b562836b582b9cd6065c491c8e1af7a.r2.cloudflarestorage.com",
+        "R2_BUCKET": "dhd-projects-preview"
+      }
+    }
+  }
+}

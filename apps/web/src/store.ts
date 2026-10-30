@@ -11,6 +11,7 @@ import {
   undo as coreUndo,
   emptyHistory,
   hdb4RoomProject,
+  newId,
 } from '@dhd/core';
 import { create } from 'zustand';
 import {
@@ -21,8 +22,7 @@ import {
   localBackend,
   remoteBackend,
 } from './backend';
-
-export const SAMPLE_ID = 'prj_demo';
+import { type RecentProject, forgetRecent, recentProjects, rememberRecent } from './recent';
 
 export type SyncStatus =
   | { kind: 'loading' }
@@ -38,12 +38,18 @@ interface State {
   sync: SyncStatus;
   canUndo: boolean;
   canRedo: boolean;
+  recent: RecentProject[];
+  /** A one-off message for the user, e.g. why a different project opened. */
+  notice: string | null;
+  dismissNotice: () => void;
   dispatch: (cmd: Command, opts?: DispatchOptions) => void;
   undo: () => void;
   redo: () => void;
   load: (id: string) => Promise<void>;
   /** Creates a blank project, stores it and opens it. */
   createProject: (name?: string) => Promise<void>;
+  /** Opens a fresh copy of the reference plan, so every visitor edits their own. */
+  openSample: () => Promise<void>;
   save: () => Promise<void>;
 }
 
@@ -53,7 +59,8 @@ let backendPromise: Promise<Backend> | undefined;
 
 /** Probes the API once; without one, projects live in this browser. */
 function resolveBackend(): Promise<Backend> {
-  backendPromise ??= apiAvailable().then((ok) => (ok ? remoteBackend : localBackend()));
+  // A sleeping API container takes a few seconds to wake, so be patient here.
+  backendPromise ??= apiAvailable(10_000).then((ok) => (ok ? remoteBackend : localBackend()));
   return backendPromise;
 }
 
@@ -71,15 +78,18 @@ function rememberProject(id: string) {
   }
 }
 
-export function initialProjectId(): string {
+/** The project to open on startup, or null to start from a copy of the sample. */
+export function initialProjectId(): string | null {
   const fromUrl = new URL(window.location.href).searchParams.get('p');
   if (fromUrl) return fromUrl;
   try {
-    return window.localStorage.getItem('dhd:last') ?? SAMPLE_ID;
+    return window.localStorage.getItem('dhd:last');
   } catch {
-    return SAMPLE_ID;
+    return null;
   }
 }
+
+const errorMessage = (prefix: string, e: unknown) => `${prefix}: ${(e as Error).message}`;
 
 export const useStore = create<State>((set, get) => {
   const commit = (editor: EditorDoc) => {
@@ -96,8 +106,27 @@ export const useStore = create<State>((set, get) => {
       sync: { kind: 'saved', version: doc.version },
       canUndo: false,
       canRedo: false,
+      recent: rememberRecent(doc),
     });
     rememberProject(doc.id);
+  };
+
+  /** Saves pending edits before switching away from the open project. */
+  const flush = async () => {
+    clearTimeout(autosaveTimer);
+    if (get().sync.kind === 'dirty') await get().save();
+  };
+
+  const createFrom = async (doc: Project) => {
+    await flush();
+    set({ sync: { kind: 'loading' } });
+    try {
+      const backend = await resolveBackend();
+      set({ backend });
+      open(await backend.create(doc));
+    } catch (e) {
+      set({ sync: { kind: 'error', message: errorMessage('Could not create a project', e) } });
+    }
   };
 
   return {
@@ -106,6 +135,9 @@ export const useStore = create<State>((set, get) => {
     sync: { kind: 'loading' },
     canUndo: false,
     canRedo: false,
+    recent: recentProjects(),
+    notice: null,
+    dismissNotice: () => set({ notice: null }),
 
     dispatch: (cmd, opts) => {
       const next = coreDispatch(get().editor, cmd, opts);
@@ -121,49 +153,28 @@ export const useStore = create<State>((set, get) => {
     },
 
     load: async (id) => {
+      if (get().editor.doc.id !== id) await flush();
       clearTimeout(autosaveTimer);
       set({ sync: { kind: 'loading' } });
       try {
         const backend = await resolveBackend();
         set({ backend });
-        let doc: Project;
-        try {
-          doc = await backend.get(id);
-        } catch (e) {
-          if (!(e instanceof NotFoundError)) throw e;
-          if (id !== SAMPLE_ID) {
-            // A stale link or a project from another browser: fall back to the sample.
-            return get().load(SAMPLE_ID);
-          }
-          try {
-            doc = await backend.create(hdb4RoomProject(id));
-          } catch (createErr) {
-            // Another tab (or React StrictMode's double effect) created it first.
-            if (!(createErr instanceof ConflictError)) throw createErr;
-            doc = await backend.get(id);
-          }
-        }
-        open(doc);
+        open(await backend.get(id));
       } catch (e) {
-        set({
-          sync: { kind: 'error', message: `Could not open the project: ${(e as Error).message}` },
-        });
+        if (e instanceof NotFoundError) {
+          // A stale link, or a project saved in another browser.
+          set({
+            recent: forgetRecent(id),
+            notice: 'That project isn’t saved here, so a fresh copy of the sample opened instead.',
+          });
+          return get().openSample();
+        }
+        set({ sync: { kind: 'error', message: errorMessage('Could not open the project', e) } });
       }
     },
 
-    createProject: async (name) => {
-      clearTimeout(autosaveTimer);
-      if (get().sync.kind === 'dirty') await get().save();
-      set({ sync: { kind: 'loading' } });
-      try {
-        const backend = await resolveBackend();
-        open(await backend.create(blankProject(name)));
-      } catch (e) {
-        set({
-          sync: { kind: 'error', message: `Could not create a project: ${(e as Error).message}` },
-        });
-      }
-    },
+    createProject: (name) => createFrom(blankProject(name)),
+    openSample: () => createFrom({ ...hdb4RoomProject(newId('prj')), name: '4-room HDB (sample)' }),
 
     save: async () => {
       clearTimeout(autosaveTimer);
@@ -179,6 +190,9 @@ export const useStore = create<State>((set, get) => {
         const changedSince = live.doc !== sent;
         set({ sync: changedSince ? { kind: 'dirty' } : { kind: 'saved', version } });
         if (changedSince) autosaveTimer = setTimeout(() => void get().save(), AUTOSAVE_MS);
+        if (sent.name !== get().recent.find((r) => r.id === sent.id)?.name) {
+          set({ recent: rememberRecent(sent) });
+        }
       } catch (e) {
         if (e instanceof ConflictError) {
           set({ sync: { kind: 'conflict', serverVersion: e.serverVersion } });

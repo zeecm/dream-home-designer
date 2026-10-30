@@ -114,6 +114,8 @@ function Rooms() {
   );
 }
 
+let started = false;
+
 export function App() {
   const { load, save, undo, redo, createProject } = useStore.getState();
   const sync = useStore((s) => s.sync);
@@ -122,7 +124,13 @@ export function App() {
   const canUndo = useStore((s) => s.canUndo);
   const canRedo = useStore((s) => s.canRedo);
   useShortcuts();
-  useEffect(() => void load(initialProjectId()), [load]);
+  useEffect(() => {
+    // StrictMode runs effects twice in dev; only start once.
+    if (started) return;
+    started = true;
+    const id = initialProjectId();
+    void (id ? load(id) : useStore.getState().openSample());
+  }, [load]);
 
   return (
     <div className="app">

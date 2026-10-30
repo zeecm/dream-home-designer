@@ -168,3 +168,16 @@ func TestNotFoundAndDuplicate(t *testing.T) {
 		t.Fatalf("want 204 on delete, got %d", res.StatusCode)
 	}
 }
+
+func TestWithoutListingHidesTheProjectList(t *testing.T) {
+	ts := httptest.NewServer(New(store.NewMemory(), slog.New(slog.NewTextHandler(io.Discard, nil)), WithoutListing()))
+	t.Cleanup(ts.Close)
+	res, err := http.Get(ts.URL + "/projects")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusMethodNotAllowed && res.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET /projects = %d, want 404 or 405", res.StatusCode)
+	}
+}
