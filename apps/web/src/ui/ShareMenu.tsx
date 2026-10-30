@@ -43,6 +43,8 @@ function ShareBody() {
   const [edit, setEdit] = useState<string | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const owner = role === 'owner' && backend?.kind === 'remote';
+  const claim = useStore((s) => s.claim);
+  const [claiming, setClaiming] = useState(false);
 
   useEffect(() => {
     if (!owner || !backend?.getShare) return;
@@ -71,6 +73,36 @@ function ShareBody() {
         This plan is saved only in this browser while the server can’t be reached, so it can’t be
         shared yet.
       </p>
+    );
+  }
+
+  if (role === 'open') {
+    return (
+      <>
+        <CopyField label="Link" value={shareLink(id)} />
+        <p className="note">
+          This plan was made before sharing, so it has no owner yet: anyone with its link can edit
+          or delete it. Make yourself the owner to share it view-only and choose who can edit.
+        </p>
+        <button
+          type="button"
+          className="btn btn-small"
+          disabled={claiming}
+          onClick={() => {
+            setClaiming(true);
+            setError(null);
+            claim()
+              .then((ok) => {
+                if (!ok) setError('Someone else already owns this plan.');
+              })
+              .catch((e: Error) => setError(e.message))
+              .finally(() => setClaiming(false));
+          }}
+        >
+          Make me the owner
+        </button>
+        {error && <p className="field-hint error-text">{error}</p>}
+      </>
     );
   }
 
@@ -114,6 +146,7 @@ function ShareBody() {
 }
 
 export function ShareMenu() {
+  const id = useProject().id;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -144,7 +177,7 @@ export function ShareMenu() {
       </button>
       {open && (
         <section className="menu share-menu" aria-label="Share this plan">
-          <ShareBody />
+          <ShareBody key={id} />
         </section>
       )}
     </div>

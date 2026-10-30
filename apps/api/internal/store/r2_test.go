@@ -38,6 +38,8 @@ type fakeS3 struct {
 	objects map[string]fakeObject
 	// beforePut lets a test interleave a competing write.
 	beforePut func()
+	// failDelete makes DELETEs of keys with this prefix fail, as a flaky bucket would.
+	failDelete string
 }
 
 type fakeObject struct {
@@ -116,6 +118,8 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.writes++
 		sum := md5.Sum(append(body, byte(f.writes)))
 		f.objects[key] = fakeObject{body: body, meta: meta, etag: `"` + hex.EncodeToString(sum[:]) + `"`}
+	case r.Method == http.MethodDelete && f.failDelete != "" && strings.HasPrefix(key, f.failDelete):
+		http.Error(w, "InternalError", http.StatusInternalServerError)
 	case r.Method == http.MethodDelete:
 		delete(f.objects, key)
 		w.WriteHeader(http.StatusNoContent)
@@ -149,6 +153,26 @@ func TestR2UpdateLosesRaceCleanly(t *testing.T) {
 	var ce *ConflictError
 	if !errorsAs(err, &ce) || ce.Current != 2 {
 		t.Fatalf("want conflict at v2, got %v", err)
+	}
+}
+
+func TestR2FailedDeleteKeepsTheOwner(t *testing.T) {
+	f, srv := newFakeS3(t)
+	s := NewR2(srv.URL, "bucket", "test", "secret")
+	ctx := context.Background()
+	if err := s.CreateAccess(ctx, "prj_a", Access{OwnerHash: "h"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Create(ctx, Record{ID: "prj_a", Name: "Flat", Doc: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	// The project's DELETE fails: it must not be left behind without its owner.
+	f.failDelete = "projects/"
+	if err := s.Delete(ctx, "prj_a"); err == nil {
+		t.Fatal("want the delete to fail")
+	}
+	if a, err := s.GetAccess(ctx, "prj_a"); err != nil || a.OwnerHash != "h" {
+		t.Fatalf("access after a failed delete: %+v %v", a, err)
 	}
 }
 

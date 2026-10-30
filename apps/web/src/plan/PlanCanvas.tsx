@@ -166,6 +166,11 @@ export function PlanCanvas() {
     };
   };
   const onTouchDown = (e: React.PointerEvent) => {
+    // The first finger down: forget any touch whose lift never arrived.
+    if (e.isPrimary) {
+      touches.current.clear();
+      gesture.current = null;
+    }
     touches.current.set(e.pointerId, screenOf(e));
     if (touches.current.size >= 2) {
       // A second finger: whatever the first one was starting is called off.
@@ -203,8 +208,10 @@ export function PlanCanvas() {
     if (!t.moved) {
       t.moved = true;
       if (tool === 'select') {
-        // Select acts on press: drag a corner or a door, or pan the plan.
-        t.claimed = active.down(t.start);
+        // Dragging a corner or a door moves it; dragging anything else pans the plan,
+        // without selecting what the finger started on.
+        const kind = t.start.hit?.kind;
+        t.claimed = (kind === 'vertex' || kind === 'opening') && active.down(t.start);
         if (!t.claimed) pan.current = t.start.screen;
       }
     }
@@ -238,6 +245,16 @@ export function PlanCanvas() {
       active.down(t.moved ? end : t.start);
       active.up(t.moved ? end : t.start);
     }
+  };
+
+  /** The system took the touch (a back swipe, a long press): end it without acting. */
+  const onTouchCancel = (e: React.PointerEvent) => {
+    touches.current.delete(e.pointerId);
+    if (touches.current.size === 0) gesture.current = null;
+    const t = touch.current;
+    touch.current = null;
+    pan.current = null;
+    if (t?.claimed && ctx) active.up(t.start);
   };
 
   // Pointer events don't reliably carry a click count, so detect double-clicks here.
@@ -395,7 +412,7 @@ export function PlanCanvas() {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
+        onPointerCancel={(e) => (e.pointerType === 'touch' ? onTouchCancel(e) : onPointerUp(e))}
         onContextMenu={(e) => e.preventDefault()}
       >
         <defs>

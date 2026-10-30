@@ -92,6 +92,9 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("X-Role", string(role))
+	// The role depends on the caller's key: never serve one caller's answer to another.
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("Vary", "Authorization")
 	w.Header().Set("ETag", etag(rec.Version))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -119,7 +122,9 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := s.store.Create(r.Context(), store.Record{ID: env.ID, Name: env.Name, Doc: doc}); err != nil {
-		if acc, ok := s.store.(store.AccessStore); ok && !errors.Is(err, store.ErrExists) {
+		// The access record is this request's own (creating it would have failed had one
+		// existed), so it goes even when the project already exists without one.
+		if acc, ok := s.store.(store.AccessStore); ok {
 			_ = acc.DeleteAccess(r.Context(), env.ID)
 		}
 		s.fail(w, err)

@@ -1,4 +1,5 @@
 import {
+  type HistoryEntry,
   type OpeningKind,
   type OpeningPlacement,
   type SnapResult,
@@ -44,23 +45,33 @@ export function useWallTool(ctx: ToolContext): ToolController {
   const tool = useEditor((s) => s.tool);
   const fromPos = from ? posOf(ctx, from) : null;
 
+  /** Corners this chain created or started from, so returning to them doesn't end it. */
+  const chain = useRef(new Set<string>());
+  /** Each wall of the chain: where it started and the undo step it made, for "Undo". */
+  const steps = useRef<{ start: string; entry: HistoryEntry | undefined }[]>([]);
+  /** The direction of the last wall, for a typed length with no pointer to aim by. */
+  const lastDir = useRef<Vec2>({ x: 1, y: 0 });
+  /** Ends the chain in progress. */
+  const finish = () => {
+    setFrom(null);
+    setFirst(null);
+    setTyped('');
+    setError(null);
+    setSnap(null);
+    chain.current = new Set();
+    steps.current = [];
+  };
+
   // Undo can remove the corner the chain is drawing from; start over rather than fail.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reacts to the corner going
   useEffect(() => {
-    if (from && !fromPos) {
-      setFrom(null);
-      setFirst(null);
-      setTyped('');
-    }
+    if (from && !fromPos) finish();
   }, [from, fromPos]);
 
   // Leaving the tool abandons the chain in progress.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reacts to the tool only
   useEffect(() => {
-    if (tool !== 'wall') {
-      setFrom(null);
-      setFirst(null);
-      setTyped('');
-      setSnap(null);
-    }
+    if (tool !== 'wall') finish();
   }, [tool]);
 
   const snapAt = (p: PlanPointer): SnapResult =>
@@ -72,38 +83,22 @@ export function useWallTool(ctx: ToolContext): ToolController {
           from: fromPos ?? undefined,
         });
 
-  /** Corners this chain created or started from, so returning to them doesn't end it. */
-  const chain = useRef(new Set<string>());
-  /** Where each wall of the chain started, for "Undo last". */
-  const starts = useRef<string[]>([]);
-  /** The direction of the last wall, for a typed length with no pointer to aim by. */
-  const lastDir = useRef<Vec2>({ x: 1, y: 0 });
-  const finish = () => {
-    setFrom(null);
-    setFirst(null);
-    setTyped('');
-    setError(null);
-    chain.current = new Set();
-    starts.current = [];
-  };
-
   // A new thickness starts a new chain (it is how people switch to inner walls).
   // biome-ignore lint/correctness/useExhaustiveDependencies: reacts to thickness only
-  useEffect(() => {
-    setFrom(null);
-    setFirst(null);
-    chain.current = new Set();
-  }, [thickness]);
+  useEffect(() => finish(), [thickness]);
 
   const commit = (end: WallEnd, start: WallEnd | null = from) => {
     if (!start) return;
     try {
-      const existed = new Set(Object.keys(ctx.level.vertices));
       const level = useStore.getState().editor.doc.levels[0] ?? ctx.level;
+      const existed = new Set(Object.keys(level.vertices));
       const r = drawWall(level, start, end, newWallOptions(thickness));
       ctx.dispatch(r.command);
       setError(null);
-      starts.current.push(r.startVertexId);
+      // Aim the next typed length afresh: by the pointer once it moves, else straight on.
+      setSnap(null);
+      const past = useStore.getState().editor.history.past;
+      steps.current.push({ start: r.startVertexId, entry: past[past.length - 1] });
       const after = useStore.getState().editor.doc.levels[0];
       const a = after?.vertices[r.startVertexId];
       const b = after?.vertices[r.endVertexId];
@@ -148,12 +143,20 @@ export function useWallTool(ctx: ToolContext): ToolController {
     commit({ point: { x: fromPos.x + d.x * len, y: fromPos.y + d.y * len } });
   };
 
-  /** Takes back the chain's last wall and carries on from where it started. */
+  /**
+   * Takes back the chain's last wall and carries on from where it started. Only while that
+   * wall is still the latest undo step; after any other edit it just ends the chain.
+   */
   const undoLast = () => {
-    const start = starts.current.pop();
+    const step = steps.current.pop();
+    const past = useStore.getState().editor.history.past;
+    if (!step || past[past.length - 1] !== step.entry) {
+      finish();
+      return;
+    }
     useStore.getState().undo();
     const level = useStore.getState().editor.doc.levels[0];
-    if (start && level?.vertices[start]) setFrom({ vertexId: start });
+    if (level?.vertices[step.start]) setFrom({ vertexId: step.start });
     else finish();
   };
 
@@ -232,6 +235,8 @@ export function useWallTool(ctx: ToolContext): ToolController {
               <form
                 className="draw-bar"
                 onPointerDown={(e) => e.stopPropagation()}
+                onPointerMove={(e) => e.stopPropagation()}
+                onPointerUp={(e) => e.stopPropagation()}
                 onSubmit={(e) => {
                   e.preventDefault();
                   addTyped();
@@ -252,7 +257,7 @@ export function useWallTool(ctx: ToolContext): ToolController {
                 <button
                   type="button"
                   className="btn"
-                  disabled={starts.current.length === 0}
+                  disabled={steps.current.length === 0}
                   onClick={undoLast}
                 >
                   Undo

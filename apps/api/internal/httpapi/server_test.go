@@ -358,6 +358,13 @@ func TestSharing(t *testing.T) {
 	if r, _ := do(t, "GET", open.URL+"/projects/prj_old", nil, anon); r.Header.Get("X-Role") != "open" {
 		t.Fatalf("legacy role: %q", r.Header.Get("X-Role"))
 	}
+	// Creating a project with its id fails and leaves it open, not owned by nobody.
+	if r, _ := do(t, "POST", open.URL+"/projects", doc("prj_old", "Mine", 0), nil); r.StatusCode != http.StatusConflict {
+		t.Fatalf("create over a legacy id: %d", r.StatusCode)
+	}
+	if r, _ := do(t, "GET", open.URL+"/projects/prj_old", nil, anon); r.Header.Get("X-Role") != "open" {
+		t.Fatalf("legacy role after a failed create: %q", r.Header.Get("X-Role"))
+	}
 	r, claimed := do(t, "POST", open.URL+"/projects/prj_old/claim", nil, anon)
 	owner, _ := claimed["owner"].(string)
 	if r.StatusCode != http.StatusOK || owner == "" {

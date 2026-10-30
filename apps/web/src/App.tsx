@@ -36,6 +36,7 @@ function useShortcuts() {
       if (ed.walking) return; // walking has its own keys
       const tool = TOOLS.find((t) => t.key.toLowerCase() === k);
       if (tool) {
+        if (useStore.getState().role === 'viewer') return; // view-only: Select it stays
         ed.setTool(tool.id as Tool);
       } else if (VIEW_KEYS[k]) {
         ed.setViewMode(VIEW_KEYS[k] as ViewMode);
@@ -53,7 +54,14 @@ function useShortcuts() {
       e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // Becoming view-only (a link's edit access was reset) drops any drawing tool.
+    const unsubscribe = useStore.subscribe((s, prev) => {
+      if (s.role === 'viewer' && prev.role !== 'viewer') useEditor.getState().setTool('select');
+    });
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      unsubscribe();
+    };
   }, []);
 }
 

@@ -38,16 +38,20 @@ export function authHeaders(id: string): Record<string, string> {
 }
 
 /**
- * Takes an edit key from the address (?p=id&k=key), keeps it for the project, and removes
- * it from the address bar so a copied address shares view-only. Returns the project id.
+ * Takes an edit key from the address (?p=id#k=key, or ?p=id&k=key from older links), keeps
+ * it for the project, and removes it from the address bar so a copied address shares
+ * view-only. In the fragment, the key never reaches a server log or a Referer header.
  */
 export function absorbLinkKey(): void {
   const url = new URL(window.location.href);
   const id = url.searchParams.get('p');
-  const k = url.searchParams.get('k');
+  const hash = new URLSearchParams(url.hash.slice(1));
+  const k = hash.get('k') ?? url.searchParams.get('k');
   if (!id || !k) return;
   saveKeys(id, { edit: k });
   url.searchParams.delete('k');
+  hash.delete('k');
+  url.hash = hash.toString();
   window.history.replaceState(null, '', url);
 }
 
@@ -55,6 +59,6 @@ export function absorbLinkKey(): void {
 export function shareLink(id: string, editKey?: string | null): string {
   const url = new URL(window.location.origin + window.location.pathname);
   url.searchParams.set('p', id);
-  if (editKey) url.searchParams.set('k', editKey);
+  if (editKey) url.hash = new URLSearchParams({ k: editKey }).toString();
   return url.toString();
 }

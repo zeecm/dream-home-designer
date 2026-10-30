@@ -98,20 +98,17 @@ func (m *Memory) Delete(_ context.Context, id string) error {
 	if !ok {
 		return ErrNotFound
 	}
-	if err := m.deleteImage(id); err != nil {
-		return err
-	}
-	if _, ok := m.access[id]; ok {
-		if err := m.putAccess(id, nil); err != nil {
-			return err
-		}
-	}
+	// The project goes first, as in R2: a leftover image or access record is harmless.
 	if m.onWrite != nil {
 		if err := m.onWrite(rec, true); err != nil {
 			return err
 		}
 	}
 	delete(m.records, id)
+	_ = m.deleteImage(id)
+	if _, ok := m.access[id]; ok {
+		_ = m.putAccess(id, nil)
+	}
 	return nil
 }
 

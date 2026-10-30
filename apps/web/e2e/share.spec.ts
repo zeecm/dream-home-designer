@@ -18,7 +18,7 @@ test('a view link only looks; an edit link saves to the owner’s plan until it 
   await allowEdit.click();
   await expect(page.getByLabel('Edit link')).toBeVisible();
   const editLink = await page.getByLabel('Edit link').inputValue();
-  expect(editLink).toContain('&k=');
+  expect(editLink).toContain('#k='); // the key stays out of server logs
   await page.keyboard.press('Escape');
 
   // The view link: the plan shows, but nothing can change it.

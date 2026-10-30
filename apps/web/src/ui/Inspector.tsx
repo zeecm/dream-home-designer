@@ -41,14 +41,14 @@ export function Inspector() {
   // On a phone the panel folds to one row when there's nothing to edit, so the plan gets
   // the screen; it opens for a selection or a drawing tool, or by hand.
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new selection or tool decides afresh
-  useEffect(() => setUserOpen(null), [selection, tool]);
-  const open = userOpen ?? (!!selection || tool !== 'select');
-  if (!level) return null;
-  let body = <PlanSummary level={level} />;
   // Keyed by object: another selection mounts fresh fields, and the old ones commit any
   // edit in progress to the object it was typed for as they go.
   const key = selection ? `${selection.kind}:${selection.id}` : undefined;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: another object or tool decides afresh
+  useEffect(() => setUserOpen(null), [key, tool]);
+  const open = userOpen ?? (!!selection || tool !== 'select');
+  if (!level) return null;
+  let body = <PlanSummary level={level} />;
   if (selection?.kind === 'wall' && level.walls[selection.id]) {
     body = <WallInspector key={key} level={level} id={selection.id} />;
   } else if (selection?.kind === 'vertex' && level.vertices[selection.id]) {

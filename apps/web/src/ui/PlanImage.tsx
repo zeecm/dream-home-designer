@@ -27,6 +27,7 @@ import { icons } from './icons';
  * copies it to the server in the background.
  */
 export async function uploadPlanImage(file: File): Promise<void> {
+  if (useStore.getState().role === 'viewer') return;
   const projectId = useStore.getState().editor.doc.id;
   const { width, height, blob } = await prepareUpload(file);
   const key = keyOfHash(await hashBlob(blob));
@@ -136,9 +137,11 @@ export function usePlanImage(): AssetState {
   const key = project.underlay?.assetKey;
   const backend = useStore((s) => s.backend);
   const id = project.id;
+  // The project id too: a copy keeps the image key but needs its own server copy.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: id re-runs it for a copy
   useEffect(() => {
     if (key && backend) void syncPlanImage();
-  }, [key, backend]);
+  }, [key, backend, id]);
   const getImage = backend?.getImage;
   return useAsset(key, getImage ? (hash) => getImage(id, hash) : undefined);
 }

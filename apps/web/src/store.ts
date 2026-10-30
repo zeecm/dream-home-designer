@@ -58,6 +58,11 @@ interface State {
   role: Role;
   /** Opens a copy of the open project as a new plan of this browser's own. */
   copyProject: () => Promise<void>;
+  /**
+   * Makes this browser the owner of a plan from before sharing (role `open`). Asked for, not
+   * automatic: anyone with such a plan's link could otherwise take it from its creator.
+   */
+  claim: () => Promise<boolean>;
   dispatch: (cmd: Command, opts?: DispatchOptions) => void;
   undo: () => void;
   redo: () => void;
@@ -161,8 +166,6 @@ export const useStore = create<State>((set, get) => {
     retries = 0;
     const backend = get().backend;
     const role = backend?.role?.(doc.id) ?? 'owner';
-    // A plan from before sharing that this browser already worked on becomes its own.
-    const knew = get().recent.some((r) => r.id === doc.id);
     set({
       editor: { doc, history: emptyHistory() },
       sync: { kind: 'saved', version: doc.version },
@@ -173,14 +176,6 @@ export const useStore = create<State>((set, get) => {
       recent: role === 'viewer' ? get().recent : rememberRecent(doc),
     });
     rememberProject(doc.id);
-    if (role === 'open' && knew && backend?.claim) {
-      void backend
-        .claim(doc.id)
-        .then((claimed) => {
-          if (claimed && get().editor.doc.id === doc.id) set({ role: 'owner' });
-        })
-        .catch(() => {});
-    }
   };
 
   /** Finishes any save in flight and saves pending edits before leaving the open project. */
@@ -306,6 +301,15 @@ export const useStore = create<State>((set, get) => {
       useEditor.getState().setViewMode('plan');
     },
     openSample: () => createFrom(sampleFlatProject(newId('prj'))),
+    claim: async () => {
+      const { backend, editor } = get();
+      const id = editor.doc.id;
+      if (!backend?.claim) return false;
+      const claimed = await backend.claim(id);
+      // Not claimed: someone else got there first, so this browser can only look.
+      if (get().editor.doc.id === id) set({ role: claimed ? 'owner' : 'viewer' });
+      return claimed;
+    },
     copyProject: async () => {
       const doc = get().editor.doc;
       const name = doc.name.replace(/ \(sample\)$/, '');
