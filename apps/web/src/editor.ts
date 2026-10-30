@@ -35,7 +35,7 @@ export interface EditorState {
   fitRequested: boolean;
   /** True once the user pans or zooms; until then the plan refits when its pane resizes. */
   viewAdjusted: boolean;
-  /** Thickness for walls the Wall tool draws, in metres. */
+  /** Thickness for walls the Wall tool draws, in metres; 0 draws room boundaries. */
   wallThickness: number;
   setWallThickness: (t: number) => void;
   /** Width for new doors, windows and openings, in metres. */
@@ -76,6 +76,13 @@ const rememberViewMode = (m: ViewMode) => {
     // storage disabled
   }
 };
+
+/**
+ * What the Wall and Room tools draw for a palette choice: a thickness of 0 is the
+ * "Boundary" choice, a room edge with no wall.
+ */
+export const newWallOptions = (thickness: number) =>
+  thickness > 0 ? { thickness } : { thickness: 0.1, kind: 'boundary' as const };
 
 export const useEditor = create<EditorState>((set) => ({
   tool: 'select',

@@ -35,6 +35,7 @@ export const THICKNESS_PRESETS: Preset[] = [
   { value: 0.1, label: '100 mm', note: 'inside walls' },
   { value: 0.15, label: '150 mm' },
   { value: 0.2, label: '200 mm', note: 'outer walls' },
+  { value: 0, label: 'Boundary', note: 'no wall' },
 ];
 
 /** Room names people trace most, offered while renaming. */

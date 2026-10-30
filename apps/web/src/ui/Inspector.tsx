@@ -4,6 +4,7 @@ import {
   deleteOpening,
   deleteVertex,
   deleteWall,
+  isBoundary,
   moveVertex,
   roomArea,
   setCeilingHeight,
@@ -152,9 +153,30 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
   if (!wall) return null;
   const length = wallLine(level, wall).length;
   const onWall = Object.values(level.openings).filter((o) => o.wallId === id).length;
+  const boundary = isBoundary(wall);
   return (
     <>
-      <Header title="Wall" onClose={clear} />
+      <Header title={boundary ? 'Room boundary' : 'Wall'} onClose={clear} />
+      <Segmented
+        label="Kind"
+        value={boundary ? 'boundary' : 'wall'}
+        options={[
+          { value: 'wall', label: 'Wall' },
+          { value: 'boundary', label: 'Boundary', title: 'Divides rooms without a wall' },
+        ]}
+        onChange={(kind) => dispatch(updateWall(level.id, id, { kind }))}
+      />
+      {boundary && (
+        <p className="note">
+          A boundary divides rooms without a wall, such as an open kitchen and the living room. It
+          isn’t built in 3D.
+        </p>
+      )}
+      {!boundary && onWall > 0 && (
+        <p className="note">
+          Making this a boundary removes its {onWall === 1 ? 'opening' : `${onWall} openings`}.
+        </p>
+      )}
       <LengthField
         label="Length"
         value={length}
@@ -163,24 +185,30 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
         hint="The far end moves; walls square to it move with it."
         onCommit={(v) => v !== undefined && dispatch(setWallLength(level.id, id, v))}
       />
-      <LengthField
-        label="Thickness"
-        value={wall.thickness}
-        min={0.02}
-        max={1}
-        hint={THICKNESS_HINT}
-        onCommit={(v) => v !== undefined && dispatch(updateWall(level.id, id, { thickness: v }))}
-      />
-      <LengthField
-        label="Height"
-        value={wall.height}
-        placeholder={`Auto · ${formatLength(level.ceilingHeight)}`}
-        min={0.1}
-        max={6}
-        allowEmpty
-        hint="Leave empty to follow the ceiling height."
-        onCommit={(v) => dispatch(updateWall(level.id, id, { height: v }))}
-      />
+      {!boundary && (
+        <>
+          <LengthField
+            label="Thickness"
+            value={wall.thickness}
+            min={0.02}
+            max={1}
+            hint={THICKNESS_HINT}
+            onCommit={(v) =>
+              v !== undefined && dispatch(updateWall(level.id, id, { thickness: v }))
+            }
+          />
+          <LengthField
+            label="Height"
+            value={wall.height}
+            placeholder={`Auto · ${formatLength(level.ceilingHeight)}`}
+            min={0.1}
+            max={6}
+            allowEmpty
+            hint="Leave empty to follow the ceiling height."
+            onCommit={(v) => dispatch(updateWall(level.id, id, { height: v }))}
+          />
+        </>
+      )}
       {onWall > 0 && (
         <p className="note">
           {onWall === 1 ? '1 opening is' : `${onWall} openings are`} on this wall and will be
@@ -188,7 +216,7 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
         </p>
       )}
       <DeleteButton
-        label="Delete wall"
+        label={boundary ? 'Delete boundary' : 'Delete wall'}
         onClick={() => {
           dispatch(deleteWall(level.id, id));
           clear();
@@ -241,13 +269,20 @@ function VertexInspector({ level, id }: { level: Level; id: string }) {
           <h3 id="corner-walls-h" className="section-title">
             Walls from this corner
           </h3>
-          {walls.map((w) => {
+          {walls.map((w, i) => {
             const far = level.vertices[w.a === id ? w.b : w.a];
             if (!far) return null;
+            const dir = direction(far.x - v.x, far.y - v.y);
+            // Two walls heading the same rough way get numbered apart.
+            const same = walls.filter((o) => {
+              const f = level.vertices[o.a === id ? o.b : o.a];
+              return f && direction(f.x - v.x, f.y - v.y) === dir;
+            });
+            const n = same.length > 1 ? ` (${same.indexOf(w) + 1})` : '';
             return (
               <LengthField
                 key={w.id}
-                label={`Wall ${direction(far.x - v.x, far.y - v.y)}`}
+                label={`${isBoundary(w) ? 'Boundary' : 'Wall'} ${dir}${n}`}
                 value={Math.hypot(far.x - v.x, far.y - v.y)}
                 min={0.05}
                 max={50}
@@ -255,7 +290,9 @@ function VertexInspector({ level, id }: { level: Level; id: string }) {
               />
             );
           })}
-          <p className="note">A new length moves this corner along that wall.</p>
+          <p className="note">
+            A new length moves this corner along that wall; its other walls stretch to follow.
+          </p>
         </section>
       )}
       <DeleteButton
@@ -314,14 +351,24 @@ function OpeningInspector({ level, id }: { level: Level; id: string }) {
         max={length}
         onCommit={(v) => v !== undefined && set({ width: v })}
       />
-      <Segmented
-        label="Common widths"
-        value={String(o.width)}
-        options={OPENING_PRESETS[o.kind]
-          .filter((p) => p.value <= length + 1e-9)
-          .map((p) => ({ value: String(p.value), label: p.label, title: p.note }))}
-        onChange={(w) => set({ width: Number(w) })}
-      />
+      <div className="field">
+        <span className="field-label" aria-hidden="true">
+          Common widths, mm
+        </span>
+        <Segmented
+          label="Common widths in millimetres"
+          fill
+          value={String(o.width)}
+          options={OPENING_PRESETS[o.kind]
+            .filter((p) => p.value <= length + 1e-9)
+            .map((p) => ({
+              value: String(p.value),
+              label: String(Math.round(p.value * 1000)),
+              title: p.note,
+            }))}
+          onChange={(w) => set({ width: Number(w) })}
+        />
+      </div>
       <LengthField
         label="Height"
         value={o.height}
@@ -398,6 +445,7 @@ function RoomInspector({ level, id }: { level: Level; id: string }) {
         value={room.name}
         suggestions={ROOM_NAMES}
         focusToken={renameToken}
+        onDone={() => document.querySelector<SVGSVGElement>('svg.plan-svg')?.focus()}
         onCommit={(name) => dispatch(updateRoom(level.id, id, { name }))}
       />
       <p className="total">

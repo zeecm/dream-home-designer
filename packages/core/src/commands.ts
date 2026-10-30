@@ -4,7 +4,7 @@ import { clampOpeningT } from './geometry';
 import type { Command } from './history';
 import { newId } from './ids';
 import { syncRooms } from './rooms';
-import { type Level, Opening, type Project, Room, type Vec2, Wall } from './schema';
+import { type Level, Opening, type Project, Room, type Vec2, Wall, isBoundary } from './schema';
 import { projectOnSegment, segmentIntersection } from './snap';
 import { endCapture, reclampOpenings, splitWallAt } from './topology';
 
@@ -54,7 +54,7 @@ export function addWall(
   levelId: string,
   a: Endpoint,
   b: Endpoint,
-  opts: { thickness?: number; height?: number } = {},
+  opts: { thickness?: number; height?: number; kind?: Wall['kind'] } = {},
 ): AddWallResult {
   const wallId = newId('w');
   const aId = 'vertexId' in a ? a.vertexId : newId('v');
@@ -83,6 +83,7 @@ export function addWall(
         height: opts.height,
         materialLeft: 'paint-white',
         materialRight: 'paint-white',
+        ...(opts.kind === 'boundary' ? { kind: 'boundary' as const } : {}),
       };
     },
   };
@@ -157,7 +158,9 @@ export function addOpening(
       label: `Add ${opening.kind}`,
       recipe: (d) => {
         const lvl = level(d, levelId);
-        if (!lvl.walls[opening.wallId]) throw new Error(`wall ${opening.wallId} not found`);
+        const wall = lvl.walls[opening.wallId];
+        if (!wall) throw new Error(`wall ${opening.wallId} not found`);
+        if (isBoundary(wall)) throw new Error('a room boundary has no wall to put an opening in');
         lvl.openings[openingId] = { ...opening, id: openingId };
       },
     },
@@ -182,6 +185,7 @@ const WallPatch = Wall.pick({
   height: true,
   materialLeft: true,
   materialRight: true,
+  kind: true,
 }).partial();
 export type WallPatch = z.input<typeof WallPatch>;
 
@@ -195,6 +199,13 @@ export function updateWall(levelId: string, wallId: string, patch: WallPatch): C
       if (!w) throw new Error(`wall ${wallId} not found`);
       Object.assign(w, p);
       if ('height' in patch && patch.height === undefined) delete w.height;
+      if (w.kind === 'wall') delete w.kind; // absent means a wall
+      if (w.kind === 'boundary') {
+        // A boundary has nothing to put a door or window in.
+        const lvl = level(d, levelId);
+        for (const o of Object.values(lvl.openings))
+          if (o.wallId === wallId) delete lvl.openings[o.id];
+      }
     },
   };
 }
@@ -446,7 +457,7 @@ export function drawWall(
   snapshot: Level,
   rawStart: WallEnd,
   rawEnd: WallEnd,
-  opts: { thickness?: number; height?: number } = {},
+  opts: { thickness?: number; height?: number; kind?: Wall['kind'] } = {},
 ): DrawWallResult {
   const levelId = snapshot.id;
   const start = attach(snapshot, rawStart);
@@ -571,6 +582,7 @@ export function drawWall(
           height: opts.height,
           materialLeft: 'paint-white',
           materialRight: 'paint-white',
+          ...(opts.kind === 'boundary' ? { kind: 'boundary' as const } : {}),
         };
         if (opts.height === undefined) delete lvl.walls[id]?.height;
       }

@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { hdb4RoomLevel } from './fixtures/hdb4room';
+import { addOpening, drawWall, updateWall } from './commands';
+import { blankProject } from './factory';
+import { hdb4RoomLevel, hdb4RoomProject } from './fixtures/hdb4room';
+import { wallFootprints } from './footprints';
 import { signedArea } from './geometry';
+import { type EditorDoc, dispatch, emptyHistory } from './history';
+import { loadProject } from './migrate';
 import { doorSwing, framePoint, placeOpening, planGeometry } from './plan';
+import { type Level, SCHEMA_VERSION, type Vec2, type Wall, isBoundary } from './schema';
 
 const area = (p: { x: number; y: number }[]) => Math.abs(signedArea(p));
 
@@ -72,5 +78,65 @@ describe('placeOpening', () => {
     const p = placeOpening(g, { x: 10.95, y: 0.1 }, 1.2, 0.3)!;
     expect(p.t * 6 + p.width / 2).toBeLessThanOrEqual(6 + 1e-9);
     expect(placeOpening(g, { x: 20, y: 20 }, 1.2, 0.3)).toBeNull();
+  });
+});
+
+describe('room boundaries', () => {
+  const split = () => {
+    let s: EditorDoc = { doc: blankProject('t', 'prj_t'), history: emptyHistory() };
+    const lvl = () => s.doc.levels[0] as Level;
+    const draw = (a: Vec2, b: Vec2, kind?: 'boundary') => {
+      s = dispatch(s, drawWall(lvl(), { point: a }, { point: b }, { kind }).command);
+    };
+    const c = [
+      { x: 0, y: 0 },
+      { x: 6, y: 0 },
+      { x: 6, y: 4 },
+      { x: 0, y: 4 },
+    ];
+    for (let i = 0; i < 4; i++) draw(c[i] as Vec2, c[(i + 1) % 4] as Vec2);
+    draw({ x: 2, y: 0 }, { x: 2, y: 4 }, 'boundary');
+    const set = (n: EditorDoc) => {
+      s = n;
+    };
+    return { s: () => s, lvl, set };
+  };
+
+  it('divides rooms without building a wall', () => {
+    const { lvl } = split();
+    const l = lvl();
+    expect(Object.keys(l.rooms)).toHaveLength(2);
+    const b = Object.values(l.walls).find((w) => isBoundary(w));
+    expect(b).toBeDefined();
+    const fp = wallFootprints(l);
+    expect(fp.walls[b?.id ?? '']).toBeUndefined();
+    const geom = planGeometry(l);
+    expect(geom.boundaries).toEqual([b?.id]);
+    expect(geom.pieces.some((p) => p.wallId === b?.id)).toBe(false);
+    expect(geom.frames[b?.id ?? '']?.half).toBe(0);
+    // The outer wall it meets stays straight: no hub at the T.
+    expect(fp.hubs.filter((h) => h.vertexId === b?.a || h.vertexId === b?.b)).toEqual([]);
+  });
+
+  it('takes no openings, and loses them when a wall becomes a boundary', () => {
+    const { s, lvl, set } = split();
+    const b = Object.values(lvl().walls).find((w) => isBoundary(w)) as Wall;
+    expect(placeOpening(planGeometry(lvl()), { x: 2, y: 2 }, 0.9, 0.3)?.wallId).not.toBe(b.id);
+    const op = { wallId: b.id, kind: 'door' as const, t: 0.5, width: 0.9, height: 2.1, sill: 0 };
+    expect(() => dispatch(s(), addOpening(lvl().id, op).command)).toThrow();
+
+    set(dispatch(s(), updateWall(lvl().id, b.id, { kind: 'wall' })));
+    expect(lvl().walls[b.id]?.kind).toBeUndefined();
+    set(dispatch(s(), addOpening(lvl().id, op).command));
+    expect(Object.keys(lvl().openings)).toHaveLength(1);
+    set(dispatch(s(), updateWall(lvl().id, b.id, { kind: 'boundary' })));
+    expect(Object.keys(lvl().openings)).toHaveLength(0);
+  });
+
+  it('migrates version-1 documents unchanged', () => {
+    const v1 = { ...hdb4RoomProject(), schemaVersion: 1 };
+    const { project } = loadProject(JSON.parse(JSON.stringify(v1)));
+    expect(project.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(project.levels[0]?.walls).toEqual(hdb4RoomProject().levels[0]?.walls);
   });
 });

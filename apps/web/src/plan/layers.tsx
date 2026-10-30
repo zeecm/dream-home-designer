@@ -69,6 +69,26 @@ export const PlanShapes = memo(function PlanShapes({
             pointerEvents={pe}
           />
         ))}
+        {geom.boundaries.map((id) => {
+          const f = geom.frames[id];
+          if (!f) return null;
+          const a = framePoint(f, 0, 0);
+          const b = framePoint(f, f.length, 0);
+          // A dashed line is only hittable on its dashes; a wide clear twin takes the clicks.
+          return (
+            <g key={id} data-hit={hit({ kind: 'wall', id })}>
+              <line
+                className="boundary-hit"
+                x1={a.x}
+                y1={a.y}
+                x2={b.x}
+                y2={b.y}
+                pointerEvents={pe ?? 'stroke'}
+              />
+              <line className="boundary" x1={a.x} y1={a.y} x2={b.x} y2={b.y} pointerEvents="none" />
+            </g>
+          );
+        })}
         {geom.footprints.hubs.map((h) => (
           <polygon
             key={h.vertexId}
@@ -138,6 +158,13 @@ export function PlanHighlights({
 }) {
   const shape = (s: Selection | null, cls: string) => {
     if (!s) return null;
+    if (s.kind === 'wall' && geom.boundaries.includes(s.id)) {
+      const f = geom.frames[s.id];
+      if (!f) return null;
+      const a = framePoint(f, 0, 0);
+      const b = framePoint(f, f.length, 0);
+      return <line className={`${cls} boundary-mark`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} />;
+    }
     if (s.kind === 'wall') {
       return geom.pieces
         .filter((p) => p.wallId === s.id)
@@ -214,7 +241,8 @@ function roomLabels(level: Level, geom: PlanGeometry, zoom: number): RoomLabel[]
       x: Math.max(name.length * 7.6, areaFits ? area.length * 6.8 : 0) / 2 + 4,
       y: areaFits ? 20 : 10,
     };
-    const half = { x: halfPx.x / zoom, y: halfPx.y / zoom };
+    // Keep 10 cm clear of the walls' centre lines, so a label never sits on a thick wall.
+    const half = { x: halfPx.x / zoom + 0.1, y: halfPx.y / zoom + 0.1 };
     const at = placeLabel(poly, half, swings, shape.holes);
     out.push({ id: r.id, name, area: areaFits ? area : null, at });
   }

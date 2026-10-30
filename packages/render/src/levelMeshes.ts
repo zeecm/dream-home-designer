@@ -5,6 +5,7 @@ import {
   type Vec2,
   type WallFrame,
   framePoint,
+  isBoundary,
   openingsOnWall,
   roomShapes,
   wallFootprints,
@@ -73,6 +74,7 @@ export class LevelMeshes {
     const hubHeight = new Map<string, number>();
 
     for (const wall of Object.values(level.walls)) {
+      if (isBoundary(wall)) continue; // a room edge, not something built
       const f = wallFrame(level, wall, footprints.walls[wall.id]);
       if (!f) continue;
       const height = wall.height ?? level.ceilingHeight;

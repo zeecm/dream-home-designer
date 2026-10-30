@@ -135,8 +135,8 @@ Writes are rate-limited per IP at the Worker (60/min). IDs must match `^[a-z0-9]
 - **Plan and 3D:** walls have mitred corners in both views, and the 3D rebuild is incremental.
 
 **Tests:**
-- 108 core and 11 render unit tests, plus 21 web unit tests.
-- A 6-test end-to-end suite.
+- 111 core and 12 render unit tests, plus 22 web unit tests.
+- A 7-test end-to-end suite.
 - Go tests, including a store contract test that has passed against live R2.
 
 **Independent acceptance testing, round 1, found:** cropped Split view, the Esc handling in
@@ -193,6 +193,26 @@ from upload to rooms on the live preview.
 - **Smaller fixes:** labels are re-fitted per zoom step, not per wheel tick. Columns down to
   0.01 m² count as holes. The shape cache only holds frozen levels.
 
+**Room boundaries (schema 2):** `Wall.kind: 'boundary'` is a room edge that is not a wall, such
+as an open kitchen beside the living room. It divides rooms, has no footprint, mesh or
+openings, and is drawn dashed. The Wall and Room tools offer "Boundary" beside the
+thicknesses, and the wall inspector switches a wall between the two kinds. Making a wall a
+boundary removes its openings. Version-1 documents migrate unchanged, and the Go API accepts
+versions 1 and 2.
+
+**Round 3 acceptance (fixed):**
+- **Double-click rename:** see the code review above.
+- **Escape:** it now cancels in text and length fields instead of saving.
+- **Focus after a rename:** a keyboard rename hands focus back to the plan.
+- **Decimal commas:** `3,5` is read as 3.5, and `10,275` is still read as thousands.
+- **Common widths:** the control fits the inspector.
+- **Labels:** they keep 10 cm clear of walls.
+- **Empty-plan card:** it no longer blocks drawing.
+- **Corner fields:** two of them pointing the same way are numbered.
+- **Wall announcements:** they name the rooms on either side.
+- **Open:** the phone palette hides the width presets, and the 390 px layout scrolls 2 px
+  sideways.
+
 **Sample flat:** `sampleFlatProject` (core fixtures) is a 96 m² HDB-style 4-room flat with a
 service yard, kitchen, household shelter, two bathrooms, three bedrooms and an L-shaped
 living and dining room. It is built with the editor's own commands, then given readable ids
@@ -209,6 +229,9 @@ JPEG first. Older `img_…` keys are uploaded and re-keyed the next time their p
 browser that has them.
 
 ## 5. Owner to-dos
+
+0. **Before merging:** the production API must accept schema 2. It was deployed from this branch
+   at the same time as the preview, and it still accepts version-1 documents from `main`.
 
 1. **Connect the API Worker to Git (one time, in the dashboard).** The Builds API refuses the
    account token, so this can't be scripted. In **Workers & Pages → dhd-api → Settings → Builds →
@@ -227,11 +250,11 @@ browser that has them.
 ## 6. Next
 
 **Finish Phase 1**, in order:
-1. **Open-plan boundaries:** a room boundary that isn't a wall (dry kitchen vs living, for
-   example), probably `Wall.kind: 'boundary'` drawn dashed and never extruded. This is a schema bump.
-2. **Public-deployment safety:** a write token separate from the share link, a previous-version
-   copy on PUT and DELETE, and a limit or lifecycle rule on stored projects.
-3. **Room matching by overlap:** rooms are matched across edits by label point and corners. Matching
+1. **Public-deployment safety (needs the owner's call):** a write token separate from the share
+   link changes sharing: a plain link would become view-only, and editing on another device would
+   need an edit link. Also a previous-version copy on PUT and DELETE, and a limit or lifecycle
+   rule on stored projects.
+2. **Room matching by overlap:** rooms are matched across edits by label point and corners. Matching
    by overlapping area would be sturdier for large reshapes.
 
 **Phase 2, first-person walkthrough:**

@@ -116,6 +116,19 @@ describe('LevelMeshes', () => {
   });
 });
 
+describe('room boundaries', () => {
+  it('builds no wall for a boundary, and removes the wall when one becomes a boundary', () => {
+    const l = hdb4RoomLevel();
+    const meshes = new LevelMeshes(new MaterialCache());
+    meshes.update(l);
+    expect(meshes.group.getObjectByName('wall:w_mid_3')).toBeDefined();
+    const w = l.walls.w_mid_3;
+    if (!w) throw new Error('fixture');
+    meshes.update({ ...l, walls: { ...l.walls, w_mid_3: { ...w, kind: 'boundary' } } });
+    expect(meshes.group.getObjectByName('wall:w_mid_3')).toBeUndefined();
+  });
+});
+
 describe('rooms inside rooms', () => {
   /** Area of a mesh's triangles projected on the floor plane. */
   const floorArea = (m: THREE.Mesh) => {

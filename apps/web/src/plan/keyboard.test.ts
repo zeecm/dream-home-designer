@@ -77,8 +77,10 @@ group('nudge', () => {
 });
 
 group('describe', () => {
-  it('names walls by length', () => {
+  it('names walls by the rooms beside them and their length', () => {
     const level = hdb4RoomLevel();
-    expect(describe(level, { kind: 'wall', id: 'w_mid_3' })).toMatch(/^Wall, 2(\.00)? m long$/);
+    expect(describe(level, { kind: 'wall', id: 'w_mid_3' })).toMatch(
+      /^Wall between Bedroom 2 and Kitchen, 2(\.00)? m long$/,
+    );
   });
 });

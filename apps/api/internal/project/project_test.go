@@ -17,7 +17,7 @@ func TestParse(t *testing.T) {
 		"array":          `[]`,
 		"no levels":      `{"schemaVersion":1,"id":"prj_demo","version":0,"name":"Flat"}`,
 		"empty levels":   `{"schemaVersion":1,"id":"prj_demo","version":0,"name":"Flat","levels":[]}`,
-		"future schema":  `{"schemaVersion":2,"id":"prj_demo","version":0,"name":"Flat","levels":[{}]}`,
+		"future schema":  `{"schemaVersion":99,"id":"prj_demo","version":0,"name":"Flat","levels":[{}]}`,
 		"unsafe id":      `{"schemaVersion":1,"id":"../etc","version":0,"name":"Flat","levels":[{}]}`,
 		"uppercase id":   `{"schemaVersion":1,"id":"PRJ","version":0,"name":"Flat","levels":[{}]}`,
 		"negative ver":   `{"schemaVersion":1,"id":"prj_demo","version":-1,"name":"Flat","levels":[{}]}`,

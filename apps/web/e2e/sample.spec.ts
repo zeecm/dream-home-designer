@@ -46,3 +46,22 @@ test('a broken link opens a fresh sample with a notice', async ({ page }) => {
   await expect(page.locator('.notice')).toContainText('doesn’t point to a plan');
   await expect(page).toHaveURL(/\?p=prj_/);
 });
+
+test('a wall can become a room boundary: rooms stay, the wall goes from 3D', async ({ page }) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await page
+    .locator('[data-hit="wall:w_kitchen_living-and-dining"]')
+    .first()
+    .click({ force: true });
+  await expect(page.getByRole('heading', { name: 'Wall', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Boundary', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Room boundary' })).toBeVisible();
+  await expect(page.locator('line.boundary')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.room-list li')).toHaveCount(10);
+  await expect(floorArea(page)).toHaveText('96.0 m²');
+  await page.keyboard.press('Control+z');
+  await expect(page.locator('line.boundary')).toHaveCount(0);
+});

@@ -22,6 +22,15 @@ test('the plan works from the keyboard: Tab selects, Enter renames, arrows nudge
   await page.keyboard.type('Study');
   await page.keyboard.press('Enter');
   await expect(name).toHaveValue('Study');
+  // Focus goes back to the plan, so the keyboard user keeps their place.
+  await expect(plan).toBeFocused();
+
+  // Escape cancels a rename.
+  await page.keyboard.press('F2');
+  await page.keyboard.type('Qq');
+  await page.keyboard.press('Escape');
+  await expect(name).toHaveValue('Study');
+  await expect(plan).toBeFocused();
 
   // Double-clicking a room also starts a rename, and the name field keeps focus.
   await page.keyboard.press('Escape');

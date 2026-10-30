@@ -2,10 +2,13 @@ import {
   type Command,
   type Level,
   type Vec2,
+  isBoundary,
   moveVertex,
   placeLabel,
+  pointInPolygon,
   roomArea,
   roomShape,
+  roomShapes,
   updateOpening,
   wallLine,
 } from '@dhd/core';
@@ -78,6 +81,28 @@ export function cycle(
   return objects[back ? i - 1 : i + 1] ?? null;
 }
 
+/** The names of the rooms on either side of a wall (one for an outer wall). */
+export function roomsBeside(level: Level, wallId: string): string[] {
+  const w = level.walls[wallId];
+  if (!w) return [];
+  const l = wallLine(level, w);
+  if (l.length < 1e-9) return [];
+  const mid = { x: (l.a.x + l.b.x) / 2, y: (l.a.y + l.b.y) / 2 };
+  const n = { x: -(l.b.y - l.a.y) / l.length, y: (l.b.x - l.a.x) / l.length };
+  const off = w.thickness / 2 + 0.05;
+  const shapes = roomShapes(level);
+  const names: string[] = [];
+  for (const k of [1, -1]) {
+    const p = { x: mid.x + n.x * off * k, y: mid.y + n.y * off * k };
+    const room = Object.values(level.rooms).find((r) => {
+      const s = shapes.get(r.id);
+      return s && pointInPolygon(p, s.outer) && !s.holes.some((h) => pointInPolygon(p, h));
+    });
+    if (room && !names.includes(room.name)) names.push(room.name);
+  }
+  return names;
+}
+
 /** A short spoken description of the selection. */
 export function describe(level: Level, sel: Selection | null): string {
   if (!sel) return '';
@@ -88,7 +113,11 @@ export function describe(level: Level, sel: Selection | null): string {
     }
     case 'wall': {
       const w = level.walls[sel.id];
-      return w ? `Wall, ${formatLength(wallLine(level, w).length)} long` : '';
+      if (!w) return '';
+      const what = isBoundary(w) ? 'Room boundary' : 'Wall';
+      const rooms = roomsBeside(level, sel.id);
+      const where = rooms.length ? ` between ${rooms.join(' and ')}` : '';
+      return `${what}${where}, ${formatLength(wallLine(level, w).length)} long`;
     }
     case 'opening': {
       const o = level.openings[sel.id];

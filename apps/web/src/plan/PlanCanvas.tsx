@@ -363,7 +363,8 @@ export function PlanCanvas() {
         {describe(level, selection)}
       </p>
 
-      {empty && !underlay && (
+      {/* Out of the way as soon as a drawing tool is picked, so it never blocks a click. */}
+      {empty && !underlay && (tool === 'select' || tool === 'measure') && (
         <div className="plan-empty">
           <p className="plan-empty-title">Start your plan</p>
           <p>Trace over a picture of your floor plan, or draw walls straight away.</p>

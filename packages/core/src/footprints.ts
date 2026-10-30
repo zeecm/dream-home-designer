@@ -1,4 +1,4 @@
-import type { Level, Vec2 } from './schema';
+import { type Level, type Vec2, isBoundary } from './schema';
 
 /**
  * Plan-space outline of one wall with mitred ends. "Left" is the side of the normal
@@ -66,6 +66,7 @@ export function wallFootprints(level: Level): Footprints {
   const dirs = new Map<string, Vec2>();
 
   for (const w of Object.values(level.walls)) {
+    if (isBoundary(w)) continue; // no thickness: neither mitred nor part of a junction
     const a = level.vertices[w.a];
     const b = level.vertices[w.b];
     if (!a || !b) continue;

@@ -14,7 +14,10 @@ export class NewerSchemaError extends Error {
  * Upgrades a stored document to SCHEMA_VERSION, one step at a time. Add an entry for each
  * bump: MIGRATIONS[n] turns a version-n document into version n + 1.
  */
-const MIGRATIONS: Record<number, (doc: Record<string, unknown>) => Record<string, unknown>> = {};
+const MIGRATIONS: Record<number, (doc: Record<string, unknown>) => Record<string, unknown>> = {
+  // 2 adds the optional Wall.kind ('boundary'); every version-1 wall is a wall as it was.
+  1: (doc) => doc,
+};
 
 export function migrate(input: unknown): unknown {
   if (!input || typeof input !== 'object') return input;

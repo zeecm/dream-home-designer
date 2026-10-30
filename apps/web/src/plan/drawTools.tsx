@@ -12,7 +12,7 @@ import {
   snapPoint,
 } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
-import { useEditor } from '../editor';
+import { newWallOptions, useEditor } from '../editor';
 import { useStore } from '../store';
 import { formatLength, parseLength } from '../units';
 import { type PlanPointer, type ToolContext, type ToolController, snapTolerance } from './tools';
@@ -94,7 +94,7 @@ export function useWallTool(ctx: ToolContext): ToolController {
     if (!from) return;
     try {
       const existed = new Set(Object.keys(ctx.level.vertices));
-      const r = drawWall(ctx.level, from, end, { thickness });
+      const r = drawWall(ctx.level, from, end, newWallOptions(thickness));
       ctx.dispatch(r.command);
       setError(null);
       // The chain ends where it joins what is already drawn: back at its first corner,
@@ -193,6 +193,7 @@ export function useWallTool(ctx: ToolContext): ToolController {
                 x2={s1.x}
                 y2={s1.y}
                 strokeWidth={Math.max(2, thickness * view.zoom)}
+                strokeDasharray={thickness > 0 ? undefined : '6 4'}
               />
               <g transform={`translate(${(s0.x + s1.x) / 2} ${(s0.y + s1.y) / 2 - 18})`}>
                 <rect x={-34} y={-11} width={68} height={22} rx={4} />
@@ -490,7 +491,7 @@ export function useRoomTool(ctx: ToolContext): ToolController {
         if (!level) return;
         const to: WallEnd =
           i === 4 && first ? { vertexId: first } : { point: corners[i % 4] as Vec2 };
-        const r = drawWall(level, from, to, { thickness });
+        const r = drawWall(level, from, to, newWallOptions(thickness));
         ctx.dispatch(r.command, { coalesceKey: key });
         first ??= r.startVertexId;
         from = { vertexId: r.endVertexId };

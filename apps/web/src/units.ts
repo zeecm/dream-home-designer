@@ -7,11 +7,11 @@ export const BARE_MM_FROM = 50;
  * (a bare number of 50 or more is read as millimetres; nothing in a flat is 50 m).
  */
 export function parseLength(input: string): number | null {
-  const m = input
-    .trim()
-    .toLowerCase()
-    .replace(/,/g, '')
-    .match(/^(-?\d*\.?\d+)\s*(mm|cm|m)?$/);
+  let s = input.trim().toLowerCase();
+  // "10,275" groups thousands; any other single comma is a decimal comma ("3,5" is 3.5).
+  if (/^-?\d{1,3}(,\d{3})+(\.\d+)?\s*[a-z]*$/.test(s)) s = s.replace(/,/g, '');
+  else if ((s.match(/,/g) ?? []).length === 1 && !s.includes('.')) s = s.replace(',', '.');
+  const m = s.match(/^(-?\d*\.?\d+)\s*(mm|cm|m)?$/);
   if (!m) return null;
   const n = Number(m[1]);
   if (!Number.isFinite(n)) return null;

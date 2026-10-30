@@ -357,6 +357,18 @@ select {
   cursor: pointer;
   font-weight: 500;
 }
+.segmented-fill {
+  display: flex;
+  width: 100%;
+}
+.segmented-fill button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 4px;
+}
+.field-label {
+  font-weight: 500;
+}
 .segmented button[aria-pressed="true"] {
   background: var(--surface);
   border-color: var(--border);
@@ -677,6 +689,19 @@ select {
   stroke: var(--muted);
   stroke-width: 1;
 }
+.boundary {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+.boundary-hit {
+  stroke: transparent;
+  stroke-width: 12px;
+}
+.boundary-mark {
+  stroke-width: 3;
+  stroke-dasharray: 6 4;
+}
 .hover {
   fill: var(--accent);
   fill-opacity: 0.4;
@@ -804,6 +829,13 @@ select {
 }
 .plan-empty p {
   margin: 0;
+}
+/* Clicks between the card's controls reach the canvas. */
+.plan-empty {
+  pointer-events: none;
+}
+.plan-empty button {
+  pointer-events: auto;
 }
 .plan-empty-title {
   color: var(--text);

@@ -25,8 +25,16 @@ export const Wall = z.object({
   height: z.number().positive().optional(),
   materialLeft: z.string().default('paint-white'),
   materialRight: z.string().default('paint-white'),
+  /**
+   * 'boundary' marks a room edge that is not a wall, such as where an open kitchen meets the
+   * living room: it divides rooms but has no thickness, is never built in 3D and takes no
+   * openings. Absent means a wall.
+   */
+  kind: z.enum(['wall', 'boundary']).optional(),
 });
 export type Wall = z.infer<typeof Wall>;
+
+export const isBoundary = (w: Pick<Wall, 'kind'>): boolean => w.kind === 'boundary';
 
 export const OpeningKind = z.enum(['door', 'window', 'passage']);
 export type OpeningKind = z.infer<typeof OpeningKind>;
@@ -101,7 +109,7 @@ export const Underlay = z.object({
 });
 export type Underlay = z.infer<typeof Underlay>;
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const Project = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),

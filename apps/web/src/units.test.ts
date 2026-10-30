@@ -14,6 +14,14 @@ describe('parseLength', () => {
     expect(parseLength('12')).toBe(12);
   });
 
+  it('reads a decimal comma, and commas that group thousands', () => {
+    expect(parseLength('3,5')).toBe(3.5);
+    expect(parseLength('2,45 m')).toBe(2.45);
+    expect(parseLength('10,275')).toBe(10.275);
+    expect(parseLength('3,500')).toBe(3.5);
+    expect(parseLength('1,2,3')).toBeNull();
+  });
+
   it('rejects anything else', () => {
     expect(parseLength('')).toBeNull();
     expect(parseLength('abc')).toBeNull();

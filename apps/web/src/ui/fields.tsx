@@ -53,12 +53,18 @@ export function LengthField({
   const shown = value === undefined ? '' : formatLength(value);
   const [draft, setDraft] = useState(shown);
   const [error, setError] = useState<string | null>(null);
+  // Escape blurs the field; the blur that follows must not commit what was typed.
+  const cancelled = useRef(false);
   useEffect(() => {
     setDraft(shown);
     setError(null);
   }, [shown]);
 
   const commit = () => {
+    if (cancelled.current) {
+      cancelled.current = false;
+      return;
+    }
     if (draft.trim() === '' && allowEmpty) {
       if (value !== undefined) onCommit(undefined);
       setError(null);
@@ -94,6 +100,7 @@ export function LengthField({
           onKeyDown={(e) => {
             if (e.key === 'Enter') e.currentTarget.blur();
             if (e.key === 'Escape') {
+              cancelled.current = true;
               setDraft(shown);
               setError(null);
               e.currentTarget.blur();
@@ -110,6 +117,7 @@ export function TextField({
   value,
   suggestions,
   focusToken = 0,
+  onDone,
   onCommit,
 }: {
   label: string;
@@ -118,6 +126,8 @@ export function TextField({
   suggestions?: string[];
   /** Each change focuses the field and selects its text. */
   focusToken?: number;
+  /** Called after Enter or Escape when focus came from `focusToken`, to hand focus back. */
+  onDone?: () => void;
   onCommit: (v: string) => void;
 }) {
   const [draft, setDraft] = useState(value);
@@ -126,13 +136,21 @@ export function TextField({
   useEffect(() => setDraft(value), [value]);
   // Focus on a new request only, not on mount with a token left over from an earlier one.
   const seenToken = useRef(focusToken);
+  const requested = useRef(false);
+  const cancelled = useRef(false);
   useEffect(() => {
     if (focusToken === seenToken.current) return;
     seenToken.current = focusToken;
+    requested.current = true;
     input.current?.focus();
     input.current?.select();
   }, [focusToken]);
   const commit = () => {
+    if (cancelled.current) {
+      cancelled.current = false;
+      setDraft(value);
+      return;
+    }
     const v = draft.trim();
     if (v && v !== value) onCommit(v);
     else setDraft(value);
@@ -149,13 +167,16 @@ export function TextField({
             list={suggestions ? listId : undefined}
             autoComplete="off"
             onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
+            onBlur={() => {
+              commit();
+              requested.current = false;
+            }}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') e.currentTarget.blur();
-              if (e.key === 'Escape') {
-                setDraft(value);
-                e.currentTarget.blur();
-              }
+              if (e.key !== 'Enter' && e.key !== 'Escape') return;
+              if (e.key === 'Escape') cancelled.current = true;
+              const handBack = requested.current;
+              e.currentTarget.blur();
+              if (handBack) onDone?.();
             }}
           />
           {suggestions && (
@@ -207,15 +228,18 @@ export function Segmented<T extends string>({
   label,
   value,
   options,
+  fill,
   onChange,
 }: {
   label: string;
+  /** Stretch across the container, options sharing the width. */
+  fill?: boolean;
   value: T;
   options: { value: T; label: string; title?: string }[];
   onChange: (v: T) => void;
 }) {
   return (
-    <fieldset className="segmented" aria-label={label}>
+    <fieldset className={`segmented${fill ? ' segmented-fill' : ''}`} aria-label={label}>
       {options.map((o) => (
         <button
           key={o.value}

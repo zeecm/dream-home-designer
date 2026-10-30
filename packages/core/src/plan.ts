@@ -1,6 +1,13 @@
 import { type Footprints, type WallFootprint, footprintSpans, wallFootprints } from './footprints';
 import { type Circle, clampOpeningT, openingsOnWall } from './geometry';
-import type { Level, Opening, OpeningKind, Vec2, Wall } from './schema';
+import {
+  type Level,
+  type Opening,
+  type OpeningKind,
+  type Vec2,
+  type Wall,
+  isBoundary,
+} from './schema';
 
 /**
  * A wall's local frame: origin at vertex a, unit direction d towards b, left normal n,
@@ -24,18 +31,23 @@ export function wallFrame(
 ): WallFrame | null {
   const a = level.vertices[wall.a];
   const b = level.vertices[wall.b];
-  if (!a || !b || !fp) return null;
+  const boundary = isBoundary(wall);
+  if (!a || !b || (!fp && !boundary)) return null;
   const length = Math.hypot(b.x - a.x, b.y - a.y);
   if (length < 1e-9) return null;
   const d = { x: (b.x - a.x) / length, y: (b.y - a.y) / length };
-  const spans = footprintSpans(fp, a, d);
+  // A boundary is a line: no thickness and no mitres.
+  const spans =
+    fp && !boundary
+      ? footprintSpans(fp, a, d)
+      : { left: [0, length] as [number, number], right: [0, length] as [number, number] };
   return {
     wall,
     a: { x: a.x, y: a.y },
     d,
     n: { x: -d.y, y: d.x },
     length,
-    half: wall.thickness / 2,
+    half: boundary ? 0 : wall.thickness / 2,
     left: spans.left,
     right: spans.right,
   };
@@ -76,6 +88,8 @@ export interface PlanGeometry {
   /** Solid wall between openings, mitred at the ends. */
   pieces: PlanWallPiece[];
   openings: PlanOpening[];
+  /** Room boundaries that are not walls, drawn as dashed lines. */
+  boundaries: string[];
 }
 
 /**
@@ -87,11 +101,16 @@ export function planGeometry(level: Level, footprints = wallFootprints(level)): 
   const frames: Record<string, WallFrame> = {};
   const pieces: PlanWallPiece[] = [];
   const openings: PlanOpening[] = [];
+  const boundaries: string[] = [];
 
   for (const wall of Object.values(level.walls)) {
     const f = wallFrame(level, wall, footprints.walls[wall.id]);
     if (!f) continue;
     frames[wall.id] = f;
+    if (isBoundary(wall)) {
+      boundaries.push(wall.id);
+      continue;
+    }
     const holes = openingsOnWall(level, wall.id)
       .map((o) => ({ o, span: openingSpan(f, o) }))
       .filter((h) => h.span[1] > h.span[0])
@@ -136,7 +155,7 @@ export function planGeometry(level: Level, footprints = wallFootprints(level)): 
     }
     solid(cursor, f.length);
   }
-  return { footprints, frames, pieces, openings };
+  return { footprints, frames, pieces, openings, boundaries };
 }
 
 export interface DoorSwing {
@@ -202,6 +221,7 @@ export function placeOpening(
 ): OpeningPlacement | null {
   let best: (OpeningPlacement & { d: number }) | null = null;
   for (const f of Object.values(geom.frames)) {
+    if (isBoundary(f.wall)) continue; // nothing to cut an opening into
     const b = { x: f.a.x + f.d.x * f.length, y: f.a.y + f.d.y * f.length };
     const dx = b.x - f.a.x;
     const dy = b.y - f.a.y;
