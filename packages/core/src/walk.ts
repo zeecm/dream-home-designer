@@ -29,7 +29,25 @@ export function collisionSegments(level: Level, geom: PlanGeometry = planGeometr
   };
   for (const p of geom.pieces) ring(p.polygon);
   for (const h of geom.footprints.hubs) ring(h.polygon);
-  for (const o of geom.openings) if (o.kind === 'window') ring(o.polygon);
+  // Windows are closed; so are doors and openings that lead outside (the front door),
+  // since there is nothing out there to walk into.
+  const shapes = [...roomShapes(level).values()];
+  const inRoom = (p: Vec2) =>
+    shapes.some((s) => pointInPolygon(p, s.outer) && !s.holes.some((h) => pointInPolygon(p, h)));
+  for (const o of geom.openings) {
+    if (o.kind === 'window') {
+      ring(o.polygon);
+      continue;
+    }
+    const f = o.frame;
+    const u = (o.span[0] + o.span[1]) / 2;
+    const off = f.half + 0.1;
+    const side = (k: number) => ({
+      x: f.a.x + f.d.x * u + f.n.x * off * k,
+      y: f.a.y + f.d.y * u + f.n.y * off * k,
+    });
+    if (!inRoom(side(1)) || !inRoom(side(-1))) ring(o.polygon);
+  }
   return out;
 }
 

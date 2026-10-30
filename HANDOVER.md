@@ -135,7 +135,7 @@ Writes are rate-limited per IP at the Worker (60/min). IDs must match `^[a-z0-9]
 - **Plan and 3D:** walls have mitred corners in both views, and the 3D rebuild is incremental.
 
 **Tests:**
-- 124 core and 12 render unit tests, plus 22 web unit tests.
+- 126 core and 12 render unit tests, plus 22 web unit tests.
 - A 9-test end-to-end suite.
 - Go tests, including a store contract test that has passed against live R2.
 
@@ -348,11 +348,12 @@ browser that has them.
   and room boundaries never block. This replaces the planned three-mesh-bvh capsule, because a
   single floor needs no 3D collision and this one is unit-tested. Revisit it if stairs or
   furniture collision arrive.
+- **Outside openings:** doors and openings to the outside (with a room on one side only)
+  block like windows, so the walk stays inside the flat.
 - **Mini-map:** a small plan in the corner while walking shows where you are and which way you
   face (`walk/MiniMap.tsx`).
 - **Next:**
   - door leaves;
-  - stopping the walker from leaving through the front door into empty space;
   - head bob and footstep feel, kept subtle;
   - remembering the last walk position.
 

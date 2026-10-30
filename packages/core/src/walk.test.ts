@@ -62,6 +62,29 @@ describe('walk', () => {
     expect(walk(segs, { x: 2, y: 2 }, { x: 4, y: 0 }).x).toBeLessThan(4);
   });
 
+  it('does not let the walker out through a door to the outside', () => {
+    const level = twoRooms();
+    const p = placeOpening(planGeometry(level), { x: 2, y: 0.1 }, 0.9, 0.3);
+    if (!p) throw new Error('no wall');
+    let s: EditorDoc = {
+      doc: { ...blankProject('t', 'prj_t'), levels: [level] },
+      history: emptyHistory(),
+    };
+    s = dispatch(
+      s,
+      addOpening(level.id, {
+        wallId: p.wallId,
+        kind: 'door',
+        t: p.t,
+        width: 0.9,
+        height: 2.1,
+        sill: 0,
+      }).command,
+    );
+    const segs = collisionSegments(s.doc.levels[0] as Level);
+    expect(walk(segs, { x: 2, y: 2 }, { x: 0, y: -4 }).y).toBeGreaterThan(0);
+  });
+
   it('does not tunnel through a thin wall in one big step', () => {
     const segs = collisionSegments(twoRooms());
     expect(walk(segs, { x: 3.7, y: 2 }, { x: 1.0, y: 0 }).x).toBeLessThan(4);
