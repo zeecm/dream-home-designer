@@ -2061,3 +2061,152 @@ h3.field-label {
     overscroll-behavior: contain;
   }
 }
+
+/* ---------------------------------------------------------------- phone on its side */
+
+/* A phone turned sideways has width but almost no height. The bars shrink to one thin row,
+   the tools stay a rail at the left, the details fold into a tab at the right edge, and
+   walking takes the whole screen below the top bar. */
+@media (orientation: landscape) and (max-height: 500px) {
+  :root {
+    --inset: 4px;
+    --gap: 4px;
+    --palette-width: 52px;
+    --inspector-width: 232px;
+  }
+  .app {
+    grid-template-rows: 40px 1fr;
+  }
+  html,
+  body {
+    overscroll-behavior: none;
+  }
+  .brand-name,
+  .topbar-divider,
+  .share-btn-label {
+    display: none;
+  }
+  .share-btn-icon {
+    display: inline-flex;
+  }
+  .share-btn {
+    padding: 0 10px;
+  }
+  .topbar {
+    gap: 8px;
+  }
+  .topbar .btn,
+  .topbar .icon-btn,
+  .topbar .segmented button {
+    min-height: 34px;
+    height: 34px;
+  }
+  .topbar .segmented button {
+    padding: 0 10px;
+  }
+  .project-name {
+    font-size: var(--fs-body);
+    max-width: 26vw;
+  }
+  /* The save status shrinks to a dot (its words stay in the title and for screen readers). */
+  .topbar .pill {
+    width: 10px;
+    min-width: 10px;
+    height: 10px;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 0;
+  }
+  .topbar .pill.pill-neutral {
+    background: var(--control);
+  }
+  .topbar .pill.pill-negative {
+    background: var(--negative);
+  }
+  .sample-banner {
+    flex-wrap: nowrap;
+    gap: 8px;
+    padding: 2px 4px 2px 12px;
+    font-size: var(--fs-small);
+  }
+  .sample-banner span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .sample-banner .btn {
+    min-height: 32px;
+    white-space: nowrap;
+  }
+  .palette {
+    padding: 4px;
+  }
+  .tool {
+    height: 40px;
+  }
+
+  /* The details: a column that folds away to a thin tab, giving the plan the width. */
+  .workspace {
+    grid-template-columns: var(--palette-width) minmax(0, 1fr) auto;
+  }
+  .inspector {
+    width: var(--inspector-width);
+    padding: 8px 12px;
+    gap: 12px;
+    overscroll-behavior: contain;
+  }
+  .inspector-toggle {
+    display: block;
+    width: 100%;
+    min-height: 36px;
+    padding: 0;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-weight: 500;
+    text-align: left;
+  }
+  .inspector-folded {
+    width: 40px;
+    padding: 0;
+  }
+  .inspector-folded > :not(.inspector-toggle) {
+    display: none;
+  }
+  .inspector-folded .inspector-toggle {
+    height: 100%;
+    border-bottom: 0;
+    writing-mode: vertical-rl;
+    text-align: center;
+  }
+
+  /* Walking: the 3D view alone, its overlays smaller so the room shows between them. */
+  .app-walking .sample-banner,
+  .app-walking .inspector,
+  .app-walking .palette {
+    display: none;
+  }
+  .app-walking .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sun-control {
+    top: 8px;
+    left: 8px;
+    width: 140px;
+    padding: 4px 10px;
+  }
+  .minimap {
+    right: 8px;
+    bottom: 8px;
+    transform: scale(0.62);
+    transform-origin: bottom right;
+  }
+  .joystick {
+    left: 16px;
+    bottom: 16px;
+  }
+  .app-walking .viewport-hint {
+    display: none;
+  }
+}

@@ -369,7 +369,6 @@ owner's plan):**
   running off screen brings its end into view; an opening narrowed to fit says so; the top
   bar fits 390 px exactly.
 - **Still open:**
-  - landscape phones get the desktop layout;
   - placing points on lift with a magnifier;
   - room deletion.
 - **Also fixed after a review:**
@@ -597,8 +596,20 @@ The Go API logs it locally (`POST /telemetry`, 204).
 - Corners are 32 px targets on touch screens; the scale bar lets drags through; a swipe in a
   walk moves the scene with the finger; the guide is worded for phones too, keeps a fixed
   height, and step 1 offers "Draw instead".
-- **Not yet (from the round):** handles on a selected piece of furniture (resize, rotate);
-  dragging a whole wall or room; distances to neighbours while dragging a door; a magnifier.
+- **Not yet (from the round):** dragging a whole wall or room; distances to neighbours while
+  dragging a door; a magnifier.
+
+**Furniture handles:** a selected piece shows four corner handles and a turn handle in front
+(`itemHandles` in `plan/tools.tsx`), in Select and in Furniture straight after placing (the
+`placing` wrapper routes a press on a handle to Select). A corner resizes with the opposite
+corner fixed (1 cm steps, 1 mm with Alt; size shown mid-drag); the turn handle faces the piece
+at the pointer in 15° steps (free with Alt). One undo step per drag; a finger takes a handle at
+once (`grabs`).
+
+**Phone on its side** (`orientation: landscape` and height ≤ 500 px, in `styles.css`): a thin
+top bar, a one-line sample notice, the tool rail at the left (it scrolls), and the details as a
+column that folds to a vertical tab at the right; walking hides the rails, the notice and the
+hint and shrinks the mini-map. `e2e/landscape.spec.ts` checks it at iPhone 13 landscape.
 
 **Wall tool on phones:** a finger drag previews the first wall (and a room, in Room) from where
 it went down (`ToolController.move`'s `dragFrom`); the last wall's ends show as handles, and a
