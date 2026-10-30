@@ -31,6 +31,7 @@ import {
   storedLocally,
 } from './backend';
 import { useEditor } from './editor';
+import { startGuide } from './guide';
 import { keysFor } from './keys';
 import {
   type RecentProject,
@@ -352,7 +353,10 @@ export const useStore = create<State>((set, get) => {
     },
 
     createProject: async (name) => {
-      await createFrom(blankProject(name));
+      const doc = blankProject(name);
+      // A first plan of one's own gets the getting-started guide.
+      startGuide(doc.id);
+      await createFrom(doc);
       // A blank plan is drawn in the plan view; 3D has nothing to show yet.
       useEditor.getState().setViewMode('plan');
     },

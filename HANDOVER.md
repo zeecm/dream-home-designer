@@ -538,6 +538,12 @@ model library, and writes 96 px WebPs to `apps/web/public/models/thumbs/`; the c
 shows them. Re-run it after changing the catalogue.
 **Next:** more models (Sketchfab CC0 needs an API key).
 
+**Getting started (Phase 5):** a new blank plan gets a guide bar over the stage (`ui/Guide.tsx`,
+`guide.ts`): add a floor plan, set its scale, draw walls round a room, walk through. Each step
+ticks off as it happens (a picture, a "Calibrate plan image" step this session or any walls,
+a room, a walk), one at a time with a button for its tool; it ends with "That's the basics"
+or when closed, and is remembered per project in this browser.
+
 **Walk-through link:** Share offers `?p=<id>&walk=1`, which opens the plan straight into a
 walk (once; the parameter is then dropped from the address).
 

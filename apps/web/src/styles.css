@@ -654,6 +654,29 @@ select {
   border-bottom: 1px solid var(--border);
   font-size: var(--fs-small);
 }
+/* ---------------------------------------------------------------- getting started */
+
+.guide {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 6px 12px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-small);
+}
+.guide-count {
+  flex: none;
+  color: var(--muted);
+}
+.guide-text {
+  flex: 1;
+  min-width: 0;
+}
+.app-walking .guide:not(.guide-done) {
+  display: none;
+}
+
 /* ---------------------------------------------------------------- renovation */
 
 .reno-bar {

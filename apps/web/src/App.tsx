@@ -4,6 +4,7 @@ import { type Tool, type ViewMode, useEditor } from './editor';
 import { absorbLinkKey } from './keys';
 import { PlanCanvas } from './plan/PlanCanvas';
 import { initialProjectId, useProject, useStore } from './store';
+import { Guide } from './ui/Guide';
 import { Inspector } from './ui/Inspector';
 import { Palette, TOOLS } from './ui/Palette';
 import { RenovationBar } from './ui/Renovation';
@@ -244,6 +245,7 @@ export function App() {
           <SampleBanner />
           <ViewOnlyBanner />
           <RenovationBar />
+          <Guide />
           <Notice />
           <Toast />
           <div className="stage-views">
