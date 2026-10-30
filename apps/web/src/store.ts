@@ -10,8 +10,8 @@ import {
   redo as coreRedo,
   undo as coreUndo,
   emptyHistory,
-  hdb4RoomProject,
   newId,
+  sampleFlatProject,
 } from '@dhd/core';
 import { create } from 'zustand';
 import {
@@ -178,7 +178,7 @@ export const useStore = create<State>((set, get) => {
 
   return {
     backend: null,
-    editor: { doc: hdb4RoomProject(), history: emptyHistory() },
+    editor: { doc: sampleFlatProject(), history: emptyHistory() },
     sync: { kind: 'loading' },
     canUndo: false,
     canRedo: false,
@@ -273,7 +273,7 @@ export const useStore = create<State>((set, get) => {
       // A blank plan is drawn in the plan view; 3D has nothing to show yet.
       useEditor.getState().setViewMode('plan');
     },
-    openSample: () => createFrom({ ...hdb4RoomProject(newId('prj')), name: '4-room HDB (sample)' }),
+    openSample: () => createFrom(sampleFlatProject(newId('prj'))),
 
     save: () => {
       clearTimeout(autosaveTimer);

@@ -135,7 +135,7 @@ Writes are rate-limited per IP at the Worker (60/min). IDs must match `^[a-z0-9]
 - **Plan and 3D:** walls have mitred corners in both views, and the 3D rebuild is incremental.
 
 **Tests:**
-- 102 core and 11 render unit tests, plus 21 web unit tests.
+- 110 core and 11 render unit tests, plus 21 web unit tests.
 - A 6-test end-to-end suite.
 - Go tests, including a store contract test that has passed against live R2.
 
@@ -183,6 +183,21 @@ from upload to rooms on the live preview.
   (`roomShapes`): its area is subtracted, the floor and ceiling are cut, the plan fill skips it,
   and room matching ignores points inside holes.
 
+**Round 3 code review (fixed):**
+- **Enclosures stealing names:** a centred enclosure could take the outer room's name when the
+  label search landed on its edge. Room matching now keeps 5 cm of clearance from holes.
+- **Nudge runs:** a run of nudges merged into, or split, whatever it passed. Nudges now only move
+  things, and the corners settle once, 0.5 s after the last press or when the selection changes.
+  A merged corner stays selected.
+- **Double-click rename:** the canvas took focus back after a double-click on a room.
+- **Smaller fixes:** labels are re-fitted per zoom step, not per wheel tick. Columns down to
+  0.01 m² count as holes. The shape cache only holds frozen levels.
+
+**Sample flat:** `sampleFlatProject` (core fixtures) is a 96 m² HDB-style 4-room flat with a
+service yard, kitchen, household shelter, two bathrooms, three bedrooms and an L-shaped
+living and dining room. It is built with the editor's own commands, then given readable ids
+(`w_bedroom-2_corridor`). `hdb4room` stays as the test fixture.
+
 **Plan images on the server (built):** `PUT /projects/{id}/image` stores one PNG, JPEG or WebP
 of up to 10 MB per project, checked by sniffing the content, and returns its SHA-256.
 `GET /projects/{id}/image/{hash}` serves it, immutable and sandboxed, only while that hash is
@@ -216,9 +231,7 @@ browser that has them.
    example), probably `Wall.kind: 'boundary'` drawn dashed and never extruded. This is a schema bump.
 2. **Public-deployment safety:** a write token separate from the share link, a previous-version
    copy on PUT and DELETE, and a limit or lifecycle rule on stored projects.
-3. **A realistic sample:** replace the simple sample flat with a realistic HDB 4-room layout
-   (bathrooms, shelter, service yard). Keep `hdb4room` for tests.
-4. **Room matching by overlap:** rooms are matched across edits by label point and corners. Matching
+3. **Room matching by overlap:** rooms are matched across edits by label point and corners. Matching
    by overlapping area would be sturdier for large reshapes.
 
 **Phase 2, first-person walkthrough:**

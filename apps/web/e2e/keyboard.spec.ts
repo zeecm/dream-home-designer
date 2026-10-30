@@ -23,6 +23,15 @@ test('the plan works from the keyboard: Tab selects, Enter renames, arrows nudge
   await page.keyboard.press('Enter');
   await expect(name).toHaveValue('Study');
 
+  // Double-clicking a room also starts a rename, and the name field keeps focus.
+  await page.keyboard.press('Escape');
+  const room = page.locator('[data-hit="room:rm_bedroom-2"]');
+  await room.dblclick({ force: true });
+  await expect(name).toBeFocused();
+  await page.keyboard.type('Guest room');
+  await page.keyboard.press('Enter');
+  await expect(name).toHaveValue('Guest room');
+
   // A selected corner shows its walls' lengths, and Shift+Arrow moves it 10 cm.
   await page.locator('[data-hit^="vertex:"]').first().click({ force: true });
   await expect(page.getByRole('heading', { name: 'Corner', exact: true })).toBeVisible();

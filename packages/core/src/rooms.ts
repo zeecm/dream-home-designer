@@ -5,6 +5,9 @@ import type { Level, Room, Vec2 } from './schema';
 /** Faces smaller than this are slivers between nearly coincident walls, not rooms. */
 export const MIN_ROOM_AREA = 0.25;
 
+/** Free-standing enclosures smaller than this (100 × 100 mm) are not subtracted. */
+const MIN_HOLE_AREA = 0.01;
+
 type LevelLike = Pick<Level, 'vertices' | 'walls'>;
 
 /**
@@ -84,7 +87,8 @@ function traceFaces(level: LevelLike): { faces: string[][]; outers: string[][] }
       }
       const area = signedArea(loop.map(pos));
       if (area > MIN_ROOM_AREA) faces.push(loop);
-      else if (area < -MIN_ROOM_AREA) outers.push(loop);
+      // Outer boundaries can be small: a column of four short walls is still a hole.
+      else if (area < -MIN_HOLE_AREA) outers.push(loop);
     }
   }
   return { faces, outers };
@@ -127,11 +131,13 @@ export interface RoomShape {
 const shapeCache = new WeakMap<object, Map<string, RoomShape>>();
 
 /**
- * Every room's outline and holes. Cached per level object, so call it freely on immutable
- * levels; a draft inside a recipe is measured afresh each time.
+ * Every room's outline and holes. Cached per frozen level object, so call it freely on
+ * immutable levels; drafts and unfrozen levels are measured afresh each time.
  */
 export function roomShapes(level: Level): Map<string, RoomShape> {
-  const cached = !isDraft(level) && shapeCache.get(level);
+  // Only frozen levels (Immer's output) are cached; drafts and plain objects can change.
+  const cacheable = !isDraft(level) && Object.isFrozen(level);
+  const cached = cacheable && shapeCache.get(level);
   if (cached) return cached;
   const pos = (id: string) => {
     const v = level.vertices[id];
@@ -149,7 +155,7 @@ export function roomShapes(level: Level): Map<string, RoomShape> {
   rooms.forEach((r, i) => {
     out.set(r.id, { outer: r.loop.map(pos), holes: (holes.get(i) ?? []).map((h) => h.map(pos)) });
   });
-  if (!isDraft(level)) shapeCache.set(level, out);
+  if (cacheable) shapeCache.set(level, out);
   return out;
 }
 
@@ -215,7 +221,8 @@ export function syncRooms(lvl: Draft<Level>): void {
       room,
       corners: new Set(room.loop),
       // A point inside the room's floor, never inside an enclosure standing in it.
-      label: placeLabel(poly, { x: 0, y: 0 }, [], holes),
+      // 5 cm of clearance keeps it off the hole's edge, where containment is ambiguous.
+      label: placeLabel(poly, { x: 0.05, y: 0.05 }, [], holes),
       area: Math.abs(signedArea(poly)) - holes.reduce((s, h) => s + Math.abs(signedArea(h)), 0),
     };
   });

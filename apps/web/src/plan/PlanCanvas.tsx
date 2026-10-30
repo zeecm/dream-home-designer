@@ -81,6 +81,7 @@ export function PlanCanvas() {
   // Focus ring on the canvas: shown when Tab moved focus here, hidden on the next click.
   const [ring, setRing] = useState(false);
   const lastTab = useRef(0);
+  const lastPointer = useRef(0);
   const v = view ?? { cx: 0, cy: 0, zoom: 50 };
 
   const viewAdjusted = useEditor((s) => s.viewAdjusted);
@@ -142,6 +143,7 @@ export function PlanCanvas() {
   // Pointer events don't reliably carry a click count, so detect double-clicks here.
   const lastDown = useRef({ t: 0, x: 0, y: 0 });
   const onPointerDown = (e: React.PointerEvent) => {
+    lastPointer.current = Date.now();
     setRing(false);
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
     const now = performance.now();
@@ -199,7 +201,11 @@ export function PlanCanvas() {
   // ---- keys: Space pans; the rest goes to the tool first
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if (e.key === 'Tab') lastTab.current = Date.now();
+      if (e.key === 'Tab') {
+        lastTab.current = Date.now();
+        // Tabbing between plan objects is keyboard use: show the ring again.
+        if (e.target === svgRef.current) setRing(true);
+      }
       if (isTyping(e.target)) return;
       if (e.code === 'Space') {
         space.current = true;
@@ -270,7 +276,9 @@ export function PlanCanvas() {
         // biome-ignore lint/a11y/noNoninteractiveTabindex: role="application" takes keyboard input
         tabIndex={0}
         data-ring={ring || undefined}
-        onFocus={() => setRing(Date.now() - lastTab.current < 500)}
+        onFocus={() =>
+          setRing(lastTab.current > lastPointer.current && Date.now() - lastTab.current < 500)
+        }
         onBlur={() => setRing(false)}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -349,7 +357,7 @@ export function PlanCanvas() {
 
       <p id="plan-keys" className="visually-hidden">
         In Select, Tab moves through rooms, walls, openings and corners. Arrow keys nudge the
-        selection by 1 cm, or 10 cm with Shift, and pan the plan when nothing is selected.
+        selected corner, wall or opening by 1 cm, or 10 cm with Shift, and otherwise pan the plan.
       </p>
       <p className="visually-hidden" aria-live="polite">
         {describe(level, selection)}

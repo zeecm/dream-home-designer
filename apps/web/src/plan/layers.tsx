@@ -223,7 +223,9 @@ function roomLabels(level: Level, geom: PlanGeometry, zoom: number): RoomLabel[]
 
 export const RoomLabels = memo(function RoomLabels({ level, geom, view, size }: ScreenProps) {
   // Placement depends on zoom, not on panning, so a pan reuses it.
-  const labels = useMemo(() => roomLabels(level, geom, view.zoom), [level, geom, view.zoom]);
+  // Fit labels to zoom in steps of about 9%, so a wheel zoom doesn't re-place them every tick.
+  const zoomStep = 2 ** (Math.round(Math.log2(view.zoom) * 8) / 8);
+  const labels = useMemo(() => roomLabels(level, geom, zoomStep), [level, geom, zoomStep]);
   return (
     <g className="room-labels" pointerEvents="none">
       {labels.map((l) => {

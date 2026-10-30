@@ -216,7 +216,8 @@ function labelClearance(
         }
       }
       const inside = pointInPolygon(q, poly) && !holes.some((h) => pointInPolygon(q, h));
-      let gap = inside ? edge : -edge;
+      // Strictly negative outside, so a point on an edge never counts as fitting.
+      let gap = inside ? edge : -edge - 1e-9;
       for (const c of avoid) gap = Math.min(gap, Math.hypot(q.x - c.c.x, q.y - c.c.y) - c.r);
       worst = Math.min(worst, gap);
     }

@@ -214,6 +214,17 @@ describe('rooms inside rooms', () => {
     expect(roomArea(lvl(s), byName(s, 'Living'))).toBeCloseTo(32);
   });
 
+  it('keeps the outer name when the enclosure edge lies on the label search grid', () => {
+    // 6 m / 20 steps puts grid lines at 1.8 and 4.2, exactly on this box's edges.
+    const s = rect(start(), 1.8, 1.8, 4.2, 4.2);
+    expect(roomArea(lvl(s), byName(s, 'Living'))).toBeCloseTo(36 - 2.4 * 2.4);
+  });
+
+  it('treats a small free-standing column as a hole', () => {
+    const s = rect(start(), 2.85, 2.85, 3.15, 3.15);
+    expect(roomArea(lvl(s), byName(s, 'Living'))).toBeCloseTo(36 - 0.09);
+  });
+
   it('gives the area back when the enclosure opens up', () => {
     let s = rect(start(), 2.5, 2.5, 3.5, 3.5);
     const inner = Object.values(lvl(s).rooms).find((r) => r.name !== 'Living')!;

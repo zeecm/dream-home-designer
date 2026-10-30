@@ -13,7 +13,7 @@ import {
   splitWall,
   updateOpening,
 } from '@dhd/core';
-import { type ReactNode, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { type Selection, type Tool, useEditor } from '../editor';
 import { useStore } from '../store';
 import { formatLength } from '../units';
@@ -99,14 +99,61 @@ type Drag =
   | { kind: 'vertex'; id: string; start: Vec2; moved: boolean; key: string }
   | { kind: 'opening'; id: string; wallId: string; start: Vec2; moved: boolean; key: string };
 
+interface NudgeRun {
+  sel: Selection;
+  key: string;
+  vertices: string[];
+  timer: number;
+}
+
+/** Settle a run of arrow-key nudges this long after the last press. */
+const NUDGE_SETTLE_MS = 500;
+
 export function useSelectTool(ctx: ToolContext): ToolController {
   const drag = useRef<Drag | null>(null);
   const { select, setHover } = useEditor.getState();
   const levelId = ctx.level.id;
+  const latest = useRef(ctx);
+  latest.current = ctx;
+  const run = useRef<NudgeRun | null>(null);
+  const live = () => useStore.getState().editor.doc.levels[0] ?? latest.current.level;
+
+  /**
+   * Ends a run of nudges: merges or splits where the moved corners came to rest, once, like
+   * the end of a drag, in the run's undo step. A corner merged into another stays selected
+   * under its surviving id.
+   */
+  const settleRun = () => {
+    const r = run.current;
+    if (!r) return;
+    run.current = null;
+    window.clearTimeout(r.timer);
+    const at = r.sel.kind === 'vertex' ? live().vertices[r.sel.id] : undefined;
+    for (const id of r.vertices) {
+      const level = live();
+      if (level.vertices[id]) {
+        latest.current.dispatch(settleVertex(level, id), { coalesceKey: r.key });
+      }
+    }
+    const level = live();
+    const cur = useEditor.getState().selection;
+    if (!cur || cur.kind !== r.sel.kind || cur.id !== r.sel.id) return;
+    if (r.sel.kind === 'vertex' && !level.vertices[r.sel.id]) {
+      const survivor =
+        at && Object.values(level.vertices).find((v) => Math.hypot(v.x - at.x, v.y - at.y) < 1e-3);
+      select(survivor ? { kind: 'vertex', id: survivor.id } : null);
+    } else if (r.sel.kind === 'wall' && !level.walls[r.sel.id]) {
+      select(null);
+    }
+  };
+  // Settle a pending run when the tool goes away (switching tools mid-run).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: settleRun reads only refs
+  useEffect(() => () => settleRun(), []);
 
   return {
     cursor: 'default',
     down: (p) => {
+      settleRun();
       const h = p.hit;
       if (!h) {
         select(null);
@@ -120,7 +167,8 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       }
       select(h);
       if (h.kind === 'room' && p.clicks === 2) {
-        useEditor.getState().requestRename();
+        // After this press's default action, which focuses the canvas, has run.
+        window.setTimeout(() => useEditor.getState().requestRename(), 0);
         return true;
       }
       // Rooms and walls select on press, but dragging from them pans (rooms cover the plan).
@@ -174,7 +222,14 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       }
     },
     key: (e) => {
+      const arrow = ARROWS[e.key];
+      if (!arrow) settleRun();
       const sel = useEditor.getState().selection;
+      if (
+        run.current &&
+        (!sel || sel.kind !== run.current.sel.kind || sel.id !== run.current.sel.id)
+      )
+        settleRun();
       const onCanvas = e.target instanceof SVGSVGElement;
       // Tab walks through the plan's objects while the canvas has focus; past the last one it
       // lets focus move on, so the canvas never traps the keyboard.
@@ -190,25 +245,30 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         useEditor.getState().requestRename();
         return true;
       }
-      const arrow = ARROWS[e.key];
       if (arrow && (onCanvas || e.target === document.body) && !e.ctrlKey && !e.metaKey) {
-        // Read the live document: key repeat can outrun React's re-render.
-        const live = () => useStore.getState().editor.doc.levels[0] ?? ctx.level;
-        // 1 cm per press, 10 cm with Shift; a run of nudges is one undo step.
-        const step = e.shiftKey ? 0.1 : 0.01;
-        const cmds = sel ? nudge(live(), sel, { x: arrow.x * step, y: arrow.y * step }) : [];
-        if (sel && cmds.length > 0) {
-          const key = `nudge:${sel.id}`;
-          const moved = movedVertices(live(), sel);
-          for (const cmd of cmds) ctx.dispatch(cmd, { coalesceKey: key });
-          for (const id of moved) {
-            const level = live();
-            if (level.vertices[id]) ctx.dispatch(settleVertex(level, id), { coalesceKey: key });
-          }
-        } else {
+        // Corners, walls and openings move; with nothing movable selected, arrows pan.
+        if (!sel || sel.kind === 'room') {
           const px = e.shiftKey ? 200 : 40;
           useEditor.getState().setView(panBy(ctx.view, -arrow.x * px, -arrow.y * px), true);
+          return true;
         }
+        // Read the live document: key repeat can outrun React's re-render. 1 cm per press,
+        // 10 cm with Shift. Corners only move during a run; they merge or split once it ends.
+        const step = e.shiftKey ? 0.1 : 0.01;
+        const cmds = nudge(live(), sel, { x: arrow.x * step, y: arrow.y * step });
+        if (cmds.length === 0) return true; // e.g. a door nudged across its wall
+        if (!run.current) {
+          run.current = {
+            sel,
+            key: `nudge:${sel.id}:${Date.now()}`,
+            vertices: movedVertices(live(), sel),
+            timer: 0,
+          };
+        }
+        const r = run.current;
+        for (const cmd of cmds) ctx.dispatch(cmd, { coalesceKey: r.key });
+        window.clearTimeout(r.timer);
+        r.timer = window.setTimeout(settleRun, NUDGE_SETTLE_MS);
         return true;
       }
       if ((e.key === 'Delete' || e.key === 'Backspace') && sel) {
