@@ -46,8 +46,10 @@ export function Inspector() {
   // Keyed by object: another selection mounts fresh fields, and the old ones commit any
   // edit in progress to the object it was typed for as they go.
   const key = selection ? `${selection.kind}:${selection.id}` : undefined;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: another object or tool decides afresh
-  useEffect(() => setUserOpen(null), [key, tool]);
+  // Another object decides afresh; a fold by hand holds across tools, so the plan keeps
+  // its room on a phone.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: another object decides afresh
+  useEffect(() => setUserOpen(null), [key]);
   // Another tool or object starts the panel at its top, with its toggle in view.
   const panel = useRef<HTMLElement>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: on another object or tool

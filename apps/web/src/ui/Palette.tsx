@@ -116,8 +116,9 @@ export function ToolPanel() {
   return (
     <section className="tool-panel" aria-label={`${def?.label ?? 'Tool'} tool`}>
       <p className="tool-panel-title">{def?.label}</p>
-      <p className="tool-panel-hint">{TOOL_HINTS[tool]}</p>
+      {/* Options first: on a phone the panel is short, and the hint can wait below. */}
       <ToolOptions tool={tool} idPrefix="panel-" />
+      <p className="tool-panel-hint">{TOOL_HINTS[tool]}</p>
       {tool === 'calibrate' && <PlanImagePanel />}
     </section>
   );

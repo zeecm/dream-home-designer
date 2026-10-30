@@ -311,10 +311,11 @@ owner's plan):**
   link can edit it and offers "Make me the owner". (Claiming automatically from the recent list
   let anyone who had opened the link take it from its creator.) If someone does take a plan,
   the remedy is deleting `access/<id>.json` in R2 by hand, which makes it open again.
-- **Recovery copies:** each save copies the version it replaces to `previous/<id>.json`, and a
-  delete first copies the project to `deleted/<id>.json` (images are not kept). Lifecycle rules
+- **Recovery copies:** each save copies the version it replaces to
+  `previous/<id>/<version>.json`, and a delete first copies the project to `deleted/<id>.json`
+  and its access record to `deleted/<id>.access.json` (images are not kept). Lifecycle rules
   on both buckets (`expire-previous`, `expire-deleted`) expire them after 30 days. To restore,
-  copy the object back to `projects/<id>.json` with wrangler.
+  copy the objects back (`projects/<id>.json`, `access/<id>.json`) with wrangler.
 - **Web:**
   - a Share menu in the top bar;
   - a view-only banner with "Make my own copy";
@@ -358,6 +359,12 @@ owner's plan):**
     plan corner on touch screens);
   - opening another plan veils the old one; a door tap that can't place says why; the wall
     details have "Add a corner in the middle".
+- **Round 3 fixes:** the details panel keeps to the screen (chips scroll sideways, options
+  before the hint) and stays folded across tools once folded; the plan keeps its place when
+  the panel resizes; a finger on a scale end takes it at once (no 8 px threshold); a typed
+  length landing on a corner joins it (closing an outline ends the chain) and a typed wall
+  running off screen brings its end into view; an opening narrowed to fit says so; the top
+  bar fits 390 px exactly.
 - **Still open:**
   - landscape phones get the desktop layout;
   - placing points on lift with a magnifier;
@@ -368,10 +375,23 @@ owner's plan):**
   - the wall bar's Undo only takes back the chain's own wall;
   - a typed length aims along the last wall unless the pointer has moved since.
 
+**Walls to one side of their line (schema 3):** `Wall.side` ('left' | 'right', absent =
+centred) puts one face on the wall's line, so walls of different thickness in a row keep a
+flush face, as real outside walls do where structure gives way to a thinner wall or a window.
+`wallFaces` gives each face's distance from the line; mitres in `wallFootprints` use those,
+and `wallFrame` sits on the real centre line, so openings, 3D, collision and hit-testing need
+no changes. The wall details offer Centred / One side / Other side. Rooms are still traced
+along wall lines, so a room bounded by a one-sided wall's line includes that wall's
+thickness.
+
 **Sample flat:** `sampleFlatProject` (core fixtures) is the owner's own plan: the published HDB
 3-room Type 4 (Blk 39A), traced from `public/samples/hdb-3room-type4.pdf`. It has 9 rooms and
-69 m² to centre lines, matching the published 69 m² gross; the dry kitchen is marked off from
-the living room by two room boundaries. It is built with the editor's own commands, then given
+68.9 m² to its wall lines, matching the published 69 m² gross; the dry kitchen is marked off
+from the living room by two room boundaries. Every wall has the thickness measured off the
+PDF at 600 dpi (300 mm structural, 255 mm shelter, 254 and 150 mm outer, 125 mm kitchen,
+105 mm ledge parapets, 100 and 90 mm partitions), and two runs are one-sided with a flush
+face: the bedroom's 300 → 100 mm wall and the shelter's wall carrying on as the kitchen's. A
+test walks from the start into every room that has a door. It is built with the editor's own commands, then given
 readable ids (`w_bedroom_main-bedroom`). It comes with its plan image already scaled under it:
 `public/samples/hdb-3room-type4.png`, a 16-grey crop of the PDF keyed by its hash
 (`SAMPLE_PLAN_KEY`). The web app fetches bundled images from `/samples` (`BUNDLED_ASSETS` in

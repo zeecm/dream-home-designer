@@ -166,7 +166,18 @@ export function useWallTool(ctx: ToolContext): ToolController {
       return;
     }
     setTyped('');
-    commit({ point: end });
+    // Landing on a corner (closing the outline, say) joins it, which also ends the chain.
+    const level = useStore.getState().editor.doc.levels[0] ?? ctx.level;
+    const onto = Object.values(level.vertices).find(
+      (v) => Math.hypot(v.x - end.x, v.y - end.y) < 0.02,
+    );
+    commit(onto ? { vertexId: onto.id } : { point: end });
+    // Keep the new end in view: a typed wall can run off the screen.
+    const s = worldToScreen(ctx.view, ctx.size, end);
+    const m = 48;
+    if (s.x < m || s.y < m + 56 || s.x > ctx.size.width - m || s.y > ctx.size.height - m) {
+      useEditor.getState().setView({ ...ctx.view, cx: end.x, cy: end.y }, true);
+    }
   };
 
   /**
@@ -424,6 +435,8 @@ export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolControl
   const [onBoundary, setOnBoundary] = useState<Vec2 | null>(null);
   /** Where a tap found no wall, to say so. */
   const [missed, setMissed] = useState<Vec2 | null>(null);
+  /** Where an opening went in narrower than picked, to fit its wall, and how wide. */
+  const [narrowed, setNarrowed] = useState<{ at: Vec2; width: number } | null>(null);
   const boundaryNear = (p: PlanPointer) =>
     ctx.geom.boundaries.some((id) => {
       const f = ctx.geom.frames[id];
@@ -447,6 +460,7 @@ export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolControl
       setPlace(null);
       setMissed(null);
       setOnBoundary(null);
+      setNarrowed(at.width < width - 1e-6 ? { at: p.screen, width: at.width } : null);
       const r = addOpening(ctx.level.id, {
         wallId: at.wallId,
         kind,
@@ -467,17 +481,21 @@ export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolControl
       setPlace(at);
       setOnBoundary(!at && boundaryNear(p) ? p.screen : null);
       setMissed(null);
+      setNarrowed(null);
     },
     up: () => {},
     key: () => false,
     overlay: ({ view, size }) => {
       const at = keep.current;
       const f = at && ctx.geom.frames[at.wallId];
-      const note = (onBoundary ?? missed) && !at ? (onBoundary ?? missed) : null;
+      const name = kind === 'passage' ? 'opening' : kind;
+      const note = at ? null : (onBoundary ?? missed ?? narrowed?.at ?? null);
       if (note) {
         const why = onBoundary
           ? 'A room boundary takes no doors or windows'
-          : `Tap or click on a wall to add ${kind === 'passage' ? 'an opening' : `a ${kind}`}`;
+          : missed
+            ? `Tap or click on a wall to add ${kind === 'passage' ? 'an opening' : `a ${kind}`}`
+            : `Narrowed to ${Math.round((narrowed?.width ?? 0) * 1000)} mm to fit this wall`;
         return (
           <g
             pointerEvents="none"
@@ -514,7 +532,7 @@ export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolControl
         ? null
         : at.width < 0.4
           ? 'This wall is too short'
-          : `No room for a ${Math.round(width * 1000)} mm ${kind === 'passage' ? 'opening' : kind} here`;
+          : `No room for a ${Math.round(width * 1000)} mm ${name} here`;
       const tip = corners[0];
       return (
         <g pointerEvents="none">

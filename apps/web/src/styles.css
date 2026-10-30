@@ -901,6 +901,8 @@ select {
 @media (max-width: 1100px) {
   .tool-panel {
     display: grid;
+    /* The column may not grow to fit a row of chips: they scroll sideways instead. */
+    grid-template-columns: minmax(0, 1fr);
     gap: 8px;
     padding-bottom: 12px;
     border-bottom: 1px solid var(--border);
@@ -1338,7 +1340,7 @@ select {
     display: none;
   }
   .topbar .segmented button {
-    padding: 0 8px;
+    padding: 0 6px;
   }
   .topbar {
     gap: 6px;

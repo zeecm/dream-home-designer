@@ -122,6 +122,21 @@ export function PlanCanvas() {
     fitDone();
   }, [fitRequested, viewAdjusted, size, image.status, ink, setView, fitDone]);
 
+  // When the pane resizes (a phone's details panel folding or opening), the plan stays put
+  // on screen: its top left keeps its place rather than everything shifting by half.
+  const lastSize = useRef(size);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on a resize only
+  useEffect(() => {
+    const prev = lastSize.current;
+    lastSize.current = size;
+    const cur = useEditor.getState().view;
+    if (!cur || !useEditor.getState().viewAdjusted || prev.width === 0 || size.width === 0) return;
+    const dx = size.width - prev.width;
+    const dy = size.height - prev.height;
+    if (dx === 0 && dy === 0) return;
+    setView({ ...cur, cx: cur.cx + dx / 2 / cur.zoom, cy: cur.cy + dy / 2 / cur.zoom }, true);
+  }, [size]);
+
   const ctx: ToolContext | null = level && geom ? { level, geom, view: v, size, dispatch } : null;
   const active = useTool(tool, ctx ?? ({} as ToolContext));
 
@@ -196,7 +211,13 @@ export function PlanCanvas() {
       return;
     }
     if (gesture.current) return; // still lifting fingers from a pinch
-    touch.current = { start: pointer(e), moved: false, claimed: false };
+    const start = pointer(e);
+    touch.current = { start, moved: false, claimed: false };
+    // A finger on something a drawing tool lets you drag (a scale line's end) takes it at
+    // once, so the smallest correction counts.
+    if (tool !== 'select' && ctx && active.grabs?.(start)) {
+      touch.current = { start, moved: true, claimed: active.down(start) };
+    }
   };
   const onTouchMove = (e: React.PointerEvent) => {
     if (!touches.current.has(e.pointerId)) return;
