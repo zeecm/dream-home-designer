@@ -118,3 +118,10 @@ export function levelBounds(level: Level): Bounds | null {
   }
   return { min, max };
 }
+
+/** Keeps an opening's centre far enough from both wall ends that it fits on the wall. */
+export function clampOpeningT(wallLength: number, width: number, t: number): number {
+  if (wallLength <= 0) return 0.5;
+  const half = Math.min(0.5, width / 2 / wallLength);
+  return Math.min(1 - half, Math.max(half, t));
+}

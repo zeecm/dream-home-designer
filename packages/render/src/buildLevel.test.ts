@@ -1,7 +1,7 @@
 import { hdb4RoomLevel, roomPolygon } from '@dhd/core';
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { buildLevel } from './buildLevel';
+import { buildLevel, extrudePolygon } from './buildLevel';
 import { MaterialCache } from './materials';
 
 describe('buildLevel', () => {
@@ -64,6 +64,41 @@ describe('buildLevel', () => {
       expect(cb.min.y, room.id).toBeCloseTo(room.ceilingHeight ?? level.ceilingHeight);
       const normals = ceil.geometry.getAttribute('normal');
       for (let i = 0; i < normals.count; i++) expect(normals.getY(i), room.id).toBeCloseTo(-1);
+    }
+  });
+});
+
+describe('extrudePolygon', () => {
+  it('builds a closed prism with outward normals whichever way the polygon winds', () => {
+    const square = [
+      { x: 0, y: 0 },
+      { x: 2, y: 0 },
+      { x: 2, y: 1 },
+      { x: 0, y: 1 },
+    ];
+    for (const poly of [square, [...square].reverse()]) {
+      const g = extrudePolygon(poly, 0, 3);
+      const pos = g.getAttribute('position');
+      const nrm = g.getAttribute('normal');
+      expect(pos.count).toBe((2 * 2 + 4 * 2) * 3); // 2 caps x 2 tris + 4 sides x 2 tris
+      const centre = new THREE.Vector3(1, 1.5, 0.5);
+      for (let i = 0; i < pos.count; i += 3) {
+        const face = new THREE.Vector3();
+        for (let j = 0; j < 3; j++) face.add(new THREE.Vector3().fromBufferAttribute(pos, i + j));
+        face.divideScalar(3).sub(centre);
+        const n = new THREE.Vector3().fromBufferAttribute(nrm, i);
+        expect(n.length()).toBeCloseTo(1);
+        expect(n.dot(face)).toBeGreaterThan(0);
+      }
+      // volume via the divergence theorem: 2 x 1 x 3
+      let vol = 0;
+      for (let i = 0; i < pos.count; i += 3) {
+        const a = new THREE.Vector3().fromBufferAttribute(pos, i);
+        const b = new THREE.Vector3().fromBufferAttribute(pos, i + 1);
+        const c = new THREE.Vector3().fromBufferAttribute(pos, i + 2);
+        vol += a.dot(b.clone().cross(c)) / 6;
+      }
+      expect(vol).toBeCloseTo(6);
     }
   });
 });

@@ -5,7 +5,11 @@
   "javascript": { "formatter": { "quoteStyle": "single", "semicolons": "always" } },
   "linter": {
     "enabled": true,
-    "rules": { "recommended": true, "style": { "noNonNullAssertion": "off" } }
+    "rules": {
+      "recommended": true,
+      "style": { "noNonNullAssertion": "off" },
+      "performance": { "noDelete": "off" }
+    }
   },
   "organizeImports": { "enabled": true }
 }

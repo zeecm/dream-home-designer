@@ -4,4 +4,5 @@ export * from './history';
 export * from './commands';
 export * from './geometry';
 export * from './factory';
+export * from './footprints';
 export { hdb4RoomLevel, hdb4RoomProject } from './fixtures/hdb4room';

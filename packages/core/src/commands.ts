@@ -1,7 +1,9 @@
 import type { Draft } from 'immer';
+import type { z } from 'zod';
+import { clampOpeningT } from './geometry';
 import type { Command } from './history';
 import { newId } from './ids';
-import type { Level, Opening, Project, Vec2 } from './schema';
+import { type Level, Opening, type Project, Room, type Vec2, Wall } from './schema';
 
 function level(draft: Draft<Project>, levelId: string): Draft<Level> {
   const lvl = draft.levels.find((l) => l.id === levelId);
@@ -149,6 +151,120 @@ export function renameRoom(levelId: string, roomId: string, name: string): Comma
       const room = level(d, levelId).rooms[roomId];
       if (!room) throw new Error(`room ${roomId} not found`);
       room.name = name;
+    },
+  };
+}
+
+// --------------------------------------------------------------------- edits by patch
+
+const WallPatch = Wall.pick({
+  thickness: true,
+  height: true,
+  materialLeft: true,
+  materialRight: true,
+}).partial();
+export type WallPatch = z.input<typeof WallPatch>;
+
+/** Updates wall properties. `height: undefined` resets to the level's ceiling height. */
+export function updateWall(levelId: string, wallId: string, patch: WallPatch): Command {
+  const p = WallPatch.parse(patch);
+  return {
+    label: 'Edit wall',
+    recipe: (d) => {
+      const w = level(d, levelId).walls[wallId];
+      if (!w) throw new Error(`wall ${wallId} not found`);
+      Object.assign(w, p);
+      if ('height' in patch && patch.height === undefined) delete w.height;
+    },
+  };
+}
+
+/** Moves vertex b along the wall so the wall has the given centre-line length. */
+export function setWallLength(levelId: string, wallId: string, newLength: number): Command {
+  if (!(newLength > 0)) throw new Error('length must be positive');
+  return {
+    label: 'Change wall length',
+    recipe: (d) => {
+      const lvl = level(d, levelId);
+      const w = lvl.walls[wallId];
+      if (!w) throw new Error(`wall ${wallId} not found`);
+      const a = lvl.vertices[w.a];
+      const b = lvl.vertices[w.b];
+      if (!a || !b) throw new Error(`wall ${wallId} references a missing vertex`);
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      if (len < 1e-9) throw new Error('wall has zero length');
+      b.x = a.x + ((b.x - a.x) / len) * newLength;
+      b.y = a.y + ((b.y - a.y) / len) * newLength;
+    },
+  };
+}
+
+const RoomPatch = Room.pick({
+  name: true,
+  floorMaterial: true,
+  ceilingMaterial: true,
+  ceilingHeight: true,
+}).partial();
+export type RoomPatch = z.input<typeof RoomPatch>;
+
+export function updateRoom(levelId: string, roomId: string, patch: RoomPatch): Command {
+  const p = RoomPatch.parse(patch);
+  if (p.name !== undefined && p.name.trim() === '') throw new Error('room name is empty');
+  return {
+    label: 'Edit room',
+    recipe: (d) => {
+      const room = level(d, levelId).rooms[roomId];
+      if (!room) throw new Error(`room ${roomId} not found`);
+      Object.assign(room, p);
+      if ('ceilingHeight' in patch && patch.ceilingHeight === undefined) delete room.ceilingHeight;
+    },
+  };
+}
+
+const OpeningPatch = Opening.omit({ id: true, wallId: true }).partial();
+export type OpeningPatch = z.input<typeof OpeningPatch>;
+
+/**
+ * Updates an opening. `t` is clamped so the opening stays on its wall; a width wider
+ * than the wall is rejected.
+ */
+export function updateOpening(levelId: string, openingId: string, patch: OpeningPatch): Command {
+  const p = OpeningPatch.parse(patch);
+  return {
+    label: 'Edit opening',
+    recipe: (d) => {
+      const lvl = level(d, levelId);
+      const o = lvl.openings[openingId];
+      if (!o) throw new Error(`opening ${openingId} not found`);
+      const wall = lvl.walls[o.wallId];
+      const a = wall && lvl.vertices[wall.a];
+      const b = wall && lvl.vertices[wall.b];
+      if (!a || !b) throw new Error(`opening ${openingId} is on a missing wall`);
+      Object.assign(o, p);
+      if ('swing' in patch && patch.swing === undefined) delete o.swing;
+      if (o.kind !== 'door') delete o.swing;
+      else o.swing ??= 'leftIn';
+      if (o.kind !== 'window') o.sill = 0;
+      o.t = clampOpeningT(Math.hypot(b.x - a.x, b.y - a.y), o.width, o.t);
+    },
+  };
+}
+
+export function deleteOpening(levelId: string, openingId: string): Command {
+  return {
+    label: 'Delete opening',
+    recipe: (d) => {
+      delete level(d, levelId).openings[openingId];
+    },
+  };
+}
+
+export function setCeilingHeight(levelId: string, height: number): Command {
+  if (!(height > 0)) throw new Error('height must be positive');
+  return {
+    label: 'Change ceiling height',
+    recipe: (d) => {
+      level(d, levelId).ceilingHeight = height;
     },
   };
 }
