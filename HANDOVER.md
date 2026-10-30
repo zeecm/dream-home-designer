@@ -455,8 +455,10 @@ blocked by the network proxy and Sketchfab needs an API key.
 1. **Public-deployment safety:** sharing and recovery copies are done (see §4). Still open: a
    cap on how many projects one visitor can create (the Worker's per-IP write limit is the only
    brake today).
-2. **Room matching by overlap:** rooms are matched across edits by label point and corners. Matching
-   by overlapping area would be sturdier for large reshapes.
+2. **Room matching by overlap (looked into, not adopted):** rooms are matched across edits by
+   label point and shared corners. Sampled area overlap was tried; it gave the same results on
+   splits, merges and a closet drawn mid-room (now a test), and disagrees only on odd shapes
+   where either answer is defensible, so the cheaper rule stays.
 
 **Phase 2, first-person walkthrough (first cut built):**
 - **What's built:**

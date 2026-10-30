@@ -247,3 +247,40 @@ describe('rooms inside rooms', () => {
     expect(areas[2]).toBeCloseTo(20);
   });
 });
+
+describe('room matching by overlap', () => {
+  it('keeps a room name on the room, not on a closet drawn around its middle', () => {
+    let s: EditorDoc = { doc: blankProject('t', 'prj_t'), history: emptyHistory() };
+    const lvl = () => s.doc.levels[0]!;
+    const loop = (pts: [number, number][]) => {
+      for (let i = 0; i < pts.length; i++) {
+        const [ax, ay] = pts[i]!;
+        const [bx, by] = pts[(i + 1) % pts.length]!;
+        s = dispatch(
+          s,
+          drawWall(lvl(), { point: { x: ax, y: ay } }, { point: { x: bx, y: by } }).command,
+        );
+      }
+    };
+    loop([
+      [0, 0],
+      [4, 0],
+      [4, 4],
+      [0, 4],
+    ]);
+    const room = Object.values(lvl().rooms)[0]!;
+    s = dispatch(s, updateRoom(lvl().id, room.id, { name: 'Study', floorMaterial: 'marble' }));
+    // A small closet standing in the middle, right where the room's label sat.
+    loop([
+      [1.5, 1.5],
+      [2.5, 1.5],
+      [2.5, 2.5],
+      [1.5, 2.5],
+    ]);
+    const rooms = Object.values(lvl().rooms);
+    expect(rooms).toHaveLength(2);
+    const study = rooms.find((r) => r.name === 'Study');
+    expect(study && roomArea(lvl(), study)).toBeCloseTo(15);
+    expect(study?.floorMaterial).toBe('marble');
+  });
+});
