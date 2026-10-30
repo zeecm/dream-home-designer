@@ -1,6 +1,9 @@
 import { Container, getContainer } from '@cloudflare/containers';
+import { type AuthEnv, d1Store, handleAuth } from './auth';
 
-export interface Env {
+export interface Env extends AuthEnv {
+  /** Accounts (D1): people, sessions and the plans they keep. */
+  DB?: D1Database;
   API: DurableObjectNamespace<ApiContainer>;
   WRITE_LIMIT: RateLimit;
   CREATE_LIMIT: RateLimit;
@@ -118,6 +121,8 @@ export default {
     }
 
     if (request.method === 'POST' && url.pathname === '/telemetry') return telemetry(request, env);
+    const account = await handleAuth(request, url.pathname, env, env.DB ? d1Store(env.DB) : null);
+    if (account) return account;
     return getContainer(env.API).fetch(new Request(url, request));
   },
 } satisfies ExportedHandler<Env>;
