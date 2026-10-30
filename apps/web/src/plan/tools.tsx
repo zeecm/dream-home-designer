@@ -499,9 +499,8 @@ export function useSelectTool(ctx: ToolContext): ToolController {
           <line x1={h.mid.x} y1={h.mid.y} x2={h.turn.x} y2={h.turn.y} className="turn-stem" />
           <circle cx={h.turn.x} cy={h.turn.y} r={8} className="turn-handle" />
           {h.corners.map((q, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: the four corners, in order
             <rect
-              key={i}
+              key={CORNER_NAMES[i]}
               x={q.x - HANDLE_SIZE / 2}
               y={q.y - HANDLE_SIZE / 2}
               width={HANDLE_SIZE}
@@ -525,6 +524,8 @@ export function useSelectTool(ctx: ToolContext): ToolController {
 
 /** How near (screen px) a press must land to a handle to take it: a fingertip's reach. */
 const HANDLE_REACH = 20;
+/** The footprint's corners, in itemFootprint's order. */
+const CORNER_NAMES = ['back-left', 'back-right', 'front-right', 'front-left'];
 /** A corner handle's drawn size (screen px); on the piece itself, a press must land on it. */
 const HANDLE_SIZE = 12;
 
