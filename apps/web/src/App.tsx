@@ -218,7 +218,12 @@ export function App() {
     void (id ? load(id) : openSample());
   }, []);
 
-  // A walk-through link (?walk=1) starts walking once its plan has opened, once.
+  // A different project starts with a clean editor and a fitted view.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the open project changes
+  useEffect(() => useEditor.getState().reset(), [projectId]);
+
+  // A walk-through link (?walk=1) starts walking once its plan has opened, once (after the
+  // reset above, which would end a walk begun in the same render).
   const opened = useStore((s) => s.sync.kind === 'saved');
   const hasRooms = useStore((s) => Object.keys(s.editor.doc.levels[0]?.rooms ?? {}).length > 0);
   useEffect(() => {
@@ -229,10 +234,6 @@ export function App() {
     window.history.replaceState(null, '', url);
     if (hasRooms) useEditor.getState().startWalk();
   }, [opened, projectId, hasRooms]);
-
-  // A different project starts with a clean editor and a fitted view.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the open project changes
-  useEffect(() => useEditor.getState().reset(), [projectId]);
 
   return (
     <div className={walking ? 'app app-walking' : 'app'}>

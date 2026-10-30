@@ -5,7 +5,7 @@ async function downloadFrom(page: import('@playwright/test').Page, item: string)
   await page.getByRole('button', { name: 'Projects' }).click();
   const [file] = await Promise.all([
     page.waitForEvent('download', { timeout: 60_000 }),
-    page.getByRole('button', { name: item }).click(),
+    page.getByRole('button', { name: item, exact: true }).click(),
   ]);
   return file;
 }
