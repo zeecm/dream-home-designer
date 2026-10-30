@@ -265,6 +265,57 @@ select {
 .btn:hover {
   background: var(--raised);
 }
+.btn-primary {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--surface);
+}
+.btn-primary:hover {
+  background: var(--text);
+  opacity: 0.9;
+}
+.link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  font-size: var(--fs-small);
+  text-align: left;
+}
+.btn-block {
+  width: 100%;
+}
+.btn-small {
+  height: 28px;
+  padding: 0 8px;
+  font-size: var(--fs-small);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.error-text {
+  color: var(--negative) !important;
+}
+.slider {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+.slider input {
+  accent-color: var(--accent);
+}
+.rotation-value {
+  min-width: 36px;
+  text-align: center;
+  align-self: center;
+  color: var(--text);
+}
 .btn-danger {
   color: var(--negative);
   border-color: var(--border);
@@ -631,6 +682,29 @@ select {
   border-top: 0;
 }
 
+.plan-dropping::after {
+  content: "Drop to use as your plan image";
+  position: absolute;
+  inset: 12px;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-card);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+  pointer-events: none;
+}
+.canvas-banner {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: var(--radius-card);
+  background: var(--text);
+  color: var(--surface);
+  font-size: var(--fs-small);
+  font-weight: 500;
+  line-height: 18px;
+}
 .plan-empty {
   position: absolute;
   inset: 50% auto auto 50%;
@@ -641,7 +715,8 @@ select {
   border-radius: var(--radius-card);
   background: var(--plan-well);
   color: var(--muted);
-  pointer-events: none;
+  display: grid;
+  gap: 8px;
 }
 .plan-empty p {
   margin: 0;

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { type Tool, useEditor } from '../editor';
 import { TOOL_HINTS } from '../plan/tools';
+import { PlanImagePanel } from './PlanImage';
 import { icons } from './icons';
 
 export interface ToolDef {
@@ -18,6 +19,7 @@ export const TOOLS: ToolDef[] = [
   { id: 'window', label: 'Window', key: 'N', icon: icons.window },
   { id: 'passage', label: 'Opening', key: 'O', icon: icons.passage },
   { id: 'measure', label: 'Measure', key: 'M', icon: icons.measure },
+  { id: 'calibrate', label: 'Set scale', key: 'C', icon: icons.calibrate },
 ];
 
 const THICKNESSES = [
@@ -72,6 +74,7 @@ export function Palette() {
         ))}
       </ul>
       {tool === 'wall' && <WallOptions />}
+      <PlanImagePanel />
       <p className="tool-hint">{TOOL_HINTS[tool]}</p>
     </nav>
   );

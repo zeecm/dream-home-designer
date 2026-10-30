@@ -4,6 +4,7 @@ import {
   type Vec2,
   type WallEnd,
   addOpening,
+  calibrateUnderlay,
   clampOpeningT,
   drawWall,
   projectOnSegment,
@@ -11,6 +12,7 @@ import {
 } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../editor';
+import { useStore } from '../store';
 import { formatLength, parseLength } from '../units';
 import { type PlanPointer, type ToolContext, type ToolController, snapTolerance } from './tools';
 import { worldToScreen } from './view';
@@ -309,3 +311,127 @@ export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolControl
     },
   };
 }
+
+/**
+ * Sets the plan image's scale: click both ends of something whose length you know (a
+ * dimensioned wall), then type that length.
+ */
+export function useCalibrateTool(ctx: ToolContext): ToolController {
+  const [points, setPoints] = useState<Vec2[]>([]);
+  const [cursor, setCursor] = useState<Vec2 | null>(null);
+  const [typed, setTyped] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const tool = useEditor((s) => s.tool);
+  useEffect(() => {
+    if (tool !== 'calibrate') {
+      setPoints([]);
+      setTyped('');
+      setError(null);
+    }
+  }, [tool]);
+
+  const apply = () => {
+    const [p1, p2] = points;
+    const len = parseLength(typed);
+    if (!p1 || !p2) return;
+    if (!len || len <= 0) {
+      setError('Type the real length, e.g. 4.5 m or 4500 mm, then press Enter.');
+      return;
+    }
+    try {
+      ctx.dispatch(calibrateUnderlay(p1, p2, len));
+      setPoints([]);
+      setTyped('');
+      setError(null);
+      useEditor.getState().setTool('wall');
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  return {
+    cursor: 'crosshair',
+    down: (p) => {
+      if (points.length >= 2) setPoints([p.world]);
+      else setPoints((prev) => [...prev, p.world]);
+      setError(null);
+      return true;
+    },
+    move: (p) => setCursor(p.world),
+    up: () => {},
+    key: (e) => {
+      if (points.length === 2 && /^[0-9.,]$|^m$|^c$/i.test(e.key)) {
+        setTyped((t) => t + e.key);
+        return true;
+      }
+      if (points.length === 2 && e.key === 'Backspace') {
+        setTyped((t) => t.slice(0, -1));
+        return true;
+      }
+      if (points.length === 2 && e.key === 'Enter') {
+        apply();
+        return true;
+      }
+      if (e.key === 'Escape' && points.length > 0) {
+        setPoints([]);
+        setTyped('');
+        return true;
+      }
+      return false;
+    },
+    overlay: ({ view, size }) => {
+      const a = points[0];
+      const b = points[1] ?? cursor;
+      const step = !ctx.level || points.length === 0 ? 1 : points.length === 1 ? 1 : 2;
+      const banner = !useStoreUnderlay()
+        ? 'Set scale needs a plan image. Upload one from the Plan image panel first.'
+        : points.length < 2
+          ? `Set scale ${step}/2 · Click both ends of a wall whose length you know (${points.length}/2 clicked).`
+          : 'Set scale 2/2 · Type its real length and press Enter (e.g. 4.5 m or 4500 mm).';
+      return (
+        <g pointerEvents="none">
+          <foreignObject x={12} y={12} width={Math.max(0, size.width - 24)} height={40}>
+            <div className="canvas-banner">{error ?? banner}</div>
+          </foreignObject>
+          {a && b && (
+            <g className="measure">
+              <line {...seg(view, size, a, b)} />
+              <circle {...dot(view, size, a)} r={4} />
+              <circle {...dot(view, size, b)} r={4} />
+            </g>
+          )}
+          {points.length === 2 && b && (
+            <g
+              transform={`translate(${worldToScreen(view, size, b).x + 14} ${worldToScreen(view, size, b).y + 22})`}
+              className="draw-overlay"
+            >
+              <rect x={0} y={-14} width={150} height={22} rx={4} className="typed" />
+              <text x={8} y={2}>{`Real length: ${typed || '…'}`}</text>
+            </g>
+          )}
+        </g>
+      );
+    },
+  };
+}
+
+const useStoreUnderlay = () => useStore.getState().editor.doc.underlay;
+
+const seg = (
+  view: Parameters<typeof worldToScreen>[0],
+  size: Parameters<typeof worldToScreen>[1],
+  a: Vec2,
+  b: Vec2,
+) => {
+  const s0 = worldToScreen(view, size, a);
+  const s1 = worldToScreen(view, size, b);
+  return { x1: s0.x, y1: s0.y, x2: s1.x, y2: s1.y };
+};
+const dot = (
+  view: Parameters<typeof worldToScreen>[0],
+  size: Parameters<typeof worldToScreen>[1],
+  p: Vec2,
+) => {
+  const s = worldToScreen(view, size, p);
+  return { cx: s.x, cy: s.y };
+};

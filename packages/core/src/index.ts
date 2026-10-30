@@ -8,4 +8,5 @@ export * from './footprints';
 export * from './plan';
 export * from './rooms';
 export * from './snap';
+export * from './underlay';
 export { hdb4RoomLevel, hdb4RoomProject } from './fixtures/hdb4room';

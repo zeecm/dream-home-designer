@@ -1,9 +1,11 @@
-import { levelBounds, planGeometry } from '@dhd/core';
+import { levelBounds, planGeometry, underlayToWorld } from '@dhd/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAsset } from '../assets';
 import { type Tool, useEditor } from '../editor';
 import { useProject, useStore } from '../store';
+import { uploadPlanImage, useUploadPicker } from '../ui/PlanImage';
 import { icons } from '../ui/icons';
-import { useOpeningTool, useWallTool } from './drawTools';
+import { useCalibrateTool, useOpeningTool, useWallTool } from './drawTools';
 import {
   PlanHighlights,
   PlanShapes,
@@ -51,7 +53,7 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
     door: useOpeningTool(ctx, 'door'),
     window: useOpeningTool(ctx, 'window'),
     passage: useOpeningTool(ctx, 'passage'),
-    calibrate: useSelectTool(ctx),
+    calibrate: useCalibrateTool(ctx),
   };
   return tools[tool];
 }
@@ -66,13 +68,30 @@ export function PlanCanvas() {
   const { setView, fitDone, setPointer, requestFit } = useEditor.getState();
 
   const geom = useMemo(() => (level ? planGeometry(level) : null), [level]);
+  const underlay = project.underlay;
+  const image = useAsset(underlay?.assetKey);
+  const upload = useUploadPicker();
+  const [dropping, setDropping] = useState(false);
   const v = view ?? { cx: 0, cy: 0, zoom: 50 };
 
   useEffect(() => {
     if (!fitRequested || !level || size.width === 0) return;
-    setView(fitBounds(levelBounds(level), size));
+    let b = levelBounds(level);
+    if (!b && underlay && image.status === 'ready') {
+      const corners = [
+        { x: 0, y: 0 },
+        { x: image.width, y: 0 },
+        { x: image.width, y: image.height },
+        { x: 0, y: image.height },
+      ].map((p) => underlayToWorld(underlay, p));
+      b = {
+        min: { x: Math.min(...corners.map((c) => c.x)), y: Math.min(...corners.map((c) => c.y)) },
+        max: { x: Math.max(...corners.map((c) => c.x)), y: Math.max(...corners.map((c) => c.y)) },
+      };
+    }
+    setView(fitBounds(b, size));
     fitDone();
-  }, [fitRequested, level, size, setView, fitDone]);
+  }, [fitRequested, level, size, setView, fitDone, underlay, image]);
 
   const ctx: ToolContext | null = level && geom ? { level, geom, view: v, size, dispatch } : null;
   const active = useTool(tool, ctx ?? ({} as ToolContext));
@@ -207,7 +226,25 @@ export function PlanCanvas() {
   const empty = Object.keys(level.walls).length === 0;
 
   return (
-    <div ref={wrapRef} className="plan" data-testid="plan">
+    <div
+      ref={wrapRef}
+      className={`plan${dropping ? ' plan-dropping' : ''}`}
+      data-testid="plan"
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes('Files')) {
+          e.preventDefault();
+          setDropping(true);
+        }
+      }}
+      onDragLeave={() => setDropping(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDropping(false);
+        const f = e.dataTransfer.files[0];
+        if (f)
+          void uploadPlanImage(f).catch((err: Error) => useStore.setState({ notice: err.message }));
+      }}
+    >
       <svg
         ref={svgRef}
         className="plan-svg"
@@ -244,6 +281,18 @@ export function PlanCanvas() {
           pointerEvents="none"
         />
         <g transform={transform}>
+          {underlay && image.status === 'ready' && (
+            <image
+              className="underlay"
+              href={image.url}
+              width={image.width}
+              height={image.height}
+              opacity={underlay.opacity}
+              transform={`translate(${underlay.origin.x} ${underlay.origin.y}) rotate(${(underlay.rotation * 180) / Math.PI}) scale(${underlay.scale})`}
+              pointerEvents="none"
+              preserveAspectRatio="none"
+            />
+          )}
           <PlanShapes level={level} geom={geom} interactive={tool === 'select'} />
           <PlanHighlights
             level={level}
