@@ -2066,8 +2066,10 @@ h3.field-label {
 
 /* A phone turned sideways has width but almost no height. The bars shrink to one thin row,
    the tools stay a rail at the left, the details fold into a tab at the right edge, and
-   walking takes the whole screen below the top bar. */
-@media (orientation: landscape) and (max-height: 500px) {
+   walking takes the whole screen below the top bar. Touch screens only: a short desktop
+   window keeps its own layout. Below 720 px wide the portrait phone rules also apply, so
+   their stacked rows are undone here. */
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
   :root {
     --inset: 4px;
     --gap: 4px;
@@ -2148,8 +2150,37 @@ h3.field-label {
   /* The details: a column that folds away to a thin tab, giving the plan the width. */
   .workspace {
     grid-template-columns: var(--palette-width) minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr);
+    padding: 0 var(--inset) var(--inset);
+    gap: var(--gap);
+  }
+  .workspace > .panel {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sheet);
+  }
+  .palette,
+  .stage,
+  .inspector {
+    grid-row: 1;
+  }
+  .palette {
+    grid-column: 1;
+  }
+  .stage {
+    grid-column: 2;
   }
   .inspector {
+    grid-column: 3;
+  }
+  .app-walking .stage {
+    grid-column: 1;
+  }
+  .tool-list {
+    grid-auto-flow: row;
+    overflow-x: visible;
+  }
+  .inspector {
+    max-height: none;
     width: var(--inspector-width);
     padding: 8px 12px;
     gap: 12px;

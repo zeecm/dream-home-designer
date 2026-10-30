@@ -143,3 +143,74 @@ test('resize and turn a selected piece by its handles, each drag one undo step',
     .poll(async () => (await page.locator('.turn-handle').boundingBox())?.y ?? 0)
     .toBeCloseTo(t.y, 0);
 });
+
+test('handles: a corner dragged past its opposite flips the piece around that corner; a tap near a handle in Furniture places another', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await page.getByRole('button', { name: /^Furniture/ }).click();
+  await page
+    .getByRole('button', { name: /^Coffee table/ })
+    .first()
+    .click();
+  const room = await page.locator('[data-hit="room:rm_living-and-dining"]').boundingBox();
+  if (!room) throw new Error('no room');
+  await page.mouse.click(room.x + room.width * 0.5, room.y + room.height * 0.5);
+  const items = page.locator('[data-hit^="item:"]');
+  await expect(items).toHaveCount(1);
+  const before = await items.first().boundingBox();
+  if (!before) throw new Error('no piece');
+
+  // The front-right corner, dragged well past the back-left one: the piece now lies beyond
+  // that corner, which stays where it was, and keeps its size as the pointer goes on.
+  const c = await page.locator('.size-handle').nth(2).boundingBox();
+  if (!c) throw new Error('no corner');
+  const from = { x: c.x + c.width / 2, y: c.y + c.height / 2 };
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  const to = { x: before.x - 60, y: before.y - 40 };
+  await page.mouse.move(to.x, to.y, { steps: 12 });
+  await page.mouse.move(to.x - 1, to.y - 1, { steps: 2 });
+  await page.mouse.up();
+  const flipped = await items.first().boundingBox();
+  if (!flipped) throw new Error('no piece');
+  // Its right and bottom edges are the old left and top edges (to the 1 cm step and stroke).
+  expect(Math.abs(flipped.x + flipped.width - before.x)).toBeLessThan(7);
+  expect(Math.abs(flipped.y + flipped.height - before.y)).toBeLessThan(7);
+  expect(flipped.width).toBeGreaterThan(40);
+  await page.keyboard.press('Control+z');
+
+  // A click just beside the selected piece, within reach of a handle, places another one.
+  const corner = await page.locator('.size-handle').nth(1).boundingBox();
+  if (!corner) throw new Error('no corner');
+  await page.mouse.click(corner.x + corner.width / 2 + 14, corner.y + corner.height / 2);
+  await expect(items).toHaveCount(2);
+});
+
+test('handles: a small selected piece is still moved by dragging its body', async ({ page }) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await page.getByRole('button', { name: /^Furniture/ }).click();
+  await page
+    .getByRole('button', { name: /^Dining chair\b/ })
+    .first()
+    .click();
+  const room = await page.locator('[data-hit="room:rm_living-and-dining"]').boundingBox();
+  if (!room) throw new Error('no room');
+  await page.mouse.click(room.x + room.width * 0.5, room.y + room.height * 0.5);
+  await page.getByRole('button', { name: /^Select/ }).click();
+  const item = page.locator('[data-hit^="item:"]').first();
+  const a = await item.boundingBox();
+  if (!a) throw new Error('no piece');
+  const width = await page.getByLabel('Width').inputValue();
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(a.x + a.width / 2 + 80, a.y + a.height / 2, { steps: 8 });
+  await page.mouse.up();
+  const b = await item.boundingBox();
+  expect((b?.x ?? 0) - a.x).toBeGreaterThan(60);
+  await expect(page.getByLabel('Width')).toHaveValue(width);
+});

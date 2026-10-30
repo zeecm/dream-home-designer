@@ -139,7 +139,15 @@ type Drag =
     }
   | { kind: 'opening'; id: string; wallId: string; start: Vec2; moved: boolean; key: string }
   /** A corner handle of a selected piece: resizes it, the opposite corner staying put. */
-  | { kind: 'resize'; id: string; corner: number; start: Vec2; moved: boolean; key: string }
+  | {
+      kind: 'resize';
+      id: string;
+      /** The opposite corner, where it was when the drag began: it stays put. */
+      anchor: Vec2;
+      start: Vec2;
+      moved: boolean;
+      key: string;
+    }
   /** The turn handle in front of a selected piece. */
   | { kind: 'rotate'; id: string; start: Vec2; moved: boolean; key: string };
 
@@ -211,18 +219,28 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       select(null);
     }
   };
-  /** The handle of the selected piece under the pointer, if any. */
+  /**
+   * The handle of the selected piece under the pointer, if any. A corner, a door or another
+   * piece under the pointer comes first; on the piece itself, only the drawn handle counts,
+   * so a small piece can still be dragged by its body.
+   */
   const handleAt = (p: PlanPointer): { id: string; corner: number | 'turn' } | null => {
     const sel = useEditor.getState().selection;
     const it = sel?.kind === 'item' ? ctx.level.items[sel.id] : undefined;
     if (!sel || !it) return null;
+    const hit = p.hit;
+    if (hit && (hit.kind === 'vertex' || hit.kind === 'opening')) return null;
+    if (hit?.kind === 'item' && hit.id !== sel.id) return null;
     const h = itemHandles(ctx, it);
-    const near = (q: Vec2 | undefined) =>
-      !!q && Math.hypot(q.x - p.screen.x, q.y - p.screen.y) <= HANDLE_REACH;
-    if (near(h.turn)) return { id: sel.id, corner: 'turn' };
-    const i = h.corners.findIndex((q) => near(q));
+    const dist = (q: Vec2 | undefined) =>
+      q ? Math.hypot(q.x - p.screen.x, q.y - p.screen.y) : Number.POSITIVE_INFINITY;
+    if (dist(h.turn) <= HANDLE_REACH) return { id: sel.id, corner: 'turn' };
+    const reach = hit?.kind === 'item' ? HANDLE_SIZE * 0.75 : HANDLE_REACH;
+    const i = h.corners.findIndex((q) => dist(q) <= reach);
     return i < 0 ? null : { id: sel.id, corner: i };
   };
+  // A finished resize clears its size label: the drag lives in a ref, so say so.
+  const [, redraw] = useState(0);
 
   // Settle a pending run when the tool goes away (switching tools mid-run).
   // biome-ignore lint/correctness/useExhaustiveDependencies: settleRun reads only refs
@@ -237,17 +255,12 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       const handle = handleAt(p);
       if (handle) {
         const key = `handle:${handle.id}:${Date.now()}`;
-        drag.current =
-          handle.corner === 'turn'
-            ? { kind: 'rotate', id: handle.id, start: p.screen, moved: false, key }
-            : {
-                kind: 'resize',
-                id: handle.id,
-                corner: handle.corner,
-                start: p.screen,
-                moved: false,
-                key,
-              };
+        const it = ctx.level.items[handle.id];
+        const anchor =
+          it && handle.corner !== 'turn' ? itemFootprint(it)[(handle.corner + 2) % 4] : undefined;
+        drag.current = anchor
+          ? { kind: 'resize', id: handle.id, anchor, start: p.screen, moved: false, key }
+          : { kind: 'rotate', id: handle.id, start: p.screen, moved: false, key };
         return true;
       }
       const h = p.hit;
@@ -320,8 +333,7 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         }
         const kind = furnitureKind(it.assetId);
         const base = kind?.size ?? { w: 0.5, d: 0.5, h: 0.5 };
-        const opp = itemFootprint(it)[(d.corner + 2) % 4];
-        if (!opp) return;
+        const opp = d.anchor;
         const c = Math.cos(it.rotationY);
         const s = Math.sin(it.rotationY);
         const v = { x: p.world.x - opp.x, y: p.world.y - opp.y };
@@ -376,6 +388,7 @@ export function useSelectTool(ctx: ToolContext): ToolController {
     up: () => {
       const d = drag.current;
       drag.current = null;
+      if (d?.kind === 'resize' && d.moved) redraw((n) => n + 1);
       if (d?.kind === 'vertex' && d.moved) {
         // Merge, split and re-detect rooms once, at the end of the drag, in the same undo step.
         const level = currentLevel();
@@ -487,7 +500,14 @@ export function useSelectTool(ctx: ToolContext): ToolController {
           <circle cx={h.turn.x} cy={h.turn.y} r={8} className="turn-handle" />
           {h.corners.map((q, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: the four corners, in order
-            <rect key={i} x={q.x - 6} y={q.y - 6} width={12} height={12} className="size-handle" />
+            <rect
+              key={i}
+              x={q.x - HANDLE_SIZE / 2}
+              y={q.y - HANDLE_SIZE / 2}
+              width={HANDLE_SIZE}
+              height={HANDLE_SIZE}
+              className="size-handle"
+            />
           ))}
           {resizing && (
             <g transform={`translate(${h.mid.x} ${h.mid.y + 26})`} className="handle-length">
@@ -505,6 +525,8 @@ export function useSelectTool(ctx: ToolContext): ToolController {
 
 /** How near (screen px) a press must land to a handle to take it: a fingertip's reach. */
 const HANDLE_REACH = 20;
+/** A corner handle's drawn size (screen px); on the piece itself, a press must land on it. */
+const HANDLE_SIZE = 12;
 
 export function useMeasureTool(ctx: ToolContext): ToolController {
   const [points, setPoints] = useState<Vec2[]>([]);

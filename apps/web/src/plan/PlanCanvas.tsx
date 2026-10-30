@@ -55,29 +55,48 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
   // Every tool hook runs every render so hook order never changes.
   const select = useSelectTool(ctx);
   const routed = useRef(false);
+  /** A press on a handle (not on the piece): a place if it never moves, a resize if it does. */
+  const onHandle = useRef<{ start: PlanPointer; moved: boolean } | null>(null);
   /**
    * A placing tool that also moves what it placed: a press on an existing piece of its kind
    * goes to Select for that gesture (a drag moves it, a tap selects it), instead of adding
-   * another one beside it. Furniture just placed shows its resize and turn handles, which
-   * also go to Select.
+   * another one beside it. Furniture just placed shows its resize and turn handles: a drag
+   * from one goes to Select too, but a tap there still places the next piece (beside a
+   * chair, the next chair).
    */
   const placing = (own: ToolController, kind: 'item' | 'opening'): ToolController => {
-    const onOwn = (p: PlanPointer) =>
-      p.hit?.kind === kind || (kind === 'item' && (select.grabs?.(p) ?? false));
+    const handle = (p: PlanPointer) =>
+      kind === 'item' && p.hit?.kind !== kind && (select.grabs?.(p) ?? false);
+    const onOwn = (p: PlanPointer) => p.hit?.kind === kind || handle(p);
     return {
       ...own,
       grabs: (p) => onOwn(p) || (own.grabs?.(p) ?? false),
       down: (p) => {
         routed.current = onOwn(p);
+        onHandle.current = handle(p) ? { start: p, moved: false } : null;
         return routed.current ? select.down(p) : own.down(p);
       },
-      move: (p, dragging, from) =>
-        routed.current && dragging ? select.move(p, dragging) : own.move(p, dragging, from),
+      move: (p, dragging, from) => {
+        const h = onHandle.current;
+        if (
+          h &&
+          dragging &&
+          Math.hypot(p.screen.x - h.start.screen.x, p.screen.y - h.start.screen.y) >= 3
+        ) {
+          h.moved = true;
+        }
+        return routed.current && dragging ? select.move(p, dragging) : own.move(p, dragging, from);
+      },
       up: (p) => {
-        if (routed.current) {
-          routed.current = false;
-          select.up(p);
-        } else own.up(p);
+        const h = onHandle.current;
+        onHandle.current = null;
+        if (!routed.current) return own.up(p);
+        routed.current = false;
+        select.up(p);
+        if (h && !h.moved) {
+          own.down(h.start);
+          own.up(p);
+        }
       },
       overlay: (o) =>
         kind === 'item' ? (
