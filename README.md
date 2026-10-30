@@ -6,6 +6,8 @@ first person. Free, browser-based, and your project is plain JSON you own.
 > Status: **Phase 0 (foundation)**. A reference 4-room HDB plan renders in 3D, edits go
 > through an undoable command store, and projects save to and reload from the API.
 
+See `HANDOVER.md` for decisions, current state and next steps.
+
 ## Layout
 
 ```
