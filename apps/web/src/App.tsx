@@ -157,6 +157,7 @@ function Toast() {
 export function App() {
   const { id: projectId, name } = useProject();
   const viewMode = useEditor((s) => s.viewMode);
+  const walking = useEditor((s) => !!s.walking);
   useShortcuts();
 
   useEffect(() => {
@@ -173,7 +174,7 @@ export function App() {
   useEffect(() => useEditor.getState().reset(), [projectId]);
 
   return (
-    <div className="app">
+    <div className={walking ? 'app app-walking' : 'app'}>
       <TopBar />
       <div className="workspace">
         <Palette />

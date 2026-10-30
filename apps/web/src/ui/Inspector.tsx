@@ -36,14 +36,17 @@ export function Inspector() {
   const selection = useEditor((s) => s.selection);
   if (!level) return null;
   let body = <PlanSummary level={level} />;
+  // Keyed by object: another selection mounts fresh fields, and the old ones commit any
+  // edit in progress to the object it was typed for as they go.
+  const key = selection ? `${selection.kind}:${selection.id}` : undefined;
   if (selection?.kind === 'wall' && level.walls[selection.id]) {
-    body = <WallInspector level={level} id={selection.id} />;
+    body = <WallInspector key={key} level={level} id={selection.id} />;
   } else if (selection?.kind === 'vertex' && level.vertices[selection.id]) {
-    body = <VertexInspector level={level} id={selection.id} />;
+    body = <VertexInspector key={key} level={level} id={selection.id} />;
   } else if (selection?.kind === 'opening' && level.openings[selection.id]) {
-    body = <OpeningInspector level={level} id={selection.id} />;
+    body = <OpeningInspector key={key} level={level} id={selection.id} />;
   } else if (selection?.kind === 'room' && level.rooms[selection.id]) {
-    body = <RoomInspector level={level} id={selection.id} />;
+    body = <RoomInspector key={key} level={level} id={selection.id} />;
   }
   return (
     <aside className="panel inspector" aria-label="Details">

@@ -263,8 +263,19 @@ export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolControl
   const def = OPENING_DEFAULTS[kind];
   const width = useEditor((s) => s.openingWidths[kind]);
 
+  const tolerance = () => Math.max(0.3, 14 / ctx.view.zoom);
   const find = (p: PlanPointer): Placement | null =>
-    placeOpening(ctx.geom, p.world, width, Math.max(0.3, 14 / ctx.view.zoom));
+    placeOpening(ctx.geom, p.world, width, tolerance());
+  // Over a room boundary there's nothing to place into; say so instead of showing nothing.
+  const [onBoundary, setOnBoundary] = useState<Vec2 | null>(null);
+  const boundaryNear = (p: PlanPointer) =>
+    ctx.geom.boundaries.some((id) => {
+      const f = ctx.geom.frames[id];
+      if (!f) return false;
+      const u = (p.world.x - f.a.x) * f.d.x + (p.world.y - f.a.y) * f.d.y;
+      const v = (p.world.x - f.a.x) * f.n.x + (p.world.y - f.a.y) * f.n.y;
+      return u >= 0 && u <= f.length && Math.abs(v) <= tolerance();
+    });
 
   return {
     cursor: 'copy',
@@ -286,12 +297,37 @@ export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolControl
       useEditor.getState().select({ kind: 'opening', id: r.openingId });
       return true;
     },
-    move: (p) => setPlace(find(p)),
+    move: (p) => {
+      const at = find(p);
+      setPlace(at);
+      setOnBoundary(!at && boundaryNear(p) ? p.screen : null);
+    },
     up: () => {},
     key: () => false,
     overlay: ({ view, size }) => {
       const at = keep.current;
       const f = at && ctx.geom.frames[at.wallId];
+      if (onBoundary && !at) {
+        const why = 'A room boundary takes no doors or windows';
+        return (
+          <g
+            pointerEvents="none"
+            transform={`translate(${onBoundary.x + 14} ${onBoundary.y + 22})`}
+          >
+            <rect
+              x={0}
+              y={-14}
+              width={why.length * 7 + 16}
+              height={22}
+              rx={4}
+              className="typed error"
+            />
+            <text x={8} y={2}>
+              {why}
+            </text>
+          </g>
+        );
+      }
       if (!at || !f) return null;
       const c = at.t * f.length;
       const corners = [
@@ -305,12 +341,34 @@ export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolControl
           y: f.a.y + f.d.y * (u as number) + f.n.y * (f.half + 0.02) * (side as number),
         }),
       );
+      const why = at.fits
+        ? null
+        : at.width < 0.4
+          ? 'This wall is too short'
+          : 'Overlaps an opening';
+      const tip = corners[0];
       return (
-        <polygon
-          className={at.fits ? 'ghost-opening' : 'ghost-opening invalid'}
-          points={corners.map((p) => `${p.x},${p.y}`).join(' ')}
-          pointerEvents="none"
-        />
+        <g pointerEvents="none">
+          <polygon
+            className={at.fits ? 'ghost-opening' : 'ghost-opening invalid'}
+            points={corners.map((p) => `${p.x},${p.y}`).join(' ')}
+          />
+          {why && tip && (
+            <g transform={`translate(${tip.x + 12} ${tip.y - 18})`}>
+              <rect
+                x={0}
+                y={-14}
+                width={why.length * 7 + 16}
+                height={22}
+                rx={4}
+                className="typed error"
+              />
+              <text x={8} y={2}>
+                {why}
+              </text>
+            </g>
+          )}
+        </g>
       );
     },
   };

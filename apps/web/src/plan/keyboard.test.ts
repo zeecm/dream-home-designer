@@ -36,7 +36,7 @@ group('cycle', () => {
   ];
   it('starts at either end and stops past the other', () => {
     expect(cycle(objs, null, false)).toEqual(objs[0]);
-    expect(cycle(objs, null, true)).toEqual(objs[1]);
+    expect(cycle(objs, null, true)).toBeNull();
     expect(cycle(objs, objs[0] ?? null, false)).toEqual(objs[1]);
     expect(cycle(objs, objs[1] ?? null, false)).toBeNull();
     expect(cycle(objs, objs[0] ?? null, true)).toBeNull();

@@ -83,4 +83,19 @@ test('an edit lands on the object it was typed for, even after clicking another'
   await expect(rooms.filter({ hasText: 'Pantry' })).toHaveCount(1);
   await expect(rooms.filter({ hasText: 'Bedroom 2' })).toHaveCount(1);
   await expect(rooms.filter({ hasText: 'Kitchen' })).toHaveCount(0);
+
+  // The same when the next click is a different kind of object, or empty canvas.
+  await page.locator('[data-hit="room:rm_bedroom-2"]').click({ force: true });
+  await name.fill('Study');
+  await page.locator('[data-hit="wall:w_bedroom-2_corridor"]').first().click({ force: true });
+  await expect(page.getByRole('heading', { name: 'Wall', exact: true })).toBeVisible();
+  const thickness = page.getByLabel('Thickness');
+  await thickness.fill('150 mm');
+  const box = await page.getByTestId('plan').boundingBox();
+  // Empty canvas: the top edge of the plan, inside the fit padding.
+  await page.mouse.click((box?.x ?? 0) + (box?.width ?? 0) / 2, (box?.y ?? 0) + 24);
+  await expect(page.getByRole('heading', { name: 'Plan', exact: true })).toBeVisible();
+  await expect(rooms.filter({ hasText: 'Study' })).toHaveCount(1);
+  await page.locator('[data-hit="wall:w_bedroom-2_corridor"]').first().click({ force: true });
+  await expect(page.getByLabel('Thickness')).toHaveValue('0.15 m');
 });

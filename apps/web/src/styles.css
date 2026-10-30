@@ -432,6 +432,8 @@ select {
   gap: 2px;
 }
 .tool {
+  /* Holds its visually hidden key hint, so the hint never widens a scrolling tool bar. */
+  position: relative;
   display: grid;
   grid-template-columns: 24px 1fr auto;
   align-items: center;
@@ -579,8 +581,9 @@ select {
   width: 112px;
   height: 112px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.18);
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(20, 24, 28, 0.42);
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
   display: grid;
   place-items: center;
   touch-action: none;
@@ -589,7 +592,8 @@ select {
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--accent);
+  border: 2px solid #ffffff;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
   pointer-events: none;
 }
@@ -1181,5 +1185,10 @@ select {
   .tool {
     width: 48px;
     height: 44px;
+  }
+  /* Walking on a phone takes the whole screen below the top bar. */
+  .app-walking .inspector,
+  .app-walking .palette {
+    display: none;
   }
 }

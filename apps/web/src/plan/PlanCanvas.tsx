@@ -356,8 +356,9 @@ export function PlanCanvas() {
       </svg>
 
       <p id="plan-keys" className="visually-hidden">
-        In Select, Tab moves through rooms, walls, openings and corners. Arrow keys nudge the
-        selected corner, wall or opening by 1 cm, or 10 cm with Shift, and otherwise pan the plan.
+        In Select, Tab moves through rooms, walls, openings and corners; Escape then Shift+Tab
+        leaves the plan. Arrow keys nudge the selected corner, wall or opening by 1 cm, or 10 cm
+        with Shift, and otherwise pan the plan.
       </p>
       <p className="visually-hidden" aria-live="polite">
         {describe(level, selection)}

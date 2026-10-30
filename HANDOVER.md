@@ -256,6 +256,27 @@ versions 1 and 2.
   - Labels are truncated in Split view at default zoom.
   - Dimension labels can cover room labels.
 
+**Round 5 (fixed):**
+- **Walk mode passed:** an independent agent took about 2,200 position samples and saw no
+  wall or window crossed. Doors and passages let you through, and phone stick and look work.
+- **Edits on panel change:** an edit was lost when the next click was a different kind of
+  object or empty canvas. Inspector panels are now keyed by object, and a field commits its
+  pending edit as it unmounts. A refused value no longer carries over.
+- **Plan images:** removing an image and then undoing straight away could delete the server's
+  copy after re-checking it. Deletes now queue behind uploads. A new route,
+  `GET /projects/{id}/image` → `{hash}`, replaces the HEAD check that logged 404s.
+- **Walking:**
+  - The start view faces the longest view across the room.
+  - A light at head height gives the walls depth.
+  - On phones the walk view takes the whole screen, and the thumb stick has more contrast.
+  - The hint explains the two-step Esc.
+  - Clicking under pointer lock no longer throws.
+- **Openings:** the door, window and opening tools say why a spot is refused: it overlaps an
+  opening, the wall is too short, or it's a room boundary.
+- **Keyboard:** Escape then Shift+Tab leaves the plan.
+- **Wording:** a wall with the same room on both sides is announced "in" that room.
+- **Phone width:** the last 2 px of sideways overflow is gone.
+
 **Sample flat:** `sampleFlatProject` (core fixtures) is a 96 m² HDB-style 4-room flat with a
 service yard, kitchen, household shelter, two bathrooms, three bedrooms and an L-shaped
 living and dining room. It is built with the editor's own commands, then given readable ids

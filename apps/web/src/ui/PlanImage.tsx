@@ -50,9 +50,24 @@ const refused = new Set<string>();
 /** Server statuses that won't change on a retry: too large, or not an image it accepts. */
 const permanent = (e: unknown) => e instanceof Error && /^(413|415) /.test(e.message);
 
-/** Forgets what the server holds for a project whose image was removed there. */
-export function forgetSyncedImage(projectId: string) {
-  synced.delete(projectId);
+/** Runs `job` after any sync or delete already queued for the project. */
+function enqueue(projectId: string, job: () => Promise<void>): Promise<void> {
+  const next = (queues.get(projectId) ?? Promise.resolve()).then(job).catch(() => {});
+  queues.set(projectId, next);
+  return next;
+}
+
+/**
+ * Deletes the server's copy of the open project's plan image (it was removed). Queued like
+ * uploads, so an Undo straight after uploads it again only once the delete is done.
+ */
+export function deleteServerImage(): Promise<void> {
+  const { backend, editor } = useStore.getState();
+  const projectId = editor.doc.id;
+  return enqueue(projectId, async () => {
+    synced.delete(projectId);
+    await backend?.deleteImage?.(projectId);
+  });
 }
 
 /**
@@ -64,9 +79,7 @@ export function forgetSyncedImage(projectId: string) {
  */
 export function syncPlanImage(): Promise<void> {
   const id = useStore.getState().editor.doc.id;
-  const next = (queues.get(id) ?? Promise.resolve()).then(() => syncOnce(id)).catch(() => {});
-  queues.set(id, next);
-  return next;
+  return enqueue(id, () => syncOnce(id));
 }
 
 async function syncOnce(projectId: string): Promise<void> {
@@ -309,9 +322,7 @@ export function PlanImagePanel() {
           onClick={() => {
             dispatch(setUnderlay(null));
             // The server's copy goes too; undo uploads it again from this browser.
-            const { backend, editor } = useStore.getState();
-            forgetSyncedImage(editor.doc.id);
-            void backend?.deleteImage?.(editor.doc.id).catch(() => {});
+            void deleteServerImage();
           }}
         >
           Remove

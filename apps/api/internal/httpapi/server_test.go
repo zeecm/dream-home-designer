@@ -240,6 +240,9 @@ func TestPlanImage(t *testing.T) {
 		t.Fatalf("oversized: %d", res.StatusCode)
 	}
 
+	if res, body := do(t, "GET", ts.URL+"/projects/prj_a/image", nil, nil); res.StatusCode != http.StatusOK || body["hash"] != hash {
+		t.Fatalf("image status: %d %v", res.StatusCode, body)
+	}
 	head, _ := do(t, "HEAD", ts.URL+"/projects/prj_a/image/"+hash, nil, nil)
 	if head.StatusCode != http.StatusOK || head.Header.Get("Content-Length") != strconv.Itoa(len(tinyPNG)) {
 		t.Fatalf("head: %d %v", head.StatusCode, head.Header)
@@ -249,6 +252,9 @@ func TestPlanImage(t *testing.T) {
 	}
 	if res, _ := do(t, "GET", ts.URL+"/projects/prj_a/image/"+hash, nil, nil); res.StatusCode != http.StatusNotFound {
 		t.Fatalf("image after its delete: %d", res.StatusCode)
+	}
+	if res, body := do(t, "GET", ts.URL+"/projects/prj_a/image", nil, nil); res.StatusCode != http.StatusOK || body["hash"] != nil {
+		t.Fatalf("image status after delete: %d %v", res.StatusCode, body)
 	}
 	do(t, "PUT", ts.URL+"/projects/prj_a/image", tinyPNG, nil)
 	do(t, "DELETE", ts.URL+"/projects/prj_a", nil, nil)

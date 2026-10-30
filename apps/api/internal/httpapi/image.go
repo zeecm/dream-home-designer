@@ -128,6 +128,33 @@ func imageHeaders(w http.ResponseWriter, info store.ImageInfo) {
 	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
 }
 
+// imageStatus says which image the server holds for the project: {"hash": "<hex>"}, or
+// {"hash": null} with none. Always 200, so a client checking before an upload doesn't log
+// a failed request.
+func (s *Server) imageStatus(w http.ResponseWriter, r *http.Request) {
+	imgs, ok := s.store.(store.ImageStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "this server does not store plan images")
+		return
+	}
+	id := r.PathValue("id")
+	if !project.ValidID(id) {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	info, err := imgs.ImageInfo(r.Context(), id)
+	if errors.Is(err, store.ErrNoImage) {
+		writeJSON(w, http.StatusOK, map[string]any{"hash": nil})
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{"hash": info.Hash})
+}
+
 // deleteImage removes the project's plan image (the plan's image was removed).
 func (s *Server) deleteImage(w http.ResponseWriter, r *http.Request) {
 	imgs, ok := s.store.(store.ImageStore)

@@ -110,10 +110,8 @@ export const remoteBackend: Backend = {
     );
   },
   async hasImage(id, hash) {
-    const res = await fetch(imageUrl(id, hash), { method: 'HEAD' });
-    if (res.ok) return true;
-    if (res.status === 404) return false;
-    throw new Error(`the plan image could not be checked (${res.status})`);
+    const res = await check(await fetch(`${BASE}/projects/${encodeURIComponent(id)}/image`));
+    return ((await res.json()) as { hash: string | null }).hash === hash;
   },
 };
 

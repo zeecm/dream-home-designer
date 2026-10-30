@@ -103,7 +103,7 @@ export function Viewport() {
         <color attach="background" args={[dark ? '#0a0a0a' : '#f4f6f8']} />
         <hemisphereLight args={['#ffffff', dark ? '#3a3d40' : '#dfe3e6', walking ? 2.2 : 1.5]} />
         {/* Under the ceilings the sun can't reach; even light keeps rooms readable. */}
-        {walking && <ambientLight intensity={0.6} />}
+        {walking && <ambientLight intensity={0.35} />}
         <directionalLight
           castShadow={!walking}
           position={[frame.x + 8, 16, frame.z + 10]}
@@ -144,7 +144,7 @@ export function Viewport() {
           <p className="viewport-hint">
             {coarsePointer()
               ? 'Thumb stick to walk · drag to look'
-              : 'W A S D or arrows to walk · Shift to run · click, then move the mouse to look · Esc to leave'}
+              : 'W A S D or arrows to walk · Shift to run · click to look with the mouse · Esc frees the mouse, Esc again leaves'}
           </p>
         </>
       ) : (

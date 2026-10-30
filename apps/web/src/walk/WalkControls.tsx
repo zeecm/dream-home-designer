@@ -1,7 +1,7 @@
 import { EYE_HEIGHT, type Level, type Vec2, collisionSegments, walk, walkStart } from '@dhd/core';
 import { useFrame, useThree } from '@react-three/fiber';
 import { type MutableRefObject, useEffect, useMemo, useRef } from 'react';
-import type { PerspectiveCamera } from 'three';
+import type { PerspectiveCamera, PointLight } from 'three';
 import { useEditor } from '../editor';
 
 /** Joystick input, each axis -1..1: x strafes right, y walks forward. */
@@ -88,7 +88,14 @@ export function WalkControls({ level, stick }: { level: Level; stick: StickInput
         Promise.resolve(el.requestPointerLock?.()).catch(() => {});
       }
       drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
-      el.setPointerCapture?.(e.pointerId);
+      // Under pointer lock there is nothing to capture (and the browser throws).
+      if (!document.pointerLockElement) {
+        try {
+          el.setPointerCapture(e.pointerId);
+        } catch {
+          // a pointer that has already gone
+        }
+      }
     };
     const onMove = (e: PointerEvent) => {
       if (document.pointerLockElement === el) {
@@ -115,6 +122,10 @@ export function WalkControls({ level, stick }: { level: Level; stick: StickInput
     };
   }, [gl]);
 
+  // A soft light carried at head height: near walls read brighter than far ones, which gives
+  // the rooms depth that flat ambient light doesn't.
+  const lamp = useRef<PointLight>(null);
+
   useFrame((_, dt) => {
     const p = pose.current;
     if (!p) return;
@@ -140,6 +151,7 @@ export function WalkControls({ level, stick }: { level: Level; stick: StickInput
     p.at = walk(segments, p.at, delta);
     const eye = level.elevation + EYE_HEIGHT;
     camera.position.set(p.at.x, eye, p.at.y);
+    lamp.current?.position.set(p.at.x, eye + 0.3, p.at.y);
     camera.lookAt(
       p.at.x + Math.cos(p.yaw) * Math.cos(p.pitch),
       eye + Math.sin(p.pitch),
@@ -147,5 +159,5 @@ export function WalkControls({ level, stick }: { level: Level; stick: StickInput
     );
   });
 
-  return null;
+  return <pointLight ref={lamp} intensity={6} distance={9} decay={1.6} />;
 }

@@ -69,7 +69,11 @@ export function planObjects(level: Level): Selection[] {
   return keyed.map((k) => k.s);
 }
 
-/** The next object after `current` (or before it, with `back`); null past either end. */
+/**
+ * The next object after `current` (or before it, with `back`); null past either end. With
+ * nothing selected, Tab starts at the first object and Shift+Tab leaves at once, so Esc then
+ * Shift+Tab always gets out of the plan.
+ */
 export function cycle(
   objects: Selection[],
   current: Selection | null,
@@ -77,12 +81,12 @@ export function cycle(
 ): Selection | null {
   if (objects.length === 0) return null;
   const i = current ? objects.findIndex((o) => o.kind === current.kind && o.id === current.id) : -1;
-  if (i < 0) return (back ? objects[objects.length - 1] : objects[0]) ?? null;
+  if (i < 0) return back ? null : (objects[0] ?? null);
   return objects[back ? i - 1 : i + 1] ?? null;
 }
 
-/** The names of the rooms on either side of a wall (one for an outer wall). */
-export function roomsBeside(level: Level, wallId: string): string[] {
+/** The room on each side of a wall (null where there is none, e.g. outside). */
+export function roomsBeside(level: Level, wallId: string): (string | null)[] {
   const w = level.walls[wallId];
   if (!w) return [];
   const l = wallLine(level, w);
@@ -91,16 +95,14 @@ export function roomsBeside(level: Level, wallId: string): string[] {
   const n = { x: -(l.b.y - l.a.y) / l.length, y: (l.b.x - l.a.x) / l.length };
   const off = w.thickness / 2 + 0.05;
   const shapes = roomShapes(level);
-  const names: string[] = [];
-  for (const k of [1, -1]) {
+  return [1, -1].map((k) => {
     const p = { x: mid.x + n.x * off * k, y: mid.y + n.y * off * k };
     const room = Object.values(level.rooms).find((r) => {
       const s = shapes.get(r.id);
       return s && pointInPolygon(p, s.outer) && !s.holes.some((h) => pointInPolygon(p, h));
     });
-    if (room && !names.includes(room.name)) names.push(room.name);
-  }
-  return names;
+    return room?.name ?? null;
+  });
 }
 
 /** A short spoken description of the selection. */
@@ -115,12 +117,14 @@ export function describe(level: Level, sel: Selection | null): string {
       const w = level.walls[sel.id];
       if (!w) return '';
       const what = isBoundary(w) ? 'Room boundary' : 'Wall';
-      const rooms = roomsBeside(level, sel.id);
+      const [p, q] = roomsBeside(level, sel.id);
       const where =
-        rooms.length === 2
-          ? ` between ${rooms.join(' and ')}`
-          : rooms.length === 1
-            ? ` between ${rooms[0]} and outside`
+        p && q
+          ? p === q
+            ? ` in ${p}`
+            : ` between ${p} and ${q}`
+          : p || q
+            ? ` between ${p ?? q} and outside`
             : '';
       return `${what}${where}, ${formatLength(wallLine(level, w).length)} long`;
     }

@@ -100,7 +100,8 @@ export function LengthField({
     if (!edit.editing()) setError(null);
   }, [shown]);
 
-  const commit = () => {
+  /** `leaving`: the field is going away (another selection); a bad value is dropped. */
+  const commit = (leaving = false) => {
     if (cancelled.current) {
       cancelled.current = false;
       edit.reset();
@@ -111,12 +112,14 @@ export function LengthField({
     const t = s.target;
     if (s.draft.trim() === '' && t.allowEmpty) {
       if (t.value !== undefined) t.onCommit(undefined);
+      if (leaving) return;
       setError(null);
       edit.reset();
       return;
     }
     const v = parseLength(s.draft);
     if (v === null || v < t.min || v > t.max) {
+      if (leaving) return;
       setError(
         v === null
           ? 'Enter a length such as 2.5 m, 250 cm, 2500 mm or just 2500.'
@@ -125,10 +128,15 @@ export function LengthField({
       edit.keep(s);
       return;
     }
-    setError(null);
     if (t.value === undefined || Math.abs(v - t.value) > 1e-9) t.onCommit(v);
+    if (leaving) return;
+    setError(null);
     edit.reset();
   };
+  // An input removed while focused gets no blur: commit what was typed as it goes.
+  const commitRef = useRef(commit);
+  commitRef.current = commit;
+  useEffect(() => () => commitRef.current(true), []);
 
   return (
     <Field label={label} hint={error ?? hint}>
@@ -142,7 +150,7 @@ export function LengthField({
           aria-invalid={!!error}
           aria-describedby={describedBy}
           onChange={(e) => edit.type(e.target.value)}
-          onBlur={commit}
+          onBlur={() => commit()}
           onKeyDown={(e) => {
             if (e.key === 'Enter') e.currentTarget.blur();
             if (e.key === 'Escape') {
@@ -189,7 +197,7 @@ export function TextField({
     input.current?.focus();
     input.current?.select();
   }, [focusToken]);
-  const commit = () => {
+  const commit = (leaving = false) => {
     const s = edit.take();
     if (cancelled.current) {
       cancelled.current = false;
@@ -197,8 +205,12 @@ export function TextField({
       const v = s.draft.trim();
       if (v && v !== s.target.value) s.target.onCommit(v);
     }
-    edit.reset();
+    if (!leaving) edit.reset();
   };
+  // An input removed while focused gets no blur: commit what was typed as it goes.
+  const commitRef = useRef(commit);
+  commitRef.current = commit;
+  useEffect(() => () => commitRef.current(true), []);
   return (
     <Field label={label}>
       {(id) => (

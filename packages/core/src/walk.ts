@@ -121,13 +121,18 @@ export function walkStart(level: Level): { at: Vec2; heading: number } | null {
     }
   }
   if (!at) return null;
-  // Face the longest clear view inside the flat, in 16 directions; a view out through an
-  // open door (an endless ray) doesn't count.
+  // Face the longest view across the room itself, in 16 directions: measured to the room's
+  // outline (not the walls), so a glimpse through a doorway or out of the front door
+  // doesn't win over looking along the room.
+  const outline: Segment[] = [];
+  for (const ring of [best.outer, ...best.holes]) {
+    ring.forEach((a, i) => outline.push({ a, b: ring[(i + 1) % ring.length] as Vec2 }));
+  }
   let heading = 0;
   let far = -1;
   for (let i = 0; i < 16; i++) {
     const h = (i * Math.PI) / 8;
-    const ray = rayDistance(segments, at, { x: Math.cos(h), y: Math.sin(h) });
+    const ray = rayDistance(outline, at, { x: Math.cos(h), y: Math.sin(h) });
     const d = Number.isFinite(ray) ? ray : -1;
     if (d > far + 1e-9) {
       far = d;
