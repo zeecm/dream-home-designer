@@ -13,6 +13,11 @@ export interface Backend {
   /** Optimistic save: rejects with ConflictError if `doc.version` is stale. Returns the new version. */
   save(doc: Project): Promise<number>;
   remove(id: string): Promise<void>;
+  /** The server's copy of a project's plan image (remote only); returns its SHA-256. */
+  putImage?(id: string, blob: Blob): Promise<string>;
+  /** Rejects with NotFoundError unless the project's image has this hash. */
+  getImage?(id: string, hash: string): Promise<Blob>;
+  hasImage?(id: string, hash: string): Promise<boolean>;
 }
 
 export interface ProjectSummary {
@@ -80,7 +85,34 @@ export const remoteBackend: Backend = {
   async remove(id) {
     await check(await fetch(`${BASE}/projects/${encodeURIComponent(id)}`, { method: 'DELETE' }));
   },
+  async putImage(id, blob) {
+    const res = await check(
+      await fetch(`${BASE}/projects/${encodeURIComponent(id)}/image`, {
+        method: 'PUT',
+        headers: { 'Content-Type': blob.type || 'application/octet-stream' },
+        body: blob,
+      }),
+    );
+    return ((await res.json()) as { hash: string }).hash;
+  },
+  async getImage(id, hash) {
+    const res = await fetch(imageUrl(id, hash));
+    if (res.status === 404) throw new NotFoundError('image not found');
+    if (!res.ok || !res.headers.get('content-type')?.startsWith('image/')) {
+      throw new Error(`the plan image could not be fetched (${res.status})`);
+    }
+    return res.blob();
+  },
+  async hasImage(id, hash) {
+    const res = await fetch(imageUrl(id, hash), { method: 'HEAD' });
+    if (res.ok) return true;
+    if (res.status === 404) return false;
+    throw new Error(`the plan image could not be checked (${res.status})`);
+  },
 };
+
+const imageUrl = (id: string, hash: string) =>
+  `${BASE}/projects/${encodeURIComponent(id)}/image/${hash}`;
 
 /** True if the Go API answers its health check within `timeoutMs`. */
 export async function apiAvailable(timeoutMs = 2500): Promise<boolean> {

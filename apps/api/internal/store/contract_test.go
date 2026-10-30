@@ -56,6 +56,44 @@ func runContract(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 	})
 
+	t.Run("plan image", func(t *testing.T) {
+		s := newStore(t)
+		imgs, ok := s.(ImageStore)
+		if !ok {
+			t.Fatal("store does not keep plan images")
+		}
+		img := Image{Hash: "abc", ContentType: "image/png", Data: []byte("\x89PNG fake")}
+		if err := imgs.PutImage(ctx, "prj_i", img); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("image for a missing project: %v", err)
+		}
+		if err := s.Create(ctx, Record{ID: "prj_i", Name: "I", Doc: []byte(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := imgs.GetImage(ctx, "prj_i"); !errors.Is(err, ErrNoImage) {
+			t.Fatalf("get before put: %v", err)
+		}
+		if err := imgs.PutImage(ctx, "prj_i", img); err != nil {
+			t.Fatal(err)
+		}
+		got, err := imgs.GetImage(ctx, "prj_i")
+		if err != nil || got.Hash != "abc" || got.ContentType != "image/png" || string(got.Data) != string(img.Data) {
+			t.Fatalf("get: %+v %v", got, err)
+		}
+		next := Image{Hash: "def", ContentType: "image/jpeg", Data: []byte("jpeg")}
+		if err := imgs.PutImage(ctx, "prj_i", next); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := imgs.GetImage(ctx, "prj_i"); got.Hash != "def" || string(got.Data) != "jpeg" {
+			t.Fatalf("replace: %+v", got)
+		}
+		if err := s.Delete(ctx, "prj_i"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := imgs.GetImage(ctx, "prj_i"); !errors.Is(err, ErrNoImage) {
+			t.Fatalf("image outlived its project: %v", err)
+		}
+	})
+
 	t.Run("errors", func(t *testing.T) {
 		s := newStore(t)
 		if _, err := s.Get(ctx, "prj_missing"); !errors.Is(err, ErrNotFound) {

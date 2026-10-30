@@ -194,3 +194,53 @@ func TestDeleteRejectsUnsafeIDs(t *testing.T) {
 		t.Fatalf("DELETE with a traversal id = %d, want 400", res.StatusCode)
 	}
 }
+
+// A 1×1 PNG.
+var tinyPNG = []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfe\xa7V\xbd\xfa\x00\x00\x00\x00IEND\xaeB`\x82")
+
+func TestPlanImage(t *testing.T) {
+	ts := newTestServer(t)
+	if res, _ := do(t, "PUT", ts.URL+"/projects/prj_a/image", tinyPNG, nil); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("image for a missing project: %d", res.StatusCode)
+	}
+	do(t, "POST", ts.URL+"/projects", doc("prj_a", "Flat", 0), nil)
+
+	if res, _ := do(t, "PUT", ts.URL+"/projects/prj_a/image", []byte("<svg onload=alert(1)>"), nil); res.StatusCode != http.StatusUnsupportedMediaType {
+		t.Fatalf("non-image upload: %d", res.StatusCode)
+	}
+	res, body := do(t, "PUT", ts.URL+"/projects/prj_a/image", tinyPNG, map[string]string{"Content-Type": "image/png"})
+	hash, _ := body["hash"].(string)
+	if res.StatusCode != http.StatusOK || len(hash) != 64 {
+		t.Fatalf("upload: %d %v", res.StatusCode, body)
+	}
+
+	get, err := http.Get(ts.URL + "/projects/prj_a/image/" + hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(get.Body)
+	get.Body.Close()
+	if get.StatusCode != http.StatusOK || !bytes.Equal(got, tinyPNG) ||
+		get.Header.Get("Content-Type") != "image/png" ||
+		get.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("get: %d %q %v", get.StatusCode, get.Header.Get("Content-Type"), get.Header)
+	}
+
+	stale := "0000000000000000000000000000000000000000000000000000000000000000"
+	if res, _ := do(t, "GET", ts.URL+"/projects/prj_a/image/"+stale, nil, nil); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("stale hash: %d", res.StatusCode)
+	}
+	if res, _ := do(t, "GET", ts.URL+"/projects/prj_a/image/nothex", nil, nil); res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad hash: %d", res.StatusCode)
+	}
+
+	big := append(append([]byte{}, tinyPNG...), make([]byte, MaxImageBytes)...)
+	if res, _ := do(t, "PUT", ts.URL+"/projects/prj_a/image", big, nil); res.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized: %d", res.StatusCode)
+	}
+
+	do(t, "DELETE", ts.URL+"/projects/prj_a", nil, nil)
+	if res, _ := do(t, "GET", ts.URL+"/projects/prj_a/image/"+hash, nil, nil); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("image after delete: %d", res.StatusCode)
+	}
+}

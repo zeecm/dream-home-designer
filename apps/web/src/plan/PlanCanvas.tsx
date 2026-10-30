@@ -1,9 +1,8 @@
 import { levelBounds, planGeometry, underlayToWorld } from '@dhd/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAsset } from '../assets';
 import { type Tool, useEditor } from '../editor';
 import { useProject, useStore } from '../store';
-import { uploadPlanImage, useUploadPicker } from '../ui/PlanImage';
+import { uploadPlanImage, usePlanImage, useUploadPicker } from '../ui/PlanImage';
 import { icons } from '../ui/icons';
 import { useCalibrateTool, useOpeningTool, useRoomTool, useWallTool } from './drawTools';
 import { describe } from './keyboard';
@@ -76,7 +75,7 @@ export function PlanCanvas() {
 
   const geom = useMemo(() => (level ? planGeometry(level) : null), [level]);
   const underlay = project.underlay;
-  const image = useAsset(underlay?.assetKey);
+  const image = usePlanImage();
   const upload = useUploadPicker();
   const [dropping, setDropping] = useState(false);
   // Focus ring on the canvas: shown when Tab moved focus here, hidden on the next click.

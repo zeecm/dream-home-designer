@@ -1,30 +1,97 @@
 import {
-  newId,
   placeUnderlay,
   rotateUnderlay,
   setUnderlay,
   setUnderlayOpacity,
   underlayToWorld,
 } from '@dhd/core';
-import { useRef, useState } from 'react';
-import { prepareUpload, putAsset, useAsset } from '../assets';
+import { useEffect, useRef, useState } from 'react';
+import {
+  type AssetState,
+  getAsset,
+  hashBlob,
+  hashOfKey,
+  keyOfHash,
+  prepareUpload,
+  putAsset,
+  useAsset,
+} from '../assets';
 import { useEditor } from '../editor';
 import { useProject, useStore } from '../store';
 import { icons } from './icons';
 
-/** Stores an uploaded plan locally and puts it under the plan, centred in view. */
+/**
+ * Stores an uploaded plan in this browser, puts it under the plan centred in view, and
+ * copies it to the server in the background.
+ */
 export async function uploadPlanImage(file: File): Promise<void> {
   const projectId = useStore.getState().editor.doc.id;
   const { width, height, blob } = await prepareUpload(file);
+  const key = keyOfHash(await hashBlob(blob));
   // A PDF can take a moment to render; don't put it on a different plan opened meanwhile.
   if (useStore.getState().editor.doc.id !== projectId) return;
-  const key = `img_${newId('it').slice(3)}`;
   await putAsset(key, blob);
   const view = useEditor.getState().view;
   const centre = view ? { x: view.cx, y: view.cy } : { x: 0, y: 0 };
   useStore.getState().dispatch(setUnderlay(placeUnderlay(key, { width, height }, centre)));
   // Straight into calibration: the image's scale is only a guess until then.
   useEditor.getState().setTool('calibrate');
+  void syncPlanImage();
+}
+
+const SERVER_MAX_BYTES = 10 * 1024 * 1024;
+const synced = new Set<string>();
+
+/**
+ * Makes sure the server has the open project's plan image, uploading it from this browser
+ * if not. An image from before server storage (an `img_…` key) is moved to its hash key
+ * first. Runs once per project and image in a session; a failure is retried next time.
+ */
+export async function syncPlanImage(): Promise<void> {
+  const { backend, editor } = useStore.getState();
+  const doc = editor.doc;
+  const key = doc.underlay?.assetKey;
+  if (!key || !backend?.putImage || !backend.hasImage) return;
+  const tag = `${doc.id}|${key}`;
+  if (synced.has(tag)) return;
+  synced.add(tag);
+  try {
+    const blob = await getAsset(key);
+    if (!blob) return; // not in this browser: nothing to upload from here
+    if (blob.size > SERVER_MAX_BYTES) throw new Error('too large');
+    const hash = hashOfKey(key) ?? (await hashBlob(blob));
+    if (!(await backend.hasImage(doc.id, hash))) await backend.putImage(doc.id, blob);
+    if (!hashOfKey(key)) {
+      // Re-key the older image so other browsers can fetch it by hash.
+      const next = keyOfHash(hash);
+      await putAsset(next, blob);
+      const now = useStore.getState().editor.doc;
+      if (now.id === doc.id && now.underlay?.assetKey === key) {
+        useStore.getState().dispatch(setUnderlay({ ...now.underlay, assetKey: next }));
+      }
+    }
+  } catch {
+    synced.delete(tag);
+    if (useStore.getState().editor.doc.id === doc.id) {
+      useStore.setState({
+        notice:
+          'The plan image couldn’t be copied to the server, so it shows only in this browser for now.',
+      });
+    }
+  }
+}
+
+/** The open project's plan image, fetched from the server if this browser lacks it. */
+export function usePlanImage(): AssetState {
+  const project = useProject();
+  const key = project.underlay?.assetKey;
+  const backend = useStore((s) => s.backend);
+  const id = project.id;
+  useEffect(() => {
+    if (key && backend) void syncPlanImage();
+  }, [key, backend]);
+  const getImage = backend?.getImage;
+  return useAsset(key, getImage ? (hash) => getImage(id, hash) : undefined);
 }
 
 /** Bundled plans for trying the tracing flow without a plan of your own. */
@@ -81,7 +148,7 @@ const deg = (r: number) => {
 
 export function PlanImagePanel() {
   const underlay = useProject().underlay;
-  const asset = useAsset(underlay?.assetKey);
+  const asset = usePlanImage();
   const dispatch = useStore((s) => s.dispatch);
   const setTool = useEditor((s) => s.setTool);
   const { picker, open, sample, error, busy } = useUploadPicker();
@@ -133,7 +200,8 @@ export function PlanImagePanel() {
       </h3>
       {asset.status === 'missing' && (
         <p className="field-hint error-text">
-          This image is stored in another browser. Upload it again to trace here.
+          This image is stored only in the browser it was uploaded from. Upload it again to trace
+          here.
         </p>
       )}
       <label className="slider">

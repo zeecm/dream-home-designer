@@ -49,6 +49,8 @@ func New(s store.Store, log *slog.Logger, opts ...Option) *Server {
 	srv.mux.HandleFunc("GET /projects/{id}", srv.get)
 	srv.mux.HandleFunc("PUT /projects/{id}", srv.update)
 	srv.mux.HandleFunc("DELETE /projects/{id}", srv.remove)
+	srv.mux.HandleFunc("PUT /projects/{id}/image", srv.putImage)
+	srv.mux.HandleFunc("GET /projects/{id}/image/{hash}", srv.getImage)
 	return srv
 }
 
@@ -162,7 +164,7 @@ func (s *Server) readDoc(w http.ResponseWriter, r *http.Request) ([]byte, projec
 func (s *Server) fail(w http.ResponseWriter, err error) {
 	var conflict *store.ConflictError
 	switch {
-	case errors.Is(err, store.ErrNotFound):
+	case errors.Is(err, store.ErrNotFound), errors.Is(err, store.ErrNoImage):
 		writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, store.ErrExists):
 		writeError(w, http.StatusConflict, err.Error())

@@ -3,7 +3,7 @@ import { clickImage, floorArea, imagePoint, newBlankPlan, waitSaved } from './he
 
 // The bundled sample plan is 1100 x 940 px at 80 px/m with the flat's centre lines from
 // (110, 110) to (990, 790); its 11000 mm dimension runs from x 110 to 990 at y 50.
-test('trace a plan image: upload, set scale, draw walls, reload', async ({ page }) => {
+test('trace a plan image: upload, set scale, draw walls, reload', async ({ page, browser }) => {
   await newBlankPlan(page);
   await page.getByRole('button', { name: 'try the sample plan' }).click();
   await expect(page.locator('image.underlay')).toBeVisible();
@@ -50,6 +50,15 @@ test('trace a plan image: upload, set scale, draw walls, reload', async ({ page 
   await waitSaved(page);
   await expect(page.locator('image.underlay')).toBeVisible();
   await expect(page.locator('.room-list li')).toHaveCount(2);
+
+  // Another browser, with nothing stored locally, gets the plan image from the server.
+  const other = await browser.newContext();
+  const elsewhere = await other.newPage();
+  await elsewhere.goto(page.url());
+  await waitSaved(elsewhere);
+  await expect(elsewhere.locator('image.underlay')).toBeVisible();
+  await expect(elsewhere.getByText('stored only in the browser')).toHaveCount(0);
+  await other.close();
 });
 
 test('a real HDB plan PDF renders as the plan image', async ({ page }) => {

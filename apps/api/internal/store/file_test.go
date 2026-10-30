@@ -56,3 +56,36 @@ func TestUpdateBuildErrorLeavesStoreUnchanged(t *testing.T) {
 		t.Fatalf("store changed on failed update: %+v", rec)
 	}
 }
+
+func TestFileStoreKeepsImagesAcrossReopen(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	s, err := NewFile(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Create(ctx, Record{ID: "prj_a", Name: "Flat", Doc: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutImage(ctx, "prj_a", Image{Hash: "h1", ContentType: "image/png", Data: []byte("png")}); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewFile(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := reopened.GetImage(ctx, "prj_a")
+	if err != nil || img.Hash != "h1" || img.ContentType != "image/png" || string(img.Data) != "png" {
+		t.Fatalf("image after reopen: %+v %v", img, err)
+	}
+	if err := reopened.Delete(ctx, "prj_a"); err != nil {
+		t.Fatal(err)
+	}
+	again, err := NewFile(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := again.GetImage(ctx, "prj_a"); !errors.Is(err, ErrNoImage) {
+		t.Fatalf("image after delete and reopen: %v", err)
+	}
+}

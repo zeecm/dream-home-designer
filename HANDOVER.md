@@ -135,7 +135,7 @@ Writes are rate-limited per IP at the Worker (60/min). IDs must match `^[a-z0-9]
 - **Plan and 3D:** walls have mitred corners in both views, and the 3D rebuild is incremental.
 
 **Tests:**
-- 102 core and 11 render unit tests, plus 19 web unit tests.
+- 102 core and 11 render unit tests, plus 21 web unit tests.
 - A 6-test end-to-end suite.
 - Go tests, including a store contract test that has passed against live R2.
 
@@ -183,6 +183,16 @@ from upload to rooms on the live preview.
   (`roomShapes`): its area is subtracted, the floor and ceiling are cut, the plan fill skips it,
   and room matching ignores points inside holes.
 
+**Plan images on the server (built):** `PUT /projects/{id}/image` stores one PNG, JPEG or WebP
+of up to 10 MB per project, checked by sniffing the content, and returns its SHA-256.
+`GET /projects/{id}/image/{hash}` serves it, immutable and sandboxed, only while that hash is
+current. Deleting a project deletes its image. The memory, file and R2 stores implement
+`store.ImageStore`; in R2 it is `images/<id>`. In the web app, `underlay.assetKey` is
+`sha256:<hex>`. The image is kept in IndexedDB and uploaded in the background, and a browser
+without it fetches it from the server. Other formats and very large photos are re-encoded as
+JPEG first. Older `img_…` keys are uploaded and re-keyed the next time their plan opens in the
+browser that has them.
+
 ## 5. Owner to-dos
 
 1. **Connect the API Worker to Git (one time, in the dashboard).** The Builds API refuses the
@@ -202,14 +212,13 @@ from upload to rooms on the live preview.
 ## 6. Next
 
 **Finish Phase 1**, in order:
-1. **Plan images on the server:** upload them to R2 through the API so they work on every device.
-2. **Open-plan boundaries:** a room boundary that isn't a wall (dry kitchen vs living, for
+1. **Open-plan boundaries:** a room boundary that isn't a wall (dry kitchen vs living, for
    example), probably `Wall.kind: 'boundary'` drawn dashed and never extruded. This is a schema bump.
-3. **Public-deployment safety:** a write token separate from the share link, a previous-version
+2. **Public-deployment safety:** a write token separate from the share link, a previous-version
    copy on PUT and DELETE, and a limit or lifecycle rule on stored projects.
-4. **A realistic sample:** replace the simple sample flat with a realistic HDB 4-room layout
+3. **A realistic sample:** replace the simple sample flat with a realistic HDB 4-room layout
    (bathrooms, shelter, service yard). Keep `hdb4room` for tests.
-5. **Room matching by overlap:** rooms are matched across edits by label point and corners. Matching
+4. **Room matching by overlap:** rooms are matched across edits by label point and corners. Matching
    by overlapping area would be sturdier for large reshapes.
 
 **Phase 2, first-person walkthrough:**
@@ -269,7 +278,8 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
 
 - **No auth.** A project is reachable by anyone with its link, so ids are the capability. Listing
   is off in production, and writes are rate-limited. Auth arrives in Phase 4.
-- **Plan images are browser-local**, in IndexedDB, until server uploads exist.
+- **One plan image per project on the server.** Replacing it drops the old one, so undoing a
+  replacement shows the old image only in browsers that still have it locally.
 - **Walls use one material for both faces.** `materialLeft` covers both, and per-side materials
   come in Phase 3.
 - **No `project_versions` history yet.** It's planned with Postgres.
