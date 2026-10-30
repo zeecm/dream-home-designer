@@ -36,7 +36,10 @@ The full feature inventory is in the plan doc.
 | Backend libraries | **Standard library only** (chi + pgx + sqlc + goose were the plan) | Go 1.22+ `ServeMux` covers routing; the R2 client signs SigV4 itself |
 | Web hosting | **Cloudflare Pages, connected to GitHub** (owner asked for this) | `main` deploys production, every other branch a preview, with PR comments |
 | API hosting | **Cloudflare Containers** behind a Worker (`apps/edge`), replacing Fly.io | Owner upgraded to Workers Paid to unblock it. Pages reaches it through a Pages Function and a service binding, so the app stays same-origin |
-| Project storage (until Postgres) | **R2**, one object per project, conditional writes for optimistic concurrency | Containers have no persistent disk. Postgres on Neon still arrives in Phase 4 behind the same `store.Store` interface |
+| Project storage | **R2**, one object per project, conditional writes for optimistic concurrency | Containers have no persistent disk |
+| Accounts and version history (Phase 4) | **Cloudflare D1** (owner chose it over Postgres) | Stays on Cloudflare; replaces the Postgres-on-Neon plan |
+| Licence | **MIT**, repo to be published at beta (owner approved) | Helps catalogue contributions |
+| HDB BTO layout presets | **Not wanted** (owner) | |
 | Document storage | The project is one JSON document; the server validates only the envelope | Keeps the schema in one place (zod in `packages/core`) |
 | Wall model | Walls reference **shared vertex ids**; the wall tool splits walls where they meet or cross | Dragging a corner moves every wall at it, and rooms can be found from the wall graph |
 | Rooms | **Detected** from the wall graph's faces inside each topology-changing command | Rooms can't drift from walls; names survive edits by matching faces to old rooms |
@@ -47,8 +50,8 @@ The full feature inventory is in the plan doc.
 | Units | Metres and radians everywhere. Plan (x, y) maps to world (x, 0, y), +Y up | |
 | Visual style | taste-skill "framed sheet" app style (seed 69376578), IBM Plex Sans, colour on data only | Owner asked to use taste-skill; it is vendored in `.claude/skills/design-taste-frontend` |
 
-Still open (from the plan doc): MIT open-sourcing at beta; whether "before/after"
-variants go in v1; whether to ship HDB BTO layout presets as templates.
+Before/after renovation variants (the flat as it is and as planned, compared in plan and
+3D) are **in v1** (owner, 30 Oct).
 
 ## 3. Repository tour
 
@@ -577,6 +580,6 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
   replacement shows the old image only in browsers that still have it locally.
 - **Walls use one material for both faces.** `materialLeft` covers both, and per-side materials
   come in Phase 3.
-- **No `project_versions` history yet.** It's planned with Postgres.
+- **No `project_versions` history yet.** It comes with accounts in Phase 4, on D1.
 - **Corner dimension lines** for walls that run into the room draw inside it; fine at plan scale,
   busy on short walls.
