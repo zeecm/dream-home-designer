@@ -471,11 +471,14 @@ browser's plans (the recent list, up to 20): open one, delete one (with an inlin
 Clear all. Plans this browser owns (owner key, or a local-only plan: `ownsPlan`) are deleted
 on the server, which keeps its 30-day recovery copy; plans shared with it are only taken off
 the list. Sample copies (`RecentProject.sample`, or older ones named "… (sample)") are kept
-and can't be deleted. Deleting the open plan opens the newest one left, or a new sample.
+and can't be deleted: the most recently opened sample copy is kept (`keptSample`), and older
+copies (from another "New copy of the sample flat") can be deleted. A link to a missing plan
+opens the kept sample rather than making another copy. Deleting the open plan opens the
+newest one left, or a new sample.
 While a dialog is open the plan's keyboard shortcuts are off.
 
-**Still open:** latitude and place aren't editable in the UI; ceiling lights don't follow a
-later ceiling-height change; lamps are always on.
+**Still open:** latitude and place aren't editable in the UI; lamps are always on. Ceiling
+lights move with `setCeilingHeight`. Walking at night is lit by lamps, with only a faint fill.
 
 Poly Haven (CC0, reachable from here) has about 136 indoor models for later; Kenney is
 blocked by the network proxy and Sketchfab needs an API key.

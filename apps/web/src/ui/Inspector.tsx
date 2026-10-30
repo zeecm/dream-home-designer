@@ -93,18 +93,26 @@ export function Inspector() {
   useEffect(() => {
     if (panel.current) panel.current.scrollTop = 0;
   }, [key, tool]);
-  // The plan's compass opens the details at which way the plan faces.
+  // The plan's compass opens the details at which way the plan faces: unfold first, then
+  // scroll once the unfolded panel has laid out (a folded panel hides its body).
   const directionToken = useEditor((s) => s.directionToken);
+  const reveal = useRef(0);
   useEffect(() => {
     if (!directionToken) return;
+    reveal.current = directionToken;
     setUserOpen(true);
-    requestAnimationFrame(() => {
-      const section = document.getElementById('facing-h')?.parentElement;
-      section?.scrollIntoView({ block: 'nearest' });
-      section?.querySelector<HTMLElement>('[aria-pressed="true"], input')?.focus();
-    });
   }, [directionToken]);
   const open = userOpen ?? (!!selection || tool !== 'select');
+  // biome-ignore lint/correctness/useExhaustiveDependencies: after a reveal, once open
+  useEffect(() => {
+    if (!open || !reveal.current) return;
+    reveal.current = 0;
+    requestAnimationFrame(() => {
+      const section = document.getElementById('facing-h')?.parentElement;
+      section?.scrollIntoView({ block: 'start' });
+      section?.querySelector<HTMLElement>('[aria-pressed="true"], input')?.focus();
+    });
+  }, [open, directionToken]);
   if (!level) return null;
   let body = <PlanSummary level={level} />;
   if (selection?.kind === 'wall' && level.walls[selection.id]) {
@@ -571,7 +579,15 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
         value={it.position.y}
         min={0}
         max={level.ceilingHeight}
-        hint="Wall cabinets and a TV on a console sit above the floor."
+        hint={
+          kind?.ceiling
+            ? 'It hangs from the ceiling, and moves with the ceiling height.'
+            : kind?.light
+              ? kind.elevation
+                ? 'It sits on a table or bedside: set how high that is.'
+                : undefined
+              : 'Wall cabinets and a TV on a console sit above the floor.'
+        }
         onCommit={(v) => v !== undefined && set({ position: { y: v } })}
       />
       <div className="field">

@@ -274,7 +274,8 @@ function roomLabels(level: Level, geom: PlanGeometry, zoom: number): RoomLabel[]
       .filter((o) => o.kind === 'door')
       .map((o) => swingZone(doorSwing(o.frame, o.opening))),
     ...Object.values(level.items)
-      .filter((it) => it.flags.collidable)
+      // What stands in the room, and the lights drawn over it.
+      .filter((it) => it.flags.collidable || furnitureKind(it.assetId)?.ceiling)
       .map((it) => {
         const { w, d } = itemSize(it);
         return { c: { x: it.position.x, y: it.position.z }, r: Math.hypot(w, d) / 2 };

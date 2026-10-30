@@ -110,8 +110,13 @@ function Catalogue({ idPrefix }: { idPrefix: string }) {
   const pick = useEditor.getState().setFurnitureKind;
   const [filter, setFilter] = useState('');
   const q = filter.trim().toLowerCase();
+  // The piece that is armed stays in view, so a filter never hides what a tap will place.
   const shown = FURNITURE.filter(
-    (k) => !q || k.name.toLowerCase().includes(q) || k.category.toLowerCase().includes(q),
+    (k) =>
+      !q ||
+      k.id === picked ||
+      k.name.toLowerCase().includes(q) ||
+      k.category.toLowerCase().includes(q),
   );
   const groups = [...new Set(shown.map((k) => k.category))];
   const cm = (m: number) => Math.round(m * 100);
@@ -149,7 +154,9 @@ function Catalogue({ idPrefix }: { idPrefix: string }) {
           </div>
         ))}
       </div>
-      {shown.length === 0 && <p className="field-hint">Nothing called that yet.</p>}
+      {q && !shown.some((k) => k.id !== picked) && (
+        <p className="field-hint">Nothing called that yet.</p>
+      )}
     </section>
   );
 }

@@ -29,8 +29,9 @@ import { useEditor } from './editor';
 import { keysFor } from './keys';
 import {
   type RecentProject,
+  deletable,
   forgetRecent,
-  isSample,
+  keptSample,
   recentProjects,
   rememberRecent,
 } from './recent';
@@ -208,6 +209,12 @@ export const useStore = create<State>((set, get) => {
     while (inflight) await inflight;
   };
 
+  /** Where a missing plan leads: the sample this browser keeps, or a new copy of it. */
+  const fallBack = () => {
+    const kept = keptSample(get().recent);
+    return kept ? get().load(kept) : get().openSample();
+  };
+
   const createFrom = async (doc: Project, sample = false) => {
     await flush();
     set({ sync: { kind: 'loading' } });
@@ -260,10 +267,9 @@ export const useStore = create<State>((set, get) => {
     load: async (id) => {
       if (!VALID_ID.test(id)) {
         set({
-          notice:
-            'That link doesn’t point to a plan, so a fresh copy of the sample opened instead.',
+          notice: 'That link doesn’t point to a plan, so the sample flat opened instead.',
         });
-        return get().openSample();
+        return fallBack();
       }
       if (get().editor.doc.id !== id) await flush();
       set({ sync: { kind: 'loading' } });
@@ -299,9 +305,9 @@ export const useStore = create<State>((set, get) => {
         }
         set({
           recent: forgetRecent(id),
-          notice: 'That project isn’t saved here, so a fresh copy of the sample opened instead.',
+          notice: 'That project isn’t saved here, so the sample flat opened instead.',
         });
-        return get().openSample();
+        return fallBack();
       } catch (e) {
         set({
           sync: { kind: 'failed', id, message: errorMessage('Could not open the project', e) },
@@ -323,7 +329,8 @@ export const useStore = create<State>((set, get) => {
     },
     openSample: () => createFrom(sampleFlatProject(newId('prj')), true),
     deletePlans: async (ids) => {
-      const doomed = get().recent.filter((r) => ids.includes(r.id) && !isSample(r));
+      const list = get().recent;
+      const doomed = list.filter((r) => ids.includes(r.id) && deletable(r, list));
       if (doomed.length === 0) return [];
       const gone = new Set(doomed.map((r) => r.id));
       // Move off the open plan first, so nothing saves it back as it goes.

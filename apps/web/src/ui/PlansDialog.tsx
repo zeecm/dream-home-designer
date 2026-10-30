@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { isSample } from '../recent';
+import { deletable, isSample } from '../recent';
 import { ownsPlan, useProject, useStore } from '../store';
 import { icons } from './icons';
 
 const opened = (iso: string) =>
-  new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  new Date(iso).toLocaleString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 
 /**
  * The plans this browser keeps: open one, delete one, or clear them all. Sample copies are
@@ -26,7 +31,7 @@ export function PlansDialog({ onClose }: { onClose: () => void }) {
   }, []);
   const close = () => ref.current?.close();
 
-  const removable = recent.filter((r) => !isSample(r));
+  const removable = recent.filter((r) => deletable(r, recent));
   const owned = removable.filter((r) => ownsPlan(r.id));
   const shared = removable.length - owned.length;
   const verb = (id: string) => (ownsPlan(id) ? 'Delete' : 'Remove');
@@ -62,6 +67,7 @@ export function PlansDialog({ onClose }: { onClose: () => void }) {
       <ul className="plan-list">
         {recent.map((r) => {
           const sample = isSample(r);
+          const kept = !deletable(r, recent);
           const here = r.id === currentId;
           const asking = confirm === r.id;
           return (
@@ -86,7 +92,7 @@ export function PlansDialog({ onClose }: { onClose: () => void }) {
                     .join(' · ')}
                 </span>
               </button>
-              {sample ? (
+              {kept ? (
                 <span className="plan-list-kept">Kept</span>
               ) : asking ? (
                 <span className="button-row">
@@ -118,7 +124,10 @@ export function PlansDialog({ onClose }: { onClose: () => void }) {
                   className="btn btn-small"
                   aria-label={`${verb(r.id)} ${r.name}`}
                   disabled={busy}
-                  onClick={() => setConfirm(r.id)}
+                  onClick={() => {
+                    setStatus('');
+                    setConfirm(r.id);
+                  }}
                 >
                   {verb(r.id)}
                 </button>
@@ -139,7 +148,7 @@ export function PlansDialog({ onClose }: { onClose: () => void }) {
               ]
                 .filter(Boolean)
                 .join(' and ')}
-              ? Samples stay. This can’t be undone.
+              ? One sample stays. This can’t be undone.
             </p>
             <span className="button-row">
               <button
@@ -149,7 +158,7 @@ export function PlansDialog({ onClose }: { onClose: () => void }) {
                 onClick={() =>
                   void run(
                     removable.map((r) => r.id),
-                    'Plans cleared. Samples kept.',
+                    'Plans cleared. The sample flat is kept.',
                   )
                 }
               >
@@ -170,7 +179,10 @@ export function PlansDialog({ onClose }: { onClose: () => void }) {
             type="button"
             className="btn"
             disabled={busy || removable.length === 0}
-            onClick={() => setConfirm('all')}
+            onClick={() => {
+              setStatus('');
+              setConfirm('all');
+            }}
           >
             Clear all plans
           </button>

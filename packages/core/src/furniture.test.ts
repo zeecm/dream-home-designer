@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { drawWall } from './commands';
+import { drawWall, setCeilingHeight } from './commands';
 import { blankProject } from './factory';
 import { hdb4RoomLevel } from './fixtures/hdb4room';
 import { sampleFlatProject } from './fixtures/sampleFlat';
@@ -203,5 +203,25 @@ describe('lamps', () => {
       expect(z).toBeGreaterThanOrEqual(k.ceiling ? -0.15 : 0);
       expect(z).toBeLessThanOrEqual(k.size.h);
     }
+  });
+});
+
+describe('ceiling lights and the ceiling height', () => {
+  it('move with the ceiling, and undo with it; floor pieces stay', () => {
+    const p = sampleFlatProject('p1');
+    const lvl = p.levels[0];
+    if (!lvl) throw new Error('no level');
+    const light = furnitureKind('ceiling-light');
+    const lamp = furnitureKind('floor-lamp');
+    if (!light || !lamp) throw new Error('missing kinds');
+    let s = { doc: p, history: emptyHistory() };
+    s = dispatch(s, addItem(lvl.id, newItem('c', light, { x: 2, y: 2 }, 0, lvl.ceilingHeight)));
+    s = dispatch(s, addItem(lvl.id, newItem('f', lamp, { x: 3, y: 2 })));
+    s = dispatch(s, setCeilingHeight(lvl.id, 3.2));
+    const items = s.doc.levels[0]?.items;
+    expect((items?.c?.position.y ?? 0) + light.size.h).toBeCloseTo(3.2);
+    expect(items?.f?.position.y).toBe(0);
+    s = undo(s);
+    expect(s.doc.levels[0]?.items.c?.position.y).toBeCloseTo(lvl.ceilingHeight - light.size.h);
   });
 });

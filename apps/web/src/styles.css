@@ -706,6 +706,10 @@ select {
 .sun-control-label .num {
   color: var(--text);
 }
+/* A vertical swipe that starts on a slider scrolls the panel, not the value. */
+input[type="range"] {
+  touch-action: pan-y;
+}
 .sun-control input {
   width: 100%;
   margin: 0;
@@ -776,11 +780,16 @@ select {
 }
 .viewport-hint {
   position: absolute;
-  left: 16px;
+  left: 12px;
   bottom: 12px;
+  max-width: calc(100% - 24px);
   margin: 0;
+  padding: 2px 8px;
   font-size: var(--fs-small);
   color: var(--muted);
+  /* Readable over a dark night scene too. */
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  border-radius: var(--radius-control);
   pointer-events: none;
 }
 .muted {
@@ -1820,8 +1829,14 @@ h3.field-label {
     overflow-x: auto;
     scrollbar-width: none;
   }
-  .tool-panel .catalogue-group {
+  /* One scroller for the whole row: the groups and their lists dissolve into it, so no
+     category shrinks to a strip of its own. */
+  .tool-panel .catalogue-group,
+  .tool-panel .catalogue .choice-list {
     display: contents;
+  }
+  .tool-panel .catalogue-list li {
+    flex: none;
   }
   .inspector {
     overscroll-behavior: contain;

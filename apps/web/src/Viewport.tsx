@@ -239,11 +239,12 @@ export function Viewport() {
           args={[
             sky,
             dark ? '#3a3d40' : '#dfe3e6',
-            walking ? 0.3 + 1.9 * light : 0.3 + 1.2 * light,
+            // Indoors at night only the lamps should really light a room.
+            walking ? 0.05 + 2.15 * light : 0.3 + 1.2 * light,
           ]}
         />
         {/* Under the ceilings the sun can't reach; even light keeps rooms readable. */}
-        {walking && <ambientLight intensity={0.08 + 0.27 * light} />}
+        {walking && <ambientLight intensity={0.02 + 0.33 * light} />}
         <primitive object={sunTarget} position={[frame.x, 0, frame.z]} />
         <directionalLight
           castShadow={!walking && sun.altitude > 0}

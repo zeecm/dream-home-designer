@@ -43,9 +43,9 @@ test('delete plans one by one or all at once; samples stay', async ({ page }) =>
 
   // Clear all: only the sample is left, and it opens.
   await dialog.getByRole('button', { name: 'Clear all plans' }).click();
-  await expect(dialog).toContainText('Delete 1 plan? Samples stay.');
+  await expect(dialog).toContainText('Delete 1 plan? One sample stays.');
   await dialog.getByRole('button', { name: 'Clear all', exact: true }).click();
-  await expect(dialog.getByRole('status')).toContainText('Plans cleared. Samples kept.');
+  await expect(dialog.getByRole('status')).toContainText('Plans cleared. The sample flat is kept.');
   await expect(dialog.getByRole('listitem')).toHaveCount(1);
   await expect(dialog.getByRole('button', { name: 'Clear all plans' })).toBeDisabled();
   await expect.poll(() => openId(page)).toBe(sample);
@@ -54,4 +54,34 @@ test('delete plans one by one or all at once; samples stay', async ({ page }) =>
 
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
+});
+
+test('one copy of the sample is kept; another copy can be deleted', async ({ page }) => {
+  await page.goto('/');
+  await waitSaved(page);
+  const older = openId(page);
+  await page.getByRole('button', { name: 'Projects' }).click();
+  await page.getByRole('button', { name: 'New copy of the sample flat' }).click();
+  await waitSaved(page);
+  const newer = openId(page);
+  expect(newer).not.toBe(older);
+
+  const dialog = await manage(page);
+  const rows = dialog.getByRole('listitem');
+  await expect(rows).toHaveCount(2);
+  // The newest copy is kept; the older one can go.
+  await expect(rows.first()).toContainText('Kept');
+  await rows
+    .nth(1)
+    .getByRole('button', { name: /^Delete/ })
+    .click();
+  await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(rows).toHaveCount(1);
+  await expect(dialog.getByRole('button', { name: 'Clear all plans' })).toBeDisabled();
+  expect((await page.request.get(`/api/projects/${older}`)).status()).toBe(404);
+
+  // A link to the deleted copy opens the kept sample, not yet another copy.
+  await page.goto(`/?p=${older}`);
+  await waitSaved(page);
+  await expect.poll(() => openId(page)).toBe(newer);
 });

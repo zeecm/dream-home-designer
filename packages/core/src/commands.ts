@@ -1,5 +1,6 @@
 import type { Draft } from 'immer';
 import type { z } from 'zod';
+import { furnitureKind } from './furniture';
 import { clampOpeningT } from './geometry';
 import type { Command } from './history';
 import { newId } from './ids';
@@ -370,7 +371,13 @@ export function setCeilingHeight(levelId: string, height: number): Command {
   return {
     label: 'Change ceiling height',
     recipe: (d) => {
-      level(d, levelId).ceilingHeight = height;
+      const lvl = level(d, levelId);
+      // Ceiling lights hang from the ceiling: they move with it, keeping their drop.
+      const rise = height - lvl.ceilingHeight;
+      for (const it of Object.values(lvl.items)) {
+        if (furnitureKind(it.assetId)?.ceiling) it.position.y = Math.max(0, it.position.y + rise);
+      }
+      lvl.ceilingHeight = height;
     },
   };
 }

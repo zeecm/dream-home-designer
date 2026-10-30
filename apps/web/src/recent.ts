@@ -29,6 +29,15 @@ export function recentProjects(storage: Storage = window.localStorage): RecentPr
   }
 }
 
+/**
+ * The sample copy that is always kept: the most recently opened one. Older copies (another
+ * "New copy of the sample flat") may be deleted like any plan.
+ */
+export const keptSample = (list: RecentProject[]) => list.find(isSample)?.id;
+
+/** Whether the plans list may delete this entry: anything but the kept sample. */
+export const deletable = (r: RecentProject, list: RecentProject[]) => r.id !== keptSample(list);
+
 export function rememberRecent(
   p: { id: string; name: string },
   storage: Storage = window.localStorage,
