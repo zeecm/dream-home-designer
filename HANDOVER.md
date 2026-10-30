@@ -440,6 +440,14 @@ the walk collides with items standing on the floor (not rugs or wall cabinets). 
 Furniture tool (I) with a catalogue and filter in the tool options, a preview that follows
 the pointer, R to turn; in Select, drag (with the wall snap), R / Shift+R, arrows, Delete;
 the details panel sets width, depth, height, height above the floor, and turns.
+A piece backed onto a wall also slides along it clear of the walls that meet it (`clearAlong`
+clips the other wall pieces into the strip in front of the face), so a wardrobe dropped in a
+corner stands beside the side wall, not in it; a piece wider than the wall stays put. Depth
+grows from the wall. On phones the catalogue is one sideways row under a find field, and a
+selected piece's details come before the tool's options. Room labels step aside for
+furniture, and deletes and announcements name the piece and its room.
+**Still open:** the walk mini-map doesn't draw furniture; plan symbols are plain rectangles;
+Esc after an invalid field value deselects instead of reverting.
 **Finishes:** `core/finishes.ts` lists floor finishes (oak, walnut, ash vinyl, grey and white
 tile, marble, polished concrete, grey carpet, plain) and eight wall paints, with colours the
 plan (a light tint) and the 3D view share. Each side of a wall takes its own paint: the

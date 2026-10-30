@@ -1322,6 +1322,12 @@ select {
     overflow: hidden;
     clip: rect(0 0 0 0);
   }
+  /* The palette's own copies live in the details panel's tool panel here; out of layout
+     entirely, so they can't make the page taller than the screen. */
+  .palette .tool-options,
+  .palette .tool-hint {
+    display: none;
+  }
   .tool {
     grid-template-columns: 1fr;
     justify-items: center;
@@ -1605,5 +1611,25 @@ select {
   .swatch {
     width: 36px;
     height: 36px;
+  }
+}
+
+/* Phones: the catalogue is one sideways row of pieces under its filter, by room. */
+@media (max-width: 720px) {
+  .tool-panel .catalogue > .panel-heading,
+  .tool-panel .catalogue-heading {
+    display: none;
+  }
+  .tool-panel .catalogue-list {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tool-panel .catalogue-group {
+    display: contents;
+  }
+  .inspector {
+    overscroll-behavior: contain;
   }
 }

@@ -7,7 +7,7 @@ import {
   newItem,
   placeFurniture,
 } from '@dhd/core';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useEditor } from '../editor';
 import { formatLength } from '../units';
 import { type PlanPointer, type ToolContext, type ToolController, gridSnap } from './tools';
@@ -23,6 +23,9 @@ export function useFurnitureTool(ctx: ToolContext): ToolController {
   const kind = furnitureKind(kindId);
   const [turn, setTurn] = useState(0);
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  // Each piece picked starts unturned (a turn chosen for the chairs isn't the sofa's).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on a new pick only
+  useEffect(() => setTurn(0), [kindId]);
 
   const place = (p: PlanPointer) =>
     kind ? placeFurniture(ctx.geom, kind, gridSnap(p.world, 0.05, p.alt), turn) : null;
@@ -36,7 +39,8 @@ export function useFurnitureTool(ctx: ToolContext): ToolController {
       const id = newId('it');
       ctx.dispatch(addItem(ctx.level.id, newItem(id, kind, spot.at, spot.rotation)));
       useEditor.getState().select({ kind: 'item', id });
-      setAt(gridSnap(p.world, 0.05, p.alt));
+      // No preview over the piece just placed; the next pointer move brings it back.
+      setAt(null);
       return true;
     },
     move: (p) => setAt(gridSnap(p.world, 0.05, p.alt)),
@@ -49,7 +53,9 @@ export function useFurnitureTool(ctx: ToolContext): ToolController {
       const sel = useEditor.getState().selection;
       // The piece just placed (still selected) can go again straight away.
       if ((e.key === 'Delete' || e.key === 'Backspace') && sel?.kind === 'item') {
-        ctx.dispatch(deleteItem(ctx.level.id, sel.id));
+        const gone = ctx.level.items[sel.id];
+        const name = gone && furnitureKind(gone.assetId)?.name.toLowerCase();
+        ctx.dispatch(deleteItem(ctx.level.id, sel.id, name));
         useEditor.getState().select(null);
         return true;
       }
@@ -75,7 +81,7 @@ export function useFurnitureTool(ctx: ToolContext): ToolController {
           )}
           <g transform={`translate(${c.x} ${c.y})`}>
             <text textAnchor="middle" y={4} className="ghost-item-label">
-              {kind.name} · {formatLength(kind.size.w)} × {formatLength(kind.size.d)}
+              {kind.name}
             </text>
           </g>
         </g>

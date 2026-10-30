@@ -140,7 +140,14 @@ export function describe(level: Level, sel: Selection | null): string {
       const it = level.items[sel.id];
       if (!it) return '';
       const { w, d } = itemSize(it);
-      return `${furnitureKind(it.assetId)?.name ?? 'Furniture'}, ${formatLength(w)} by ${formatLength(d)}`;
+      const at = { x: it.position.x, y: it.position.z };
+      const shapes = roomShapes(level);
+      const room = Object.values(level.rooms).find((r) => {
+        const s = shapes.get(r.id);
+        return s && pointInPolygon(at, s.outer) && !s.holes.some((h) => pointInPolygon(at, h));
+      });
+      const where = room ? ` in ${room.name}` : '';
+      return `${furnitureKind(it.assetId)?.name ?? 'Furniture'}${where}, ${formatLength(w)} by ${formatLength(d)}`;
     }
     case 'opening': {
       const o = level.openings[sel.id];

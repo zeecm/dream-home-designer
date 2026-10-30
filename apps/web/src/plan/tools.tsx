@@ -75,7 +75,7 @@ export const TOOL_HINTS: Record<Tool, string> = {
   passage: 'Pick a width, then tap or click a wall to add an opening.',
   measure: 'Tap both ends, or drag between them, to measure.',
   furniture:
-    'Pick a piece, then tap or click to place it. Near a wall it backs onto it. R turns it; Esc goes back to Select.',
+    'Pick a piece, then tap or click to place it. Near a wall it backs onto it. Turn it in its details, or with R.',
   calibrate:
     'Tap both ends of a length you know on the plan image, or drag along it, then enter the real length.',
 };
@@ -116,7 +116,16 @@ const ARROWS: Record<string, Vec2> = {
 
 type Drag =
   | { kind: 'vertex'; id: string; start: Vec2; moved: boolean; key: string }
-  | { kind: 'item'; id: string; start: Vec2; grab: Vec2; moved: boolean; key: string }
+  | {
+      kind: 'item';
+      id: string;
+      start: Vec2;
+      grab: Vec2;
+      /** Its turn when picked up: kept wherever no wall turns it. */
+      turn: number;
+      moved: boolean;
+      key: string;
+    }
   | { kind: 'opening'; id: string; wallId: string; start: Vec2; moved: boolean; key: string };
 
 interface NudgeRun {
@@ -205,6 +214,7 @@ export function useSelectTool(ctx: ToolContext): ToolController {
             id: h.id,
             start: p.screen,
             grab: { x: p.world.x - it.position.x, y: p.world.y - it.position.z },
+            turn: it.rotationY,
             moved: false,
             key,
           };
@@ -243,8 +253,8 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         // A piece that stands against a wall backs onto one it's dragged near.
         const spot =
           kind && it.flags.snapWall && !p.alt
-            ? placeFurniture(ctx.geom, kind, want, it.rotationY, itemSize(it, kind))
-            : { at: want, rotation: it.rotationY };
+            ? placeFurniture(ctx.geom, kind, want, d.turn, itemSize(it, kind))
+            : { at: want, rotation: d.turn };
         ctx.dispatch(
           updateItem(levelId, d.id, {
             position: { x: spot.at.x, z: spot.at.y },
@@ -333,7 +343,11 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       if ((e.key === 'Delete' || e.key === 'Backspace') && sel) {
         const cmd =
           sel.kind === 'item'
-            ? deleteItem(levelId, sel.id)
+            ? deleteItem(
+                levelId,
+                sel.id,
+                furnitureKind(live().items[sel.id]?.assetId ?? '')?.name.toLowerCase(),
+              )
             : sel.kind === 'wall'
               ? deleteWall(levelId, sel.id, ctx.level)
               : sel.kind === 'opening'

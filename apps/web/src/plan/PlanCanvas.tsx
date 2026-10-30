@@ -101,10 +101,16 @@ export function PlanCanvas() {
   const v = view ?? { cx: 0, cy: 0, zoom: 50 };
 
   const viewAdjusted = useEditor((s) => s.viewAdjusted);
-  // Fit on request, and keep fitting while the pane resizes until the user pans or zooms.
+  /** When the plan was last fitted, and what to: a resize soon after still refits. */
+  const lastFit = useRef({ at: 0, ink: null as PixelBox | null, image: '' });
+  // Fit on request, and while the pane settles or the plan image arrives, until the user
+  // pans or zooms. Once settled, a resize (a phone's details panel opening) keeps the view.
   // biome-ignore lint/correctness/useExhaustiveDependencies: refit on size, request or image, not on every edit
   useEffect(() => {
     if ((!fitRequested && viewAdjusted) || !level || size.width === 0) return;
+    const prev = lastFit.current;
+    const resizedOnly = prev.ink === ink && prev.image === image.status;
+    if (!fitRequested && resizedOnly && prev.at > 0 && Date.now() - prev.at > 1000) return;
     let b = levelBounds(level);
     if (!b && underlay && image.status === 'ready') {
       // Frame the drawing, not the whole page around it.
@@ -121,6 +127,7 @@ export function PlanCanvas() {
       };
     }
     setView(fitBounds(b, size));
+    lastFit.current = { at: Date.now(), ink, image: image.status };
     fitDone();
   }, [fitRequested, viewAdjusted, size, image.status, ink, setView, fitDone]);
 
@@ -132,7 +139,9 @@ export function PlanCanvas() {
     const prev = lastSize.current;
     lastSize.current = size;
     const cur = useEditor.getState().view;
-    if (!cur || !useEditor.getState().viewAdjusted || prev.width === 0 || size.width === 0) return;
+    const settled = Date.now() - lastFit.current.at > 1000;
+    if (!cur || prev.width === 0 || size.width === 0) return;
+    if (!useEditor.getState().viewAdjusted && !settled) return; // still fitting
     const dx = size.width - prev.width;
     const dy = size.height - prev.height;
     if (dx === 0 && dy === 0) return;

@@ -35,6 +35,7 @@ test('furnish: place a bed against a wall, turn it, resize it, delete and undo',
   await items.first().click({ force: true });
   await page.keyboard.press('Delete');
   await expect(items).toHaveCount(0);
+  await expect(page.locator('.toast')).toContainText('Queen bed deleted');
   await page.locator('.toast').getByRole('button', { name: 'Undo' }).click();
   await expect(items).toHaveCount(1);
   await waitSaved(page);

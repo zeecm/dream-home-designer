@@ -8,6 +8,7 @@ import {
   framePoint,
   furnitureKind,
   itemFootprint,
+  itemSize,
   placeLabel,
   roomArea,
   roomShape,
@@ -242,11 +243,22 @@ interface RoomLabel {
   at: Vec2;
 }
 
-/** Fits each room's name (and area, if there is space) at this zoom, clear of door swings. */
+/**
+ * Fits each room's name (and area, if there is space) at this zoom, clear of door swings
+ * and of the furniture standing in the room.
+ */
 function roomLabels(level: Level, geom: PlanGeometry, zoom: number): RoomLabel[] {
-  const swings = geom.openings
-    .filter((o) => o.kind === 'door')
-    .map((o) => swingZone(doorSwing(o.frame, o.opening)));
+  const swings = [
+    ...geom.openings
+      .filter((o) => o.kind === 'door')
+      .map((o) => swingZone(doorSwing(o.frame, o.opening))),
+    ...Object.values(level.items)
+      .filter((it) => it.flags.collidable)
+      .map((it) => {
+        const { w, d } = itemSize(it);
+        return { c: { x: it.position.x, y: it.position.z }, r: Math.hypot(w, d) / 2 };
+      }),
+  ];
   const out: RoomLabel[] = [];
   const shapes = roomShapes(level);
   for (const r of Object.values(level.rooms)) {

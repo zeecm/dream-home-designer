@@ -118,11 +118,13 @@ export function Inspector() {
       >
         {open ? 'Hide details' : 'Show plan details'}
       </button>
-      <ToolPanel />
+      {/* With something selected (a piece just placed), its details come first. */}
+      {!selection && <ToolPanel />}
       {/* A view-only link shows the details but can't change them. */}
       <fieldset className="inspector-body" disabled={viewer}>
         {body}
       </fieldset>
+      {selection && <ToolPanel />}
     </aside>
   );
 }
@@ -475,7 +477,16 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
         value={size.d}
         min={0.05}
         max={10}
-        onCommit={(v) => v !== undefined && set({ scale: { z: v / base.d } })}
+        onCommit={(v) => {
+          if (v === undefined) return;
+          // A piece against a wall keeps its back there and grows or shrinks at the front.
+          const move = it.flags.snapWall ? (v - size.d) / 2 : 0;
+          const front = { x: -Math.sin(it.rotationY), y: Math.cos(it.rotationY) };
+          set({
+            scale: { z: v / base.d },
+            position: { x: it.position.x + front.x * move, z: it.position.z + front.y * move },
+          });
+        }}
       />
       <LengthField
         label="Height"
@@ -513,7 +524,7 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
       <DeleteButton
         label="Delete"
         onClick={() => {
-          dispatch(deleteItem(level.id, id));
+          dispatch(deleteItem(level.id, id, kind?.name.toLowerCase()));
           clear();
         }}
       />

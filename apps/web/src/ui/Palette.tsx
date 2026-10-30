@@ -128,25 +128,27 @@ function Catalogue({ idPrefix }: { idPrefix: string }) {
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
       />
-      {groups.map((g) => (
-        <div key={g} className="catalogue-group">
-          <p className="catalogue-heading">{g}</p>
-          <ul className="choice-list">
-            {shown
-              .filter((k) => k.category === g)
-              .map((k) => (
-                <li key={k.id}>
-                  <button type="button" aria-pressed={picked === k.id} onClick={() => pick(k.id)}>
-                    <span>{k.name}</span>
-                    <span className="choice-note num">
-                      {cm(k.size.w)} × {cm(k.size.d)}
-                    </span>
-                  </button>
-                </li>
-              ))}
-          </ul>
-        </div>
-      ))}
+      <div className="catalogue-list">
+        {groups.map((g) => (
+          <div key={g} className="catalogue-group">
+            <p className="catalogue-heading">{g}</p>
+            <ul className="choice-list">
+              {shown
+                .filter((k) => k.category === g)
+                .map((k) => (
+                  <li key={k.id}>
+                    <button type="button" aria-pressed={picked === k.id} onClick={() => pick(k.id)}>
+                      <span>{k.name}</span>
+                      <span className="choice-note num">
+                        {cm(k.size.w)} × {cm(k.size.d)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          </div>
+        ))}
+      </div>
       {shown.length === 0 && <p className="field-hint">Nothing called that yet.</p>}
     </section>
   );

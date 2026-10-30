@@ -383,15 +383,86 @@ export function placeFurniture(
     if (gap > WALL_SNAP || gap < -size.d / 2 - f.half) continue;
     if (best && gap >= best.gap) continue;
     const off = f.half + size.d / 2 + 0.005;
+    // Slid along the wall as little as it takes to clear the walls beside it (a corner).
+    const along = clearAlong(geom, f, side, u, size);
     best = {
       gap,
       wallId: f.wall.id,
-      at: { x: f.a.x + f.d.x * u + f.n.x * off * side, y: f.a.y + f.d.y * u + f.n.y * off * side },
+      at: {
+        x: f.a.x + f.d.x * along + f.n.x * off * side,
+        y: f.a.y + f.d.y * along + f.n.y * off * side,
+      },
       // Facing away from the wall: (-sin r, cos r) = side · n.
       rotation: Math.atan2(-f.n.x * side, f.n.y * side),
     };
   }
   return best ? { at: best.at, rotation: best.rotation, wallId: best.wallId } : { at, rotation };
+}
+
+/**
+ * The nearest centre to `u` along wall `f` at which a piece of `size`, backed onto the face
+ * on `side`, stays clear of every other wall and junction: those reaching into the strip it
+ * would stand in, measured along the wall.
+ */
+function clearAlong(
+  geom: PlanGeometry,
+  f: PlanGeometry['frames'][string],
+  side: 1 | -1,
+  u: number,
+  size: { w: number; d: number },
+): number {
+  const s0 = f.half + 0.01;
+  const s1 = f.half + size.d;
+  const blocked: [number, number][] = [];
+  const solids = [
+    ...geom.pieces.filter((p) => p.wallId !== f.wall.id).map((p) => p.polygon),
+    ...geom.footprints.hubs.map((h) => h.polygon),
+  ];
+  for (const poly of solids) {
+    // Into the wall's frame: along it, and out from its centre line on `side`.
+    const local = poly.map((p) => {
+      const rx = p.x - f.a.x;
+      const ry = p.y - f.a.y;
+      return { x: rx * f.d.x + ry * f.d.y, y: (rx * f.n.x + ry * f.n.y) * side };
+    });
+    const inStrip = clipSlab(local, s0, s1);
+    if (inStrip.length < 3) continue;
+    const xs = inStrip.map((p) => p.x);
+    blocked.push([Math.min(...xs), Math.max(...xs)]);
+  }
+  const half = size.w / 2;
+  const free = (c: number) =>
+    blocked.every(([a, b]) => c + half <= a + 1e-6 || c - half >= b - 1e-6);
+  if (free(u)) return u;
+  // Only along this wall: a piece too wide for the free stretch stays where it snapped,
+  // overlapping, rather than leaving the wall altogether.
+  const options = blocked
+    .flatMap(([a, b]) => [a - half - 0.005, b + half + 0.005])
+    .filter((c) => c >= 0 && c <= f.length && free(c))
+    .sort((p, q) => Math.abs(p - u) - Math.abs(q - u));
+  return options[0] ?? u;
+}
+
+/** The part of a polygon with y between y0 and y1 (two Sutherland–Hodgman passes). */
+function clipSlab(poly: Vec2[], y0: number, y1: number): Vec2[] {
+  const clip = (pts: Vec2[], keep: (p: Vec2) => boolean, y: number) => {
+    const out: Vec2[] = [];
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i] as Vec2;
+      const q = pts[(i + 1) % pts.length] as Vec2;
+      if (keep(p)) out.push(p);
+      if (keep(p) !== keep(q)) {
+        const t = (y - p.y) / (q.y - p.y);
+        out.push({ x: p.x + (q.x - p.x) * t, y });
+      }
+    }
+    return out;
+  };
+  return clip(
+    clip(poly, (p) => p.y >= y0, y0),
+    (p) => p.y <= y1,
+    y1,
+  );
 }
 
 function lvl(d: Draft<Project>, levelId: string): Draft<Level> {
@@ -438,9 +509,10 @@ export function updateItem(levelId: string, itemId: string, patch: ItemPatch): C
   };
 }
 
-export function deleteItem(levelId: string, itemId: string): Command {
+/** `name` (e.g. "queen bed") goes in the undo label and the Undo toast. */
+export function deleteItem(levelId: string, itemId: string, name = 'furniture'): Command {
   return {
-    label: 'Delete furniture',
+    label: `Delete ${name}`,
     recipe: (d) => {
       delete lvl(d, levelId).items[itemId];
     },

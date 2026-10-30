@@ -134,3 +134,31 @@ describe('furniture and the walk', () => {
     expect(insideFurniture(lvl(), start!.at)).toBe(false);
   });
 });
+
+describe('placeFurniture in a corner', () => {
+  const geom = planGeometry(sampleFlatProject().levels[0]!);
+
+  it('slides a wardrobe dropped in a corner clear of the side wall', () => {
+    // The main bedroom's top-left corner: top wall inner face y 0.15, left wall face x 0.3.
+    const p = placeFurniture(geom, kind('wardrobe'), { x: 0.6, y: 0.45 }, 0);
+    const f = itemFootprint(newItem('w', kind('wardrobe'), p.at, p.rotation));
+    for (const q of f) {
+      expect(q.x).toBeGreaterThanOrEqual(0.3 - 1e-6);
+      expect(q.y).toBeGreaterThanOrEqual(0.15 - 1e-6);
+    }
+  });
+
+  it('keeps a bedside table on a short wall off the thicker wall above it', () => {
+    // The bedroom's 100 mm wall (face x 6.395, y 2.156..3.048) below the 300 mm one.
+    const p = placeFurniture(geom, kind('bedside'), { x: 6.1, y: 2.2 }, 0);
+    expect(p.at.x).toBeCloseTo(6.395 - 0.2 - 0.005);
+    const f = itemFootprint(newItem('b', kind('bedside'), p.at, p.rotation));
+    for (const q of f) expect(q.y).toBeGreaterThanOrEqual(2.156 - 1e-6);
+  });
+
+  it('leaves a piece too wide for the free stretch by the wall it snapped to', () => {
+    const p = placeFurniture(geom, kind('desk'), { x: 6.0, y: 2.6 }, 0);
+    expect(p.at.y).toBeGreaterThan(2.156);
+    expect(p.at.y).toBeLessThan(3.048);
+  });
+});
