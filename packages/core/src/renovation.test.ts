@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { deleteWall, moveVertex, splitWall, updateWall } from './commands';
+import { deleteWall, moveVertex, splitWall, updateOpening, updateWall } from './commands';
 import { hdb4RoomProject } from './fixtures/hdb4room';
 import { type EditorDoc, dispatch, emptyHistory, undo } from './history';
-import { AFTER_SUFFIX, findLevel, variantLevels } from './levels';
+import { AFTER_SUFFIX, findLevel, touchedVariant, variantLevels } from './levels';
 import { loadProject } from './migrate';
 import { endRenovation, renovationDiff, startRenovation } from './renovation';
 import { Project } from './schema';
@@ -59,6 +59,26 @@ describe('startRenovation and endRenovation', () => {
     const { project } = loadProject(JSON.parse(JSON.stringify(s.doc)));
     expect(project.renovation?.levels[0]?.id).toBe(A);
   });
+
+  it('gives a renovation level that shares the plan’s id its own on load', () => {
+    const doc = JSON.parse(JSON.stringify(renovating().doc));
+    doc.renovation.levels[0].id = L;
+    const { project, fixes } = loadProject(doc);
+    expect(project.renovation?.levels[0]?.id).toBe(A);
+    expect(fixes.some((f) => f.includes('renamed'))).toBe(true);
+  });
+});
+
+describe('touchedVariant', () => {
+  it('names the version an undo step changes', () => {
+    let s = renovating();
+    expect(touchedVariant(s.history.past.at(-1)?.inverse ?? [])).toBe('after');
+    s = dispatch(s, deleteWall(A, 'w_living_kitchen'));
+    expect(touchedVariant(s.history.past.at(-1)?.inverse ?? [])).toBe('after');
+    s = dispatch(s, deleteWall(L, 'w_bed3_bed2'));
+    expect(touchedVariant(s.history.past.at(-1)?.inverse ?? [])).toBe('before');
+    expect(touchedVariant([{ op: 'replace', path: ['name'], value: 'x' }])).toBeNull();
+  });
 });
 
 describe('renovationDiff', () => {
@@ -72,9 +92,11 @@ describe('renovationDiff', () => {
   it('counts a wall taken out as hacked, with its outline, and the rooms merging', () => {
     const s = dispatch(renovating(), deleteWall(A, 'w_living_kitchen'));
     const d = diffOf(s);
-    expect(d.demolishedLength).toBeCloseTo(4.5);
+    // 4.5 m of wall line, less the 1.6 m passage in it that was never wall.
+    expect(d.demolishedLength).toBeCloseTo(2.9);
+    expect(d.openingsRemoved).toEqual(['op_kitchen']);
     expect(d.builtLength).toBe(0);
-    expect(d.demolished[0]?.polygon).toHaveLength(4);
+    expect(d.demolished.every((x) => x.polygon.length === 4)).toBe(true);
     // The kitchen joins the living room: one room fewer. Areas run to wall lines, as HDB
     // measures them, so the total stays the same.
     expect(Object.keys(s.doc.renovation?.levels[0]?.rooms ?? {}).length).toBeLessThan(
@@ -89,6 +111,16 @@ describe('renovationDiff', () => {
     const d = diffOf(dispatch(before, split.command));
     expect(d.demolishedLength).toBe(0);
     expect(d.builtLength).toBe(0);
+  });
+
+  it('counts a wall cut down to half height, and a door widened or moved', () => {
+    const low = diffOf(dispatch(renovating(), updateWall(A, 'w_bed3_bed2', { height: 1 })));
+    expect(low.demolishedLength).toBeCloseTo(4);
+    const wide = diffOf(dispatch(renovating(), updateOpening(A, 'op_bed2', { width: 1.2 })));
+    expect(wide.openingsAdded).toEqual(['op_bed2']);
+    expect(wide.openingsRemoved).toEqual(['op_bed2']);
+    const moved = diffOf(dispatch(renovating(), updateOpening(A, 'op_bed2', { t: 0.3 })));
+    expect(moved.openingsAdded).toEqual(['op_bed2']);
   });
 
   it('counts a moved wall as hacked and rebuilt, and a thicker one too', () => {

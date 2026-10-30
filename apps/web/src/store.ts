@@ -13,8 +13,10 @@ import {
   emptyHistory,
   newId,
   sampleFlatProject,
+  touchedVariant,
   variantLevels,
 } from '@dhd/core';
+import type { Patch } from 'immer';
 import { create } from 'zustand';
 import {
   type Backend,
@@ -219,6 +221,17 @@ export const useStore = create<State>((set, get) => {
     while (inflight) await inflight;
   };
 
+  /**
+   * After an undo or redo, shows the version of the flat it changed, so it never changes
+   * one out of sight.
+   */
+  const showChanged = (patches: readonly Patch[]) => {
+    const touched = touchedVariant(patches);
+    const has = !!get().editor.doc.renovation;
+    if (!has) useEditor.getState().setVariant('before');
+    else if (touched) useEditor.getState().setVariant(touched);
+  };
+
   /** Where a missing plan leads: the sample this browser keeps, or a new copy of it. */
   const fallBack = () => {
     const kept = keptSample(get().recent);
@@ -261,13 +274,19 @@ export const useStore = create<State>((set, get) => {
     },
     undo: () => {
       if (!canEdit(get())) return;
+      const step = get().editor.history.past.at(-1);
       const next = coreUndo(get().editor);
-      if (next !== get().editor) commit(next);
+      if (next === get().editor) return;
+      commit(next);
+      showChanged(step?.inverse ?? []);
     },
     redo: () => {
       if (!canEdit(get())) return;
+      const step = get().editor.history.future[0];
       const next = coreRedo(get().editor);
-      if (next !== get().editor) commit(next);
+      if (next === get().editor) return;
+      commit(next);
+      showChanged(step?.patches ?? []);
     },
 
     load: async (id) => {

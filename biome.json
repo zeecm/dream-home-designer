@@ -8,18 +8,46 @@
       ".claude",
       ".taste-skill",
       "**/test-results",
-      "**/playwright-report"
+      "**/playwright-report",
+      "tools/models/.cache"
     ]
   },
-  "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },
-  "javascript": { "formatter": { "quoteStyle": "single", "semicolons": "always" } },
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "always"
+    }
+  },
   "linter": {
     "enabled": true,
     "rules": {
       "recommended": true,
-      "style": { "noNonNullAssertion": "off" },
-      "performance": { "noDelete": "off" }
+      "style": {
+        "noNonNullAssertion": "off"
+      },
+      "performance": {
+        "noDelete": "off"
+      }
     }
   },
-  "organizeImports": { "enabled": true }
+  "organizeImports": {
+    "enabled": true
+  },
+  "overrides": [
+    {
+      "include": ["**/*.generated.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noApproximativeNumericConstant": "off"
+          }
+        }
+      }
+    }
+  ]
 }

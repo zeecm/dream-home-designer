@@ -81,9 +81,12 @@ interface Line {
   a: Vec2;
   d: Vec2;
   length: number;
+  height: number;
   /** Face offsets along the left normal (-d.y, d.x): the left face at +left, the right at -right. */
   left: number;
   right: number;
+  /** Where doors, windows and openings leave no wall, as [from, to] along the line. */
+  holes: [number, number][];
 }
 
 function linesOf(level: Level): Line[] {
@@ -96,13 +99,36 @@ function linesOf(level: Level): Line[] {
     const length = Math.hypot(b.x - a.x, b.y - a.y);
     if (length < EPS) continue;
     const { left, right } = wallFaces(wall);
+    const holes = Object.values(level.openings)
+      .filter((o) => o.wallId === wall.id)
+      .map((o): [number, number] => [
+        Math.max(0, o.t * length - o.width / 2),
+        Math.min(length, o.t * length + o.width / 2),
+      ]);
     out.push({
       wall,
       a,
       d: { x: (b.x - a.x) / length, y: (b.y - a.y) / length },
       length,
+      height: wall.height ?? level.ceilingHeight,
       left,
       right,
+      holes,
+    });
+  }
+  return out;
+}
+
+/** `spans` with `cuts` taken out (both sorted or not; [from, to] pairs). */
+function subtract(spans: [number, number][], cuts: [number, number][]): [number, number][] {
+  let out = spans;
+  for (const [c0, c1] of cuts) {
+    out = out.flatMap(([s0, s1]): [number, number][] => {
+      if (c1 <= s0 || c0 >= s1) return [[s0, s1]];
+      const keep: [number, number][] = [];
+      if (c0 - s0 > EPS) keep.push([s0, c0]);
+      if (s1 - c1 > EPS) keep.push([c1, s1]);
+      return keep;
     });
   }
   return out;
@@ -120,6 +146,8 @@ function overlap(line: Line, other: Line): [number, number] | null {
   const left = same ? other.left : other.right;
   const right = same ? other.right : other.left;
   if (Math.abs(left - line.left) > EPS || Math.abs(right - line.right) > EPS) return null;
+  // Cut down to a half-height wall is a hack too.
+  if (Math.abs(other.height - line.height) > EPS) return null;
   const t = (p: Vec2) => (p.x - line.a.x) * line.d.x + (p.y - line.a.y) * line.d.y;
   const t0 = t(other.a);
   const t1 = t0 + (same ? other.length : -other.length);
@@ -137,12 +165,14 @@ function uncovered(from: Line[], against: Line[]): WallStretch[] {
       .filter((c): c is [number, number] => !!c)
       .sort((p, q) => p[0] - q[0]);
     let at = 0;
-    const gaps: [number, number][] = [];
+    let gaps: [number, number][] = [];
     for (const [lo, hi] of covers) {
       if (lo - at > EPS) gaps.push([at, lo]);
       at = Math.max(at, hi);
     }
     if (line.length - at > EPS) gaps.push([at, line.length]);
+    // A doorway in the wall was never wall to hack or build.
+    gaps = subtract(gaps, line.holes);
     for (const [t0, t1] of gaps) {
       const p = (t: number, side: number) => ({
         x: line.a.x + line.d.x * t - line.d.y * side,
@@ -160,10 +190,41 @@ function uncovered(from: Line[], against: Line[]): WallStretch[] {
   return out;
 }
 
+interface Gap {
+  id: string;
+  kind: string;
+  centre: Vec2;
+  width: number;
+  height: number;
+  sill: number;
+}
+
+function gapsOf(level: Level): Gap[] {
+  const out: Gap[] = [];
+  for (const o of Object.values(level.openings)) {
+    const w = level.walls[o.wallId];
+    const a = w && level.vertices[w.a];
+    const b = w && level.vertices[w.b];
+    if (!a || !b) continue;
+    const centre = { x: a.x + (b.x - a.x) * o.t, y: a.y + (b.y - a.y) * o.t };
+    out.push({ id: o.id, kind: o.kind, centre, width: o.width, height: o.height, sill: o.sill });
+  }
+  return out;
+}
+
+const sameGap = (p: Gap, q: Gap) =>
+  p.kind === q.kind &&
+  Math.hypot(p.centre.x - q.centre.x, p.centre.y - q.centre.y) < 0.01 &&
+  Math.abs(p.width - q.width) < 0.005 &&
+  Math.abs(p.height - q.height) < 0.005 &&
+  Math.abs(p.sill - q.sill) < 0.005;
+
 /**
  * What a renovation changes, as a hacking plan shows it: the wall taken away and the wall
  * put up, matched by where walls run (not by id), so a wall split or redrawn in the same
- * place counts as unchanged, and one moved or made thicker counts as hacked and rebuilt.
+ * place counts as unchanged, and one moved, thickened or cut down counts as hacked and
+ * rebuilt. Doors and windows are matched by where they are and their size, so one moved or
+ * widened counts as removed and added.
  */
 export function renovationDiff(before: Level, after: Level): RenovationDiff {
   const b = linesOf(before);
@@ -172,13 +233,15 @@ export function renovationDiff(before: Level, after: Level): RenovationDiff {
   const built = uncovered(a, b);
   const sum = (xs: WallStretch[]) => xs.reduce((s, x) => s + x.length, 0);
   const area = (l: Level) => Object.values(l.rooms).reduce((s, r) => s + roomArea(l, r), 0);
+  const gb = gapsOf(before);
+  const ga = gapsOf(after);
   return {
     demolished,
     built,
     demolishedLength: sum(demolished),
     builtLength: sum(built),
-    openingsAdded: Object.keys(after.openings).filter((id) => !before.openings[id]),
-    openingsRemoved: Object.keys(before.openings).filter((id) => !after.openings[id]),
+    openingsAdded: ga.filter((g) => !gb.some((h) => sameGap(g, h))).map((g) => g.id),
+    openingsRemoved: gb.filter((g) => !ga.some((h) => sameGap(g, h))).map((g) => g.id),
     areaBefore: area(before),
     areaAfter: area(after),
   };

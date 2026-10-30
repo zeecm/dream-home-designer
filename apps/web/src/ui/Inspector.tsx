@@ -236,6 +236,7 @@ function PlanSummary({ level }: { level: Level }) {
           <dd className="num">{count('window')}</dd>
         </div>
       </dl>
+      <RenovationSection />
       <LengthField
         label="Ceiling height"
         value={level.ceilingHeight}
@@ -244,7 +245,6 @@ function PlanSummary({ level }: { level: Level }) {
         onCommit={(v) => v !== undefined && dispatch(setCeilingHeight(level.id, v))}
       />
       <NorthField />
-      <RenovationSection />
     </>
   );
 }

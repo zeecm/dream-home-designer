@@ -21,9 +21,19 @@ export function diffLine(d: RenovationDiff): string {
   const parts: string[] = [];
   if (d.demolishedLength > 0) parts.push(`${formatLength(d.demolishedLength)} of wall hacked`);
   if (d.builtLength > 0) parts.push(`${formatLength(d.builtLength)} built`);
-  const doors = d.openingsAdded.length + d.openingsRemoved.length;
-  if (doors > 0) parts.push(count(doors, 'opening changed', 'openings changed'));
+  const doors = openingsText(d);
+  if (doors) parts.push(doors);
   return parts.length ? parts.join(' · ') : 'No changes yet';
+}
+
+/** "1 door or window added, 2 removed", or '' for none (a moved one is both). */
+function openingsText(d: RenovationDiff): string {
+  const added = d.openingsAdded.length;
+  const removed = d.openingsRemoved.length;
+  if (!added && !removed) return '';
+  const what = (n: number) => count(n, 'door or window', 'doors or windows');
+  if (added && removed) return `${what(added)} added, ${removed} removed`;
+  return added ? `${what(added)} added` : `${what(removed)} removed`;
 }
 
 /**
@@ -50,7 +60,13 @@ export function RenovationBar() {
       <span className="reno-summary">
         <span className="reno-key reno-key-hack" aria-hidden="true" />
         <span className="reno-key reno-key-new" aria-hidden="true" />
-        {diffLine(diff)}
+        <span className="reno-summary-text">
+          {/* Edits go to the version shown; say which, so a fix to the trace isn't a surprise. */}
+          <span className="reno-editing">
+            {variant === 'before' ? 'Editing the flat as it is. ' : 'Editing the renovation. '}
+          </span>
+          {diffLine(diff)}
+        </span>
       </span>
     </div>
   );
@@ -80,12 +96,12 @@ export function RenovationMarks() {
         </pattern>
       </defs>
       {diff.demolished.map((s, i) => (
-        <polygon
-          // biome-ignore lint/suspicious/noArrayIndexKey: stretches have no id of their own
-          key={`d${i}`}
-          className="reno-hack"
-          points={pts(s.polygon)}
-        />
+        // biome-ignore lint/suspicious/noArrayIndexKey: stretches have no id of their own
+        <g key={`d${i}`}>
+          {/* A pale ground under the hatch, so it shows over the black of a wall. */}
+          <polygon className="reno-hack-ground" points={pts(s.polygon)} />
+          <polygon className="reno-hack" points={pts(s.polygon)} />
+        </g>
       ))}
       {diff.built.map((s, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: stretches have no id of their own
@@ -146,11 +162,7 @@ export function RenovationSection() {
         </div>
         <div>
           <dt>Doors and windows</dt>
-          <dd className="num">
-            {diff.openingsAdded.length || diff.openingsRemoved.length
-              ? `+${diff.openingsAdded.length} / −${diff.openingsRemoved.length}`
-              : 'No change'}
-          </dd>
+          <dd>{openingsText(diff) || 'No change'}</dd>
         </div>
         <div>
           <dt>Floor area</dt>
@@ -167,7 +179,9 @@ export function RenovationSection() {
         </div>
       </dl>
       <p className="field-hint">
-        Once the work is done, make the renovation the plan. Either step can be undone.
+        Edits go to the version shown above the plan. Moving a wall counts as hacking it and
+        building it anew. Once the work is done, make the renovation the plan; either step can be
+        undone.
       </p>
       <span className="button-row">
         <button

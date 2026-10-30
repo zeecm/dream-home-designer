@@ -480,7 +480,13 @@ rebuilt. The plan marks hacked wall (red hatch; a dashed outline in "after") and
 (accent; an outline in "before"); a bar above the stage switches versions and sums the
 changes; the plan details show the totals and "Make it the plan" (`endRenovation('after')`)
 or "Discard the renovation", both undoable with a toast. The plan image, north and site are
-shared. **Not yet:** a side-by-side 3D compare, and listing what changed room by room.
+shared. The diff counts height (a wall cut down is hacked), leaves doorways out of the
+lengths, and matches doors and windows by position and size. Undo and redo switch to the
+version they change (`touchedVariant` on the step's patches); switching versions remounts the
+plan, dropping a half-drawn wall; the bar says which version edits go to and hides while
+walking; `loadProject` gives a renovation level that clashes with the plan's id its own.
+**Not yet:** a side-by-side 3D compare; listing changes room by room; applying an edit to
+both versions at once (a trace fix in "before" shows as built wall in the after).
 
 **Your plans:** the project menu's "Manage your plans…" opens a dialog listing this
 browser's plans (the recent list, up to 20): open one, delete one (with an inline confirm), or
@@ -495,6 +501,18 @@ While a dialog is open the plan's keyboard shortcuts are off.
 
 **Still open:** latitude and place aren't editable in the UI; lamps are always on. Ceiling
 lights move with `setCeilingHeight`. Walking at night is lit by lamps, with only a faint fill.
+
+**Furniture models (Phase 3c):** `tools/models` (a workspace package) builds them:
+`pnpm --filter @dhd/models build [ids…]` reads `catalogue.json` (Poly Haven asset, our id,
+name, category, placement flags, an optional `turn` to face +Z, triangle budget), downloads
+each 1k glTF, centres it on its footprint with its base at 0, simplifies above 40k triangles,
+shrinks textures to 512 px WebP, compresses with meshopt, and writes
+`apps/web/public/models/<id>.<hash>.glb` (19 models, 3.7 MB, cached immutable) and
+`packages/core/src/modelKinds.generated.ts` (sizes measured from the models). Core adds them
+to `FURNITURE` with a stand-in box (`placeholder`); render's `ModelLibrary` loads each GLB
+once and `LevelMeshes` swaps the box for a copy when it arrives (copies share geometry, marked
+`userData.shared`). No modern beds or TVs on Poly Haven, so those stay box-built.
+**Next:** catalogue thumbnails; more models (Sketchfab CC0 needs an API key).
 
 Poly Haven (CC0, reachable from here) has about 136 indoor models for later; Kenney is
 blocked by the network proxy and Sketchfab needs an API key.
@@ -594,5 +612,10 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
 - **Walls use one material for both faces.** `materialLeft` covers both, and per-side materials
   come in Phase 3.
 - **No `project_versions` history yet.** It comes with accounts in Phase 4, on D1.
+- **Flaky phone e2e:** `mobile.spec.ts` sometimes loses the drawing bar's Add tap when the
+  run is slow (failing runs take twice as long). Seen before and after the renovation work;
+  CI hasn't hit it.
+- **Wall tool snapping:** it snaps hard to door and window ends, so a wall drawn across a room
+  past a door can come out slanted (seen in acceptance round 9).
 - **Corner dimension lines** for walls that run into the room draw inside it; fine at plan scale,
   busy on short walls.

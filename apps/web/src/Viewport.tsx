@@ -9,7 +9,7 @@ import {
   sunDirection,
   sunPosition,
 } from '@dhd/core';
-import { LevelMeshes, MaterialCache } from '@dhd/render';
+import { LevelMeshes, MaterialCache, ModelLibrary } from '@dhd/render';
 import { OrbitControls } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -22,6 +22,8 @@ import { WalkControls, type WalkPose } from './walk/WalkControls';
 import { loadWalkPose, saveWalkPose } from './walk/pose';
 
 const materials = new MaterialCache();
+/** The furniture models, fetched once each for the session (Pages serves /models). */
+const models = new ModelLibrary('/models/');
 const FOV = 40;
 
 /**
@@ -30,11 +32,15 @@ const FOV = 40;
  */
 function LevelMesh({ ceilings }: { ceilings: boolean }) {
   const level = useLevel();
-  const meshes = useMemo(() => new LevelMeshes(materials, { ceilings }), [ceilings]);
+  const meshes = useMemo(() => new LevelMeshes(materials, { ceilings, models }), [ceilings]);
   useEffect(() => () => meshes.dispose(), [meshes]);
+  // A model arriving swaps its stand-in box for it.
+  const [arrived, setArrived] = useState(0);
+  useEffect(() => models.onLoad(() => setArrived((n) => n + 1)), []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `arrived` re-runs it for new models
   useLayoutEffect(() => {
     if (level) meshes.update(level);
-  }, [level, meshes]);
+  }, [level, meshes, arrived]);
   return <primitive object={meshes.group} />;
 }
 

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { drawWall, setCeilingHeight } from './commands';
 import { blankProject } from './factory';
@@ -223,5 +224,18 @@ describe('ceiling lights and the ceiling height', () => {
     expect(items?.f?.position.y).toBe(0);
     s = undo(s);
     expect(s.doc.levels[0]?.items.c?.position.y).toBeCloseTo(lvl.ceilingHeight - light.size.h);
+  });
+});
+
+describe('model kinds', () => {
+  it('each has its GLB in the web app, a real size and a CC0 source', () => {
+    const models = FURNITURE.filter((k) => k.model);
+    expect(models.length).toBeGreaterThan(10);
+    for (const k of models) {
+      expect(existsSync(`../../apps/web/public/models/${k.model}`), k.id).toBe(true);
+      expect(k.size.w * k.size.d * k.size.h).toBeGreaterThan(0);
+      expect(k.source).toMatch(/^https:\/\/polyhaven\.com\/a\//);
+    }
+    expect(new Set(FURNITURE.map((k) => k.id)).size).toBe(FURNITURE.length);
   });
 });

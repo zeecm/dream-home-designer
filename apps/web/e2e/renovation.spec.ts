@@ -53,3 +53,35 @@ test('renovation: hack a wall in the after, compare with before, then keep or di
   await expect(page.locator(WALL)).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+test('undo shows the version it changes, and switching versions drops a half-drawn wall', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await page.getByRole('button', { name: 'Plan a renovation' }).click();
+  const bar = page.locator('.reno-bar');
+  await page.locator(WALL).first().click({ force: true });
+  await page.keyboard.press('Delete');
+  await page.keyboard.press('Escape');
+  await bar.getByRole('button', { name: 'Before' }).click();
+  await expect(bar).toContainText('Editing the flat as it is');
+
+  // Undo from Before takes back the After's edit, in view.
+  await page.keyboard.press('Control+z');
+  await expect(bar.getByRole('button', { name: 'After' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(bar).toContainText('No changes yet');
+
+  // Start a wall in After, switch to Before, and click: nothing is drawn into Before.
+  const walls = await page.locator('[data-hit^="wall:"]').count();
+  await page.keyboard.press('w');
+  const plan = await page.locator('svg.plan-svg').boundingBox();
+  if (!plan) throw new Error('no plan');
+  await page.mouse.click(plan.x + plan.width * 0.45, plan.y + plan.height * 0.5);
+  await bar.getByRole('button', { name: 'Before' }).click();
+  await page.mouse.click(plan.x + plan.width * 0.55, plan.y + plan.height * 0.5);
+  await page.keyboard.press('Escape');
+  await expect(bar).toContainText('No changes yet');
+  await expect(page.locator('[data-hit^="wall:"]')).toHaveCount(walls);
+});

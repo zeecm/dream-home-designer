@@ -12,7 +12,7 @@ import {
   planGeometry,
 } from '@dhd/core';
 import type * as THREE from 'three';
-import { Box3, Vector3 } from 'three';
+import { Box3, BoxGeometry, Mesh, type MeshStandardMaterial, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import { extrudePolygon } from './extrude';
 import { LevelMeshes } from './levelMeshes';
@@ -239,6 +239,57 @@ describe('furniture', () => {
       box.expandByObject(o);
     expect(box.max.z - box.min.z).toBeCloseTo(2.1, 1);
     expect(box.max.x - box.min.x).toBeCloseTo(0.9, 1);
+  });
+});
+
+describe('furniture models', () => {
+  /** A stand-in model library: one shared box geometry, "loaded" when told to. */
+  function fakeModels() {
+    const geometry = new BoxGeometry(1, 1, 1);
+    let ready = false;
+    const lib = {
+      geometry,
+      load: () => {
+        ready = true;
+      },
+      has: () => ready,
+      get: () => {
+        if (!ready) return null;
+        const mesh = new Mesh(geometry);
+        mesh.userData.shared = true;
+        return mesh;
+      },
+    };
+    return lib;
+  }
+
+  it('shows a box until the model loads, then the model, scaled and turned like the item', () => {
+    const kind = furnitureKind('lounge-chair')!;
+    expect(kind.model).toMatch(/\.glb$/);
+    const l = hdb4RoomLevel();
+    const item = { ...newItem('it_chair', kind, { x: 3, y: 3 }), scale: { x: 2, y: 1, z: 1 } };
+    const lib = fakeModels();
+    const m = new LevelMeshes(new MaterialCache(), { models: lib });
+    m.update({ ...l, items: { it_chair: item } });
+    const box = m.group.getObjectByName('item:it_chair') as Mesh;
+    expect((box.material as MeshStandardMaterial).color.getHexString()).toBe('d6dade');
+
+    lib.load();
+    const stats = m.update({ ...l, items: { it_chair: item } });
+    expect(stats.built).toBe(1);
+    const model = m.group.getObjectByName('item:it_chair')!;
+    expect(model.children[0]).toBeInstanceOf(Mesh);
+    expect(model.scale.x).toBe(2);
+    expect(model.userData).toEqual({ kind: 'item', itemId: 'it_chair' });
+
+    // Removing the piece leaves the library's shared geometry alone.
+    let disposed = false;
+    lib.geometry.addEventListener('dispose', () => {
+      disposed = true;
+    });
+    m.update({ ...l, items: {} });
+    expect(m.group.getObjectByName('item:it_chair')).toBeUndefined();
+    expect(disposed).toBe(false);
   });
 });
 

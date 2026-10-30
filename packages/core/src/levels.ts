@@ -1,4 +1,4 @@
-import type { Draft } from 'immer';
+import type { Draft, Patch } from 'immer';
 import type { Level, Project } from './schema';
 
 /** Before or after a renovation: which of a project's two versions of the flat. */
@@ -24,4 +24,15 @@ export function draftLevel(d: Draft<Project>, id: string): Draft<Level> {
 /** The levels a view shows: the renovation's when asked for and there is one. */
 export function variantLevels(p: Pick<Project, 'levels' | 'renovation'>, v: Variant): Level[] {
   return v === 'after' && p.renovation ? p.renovation.levels : p.levels;
+}
+
+/**
+ * Which version of the flat a history step's patches change: 'after' for the renovation
+ * (or starting or ending one), 'before' for the plan's own levels, null for neither (the
+ * name, the site, the plan image).
+ */
+export function touchedVariant(patches: readonly Patch[]): Variant | null {
+  if (patches.some((p) => p.path[0] === 'renovation')) return 'after';
+  if (patches.some((p) => p.path[0] === 'levels')) return 'before';
+  return null;
 }

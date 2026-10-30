@@ -669,9 +669,19 @@ select {
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+/* Up to two lines, so a phone shows the whole summary. */
+.reno-summary-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+}
+.reno-editing {
+  color: var(--text);
+}
+.app-walking .reno-bar {
+  display: none;
 }
 .reno-key {
   display: inline-block;
@@ -689,7 +699,13 @@ select {
 }
 .reno-hatch-line {
   stroke: var(--negative);
-  stroke-width: 0.03;
+  stroke-width: 0.04;
+}
+.reno-hack-ground {
+  fill: color-mix(in srgb, var(--negative) 18%, var(--surface));
+}
+.reno-after .reno-hack-ground {
+  fill-opacity: 0.5;
 }
 .reno-hack {
   fill: url(#reno-hatch);

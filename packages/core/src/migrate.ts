@@ -1,3 +1,4 @@
+import { AFTER_SUFFIX } from './levels';
 import { type Level, type Project, SCHEMA_VERSION, parseProject } from './schema';
 import { repairLevel } from './topology';
 
@@ -52,7 +53,23 @@ export function loadProject(input: unknown): { project: Project; fixes: string[]
     return r.level;
   };
   const levels = project.levels.map(repair);
-  const renovation = project.renovation && { levels: project.renovation.levels.map(repair) };
+  // Every renovation level needs its own id, apart from the plan's, or edits meant for the
+  // "after" would land on the "before".
+  const taken = new Set(levels.map((l) => l.id));
+  const renovation = project.renovation && {
+    levels: project.renovation.levels.map((l) => {
+      const r = repair(l);
+      if (!taken.has(r.id) && r.id.endsWith(AFTER_SUFFIX)) {
+        taken.add(r.id);
+        return r;
+      }
+      let id = `${r.id.replace(/~after$/, '')}${AFTER_SUFFIX}`;
+      for (let n = 2; taken.has(id); n++) id = `${r.id}${AFTER_SUFFIX}${n}`;
+      taken.add(id);
+      fixes.push(`Renovation level ${r.id} renamed to ${id}`);
+      return { ...r, id };
+    }),
+  };
   return {
     project: fixes.length ? { ...project, levels, ...(renovation ? { renovation } : {}) } : project,
     fixes,

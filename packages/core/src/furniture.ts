@@ -1,6 +1,7 @@
 import type { Draft } from 'immer';
 import type { Command } from './history';
 import { draftLevel } from './levels';
+import { MODEL_KINDS } from './modelKinds.generated';
 import type { PlanGeometry } from './plan';
 import type { Item, Level, Project, Vec2, Vec3 } from './schema';
 
@@ -26,7 +27,9 @@ export type FurnitureMaterial =
   | 'ceramic'
   | 'leaf'
   /** A lit shade or diffuser: it glows. */
-  | 'lamp';
+  | 'lamp'
+  /** The stand-in for a model that is still loading. */
+  | 'placeholder';
 
 export interface FurniturePart {
   min: [number, number, number];
@@ -60,6 +63,13 @@ export interface FurnitureKind {
   ceiling?: boolean;
   /** A lamp: where its bulb is (item axes, at scale 1), its colour and brightness. */
   light?: { at: [number, number, number]; color: string; candela: number };
+  /**
+   * A real model (a GLB file the web app serves from /models/), drawn instead of the boxes
+   * once it has loaded. Its natural size is `size`, so an item's scale stretches it too.
+   */
+  model?: string;
+  /** Where the model comes from (its licence page). */
+  source?: string;
   parts: FurniturePart[];
 }
 
@@ -361,6 +371,22 @@ export const FURNITURE: FurnitureKind[] = [
     ],
   },
 ];
+
+/** A catalogue entry made from a model (tools/models builds these). */
+export type ModelKind = Omit<FurnitureKind, 'parts' | 'model' | 'source'> & {
+  model: string;
+  source: string;
+};
+
+/** A model's entry, with one box of its size to stand in until the model loads. */
+const fromModel = (k: ModelKind): FurnitureKind => ({
+  ...k,
+  parts: [
+    box(-k.size.w / 2, k.size.w / 2, -k.size.d / 2, k.size.d / 2, 0, k.size.h, 'placeholder'),
+  ],
+});
+
+FURNITURE.push(...MODEL_KINDS.map(fromModel));
 
 const byId = new Map(FURNITURE.map((k) => [k.id, k]));
 

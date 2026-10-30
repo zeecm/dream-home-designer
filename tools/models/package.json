@@ -1,0 +1,16 @@
+{
+  "name": "@dhd/models",
+  "private": true,
+  "type": "module",
+  "description": "Builds the furniture models: downloads CC0 models from Poly Haven, normalises and compresses them, and writes the web app's GLBs and the core catalogue entries.",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "@gltf-transform/core": "^4.5.0",
+    "@gltf-transform/extensions": "^4.5.0",
+    "@gltf-transform/functions": "^4.5.0",
+    "meshoptimizer": "^1.0.0",
+    "sharp": "^0.34.0"
+  }
+}

@@ -205,6 +205,7 @@ export function App() {
   const { id: projectId, name } = useProject();
   const viewMode = useEditor((s) => s.viewMode);
   const walking = useEditor((s) => !!s.walking);
+  const variant = useEditor((s) => s.variant);
   useShortcuts();
 
   useEffect(() => {
@@ -228,12 +229,13 @@ export function App() {
         <Palette />
         <main className={`panel stage stage-${viewMode}`}>
           <SampleBanner />
-          <RenovationBar />
           <ViewOnlyBanner />
+          <RenovationBar />
           <Notice />
           <Toast />
           <div className="stage-views">
-            {viewMode !== '3d' && <PlanCanvas />}
+            {/* Another version remounts the plan, so a wall half drawn in one can't land in the other. */}
+            {viewMode !== '3d' && <PlanCanvas key={variant} />}
             {viewMode !== 'plan' && <Viewport key={projectId} />}
             <LoadingVeil />
           </div>

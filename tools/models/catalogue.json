@@ -1,0 +1,139 @@
+[
+  {
+    "polyhaven": "Sofa_01",
+    "id": "chesterfield-sofa",
+    "name": "Chesterfield sofa",
+    "category": "Living",
+    "againstWall": true
+  },
+  {
+    "polyhaven": "modern_arm_chair_01",
+    "id": "armchair-wood-leather",
+    "name": "Armchair, wood and leather",
+    "category": "Living"
+  },
+  {
+    "polyhaven": "mid_century_lounge_chair",
+    "id": "lounge-chair",
+    "name": "Lounge chair",
+    "category": "Living"
+  },
+  {
+    "polyhaven": "modern_coffee_table_01",
+    "id": "coffee-table-wood-stone",
+    "name": "Coffee table, wood and stone",
+    "category": "Living",
+    "turn": 90
+  },
+  {
+    "polyhaven": "coffee_table_round_01",
+    "id": "coffee-table-marble",
+    "name": "Round coffee table, marble",
+    "category": "Living"
+  },
+  {
+    "polyhaven": "side_table_01",
+    "id": "side-table-two-tier",
+    "name": "Side table",
+    "category": "Living"
+  },
+  {
+    "polyhaven": "modern_wooden_cabinet",
+    "id": "tv-console-slatted",
+    "name": "TV console, slatted",
+    "category": "Living",
+    "againstWall": true
+  },
+  {
+    "polyhaven": "wooden_table_02",
+    "id": "wooden-table",
+    "name": "Wooden table",
+    "category": "Dining"
+  },
+  {
+    "polyhaven": "dining_chair_02",
+    "id": "dining-chair-upholstered",
+    "name": "Dining chair, upholstered",
+    "category": "Dining"
+  },
+  {
+    "polyhaven": "painted_wooden_nightstand",
+    "id": "nightstand-painted",
+    "name": "Nightstand, painted",
+    "category": "Bedroom",
+    "againstWall": true
+  },
+  {
+    "polyhaven": "drawer_cabinet",
+    "id": "shelf-with-drawers",
+    "name": "Shelf with drawers",
+    "category": "Storage",
+    "againstWall": true
+  },
+  {
+    "polyhaven": "wooden_display_shelves_01",
+    "id": "cube-bookcase",
+    "name": "Cube bookcase",
+    "category": "Storage",
+    "againstWall": true,
+    "turn": -90
+  },
+  {
+    "polyhaven": "desk_lamp_arm_01",
+    "id": "desk-lamp",
+    "name": "Desk lamp",
+    "category": "Lighting",
+    "elevation": 0.75,
+    "walkThrough": true,
+    "light": { "at": [0, 0.15, 0.7], "color": "#ffe0b0", "candela": 25 }
+  },
+  {
+    "polyhaven": "modern_ceiling_lamp_01",
+    "id": "globe-pendant",
+    "name": "Globe pendant",
+    "category": "Lighting",
+    "ceiling": true,
+    "walkThrough": true,
+    "light": { "at": [0, 0, 0.12], "color": "#fff1dc", "candela": 70 }
+  },
+  {
+    "polyhaven": "ceiling_fan",
+    "id": "ceiling-fan",
+    "name": "Ceiling fan",
+    "category": "Lighting",
+    "ceiling": true,
+    "walkThrough": true
+  },
+  {
+    "polyhaven": "potted_plant_01",
+    "id": "potted-ficus",
+    "name": "Potted ficus",
+    "category": "Decor",
+    "maxTriangles": 15000,
+    "simplifyError": 0.02
+  },
+  {
+    "polyhaven": "potted_plant_02",
+    "id": "potted-elephant-ear",
+    "name": "Potted elephant ear",
+    "category": "Decor",
+    "maxTriangles": 15000,
+    "simplifyError": 0.02
+  },
+  {
+    "polyhaven": "wall_clock",
+    "id": "wall-clock",
+    "name": "Wall clock",
+    "category": "Decor",
+    "elevation": 1.7,
+    "againstWall": true,
+    "walkThrough": true
+  },
+  {
+    "polyhaven": "exterior_aircon_unit",
+    "id": "aircon-compressors",
+    "name": "Air-con compressors",
+    "category": "Decor",
+    "againstWall": true
+  }
+]
