@@ -13,10 +13,11 @@ import (
 )
 
 // SchemaVersion must match SCHEMA_VERSION in packages/core/src/schema.ts.
-const SchemaVersion = 1
+const SchemaVersion = 4
 
-// MaxDocBytes caps a single project document. The reference plan is ~15 kB.
-const MaxDocBytes = 2 << 20
+// MaxDocBytes caps a single project document. The reference plan is ~15 kB, and plan
+// images are stored separately, so 512 KB leaves plenty of room.
+const MaxDocBytes = 512 << 10
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
@@ -55,8 +56,9 @@ func Parse(raw []byte) (Envelope, error) {
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return Envelope{}, invalid("bad envelope: %v", err)
 	}
-	if env.SchemaVersion != SchemaVersion {
-		return Envelope{}, invalid("schemaVersion %d not supported (want %d)", env.SchemaVersion, SchemaVersion)
+	// Older formats are accepted (clients migrate them on load); newer ones need a newer API.
+	if env.SchemaVersion < 1 || env.SchemaVersion > SchemaVersion {
+		return Envelope{}, invalid("schemaVersion %d not supported (want 1-%d)", env.SchemaVersion, SchemaVersion)
 	}
 	if !ValidID(env.ID) {
 		return Envelope{}, invalid("id %q must match %s", env.ID, idPattern)

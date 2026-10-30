@@ -21,16 +21,41 @@ type Server struct {
 	mux   *http.ServeMux
 }
 
-func New(s store.Store, log *slog.Logger) *Server {
+// Option configures a Server.
+type Option func(*options)
+
+type options struct{ noList bool }
+
+// WithoutListing disables GET /projects. Until there is auth, a public deployment uses
+// this so a project is reachable only by its unguessable id.
+func WithoutListing() Option { return func(o *options) { o.noList = true } }
+
+// WithListing enables GET /projects (off by default; for local development).
+func WithListing() Option { return func(o *options) { o.noList = false } }
+
+func New(s store.Store, log *slog.Logger, opts ...Option) *Server {
+	o := options{noList: true}
+	for _, opt := range opts {
+		opt(&o)
+	}
 	srv := &Server{store: s, log: log, mux: http.NewServeMux()}
 	srv.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	srv.mux.HandleFunc("GET /projects", srv.list)
+	if !o.noList {
+		srv.mux.HandleFunc("GET /projects", srv.list)
+	}
 	srv.mux.HandleFunc("POST /projects", srv.create)
 	srv.mux.HandleFunc("GET /projects/{id}", srv.get)
 	srv.mux.HandleFunc("PUT /projects/{id}", srv.update)
 	srv.mux.HandleFunc("DELETE /projects/{id}", srv.remove)
+	srv.mux.HandleFunc("PUT /projects/{id}/image", srv.putImage)
+	srv.mux.HandleFunc("GET /projects/{id}/image/{hash}", srv.getImage)
+	srv.mux.HandleFunc("DELETE /projects/{id}/image", srv.deleteImage)
+	srv.mux.HandleFunc("GET /projects/{id}/image", srv.imageStatus)
+	srv.mux.HandleFunc("GET /projects/{id}/share", srv.getShare)
+	srv.mux.HandleFunc("PUT /projects/{id}/share", srv.putShare)
+	srv.mux.HandleFunc("POST /projects/{id}/claim", srv.claim)
 	return srv
 }
 
@@ -61,6 +86,15 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	role, _, err := s.role(r, id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.Header().Set("X-Role", string(role))
+	// The role depends on the caller's key: never serve one caller's answer to another.
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("Vary", "Authorization")
 	w.Header().Set("ETag", etag(rec.Version))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -77,9 +111,28 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// The creator owns the project: the owner key is returned once, here, and only its
+	// hash is kept. The access record goes first, so a project never exists unowned.
+	owner := ""
+	if acc, ok := s.store.(store.AccessStore); ok {
+		owner = newToken()
+		if err := acc.CreateAccess(r.Context(), env.ID, store.Access{OwnerHash: hashToken(owner)}); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
 	if err := s.store.Create(r.Context(), store.Record{ID: env.ID, Name: env.Name, Doc: doc}); err != nil {
+		// The access record is this request's own (creating it would have failed had one
+		// existed), so it goes even when the project already exists without one.
+		if acc, ok := s.store.(store.AccessStore); ok {
+			_ = acc.DeleteAccess(r.Context(), env.ID)
+		}
 		s.fail(w, err)
 		return
+	}
+	if owner != "" {
+		w.Header().Set("X-Owner-Token", owner)
+		w.Header().Set("X-Role", string(RoleOwner))
 	}
 	w.Header().Set("ETag", etag(1))
 	w.Header().Set("Location", "/projects/"+env.ID)
@@ -103,6 +156,9 @@ func (s *Server) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "document id does not match the URL")
 		return
 	}
+	if !s.allow(w, r, id, Role.canEdit) {
+		return
+	}
 	version, err := s.store.Update(r.Context(), id, expected, env.Name, func(v int) ([]byte, error) {
 		return project.WithVersion(raw, v)
 	})
@@ -115,7 +171,15 @@ func (s *Server) update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) remove(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.Delete(r.Context(), r.PathValue("id")); err != nil {
+	id := r.PathValue("id")
+	if !project.ValidID(id) {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	if !s.allow(w, r, id, func(r Role) bool { return r == RoleOwner || r == RoleOpen }) {
+		return
+	}
+	if err := s.store.Delete(r.Context(), id); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -139,7 +203,7 @@ func (s *Server) readDoc(w http.ResponseWriter, r *http.Request) ([]byte, projec
 func (s *Server) fail(w http.ResponseWriter, err error) {
 	var conflict *store.ConflictError
 	switch {
-	case errors.Is(err, store.ErrNotFound):
+	case errors.Is(err, store.ErrNotFound), errors.Is(err, store.ErrNoImage):
 		writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, store.ErrExists):
 		writeError(w, http.StatusConflict, err.Error())

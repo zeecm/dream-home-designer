@@ -9,6 +9,8 @@ next steps. The product plan lives at https://claude.ai/artifact/Wu33FsPzhspwQJB
 - `packages/render`: project → three.js meshes.
 - `apps/web`: Vite + React 18 + React Three Fiber + Zustand.
 - `apps/api`: Go standard library REST API; documents are opaque JSON with `If-Match` versioning.
+- `apps/edge`: Cloudflare Worker running `apps/api` as a Container (R2 storage); `functions/` is the
+  Pages Function that routes `/api` to it.
 
 ## Rules
 - Mutate the project only through a `Command` from `packages/core/src/commands.ts`; generate ids outside the recipe.
@@ -16,11 +18,14 @@ next steps. The product plan lives at https://claude.ai/artifact/Wu33FsPzhspwQJB
 - Metres and radians. Plan (x, y) maps to world (x, 0, y), +Y up. Walls share vertex ids.
 - A schema change bumps `SCHEMA_VERSION` (TS) and `SchemaVersion` (Go) together, and regenerates `apps/api/internal/project/testdata/hdb4room.json`.
 - Strict TS (`noUncheckedIndexedAccess`), Biome (single quotes, 100 cols), gofmt.
+- Front-end design follows the vendored `design-taste-frontend` skill (app-screen rules, framed-sheet
+  style); check UI changes with its inspector and by looking at screenshots.
 
 ## Commands
 ```sh
 pnpm install && pnpm dev          # web :5173, /api proxied to :8080
 pnpm test && pnpm typecheck && pnpm lint
+pnpm --filter @dhd/web e2e        # Playwright against the build + Go API
 cd apps/api && go run ./cmd/api   # STORE=memory to skip disk
 cd apps/api && go test -race ./...
 ```

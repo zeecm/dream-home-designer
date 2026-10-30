@@ -1,0 +1,42 @@
+import { expect, test } from '@playwright/test';
+import { waitSaved } from './helpers';
+
+test('walk through the flat in first person, then leave with Esc', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('2');
+  await page.getByRole('button', { name: 'Walk through' }).click();
+  await expect(page.getByRole('button', { name: 'Leave walk' })).toBeVisible();
+  await expect(page.locator('svg.minimap')).toBeVisible();
+  // The plan is hidden while walking, and the tool keys don't fire.
+  await expect(page.getByTestId('plan')).toHaveCount(0);
+  await page.keyboard.down('KeyW');
+  await page.waitForTimeout(800);
+  await page.keyboard.up('KeyW');
+  await expect(page.locator('.tool[aria-pressed="true"]')).toContainText('Select');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: 'Walk through' })).toBeVisible();
+  // Back to the view it started from.
+  await expect(page.getByTestId('plan')).toBeVisible();
+
+  // The next walk picks up where this one stopped.
+  const spot = () =>
+    page.evaluate(() => {
+      const id = new URL(location.href).searchParams.get('p');
+      return JSON.parse(localStorage.getItem(`dhd:walk:${id}`) ?? 'null')?.at;
+    });
+  // The 3D view's own renderer lets the walk go a moment after the button comes back.
+  await expect.poll(spot).toBeTruthy();
+  const left = await spot();
+  await page.getByRole('button', { name: 'Walk through' }).click();
+  await expect(page.getByRole('button', { name: 'Leave walk' })).toBeVisible();
+  await page.getByRole('button', { name: 'Leave walk' }).click();
+  await expect(page.getByRole('button', { name: 'Walk through' })).toBeVisible();
+  await page.waitForTimeout(300);
+  const again = await spot();
+  expect(again.x).toBeCloseTo(left.x, 3);
+  expect(again.y).toBeCloseTo(left.y, 3);
+  expect(errors).toEqual([]);
+});

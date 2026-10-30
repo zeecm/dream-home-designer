@@ -69,10 +69,18 @@ const window_ = (id: string, wallId: string, t: number, width: number): Opening 
 
 const openings: Opening[] = [
   door('op_main', 'w_front_l', 0.25, 1.0),
-  { id: 'op_kitchen', wallId: 'w_living_kitchen', kind: 'passage', t: 0.5, width: 1.6, height: 2.1, sill: 0 },
+  {
+    id: 'op_kitchen',
+    wallId: 'w_living_kitchen',
+    kind: 'passage',
+    t: 0.5,
+    width: 1.6,
+    height: 2.1,
+    sill: 0,
+  },
   door('op_bed3', 'w_mid_1', 0.7),
   door('op_bed2', 'w_mid_2', 0.5),
-  door('op_master', 'w_mid_3', 0.5),
+  door('op_master', 'w_mid_4', 0.2),
   window_('op_win_living', 'w_left_f', 0.5, 2.0),
   window_('op_win_kitchen', 'w_front_r', 0.6, 1.8),
   window_('op_win_bed3', 'w_back_l', 0.5, 1.4),

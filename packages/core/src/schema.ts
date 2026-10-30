@@ -25,8 +25,33 @@ export const Wall = z.object({
   height: z.number().positive().optional(),
   materialLeft: z.string().default('paint-white'),
   materialRight: z.string().default('paint-white'),
+  /**
+   * 'boundary' marks a room edge that is not a wall, such as where an open kitchen meets the
+   * living room: it divides rooms but has no thickness, is never built in 3D and takes no
+   * openings. Absent means a wall.
+   */
+  kind: z.enum(['wall', 'boundary']).optional(),
+  /**
+   * Which side of its line (a to b) the wall's thickness lies on: absent means centred on
+   * it; 'left' or 'right' puts one face on the line. Walls of different thickness in a
+   * row keep a flush face this way, as an outside wall does where it thins at a window.
+   */
+  side: z.enum(['left', 'right']).optional(),
 });
 export type Wall = z.infer<typeof Wall>;
+
+export const isBoundary = (w: Pick<Wall, 'kind'>): boolean => w.kind === 'boundary';
+
+/** How far a wall's left and right faces lie from its line (left is +n, n = d rotated +90°). */
+export function wallFaces(w: Pick<Wall, 'thickness' | 'side' | 'kind'>): {
+  left: number;
+  right: number;
+} {
+  if (isBoundary(w)) return { left: 0, right: 0 };
+  if (w.side === 'left') return { left: w.thickness, right: 0 };
+  if (w.side === 'right') return { left: 0, right: w.thickness };
+  return { left: w.thickness / 2, right: w.thickness / 2 };
+}
 
 export const OpeningKind = z.enum(['door', 'window', 'passage']);
 export type OpeningKind = z.infer<typeof OpeningKind>;
@@ -101,7 +126,24 @@ export const Underlay = z.object({
 });
 export type Underlay = z.infer<typeof Underlay>;
 
-export const SCHEMA_VERSION = 1;
+/**
+ * Where the home stands, for the sun. `north` is the bearing of north from the plan's up
+ * direction, in radians clockwise: 0 when north is up the plan, π/2 when it points to the
+ * plan's right. `latitude` and `longitude` are in degrees (+ north, + east), and
+ * `utcOffset` is the clock's hours ahead of UTC, so times of day read as on a wall clock.
+ */
+export const Site = z.object({
+  north: z.number(),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  utcOffset: z.number().min(-12).max(14),
+});
+export type Site = z.infer<typeof Site>;
+
+/** Singapore, with north up the plan: what a project without a site gets. */
+export const DEFAULT_SITE: Site = { north: 0, latitude: 1.35, longitude: 103.82, utcOffset: 8 };
+
+export const SCHEMA_VERSION = 4;
 
 export const Project = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
@@ -111,6 +153,8 @@ export const Project = z.object({
   name: z.string().min(1),
   units: z.literal('m'),
   underlay: Underlay.nullable(),
+  /** Absent means DEFAULT_SITE. */
+  site: Site.optional(),
   levels: z.array(Level).min(1),
 });
 export type Project = z.infer<typeof Project>;

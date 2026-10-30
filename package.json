@@ -9,7 +9,8 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "lint": "biome check .",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "deploy:web": "pnpm --filter @dhd/web build && pnpm dlx wrangler@4.152.0 pages deploy apps/web/dist --project-name dream-home-designer"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

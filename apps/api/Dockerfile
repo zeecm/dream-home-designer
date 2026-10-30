@@ -1,5 +1,6 @@
 # Build from the repo root: docker build -f apps/api/Dockerfile apps/api
-FROM golang:1.24-alpine AS build
+# mirror.gcr.io is Docker Hub's official images without anonymous pull limits.
+FROM mirror.gcr.io/library/golang:1.24-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 RUN go mod download

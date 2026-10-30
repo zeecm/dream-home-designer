@@ -1,0 +1,39 @@
+import { describe, expect, it } from 'vitest';
+import { formatArea, formatLength, parseLength } from './units';
+
+describe('parseLength', () => {
+  it('reads metres by default and converts mm and cm', () => {
+    expect(parseLength('2.5')).toBe(2.5);
+    expect(parseLength(' 2.5 m ')).toBe(2.5);
+    expect(parseLength('250cm')).toBe(2.5);
+    expect(parseLength('2,500 mm')).toBe(2.5);
+    expect(parseLength('.9')).toBe(0.9);
+    // bare numbers off a plan are millimetres
+    expect(parseLength('900')).toBe(0.9);
+    expect(parseLength('10275')).toBe(10.275);
+    expect(parseLength('12')).toBe(12);
+  });
+
+  it('reads a decimal comma, and commas that group thousands', () => {
+    expect(parseLength('3,5')).toBe(3.5);
+    expect(parseLength('2,45 m')).toBe(2.45);
+    expect(parseLength('10,275')).toBe(10.275);
+    expect(parseLength('3,500')).toBe(3.5);
+    expect(parseLength('1,2,3')).toBeNull();
+    expect(parseLength('0,040')).toBe(0.04);
+    expect(parseLength('2,450 m')).toBe(2.45);
+    expect(parseLength('1,250 cm')).toBe(1.25 / 100);
+    expect(parseLength('10,275 mm')).toBe(10.275);
+  });
+
+  it('rejects anything else', () => {
+    expect(parseLength('')).toBeNull();
+    expect(parseLength('abc')).toBeNull();
+    expect(parseLength('2.5 ft')).toBeNull();
+  });
+
+  it('formats lengths and areas', () => {
+    expect(formatLength(2.456)).toBe('2.46 m');
+    expect(formatArea(93.5)).toBe('93.5 m²');
+  });
+});

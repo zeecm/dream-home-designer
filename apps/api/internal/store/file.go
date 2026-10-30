@@ -44,6 +44,12 @@ func NewFile(dir string) (*Memory, error) {
 		}
 		m.records[fr.ID] = Record{ID: fr.ID, Name: fr.Name, Version: fr.Version, Doc: fr.Doc, UpdatedAt: fr.UpdatedAt}
 	}
+	if m.onImage, err = fileImages(dir, m.images); err != nil {
+		return nil, err
+	}
+	if m.onAccess, err = fileAccess(dir, m.access); err != nil {
+		return nil, err
+	}
 	m.onWrite = func(rec Record, deleted bool) error {
 		path := filepath.Join(dir, rec.ID+".json")
 		if deleted {
@@ -56,20 +62,7 @@ func NewFile(dir string) (*Memory, error) {
 		if err != nil {
 			return err
 		}
-		tmp, err := os.CreateTemp(dir, rec.ID+".*.tmp")
-		if err != nil {
-			return err
-		}
-		if _, err := tmp.Write(b); err != nil {
-			tmp.Close()
-			os.Remove(tmp.Name())
-			return err
-		}
-		if err := tmp.Close(); err != nil {
-			os.Remove(tmp.Name())
-			return err
-		}
-		return os.Rename(tmp.Name(), path)
+		return writeAtomic(dir, path, b)
 	}
 	return m, nil
 }

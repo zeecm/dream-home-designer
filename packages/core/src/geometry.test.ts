@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { hdb4RoomLevel, hdb4RoomProject } from './fixtures/hdb4room';
-import { levelBounds, roomArea, signedArea, wallLine, wallPieces } from './geometry';
+import {
+  labelPoint,
+  levelBounds,
+  placeLabel,
+  pointInPolygon,
+  polygonCentroid,
+  signedArea,
+  wallLine,
+  wallPieces,
+} from './geometry';
+import { roomArea } from './rooms';
 import type { Opening } from './schema';
 import { Project } from './schema';
 
@@ -27,7 +37,8 @@ describe('fixture', () => {
       expect(l.vertices[w.b], w.id).toBeDefined();
     }
     for (const o of Object.values(l.openings)) expect(l.walls[o.wallId], o.id).toBeDefined();
-    for (const r of Object.values(l.rooms)) for (const v of r.loop) expect(l.vertices[v]).toBeDefined();
+    for (const r of Object.values(l.rooms))
+      for (const v of r.loop) expect(l.vertices[v]).toBeDefined();
   });
 
   it('room areas add up to the flat', () => {
@@ -113,5 +124,80 @@ describe('wallPieces', () => {
     ]);
     const solid = p.reduce((s, q) => s + (q.u1 - q.u0) * (q.y1 - q.y0), 0);
     expect(solid).toBeCloseTo(5 * 2.6 - 1 * 2.1 - 1.5 * 1.2);
+  });
+});
+
+describe('polygon helpers', () => {
+  const L = [
+    { x: 0, y: 0 },
+    { x: 4, y: 0 },
+    { x: 4, y: 1 },
+    { x: 1, y: 1 },
+    { x: 1, y: 4 },
+    { x: 0, y: 4 },
+  ];
+
+  it('area centroid of a rectangle is its centre, either winding', () => {
+    const r = [
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+      { x: 4, y: 2 },
+      { x: 0, y: 2 },
+    ];
+    expect(polygonCentroid(r)).toEqual({ x: 2, y: 1 });
+    expect(polygonCentroid([...r].reverse())).toEqual({ x: 2, y: 1 });
+  });
+
+  it('point in polygon handles an L shape', () => {
+    expect(pointInPolygon({ x: 0.5, y: 3 }, L)).toBe(true);
+    expect(pointInPolygon({ x: 2, y: 2 }, L)).toBe(false);
+  });
+
+  it('label point stays inside a thin L whose centroid falls outside', () => {
+    const thin = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 0.5 },
+      { x: 0.5, y: 0.5 },
+      { x: 0.5, y: 10 },
+      { x: 0, y: 10 },
+    ];
+    expect(pointInPolygon(polygonCentroid(thin), thin)).toBe(false);
+    expect(pointInPolygon(labelPoint(thin), thin)).toBe(true);
+    expect(pointInPolygon(labelPoint(L), L)).toBe(true);
+  });
+});
+
+describe('placeLabel', () => {
+  const square = [
+    { x: 0, y: 0 },
+    { x: 4, y: 0 },
+    { x: 4, y: 4 },
+    { x: 0, y: 4 },
+  ];
+  const half = { x: 0.6, y: 0.25 };
+
+  it('uses the centre when nothing is in the way', () => {
+    expect(placeLabel(square, half)).toEqual({ x: 2, y: 2 });
+  });
+
+  it('moves clear of a door swing over the centre', () => {
+    const swing = { c: { x: 2, y: 1.6 }, r: 0.9 };
+    const p = placeLabel(square, half, [swing]);
+    expect(pointInPolygon(p, square)).toBe(true);
+    // The whole box clears the circle and stays inside the room.
+    for (const sx of [-1, 1]) {
+      for (const sy of [-1, 1]) {
+        const q = { x: p.x + sx * half.x, y: p.y + sy * half.y };
+        expect(Math.hypot(q.x - 2, q.y - 1.6)).toBeGreaterThanOrEqual(0.9 - 1e-9);
+        expect(pointInPolygon(q, square)).toBe(true);
+      }
+    }
+  });
+
+  it('falls back to the roomiest spot when nothing fits', () => {
+    const tiny = square.map((v) => ({ x: v.x / 4, y: v.y / 4 }));
+    const p = placeLabel(tiny, half);
+    expect(pointInPolygon(p, tiny)).toBe(true);
   });
 });
