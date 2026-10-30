@@ -1,6 +1,7 @@
 import {
   type Command,
   type DispatchOptions,
+  type Item,
   type Level,
   type PlanGeometry,
   type Vec2,
@@ -11,6 +12,7 @@ import {
   deleteWall,
   duplicateOf,
   furnitureKind,
+  itemFootprint,
   itemSize,
   moveVertex,
   newId,
@@ -135,7 +137,32 @@ type Drag =
       moved: boolean;
       key: string;
     }
-  | { kind: 'opening'; id: string; wallId: string; start: Vec2; moved: boolean; key: string };
+  | { kind: 'opening'; id: string; wallId: string; start: Vec2; moved: boolean; key: string }
+  /** A corner handle of a selected piece: resizes it, the opposite corner staying put. */
+  | { kind: 'resize'; id: string; corner: number; start: Vec2; moved: boolean; key: string }
+  /** The turn handle in front of a selected piece. */
+  | { kind: 'rotate'; id: string; start: Vec2; moved: boolean; key: string };
+
+/** How far in front of a selected piece (screen px) its turn handle sits. */
+const TURN_HANDLE_GAP = 30;
+
+/**
+ * The handles of a selected piece of furniture, on screen: its four corners (back-left,
+ * back-right, front-right, front-left) and the turn handle in front of it.
+ */
+function itemHandles(ctx: ToolContext, it: Item) {
+  const f = itemFootprint(it);
+  const corners = f.map((q) => worldToScreen(ctx.view, ctx.size, q));
+  const [, , fr, fl] = corners;
+  const mid = { x: ((fr?.x ?? 0) + (fl?.x ?? 0)) / 2, y: ((fr?.y ?? 0) + (fl?.y ?? 0)) / 2 };
+  const c = worldToScreen(ctx.view, ctx.size, { x: it.position.x, y: it.position.z });
+  const n = Math.hypot(mid.x - c.x, mid.y - c.y) || 1;
+  const turn = {
+    x: mid.x + ((mid.x - c.x) / n) * TURN_HANDLE_GAP,
+    y: mid.y + ((mid.y - c.y) / n) * TURN_HANDLE_GAP,
+  };
+  return { corners, mid, turn };
+}
 
 interface NudgeRun {
   sel: Selection;
@@ -184,14 +211,45 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       select(null);
     }
   };
+  /** The handle of the selected piece under the pointer, if any. */
+  const handleAt = (p: PlanPointer): { id: string; corner: number | 'turn' } | null => {
+    const sel = useEditor.getState().selection;
+    const it = sel?.kind === 'item' ? ctx.level.items[sel.id] : undefined;
+    if (!sel || !it) return null;
+    const h = itemHandles(ctx, it);
+    const near = (q: Vec2 | undefined) =>
+      !!q && Math.hypot(q.x - p.screen.x, q.y - p.screen.y) <= HANDLE_REACH;
+    if (near(h.turn)) return { id: sel.id, corner: 'turn' };
+    const i = h.corners.findIndex((q) => near(q));
+    return i < 0 ? null : { id: sel.id, corner: i };
+  };
+
   // Settle a pending run when the tool goes away (switching tools mid-run).
   // biome-ignore lint/correctness/useExhaustiveDependencies: settleRun reads only refs
   useEffect(() => () => settleRun(), []);
 
   return {
     cursor: 'default',
+    // On a touch screen, a finger on a selected piece's handle takes it at once.
+    grabs: (p) => handleAt(p) !== null,
     down: (p) => {
       settleRun();
+      const handle = handleAt(p);
+      if (handle) {
+        const key = `handle:${handle.id}:${Date.now()}`;
+        drag.current =
+          handle.corner === 'turn'
+            ? { kind: 'rotate', id: handle.id, start: p.screen, moved: false, key }
+            : {
+                kind: 'resize',
+                id: handle.id,
+                corner: handle.corner,
+                start: p.screen,
+                moved: false,
+                key,
+              };
+        return true;
+      }
       const h = p.hit;
       if (!h) {
         select(null);
@@ -249,6 +307,41 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       }
       if (!d.moved && Math.hypot(p.screen.x - d.start.x, p.screen.y - d.start.y) < 3) return;
       d.moved = true;
+      if (d.kind === 'resize' || d.kind === 'rotate') {
+        const it = ctx.level.items[d.id];
+        if (!it) return;
+        if (d.kind === 'rotate') {
+          // The piece turns to face the pointer, in 15° steps unless Alt is held.
+          const v = { x: p.world.x - it.position.x, y: p.world.y - it.position.z };
+          let r = Math.atan2(-v.x, v.y);
+          if (!p.alt) r = Math.round(r / (Math.PI / 12)) * (Math.PI / 12);
+          ctx.dispatch(updateItem(levelId, d.id, { rotationY: r }), { coalesceKey: d.key });
+          return;
+        }
+        const kind = furnitureKind(it.assetId);
+        const base = kind?.size ?? { w: 0.5, d: 0.5, h: 0.5 };
+        const opp = itemFootprint(it)[(d.corner + 2) % 4];
+        if (!opp) return;
+        const c = Math.cos(it.rotationY);
+        const s = Math.sin(it.rotationY);
+        const v = { x: p.world.x - opp.x, y: p.world.y - opp.y };
+        const lx = v.x * c + v.y * s;
+        const ly = -v.x * s + v.y * c;
+        const step = p.alt ? 0.001 : 0.01;
+        const w = Math.max(0.1, Math.round(Math.abs(lx) / step) * step);
+        const dd = Math.max(0.1, Math.round(Math.abs(ly) / step) * step);
+        const hx = (Math.sign(lx) || 1) * (w / 2);
+        const hy = (Math.sign(ly) || 1) * (dd / 2);
+        const centre = { x: opp.x + hx * c - hy * s, y: opp.y + hx * s + hy * c };
+        ctx.dispatch(
+          updateItem(levelId, d.id, {
+            scale: { x: w / base.w, z: dd / base.d },
+            position: { x: centre.x, z: centre.y },
+          }),
+          { coalesceKey: d.key },
+        );
+        return;
+      }
       if (d.kind === 'vertex') {
         const to = p.alt
           ? p.world
@@ -380,9 +473,38 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       }
       return false;
     },
-    overlay: () => null,
+    overlay: (o) => {
+      const sel = useEditor.getState().selection;
+      const it = sel?.kind === 'item' ? o.level.items[sel.id] : undefined;
+      if (!it) return null;
+      const h = itemHandles(o, it);
+      const size = itemSize(it);
+      const d = drag.current;
+      const resizing = d?.kind === 'resize' && d.moved;
+      return (
+        <g className="item-handles" pointerEvents="none">
+          <line x1={h.mid.x} y1={h.mid.y} x2={h.turn.x} y2={h.turn.y} className="turn-stem" />
+          <circle cx={h.turn.x} cy={h.turn.y} r={8} className="turn-handle" />
+          {h.corners.map((q, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: the four corners, in order
+            <rect key={i} x={q.x - 6} y={q.y - 6} width={12} height={12} className="size-handle" />
+          ))}
+          {resizing && (
+            <g transform={`translate(${h.mid.x} ${h.mid.y + 26})`} className="handle-length">
+              <rect x={-52} y={-11} width={104} height={22} rx={4} />
+              <text textAnchor="middle" y={4} className="num">
+                {`${formatLength(size.w)} × ${formatLength(size.d)}`}
+              </text>
+            </g>
+          )}
+        </g>
+      );
+    },
   };
 }
+
+/** How near (screen px) a press must land to a handle to take it: a fingertip's reach. */
+const HANDLE_REACH = 20;
 
 export function useMeasureTool(ctx: ToolContext): ToolController {
   const [points, setPoints] = useState<Vec2[]>([]);

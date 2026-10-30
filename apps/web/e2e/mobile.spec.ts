@@ -265,3 +265,48 @@ test('on a phone: the first wall shows under the finger, and its ends can be dra
   await h.lift();
   await expect(walls).toHaveText('6');
 });
+
+test('on a phone: a placed piece resizes and turns by finger on its handles', async ({ page }) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.evaluate(() => document.fonts.ready);
+  await page.getByRole('button', { name: /^Furniture/ }).tap();
+  await page
+    .getByRole('button', { name: /^Coffee table/ })
+    .first()
+    .tap();
+  const room = await page.locator('[data-hit="room:rm_living-and-dining"]').boundingBox();
+  if (!room) throw new Error('no room');
+  await page.touchscreen.tap(room.x + room.width * 0.5, room.y + room.height * 0.5);
+  const items = page.locator('[data-hit^="item:"]');
+  await expect(items).toHaveCount(1);
+  const width = page.getByLabel('Width');
+  const before = await width.inputValue();
+
+  // A corner, dragged by finger: the size shows under the finger before it lifts, and the
+  // piece is resized, not moved or added to.
+  const corner = await page.locator('.size-handle').nth(2).boundingBox();
+  if (!corner) throw new Error('no corner handle');
+  const from = { x: corner.x + corner.width / 2, y: corner.y + corner.height / 2 };
+  const f = await finger(page, from);
+  await f.moveTo({ x: from.x + 40, y: from.y + 40 });
+  await expect(page.locator('.handle-length')).toBeVisible();
+  await f.lift();
+  await expect(items).toHaveCount(1);
+  await expect(width).not.toHaveValue(before);
+
+  // The turn handle, dragged round to the right.
+  const piece = await items.first().boundingBox();
+  const t = await page.locator('.turn-handle').boundingBox();
+  if (!piece || !t) throw new Error('no turn handle');
+  const centre = { x: piece.x + piece.width / 2, y: piece.y + piece.height / 2 };
+  const g = await finger(page, { x: t.x + t.width / 2, y: t.y + t.height / 2 });
+  await g.moveTo({ x: centre.x + 90, y: centre.y });
+  await g.lift();
+  await expect(items).toHaveCount(1);
+  const turned = await page.locator('.turn-handle').boundingBox();
+  // Its handle now sits out to the right of the piece, level with its centre.
+  if (!turned) throw new Error('no turn handle');
+  expect(turned.x + turned.width / 2 - centre.x).toBeGreaterThan(25);
+  expect(Math.abs(turned.y + turned.height / 2 - centre.y)).toBeLessThan(6);
+});

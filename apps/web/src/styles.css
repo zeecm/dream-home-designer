@@ -1467,6 +1467,16 @@ h3.field-label {
   fill: var(--text);
   font-size: var(--fs-small);
 }
+.size-handle,
+.turn-handle {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 2px;
+}
+.turn-stem {
+  stroke: var(--accent);
+  stroke-width: 1.5px;
+}
 .end-handle {
   fill: var(--surface);
   stroke: var(--accent);

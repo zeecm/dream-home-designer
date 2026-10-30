@@ -58,10 +58,12 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
   /**
    * A placing tool that also moves what it placed: a press on an existing piece of its kind
    * goes to Select for that gesture (a drag moves it, a tap selects it), instead of adding
-   * another one beside it.
+   * another one beside it. Furniture just placed shows its resize and turn handles, which
+   * also go to Select.
    */
   const placing = (own: ToolController, kind: 'item' | 'opening'): ToolController => {
-    const onOwn = (p: PlanPointer) => p.hit?.kind === kind;
+    const onOwn = (p: PlanPointer) =>
+      p.hit?.kind === kind || (kind === 'item' && (select.grabs?.(p) ?? false));
     return {
       ...own,
       grabs: (p) => onOwn(p) || (own.grabs?.(p) ?? false),
@@ -77,6 +79,15 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
           select.up(p);
         } else own.up(p);
       },
+      overlay: (o) =>
+        kind === 'item' ? (
+          <>
+            {own.overlay(o)}
+            {select.overlay(o)}
+          </>
+        ) : (
+          own.overlay(o)
+        ),
     };
   };
   const tools: Record<Tool, ToolController> = {
@@ -256,7 +267,7 @@ export function PlanCanvas() {
     touch.current = { start, moved: false, claimed: false };
     // A finger on something a drawing tool lets you drag (a scale line's end) takes it at
     // once, so the smallest correction counts.
-    if (tool !== 'select' && ctx && active.grabs?.(start)) {
+    if (ctx && active.grabs?.(start)) {
       touch.current = { start, moved: true, claimed: active.down(start) };
     }
   };

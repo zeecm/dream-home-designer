@@ -88,3 +88,58 @@ test('duplicate a piece beside itself, from the details or with Ctrl+D', async (
   await page.keyboard.press('Control+z');
   await expect(items).toHaveCount(2);
 });
+
+test('resize and turn a selected piece by its handles, each drag one undo step', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await page.getByRole('button', { name: /^Furniture/ }).click();
+  await page
+    .getByRole('button', { name: /^Round coffee table|^Coffee table/ })
+    .first()
+    .click();
+  const room = await page.locator('[data-hit="room:rm_living-and-dining"]').boundingBox();
+  if (!room) throw new Error('no room');
+  await page.mouse.click(room.x + room.width * 0.5, room.y + room.height * 0.5);
+  const width = page.getByLabel('Width');
+  const before = await width.inputValue();
+
+  // Straight after placing it, still in Furniture: the front-right corner, dragged out: wider and deeper, with the size shown mid-drag.
+  const corners = page.locator('.size-handle');
+  await expect(corners).toHaveCount(4);
+  const c = await corners.nth(2).boundingBox();
+  if (!c) throw new Error('no corner');
+  const from = { x: c.x + c.width / 2, y: c.y + c.height / 2 };
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 30, from.y + 30, { steps: 5 });
+  await page.mouse.move(from.x + 60, from.y + 60, { steps: 5 });
+  await expect(page.locator('.handle-length')).toBeVisible();
+  await page.mouse.up();
+  await expect(page.locator('.handle-length')).toHaveCount(0);
+  await expect(width).not.toHaveValue(before);
+  await page.keyboard.press('Control+z');
+  await expect(width).toHaveValue(before);
+
+  await expect(page.locator('[data-hit^="item:"]')).toHaveCount(1);
+
+  // In Select, the turn handle dragged round to the right: the piece faces right.
+  await page.getByRole('button', { name: /^Select/ }).click();
+  const item = await page.locator('[data-hit^="item:"]').first().boundingBox();
+  const t = await page.locator('.turn-handle').boundingBox();
+  if (!item || !t) throw new Error('no turn handle');
+  const centre = { x: item.x + item.width / 2, y: item.y + item.height / 2 };
+  await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(centre.x + 120, centre.y, { steps: 10 });
+  await page.mouse.up();
+  const turned = await page.locator('.turn-handle').boundingBox();
+  expect((turned?.x ?? 0) - centre.x).toBeGreaterThan(40);
+  expect(Math.abs((turned?.y ?? 0) + (turned?.height ?? 0) / 2 - centre.y)).toBeLessThan(6);
+  await page.keyboard.press('Control+z');
+  await expect
+    .poll(async () => (await page.locator('.turn-handle').boundingBox())?.y ?? 0)
+    .toBeCloseTo(t.y, 0);
+});
