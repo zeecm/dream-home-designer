@@ -8,3 +8,5 @@ dist/
 coverage/
 apps/api/bin/
 apps/api/data/
+.taste-skill/
+.wrangler/
