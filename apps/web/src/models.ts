@@ -2,6 +2,7 @@ import { addModel, customModelFile, newId } from '@dhd/core';
 import { useEffect } from 'react';
 import * as THREE from 'three';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { getAsset, hashBlob, hashOfKey, putAsset } from './assets';
 import { NotFoundError } from './backend';
@@ -15,8 +16,19 @@ import { useStore } from './store';
  * copied to the server in the background, from where another browser fetches it.
  */
 
+let draco: DRACOLoader | undefined;
+/**
+ * Readies a loader for models made anywhere: meshopt (as the catalogue's) and Draco
+ * compression (common from Blender), its decoder fetched from /draco/ when first needed.
+ */
+export function configureLoader(loader: GLTFLoader) {
+  draco ??= new DRACOLoader().setDecoderPath('/draco/');
+  loader.setMeshoptDecoder(MeshoptDecoder).setDRACOLoader(draco);
+}
+
 async function measure(buf: ArrayBuffer) {
-  const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+  const loader = new GLTFLoader();
+  configureLoader(loader);
   const gltf = await loader.parseAsync(buf, '');
   const box = new THREE.Box3().setFromObject(gltf.scene);
   if (box.isEmpty()) throw new Error('empty');
@@ -80,23 +92,33 @@ export function syncModels(): Promise<void> {
 }
 
 async function syncOnce(projectId: string) {
-  const { backend, editor, sync } = useStore.getState();
-  if (editor.doc.id !== projectId || !backend?.putModel) return;
-  if (!['saved', 'dirty', 'saving'].includes(sync.kind)) return;
+  const { backend, editor, sync, role } = useStore.getState();
+  if (editor.doc.id !== projectId || !backend?.putModel || !backend.listModels) return;
+  // Only for a plan open for editing: a view-only link can't store anything.
+  if (role === 'viewer' || !['saved', 'dirty', 'saving'].includes(sync.kind)) return;
   const held = synced.get(projectId) ?? new Set<string>();
   synced.set(projectId, held);
-  for (const m of Object.values(editor.doc.models ?? {})) {
-    const tag = `${projectId}|${m.hash}`;
-    if (held.has(m.hash) || refused.has(tag)) continue;
-    const blob = await getAsset(customModelFile(m.hash));
-    if (!blob) continue; // not in this browser: another one uploads it
+  const todo = Object.values(editor.doc.models ?? {}).filter(
+    (m) => !held.has(m.hash) && !refused.has(`${projectId}|${m.hash}`),
+  );
+  if (todo.length === 0) return;
+  // Ask once what the server has, so a model is never sent twice.
+  for (const h of await backend.listModels(projectId)) held.add(h);
+  const missing: string[] = [];
+  for (const m of todo) {
+    if (held.has(m.hash)) continue;
+    const blob = await getAsset(customModelFile(m.hash)).catch(() => undefined);
+    if (!blob) {
+      missing.push(m.name);
+      continue;
+    }
     try {
       await backend.putModel(projectId, blob);
       held.add(m.hash);
     } catch (e) {
       if (useStore.getState().editor.doc.id !== projectId) return;
-      const permanent = e instanceof Error && /^(409|413|415) /.test(e.message);
-      if (permanent) refused.add(tag);
+      const permanent = e instanceof Error && /^(413|415|422) /.test(e.message);
+      if (permanent) refused.add(`${projectId}|${m.hash}`);
       useStore.setState({
         notice: permanent
           ? `The server couldn’t take the model “${m.name}”, so it shows only in this browser.`
@@ -105,20 +127,27 @@ async function syncOnce(projectId: string) {
       return;
     }
   }
+  // Named by the plan, but on neither this device nor the server (an imported plan, say).
+  if (missing.length && useStore.getState().editor.doc.id === projectId) {
+    for (const m of todo) if (missing.includes(m.name)) refused.add(`${projectId}|${m.hash}`);
+    useStore.setState({
+      notice: `The model ${missing.map((n) => `“${n}”`).join(', ')} isn’t on this device or the server, so it shows as a box. Upload it again to see it.`,
+    });
+  }
 }
 
 /**
  * An uploaded model's bytes, for the 3D view: from this browser, or else from the server
- * (then kept here).
+ * (then kept here, if this browser can keep things).
  */
 export async function fetchUploaded(key: string): Promise<ArrayBuffer> {
-  const local = await getAsset(key);
+  const local = await getAsset(key).catch(() => undefined);
   if (local) return local.arrayBuffer();
   const hash = hashOfKey(key);
   const { backend, editor } = useStore.getState();
   if (!hash || !backend?.getModel) throw new NotFoundError('model not in this browser');
   const blob = await backend.getModel(editor.doc.id, hash);
-  await putAsset(key, blob);
+  await putAsset(key, blob).catch(() => {});
   return blob.arrayBuffer();
 }
 

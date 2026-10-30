@@ -34,11 +34,20 @@ export class ModelLibrary implements ModelSource {
   private readonly loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   private readonly sizes = new Map<string, THREE.Vector3>();
 
-  /** `fetchUploaded` gets uploaded models' bytes; without it they stay as boxes. */
+  /** When an uploaded model last failed to load: it is tried again a minute later. */
+  private readonly failedAt = new Map<string, number>();
+
+  /**
+   * `fetchUploaded` gets uploaded models' bytes; without it they stay as boxes.
+   * `configure` sets up the loader further (e.g. a Draco decoder for uploaded models).
+   */
   constructor(
     private readonly base: string,
     private readonly fetchUploaded?: ModelFetch,
-  ) {}
+    configure?: (loader: GLTFLoader) => void,
+  ) {
+    configure?.(this.loader);
+  }
 
   natural(file: string): THREE.Vector3 | undefined {
     return this.sizes.get(file);
@@ -47,6 +56,12 @@ export class ModelLibrary implements ModelSource {
   get(file: string): THREE.Object3D | null {
     const model = this.loaded.get(file);
     if (model) return model.clone(true);
+    // An uploaded model may still be on its way to the server from another browser.
+    const at = this.failedAt.get(file);
+    if (at !== undefined && Date.now() - at > 60_000) {
+      this.failedAt.delete(file);
+      this.failed.delete(file);
+    }
     if (!this.loading.has(file) && !this.failed.has(file)) this.load(file);
     return null;
   }
@@ -80,6 +95,7 @@ export class ModelLibrary implements ModelSource {
   }
 
   private load(file: string) {
+    const uploaded = file.startsWith(UPLOADED);
     this.loading.add(file);
     this.scene(file).then(
       (scene) => {
@@ -91,8 +107,9 @@ export class ModelLibrary implements ModelSource {
             o.geometry.computeBoundingSphere();
             o.castShadow = (o.geometry.boundingSphere?.radius ?? 0) > 0.5;
             o.receiveShadow = true;
+            // An uploaded model keeps its own sides: its lampshade may be a single surface.
             for (const m of [o.material].flat() as THREE.Material[]) {
-              if (!m.transparent && m.alphaTest === 0) m.side = THREE.FrontSide;
+              if (!m.transparent && m.alphaTest === 0 && !uploaded) m.side = THREE.FrontSide;
             }
             o.userData.shared = true;
           }
@@ -107,6 +124,7 @@ export class ModelLibrary implements ModelSource {
         this.tries.set(file, n);
         // Missing or broken: the stand-in box stays, retried twice, never every frame.
         this.failed.add(file);
+        if (uploaded) this.failedAt.set(file, Date.now());
         if (n <= 2) {
           setTimeout(
             () => {

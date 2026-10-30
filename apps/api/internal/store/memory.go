@@ -20,9 +20,11 @@ type Memory struct {
 	onImage func(id string, img *Image) error
 	models  map[string]map[string][]byte
 	// onModel persists a model (nil data deletes the project's models) while the lock is held.
-	onModel  func(id, hash string, data []byte) error
-	access   map[string]Access
-	onAccess func(id string, a *Access) error
+	onModel func(id, hash string, data []byte) error
+	// modelFile is where the file store keeps a model; its bytes aren't held in memory.
+	modelFile func(id, hash string) string
+	access    map[string]Access
+	onAccess  func(id string, a *Access) error
 	// history keeps, per project, the versions saves replaced (not persisted).
 	history map[string][]memoryVersion
 }

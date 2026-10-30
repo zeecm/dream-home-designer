@@ -33,7 +33,7 @@ export function renameProject(name: string): Command {
 
 /**
  * Puts the plan back as it was in `from` (an earlier saved version of the same project):
- * its levels, renovation, plan image, site and name. One undoable step.
+ * its levels, renovation, plan image, site, uploaded models and name. One undoable step.
  */
 export function restoreVersion(from: Project): Command {
   return {
@@ -44,6 +44,8 @@ export function restoreVersion(from: Project): Command {
       d.renovation = from.renovation && structuredClone(from.renovation);
       d.underlay = from.underlay && structuredClone(from.underlay);
       d.site = from.site && { ...from.site };
+      // Its uploaded models too, so its pieces have theirs (the files stay on the server).
+      d.models = from.models && structuredClone(from.models);
     },
   };
 }

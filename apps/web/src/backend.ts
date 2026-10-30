@@ -29,6 +29,8 @@ export interface Backend {
   deleteImage?(id: string): Promise<void>;
   /** Stores an uploaded furniture model (GLB) with the project; returns its SHA-256. */
   putModel?(id: string, blob: Blob): Promise<string>;
+  /** The SHA-256s of the models the server holds for the project. */
+  listModels?(id: string): Promise<string[]>;
   /** A model the project holds, by its SHA-256; NotFoundError if it has none such. */
   getModel?(id: string, hash: string): Promise<Blob>;
   /** What this browser may do with the project, as the server last said. */
@@ -169,6 +171,10 @@ export const remoteBackend: Backend = {
       }),
     );
     return ((await res.json()) as { hash: string }).hash;
+  },
+  async listModels(id) {
+    const res = await check(await fetch(url(id, '/models')));
+    return ((await res.json()) as { hashes: string[] }).hashes;
   },
   async getModel(id, hash) {
     const res = await fetch(url(id, `/models/${hash}`));

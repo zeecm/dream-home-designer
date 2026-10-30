@@ -54,6 +54,7 @@ func New(s store.Store, log *slog.Logger, opts ...Option) *Server {
 	srv.mux.HandleFunc("DELETE /projects/{id}/image", srv.deleteImage)
 	srv.mux.HandleFunc("GET /projects/{id}/image", srv.imageStatus)
 	srv.mux.HandleFunc("PUT /projects/{id}/models", srv.putModel)
+	srv.mux.HandleFunc("GET /projects/{id}/models", srv.listModels)
 	srv.mux.HandleFunc("GET /projects/{id}/models/{hash}", srv.getModel)
 	srv.mux.HandleFunc("GET /projects/{id}/share", srv.getShare)
 	srv.mux.HandleFunc("PUT /projects/{id}/share", srv.putShare)

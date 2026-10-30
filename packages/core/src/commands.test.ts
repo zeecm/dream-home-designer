@@ -198,6 +198,21 @@ describe('restoreVersion', () => {
     expect(s.doc.version).toBe(7);
     expect(undo(s).doc.name).toBe('Changed');
   });
+
+  it('brings back the uploaded models its pieces were made from', () => {
+    const model = {
+      id: 'mdl_1',
+      name: 'Chair',
+      hash: 'b'.repeat(64),
+      category: 'Living',
+      size: { w: 0.5, d: 0.5, h: 0.9 },
+    };
+    const old = { ...hdb4RoomProject(), models: { mdl_1: model } };
+    let s: EditorDoc = { doc: { ...hdb4RoomProject(), version: 3 }, history: emptyHistory() };
+    s = dispatch(s, restoreVersion(old));
+    expect(s.doc.models?.mdl_1).toEqual(model);
+    expect(undo(s).doc.models).toBeUndefined();
+  });
 });
 
 describe('deleteRoom', () => {

@@ -61,8 +61,9 @@ function sidewaysTest() {
     await expect(page.getByRole('button', { name: 'Leave walk' })).toBeVisible();
     await expect(page.locator('.palette')).toBeHidden();
     await expect(details).toBeHidden();
-    const canvas = await page.locator('canvas').boundingBox();
-    expect(canvas?.width ?? 0).toBeGreaterThan(vp.width * 0.95);
-    expect(canvas?.height ?? 0).toBeGreaterThan(vp.height * 0.75);
+    // (The 3D view catches up with its new size a frame or two later.)
+    const canvas = () => page.locator('canvas').boundingBox();
+    await expect.poll(async () => (await canvas())?.width ?? 0).toBeGreaterThan(vp.width * 0.95);
+    await expect.poll(async () => (await canvas())?.height ?? 0).toBeGreaterThan(vp.height * 0.75);
   });
 }

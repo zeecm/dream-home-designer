@@ -24,6 +24,9 @@ describe('uploaded models', () => {
     expect(modelSize({ x: 80, y: 100, z: 90 })).toEqual({ w: 0.8, d: 0.9, h: 1 });
     expect(modelSize({ x: 150, y: 90, z: 200 })).toEqual({ w: 1.5, d: 2, h: 0.9 });
     expect(modelSize({ x: 2400, y: 750, z: 900 })).toEqual({ w: 2.4, d: 0.9, h: 0.75 });
+    // A 1600 mm table, a 15 cm vase.
+    expect(modelSize({ x: 1600, y: 750, z: 800 })).toEqual({ w: 1.6, d: 0.8, h: 0.75 });
+    expect(modelSize({ x: 12, y: 15, z: 12 })).toEqual({ w: 0.12, d: 0.12, h: 0.15 });
     // A flat model (a rug) keeps a sliver of height.
     expect(modelSize({ x: 2, y: 0, z: 3 }).h).toBe(0.01);
   });

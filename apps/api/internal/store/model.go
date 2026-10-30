@@ -28,6 +28,8 @@ type ModelStore interface {
 	OpenModel(ctx context.Context, id, hash string) (int64, io.ReadCloser, error)
 	// Models lists the hashes the project holds.
 	Models(ctx context.Context, id string) ([]string, error)
+	// DeleteModel removes one model (no error if it is already gone).
+	DeleteModel(ctx context.Context, id, hash string) error
 	DeleteModels(ctx context.Context, id string) error
 }
 
@@ -48,6 +50,9 @@ func (m *Memory) PutModel(_ context.Context, id, hash string, data []byte) error
 	if m.models[id] == nil {
 		m.models[id] = map[string][]byte{}
 	}
+	if m.modelFile != nil {
+		data = nil // on disk; read when asked for
+	}
 	m.models[id][hash] = data
 	return nil
 }
@@ -61,7 +66,37 @@ func (m *Memory) OpenModel(_ context.Context, id, hash string) (int64, io.ReadCl
 	if !ok {
 		return 0, nil, ErrNoModel
 	}
+	if m.modelFile != nil {
+		f, err := os.Open(m.modelFile(id, hash))
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil, ErrNoModel
+		}
+		if err != nil {
+			return 0, nil, err
+		}
+		st, err := f.Stat()
+		if err != nil {
+			f.Close()
+			return 0, nil, err
+		}
+		return st.Size(), f, nil
+	}
 	return int64(len(data)), io.NopCloser(bytes.NewReader(data)), nil
+}
+
+func (m *Memory) DeleteModel(_ context.Context, id, hash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.models[id][hash]; !ok {
+		return nil
+	}
+	if m.modelFile != nil {
+		if err := os.Remove(m.modelFile(id, hash)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	delete(m.models[id], hash)
+	return nil
 }
 
 func (m *Memory) Models(_ context.Context, id string) ([]string, error) {
@@ -95,16 +130,17 @@ func (m *Memory) deleteModels(id string) error {
 	return nil
 }
 
-// fileModels loads dir/models/<id>/<hash>.glb and returns the hook that keeps the folder in
-// step with the store: (id, hash, data) writes one, (id, "", nil) removes the project's.
-func fileModels(dir string, into map[string]map[string][]byte) (func(id, hash string, data []byte) error, error) {
+// fileModels lists dir/models/<id>/<hash>.glb (their bytes stay on disk until asked for)
+// and returns the hook that keeps the folder in step with the store: (id, hash, data)
+// writes one, (id, "", nil) removes the project's; and where each one lives.
+func fileModels(dir string, into map[string]map[string][]byte) (func(id, hash string, data []byte) error, func(id, hash string) string, error) {
 	root := filepath.Join(dir, "models")
 	if err := os.MkdirAll(root, 0o755); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	projects, err := os.ReadDir(root)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, p := range projects {
 		if !p.IsDir() {
@@ -112,23 +148,20 @@ func fileModels(dir string, into map[string]map[string][]byte) (func(id, hash st
 		}
 		files, err := os.ReadDir(filepath.Join(root, p.Name()))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, f := range files {
 			hash, ok := strings.CutSuffix(f.Name(), ".glb")
 			if !ok {
 				continue // a half-written temporary file
 			}
-			data, err := os.ReadFile(filepath.Join(root, p.Name(), f.Name()))
-			if err != nil {
-				return nil, err
-			}
 			if into[p.Name()] == nil {
 				into[p.Name()] = map[string][]byte{}
 			}
-			into[p.Name()][hash] = data
+			into[p.Name()][hash] = nil
 		}
 	}
+	path := func(id, hash string) string { return filepath.Join(root, id, hash+".glb") }
 	return func(id, hash string, data []byte) error {
 		d := filepath.Join(root, id)
 		if data == nil {
@@ -137,8 +170,8 @@ func fileModels(dir string, into map[string]map[string][]byte) (func(id, hash st
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return err
 		}
-		return writeAtomic(d, filepath.Join(d, hash+".glb"), data)
-	}, nil
+		return writeAtomic(d, path(id, hash), data)
+	}, path, nil
 }
 
 // ------------------------------------------------------------------------- R2
@@ -192,6 +225,18 @@ func (s *R2) Models(ctx context.Context, id string) ([]string, error) {
 	}
 	slices.Sort(out)
 	return out, nil
+}
+
+func (s *R2) DeleteModel(ctx context.Context, id, hash string) error {
+	res, err := s.do(ctx, http.MethodDelete, modelKey(id, hash), nil, nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	res.Body.Close()
+	return nil
 }
 
 func (s *R2) DeleteModels(ctx context.Context, id string) error {

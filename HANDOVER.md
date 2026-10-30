@@ -415,15 +415,21 @@ binary glTF (`.glb`, up to 20 MB, 40 per plan). `Project.models` (optional) hold
 name, SHA-256, category and size; items made from it have its id (`mdl_…`) as `assetId`.
 Core keeps the open project's models in a registry (`setProjectModels`; `furnitureKind`
 falls back to it), which the web store refreshes whenever the document changes (`store.ts`).
-The size is measured on upload (`modelFiles.ts`: a model over 20 m is read as centimetres,
-over 2 km as millimetres); render's `ModelLibrary` centres the model on load and the scene
-fits it to that size. The GLB is kept in IndexedDB under `sha256:<hash>` and copied to the
+The size is measured on upload (`modelFiles.ts`: the first of metres, centimetres and
+millimetres that makes the largest side 5 cm to 6 m); render's `ModelLibrary` centres the
+model on load and the scene fits it to that size. Draco-compressed models load (decoder in
+`public/draco/`, copied from three's `examples/jsm/libs/draco/gltf`, outside Biome). The GLB is kept in IndexedDB under `sha256:<hash>` and copied to the
 API in the background (`models.ts`, `syncModels`); a browser without it fetches it from
 `GET /projects/{id}/models/{hash}` (no key needed, immutable, sandboxed, as plan images).
-The API stores them per project (memory, file `models/<id>/<hash>.glb`, R2
-`models/<id>/<hash>`) and deletes them with the project. The details panel's "Your model"
-renames a model or removes it with every piece made from it (one undo step). Not yet:
-models no longer in the document stay on the server until the project is deleted.
+The API stores them per project (memory, file `models/<id>/<hash>.glb` read on demand, R2
+`models/<id>/<hash>`) and deletes them with the project. `GET /projects/{id}/models` lists
+the hashes held, so a client uploads only what's missing (never from a view-only link).
+At 40, an upload first drops the models the saved document no longer names; still full is
+422. Uploads run two at a time, downloads eight. Copying a plan fetches its models into this
+browser first, so the copy can upload them; a plan naming a model that is on neither this
+device nor the server (an imported file) says so. The details panel's "Your model" renames
+a model or removes it with every piece made from it (one undo step); restoring an earlier
+version brings its models back. Not handled: rigged (skinned) models measure wrongly.
 
 ## 5. Owner to-dos
 

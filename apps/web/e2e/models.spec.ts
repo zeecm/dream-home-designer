@@ -57,6 +57,17 @@ test('upload your own model: place it, it reaches the server, another browser se
     .poll(async () => (await page.request.get(`/api/projects/${id}/models/${hash}`)).status())
     .toBe(200);
 
+  // Opened again, the plan uploads nothing: the server already has its model.
+  const puts: string[] = [];
+  page.on('request', (r) => {
+    if (r.method() === 'PUT' && r.url().includes('/models')) puts.push(r.url());
+  });
+  await page.reload();
+  await waitSaved(page);
+  await expect(items).toHaveCount(1);
+  await page.waitForTimeout(1000);
+  expect(puts).toEqual([]);
+
   // In 3D it draws without errors.
   await page.keyboard.press('3');
   await expect(page.getByRole('button', { name: 'Walk through' })).toBeVisible();

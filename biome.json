@@ -9,7 +9,8 @@
       ".taste-skill",
       "**/test-results",
       "**/playwright-report",
-      "tools/models/.cache"
+      "tools/models/.cache",
+      "apps/web/public/draco"
     ]
   },
   "formatter": {

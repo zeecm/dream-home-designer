@@ -350,14 +350,42 @@ func TestModels(t *testing.T) {
 		t.Fatalf("unknown hash: %d", res.StatusCode)
 	}
 
-	// A project holds at most MaxModelsPerProject models.
-	for i := 1; i < MaxModelsPerProject; i++ {
-		if res, _ := do(t, "PUT", ts.URL+"/projects/prj_m/models", tinyGLB(fmt.Sprintf(`,"n":%d`, i)), nil); res.StatusCode != http.StatusOK {
-			t.Fatalf("model %d: %d", i, res.StatusCode)
+	// A project holds at most MaxModelsPerProject models that its plan uses.
+	save := func(version int, hashes []string) {
+		models := map[string]any{}
+		for i, h := range hashes {
+			models[fmt.Sprintf("mdl_%d", i)] = map[string]any{"hash": h}
+		}
+		b, _ := json.Marshal(map[string]any{
+			"schemaVersion": 6, "id": "prj_m", "version": version, "name": "Flat", "units": "m",
+			"underlay": nil, "levels": []any{map[string]any{}}, "models": models,
+		})
+		if res, _ := do(t, "PUT", ts.URL+"/projects/prj_m", b, map[string]string{"If-Match": fmt.Sprintf(`"%d"`, version)}); res.StatusCode != http.StatusOK {
+			t.Fatalf("save v%d: %d", version, res.StatusCode)
 		}
 	}
-	if res, _ := do(t, "PUT", ts.URL+"/projects/prj_m/models", tinyGLB(`,"n":-1`), nil); res.StatusCode != http.StatusConflict {
+	all := []string{hash}
+	for i := 1; i < MaxModelsPerProject; i++ {
+		res, body := do(t, "PUT", ts.URL+"/projects/prj_m/models", tinyGLB(fmt.Sprintf(`,"n":%d`, i)), nil)
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("model %d: %d", i, res.StatusCode)
+		}
+		all = append(all, body["hash"].(string))
+	}
+	save(1, all)
+	if res, _ := do(t, "PUT", ts.URL+"/projects/prj_m/models", tinyGLB(`,"n":-1`), nil); res.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("one too many: %d", res.StatusCode)
+	}
+	if res, body := do(t, "GET", ts.URL+"/projects/prj_m/models", nil, nil); res.StatusCode != http.StatusOK || len(body["hashes"].([]any)) != MaxModelsPerProject {
+		t.Fatalf("list: %d %v", res.StatusCode, body)
+	}
+	// The plan names only the first model now: the rest make room for a new one.
+	save(2, all[:1])
+	if res, _ := do(t, "PUT", ts.URL+"/projects/prj_m/models", tinyGLB(`,"n":-1`), nil); res.StatusCode != http.StatusOK {
+		t.Fatalf("upload once unused ones go: %d", res.StatusCode)
+	}
+	if _, body := do(t, "GET", ts.URL+"/projects/prj_m/models", nil, nil); len(body["hashes"].([]any)) != 2 {
+		t.Fatalf("after making room: %v", body)
 	}
 
 	do(t, "DELETE", ts.URL+"/projects/prj_m", nil, nil)

@@ -47,7 +47,7 @@ func NewFile(dir string) (*Memory, error) {
 	if m.onImage, err = fileImages(dir, m.images); err != nil {
 		return nil, err
 	}
-	if m.onModel, err = fileModels(dir, m.models); err != nil {
+	if m.onModel, m.modelFile, err = fileModels(dir, m.models); err != nil {
 		return nil, err
 	}
 	if m.onAccess, err = fileAccess(dir, m.access); err != nil {

@@ -2,6 +2,7 @@ import {
   type Command,
   type DispatchOptions,
   type EditorDoc,
+  FURNITURE,
   type Level,
   type Project,
   blankProject,
@@ -10,7 +11,9 @@ import {
   dispatch as coreDispatch,
   redo as coreRedo,
   undo as coreUndo,
+  customModelFile,
   emptyHistory,
+  furnitureKind,
   loadProject,
   newId,
   sampleFlatProject,
@@ -21,6 +24,7 @@ import {
 import type { Patch } from 'immer';
 import { create } from 'zustand';
 import { forgetWithAccount, keepWithAccount } from './account';
+import { getAsset, putAsset } from './assets';
 import {
   type Backend,
   ConflictError,
@@ -434,6 +438,16 @@ export const useStore = create<State>((set, get) => {
     },
     copyProject: async () => {
       const doc = get().editor.doc;
+      // The copy uploads its models from this browser: fetch any it doesn't hold yet.
+      const backend = get().backend;
+      await Promise.all(
+        Object.values(doc.models ?? {}).map(async (m) => {
+          const key = customModelFile(m.hash);
+          if (await getAsset(key).catch(() => undefined)) return;
+          const blob = await backend?.getModel?.(doc.id, m.hash).catch(() => undefined);
+          if (blob) await putAsset(key, blob).catch(() => {});
+        }),
+      );
       const name = doc.name.replace(/ \(sample\)$/, '');
       await createFrom({ ...doc, id: newId('prj'), version: 0, name: `${name} (copy)` });
     },
@@ -540,6 +554,9 @@ const followModels = (doc: Project) => {
   if (doc.models === shownModels) return;
   shownModels = doc.models;
   setProjectModels(doc.models);
+  // A model removed (or undone away) while the Furniture tool held it: arm a catalogue piece.
+  const armed = useEditor.getState().furnitureKind;
+  if (!furnitureKind(armed)) useEditor.getState().setFurnitureKind(FURNITURE[0]?.id ?? armed);
 };
 followModels(useStore.getState().editor.doc);
 useStore.subscribe((s) => followModels(s.editor.doc));
