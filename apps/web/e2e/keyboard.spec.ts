@@ -34,7 +34,7 @@ test('the plan works from the keyboard: Tab selects, Enter renames, arrows nudge
 
   // Double-clicking a room also starts a rename, and the name field keeps focus.
   await page.keyboard.press('Escape');
-  const room = page.locator('[data-hit="room:rm_bedroom-2"]');
+  const room = page.locator('[data-hit="room:rm_bedroom"]');
   await room.dblclick({ force: true });
   await expect(name).toBeFocused();
   await page.keyboard.type('Guest room');

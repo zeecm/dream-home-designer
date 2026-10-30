@@ -1,3 +1,4 @@
+import { SAMPLE_PLAN_KEY } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 
 /**
@@ -73,6 +74,22 @@ export async function hashBlob(blob: Blob): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** Images that ship with the app, by key: the sample flat's floor plan. */
+export const BUNDLED_ASSETS: Record<string, string> = {
+  [SAMPLE_PLAN_KEY]: '/samples/hdb-3room-type4.png',
+};
+
+/** A bundled image, kept in this browser once fetched; undefined for any other key. */
+export async function bundledAsset(key: string): Promise<Blob | undefined> {
+  const url = BUNDLED_ASSETS[key];
+  if (!url) return undefined;
+  const res = await fetch(url);
+  if (!res.ok) return undefined;
+  const blob = await res.blob();
+  await putAsset(key, blob).catch(() => undefined);
+  return blob;
+}
+
 /** Fetches an image by hash from the server, for images this browser doesn't have. */
 export type RemoteImage = (hash: string) => Promise<Blob>;
 
@@ -86,7 +103,9 @@ export function loadAsset(key: string, remote?: RemoteImage): Promise<LoadedImag
   let p = cache.get(key);
   if (!p) {
     p = (async () => {
-      let blob = await getAsset(key).catch(() => undefined);
+      let blob =
+        (await getAsset(key).catch(() => undefined)) ??
+        (await bundledAsset(key).catch(() => undefined));
       const hash = hashOfKey(key);
       if (!blob && hash && remote) {
         blob = await remote(hash).catch(() => undefined);

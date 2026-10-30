@@ -8,6 +8,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import {
   type AssetState,
+  bundledAsset,
   getAsset,
   hashBlob,
   hashOfKey,
@@ -91,7 +92,7 @@ async function syncOnce(projectId: string): Promise<void> {
   const tag = `${projectId}|${key}`;
   if (synced.get(projectId) === key || refused.has(tag)) return;
   try {
-    const local = await getAsset(key);
+    const local = (await getAsset(key)) ?? (await bundledAsset(key));
     if (!local) return; // not in this browser: nothing to upload from here
     const hash = hashOfKey(key);
     if (hash && (await backend.hasImage(projectId, hash))) {

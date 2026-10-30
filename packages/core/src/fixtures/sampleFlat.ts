@@ -5,110 +5,125 @@ import { type EditorDoc, dispatch, emptyHistory } from '../history';
 import { placeOpening, planGeometry } from '../plan';
 import type { Level, OpeningKind, Project, Vec2 } from '../schema';
 
+/** The bundled image of the sample's floor plan (`/samples/hdb-3room-type4.png` in the web app). */
+export const SAMPLE_PLAN_KEY =
+  'sha256:2bc0d95b7f74579cd970db461ce45dfc08900e46b301315899780ed5a56a5c9a';
+
 /**
- * The sample flat new visitors explore: a 4-room HDB-style layout of about 96 m² (to wall
- * centre lines) with a service yard, kitchen, household shelter, two bathrooms, three
- * bedrooms and an L-shaped living and dining room. It is built with the same commands the
- * editor uses, so it is always a valid, fully connected plan, then given readable ids.
+ * The sample flat new visitors explore: an HDB 3-room Type 4 flat (Blk 39A), traced from
+ * its published floor plan, which sits under it already scaled. Two bedrooms, two
+ * bathrooms, a kitchen, a household shelter, an air-con ledge, and an L-shaped living and
+ * dining room with a dry kitchen marked off by room boundaries. It is built with the same
+ * commands the editor uses, so it is always a valid, fully connected plan, then given
+ * readable ids. Coordinates are wall centre lines in millimetres from the plan's top left.
  *
- *   0          3.2       5.6       8.6     10.6    12
- * 0 +----------+---------+---------+-------+------+
- *   | Yard     |         | Bed 3   | Master       |
- * 1.6+---------+         |         |              |
- *   | Kitchen  |  Living +---------+ 3.2          |
- *   |          |  and              +-------+------+ 3.6
- * 4.6+----+----+  dining           | Corr. | M.bath|
- *   | HS | Bath|                   +-------+------+ 5.2
- * 6.2+----+----+                   | Bedroom 2    |
- *   |                              |              |
- * 8 +------------------------------+--------------+
+ *    0.15      3.3        6.35          10.16
+ *  0 +---------+----------+
+ *    | Main    | Bedroom  |
+ *    | bedroom |          +--------------+ 1.58
+ *    |         +----------+              |
+ *    |         |   (3.1)     Living and  |
+ *    +----+----+----+.......  dining     | 4.33
+ *    |Bath|Bath     |Dry   :             |
+ *    | 1  | 2       |kitch.:             |
+ *    +----+----+----+------+-----+-------+ 6.15
+ *    |Ledge|   |Kitchen    |Shel-|
+ *    +-----+   |           |ter  |         7.17 / 7.89
+ *              +-----------+-----+         8.89
  */
 export function sampleFlatProject(id = 'prj_sample'): Project {
-  let s: EditorDoc = { doc: blankProject('4-room HDB (sample)', id), history: emptyHistory() };
+  let s: EditorDoc = { doc: blankProject('3-room HDB (sample)', id), history: emptyHistory() };
   const level = () => s.doc.levels[0] as Level;
-  const wall = (pts: [number, number][], thickness = 0.1) => {
+  const wall = (pts: [number, number][], thickness = 0.1, kind?: 'boundary') => {
     for (let i = 0; i + 1 < pts.length; i++) {
       const [ax, ay] = pts[i] as [number, number];
       const [bx, by] = pts[i + 1] as [number, number];
       const r = drawWall(
         level(),
-        { point: { x: ax, y: ay } },
-        { point: { x: bx, y: by } },
-        {
-          thickness,
-        },
+        { point: { x: ax / 1000, y: ay / 1000 } },
+        { point: { x: bx / 1000, y: by / 1000 } },
+        { thickness, ...(kind ? { kind } : {}) },
       );
       s = dispatch(s, r.command);
     }
   };
 
+  // The outside of the flat, then the shelter's thick walls.
   wall(
     [
-      [0, 0],
-      [12, 0],
-      [12, 8],
-      [0, 8],
-      [0, 0],
+      [150, 72],
+      [6352, 72],
+      [6352, 1579],
+      [10158, 1579],
+      [10158, 6150],
+      [8136, 6150],
+      [8136, 7891],
+      [6435, 7891],
+      [6435, 8886],
+      [3285, 8886],
+      [3285, 6150],
+      [2450, 6150],
+      [2450, 7171],
+      [150, 7171],
+      [150, 72],
+    ],
+    0.2,
+  );
+  wall(
+    [
+      [8136, 6150],
+      [6435, 6150],
+      [6435, 7891],
     ],
     0.2,
   );
   wall([
-    [3.2, 0],
-    [3.2, 6.2],
+    [150, 6150],
+    [2450, 6150],
   ]);
   wall([
-    [0, 1.6],
-    [3.2, 1.6],
+    [3285, 6150],
+    [6435, 6150],
   ]);
   wall([
-    [0, 4.6],
-    [3.2, 4.6],
+    [150, 4327],
+    [4545, 4327],
+    [4545, 6150],
   ]);
   wall([
-    [0, 6.2],
-    [3.2, 6.2],
+    [3285, 72],
+    [3285, 4327],
   ]);
   wall([
-    [1.4, 4.6],
-    [1.4, 6.2],
+    [2450, 4327],
+    [2450, 6150],
   ]);
   wall([
-    [8.6, 0],
-    [8.6, 8],
+    [6352, 1579],
+    [6352, 3100],
+    [3285, 3100],
   ]);
-  wall([
-    [5.6, 0],
-    [5.6, 3.2],
-    [8.6, 3.2],
-  ]);
-  wall([
-    [8.6, 3.6],
-    [12, 3.6],
-  ]);
-  wall([
-    [10.6, 3.6],
-    [10.6, 5.2],
-  ]);
-  wall([
-    [8.6, 5.2],
-    [10.6, 5.2],
-  ]);
-  wall([
-    [10.6, 5.2],
-    [12, 5.2],
-  ]);
+  // The dry kitchen is open to the living room: dashed boundaries, not walls.
+  wall(
+    [
+      [4545, 4327],
+      [6435, 4327],
+      [6435, 6150],
+    ],
+    0.1,
+    'boundary',
+  );
 
   const rooms: [string, string, Vec2][] = [
-    ['Service yard', 'tile-grey', { x: 1.6, y: 0.8 }],
-    ['Kitchen', 'tile-grey', { x: 1.6, y: 3.1 }],
-    ['Household shelter', 'paint-white', { x: 0.7, y: 5.4 }],
-    ['Bathroom', 'tile-grey', { x: 2.3, y: 5.4 }],
-    ['Living and dining', 'wood-oak', { x: 5, y: 5.5 }],
-    ['Bedroom 3', 'wood-oak', { x: 7.1, y: 1.6 }],
-    ['Master bedroom', 'wood-walnut', { x: 10.3, y: 1.8 }],
-    ['Corridor', 'wood-oak', { x: 9.6, y: 4.4 }],
-    ['Master bathroom', 'tile-grey', { x: 11.3, y: 4.4 }],
-    ['Bedroom 2', 'wood-oak', { x: 10.3, y: 6.6 }],
+    ['Main bedroom', 'wood-walnut', { x: 1.7, y: 1.5 }],
+    ['Bedroom', 'wood-oak', { x: 4.8, y: 1.5 }],
+    ['Living and dining', 'wood-oak', { x: 8.3, y: 4.3 }],
+    ['Dry kitchen', 'tile-grey', { x: 5.5, y: 5.2 }],
+    ['Bath/WC 1', 'tile-grey', { x: 1.1, y: 5.5 }],
+    ['Bath/WC 2', 'tile-grey', { x: 3.5, y: 5.5 }],
+    ['Kitchen', 'tile-grey', { x: 4.6, y: 7.9 }],
+    ['Household shelter', 'paint-white', { x: 7.3, y: 7.2 }],
+    ['Air-con ledge', 'paint-white', { x: 1.3, y: 6.7 }],
   ];
   for (const [name, floorMaterial, at] of rooms) {
     const room = Object.values(level().rooms).find((r) =>
@@ -120,24 +135,20 @@ export function sampleFlatProject(id = 'prj_sample'): Project {
 
   // Each opening is placed on the wall nearest `at`; a door swings to the side `at` is on.
   const openings: [OpeningKind, number, Vec2][] = [
-    ['door', 0.9, { x: 4.4, y: 7.8 }], // main door
-    ['passage', 0.9, { x: 3.3, y: 3.0 }], // kitchen
-    ['passage', 0.8, { x: 1.6, y: 1.7 }], // yard
-    ['door', 0.8, { x: 0.7, y: 6.3 }], // shelter, opening outwards
-    ['door', 0.7, { x: 2.4, y: 6.1 }], // bathroom
-    ['door', 0.8, { x: 6.2, y: 3.1 }], // bedroom 3
-    ['passage', 0.9, { x: 8.7, y: 4.4 }], // corridor
-    ['door', 0.8, { x: 9.6, y: 3.5 }], // master bedroom
-    ['door', 0.7, { x: 11.3, y: 3.7 }], // master bathroom
-    ['door', 0.8, { x: 9.6, y: 5.3 }], // bedroom 2
-    ['window', 1.6, { x: 4.4, y: 0.1 }], // living
-    ['window', 1.8, { x: 7.0, y: 7.9 }], // dining
-    ['window', 1.2, { x: 0.1, y: 3.1 }], // kitchen
-    ['window', 0.9, { x: 0.1, y: 0.8 }], // yard
-    ['window', 1.5, { x: 7.1, y: 0.1 }], // bedroom 3
-    ['window', 1.8, { x: 10.3, y: 0.1 }], // master bedroom
-    ['window', 0.6, { x: 11.9, y: 4.4 }], // master bathroom
-    ['window', 1.2, { x: 11.9, y: 6.6 }], // bedroom 2
+    ['door', 1.0, { x: 9.257, y: 6.09 }], // main door
+    ['door', 0.8, { x: 3.24, y: 3.725 }], // main bedroom
+    ['door', 0.8, { x: 3.944, y: 3.05 }], // bedroom
+    ['door', 0.7, { x: 1.7, y: 4.28 }], // bath 1
+    ['door', 0.7, { x: 3.9, y: 4.28 }], // bath 2
+    ['door', 0.8, { x: 6.39, y: 7.218 }], // shelter
+    ['passage', 1.2, { x: 5.81, y: 6.15 }], // kitchen
+    ['window', 1.8, { x: 1.828, y: 0.072 }], // main bedroom
+    ['window', 1.6, { x: 0.15, y: 3.387 }], // main bedroom, side
+    ['window', 1.8, { x: 4.678, y: 0.072 }], // bedroom
+    ['window', 2.4, { x: 8.17, y: 1.579 }], // living
+    ['window', 0.8, { x: 1.062, y: 6.15 }], // bath 1
+    ['window', 0.6, { x: 2.867, y: 6.15 }], // bath 2
+    ['window', 1.2, { x: 3.285, y: 7.3 }], // kitchen
   ];
   for (const [kind, width, at] of openings) {
     const p = placeOpening(planGeometry(level()), at, width, 0.3);
@@ -155,7 +166,18 @@ export function sampleFlatProject(id = 'prj_sample'): Project {
     });
     s = dispatch(s, r.command);
   }
-  return readableIds(s.doc);
+  const project = readableIds(s.doc);
+  // The published plan, scaled so its drawing lines up with the walls traced from it.
+  return {
+    ...project,
+    underlay: {
+      assetKey: SAMPLE_PLAN_KEY,
+      opacity: 0.45,
+      rotation: 0,
+      origin: { x: -2.970327, y: -2.439987 },
+      scale: 0.009901979,
+    },
+  };
 }
 
 const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
