@@ -25,7 +25,14 @@ import {
   remoteBackend,
 } from './backend';
 import { useEditor } from './editor';
-import { type RecentProject, forgetRecent, recentProjects, rememberRecent } from './recent';
+import { keysFor } from './keys';
+import {
+  type RecentProject,
+  forgetRecent,
+  isSample,
+  recentProjects,
+  rememberRecent,
+} from './recent';
 
 export type SyncStatus =
   | { kind: 'loading' }
@@ -73,6 +80,12 @@ interface State {
   createProject: (name?: string) => Promise<void>;
   /** Opens a fresh copy of the reference plan, so every visitor edits their own. */
   openSample: () => Promise<void>;
+  /**
+   * Deletes plans this browser owns and takes plans shared with it off its list; sample
+   * copies are kept. If the open plan goes, the newest one left (or a new sample) opens.
+   * Resolves to the names that couldn't be deleted.
+   */
+  deletePlans: (ids: string[]) => Promise<string[]>;
   save: () => Promise<void>;
   /** Resolves a save conflict: reload the server's version, or overwrite it with ours. */
   resolveConflict: (keep: 'theirs' | 'mine') => Promise<void>;
@@ -142,6 +155,13 @@ const errorMessage = (prefix: string, e: unknown) => `${prefix}: ${(e as Error).
 /** The API's id rule; anything else can't be a project of ours. */
 const VALID_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
+/**
+ * Whether this browser may delete a plan rather than just take it off its list: it holds
+ * the owner key, or the plan lives only in this browser.
+ */
+export const ownsPlan = (backend: Backend | null, id: string) =>
+  backend?.kind === 'local' || !!keysFor(id).owner;
+
 /** Commands that remove things get an Undo toast. */
 const DESTRUCTIVE = /^Delete /;
 
@@ -161,7 +181,7 @@ export const useStore = create<State>((set, get) => {
     autosaveTimer = setTimeout(() => void get().save(), AUTOSAVE_MS);
   };
 
-  const open = (doc: Project) => {
+  const open = (doc: Project, sample = false) => {
     clearTimeout(retryTimer);
     retries = 0;
     const backend = get().backend;
@@ -173,7 +193,7 @@ export const useStore = create<State>((set, get) => {
       canRedo: false,
       role,
       // A viewer is just looking: don't put the plan in this browser's project list.
-      recent: role === 'viewer' ? get().recent : rememberRecent(doc),
+      recent: role === 'viewer' ? get().recent : rememberRecent(doc, undefined, sample),
     });
     rememberProject(doc.id);
   };
@@ -187,14 +207,14 @@ export const useStore = create<State>((set, get) => {
     while (inflight) await inflight;
   };
 
-  const createFrom = async (doc: Project) => {
+  const createFrom = async (doc: Project, sample = false) => {
     await flush();
     set({ sync: { kind: 'loading' } });
     try {
       const backend = await resolveBackend();
       set({ backend });
       if (backend.kind === 'local' && !get().notice) set({ notice: localNotice });
-      open(await backend.create(doc));
+      open(await backend.create(doc), sample);
     } catch (e) {
       set({ sync: { kind: 'error', message: errorMessage('Could not create a project', e) } });
     }
@@ -300,7 +320,34 @@ export const useStore = create<State>((set, get) => {
       // A blank plan is drawn in the plan view; 3D has nothing to show yet.
       useEditor.getState().setViewMode('plan');
     },
-    openSample: () => createFrom(sampleFlatProject(newId('prj'))),
+    openSample: () => createFrom(sampleFlatProject(newId('prj')), true),
+    deletePlans: async (ids) => {
+      const doomed = get().recent.filter((r) => ids.includes(r.id) && !isSample(r));
+      if (doomed.length === 0) return [];
+      const gone = new Set(doomed.map((r) => r.id));
+      // Move off the open plan first, so nothing saves it back as it goes.
+      if (gone.has(get().editor.doc.id)) {
+        const next = get().recent.find((r) => !gone.has(r.id));
+        if (next) await get().load(next.id);
+        else await get().openSample();
+      }
+      const backend = get().backend ?? (await resolveBackend());
+      const failed: string[] = [];
+      for (const r of doomed) {
+        if (ownsPlan(backend, r.id)) {
+          try {
+            await backend.remove(r.id);
+          } catch (e) {
+            if (!(e instanceof NotFoundError)) {
+              failed.push(r.name);
+              continue;
+            }
+          }
+        }
+        set({ recent: forgetRecent(r.id) });
+      }
+      return failed;
+    },
     claim: async () => {
       const { backend, editor } = get();
       const id = editor.doc.id;

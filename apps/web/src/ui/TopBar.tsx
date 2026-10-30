@@ -2,6 +2,7 @@ import { renameProject } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { type ViewMode, useEditor } from '../editor';
 import { type SyncStatus, useProject, useStore } from '../store';
+import { PlansDialog } from './PlansDialog';
 import { ShareMenu } from './ShareMenu';
 import { Segmented } from './fields';
 import { Mark, icons } from './icons';
@@ -60,6 +61,7 @@ function ProjectName() {
 
 function ProjectMenu() {
   const [open, setOpen] = useState(false);
+  const [managing, setManaging] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const recent = useStore((s) => s.recent);
   const currentId = useProject().id;
@@ -119,8 +121,13 @@ function ProjectMenu() {
               ))}
             </>
           )}
+          <hr className="menu-rule" />
+          <button type="button" onClick={run(() => setManaging(true))}>
+            Manage your plans…
+          </button>
         </div>
       )}
+      {managing && <PlansDialog onClose={() => setManaging(false)} />}
     </div>
   );
 }

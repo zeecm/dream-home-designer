@@ -10,8 +10,10 @@ import { TopBar } from './ui/TopBar';
 import { icons } from './ui/icons';
 
 const isTyping = (t: EventTarget | null) =>
-  t instanceof HTMLElement &&
-  (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName));
+  // While a dialog is open, keys are the dialog's, not the plan's shortcuts.
+  !!document.querySelector('dialog[open]') ||
+  (t instanceof HTMLElement &&
+    (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)));
 
 const VIEW_KEYS: Record<string, ViewMode> = { '1': 'plan', '2': 'split', '3': '3d' };
 

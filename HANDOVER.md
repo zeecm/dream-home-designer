@@ -466,6 +466,14 @@ only) shows north and opens that setting. Lamps: floor and table lamps, ceiling 
 lights (category Lighting; ceiling ones hang from the level's ceiling height and draw as a
 circle-and-cross). `itemLights` places each bulb; the view lights the 8 nearest the camera
 with unshadowed point lights fading out by 7 m, so some light leaks through walls.
+**Your plans:** the project menu's "Manage your plans…" opens a dialog listing this
+browser's plans (the recent list, up to 20): open one, delete one (with an inline confirm), or
+Clear all. Plans this browser owns (owner key, or a local-only plan: `ownsPlan`) are deleted
+on the server, which keeps its 30-day recovery copy; plans shared with it are only taken off
+the list. Sample copies (`RecentProject.sample`, or older ones named "… (sample)") are kept
+and can't be deleted. Deleting the open plan opens the newest one left, or a new sample.
+While a dialog is open the plan's keyboard shortcuts are off.
+
 **Still open:** latitude and place aren't editable in the UI; ceiling lights don't follow a
 later ceiling-height change; lamps are always on.
 

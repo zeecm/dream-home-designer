@@ -6,7 +6,12 @@ export interface RecentProject {
   id: string;
   name: string;
   openedAt: string;
+  /** A copy of the sample flat: always kept, so it can't be deleted from the list. */
+  sample?: boolean;
 }
+
+/** Sample copies stay; older ones are known by the name the sample comes with. */
+export const isSample = (r: RecentProject) => !!r.sample || / \(sample\)$/.test(r.name);
 
 const KEY = 'dhd:recent';
 const MAX = 20;
@@ -24,11 +29,13 @@ export function recentProjects(storage: Storage = window.localStorage): RecentPr
 export function rememberRecent(
   p: { id: string; name: string },
   storage: Storage = window.localStorage,
+  sample = false,
 ): RecentProject[] {
-  const list = [
-    { id: p.id, name: p.name, openedAt: new Date().toISOString() },
-    ...recentProjects(storage).filter((r) => r.id !== p.id),
-  ].slice(0, MAX);
+  const earlier = recentProjects(storage);
+  const was = earlier.find((r) => r.id === p.id);
+  const entry: RecentProject = { id: p.id, name: p.name, openedAt: new Date().toISOString() };
+  if (sample || was?.sample) entry.sample = true;
+  const list = [entry, ...earlier.filter((r) => r.id !== p.id)].slice(0, MAX);
   try {
     storage.setItem(KEY, JSON.stringify(list));
   } catch {

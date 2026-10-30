@@ -45,8 +45,10 @@ function useElementSize<T extends Element>() {
 }
 
 const isTyping = (t: EventTarget | null) =>
-  t instanceof HTMLElement &&
-  (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName));
+  // While a dialog is open, keys are the dialog's, not the plan's shortcuts.
+  !!document.querySelector('dialog[open]') ||
+  (t instanceof HTMLElement &&
+    (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)));
 
 function useTool(tool: Tool, ctx: ToolContext): ToolController {
   // Every tool hook runs every render so hook order never changes.
