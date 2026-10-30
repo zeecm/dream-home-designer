@@ -54,6 +54,10 @@ export interface EditorState {
   fitDone: () => void;
   /** Called when another project opens. */
   reset: () => void;
+  /** First-person walk in the 3D view; remembers the view mode to return to. */
+  walking: { returnTo: ViewMode } | null;
+  startWalk: () => void;
+  stopWalk: () => void;
 }
 
 const VIEW_KEY = 'dhd:view';
@@ -105,12 +109,23 @@ export const useEditor = create<EditorState>((set) => ({
   setView: (view, byUser) => set(byUser ? { view, viewAdjusted: true } : { view }),
   setViewMode: (viewMode) => {
     rememberViewMode(viewMode);
-    set({ viewMode, fitRequested: true, viewAdjusted: false });
+    set({ viewMode, fitRequested: true, viewAdjusted: false, walking: null });
   },
+  walking: null,
+  // Walking takes the whole stage (and isn't remembered as the view mode).
+  startWalk: () => set((s) => ({ walking: { returnTo: s.viewMode }, viewMode: '3d' })),
+  stopWalk: () => set((s) => (s.walking ? { viewMode: s.walking.returnTo, walking: null } : {})),
   requestFit: () => set({ fitRequested: true, viewAdjusted: false }),
   fitDone: () => set({ fitRequested: false }),
   reset: () =>
-    set({ tool: 'select', selection: null, hover: null, fitRequested: true, viewAdjusted: false }),
+    set((s) => ({
+      tool: 'select',
+      selection: null,
+      hover: null,
+      fitRequested: true,
+      viewAdjusted: false,
+      ...(s.walking ? { viewMode: s.walking.returnTo, walking: null } : {}),
+    })),
 }));
 
 export const sameSelection = (a: Selection | null, b: Selection | null) =>

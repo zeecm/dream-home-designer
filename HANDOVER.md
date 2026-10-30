@@ -135,8 +135,8 @@ Writes are rate-limited per IP at the Worker (60/min). IDs must match `^[a-z0-9]
 - **Plan and 3D:** walls have mitred corners in both views, and the 3D rebuild is incremental.
 
 **Tests:**
-- 111 core and 12 render unit tests, plus 22 web unit tests.
-- A 7-test end-to-end suite.
+- 119 core and 12 render unit tests, plus 22 web unit tests.
+- An 8-test end-to-end suite.
 - Go tests, including a store contract test that has passed against live R2.
 
 **Independent acceptance testing, round 1, found:** cropped Split view, the Esc handling in
@@ -257,11 +257,25 @@ browser that has them.
 2. **Room matching by overlap:** rooms are matched across edits by label point and corners. Matching
    by overlapping area would be sturdier for large reshapes.
 
-**Phase 2, first-person walkthrough:**
-- PointerLockControls.
-- A capsule colliding with a wall BVH (three-mesh-bvh), with door passages excluded from
-  collision.
-- A touch joystick on phones.
+**Phase 2, first-person walkthrough (first cut built):**
+- **What's built:**
+  - "Walk through" in the 3D view starts walking in the largest room, facing its longest view
+    inside the flat (`walkStart`).
+  - Movement is WASD or the arrow keys, with Shift to run, plus a thumb stick on touch screens.
+  - Clicking the view gives mouse look under pointer lock. Dragging to look works everywhere.
+  - Esc or "Leave walk" returns to the previous view.
+  - Ceilings are on while walking.
+- **Collision:** it is 2D, in core (`walk.ts`). The walker is a 0.2 m circle sliding against the
+  edges of the plan's wall pieces and hubs. Door and passage gaps are open, windows are closed,
+  and room boundaries never block. This replaces the planned three-mesh-bvh capsule, because a
+  single floor needs no 3D collision and this one is unit-tested. Revisit it if stairs or
+  furniture collision arrive.
+- **Next:**
+  - better indoor lighting (the walls read flat);
+  - door leaves;
+  - a mini-map with your position;
+  - head bob and footstep feel, kept subtle;
+  - remembering the last walk position.
 
 `LevelMeshes` already gives one mesh per wall, with `userData.wallId`. The plan doc has the
 algorithm notes and the checklists for Phases 3 to 5.

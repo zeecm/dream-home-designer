@@ -32,6 +32,7 @@ function useShortcuts() {
         return;
       }
       if (isTyping(e.target) || e.altKey) return;
+      if (ed.walking) return; // walking has its own keys
       const tool = TOOLS.find((t) => t.key.toLowerCase() === k);
       if (tool) {
         ed.setTool(tool.id as Tool);

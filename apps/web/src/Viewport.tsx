@@ -1,17 +1,23 @@
-import { type Level, levelBounds } from '@dhd/core';
+import { type Level, type Vec2, levelBounds } from '@dhd/core';
 import { LevelMeshes, MaterialCache } from '@dhd/render';
 import { OrbitControls } from '@react-three/drei';
 import { Canvas, useThree } from '@react-three/fiber';
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEditor } from './editor';
 import { useProject } from './store';
+import { Joystick } from './walk/Joystick';
+import { WalkControls } from './walk/WalkControls';
 
 const materials = new MaterialCache();
 const FOV = 40;
 
-/** Keeps one incremental mesh set per project; each edit rebuilds only what changed. */
-function LevelMesh() {
+/**
+ * Keeps one incremental mesh set per project; each edit rebuilds only what changed. Walking
+ * puts the ceilings on (the orbit view leaves them off to see in).
+ */
+function LevelMesh({ ceilings }: { ceilings: boolean }) {
   const level = useProject().levels[0];
-  const meshes = useMemo(() => new LevelMeshes(materials), []);
+  const meshes = useMemo(() => new LevelMeshes(materials, { ceilings }), [ceilings]);
   useEffect(() => () => meshes.dispose(), [meshes]);
   useLayoutEffect(() => {
     if (level) meshes.update(level);
@@ -68,10 +74,16 @@ function usePrefersDark() {
   return dark;
 }
 
+const coarsePointer = () => window.matchMedia('(pointer: coarse)').matches;
+
 export function Viewport() {
   const level = useProject().levels[0];
   const hasWalls = !!level && Object.keys(level.walls).length > 0;
+  const hasRooms = !!level && Object.keys(level.rooms).length > 0;
   const dark = usePrefersDark();
+  const walking = useEditor((s) => !!s.walking);
+  const { startWalk, stopWalk } = useEditor.getState();
+  const stick = useRef<Vec2>({ x: 0, y: 0 });
   // Frame the plan when the view mounts (once per project), not on every edit; the
   // parent remounts this component when another project opens.
   // biome-ignore lint/correctness/useExhaustiveDependencies: frame once walls exist, not on every edit
@@ -89,11 +101,13 @@ export function Viewport() {
     <div className="viewport" data-testid="viewport-wrap">
       <Canvas shadows camera={{ fov: FOV, near: 0.05, far: 500 }} data-testid="viewport">
         <color attach="background" args={[dark ? '#0a0a0a' : '#f4f6f8']} />
-        <hemisphereLight args={['#ffffff', dark ? '#3a3d40' : '#dfe3e6', 1.5]} />
+        <hemisphereLight args={['#ffffff', dark ? '#3a3d40' : '#dfe3e6', walking ? 2.2 : 1.5]} />
+        {/* Under the ceilings the sun can't reach; even light keeps rooms readable. */}
+        {walking && <ambientLight intensity={0.6} />}
         <directionalLight
+          castShadow={!walking}
           position={[frame.x + 8, 16, frame.z + 10]}
           intensity={1.8}
-          castShadow
           shadow-mapSize={[2048, 2048]}
           shadow-bias={-0.0005}
           shadow-camera-left={-frame.radius * 1.5}
@@ -105,17 +119,44 @@ export function Viewport() {
           <planeGeometry args={[200, 200]} />
           <meshStandardMaterial color={dark ? '#1a1c1e' : '#eef1f3'} />
         </mesh>
-        <LevelMesh />
-        <CameraRig frame={frame} />
-        <OrbitControls
-          target={[frame.x, 0, frame.z]}
-          makeDefault
-          maxPolarAngle={Math.PI / 2 - 0.05}
-          minDistance={2}
-          maxDistance={80}
-        />
+        <LevelMesh ceilings={walking} />
+        {walking && level ? (
+          <WalkControls level={level} stick={stick} />
+        ) : (
+          <>
+            <CameraRig frame={frame} />
+            <OrbitControls
+              target={[frame.x, 0, frame.z]}
+              makeDefault
+              maxPolarAngle={Math.PI / 2 - 0.05}
+              minDistance={2}
+              maxDistance={80}
+            />
+          </>
+        )}
       </Canvas>
-      <p className="viewport-hint">Drag to orbit · right-drag to pan · scroll to zoom</p>
+      {walking ? (
+        <>
+          <button type="button" className="btn viewport-action" onClick={stopWalk}>
+            Leave walk
+          </button>
+          {coarsePointer() && <Joystick stick={stick} />}
+          <p className="viewport-hint">
+            {coarsePointer()
+              ? 'Thumb stick to walk · drag to look'
+              : 'W A S D or arrows to walk · Shift to run · click, then move the mouse to look · Esc to leave'}
+          </p>
+        </>
+      ) : (
+        <>
+          {hasRooms && (
+            <button type="button" className="btn viewport-action" onClick={startWalk}>
+              Walk through
+            </button>
+          )}
+          <p className="viewport-hint">Drag to orbit · right-drag to pan · scroll to zoom</p>
+        </>
+      )}
     </div>
   );
 }
