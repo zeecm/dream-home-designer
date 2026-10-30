@@ -34,6 +34,9 @@ func (s *Server) putImage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid project id")
 		return
 	}
+	if !s.allow(w, r, id, Role.canEdit) {
+		return
+	}
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxImageBytes))
 	var tooBig *http.MaxBytesError
 	if errors.As(err, &tooBig) {
@@ -166,6 +169,9 @@ func (s *Server) deleteImage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !project.ValidID(id) {
 		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	if !s.allow(w, r, id, Role.canEdit) {
 		return
 	}
 	if err := imgs.DeleteImage(r.Context(), id); err != nil {

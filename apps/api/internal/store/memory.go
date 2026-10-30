@@ -17,11 +17,18 @@ type Memory struct {
 	onWrite func(rec Record, deleted bool) error
 	images  map[string]Image
 	// onImage persists an image change (nil deletes) while the lock is held.
-	onImage func(id string, img *Image) error
+	onImage  func(id string, img *Image) error
+	access   map[string]Access
+	onAccess func(id string, a *Access) error
 }
 
 func NewMemory() *Memory {
-	return &Memory{records: map[string]Record{}, images: map[string]Image{}, now: time.Now}
+	return &Memory{
+		records: map[string]Record{},
+		images:  map[string]Image{},
+		access:  map[string]Access{},
+		now:     time.Now,
+	}
 }
 
 func (m *Memory) List(_ context.Context) ([]Summary, error) {
@@ -93,6 +100,11 @@ func (m *Memory) Delete(_ context.Context, id string) error {
 	}
 	if err := m.deleteImage(id); err != nil {
 		return err
+	}
+	if _, ok := m.access[id]; ok {
+		if err := m.putAccess(id, nil); err != nil {
+			return err
+		}
 	}
 	if m.onWrite != nil {
 		if err := m.onWrite(rec, true); err != nil {

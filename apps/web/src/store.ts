@@ -17,7 +17,9 @@ import { create } from 'zustand';
 import {
   type Backend,
   ConflictError,
+  ForbiddenError,
   NotFoundError,
+  type Role,
   apiAvailable,
   localBackend,
   remoteBackend,
@@ -52,6 +54,10 @@ interface State {
   dismissNotice: () => void;
   /** A short confirmation after a destructive edit, offering Undo. */
   toast: { text: string; at: number } | null;
+  /** What this browser may do with the open project; a viewer can't change it. */
+  role: Role;
+  /** Opens a copy of the open project as a new plan of this browser's own. */
+  copyProject: () => Promise<void>;
   dispatch: (cmd: Command, opts?: DispatchOptions) => void;
   undo: () => void;
   redo: () => void;
@@ -137,6 +143,10 @@ const DESTRUCTIVE = /^Delete /;
 /** States in which the open document may be edited. */
 const EDITABLE = new Set<SyncStatus['kind']>(['saved', 'dirty', 'saving', 'conflict', 'error']);
 
+/** Whether the open document may be edited now: a real project is open, not view-only. */
+export const canEdit = (s: { sync: SyncStatus; role: Role }) =>
+  EDITABLE.has(s.sync.kind) && s.role !== 'viewer';
+
 export const useStore = create<State>((set, get) => {
   const commit = (editor: EditorDoc) => {
     set({ editor, canUndo: canUndo(editor), canRedo: canRedo(editor) });
@@ -149,14 +159,28 @@ export const useStore = create<State>((set, get) => {
   const open = (doc: Project) => {
     clearTimeout(retryTimer);
     retries = 0;
+    const backend = get().backend;
+    const role = backend?.role?.(doc.id) ?? 'owner';
+    // A plan from before sharing that this browser already worked on becomes its own.
+    const knew = get().recent.some((r) => r.id === doc.id);
     set({
       editor: { doc, history: emptyHistory() },
       sync: { kind: 'saved', version: doc.version },
       canUndo: false,
       canRedo: false,
-      recent: rememberRecent(doc),
+      role,
+      // A viewer is just looking: don't put the plan in this browser's project list.
+      recent: role === 'viewer' ? get().recent : rememberRecent(doc),
     });
     rememberProject(doc.id);
+    if (role === 'open' && knew && backend?.claim) {
+      void backend
+        .claim(doc.id)
+        .then((claimed) => {
+          if (claimed && get().editor.doc.id === doc.id) set({ role: 'owner' });
+        })
+        .catch(() => {});
+    }
   };
 
   /** Finishes any save in flight and saves pending edits before leaving the open project. */
@@ -191,10 +215,11 @@ export const useStore = create<State>((set, get) => {
     notice: null,
     dismissNotice: () => set({ notice: null }),
     toast: null,
+    role: 'owner',
 
     dispatch: (cmd, opts) => {
       // Nothing is edited until a real project is open (not while loading or unreachable).
-      if (!EDITABLE.has(get().sync.kind)) return;
+      if (!canEdit(get())) return;
       const next = coreDispatch(get().editor, cmd, opts);
       if (next === get().editor) return;
       commit(next);
@@ -206,12 +231,12 @@ export const useStore = create<State>((set, get) => {
       }
     },
     undo: () => {
-      if (!EDITABLE.has(get().sync.kind)) return;
+      if (!canEdit(get())) return;
       const next = coreUndo(get().editor);
       if (next !== get().editor) commit(next);
     },
     redo: () => {
-      if (!EDITABLE.has(get().sync.kind)) return;
+      if (!canEdit(get())) return;
       const next = coreRedo(get().editor);
       if (next !== get().editor) commit(next);
     },
@@ -281,6 +306,11 @@ export const useStore = create<State>((set, get) => {
       useEditor.getState().setViewMode('plan');
     },
     openSample: () => createFrom(sampleFlatProject(newId('prj'))),
+    copyProject: async () => {
+      const doc = get().editor.doc;
+      const name = doc.name.replace(/ \(sample\)$/, '');
+      await createFrom({ ...doc, id: newId('prj'), version: 0, name: `${name} (copy)` });
+    },
 
     save: () => {
       clearTimeout(autosaveTimer);
@@ -319,6 +349,16 @@ export const useStore = create<State>((set, get) => {
           if (get().editor.doc.id !== sent.id) return;
           if (e instanceof ConflictError) {
             set({ sync: { kind: 'conflict', serverVersion: e.serverVersion } });
+            return;
+          }
+          if (e instanceof ForbiddenError) {
+            // The edit link was turned off or reset while this tab was open.
+            set({
+              role: 'viewer',
+              sync: { kind: 'saved', version: sent.version },
+              notice:
+                'This plan’s edit link no longer works, so the latest changes weren’t saved. Make your own copy to keep them.',
+            });
             return;
           }
           // Rate limits, a waking server or a dropped connection: try again, backing off.

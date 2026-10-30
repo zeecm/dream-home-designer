@@ -34,6 +34,7 @@ const THICKNESS_HINT = 'HDB walls are usually 0.10 m inside and 0.20 m on the ou
 export function Inspector() {
   const level = useProject().levels[0];
   const selection = useEditor((s) => s.selection);
+  const viewer = useStore((s) => s.role === 'viewer');
   if (!level) return null;
   let body = <PlanSummary level={level} />;
   // Keyed by object: another selection mounts fresh fields, and the old ones commit any
@@ -50,7 +51,10 @@ export function Inspector() {
   }
   return (
     <aside className="panel inspector" aria-label="Details">
-      {body}
+      {/* A view-only link shows the details but can't change them. */}
+      <fieldset className="inspector-body" disabled={viewer}>
+        {body}
+      </fieldset>
     </aside>
   );
 }

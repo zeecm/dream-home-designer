@@ -126,6 +126,40 @@ func runContract(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 	})
 
+	t.Run("access", func(t *testing.T) {
+		s := newStore(t)
+		acc, ok := s.(AccessStore)
+		if !ok {
+			t.Fatal("store does not keep access records")
+		}
+		if _, err := acc.GetAccess(ctx, "prj_c"); !errors.Is(err, ErrNoAccess) {
+			t.Fatalf("get before create: %v", err)
+		}
+		if err := s.Create(ctx, Record{ID: "prj_c", Name: "C", Doc: []byte(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+		a := Access{OwnerHash: "h1"}
+		if err := acc.CreateAccess(ctx, "prj_c", a); err != nil {
+			t.Fatal(err)
+		}
+		if err := acc.CreateAccess(ctx, "prj_c", Access{OwnerHash: "thief"}); !errors.Is(err, ErrExists) {
+			t.Fatalf("second create: %v", err)
+		}
+		if err := acc.PutAccess(ctx, "prj_c", Access{OwnerHash: "h1", EditToken: "e1"}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := acc.GetAccess(ctx, "prj_c")
+		if err != nil || got.OwnerHash != "h1" || got.EditToken != "e1" {
+			t.Fatalf("get: %+v %v", got, err)
+		}
+		if err := s.Delete(ctx, "prj_c"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := acc.GetAccess(ctx, "prj_c"); !errors.Is(err, ErrNoAccess) {
+			t.Fatalf("access outlived its project: %v", err)
+		}
+	})
+
 	t.Run("errors", func(t *testing.T) {
 		s := newStore(t)
 		if _, err := s.Get(ctx, "prj_missing"); !errors.Is(err, ErrNotFound) {

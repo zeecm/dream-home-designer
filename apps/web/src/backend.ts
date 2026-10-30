@@ -1,4 +1,12 @@
 import { type Project, loadProject } from '@dhd/core';
+import { authHeaders, saveKeys } from './keys';
+
+/**
+ * What this browser may do with a project: owner (edit, share, delete), editor (edit,
+ * through an edit link), viewer (look only), or open (a project from before sharing, which
+ * anyone with its link may edit until it is claimed).
+ */
+export type Role = 'owner' | 'editor' | 'viewer' | 'open';
 
 /** Migrates, validates and repairs a document read from storage. */
 const parseProject = (input: unknown): Project => loadProject(input).project;
@@ -19,7 +27,22 @@ export interface Backend {
   getImage?(id: string, hash: string): Promise<Blob>;
   hasImage?(id: string, hash: string): Promise<boolean>;
   deleteImage?(id: string): Promise<void>;
+  /** What this browser may do with the project, as the server last said. */
+  role?(id: string): Role;
+  /** The edit-link key, or null while the plan's links are view-only (owner only). */
+  getShare?(id: string): Promise<string | null>;
+  setShare?(id: string, edit: boolean, reset?: boolean): Promise<string | null>;
+  /** Becomes the owner of a project from before sharing; false if it has one. */
+  claim?(id: string): Promise<boolean>;
 }
+
+/** Roles the server reported, by project id. */
+const roles = new Map<string, Role>();
+const readRole = (id: string, res: Response) => {
+  const r = res.headers.get('X-Role');
+  if (r === 'owner' || r === 'editor' || r === 'viewer' || r === 'open') roles.set(id, r);
+};
+const url = (id: string, rest = '') => `${BASE}/projects/${encodeURIComponent(id)}${rest}`;
 
 export interface ProjectSummary {
   id: string;
@@ -35,6 +58,8 @@ export class ConflictError extends Error {
 }
 
 export class NotFoundError extends Error {}
+/** The server refused a change: this browser only has view access. */
+export class ForbiddenError extends Error {}
 
 // ---------------------------------------------------------------------------- remote
 
@@ -42,6 +67,7 @@ const BASE = '/api';
 
 async function check(res: Response): Promise<Response> {
   if (res.status === 404) throw new NotFoundError('not found');
+  if (res.status === 403) throw new ForbiddenError('view only');
   if (res.status === 409) {
     const body = (await res.json().catch(() => ({}))) as { version?: number };
     throw new ConflictError(body.version ?? -1);
@@ -65,32 +91,36 @@ export const remoteBackend: Backend = {
     return (await (await check(await fetch(`${BASE}/projects`))).json()) as ProjectSummary[];
   },
   async get(id) {
-    const res = await check(await fetch(`${BASE}/projects/${encodeURIComponent(id)}`));
+    const res = await check(await fetch(url(id), { headers: authHeaders(id) }));
+    readRole(id, res);
     return parseProject(await res.json());
   },
   async create(doc) {
     const res = await check(await fetch(`${BASE}/projects`, { method: 'POST', ...json(doc) }));
+    const owner = res.headers.get('X-Owner-Token');
+    if (owner) saveKeys(doc.id, { owner });
+    readRole(doc.id, res);
     return parseProject(await res.json());
   },
   async save(doc) {
     const init = json(doc);
     const res = await check(
-      await fetch(`${BASE}/projects/${encodeURIComponent(doc.id)}`, {
+      await fetch(url(doc.id), {
         ...init,
         method: 'PUT',
-        headers: { ...init.headers, 'If-Match': `"${doc.version}"` },
+        headers: { ...init.headers, ...authHeaders(doc.id), 'If-Match': `"${doc.version}"` },
       }),
     );
     return ((await res.json()) as { version: number }).version;
   },
   async remove(id) {
-    await check(await fetch(`${BASE}/projects/${encodeURIComponent(id)}`, { method: 'DELETE' }));
+    await check(await fetch(url(id), { method: 'DELETE', headers: authHeaders(id) }));
   },
   async putImage(id, blob) {
     const res = await check(
-      await fetch(`${BASE}/projects/${encodeURIComponent(id)}/image`, {
+      await fetch(url(id, '/image'), {
         method: 'PUT',
-        headers: { 'Content-Type': blob.type || 'application/octet-stream' },
+        headers: { 'Content-Type': blob.type || 'application/octet-stream', ...authHeaders(id) },
         body: blob,
       }),
     );
@@ -105,9 +135,30 @@ export const remoteBackend: Backend = {
     return res.blob();
   },
   async deleteImage(id) {
-    await check(
-      await fetch(`${BASE}/projects/${encodeURIComponent(id)}/image`, { method: 'DELETE' }),
+    await check(await fetch(url(id, '/image'), { method: 'DELETE', headers: authHeaders(id) }));
+  },
+  role: (id) => roles.get(id) ?? 'viewer',
+  async getShare(id) {
+    const res = await check(await fetch(url(id, '/share'), { headers: authHeaders(id) }));
+    return ((await res.json()) as { edit: string | null }).edit;
+  },
+  async setShare(id, edit, reset = false) {
+    const res = await check(
+      await fetch(url(id, '/share'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(id) },
+        body: JSON.stringify({ edit, reset }),
+      }),
     );
+    return ((await res.json()) as { edit: string | null }).edit;
+  },
+  async claim(id) {
+    const res = await fetch(url(id, '/claim'), { method: 'POST' });
+    if (res.status === 409) return false;
+    const owner = ((await (await check(res)).json()) as { owner: string }).owner;
+    saveKeys(id, { owner });
+    roles.set(id, 'owner');
+    return true;
   },
   async hasImage(id, hash) {
     const res = await check(await fetch(`${BASE}/projects/${encodeURIComponent(id)}/image`));

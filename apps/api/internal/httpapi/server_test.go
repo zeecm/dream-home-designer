@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
 	"sync"
 	"testing"
@@ -29,18 +30,45 @@ func doc(id, name string, version int) []byte {
 	return b
 }
 
+// ownerKeys holds the owner key each create returned, by project id, so later requests
+// in a test act as the owner unless they set their own Authorization ("" for none).
+var (
+	ownerKeysMu sync.Mutex
+	ownerKeys   = map[string]string{}
+)
+
+var projectInURL = regexp.MustCompile(`/projects/([a-z0-9_-]+)`)
+
 func do(t *testing.T, method, url string, body []byte, hdr map[string]string) (*http.Response, map[string]any) {
 	t.Helper()
 	req, err := http.NewRequest(method, url, bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
+	if m := projectInURL.FindStringSubmatch(url); m != nil {
+		ownerKeysMu.Lock()
+		if k := ownerKeys[m[1]]; k != "" {
+			req.Header.Set("Authorization", "Bearer "+k)
+		}
+		ownerKeysMu.Unlock()
+	}
 	for k, v := range hdr {
+		if k == "Authorization" && v == "" {
+			req.Header.Del(k)
+			continue
+		}
 		req.Header.Set(k, v)
 	}
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if k := res.Header.Get("X-Owner-Token"); k != "" && method == "POST" {
+		var env struct{ ID string }
+		_ = json.Unmarshal(body, &env)
+		ownerKeysMu.Lock()
+		ownerKeys[env.ID] = k
+		ownerKeysMu.Unlock()
 	}
 	defer res.Body.Close()
 	var out map[string]any
@@ -260,5 +288,85 @@ func TestPlanImage(t *testing.T) {
 	do(t, "DELETE", ts.URL+"/projects/prj_a", nil, nil)
 	if res, _ := do(t, "GET", ts.URL+"/projects/prj_a/image/"+hash, nil, nil); res.StatusCode != http.StatusNotFound {
 		t.Fatalf("image after delete: %d", res.StatusCode)
+	}
+}
+
+func TestSharing(t *testing.T) {
+	ts := newTestServer(t)
+	res, _ := do(t, "POST", ts.URL+"/projects", doc("prj_s", "Flat", 0), nil)
+	if res.Header.Get("X-Owner-Token") == "" || res.Header.Get("X-Role") != "owner" {
+		t.Fatalf("create should return an owner key: %v", res.Header)
+	}
+	anon := map[string]string{"Authorization": ""}
+
+	// The plain link views.
+	got, _ := do(t, "GET", ts.URL+"/projects/prj_s", nil, anon)
+	if got.StatusCode != http.StatusOK || got.Header.Get("X-Role") != "viewer" {
+		t.Fatalf("viewer get: %d %q", got.StatusCode, got.Header.Get("X-Role"))
+	}
+	if r, _ := do(t, "PUT", ts.URL+"/projects/prj_s", doc("prj_s", "Hacked", 1), map[string]string{"If-Match": `"1"`, "Authorization": ""}); r.StatusCode != http.StatusForbidden {
+		t.Fatalf("viewer put: %d", r.StatusCode)
+	}
+	if r, _ := do(t, "DELETE", ts.URL+"/projects/prj_s", nil, anon); r.StatusCode != http.StatusForbidden {
+		t.Fatalf("viewer delete: %d", r.StatusCode)
+	}
+	if r, _ := do(t, "PUT", ts.URL+"/projects/prj_s/image", tinyPNG, anon); r.StatusCode != http.StatusForbidden {
+		t.Fatalf("viewer image: %d", r.StatusCode)
+	}
+	if r, _ := do(t, "GET", ts.URL+"/projects/prj_s/share", nil, anon); r.StatusCode != http.StatusForbidden {
+		t.Fatalf("viewer share: %d", r.StatusCode)
+	}
+
+	// The owner turns the edit link on; its key edits but can't share or delete.
+	_, share := do(t, "PUT", ts.URL+"/projects/prj_s/share", []byte(`{"edit":true}`), nil)
+	key, _ := share["edit"].(string)
+	if key == "" {
+		t.Fatalf("share: %v", share)
+	}
+	asEditor := map[string]string{"Authorization": "Bearer " + key}
+	if r, _ := do(t, "GET", ts.URL+"/projects/prj_s", nil, asEditor); r.Header.Get("X-Role") != "editor" {
+		t.Fatalf("editor role: %q", r.Header.Get("X-Role"))
+	}
+	if r, _ := do(t, "PUT", ts.URL+"/projects/prj_s", doc("prj_s", "Edited", 1), map[string]string{"If-Match": `"1"`, "Authorization": "Bearer " + key}); r.StatusCode != http.StatusOK {
+		t.Fatalf("editor put: %d", r.StatusCode)
+	}
+	if r, _ := do(t, "DELETE", ts.URL+"/projects/prj_s", nil, asEditor); r.StatusCode != http.StatusForbidden {
+		t.Fatalf("editor delete: %d", r.StatusCode)
+	}
+	if r, _ := do(t, "PUT", ts.URL+"/projects/prj_s/share", []byte(`{"edit":true,"reset":true}`), asEditor); r.StatusCode != http.StatusForbidden {
+		t.Fatalf("editor reshare: %d", r.StatusCode)
+	}
+
+	// Resetting the link stops the old key; turning it off stops editing by link at all.
+	_, again := do(t, "PUT", ts.URL+"/projects/prj_s/share", []byte(`{"edit":true,"reset":true}`), nil)
+	if again["edit"] == key {
+		t.Fatal("reset kept the old key")
+	}
+	if r, _ := do(t, "GET", ts.URL+"/projects/prj_s", nil, asEditor); r.Header.Get("X-Role") != "viewer" {
+		t.Fatalf("old key after reset: %q", r.Header.Get("X-Role"))
+	}
+	_, off := do(t, "PUT", ts.URL+"/projects/prj_s/share", []byte(`{"edit":false}`), nil)
+	if off["edit"] != nil {
+		t.Fatalf("off: %v", off)
+	}
+
+	// A project without an owner (from before sharing) is open, and can be claimed once.
+	st := store.NewMemory()
+	open := httptest.NewServer(New(st, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	t.Cleanup(open.Close)
+	_ = st.Create(t.Context(), store.Record{ID: "prj_old", Name: "Old", Doc: doc("prj_old", "Old", 1)})
+	if r, _ := do(t, "GET", open.URL+"/projects/prj_old", nil, anon); r.Header.Get("X-Role") != "open" {
+		t.Fatalf("legacy role: %q", r.Header.Get("X-Role"))
+	}
+	r, claimed := do(t, "POST", open.URL+"/projects/prj_old/claim", nil, anon)
+	owner, _ := claimed["owner"].(string)
+	if r.StatusCode != http.StatusOK || owner == "" {
+		t.Fatalf("claim: %d %v", r.StatusCode, claimed)
+	}
+	if r, _ := do(t, "POST", open.URL+"/projects/prj_old/claim", nil, anon); r.StatusCode != http.StatusConflict {
+		t.Fatalf("second claim: %d", r.StatusCode)
+	}
+	if r, _ := do(t, "GET", open.URL+"/projects/prj_old", nil, map[string]string{"Authorization": "Bearer " + owner}); r.Header.Get("X-Role") != "owner" {
+		t.Fatalf("claimed role: %q", r.Header.Get("X-Role"))
 	}
 }

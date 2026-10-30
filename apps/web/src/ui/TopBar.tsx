@@ -2,6 +2,7 @@ import { renameProject } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { type ViewMode, useEditor } from '../editor';
 import { type SyncStatus, useProject, useStore } from '../store';
+import { ShareMenu } from './ShareMenu';
 import { Segmented } from './fields';
 import { Mark, icons } from './icons';
 
@@ -28,6 +29,7 @@ function syncText(s: SyncStatus, local: boolean): { text: string; tone: 'neutral
 
 function ProjectName() {
   const name = useProject().name;
+  const viewer = useStore((s) => s.role === 'viewer');
   const dispatch = useStore((s) => s.dispatch);
   const [draft, setDraft] = useState(name);
   useEffect(() => setDraft(name), [name]);
@@ -40,6 +42,7 @@ function ProjectName() {
     <input
       className="project-name"
       aria-label="Project name"
+      readOnly={viewer}
       value={draft}
       size={Math.max(8, Math.min(40, draft.length + 1))}
       onChange={(e) => setDraft(e.target.value)}
@@ -154,6 +157,7 @@ export function TopBar() {
         </span>
       </div>
       <div className="topbar-right">
+        <ShareMenu />
         <button
           type="button"
           className="icon-btn"

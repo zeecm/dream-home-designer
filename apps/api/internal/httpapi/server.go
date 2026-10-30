@@ -53,6 +53,9 @@ func New(s store.Store, log *slog.Logger, opts ...Option) *Server {
 	srv.mux.HandleFunc("GET /projects/{id}/image/{hash}", srv.getImage)
 	srv.mux.HandleFunc("DELETE /projects/{id}/image", srv.deleteImage)
 	srv.mux.HandleFunc("GET /projects/{id}/image", srv.imageStatus)
+	srv.mux.HandleFunc("GET /projects/{id}/share", srv.getShare)
+	srv.mux.HandleFunc("PUT /projects/{id}/share", srv.putShare)
+	srv.mux.HandleFunc("POST /projects/{id}/claim", srv.claim)
 	return srv
 }
 
@@ -83,6 +86,12 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	role, _, err := s.role(r, id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.Header().Set("X-Role", string(role))
 	w.Header().Set("ETag", etag(rec.Version))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -99,9 +108,26 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// The creator owns the project: the owner key is returned once, here, and only its
+	// hash is kept. The access record goes first, so a project never exists unowned.
+	owner := ""
+	if acc, ok := s.store.(store.AccessStore); ok {
+		owner = newToken()
+		if err := acc.CreateAccess(r.Context(), env.ID, store.Access{OwnerHash: hashToken(owner)}); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
 	if err := s.store.Create(r.Context(), store.Record{ID: env.ID, Name: env.Name, Doc: doc}); err != nil {
+		if acc, ok := s.store.(store.AccessStore); ok && !errors.Is(err, store.ErrExists) {
+			_ = acc.DeleteAccess(r.Context(), env.ID)
+		}
 		s.fail(w, err)
 		return
+	}
+	if owner != "" {
+		w.Header().Set("X-Owner-Token", owner)
+		w.Header().Set("X-Role", string(RoleOwner))
 	}
 	w.Header().Set("ETag", etag(1))
 	w.Header().Set("Location", "/projects/"+env.ID)
@@ -125,6 +151,9 @@ func (s *Server) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "document id does not match the URL")
 		return
 	}
+	if !s.allow(w, r, id, Role.canEdit) {
+		return
+	}
 	version, err := s.store.Update(r.Context(), id, expected, env.Name, func(v int) ([]byte, error) {
 		return project.WithVersion(raw, v)
 	})
@@ -140,6 +169,9 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !project.ValidID(id) {
 		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	if !s.allow(w, r, id, func(r Role) bool { return r == RoleOwner || r == RoleOpen }) {
 		return
 	}
 	if err := s.store.Delete(r.Context(), id); err != nil {

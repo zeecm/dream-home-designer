@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Viewport } from './Viewport';
 import { type Tool, type ViewMode, useEditor } from './editor';
+import { absorbLinkKey } from './keys';
 import { PlanCanvas } from './plan/PlanCanvas';
 import { initialProjectId, useProject, useStore } from './store';
 import { Inspector } from './ui/Inspector';
@@ -107,11 +108,31 @@ function Notice() {
   );
 }
 
+/** Shown on a view-only link: what this is, and how to get a copy to change. */
+function ViewOnlyBanner() {
+  const role = useStore((s) => s.role);
+  const { copyProject } = useStore.getState();
+  if (role !== 'viewer') return null;
+  return (
+    <div className="sample-banner">
+      <span>View only. You can look around and walk through this plan, but not change it.</span>
+      <button
+        type="button"
+        className="btn btn-small btn-primary"
+        onClick={() => void copyProject()}
+      >
+        Make my own copy
+      </button>
+    </div>
+  );
+}
+
 /** Shown while the visitor is in a copy of the sample, so it's clear how to start their own. */
 function SampleBanner() {
   const name = useProject().name;
+  const role = useStore((s) => s.role);
   const { createProject } = useStore.getState();
-  if (!name.endsWith('(sample)')) return null;
+  if (!name.endsWith('(sample)') || role === 'viewer') return null;
   return (
     <div className="sample-banner">
       <span>You’re exploring a sample flat. Edits are saved to your own copy.</span>
@@ -164,6 +185,7 @@ export function App() {
     // StrictMode runs effects twice in dev; only start once.
     if (started) return;
     started = true;
+    absorbLinkKey(); // an edit link's key, kept for its plan and taken out of the address
     const id = initialProjectId();
     const { load, openSample } = useStore.getState();
     void (id ? load(id) : openSample());
@@ -180,6 +202,7 @@ export function App() {
         <Palette />
         <main className={`panel stage stage-${viewMode}`}>
           <SampleBanner />
+          <ViewOnlyBanner />
           <Notice />
           <Toast />
           <div className="stage-views">

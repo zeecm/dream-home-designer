@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { type Tool, useEditor } from '../editor';
 import { TOOL_HINTS } from '../plan/tools';
 import { OPENING_PRESETS, type Preset, THICKNESS_PRESETS } from '../presets';
+import { useStore } from '../store';
 import { PlanImagePanel } from './PlanImage';
 import { icons } from './icons';
 
@@ -96,6 +97,8 @@ export function Palette() {
   const tool = useEditor((s) => s.tool);
   const setTool = useEditor((s) => s.setTool);
   const only3d = useEditor((s) => s.viewMode === '3d');
+  const viewer = useStore((s) => s.role === 'viewer');
+  const locked = only3d || viewer;
   return (
     <nav className="panel palette" aria-label="Tools">
       <h2 className="panel-heading">Tools</h2>
@@ -106,7 +109,7 @@ export function Palette() {
               type="button"
               className="tool"
               aria-pressed={tool === t.id}
-              disabled={only3d}
+              disabled={locked}
               onClick={() => setTool(t.id)}
               title={`${t.label} (${t.key})`}
             >
@@ -120,7 +123,11 @@ export function Palette() {
       <ToolOptions tool={tool} />
       <PlanImagePanel />
       <p className="tool-hint">
-        {only3d ? 'Switch to Plan or Split to draw and edit.' : TOOL_HINTS[tool]}
+        {viewer
+          ? 'This is a view-only link. Make your own copy to change the plan.'
+          : only3d
+            ? 'Switch to Plan or Split to draw and edit.'
+            : TOOL_HINTS[tool]}
       </p>
     </nav>
   );

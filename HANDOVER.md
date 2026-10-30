@@ -136,7 +136,7 @@ Writes are rate-limited per IP at the Worker (60/min). IDs must match `^[a-z0-9]
 
 **Tests:**
 - 126 core and 12 render unit tests, plus 22 web unit tests.
-- A 9-test end-to-end suite.
+- A 10-test end-to-end suite.
 - Go tests, including a store contract test that has passed against live R2.
 
 **Independent acceptance testing, round 1, found:** cropped Split view, the Esc handling in
@@ -291,6 +291,32 @@ versions 1 and 2.
   - The file store reads older `<id>.bin` images.
   - A busy image GET returns 503.
 
+**Sharing (owner's decision: links can be view-only or editable, and edits save to the
+owner's plan):**
+- **Owner key:** creating a project returns `X-Owner-Token` once; the server keeps only its
+  SHA-256 (`store.AccessStore`, `access/<id>.json` in R2). The browser keeps its keys per project
+  in localStorage (`keys.ts`) and sends `Authorization: Bearer …`.
+- **Roles:** `GET /projects/{id}` reports `X-Role`:
+  - `owner`: edit, share and delete;
+  - `editor`: edit, through the edit link `?p=<id>&k=<key>`;
+  - `viewer`: the plain link;
+  - `open`: a project from before sharing.
+  Writes (PUT, image PUT and DELETE) need owner, editor or open; DELETE of a project needs
+  owner or open.
+- **Sharing endpoints:** `GET`/`PUT /projects/{id}/share` (owner only) turn the edit link on or
+  off, or reset its key so old edit links stop working.
+- **Claiming:** `POST /projects/{id}/claim` makes the caller the owner of an `open` project. The
+  web app claims automatically when a browser opens an open project that is already in its
+  recent list.
+- **Web:**
+  - a Share menu in the top bar;
+  - a view-only banner with "Make my own copy";
+  - tools, inspector and project name locked for viewers;
+  - an edit key is taken out of the address bar and kept;
+  - a save refused with 403 turns the tab view-only with a notice.
+- **Deploy order:** a web app that expects roles must not meet an API without them, or every
+  visitor becomes a viewer. Deploy the API first.
+
 **Sample flat:** `sampleFlatProject` (core fixtures) is a 96 m² HDB-style 4-room flat with a
 service yard, kitchen, household shelter, two bathrooms, three bedrooms and an L-shaped
 living and dining room. It is built with the editor's own commands, then given readable ids
@@ -328,10 +354,8 @@ browser that has them.
 ## 6. Next
 
 **Finish Phase 1**, in order:
-1. **Public-deployment safety (needs the owner's call):** a write token separate from the share
-   link changes sharing: a plain link would become view-only, and editing on another device would
-   need an edit link. Also a previous-version copy on PUT and DELETE, and a limit or lifecycle
-   rule on stored projects.
+1. **Public-deployment safety:** sharing is done (see §4). Still open: a previous-version copy
+   on PUT and DELETE, and a limit or lifecycle rule on stored projects.
 2. **Room matching by overlap:** rooms are matched across edits by label point and corners. Matching
    by overlapping area would be sturdier for large reshapes.
 
