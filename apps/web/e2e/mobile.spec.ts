@@ -463,3 +463,86 @@ test('on a phone: a wall move whose touch is cancelled is taken back', async ({ 
   await expect.poll(async () => (await wall.boundingBox())?.x ?? 0).toBeCloseTo(b.x, 0);
   await expect(page.locator('.wall-shift')).toHaveCount(0);
 });
+
+test('on a phone: the plan stays under a fast finger, coasts after a swipe, and pans on after a pinch', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.evaluate(() => document.fonts.ready);
+  const r = await planBox(page);
+  const wall = page.locator('[data-hit^="wall:"]').first();
+  const x = async () => (await wall.boundingBox())?.x ?? 0;
+  const cdp = await page.context().newCDPSession(page);
+  const send = (type: 'touchStart' | 'touchMove' | 'touchEnd', pts: { x: number; y: number }[]) =>
+    cdp.send('Input.dispatchTouchEvent', {
+      type,
+      touchPoints: pts.map((p, id) => ({ ...p, id })),
+    });
+
+  // A fast drag, every move sent at once (faster than the page redraws): mid-drag, the plan
+  // has moved exactly as far as the finger.
+  const from = { x: r.x + r.width * 0.3, y: r.y + r.height * 0.75 };
+  const x0 = await x();
+  await send('touchStart', [from]);
+  for (let i = 1; i <= 12; i++) await send('touchMove', [{ x: from.x + i * 10, y: from.y }]);
+  await expect.poll(x).toBeCloseTo(x0 + 120, 0);
+  // Held still, then lifted: it stays where the finger left it.
+  await page.waitForTimeout(150);
+  await send('touchEnd', []);
+  await page.waitForTimeout(300);
+  expect(await x()).toBeCloseTo(x0 + 120, 0);
+  // Let go while moving (a swipe): it carries on further, then stops.
+  const x1 = await x();
+  await send('touchStart', [from]);
+  for (let i = 1; i <= 6; i++) {
+    await send('touchMove', [{ x: from.x + i * 12, y: from.y }]);
+    await page.waitForTimeout(8);
+  }
+  await send('touchEnd', []);
+  await expect.poll(x).toBeGreaterThan(x1 + 72 + 20);
+  await page.waitForTimeout(1500);
+  const settled = await x();
+  await page.waitForTimeout(300);
+  expect(await x()).toBeCloseTo(settled, 0);
+
+  // Two fingers, then one lifts: the other moves the plan on.
+  const a = { x: r.x + r.width * 0.4, y: r.y + r.height * 0.5 };
+  const b = { x: r.x + r.width * 0.6, y: r.y + r.height * 0.5 };
+  await page.evaluate(() => {
+    const w = window as unknown as { second?: number };
+    document.querySelector('svg.plan-svg')?.addEventListener('pointerdown', (e) => {
+      if (!(e as PointerEvent).isPrimary) w.second = (e as PointerEvent).pointerId;
+    });
+  });
+  await send('touchStart', [a, b]);
+  await send('touchMove', [
+    { x: a.x - 5, y: a.y },
+    { x: b.x + 5, y: b.y },
+  ]);
+  // The second finger lifts (CDP can't lift one finger of two, so the page is told so).
+  await page.evaluate(
+    ({ x, y }) => {
+      const id = (window as unknown as { second?: number }).second;
+      document.querySelector('svg.plan-svg')?.dispatchEvent(
+        new PointerEvent('pointerup', {
+          pointerId: id,
+          pointerType: 'touch',
+          isPrimary: false,
+          clientX: x,
+          clientY: y,
+          bubbles: true,
+        }),
+      );
+    },
+    { x: b.x + 5, y: b.y },
+  );
+  const before = await x();
+  for (let i = 1; i <= 6; i++) {
+    await send('touchMove', [{ x: a.x - 5 - i * 8, y: a.y }]);
+    await page.waitForTimeout(16);
+  }
+  await page.waitForTimeout(100);
+  await send('touchEnd', []);
+  expect(before - (await x())).toBeGreaterThan(30);
+});
