@@ -353,7 +353,8 @@ test('on a phone: a tapped wall drags sideways by finger; an untapped one pans',
   await page.goto('/');
   await waitSaved(page);
   await page.evaluate(() => document.fonts.ready);
-  const wall = page.locator('[data-hit="wall:w_bedroom_main-bedroom"]').first();
+  // The Main bedroom's outside wall on the left, moved outwards (nothing in the way).
+  const wall = page.locator('[data-hit="wall:w_main-bedroom_outside-2"]').first();
   const box = async () => {
     const b = await wall.boundingBox();
     if (!b) throw new Error('no wall');
@@ -379,9 +380,38 @@ test('on a phone: a tapped wall drags sideways by finger; an untapped one pans',
   b = await box();
   const from = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
   const f = await finger(page, from);
-  await f.moveTo({ x: from.x + 30, y: from.y });
+  await f.moveTo({ x: from.x - 30, y: from.y });
   await expect(page.locator('.wall-shift')).toBeVisible();
   await f.lift();
   const moved = await box();
-  expect(moved.x - b.x).toBeGreaterThan(20);
+  expect(b.x - moved.x).toBeGreaterThan(20);
+});
+
+test('on a phone: a wall move whose touch is cancelled is taken back', async ({ page }) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.evaluate(() => document.fonts.ready);
+  const wall = page.locator('[data-hit="wall:w_bedroom_main-bedroom"]').first();
+  let b = await wall.boundingBox();
+  if (!b) throw new Error('no wall');
+  await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+  b = await wall.boundingBox();
+  if (!b) throw new Error('no wall');
+  const cdp = await page.context().newCDPSession(page);
+  const at = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ ...at, id: 0 }],
+  });
+  for (let i = 1; i <= 6; i++) {
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x: at.x + i * 6, y: at.y, id: 0 }],
+    });
+    await page.waitForTimeout(16);
+  }
+  await expect(page.locator('.wall-shift')).toBeVisible();
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+  await expect.poll(async () => (await wall.boundingBox())?.x ?? 0).toBeCloseTo(b.x, 0);
+  await expect(page.locator('.wall-shift')).toHaveCount(0);
 });

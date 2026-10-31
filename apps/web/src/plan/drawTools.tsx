@@ -651,7 +651,12 @@ export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolControl
       useEditor.getState().select({ kind: 'opening', id: r.openingId });
       return true;
     },
-    move: (p) => {
+    move: (p, dragging) => {
+      // Still pressing on the one just placed: no ghost of another over it.
+      if (dragging) {
+        setPlace(null);
+        return;
+      }
       const at = find(p);
       setPlace(at);
       setOnBoundary(!at && boundaryNear(p) ? p.screen : null);
@@ -677,7 +682,7 @@ export function useOpeningTool(ctx: ToolContext, kind: OpeningKind): ToolControl
         return (
           <g
             pointerEvents="none"
-            transform={`translate(${Math.min(note.x + 14, size.width - why.length * 7 - 24)} ${note.y + 22})`}
+            transform={`translate(${Math.max(8, Math.min(note.x + 14, size.width - why.length * 7.5 - 24))} ${note.y + 22})`}
           >
             <rect
               x={0}

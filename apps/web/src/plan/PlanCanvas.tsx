@@ -104,6 +104,13 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
       },
       // Mid-drag on a piece or a handle, Escape and the rest go to Select's drag.
       key: (e) => (routed.current && select.key(e)) || own.key(e),
+      touchCancel: () => {
+        onHandle.current = null;
+        if (routed.current) {
+          routed.current = false;
+          select.touchCancel?.();
+        } else own.touchCancel?.();
+      },
       overlay: (o) =>
         kind === 'item' ? (
           <>
@@ -291,6 +298,13 @@ export function PlanCanvas() {
   // started to where it lifts; a second finger turns it into pinch-zoom and two-finger pan,
   // in every tool, without ever placing anything.
   const touches = useRef(new Map<number, Vec2>());
+  /** Tools whose finger drags (corners, walls, doors, pieces) are taken back on a cancel. */
+  const takesBack =
+    tool === 'select' ||
+    tool === 'furniture' ||
+    tool === 'door' ||
+    tool === 'window' ||
+    tool === 'passage';
   const touch = useRef<{
     start: PlanPointer;
     moved: boolean;
@@ -300,6 +314,19 @@ export function PlanCanvas() {
   const gesture = useRef<{ dist: number; mid: Vec2 } | null>(null);
   /** Where a finger placing a point is: the magnifier shows the plan under it. */
   const [loupe, setLoupe] = useState<Vec2 | null>(null);
+  /** Whether a finger here places a point: drawing, or dragging a corner in Select. */
+  const placesPoint = (start: PlanPointer, claimed: boolean) =>
+    tool === 'wall' ||
+    tool === 'room' ||
+    tool === 'measure' ||
+    tool === 'calibrate' ||
+    (tool === 'select' && claimed && start.hit?.kind === 'vertex');
+  /** A finger held still on a point shows the magnifier too, after a moment. */
+  const loupeHold = useRef<number | undefined>(undefined);
+  const hideLoupe = () => {
+    window.clearTimeout(loupeHold.current);
+    setLoupe(null);
+  };
   // (Without useId's colons, which SVG url(#…) references don't take.)
   const sceneId = `plan-scene${useId().replace(/:/g, '')}`;
   const screenOf = (e: { clientX: number; clientY: number }): Vec2 => {
@@ -322,9 +349,13 @@ export function PlanCanvas() {
     }
     touches.current.set(e.pointerId, screenOf(e));
     if (touches.current.size >= 2) {
-      setLoupe(null);
-      // A second finger: whatever the first one was starting is called off.
-      if (touch.current?.claimed && ctx) active.up(touch.current.start);
+      hideLoupe();
+      // A second finger: whatever the first one was starting is called off (a drag it had
+      // begun is taken back).
+      if (touch.current?.claimed && ctx) {
+        if (takesBack) active.touchCancel?.();
+        else active.up(touch.current.start);
+      }
       touch.current = null;
       pan.current = null;
       gesture.current = twoFingers();
@@ -333,6 +364,13 @@ export function PlanCanvas() {
     if (gesture.current) return; // still lifting fingers from a pinch
     const start = pointer(e);
     touch.current = { start, moved: false, claimed: false };
+    // Held still on the spot it will place (or on a corner in Select): magnify it.
+    window.clearTimeout(loupeHold.current);
+    if (placesPoint(start, true)) {
+      loupeHold.current = window.setTimeout(() => {
+        if (touch.current?.start === start && !gesture.current) setLoupe(start.screen);
+      }, 250);
+    }
     // A finger on something a drawing tool lets you drag (a scale line's end) takes it at
     // once, so the smallest correction counts.
     if (ctx && active.grabs?.(start)) {
@@ -384,13 +422,8 @@ export function PlanCanvas() {
       return;
     }
     // Placing a point (drawing, or dragging a corner), the finger hides it: magnify it.
-    const placingPoint =
-      tool === 'wall' ||
-      tool === 'room' ||
-      tool === 'measure' ||
-      tool === 'calibrate' ||
-      (tool === 'select' && t.claimed && t.start.hit?.kind === 'vertex');
-    setLoupe(placingPoint ? p.screen : null);
+    window.clearTimeout(loupeHold.current);
+    setLoupe(placesPoint(t.start, t.claimed) ? p.screen : null);
     // Drawing tools follow the finger as they follow a hovering mouse, and see where a drag
     // they'll get whole (touchDrag) began, to preview it.
     active.move(p, t.claimed, !t.claimed && active.touchDrag ? t.start : undefined);
@@ -399,7 +432,7 @@ export function PlanCanvas() {
     // A busy page can merge a quick drag's moves into the lift: play its last stretch as a
     // move first, so a drag that arrived all at once is still a drag, not a tap.
     onTouchMove(e);
-    setLoupe(null);
+    hideLoupe();
     touches.current.delete(e.pointerId);
     if (gesture.current) {
       if (touches.current.size === 0) gesture.current = null;
@@ -414,7 +447,7 @@ export function PlanCanvas() {
     if (!t || !ctx) return;
     // Another finger was down somewhere: a pinch begun off the plan, not a tap or a drag.
     if (screenTouch.multi) {
-      if (t.claimed) active.up(t.start);
+      if (t.claimed && !takesBack) active.up(t.start);
       else active.touchCancel?.();
       return;
     }
@@ -431,13 +464,14 @@ export function PlanCanvas() {
 
   /** The system took the touch (a back swipe, a long press): end it without acting. */
   const onTouchCancel = (e: React.PointerEvent) => {
-    setLoupe(null);
+    hideLoupe();
     touches.current.delete(e.pointerId);
     if (touches.current.size === 0) gesture.current = null;
     const t = touch.current;
     touch.current = null;
     pan.current = null;
-    if (t?.claimed && ctx) active.up(t.start);
+    // A drag it had begun is taken back; a tool without a way to do that just ends it.
+    if (t?.claimed && ctx && !takesBack) active.up(t.start);
     else if (ctx) active.touchCancel?.();
   };
 
@@ -806,17 +840,18 @@ const LOUPE_R = 52;
 
 /**
  * A magnifier above the finger: the plan around the point it is placing, enlarged, with a
- * crosshair on the point. Near the top it moves beside the finger, and keeps to the screen.
+ * crosshair on the point. Near the top it moves to a top corner, and keeps to the screen.
  */
 function Loupe({ at, size, scene }: { at: Vec2; size: Size; scene: string }) {
   const clip = `loupe${useId().replace(/:/g, '')}`;
   const gap = LOUPE_R + 44;
   const edge = LOUPE_R + 6;
   const clamp = (n: number, max: number) => Math.min(max - edge, Math.max(edge, n));
-  // Above the finger; with no room there, beside it (never below, under the hand).
   const above = at.y - gap >= edge;
-  const x = above ? clamp(at.x, size.width) : at.x - gap >= edge ? at.x - gap : at.x + gap;
-  const y = above ? at.y - gap : clamp(at.y, size.height);
+  // Above the finger; with no room there, in the top corner away from it, clear of the wall
+  // being drawn and its length.
+  const x = above ? clamp(at.x, size.width) : at.x < size.width / 2 ? size.width - edge : edge;
+  const y = above ? at.y - gap : edge;
   return (
     <g className="loupe" pointerEvents="none" data-testid="loupe">
       <clipPath id={clip}>

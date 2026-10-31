@@ -624,18 +624,31 @@ The Go API logs it locally (`POST /telemetry`, 204).
 
 **Magnifier:** while a finger places a point (Wall, Room, Measure, Set scale, or dragging a
 corner in Select), a 2.5x loupe shows the plan under it with a crosshair, above the finger or
-beside it near the top (`Loupe` in `PlanCanvas.tsx`). It is a `<use>` of the scene group
+in a top corner away from it near the top, or after a 250 ms hold (`Loupe` in
+`PlanCanvas.tsx`). It is a `<use>` of the scene group
 (`plan-scene…`), so plan CSS must not depend on ancestors outside that group: a `<use>` copy
 matches selectors from its own root (hence `[id^="plan-scene"] *` beside `.plan-svg *`).
 
 **Moving a wall:** in Select, a wall already selected drags sideways (along its normal, 1 cm
-steps, 1 mm with Alt), its joined walls following; its corners settle (merge or split) at the
-end, in one undo step, and Escape takes the drag back. Dragging a wall not selected still
-pans, by mouse or finger. The distance moved shows beside it (`.wall-shift`).
+steps, 1 mm with Alt) through `shiftWall` in core (`shiftWall.ts`), applied afresh to the level
+as the drag began on every move:
+- Walls joined at its ends follow, keeping their far ends; their doors and windows keep
+  their distance from those far ends.
+- Where the wall carries straight on into another, that one stays put and a short step
+  joins them (`shiftIds` names the step's corner and wall up front).
+- `shiftBlocked` stops the move before it comes within the two walls' half thicknesses of
+  another wall (measured between faces), before a following wall turns back on itself, and
+  before the moving end reaches a door or window on a following wall.
+- Corners settle at the end, in one undo step; back where it began, nothing is kept. Escape,
+  a cancelled touch or a second finger takes it back. A second click that never moves still
+  splits the wall (double-click).
+- Dragging a wall not selected still pans, by mouse or finger. The distance moved shows
+  beside it (`.wall-shift`, in mm for an Alt move).
 
 **Door and window clearances:** while one is dragged (Select or its own tool), the clear wall
 on each side of it to the inside corners shows as a dimension off the wall
-(`openingClearances` in core: from where both faces have begun, past a joining wall).
+(`openingClearances` in core: from where both faces have begun, past a joining wall), on the
+side a door doesn't swing to; a door dragged stays between the inside corners.
 
 **Furniture handles:** a selected piece shows four corner handles and a turn handle in front
 (`itemHandles` in `plan/tools.tsx`), in Select and in Furniture straight after placing (the

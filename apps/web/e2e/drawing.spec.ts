@@ -85,7 +85,8 @@ test('a selected wall drags sideways, its joined walls following, in one undo st
   await page.goto('/');
   await waitSaved(page);
   await page.keyboard.press('1');
-  const wall = page.locator('[data-hit="wall:w_bedroom_main-bedroom"]').first();
+  // The Main bedroom's outside top wall (its second piece, past the window), outwards.
+  const wall = page.locator('[data-hit="wall:w_main-bedroom_outside"]').nth(1);
   const area = page.locator('[data-hit="room:rm_main-bedroom"]');
   const before = await wall.boundingBox();
   const roomBefore = await area.boundingBox();
@@ -98,16 +99,79 @@ test('a selected wall drags sideways, its joined walls following, in one undo st
   // Selected: a drag moves it, showing how far mid-drag.
   await page.mouse.move(at.x, at.y);
   await page.mouse.down();
-  await page.mouse.move(at.x + 20, at.y, { steps: 4 });
-  await page.mouse.move(at.x + 40, at.y, { steps: 4 });
+  await page.mouse.move(at.x, at.y - 20, { steps: 4 });
+  await page.mouse.move(at.x, at.y - 40, { steps: 4 });
   await expect(page.locator('.wall-shift')).toBeVisible();
   await expect(page.locator('.wall-shift text')).toHaveText(/^\d+\.\d\d m$/);
   await page.mouse.up();
   await expect(page.locator('.wall-shift')).toHaveCount(0);
   const after = await wall.boundingBox();
-  expect((after?.x ?? 0) - before.x).toBeGreaterThan(30);
-  // The main bedroom beside it grew with it.
-  expect((await area.boundingBox())?.width ?? 0).toBeGreaterThan(roomBefore.width + 30);
+  expect(before.y - (after?.y ?? 0)).toBeGreaterThan(30);
+  // The main bedroom inside it grew with it.
+  expect((await area.boundingBox())?.height ?? 0).toBeGreaterThan(roomBefore.height + 30);
   await page.keyboard.press('Control+z');
-  await expect.poll(async () => (await wall.boundingBox())?.x ?? 0).toBeCloseTo(before.x, 0);
+  await expect.poll(async () => (await wall.boundingBox())?.y ?? 0).toBeCloseTo(before.y, 0);
+});
+
+test('moving a wall: the piece carrying on in line stays straight, windows stay put, and it stops at the next wall', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  const box = async (sel: string) => {
+    const b = await page.locator(sel).first().boundingBox();
+    if (!b) throw new Error(`no ${sel}`);
+    return b;
+  };
+  const bedroomTop = '[data-hit="wall:w_bedroom_outside-2"]';
+  const bedroomWindow = '[data-hit="opening:op_window_bedroom_outside-2"]';
+  const sideWindow = '[data-hit="opening:op_window_main-bedroom_outside-2"]';
+  const before = {
+    top: await box(bedroomTop),
+    window: await box(bedroomWindow),
+    side: await box(sideWindow),
+  };
+
+  // The Main bedroom's top wall, out by about half a metre.
+  const piece = page.locator('[data-hit="wall:w_main-bedroom_outside"]').nth(1);
+  const p = await piece.boundingBox();
+  if (!p) throw new Error('no wall');
+  await piece.click({ force: true });
+  await page.waitForTimeout(400);
+  await page.mouse.move(p.x + p.width / 2, p.y + p.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(p.x + p.width / 2, p.y + p.height / 2 - 30, { steps: 6 });
+  await page.mouse.up();
+  // The Bedroom's top wall, carrying on in line, is still straight and where it was; a step
+  // joins them. The windows on the Bedroom's wall and on the wall that followed stay put.
+  const top = await box(bedroomTop);
+  expect(Math.abs(top.height - before.top.height)).toBeLessThan(2);
+  expect(Math.abs(top.y - before.top.y)).toBeLessThan(2);
+  expect(Math.abs((await box(bedroomWindow)).x - before.window.x)).toBeLessThan(2);
+  expect(Math.abs((await box(sideWindow)).y - before.side.y)).toBeLessThan(2);
+  expect((await piece.boundingBox())?.y ?? 0).toBeLessThan(p.y - 20);
+  await page.keyboard.press('Control+z');
+
+  // The wall between the bedrooms, dragged far right: it stops short of the Bedroom's door
+  // on the wall below (which keeps its place), and the rooms keep their names.
+  const wall = page.locator('[data-hit="wall:w_bedroom_main-bedroom"]').first();
+  const door = await box('[data-hit="opening:op_door_bedroom_living-and-dining-3"]');
+  const w = await wall.boundingBox();
+  if (!w) throw new Error('no wall');
+  await wall.click({ force: true });
+  await page.waitForTimeout(400);
+  await page.mouse.move(w.x + w.width / 2, w.y + w.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(w.x + w.width / 2 + 600, w.y + w.height / 2, { steps: 12 });
+  await page.mouse.up();
+  expect((await box('[data-hit="opening:op_door_bedroom_living-and-dining-3"]')).x).toBeCloseTo(
+    door.x,
+    0,
+  );
+  const moved = await wall.boundingBox();
+  expect((moved?.x ?? 0) - w.x).toBeGreaterThan(3);
+  expect((moved?.x ?? 0) - w.x).toBeLessThan(door.x - w.x);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: /^Bedroom\b/ })).toHaveCount(1);
 });
