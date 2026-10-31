@@ -414,8 +414,19 @@ select {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.menu button:hover {
+.menu button:hover,
+.menu-link:hover {
   background: var(--active);
+}
+/* A link among the menu's buttons, looking like them. */
+.menu-link {
+  display: flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-control);
+  color: inherit;
+  text-decoration: none;
 }
 .menu-right {
   left: auto;

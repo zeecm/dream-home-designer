@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
@@ -9,5 +10,15 @@ export default defineConfig({
   plugins: [react()],
   server: { port: 5173, proxy },
   preview: { port: 4173, proxy },
-  build: { sourcemap: true, chunkSizeWarningLimit: 1500 },
+  build: {
+    sourcemap: true,
+    chunkSizeWarningLimit: 1500,
+    // The app, and the welcome page that introduces it.
+    rollupOptions: {
+      input: {
+        app: fileURLToPath(new URL('index.html', import.meta.url)),
+        welcome: fileURLToPath(new URL('welcome/index.html', import.meta.url)),
+      },
+    },
+  },
 });

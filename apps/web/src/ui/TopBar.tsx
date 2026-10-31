@@ -167,6 +167,9 @@ function ProjectMenu() {
           <button type="button" onClick={run(() => setManaging(true))}>
             Manage your plans…
           </button>
+          <a className="menu-link" href="/welcome/">
+            About Dream Home
+          </a>
         </div>
       )}
       <input

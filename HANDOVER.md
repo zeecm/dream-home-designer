@@ -431,6 +431,19 @@ device nor the server (an imported file) says so. The details panel's "Your mode
 a model or removes it with every piece made from it (one undo step); restoring an earlier
 version brings its models back. Not handled: rigged (skinned) models measure wrongly.
 
+**Welcome page (`/welcome/`):** a second Vite entry (`apps/web/welcome/index.html`,
+`src/welcome/`), built with the taste-skill (direction "the product performs", seed
+1945293713, the app's palette and type kept). The app stays at `/`; its project menu links
+to the page ("About Dream Home"). The fragments are the app's own code: `MiniPlan` draws the
+sample flat with core, the hero's wall drags through `shiftWall`/`shiftBlocked` (a slider to
+keyboards), and the renovation section's controls redraw the main bedroom. Pictures are the
+app's own (3D view, walk, furnished plan, an orbit clip in `public/welcome/`, captured with
+Playwright) and one photograph, "Kovan HDB flats" by Angcr (CC BY 3.0, credited in the
+footer). The closing form opens `/?new=<name>`, which starts a blank plan of that name.
+Checked with the skill's `lint.mjs` and `inspect.mjs` (0 FAIL, 0 WARN at 1440, 768, 390;
+run the inspector with a `--no-sandbox` Chrome wrapper as root). Whether `/` should become
+the welcome page (and the app move) is the owner's call.
+
 ## 5. Owner to-dos
 
 0. **Before merging:** the production API must accept schema 6 and serve uploaded models
