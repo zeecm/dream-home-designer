@@ -2,13 +2,16 @@ package httpapi
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -291,6 +294,106 @@ func TestPlanImage(t *testing.T) {
 	}
 }
 
+// tinyGLB is a binary glTF 2.0 with only a JSON chunk: enough for the header check.
+func tinyGLB(extra string) []byte {
+	js := []byte(`{"asset":{"version":"2.0"}` + extra + `}`)
+	for len(js)%4 != 0 {
+		js = append(js, ' ')
+	}
+	out := make([]byte, 20, 20+len(js))
+	copy(out, "glTF")
+	binary.LittleEndian.PutUint32(out[4:], 2)
+	binary.LittleEndian.PutUint32(out[8:], uint32(20+len(js)))
+	binary.LittleEndian.PutUint32(out[12:], uint32(len(js)))
+	copy(out[16:], "JSON")
+	return append(out, js...)
+}
+
+func TestModels(t *testing.T) {
+	ts := newTestServer(t)
+	glb := tinyGLB("")
+	if res, _ := do(t, "PUT", ts.URL+"/projects/prj_m/models", glb, nil); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("model for a missing project: %d", res.StatusCode)
+	}
+	do(t, "POST", ts.URL+"/projects", doc("prj_m", "Flat", 0), nil)
+
+	if res, _ := do(t, "PUT", ts.URL+"/projects/prj_m/models", tinyPNG, nil); res.StatusCode != http.StatusUnsupportedMediaType {
+		t.Fatalf("non-glb upload: %d", res.StatusCode)
+	}
+	short := glb[:len(glb)-4] // its header says longer than it is
+	if res, _ := do(t, "PUT", ts.URL+"/projects/prj_m/models", short, nil); res.StatusCode != http.StatusUnsupportedMediaType {
+		t.Fatalf("truncated glb: %d", res.StatusCode)
+	}
+	res, body := do(t, "PUT", ts.URL+"/projects/prj_m/models", glb, nil)
+	hash, _ := body["hash"].(string)
+	if res.StatusCode != http.StatusOK || len(hash) != 64 {
+		t.Fatalf("upload: %d %v", res.StatusCode, body)
+	}
+	// The same file again is the same model.
+	if _, body := do(t, "PUT", ts.URL+"/projects/prj_m/models", glb, nil); body["hash"] != hash {
+		t.Fatalf("re-upload: %v", body)
+	}
+
+	get, err := http.Get(ts.URL + "/projects/prj_m/models/" + hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(get.Body)
+	get.Body.Close()
+	if get.StatusCode != http.StatusOK || !bytes.Equal(got, glb) ||
+		get.Header.Get("Content-Type") != "model/gltf-binary" ||
+		get.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("get: %d %v", get.StatusCode, get.Header)
+	}
+	stale := strings.Repeat("0", 64)
+	if res, _ := do(t, "GET", ts.URL+"/projects/prj_m/models/"+stale, nil, nil); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown hash: %d", res.StatusCode)
+	}
+
+	// A project holds at most MaxModelsPerProject models that its plan uses.
+	save := func(version int, hashes []string) {
+		models := map[string]any{}
+		for i, h := range hashes {
+			models[fmt.Sprintf("mdl_%d", i)] = map[string]any{"hash": h}
+		}
+		b, _ := json.Marshal(map[string]any{
+			"schemaVersion": 6, "id": "prj_m", "version": version, "name": "Flat", "units": "m",
+			"underlay": nil, "levels": []any{map[string]any{}}, "models": models,
+		})
+		if res, _ := do(t, "PUT", ts.URL+"/projects/prj_m", b, map[string]string{"If-Match": fmt.Sprintf(`"%d"`, version)}); res.StatusCode != http.StatusOK {
+			t.Fatalf("save v%d: %d", version, res.StatusCode)
+		}
+	}
+	all := []string{hash}
+	for i := 1; i < MaxModelsPerProject; i++ {
+		res, body := do(t, "PUT", ts.URL+"/projects/prj_m/models", tinyGLB(fmt.Sprintf(`,"n":%d`, i)), nil)
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("model %d: %d", i, res.StatusCode)
+		}
+		all = append(all, body["hash"].(string))
+	}
+	save(1, all)
+	if res, _ := do(t, "PUT", ts.URL+"/projects/prj_m/models", tinyGLB(`,"n":-1`), nil); res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("one too many: %d", res.StatusCode)
+	}
+	if res, body := do(t, "GET", ts.URL+"/projects/prj_m/models", nil, nil); res.StatusCode != http.StatusOK || len(body["hashes"].([]any)) != MaxModelsPerProject {
+		t.Fatalf("list: %d %v", res.StatusCode, body)
+	}
+	// The plan names only the first model now: the rest make room for a new one.
+	save(2, all[:1])
+	if res, _ := do(t, "PUT", ts.URL+"/projects/prj_m/models", tinyGLB(`,"n":-1`), nil); res.StatusCode != http.StatusOK {
+		t.Fatalf("upload once unused ones go: %d", res.StatusCode)
+	}
+	if _, body := do(t, "GET", ts.URL+"/projects/prj_m/models", nil, nil); len(body["hashes"].([]any)) != 2 {
+		t.Fatalf("after making room: %v", body)
+	}
+
+	do(t, "DELETE", ts.URL+"/projects/prj_m", nil, nil)
+	if res, _ := do(t, "GET", ts.URL+"/projects/prj_m/models/"+hash, nil, nil); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("model after delete: %d", res.StatusCode)
+	}
+}
+
 func TestSharing(t *testing.T) {
 	ts := newTestServer(t)
 	res, _ := do(t, "POST", ts.URL+"/projects", doc("prj_s", "Flat", 0), nil)
@@ -375,5 +478,39 @@ func TestSharing(t *testing.T) {
 	}
 	if r, _ := do(t, "GET", open.URL+"/projects/prj_old", nil, map[string]string{"Authorization": "Bearer " + owner}); r.Header.Get("X-Role") != "owner" {
 		t.Fatalf("claimed role: %q", r.Header.Get("X-Role"))
+	}
+}
+
+func TestVersionHistory(t *testing.T) {
+	ts := newTestServer(t)
+	do(t, "POST", ts.URL+"/projects", doc("prj_h", "One", 0), nil)
+	do(t, "PUT", ts.URL+"/projects/prj_h", doc("prj_h", "Two", 1), map[string]string{"If-Match": `"1"`})
+	do(t, "PUT", ts.URL+"/projects/prj_h", doc("prj_h", "Three", 2), map[string]string{"If-Match": `"2"`})
+
+	res, out := do(t, "GET", ts.URL+"/projects/prj_h/versions", nil, nil)
+	vs, _ := out["versions"].([]any)
+	if res.StatusCode != http.StatusOK || len(vs) != 2 {
+		t.Fatalf("versions: %d %v", res.StatusCode, out)
+	}
+	first, _ := vs[0].(map[string]any)
+	if first["version"] != float64(1) || first["replacedAt"] == "" {
+		t.Fatalf("first version: %v", first)
+	}
+	res, got := do(t, "GET", ts.URL+"/projects/prj_h/versions/1", nil, nil)
+	if res.StatusCode != http.StatusOK || got["name"] != "One" {
+		t.Fatalf("version 1: %d %v", res.StatusCode, got)
+	}
+	if r, _ := do(t, "GET", ts.URL+"/projects/prj_h/versions/9", nil, nil); r.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing version: %d", r.StatusCode)
+	}
+	if r, _ := do(t, "GET", ts.URL+"/projects/prj_h/versions/x", nil, nil); r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad version: %d", r.StatusCode)
+	}
+	// A view-only link doesn't see past versions.
+	if r, _ := do(t, "GET", ts.URL+"/projects/prj_h/versions", nil, map[string]string{"Authorization": ""}); r.StatusCode != http.StatusForbidden {
+		t.Fatalf("viewer versions: %d", r.StatusCode)
+	}
+	if r, _ := do(t, "GET", ts.URL+"/projects/prj_nope/versions", nil, nil); r.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing project: %d", r.StatusCode)
 	}
 }

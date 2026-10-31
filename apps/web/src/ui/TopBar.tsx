@@ -1,7 +1,16 @@
 import { renameProject } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
+import { signInUrl, useAccount } from '../account';
 import { type ViewMode, useEditor } from '../editor';
+import {
+  download3dImage,
+  download3dModel,
+  downloadPlanImage,
+  downloadProjectFile,
+  printPlan,
+} from '../exports';
 import { type SyncStatus, useProject, useStore } from '../store';
+import { HistoryDialog } from './HistoryDialog';
 import { PlansDialog } from './PlansDialog';
 import { ShareMenu } from './ShareMenu';
 import { Segmented } from './fields';
@@ -62,10 +71,19 @@ function ProjectName() {
 function ProjectMenu() {
   const [open, setOpen] = useState(false);
   const [managing, setManaging] = useState(false);
+  const [history, setHistory] = useState(false);
+  // Past versions live on the server, and a view-only link doesn't see them.
+  const canHistory = useStore((s) => !!s.backend?.versions && s.role !== 'viewer');
+  const fileInput = useRef<HTMLInputElement>(null);
   const ref = useRef<HTMLDivElement>(null);
   const recent = useStore((s) => s.recent);
   const currentId = useProject().id;
-  const { load, createProject, openSample } = useStore.getState();
+  const { load, createProject, openSample, importProject } = useStore.getState();
+  // A download that fails says why, instead of doing nothing.
+  const save = (fn: () => Promise<void>) =>
+    fn().catch((e: Error) =>
+      useStore.setState({ notice: `Couldn’t make that download: ${e.message}` }),
+    );
 
   useEffect(() => {
     if (!open) return;
@@ -121,13 +139,117 @@ function ProjectMenu() {
               ))}
             </>
           )}
+          <button type="button" onClick={run(() => fileInput.current?.click())}>
+            Open a project file…
+          </button>
+          <p className="menu-label">Download</p>
+          <button type="button" onClick={run(() => save(downloadPlanImage))}>
+            Plan as a picture (PNG)
+          </button>
+          <button type="button" onClick={run(() => save(printPlan))}>
+            Print the plan, or save it as PDF
+          </button>
+          <button type="button" onClick={run(() => save(download3dImage))}>
+            3D view as a picture (PNG)
+          </button>
+          <button type="button" onClick={run(() => save(download3dModel))}>
+            3D model (GLB)
+          </button>
+          <button type="button" onClick={run(() => save(async () => downloadProjectFile()))}>
+            Project file
+          </button>
           <hr className="menu-rule" />
+          {canHistory && (
+            <button type="button" onClick={run(() => setHistory(true))}>
+              Version history…
+            </button>
+          )}
           <button type="button" onClick={run(() => setManaging(true))}>
             Manage your plans…
           </button>
         </div>
       )}
+      <input
+        ref={fileInput}
+        type="file"
+        accept=".json,application/json"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = '';
+          if (f) void f.text().then(importProject);
+        }}
+      />
       {managing && <PlansDialog onClose={() => setManaging(false)} />}
+      {history && <HistoryDialog onClose={() => setHistory(false)} />}
+    </div>
+  );
+}
+
+/**
+ * Sign in with Google, or who is signed in with a way out. Shown only once the server says
+ * sign-in is set up.
+ */
+function AccountButton() {
+  const enabled = useAccount((s) => s.enabled);
+  const user = useAccount((s) => s.user);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (
+        e instanceof KeyboardEvent ? e.key === 'Escape' : !ref.current?.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('keydown', close);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      window.removeEventListener('keydown', close);
+    };
+  }, [open]);
+  if (!enabled) return null;
+  if (!user) {
+    return (
+      <a className="btn btn-small account-btn" href={signInUrl()} title="Sign in with Google">
+        <span className="account-btn-icon">{icons.user}</span>
+        <span className="account-btn-text">Sign in</span>
+      </a>
+    );
+  }
+  return (
+    <div className="menu-anchor" ref={ref}>
+      <button
+        type="button"
+        className="icon-btn account-avatar"
+        aria-label={`Signed in as ${user.email}`}
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {(user.name || user.email).slice(0, 1).toUpperCase()}
+      </button>
+      {open && (
+        <div className="menu menu-right">
+          <p className="menu-label">
+            Signed in as
+            <br />
+            <strong>{user.email}</strong>
+          </p>
+          <p className="menu-note">Your plans are kept with your account, on any device.</p>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              void useAccount.getState().signOut();
+            }}
+          >
+            Sign out
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -164,6 +286,7 @@ export function TopBar() {
         </span>
       </div>
       <div className="topbar-right">
+        <AccountButton />
         <ShareMenu />
         <button
           type="button"

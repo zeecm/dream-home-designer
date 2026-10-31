@@ -114,19 +114,36 @@ export function WalkControls({
 
   useEffect(() => {
     const el = gl.domElement;
-    const look = (dx: number, dy: number) => {
+    // The orbit controls leave `touch-action: auto` on the canvas as they go, and with it a
+    // phone takes a sideways swipe for a page pan and cancels it: looking needs `none`.
+    const touchAction = el.style.touchAction;
+    el.style.touchAction = 'none';
+    const look = (dx: number, dy: number, speed = LOOK_SPEED) => {
       const p = pose.current;
       if (!p) return;
-      p.yaw += dx * LOOK_SPEED;
-      p.pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, p.pitch - dy * LOOK_SPEED));
+      p.yaw += dx * speed;
+      p.pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, p.pitch - dy * speed));
     };
-    let drag: { id: number; x: number; y: number } | null = null;
+    // A finger turns by the screen, not by the pixel: a swipe across the view is half a turn,
+    // so a phone can look all round in two swipes, standing still.
+    const touchSpeed = () => Math.PI / Math.max(200, el.clientWidth);
+    /**
+     * A drag's turn: a finger moves the scene with it, as in Street View (drag left, look
+     * right); a mouse drag turns the way it moves, as in a game.
+     */
+    const turn = (d: { x: number; y: number; touch: boolean }, e: PointerEvent) => {
+      const dx = e.clientX - d.x;
+      const dy = e.clientY - d.y;
+      if (d.touch) look(-dx, -dy, touchSpeed());
+      else look(dx, dy, LOOK_SPEED);
+    };
+    let drag: { id: number; x: number; y: number; touch: boolean } | null = null;
     const onDown = (e: PointerEvent) => {
       if (e.pointerType === 'mouse' && !document.pointerLockElement) {
         // Pointer lock where the browser allows it; dragging works either way.
         Promise.resolve(el.requestPointerLock?.()).catch(() => {});
       }
-      drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, touch: e.pointerType !== 'mouse' };
       // Under pointer lock there is nothing to capture (and the browser throws).
       if (!document.pointerLockElement) {
         try {
@@ -142,22 +159,32 @@ export function WalkControls({
         return;
       }
       if (!drag || drag.id !== e.pointerId) return;
-      look(e.clientX - drag.x, e.clientY - drag.y);
-      drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      turn(drag, e);
+      drag = { ...drag, x: e.clientX, y: e.clientY };
     };
     const onUp = (e: PointerEvent) => {
+      if (drag?.id !== e.pointerId) return;
+      // A busy page can merge a quick swipe's moves into the lift: count its last stretch too.
+      if (document.pointerLockElement !== el) {
+        turn(drag, e);
+      }
+      drag = null;
+    };
+    // A cancelled touch (the system took it) has no position worth turning to.
+    const onCancel = (e: PointerEvent) => {
       if (drag?.id === e.pointerId) drag = null;
     };
     el.addEventListener('pointerdown', onDown);
     el.addEventListener('pointermove', onMove);
     el.addEventListener('pointerup', onUp);
-    el.addEventListener('pointercancel', onUp);
+    el.addEventListener('pointercancel', onCancel);
     return () => {
       el.removeEventListener('pointerdown', onDown);
       el.removeEventListener('pointermove', onMove);
       el.removeEventListener('pointerup', onUp);
-      el.removeEventListener('pointercancel', onUp);
+      el.removeEventListener('pointercancel', onCancel);
       if (document.pointerLockElement === el) document.exitPointerLock();
+      el.style.touchAction = touchAction;
     };
   }, [gl, pose]);
 

@@ -20,6 +20,8 @@ const palette: Record<string, { color: string; roughness: number; emissive?: str
   'furniture-glass': { color: '#22272b', roughness: 0.1 },
   'furniture-ceramic': { color: '#fbfbf9', roughness: 0.2 },
   'furniture-leaf': { color: '#5d8a4e', roughness: 0.8 },
+  // A model still loading: a quiet box of its size.
+  'furniture-placeholder': { color: '#d6dade', roughness: 1 },
   // A lit shade: it glows whatever falls on it.
   'furniture-lamp': { color: '#fff4e0', roughness: 0.9, emissive: '#ffe2b8' },
 };

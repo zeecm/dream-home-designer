@@ -1,6 +1,7 @@
 import {
   addItem,
   deleteItem,
+  duplicateOf,
   furnitureKind,
   itemFootprint,
   newId,
@@ -53,6 +54,15 @@ export function useFurnitureTool(ctx: ToolContext): ToolController {
         return true;
       }
       const sel = useEditor.getState().selection;
+      // Ctrl/Cmd+D: another of the piece just placed, beside it.
+      if ((e.key === 'd' || e.key === 'D') && (e.ctrlKey || e.metaKey) && sel?.kind === 'item') {
+        const it = ctx.level.items[sel.id];
+        if (!it) return false;
+        const copy = duplicateOf(it, newId('it'));
+        ctx.dispatch(addItem(ctx.level.id, copy));
+        useEditor.getState().select({ kind: 'item', id: copy.id });
+        return true;
+      }
       // The piece just placed (still selected) can go again straight away.
       if ((e.key === 'Delete' || e.key === 'Backspace') && sel?.kind === 'item') {
         const gone = ctx.level.items[sel.id];

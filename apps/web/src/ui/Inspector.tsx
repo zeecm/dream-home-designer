@@ -4,16 +4,23 @@ import {
   type Level,
   type Opening,
   PAINTS,
+  addItem,
   cornerSpot,
   deleteItem,
+  deleteModel,
   deleteOpening,
+  deleteRoom,
   deleteVertex,
   deleteWall,
+  duplicateOf,
   furnitureKind,
   isBoundary,
   itemSize,
+  modelUses,
   moveVertex,
+  newId,
   roomArea,
+  roomOwnWalls,
   setCeilingHeight,
   setSite,
   setWallLength,
@@ -21,6 +28,7 @@ import {
   siteOf,
   splitWall,
   updateItem,
+  updateModel,
   updateOpening,
   updateRoom,
   updateWall,
@@ -30,10 +38,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../editor';
 import { roomsBeside } from '../plan/keyboard';
 import { OPENING_PRESETS, ROOM_NAMES } from '../presets';
-import { useProject, useStore } from '../store';
+import { currentLevel, useLevel, useProject, useStore } from '../store';
 import { formatArea, formatLength } from '../units';
 import { COMPASS_POINTS, Compass, describeFacing, northForFacing, planFacing } from './Compass';
 import { ToolPanel } from './Palette';
+import { RenovationSection } from './Renovation';
 import { LengthField, Segmented, SelectField, TextField } from './fields';
 import { icons } from './icons';
 
@@ -73,7 +82,7 @@ function PaintField({
 const THICKNESS_HINT = 'HDB walls are usually 0.10 m inside and 0.20 m on the outside.';
 
 export function Inspector() {
-  const level = useProject().levels[0];
+  const level = useLevel();
   const selection = useEditor((s) => s.selection);
   const tool = useEditor((s) => s.tool);
   const viewer = useStore((s) => s.role === 'viewer');
@@ -235,6 +244,7 @@ function PlanSummary({ level }: { level: Level }) {
           <dd className="num">{count('window')}</dd>
         </div>
       </dl>
+      <RenovationSection />
       <LengthField
         label="Ceiling height"
         value={level.ceilingHeight}
@@ -397,7 +407,7 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
           const r = splitWall(level.id, id, corner, level);
           dispatch(r.command);
           // The new corner, selected so it can be dragged or nudged into place.
-          if (useStore.getState().editor.doc.levels[0]?.vertices[r.vertexId]) {
+          if (currentLevel()?.vertices[r.vertexId]) {
             useEditor.getState().select({ kind: 'vertex', id: r.vertexId });
           }
         }}
@@ -450,7 +460,7 @@ function VertexInspector({ level, id }: { level: Level; id: string }) {
   if (!v) return null;
   const walls = Object.values(level.walls).filter((w) => w.a === id || w.b === id);
   const settle = (key: string) => {
-    const moved = useStore.getState().editor.doc.levels[0];
+    const moved = currentLevel();
     if (moved) dispatch(settleVertex(moved, id), { coalesceKey: key });
   };
   const move = (x: number, y: number) => {
@@ -608,6 +618,18 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
           </button>
         </span>
       </div>
+      <button
+        type="button"
+        className="btn"
+        title="Duplicate (Ctrl+D)"
+        onClick={() => {
+          const copy = duplicateOf(it, newId('it'));
+          dispatch(addItem(level.id, copy));
+          useEditor.getState().select({ kind: 'item', id: copy.id });
+        }}
+      >
+        Duplicate
+      </button>
       <DeleteButton
         label="Delete"
         onClick={() => {
@@ -615,7 +637,36 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
           clear();
         }}
       />
+      <OwnModel id={it.assetId} />
     </>
+  );
+}
+
+/** For a piece made from a model uploaded to this plan: the model's name, and taking it out. */
+function OwnModel({ id }: { id: string }) {
+  const dispatch = useStore((s) => s.dispatch);
+  const project = useProject();
+  const model = project.models?.[id];
+  if (!model) return null;
+  const uses = modelUses(project, id);
+  return (
+    <section className="stack" aria-labelledby="own-model-h">
+      <h3 id="own-model-h" className="section-title">
+        Your model
+      </h3>
+      <TextField
+        label="Model name"
+        value={model.name}
+        onCommit={(name) => dispatch(updateModel(id, { name }))}
+      />
+      <DeleteButton
+        label={uses > 1 ? `Remove model and its ${uses} pieces` : 'Remove model'}
+        onClick={() => {
+          dispatch(deleteModel(id));
+          clear();
+        }}
+      />
+    </section>
   );
 }
 
@@ -774,6 +825,20 @@ function RoomInspector({ level, id }: { level: Level; id: string }) {
         hint="Leave empty to use the flat's ceiling height."
         onCommit={(v) => dispatch(updateRoom(level.id, id, { ceilingHeight: v }))}
       />
+      {roomOwnWalls(level, id).length > 0 ? (
+        <DeleteButton
+          label="Delete room"
+          onClick={() => {
+            dispatch(deleteRoom(level.id, id, level));
+            clear();
+          }}
+        />
+      ) : (
+        <p className="field-hint">
+          Every wall of this room is shared with another room. Delete one of them to join the two
+          rooms.
+        </p>
+      )}
     </>
   );
 }

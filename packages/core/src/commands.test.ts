@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   deleteOpening,
+  deleteRoom,
   deleteVertex,
+  deleteWall,
   drawWall,
+  renameProject,
+  restoreVersion,
+  roomOwnWalls,
   setCeilingHeight,
   setSite,
   setWallLength,
@@ -178,5 +183,57 @@ describe('setSite', () => {
     expect(s.doc.site).toBeUndefined();
     expect(Project.parse(dispatch(s, setSite({ latitude: 51.5 })).doc).site?.latitude).toBe(51.5);
     expect(() => setSite({ latitude: 95 })).toThrow();
+  });
+});
+
+describe('restoreVersion', () => {
+  it('puts back an earlier version in one undoable step, keeping id and version', () => {
+    const old = hdb4RoomProject();
+    let s: EditorDoc = { doc: { ...hdb4RoomProject(), version: 7 }, history: emptyHistory() };
+    s = dispatch(s, deleteWall(L, 'w_living_kitchen'));
+    s = dispatch(s, renameProject('Changed'));
+    s = dispatch(s, restoreVersion(old));
+    expect(s.doc.levels[0]?.walls.w_living_kitchen).toBeDefined();
+    expect(s.doc.name).toBe(old.name);
+    expect(s.doc.version).toBe(7);
+    expect(undo(s).doc.name).toBe('Changed');
+  });
+
+  it('brings back the uploaded models its pieces were made from', () => {
+    const model = {
+      id: 'mdl_1',
+      name: 'Chair',
+      hash: 'b'.repeat(64),
+      category: 'Living',
+      size: { w: 0.5, d: 0.5, h: 0.9 },
+    };
+    const old = { ...hdb4RoomProject(), models: { mdl_1: model } };
+    let s: EditorDoc = { doc: { ...hdb4RoomProject(), version: 3 }, history: emptyHistory() };
+    s = dispatch(s, restoreVersion(old));
+    expect(s.doc.models?.mdl_1).toEqual(model);
+    expect(undo(s).doc.models).toBeUndefined();
+  });
+});
+
+describe('deleteRoom', () => {
+  it('takes down the walls only it has, keeping the ones a neighbour shares', () => {
+    let s: EditorDoc = { doc: hdb4RoomProject(), history: emptyHistory() };
+    const lvl = s.doc.levels[0];
+    if (!lvl) throw new Error('no level');
+    const rooms = Object.values(lvl.rooms);
+    // The room with the most walls to itself: a corner bedroom.
+    const target = rooms
+      .map((r) => ({ r, own: roomOwnWalls(lvl, r.id).length }))
+      .sort((a, b) => b.own - a.own)[0];
+    if (!target) throw new Error('no rooms');
+    expect(target.own).toBeGreaterThan(0);
+    const before = Object.keys(lvl.walls).length;
+    s = dispatch(s, deleteRoom(L, target.r.id, lvl));
+    const after = s.doc.levels[0];
+    expect(after?.rooms[target.r.id]).toBeUndefined();
+    expect(Object.keys(after?.walls ?? {}).length).toBe(before - target.own);
+    // Every other room is still there.
+    expect(Object.keys(after?.rooms ?? {}).length).toBe(rooms.length - 1);
+    expect(undo(s).doc.levels[0]?.rooms[target.r.id]).toBeDefined();
   });
 });

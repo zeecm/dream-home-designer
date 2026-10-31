@@ -36,7 +36,10 @@ The full feature inventory is in the plan doc.
 | Backend libraries | **Standard library only** (chi + pgx + sqlc + goose were the plan) | Go 1.22+ `ServeMux` covers routing; the R2 client signs SigV4 itself |
 | Web hosting | **Cloudflare Pages, connected to GitHub** (owner asked for this) | `main` deploys production, every other branch a preview, with PR comments |
 | API hosting | **Cloudflare Containers** behind a Worker (`apps/edge`), replacing Fly.io | Owner upgraded to Workers Paid to unblock it. Pages reaches it through a Pages Function and a service binding, so the app stays same-origin |
-| Project storage (until Postgres) | **R2**, one object per project, conditional writes for optimistic concurrency | Containers have no persistent disk. Postgres on Neon still arrives in Phase 4 behind the same `store.Store` interface |
+| Project storage | **R2**, one object per project, conditional writes for optimistic concurrency | Containers have no persistent disk |
+| Accounts and version history (Phase 4) | **Cloudflare D1** (owner chose it over Postgres) | Stays on Cloudflare; replaces the Postgres-on-Neon plan |
+| Licence | **MIT**, repo to be published at beta (owner approved) | Helps catalogue contributions |
+| HDB BTO layout presets | **Not wanted** (owner) | |
 | Document storage | The project is one JSON document; the server validates only the envelope | Keeps the schema in one place (zod in `packages/core`) |
 | Wall model | Walls reference **shared vertex ids**; the wall tool splits walls where they meet or cross | Dragging a corner moves every wall at it, and rooms can be found from the wall graph |
 | Rooms | **Detected** from the wall graph's faces inside each topology-changing command | Rooms can't drift from walls; names survive edits by matching faces to old rooms |
@@ -47,8 +50,8 @@ The full feature inventory is in the plan doc.
 | Units | Metres and radians everywhere. Plan (x, y) maps to world (x, 0, y), +Y up | |
 | Visual style | taste-skill "framed sheet" app style (seed 69376578), IBM Plex Sans, colour on data only | Owner asked to use taste-skill; it is vendored in `.claude/skills/design-taste-frontend` |
 
-Still open (from the plan doc): MIT open-sourcing at beta; whether "before/after"
-variants go in v1; whether to ship HDB BTO layout presets as templates.
+Before/after renovation variants (the flat as it is and as planned, compared in plan and
+3D) are **in v1** (owner, 30 Oct).
 
 ## 3. Repository tour
 
@@ -366,7 +369,6 @@ owner's plan):**
   running off screen brings its end into view; an opening narrowed to fit says so; the top
   bar fits 390 px exactly.
 - **Still open:**
-  - landscape phones get the desktop layout;
   - placing points on lift with a magnifier;
   - room deletion.
 - **Also fixed after a review:**
@@ -408,9 +410,33 @@ without it fetches it from the server. Other formats and very large photos are r
 JPEG first. Older `img_…` keys are uploaded and re-keyed the next time their plan opens in the
 browser that has them.
 
+**Your own models (schema 6):** the Furniture catalogue's "Your models" group uploads a
+binary glTF (`.glb`, up to 20 MB, 40 per plan). `Project.models` (optional) holds each one's
+name, SHA-256, category and size; items made from it have its id (`mdl_…`) as `assetId`.
+Core keeps the open project's models in a registry (`setProjectModels`; `furnitureKind`
+falls back to it), which the web store refreshes whenever the document changes (`store.ts`).
+The size is measured on upload (`modelFiles.ts`: the first of metres, centimetres and
+millimetres that makes the largest side 5 cm to 6 m); render's `ModelLibrary` centres the
+model on load and the scene fits it to that size. Draco-compressed models load (decoder in
+`public/draco/`, copied from three's `examples/jsm/libs/draco/gltf`, outside Biome). The GLB is kept in IndexedDB under `sha256:<hash>` and copied to the
+API in the background (`models.ts`, `syncModels`); a browser without it fetches it from
+`GET /projects/{id}/models/{hash}` (no key needed, immutable, sandboxed, as plan images).
+The API stores them per project (memory, file `models/<id>/<hash>.glb` read on demand, R2
+`models/<id>/<hash>`) and deletes them with the project. `GET /projects/{id}/models` lists
+the hashes held, so a client uploads only what's missing (never from a view-only link).
+At 40, an upload first drops the models the saved document no longer names; still full is
+422. Uploads run two at a time, downloads eight. Copying a plan fetches its models into this
+browser first, so the copy can upload them; a plan naming a model that is on neither this
+device nor the server (an imported file) says so. The details panel's "Your model" renames
+a model or removes it with every piece made from it (one undo step); restoring an earlier
+version brings its models back. Not handled: rigged (skinned) models measure wrongly.
+
 ## 5. Owner to-dos
 
-0. **Before merging:** the production API must accept schema 4 (deployed with this branch).
+0. **Before merging:** the production API must accept schema 6 and serve uploaded models
+   (`/projects/{id}/models`). The preview API has it (30 Oct); the production deploy
+   (`pnpm --filter @dhd/edge run deploy`) was held back for the owner's go-ahead.
+   Earlier: the production API must accept schema 4 (deployed with this branch).
    Earlier note: the production API must accept schema 2. It was deployed from this branch
    at the same time as the preview, and it still accepts version-1 documents from `main`.
 
@@ -425,7 +451,14 @@ browser that has them.
 
    Until it's connected, deploy the API by hand (§8). The web app already deploys through Pages'
    Git integration.
-2. **Domain:** point it at the Pages project. The `/api` routing comes with it.
+2. **Domain:** point it at the Pages project. The `/api` routing comes with it. (Also what
+   email sign-in links would need, later.)
+2b. **Google sign-in:** create the OAuth client (Web application; origins
+   `https://dream-home-designer.pages.dev`, the branch preview and `http://localhost:5173`;
+   redirect URIs the same origins plus `/api/auth/google/callback`), send the client id, and
+   add the secrets `GOOGLE_CLIENT_SECRET` and `KEYS_SECRET` (a long random string, e.g.
+   `openssl rand -base64 32`) to dhd-api and dhd-api-preview (Workers & Pages → Settings →
+   Variables and Secrets). This session isn't allowed to write secrets.
 3. **Merge** the open PR when happy.
 
 **Furniture (Phase 3, first cut):** `core/furniture.ts` holds a catalogue of 27 pieces built
@@ -466,6 +499,44 @@ only) shows north and opens that setting. Lamps: floor and table lamps, ceiling 
 lights (category Lighting; ceiling ones hang from the level's ceiling height and draw as a
 circle-and-cross). `itemLights` places each bulb; the view lights the 8 nearest the camera
 with unshadowed point lights fading out by 7 m, so some light leaks through walls.
+**Before and after (schema 5):** `Project.renovation` holds a second copy of the levels,
+"after"; `levels` stays the flat as it is. `startRenovation` copies every level with the same
+element ids (the level id gets `AFTER_SUFFIX`, `~after`), so every existing command edits
+either version through `draftLevel`/`findLevel`. The web's `variant` (editor store) picks
+which version the plan, 3D and walk show and edit (`useLevel`, `currentLevel`); a plan with
+a renovation opens on "after". `renovationDiff` compares the two by where walls run, not by
+id: a wall split or redrawn in place is unchanged, a moved or thickened one is hacked and
+rebuilt. The plan marks hacked wall (red hatch; a dashed outline in "after") and new wall
+(accent; an outline in "before"); a bar above the stage switches versions and sums the
+changes; the plan details show the totals and "Make it the plan" (`endRenovation('after')`)
+or "Discard the renovation", both undoable with a toast. The plan image, north and site are
+shared. The diff counts height (a wall cut down is hacked), leaves doorways out of the
+lengths, and matches doors and windows by position and size. Undo and redo switch to the
+version they change (`touchedVariant` on the step's patches); switching versions remounts the
+plan, dropping a half-drawn wall; the bar says which version edits go to and hides while
+walking; `loadProject` gives a renovation level that clashes with the plan's id its own.
+**Not yet:** a side-by-side 3D compare; listing changes room by room; applying an edit to
+both versions at once (a trace fix in "before" shows as built wall in the after).
+
+**Downloads (Phase 4):** the project menu's Download section (`exports.ts`): the plan as a
+PNG (the plan SVG cloned with its computed styles inlined, handles and grid removed, the plan
+image inlined as data, drawn at 3× on a canvas), Print (the same picture on its own page;
+the print dialog saves a PDF), the 3D view as a PNG (drawn on demand through `Capture` in the
+Viewport and read at once), the 3D model as GLB (`GLTFExporter` on the level group, models
+included) and the project file (JSON). "Open a project file…" loads one through
+`loadProject` as a new plan. A download that needs the plan or 3D shows it for a moment and
+puts the view back.
+
+**Version history (Phase 4, before accounts):** the API lists and serves the copies R2 already
+keeps of each version a save replaced (`GET /projects/{id}/versions`, `…/versions/{n}`;
+`store.HistoryStore`, in R2 and memory; not for view-only links). Autosave makes a version
+every few seconds, so `historyPoints` offers the end of each editing session (a version that
+stayed current 5 minutes or more), up to 20, newest first. "Version history…" restores one
+with `restoreVersion`, one undoable step. Copies expire after 30 days (the bucket rule).
+
+**Duplicate:** Ctrl/Cmd+D or the details' Duplicate sets a copy one width along the piece
+(`duplicateOf`), selected.
+
 **Your plans:** the project menu's "Manage your plans…" opens a dialog listing this
 browser's plans (the recent list, up to 20): open one, delete one (with an inline confirm), or
 Clear all. Plans this browser owns (owner key, or a local-only plan: `ownsPlan`) are deleted
@@ -479,6 +550,97 @@ While a dialog is open the plan's keyboard shortcuts are off.
 
 **Still open:** latitude and place aren't editable in the UI; lamps are always on. Ceiling
 lights move with `setCeilingHeight`. Walking at night is lit by lamps, with only a faint fill.
+
+**Furniture models (Phase 3c):** `tools/models` (a workspace package) builds them:
+`pnpm --filter @dhd/models build [ids…]` reads `catalogue.json` (Poly Haven asset, our id,
+name, category, placement flags, an optional `turn` to face +Z, triangle budget), downloads
+each 1k glTF, centres it on its footprint with its base at 0, simplifies above 40k triangles,
+shrinks textures to 512 px WebP, compresses with meshopt, and writes
+`apps/web/public/models/<id>.<hash>.glb` (19 models, 3.7 MB, cached immutable) and
+`packages/core/src/modelKinds.generated.ts` (sizes measured from the models). Core adds them
+to `FURNITURE` with a stand-in box (`placeholder`); render's `ModelLibrary` loads each GLB
+once and `LevelMeshes` swaps the box for a copy when it arrives (copies share geometry, marked
+`userData.shared`). No modern beds or TVs on Poly Haven, so those stay box-built.
+Rebuild a few with `pnpm --filter @dhd/models build <id…>` (`built.json` remembers the rest).
+**Thumbnails:** `pnpm --filter @dhd/models thumbs` serves `apps/web/thumbs.html` (dev only,
+not in the build) with Vite, renders every catalogue piece through `LevelMeshes` and the
+model library, and writes 96 px WebPs to `apps/web/public/models/thumbs/`; the catalogue
+shows them. Re-run it after changing the catalogue.
+Kept cheap to draw (acceptance round 10 measured 0.66 fps in software rendering with all 19
+placed, now about 3.3): the pipeline drops refracting glass (`KHR_materials_transmission`,
+which makes three.js draw the scene twice a frame) for plain transparent glass and caps
+models at 12k triangles; `ModelLibrary` draws opaque materials front-side only and lets only
+pieces over 0.5 m radius cast shadows. Lamp models' shades glow (`glow` in the catalogue);
+a model that fails to load is retried after 5 and 30 seconds.
+**Next:** more models (Sketchfab CC0 needs an API key).
+
+**Accounts (Phase 4, Google sign-in on D1; built, off until the owner's Google client is
+set):** the edge Worker answers `/api/auth/*` and `/api/me/*` (`apps/edge/src/auth.ts`):
+Google's OAuth code flow with PKCE and a signed, short-lived state cookie; a 30-day
+`dhd_session` cookie (HttpOnly, Secure, SameSite=Lax; only its SHA-256 stored); and the plans
+a person keeps (`user_projects`), with their owner and edit keys sealed by AES-GCM under
+`KEYS_SECRET`. D1: `dhd-auth` and `dhd-auth-preview` (`apps/edge/migrations`, applied with
+`wrangler d1 migrations apply <db> --remote [--env preview]`). Sign-in starts only from an
+origin matching `AUTH_ORIGINS`. In the app (`account.ts`): a Sign in button when the server
+says sign-in is on; once signed in, every plan opened (not view-only) is kept with the
+account and the account's plans (and keys) join this browser's list, so another device opens
+them as owner; deleting a plan forgets it there too. **To switch it on:** set
+`GOOGLE_CLIENT_ID` in `apps/edge/wrangler.jsonc` (both environments) and redeploy, and the
+secrets `GOOGLE_CLIENT_SECRET` and `KEYS_SECRET` (any long random string) on dhd-api and
+dhd-api-preview (see §5).
+
+**Getting started (Phase 5):** a new blank plan gets a guide bar over the stage (`ui/Guide.tsx`,
+`guide.ts`): add a floor plan, set its scale, draw walls round a room, walk through. Each step
+ticks off as it happens (a picture, a "Calibrate plan image" step this session or any walls,
+a room, a walk), one at a time with a button for its tool; it ends with "That's the basics"
+or when closed, and is remembered per project in this browser.
+
+**Errors and usage (Phase 5, no third party):** the app posts to `/api/telemetry`
+(`telemetry.ts`, sendBeacon): unhandled errors and ErrorBoundary catches (message, stack,
+path; ten a visit), and usage events once a visit each (`open-sample`, `new-plan`,
+`upload-plan`, `calibrate`, `first-wall`, `first-room`, `walk`, `furnish`, `renovation`,
+`share`, `download`, `restore-version`). The edge Worker answers it itself: errors to its
+logs (Workers observability), events to Analytics Engine (`dhd_events`, `dhd_events_preview`;
+event, detail, country). No project ids, plan content or personal data. Query:
+`curl -X POST https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/analytics_engine/sql -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --data "SELECT blob1 AS event, SUM(_sample_interval) AS n FROM dhd_events WHERE timestamp > NOW() - INTERVAL '7' DAY GROUP BY event"`.
+The Go API logs it locally (`POST /telemetry`, 204).
+
+**Drawing and editing, acceptance round 11 (fingers first, mid-gesture checks):**
+- Every drag draws from where it began, with a mouse as with a finger (a press is resolved on
+  release: a click places a corner, a drag draws the wall or room); the wall, room, scale
+  line and measurement all preview mid-drag.
+- `useCornerHandles` (drawTools): the corners of the wall or room just drawn are handles; a
+  press drags the corner (live lengths, snapped, settled, one undo step), a tap on a wall end
+  carries on drawing from it. The drawing bar's Undo also takes back an end dragged.
+- A tapped first corner shows as a marker. Measure ends can be dragged; a tap starts afresh.
+- In the Door/Window/Opening and Furniture tools, a press on an existing piece of that kind
+  goes to Select for the gesture (a drag moves it), via `placing()` in `PlanCanvas`.
+- Delete room (`deleteRoom`, `roomOwnWalls`): takes down the walls only it has; a room whose
+  walls are all shared says to delete one of them instead.
+- Corners are 32 px targets on touch screens; the scale bar lets drags through; a swipe in a
+  walk moves the scene with the finger; the guide is worded for phones too, keeps a fixed
+  height, and step 1 offers "Draw instead".
+- **Not yet (from the round):** dragging a whole wall or room; distances to neighbours while
+  dragging a door; a magnifier.
+
+**Furniture handles:** a selected piece shows four corner handles and a turn handle in front
+(`itemHandles` in `plan/tools.tsx`), in Select and in Furniture straight after placing (the
+`placing` wrapper routes a press on a handle to Select). A corner resizes with the opposite
+corner fixed (1 cm steps, 1 mm with Alt; size shown mid-drag); the turn handle faces the piece
+at the pointer in 15° steps (free with Alt). One undo step per drag; a finger takes a handle at
+once (`grabs`).
+
+**Phone on its side** (`orientation: landscape` and height ≤ 500 px, in `styles.css`): a thin
+top bar, a one-line sample notice, the tool rail at the left (it scrolls), and the details as a
+column that folds to a vertical tab at the right; walking hides the rails, the notice and the
+hint and shrinks the mini-map. `e2e/landscape.spec.ts` checks it at iPhone 13 landscape.
+
+**Wall tool on phones:** a finger drag previews the first wall (and a room, in Room) from where
+it went down (`ToolController.move`'s `dragFrom`); the last wall's ends show as handles, and a
+finger on one drags that corner (`grabs`; snapped, settled, one undo step) instead of drawing.
+
+**Walk-through link:** Share offers `?p=<id>&walk=1`, which opens the plan straight into a
+walk (once; the parameter is then dropped from the address).
 
 Poly Haven (CC0, reachable from here) has about 136 indoor models for later; Kenney is
 blocked by the network proxy and Sketchfab needs an API key.
@@ -526,6 +688,25 @@ blocked by the network proxy and Sketchfab needs an API key.
 algorithm notes and the checklists for Phases 3 to 5.
 
 ## 7. Conventions
+
+**Acceptance testing method (owner, 30 Oct: "add more testing methods").** Basic phone
+interactions got through earlier rounds (no wall preview under the finger; no way to adjust
+a wall just drawn). Every acceptance round now does all of these, and reports a missing
+affordance as major:
+1. **Fingers only on a phone profile** (CDP touch events; no keyboard, no mouse), and the
+   same tasks with a mouse on desktop.
+2. **Mid-gesture checks:** for every drag (draw, move, resize, look around), a screenshot
+   while the finger is still down. Feedback must show before the lift.
+3. **Make it, then fix it:** after creating anything by touch, adjust it by touch: in the
+   same tool straight away, and in Select. Undo each step.
+4. **First use:** start from "New blank plan", not the sample, and follow the
+   getting-started guide as a newcomer would.
+5. **Slow device:** repeat the touch tasks with CPU throttling
+   (`Emulation.setCPUThrottlingRate`, rate 4) to surface lost taps and merged moves.
+6. **Expectations:** for each step, write what a person used to phone apps would try next,
+   then try it.
+The e2e suite follows the same rules for the phone (`mobile.spec.ts` checks the first wall's
+preview mid-drag and drags its end).
 
 - Every document mutation goes through a `Command` in `packages/core/src/commands.ts`.
   UI code never mutates the project directly.
@@ -577,6 +758,16 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
   replacement shows the old image only in browsers that still have it locally.
 - **Walls use one material for both faces.** `materialLeft` covers both, and per-side materials
   come in Phase 3.
-- **No `project_versions` history yet.** It's planned with Postgres.
+- **No `project_versions` history yet.** It comes with accounts in Phase 4, on D1.
+- **Flaky phone e2e:** the first test in `mobile.spec.ts` still fails about one run in four
+  locally (CI retries once): the Add tap or the finger-drawn room doesn't land when the run
+  is slow. Four real causes were found and fixed on the way: Add was `disabled` until the
+  typing re-rendered (a quick tap was dropped); a busy page merges a quick drag's moves into
+  the lift (the plan and the walk now play the lift's position as a last move); and the orbit
+  controls left `touch-action: auto` on the 3D canvas, so a phone cancelled sideways swipes
+  in walk mode (the owner's "can't look around without moving"). Swipe-to-look turns half a
+  circle per screen width on touch.
+- **Wall tool snapping:** it snaps hard to door and window ends, so a wall drawn across a room
+  past a door can come out slanted (seen in acceptance round 9).
 - **Corner dimension lines** for walls that run into the room draw inside it; fine at plan scale,
   busy on short walls.

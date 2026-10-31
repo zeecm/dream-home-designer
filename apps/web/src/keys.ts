@@ -55,10 +55,14 @@ export function absorbLinkKey(): void {
   window.history.replaceState(null, '', url);
 }
 
-/** Links to share a project: view-only, and with an edit key. */
-export function shareLink(id: string, editKey?: string | null): string {
+/**
+ * Links to share a project: view-only, with an edit key, or (`walk`) opening straight into
+ * a first-person walk.
+ */
+export function shareLink(id: string, editKey?: string | null, walk = false): string {
   const url = new URL(window.location.origin + window.location.pathname);
   url.searchParams.set('p', id);
+  if (walk) url.searchParams.set('walk', '1');
   if (editKey) url.hash = new URLSearchParams({ k: editKey }).toString();
   return url.toString();
 }

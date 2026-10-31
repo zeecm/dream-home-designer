@@ -89,3 +89,27 @@ func TestFileStoreKeepsImagesAcrossReopen(t *testing.T) {
 		t.Fatalf("image after delete and reopen: %v", err)
 	}
 }
+
+func TestFileStoreKeepsModelsAcrossReopen(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	s, _ := NewFile(dir)
+	_ = s.Create(ctx, Record{ID: "prj_m", Name: "M", Doc: []byte(`{}`)})
+	if err := s.PutModel(ctx, "prj_m", "abc", []byte("glTF abc")); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewFile(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hs, _ := reopened.Models(ctx, "prj_m"); len(hs) != 1 || hs[0] != "abc" {
+		t.Fatalf("models after reopen: %v", hs)
+	}
+	if err := reopened.Delete(ctx, "prj_m"); err != nil {
+		t.Fatal(err)
+	}
+	again, _ := NewFile(dir)
+	if hs, _ := again.Models(ctx, "prj_m"); len(hs) != 0 {
+		t.Fatalf("models after delete and reopen: %v", hs)
+	}
+}

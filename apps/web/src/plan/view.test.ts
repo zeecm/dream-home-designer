@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { fitBounds, gridStep, panBy, reveal, screenToWorld, worldToScreen, zoomAt } from './view';
+import {
+  MIN_FIT_SPAN,
+  fitBounds,
+  gridStep,
+  panBy,
+  reveal,
+  screenToWorld,
+  worldToScreen,
+  zoomAt,
+} from './view';
 
 const size = { width: 800, height: 600 };
 
@@ -34,6 +43,12 @@ describe('plan view', () => {
     expect(v.cx).toBe(5.5);
     expect(v.cy).toBe(4.25);
     expect(v.zoom).toBeCloseTo(Math.min(700 / 11, 500 / 8.5));
+  });
+
+  it('frames a first wall or two in room-sized space, not zoomed right in', () => {
+    const v = fitBounds({ min: { x: 0, y: 0 }, max: { x: 2, y: 0.1 } }, size, 50);
+    expect(v.cx).toBe(1);
+    expect(v.zoom).toBeCloseTo(Math.min(700, 500) / MIN_FIT_SPAN);
   });
 
   it('chooses a readable grid for the zoom', () => {

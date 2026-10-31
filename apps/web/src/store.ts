@@ -2,6 +2,8 @@ import {
   type Command,
   type DispatchOptions,
   type EditorDoc,
+  FURNITURE,
+  type Level,
   type Project,
   blankProject,
   canRedo,
@@ -9,11 +11,20 @@ import {
   dispatch as coreDispatch,
   redo as coreRedo,
   undo as coreUndo,
+  customModelFile,
   emptyHistory,
+  furnitureKind,
+  loadProject,
   newId,
   sampleFlatProject,
+  setProjectModels,
+  touchedVariant,
+  variantLevels,
 } from '@dhd/core';
+import type { Patch } from 'immer';
 import { create } from 'zustand';
+import { forgetWithAccount, keepWithAccount } from './account';
+import { getAsset, putAsset } from './assets';
 import {
   type Backend,
   ConflictError,
@@ -26,6 +37,7 @@ import {
   storedLocally,
 } from './backend';
 import { useEditor } from './editor';
+import { startGuide } from './guide';
 import { keysFor } from './keys';
 import {
   type RecentProject,
@@ -35,6 +47,7 @@ import {
   recentProjects,
   rememberRecent,
 } from './recent';
+import { track } from './telemetry';
 
 export type SyncStatus =
   | { kind: 'loading' }
@@ -67,6 +80,8 @@ interface State {
   role: Role;
   /** Opens a copy of the open project as a new plan of this browser's own. */
   copyProject: () => Promise<void>;
+  /** Opens a project file (from Download → Project file) as a new plan of this browser's. */
+  importProject: (text: string) => Promise<void>;
   /**
    * Makes this browser the owner of a plan from before sharing (role `open`). Asked for, not
    * automatic: anyone with such a plan's link could otherwise take it from its creator.
@@ -164,8 +179,27 @@ const VALID_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
  */
 export const ownsPlan = (id: string) => !!keysFor(id).owner || storedLocally(id);
 
-/** Commands that remove things get an Undo toast. */
-const DESTRUCTIVE = /^Delete /;
+/** Usage events from edits: the steps of a first plan, and the big features. */
+function countUsage(label: string, before: EditorDoc, after: EditorDoc) {
+  const count = (d: EditorDoc, k: 'walls' | 'rooms' | 'items') =>
+    d.doc.levels.reduce((n, l) => n + Object.keys(l[k]).length, 0);
+  if (count(before, 'walls') === 0 && count(after, 'walls') > 0) track('first-wall');
+  if (count(before, 'rooms') === 0 && count(after, 'rooms') > 0) track('first-room');
+  if (count(after, 'items') > count(before, 'items')) track('furnish');
+  if (label === 'Calibrate plan image') track('calibrate');
+  else if (label === 'Plan a renovation') track('renovation');
+  else if (label === 'Restore an earlier version') track('restore-version');
+}
+
+/** Commands that remove things get an Undo toast; this is its text, or null for none. */
+function toastFor(label: string): string | null {
+  if (label === 'Discard the renovation') return 'Renovation discarded';
+  if (label === 'Make the renovation the plan') return 'The renovation is now the plan';
+  if (label === 'Restore an earlier version') return 'Earlier version restored';
+  if (!label.startsWith('Delete ')) return null;
+  const what = label.slice('Delete '.length);
+  return `${what[0]?.toUpperCase()}${what.slice(1)} deleted`;
+}
 
 /** States in which the open document may be edited. */
 const EDITABLE = new Set<SyncStatus['kind']>(['saved', 'dirty', 'saving', 'conflict', 'error']);
@@ -198,6 +232,10 @@ export const useStore = create<State>((set, get) => {
       recent: role === 'viewer' ? get().recent : rememberRecent(doc, undefined, sample),
     });
     rememberProject(doc.id);
+    // Signed in, the plan is kept with the account, keys and all, for the person's other devices.
+    if (role !== 'viewer') keepWithAccount({ id: doc.id, name: doc.name, sample });
+    // A plan with a renovation opens on it: that is the version being worked on.
+    useEditor.getState().setVariant(doc.renovation ? 'after' : 'before');
   };
 
   /** Finishes any save in flight and saves pending edits before leaving the open project. */
@@ -207,6 +245,17 @@ export const useStore = create<State>((set, get) => {
     while (inflight) await inflight;
     if (get().sync.kind === 'dirty') await get().save();
     while (inflight) await inflight;
+  };
+
+  /**
+   * After an undo or redo, shows the version of the flat it changed, so it never changes
+   * one out of sight.
+   */
+  const showChanged = (patches: readonly Patch[]) => {
+    const touched = touchedVariant(patches);
+    const has = !!get().editor.doc.renovation;
+    if (!has) useEditor.getState().setVariant('before');
+    else if (touched) useEditor.getState().setVariant(touched);
   };
 
   /** Where a missing plan leads: the sample this browser keeps, or a new copy of it. */
@@ -243,25 +292,29 @@ export const useStore = create<State>((set, get) => {
     dispatch: (cmd, opts) => {
       // Nothing is edited until a real project is open (not while loading or unreachable).
       if (!canEdit(get())) return;
-      const next = coreDispatch(get().editor, cmd, opts);
+      const editorBefore = get().editor;
+      const next = coreDispatch(editorBefore, cmd, opts);
       if (next === get().editor) return;
       commit(next);
-      if (DESTRUCTIVE.test(cmd.label)) {
-        const what = cmd.label.replace('Delete ', '');
-        set({
-          toast: { text: `${what[0]?.toUpperCase()}${what.slice(1)} deleted`, at: Date.now() },
-        });
-      }
+      countUsage(cmd.label, editorBefore, next);
+      const text = toastFor(cmd.label);
+      if (text) set({ toast: { text, at: Date.now() } });
     },
     undo: () => {
       if (!canEdit(get())) return;
+      const step = get().editor.history.past.at(-1);
       const next = coreUndo(get().editor);
-      if (next !== get().editor) commit(next);
+      if (next === get().editor) return;
+      commit(next);
+      showChanged(step?.inverse ?? []);
     },
     redo: () => {
       if (!canEdit(get())) return;
+      const step = get().editor.history.future[0];
       const next = coreRedo(get().editor);
-      if (next !== get().editor) commit(next);
+      if (next === get().editor) return;
+      commit(next);
+      showChanged(step?.patches ?? []);
     },
 
     load: async (id) => {
@@ -323,11 +376,18 @@ export const useStore = create<State>((set, get) => {
     },
 
     createProject: async (name) => {
-      await createFrom(blankProject(name));
+      const doc = blankProject(name);
+      track('new-plan');
+      // A first plan of one's own gets the getting-started guide.
+      startGuide(doc.id);
+      await createFrom(doc);
       // A blank plan is drawn in the plan view; 3D has nothing to show yet.
       useEditor.getState().setViewMode('plan');
     },
-    openSample: () => createFrom(sampleFlatProject(newId('prj')), true),
+    openSample: () => {
+      track('open-sample');
+      return createFrom(sampleFlatProject(newId('prj')), true);
+    },
     deletePlans: async (ids) => {
       const list = get().recent;
       const doomed = list.filter((r) => ids.includes(r.id) && deletable(r, list));
@@ -353,6 +413,7 @@ export const useStore = create<State>((set, get) => {
           }
         }
         set({ recent: forgetRecent(r.id) });
+        forgetWithAccount(r.id);
       }
       return failed;
     },
@@ -365,8 +426,28 @@ export const useStore = create<State>((set, get) => {
       if (get().editor.doc.id === id) set({ role: claimed ? 'owner' : 'viewer' });
       return claimed;
     },
+    importProject: async (text) => {
+      let project: Project;
+      try {
+        project = loadProject(JSON.parse(text)).project;
+      } catch (e) {
+        set({ notice: errorMessage('That file isn’t a Dream Home project', e) });
+        return;
+      }
+      await createFrom({ ...project, id: newId('prj'), version: 0 });
+    },
     copyProject: async () => {
       const doc = get().editor.doc;
+      // The copy uploads its models from this browser: fetch any it doesn't hold yet.
+      const backend = get().backend;
+      await Promise.all(
+        Object.values(doc.models ?? {}).map(async (m) => {
+          const key = customModelFile(m.hash);
+          if (await getAsset(key).catch(() => undefined)) return;
+          const blob = await backend?.getModel?.(doc.id, m.hash).catch(() => undefined);
+          if (blob) await putAsset(key, blob).catch(() => {});
+        }),
+      );
       const name = doc.name.replace(/ \(sample\)$/, '');
       await createFrom({ ...doc, id: newId('prj'), version: 0, name: `${name} (copy)` });
     },
@@ -403,6 +484,7 @@ export const useStore = create<State>((set, get) => {
           if (changedSince) saveAgain = true;
           if (sent.name !== get().recent.find((r) => r.id === sent.id)?.name) {
             set({ recent: rememberRecent(sent) });
+            keepWithAccount({ id: sent.id, name: sent.name });
           }
         } catch (e) {
           if (get().editor.doc.id !== sent.id) return;
@@ -465,6 +547,20 @@ export const useStore = create<State>((set, get) => {
  * Local saves are synchronous under the hood, so flushing on pagehide keeps the last
  * edit. For the API, warn instead: a request started during unload may not finish.
  */
+// The open project's uploaded models join the catalogue as soon as its document changes,
+// before anything renders from it (this listener was subscribed before any component's).
+let shownModels: Project['models'] | null = null;
+const followModels = (doc: Project) => {
+  if (doc.models === shownModels) return;
+  shownModels = doc.models;
+  setProjectModels(doc.models);
+  // A model removed (or undone away) while the Furniture tool held it: arm a catalogue piece.
+  const armed = useEditor.getState().furnitureKind;
+  if (!furnitureKind(armed)) useEditor.getState().setFurnitureKind(FURNITURE[0]?.id ?? armed);
+};
+followModels(useStore.getState().editor.doc);
+useStore.subscribe((s) => followModels(s.editor.doc));
+
 window.addEventListener('pagehide', () => {
   const { sync, backend, save } = useStore.getState();
   if (sync.kind === 'dirty' && backend?.kind === 'local') void save();
@@ -476,3 +572,13 @@ window.addEventListener('beforeunload', (e) => {
 });
 
 export const useProject = () => useStore((s) => s.editor.doc);
+
+/** The level shown and edited: the plan's, or its renovation's when viewing "after". */
+export function useLevel(): Level | undefined {
+  const variant = useEditor((s) => s.variant);
+  return useStore((s) => variantLevels(s.editor.doc, variant)[0]);
+}
+
+/** useLevel outside React, as it is now. */
+export const currentLevel = (): Level | undefined =>
+  variantLevels(useStore.getState().editor.doc, useEditor.getState().variant)[0];

@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Viewport } from './Viewport';
+import { keepWithAccount, pullFromAccount, useAccount } from './account';
 import { type Tool, type ViewMode, useEditor } from './editor';
 import { absorbLinkKey } from './keys';
+import { useModelSync } from './models';
 import { PlanCanvas } from './plan/PlanCanvas';
 import { initialProjectId, useProject, useStore } from './store';
+import { Guide } from './ui/Guide';
 import { Inspector } from './ui/Inspector';
 import { Palette, TOOLS } from './ui/Palette';
+import { RenovationBar } from './ui/Renovation';
 import { TopBar } from './ui/TopBar';
 import { icons } from './ui/icons';
 
@@ -68,6 +72,13 @@ function useShortcuts() {
 }
 
 let started = false;
+
+const SIGN_IN_PROBLEMS: Record<string, string> = {
+  cancelled: 'Sign-in was cancelled.',
+  expired: 'That sign-in took too long or was opened twice. Please try again.',
+  unverified: 'Google hasn’t verified that email address yet.',
+  failed: 'Signing in with Google didn’t work. Please try again.',
+};
 
 function Notice() {
   const notice = useStore((s) => s.notice);
@@ -204,13 +215,35 @@ export function App() {
   const { id: projectId, name } = useProject();
   const viewMode = useEditor((s) => s.viewMode);
   const walking = useEditor((s) => !!s.walking);
+  const variant = useEditor((s) => s.variant);
   useShortcuts();
+  useModelSync();
 
   useEffect(() => {
     // StrictMode runs effects twice in dev; only start once.
     if (started) return;
     started = true;
     absorbLinkKey(); // an edit link's key, kept for its plan and taken out of the address
+    // Back from signing in: say if it didn't work, and tidy the address.
+    const url = new URL(window.location.href);
+    const signin = url.searchParams.get('signin');
+    if (signin) {
+      url.searchParams.delete('signin');
+      window.history.replaceState(null, '', url);
+      useStore.setState({ notice: SIGN_IN_PROBLEMS[signin] ?? SIGN_IN_PROBLEMS.failed ?? null });
+    }
+    // Signed in, the plans kept with the account join this browser's list (keys too).
+    void useAccount
+      .getState()
+      .load()
+      .then(pullFromAccount)
+      .then((list) => {
+        if (!list) return;
+        useStore.setState({ recent: list });
+        // The plan open now, if it opened before the account answered.
+        const s = useStore.getState();
+        if (s.sync.kind === 'saved' && s.role !== 'viewer') keepWithAccount(s.editor.doc);
+      });
     const id = initialProjectId();
     const { load, openSample } = useStore.getState();
     void (id ? load(id) : openSample());
@@ -220,6 +253,19 @@ export function App() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the open project changes
   useEffect(() => useEditor.getState().reset(), [projectId]);
 
+  // A walk-through link (?walk=1) starts walking once its plan has opened, once (after the
+  // reset above, which would end a walk begun in the same render).
+  const opened = useStore((s) => s.sync.kind === 'saved');
+  const hasRooms = useStore((s) => Object.keys(s.editor.doc.levels[0]?.rooms ?? {}).length > 0);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (!opened || url.searchParams.get('walk') !== '1') return;
+    if (url.searchParams.get('p') !== projectId) return;
+    url.searchParams.delete('walk');
+    window.history.replaceState(null, '', url);
+    if (hasRooms) useEditor.getState().startWalk();
+  }, [opened, projectId, hasRooms]);
+
   return (
     <div className={walking ? 'app app-walking' : 'app'}>
       <TopBar />
@@ -228,10 +274,13 @@ export function App() {
         <main className={`panel stage stage-${viewMode}`}>
           <SampleBanner />
           <ViewOnlyBanner />
+          <RenovationBar />
+          <Guide />
           <Notice />
           <Toast />
           <div className="stage-views">
-            {viewMode !== '3d' && <PlanCanvas />}
+            {/* Another version remounts the plan, so a wall half drawn in one can't land in the other. */}
+            {viewMode !== '3d' && <PlanCanvas key={variant} />}
             {viewMode !== 'plan' && <Viewport key={projectId} />}
             <LoadingVeil />
           </div>

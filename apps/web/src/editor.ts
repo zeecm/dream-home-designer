@@ -1,7 +1,8 @@
-import type { OpeningKind } from '@dhd/core';
+import type { OpeningKind, Variant } from '@dhd/core';
 import { create } from 'zustand';
 import type { View } from './plan/view';
 import { DEFAULT_OPENING_WIDTH } from './presets';
+import { track } from './telemetry';
 
 /**
  * Editor state that is never saved with the project: the active tool, the selection,
@@ -69,6 +70,9 @@ export interface EditorState {
   /** The 3D view's time of day, in hours on the site's clock (not saved with the plan). */
   sunHour: number;
   setSunHour: (h: number) => void;
+  /** Which version of the flat is shown and edited, when the plan has a renovation. */
+  variant: Variant;
+  setVariant: (v: Variant) => void;
 }
 
 const VIEW_KEY = 'dhd:view';
@@ -130,8 +134,15 @@ export const useEditor = create<EditorState>((set) => ({
   walking: null,
   sunHour: 15,
   setSunHour: (sunHour) => set({ sunHour }),
+  variant: 'before',
+  // The other version may not have what's selected or half-drawn.
+  setVariant: (variant) =>
+    set((s) => (s.variant === variant ? {} : { variant, selection: null, hover: null })),
   // Walking takes the whole stage (and isn't remembered as the view mode).
-  startWalk: () => set((s) => ({ walking: { returnTo: s.viewMode }, viewMode: '3d' })),
+  startWalk: () => {
+    track('walk');
+    set((s) => ({ walking: { returnTo: s.viewMode }, viewMode: '3d' }));
+  },
   stopWalk: () => set((s) => (s.walking ? { viewMode: s.walking.returnTo, walking: null } : {})),
   requestFit: () => set({ fitRequested: true, viewAdjusted: false }),
   fitDone: () => set({ fitRequested: false }),

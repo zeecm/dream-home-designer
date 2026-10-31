@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 )
 
@@ -123,6 +124,49 @@ func runContract(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 		if _, err := readImage(ctx, imgs, "prj_i"); !errors.Is(err, ErrNoImage) {
 			t.Fatalf("image outlived its project: %v", err)
+		}
+	})
+
+	t.Run("models", func(t *testing.T) {
+		s := newStore(t)
+		ms, ok := s.(ModelStore)
+		if !ok {
+			t.Fatal("store does not keep models")
+		}
+		if err := ms.PutModel(ctx, "prj_m", "aaa", []byte("glTF a")); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("model for a missing project: %v", err)
+		}
+		if err := s.Create(ctx, Record{ID: "prj_m", Name: "M", Doc: []byte(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := ms.OpenModel(ctx, "prj_m", "aaa"); !errors.Is(err, ErrNoModel) {
+			t.Fatalf("open before put: %v", err)
+		}
+		for _, h := range []string{"bbb", "aaa"} {
+			if err := ms.PutModel(ctx, "prj_m", h, []byte("glTF "+h)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		size, body, err := ms.OpenModel(ctx, "prj_m", "aaa")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, _ := io.ReadAll(body)
+		body.Close()
+		if string(got) != "glTF aaa" || size != int64(len(got)) {
+			t.Fatalf("open: %q %d", got, size)
+		}
+		if hs, err := ms.Models(ctx, "prj_m"); err != nil || strings.Join(hs, ",") != "aaa,bbb" {
+			t.Fatalf("list: %v %v", hs, err)
+		}
+		if err := s.Delete(ctx, "prj_m"); err != nil {
+			t.Fatal(err)
+		}
+		if hs, _ := ms.Models(ctx, "prj_m"); len(hs) != 0 {
+			t.Fatalf("models outlived their project: %v", hs)
+		}
+		if _, _, err := ms.OpenModel(ctx, "prj_m", "aaa"); !errors.Is(err, ErrNoModel) {
+			t.Fatalf("open after delete: %v", err)
 		}
 	})
 

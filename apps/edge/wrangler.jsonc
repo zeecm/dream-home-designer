@@ -23,8 +23,21 @@
   ],
   "vars": {
     "R2_ENDPOINT": "https://4b562836b582b9cd6065c491c8e1af7a.r2.cloudflarestorage.com",
-    "R2_BUCKET": "dhd-projects"
+    "R2_BUCKET": "dhd-projects",
+    // Google sign-in: the OAuth client's id (not secret; GOOGLE_CLIENT_SECRET and
+    // KEYS_SECRET are secrets). Empty turns sign-in off.
+    "GOOGLE_CLIENT_ID": "",
+    "AUTH_ORIGINS": "^https://dream-home-designer\\.pages\\.dev$"
   },
+  "analytics_engine_datasets": [{ "binding": "EVENTS", "dataset": "dhd_events" }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dhd-auth",
+      "database_id": "6ead4476-b535-4dc1-b520-20aee2bf6904",
+      "migrations_dir": "migrations"
+    }
+  ],
   "env": {
     "preview": {
       "name": "dhd-api-preview",
@@ -45,8 +58,19 @@
       ],
       "vars": {
         "R2_ENDPOINT": "https://4b562836b582b9cd6065c491c8e1af7a.r2.cloudflarestorage.com",
-        "R2_BUCKET": "dhd-projects-preview"
-      }
+        "R2_BUCKET": "dhd-projects-preview",
+        "GOOGLE_CLIENT_ID": "",
+        "AUTH_ORIGINS": "^https://([a-z0-9-]+\\.)?dream-home-designer\\.pages\\.dev$|^http://localhost:5173$"
+      },
+      "analytics_engine_datasets": [{ "binding": "EVENTS", "dataset": "dhd_events_preview" }],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "dhd-auth-preview",
+          "database_id": "1d7789fc-377b-4689-8a0b-90f8a9a23b54",
+          "migrations_dir": "migrations"
+        }
+      ]
     }
   }
 }

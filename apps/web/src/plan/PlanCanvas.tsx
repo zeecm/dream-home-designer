@@ -3,9 +3,10 @@ import type { Vec2 } from '@dhd/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type PixelBox, inkBounds } from '../assets';
 import { type Tool, useEditor } from '../editor';
-import { useProject, useStore } from '../store';
+import { currentLevel, useLevel, useProject, useStore } from '../store';
 import { Compass, describeNorth } from '../ui/Compass';
 import { uploadPlanImage, usePlanImage, useUploadPicker } from '../ui/PlanImage';
+import { RenovationMarks } from '../ui/Renovation';
 import { icons } from '../ui/icons';
 import { useCalibrateTool, useOpeningTool, useRoomTool, useWallTool } from './drawTools';
 import { useFurnitureTool } from './furnitureTool';
@@ -22,6 +23,7 @@ import {
   type PlanPointer,
   type ToolContext,
   type ToolController,
+  onDrawnHandle,
   useMeasureTool,
   useSelectTool,
 } from './tools';
@@ -52,25 +54,121 @@ const isTyping = (t: EventTarget | null) =>
 
 function useTool(tool: Tool, ctx: ToolContext): ToolController {
   // Every tool hook runs every render so hook order never changes.
+  const select = useSelectTool(ctx);
+  const routed = useRef(false);
+  /** A press on a handle (not on the piece): a place if it never moves, a resize if it does. */
+  const onHandle = useRef<{ start: PlanPointer; moved: boolean } | null>(null);
+  /** The pointer is over a placed piece or its handles: no ghost of a new one there. */
+  const overOwn = useRef(false);
+  /**
+   * A placing tool that also moves what it placed: a press on an existing piece of its kind
+   * goes to Select for that gesture (a drag moves it, a tap selects it), instead of adding
+   * another one beside it. Furniture just placed shows its resize and turn handles: a drag
+   * from one goes to Select too, but a tap there still places the next piece (beside a
+   * chair, the next chair).
+   */
+  const placing = (own: ToolController, kind: 'item' | 'opening'): ToolController => {
+    const handle = (p: PlanPointer) =>
+      kind === 'item' && p.hit?.kind !== kind && (select.grabs?.(p) ?? false);
+    const onOwn = (p: PlanPointer) => p.hit?.kind === kind || handle(p);
+    return {
+      ...own,
+      grabs: (p) => onOwn(p) || (own.grabs?.(p) ?? false),
+      down: (p) => {
+        routed.current = onOwn(p);
+        onHandle.current = handle(p) ? { start: p, moved: false } : null;
+        return routed.current ? select.down(p) : own.down(p);
+      },
+      move: (p, dragging, from) => {
+        if (!dragging) overOwn.current = onOwn(p);
+        const h = onHandle.current;
+        if (
+          h &&
+          dragging &&
+          Math.hypot(p.screen.x - h.start.screen.x, p.screen.y - h.start.screen.y) >= 3
+        ) {
+          h.moved = true;
+        }
+        return routed.current && dragging ? select.move(p, dragging) : own.move(p, dragging, from);
+      },
+      up: (p) => {
+        const h = onHandle.current;
+        onHandle.current = null;
+        if (!routed.current) return own.up(p);
+        routed.current = false;
+        select.up(p);
+        if (h && !h.moved && !(ctx && onDrawnHandle(ctx, h.start))) {
+          own.down(h.start);
+          own.up(p);
+        }
+      },
+      // Mid-drag on a piece or a handle, Escape and the rest go to Select's drag.
+      key: (e) => (routed.current && select.key(e)) || own.key(e),
+      overlay: (o) =>
+        kind === 'item' ? (
+          <>
+            {!overOwn.current && !routed.current && own.overlay(o)}
+            {select.overlay(o)}
+          </>
+        ) : (
+          own.overlay(o)
+        ),
+    };
+  };
   const tools: Record<Tool, ToolController> = {
-    select: useSelectTool(ctx),
+    select,
     measure: useMeasureTool(ctx),
     wall: useWallTool(ctx),
     room: useRoomTool(ctx),
-    door: useOpeningTool(ctx, 'door'),
-    window: useOpeningTool(ctx, 'window'),
-    passage: useOpeningTool(ctx, 'passage'),
+    door: placing(useOpeningTool(ctx, 'door'), 'opening'),
+    window: placing(useOpeningTool(ctx, 'window'), 'opening'),
+    passage: placing(useOpeningTool(ctx, 'passage'), 'opening'),
     calibrate: useCalibrateTool(ctx),
-    furniture: useFurnitureTool(ctx),
+    furniture: placing(useFurnitureTool(ctx), 'item'),
   };
   return tools[tool];
+}
+
+/**
+ * Fingers on the screen anywhere, not only on the plan: a pinch whose other finger landed
+ * on a bar beside the plan is still a pinch, never a tap. `multi` holds until all lift.
+ */
+const screenTouch = { down: new Set<number>(), multi: false };
+if (typeof window !== 'undefined') {
+  window.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (e.pointerType !== 'touch') return;
+      // The first finger on the screen: forget any whose lift never arrived.
+      if (e.isPrimary) {
+        screenTouch.down.clear();
+        screenTouch.multi = false;
+      }
+      screenTouch.down.add(e.pointerId);
+      if (screenTouch.down.size > 1) screenTouch.multi = true;
+    },
+    { capture: true },
+  );
+  // Seen in the capture phase (nothing can stop it there); `multi` is reset only after the
+  // plan's own handlers have seen the last lift.
+  const lift = (e: PointerEvent) => {
+    if (e.pointerType !== 'touch') return;
+    screenTouch.down.delete(e.pointerId);
+    if (screenTouch.down.size === 0) {
+      setTimeout(() => {
+        if (screenTouch.down.size === 0) screenTouch.multi = false;
+      });
+    }
+  };
+  window.addEventListener('pointerup', lift, { capture: true });
+  window.addEventListener('pointercancel', lift, { capture: true });
 }
 
 export function PlanCanvas() {
   const [wrapRef, size] = useElementSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
   const project = useProject();
-  const level = project.levels[0];
+  const level = useLevel();
   const dispatch = useStore((s) => s.dispatch);
   // Narrow selectors: the canvas re-renders for these, not for every editor change.
   const tool = useEditor((s) => s.tool);
@@ -229,7 +327,7 @@ export function PlanCanvas() {
     touch.current = { start, moved: false, claimed: false };
     // A finger on something a drawing tool lets you drag (a scale line's end) takes it at
     // once, so the smallest correction counts.
-    if (tool !== 'select' && ctx && active.grabs?.(start)) {
+    if (ctx && active.grabs?.(start)) {
       touch.current = { start, moved: true, claimed: active.down(start) };
     }
   };
@@ -273,10 +371,14 @@ export function PlanCanvas() {
       pan.current = p.screen;
       return;
     }
-    // Drawing tools follow the finger as they follow a hovering mouse.
-    active.move(p, t.claimed);
+    // Drawing tools follow the finger as they follow a hovering mouse, and see where a drag
+    // they'll get whole (touchDrag) began, to preview it.
+    active.move(p, t.claimed, !t.claimed && active.touchDrag ? t.start : undefined);
   };
   const onTouchUp = (e: React.PointerEvent) => {
+    // A busy page can merge a quick drag's moves into the lift: play its last stretch as a
+    // move first, so a drag that arrived all at once is still a drag, not a tap.
+    onTouchMove(e);
     touches.current.delete(e.pointerId);
     if (gesture.current) {
       if (touches.current.size === 0) gesture.current = null;
@@ -289,6 +391,12 @@ export function PlanCanvas() {
       return;
     }
     if (!t || !ctx) return;
+    // Another finger was down somewhere: a pinch begun off the plan, not a tap or a drag.
+    if (screenTouch.multi) {
+      if (t.claimed) active.up(t.start);
+      else active.touchCancel?.();
+      return;
+    }
     const end = pointer(e);
     if (t.claimed) {
       active.up(end);
@@ -308,6 +416,7 @@ export function PlanCanvas() {
     touch.current = null;
     pan.current = null;
     if (t?.claimed && ctx) active.up(t.start);
+    else if (ctx) active.touchCancel?.();
   };
 
   // Pointer events don't reliably carry a click count, so detect double-clicks here.
@@ -503,7 +612,20 @@ export function PlanCanvas() {
               preserveAspectRatio="none"
             />
           )}
-          <PlanShapes level={level} geom={geom} interactive={tool === 'select'} />
+          <PlanShapes
+            level={level}
+            geom={geom}
+            interactive={
+              tool === 'select'
+                ? true
+                : tool === 'furniture'
+                  ? 'items'
+                  : tool === 'door' || tool === 'window' || tool === 'passage'
+                    ? 'openings'
+                    : false
+            }
+          />
+          <RenovationMarks />
           <PlanHighlights
             level={level}
             geom={geom}

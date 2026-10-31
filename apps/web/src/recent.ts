@@ -1,6 +1,6 @@
 /**
- * Projects this browser has opened, newest first. The public API doesn't list projects
- * (there's no auth yet), so the project menu is built from this list instead.
+ * Projects this browser has opened, newest first; signed in, also the ones kept with the
+ * account (adoptKept). The project menu and "Manage your plans" are built from this list.
  */
 export interface RecentProject {
   id: string;
@@ -17,7 +17,7 @@ export interface RecentProject {
 export const isSample = (r: RecentProject) => r.sample ?? / \(sample\)$/.test(r.name);
 
 const KEY = 'dhd:recent';
-const MAX = 20;
+const MAX = 100;
 
 export function recentProjects(storage: Storage = window.localStorage): RecentProject[] {
   try {
@@ -63,6 +63,35 @@ export function rememberRecent(
 
 export function forgetRecent(id: string, storage: Storage = window.localStorage): RecentProject[] {
   const list = recentProjects(storage).filter((r) => r.id !== id);
+  try {
+    storage.setItem(KEY, JSON.stringify(list));
+  } catch {
+    // ignore
+  }
+  return list;
+}
+
+/**
+ * Adds the plans kept with an account to this browser's list (those it doesn't have yet, by
+ * when they were last kept), and returns the list.
+ */
+export function adoptKept(
+  kept: { id: string; name: string; sample: boolean; updatedAt: number }[],
+  storage: Storage = window.localStorage,
+): RecentProject[] {
+  const here = recentProjects(storage);
+  const known = new Set(here.map((r) => r.id));
+  const added = kept
+    .filter((k) => !known.has(k.id))
+    .map((k) => ({
+      id: k.id,
+      name: k.name,
+      openedAt: new Date(k.updatedAt).toISOString(),
+      sample: k.sample,
+    }));
+  const list = [...here, ...added]
+    .sort((a, b) => b.openedAt.localeCompare(a.openedAt))
+    .slice(0, MAX);
   try {
     storage.setItem(KEY, JSON.stringify(list));
   } catch {

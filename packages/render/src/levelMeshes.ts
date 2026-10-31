@@ -21,15 +21,18 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { extrudePolygon } from './extrude';
 import type { MaterialCache } from './materials';
+import type { ModelSource } from './models';
 
 export interface LevelMeshOptions {
   /** Hide ceilings in orbit view so the camera can see in. */
   ceilings?: boolean;
+  /** Furniture models; without it every piece is drawn from its catalogue boxes. */
+  models?: ModelSource;
 }
 
 interface Part {
   key: string;
-  meshes: THREE.Mesh[];
+  objects: THREE.Object3D[];
 }
 
 export interface UpdateStats {
@@ -105,7 +108,7 @@ export class LevelMeshes {
   update(level: Level): UpdateStats {
     const stats: UpdateStats = { built: 0, reused: 0, removed: 0 };
     const seen = new Set<string>();
-    const put = (id: string, key: string, build: () => THREE.Mesh[]) => {
+    const put = (id: string, key: string, build: () => THREE.Object3D[]) => {
       seen.add(id);
       const cur = this.parts.get(id);
       if (cur && cur.key === key) {
@@ -113,9 +116,9 @@ export class LevelMeshes {
         return;
       }
       if (cur) this.drop(cur);
-      const meshes = build();
-      for (const m of meshes) this.group.add(m);
-      this.parts.set(id, { key, meshes });
+      const objects = build();
+      for (const o of objects) this.group.add(o);
+      this.parts.set(id, { key, objects });
       stats.built++;
     };
 
@@ -209,6 +212,8 @@ export class LevelMeshes {
         r(k.y),
         r(k.z),
         r(level.elevation),
+        // Rebuilt once its model arrives, to swap the stand-in for it.
+        this.modelFor(item) ? 'model' : 'boxes',
       ].join('/');
       put(`item:${item.id}`, key, () => this.buildItem(item, level.elevation));
     }
@@ -228,10 +233,19 @@ export class LevelMeshes {
   }
 
   private drop(part: Part) {
-    for (const m of part.meshes) {
-      this.group.remove(m);
-      m.geometry.dispose();
+    for (const o of part.objects) {
+      this.group.remove(o);
+      // A model's geometry belongs to the library, shared by every copy.
+      o.traverse((m) => {
+        if (m instanceof THREE.Mesh && !m.userData.shared) m.geometry.dispose();
+      });
     }
+  }
+
+  /** The item's model file, if its kind has one and it has loaded. */
+  private modelFor(item: Item): string | undefined {
+    const file = furnitureKind(item.assetId)?.model;
+    return file && this.opts.models?.has(file) ? file : undefined;
   }
 
   private buildWall(
@@ -304,11 +318,33 @@ export class LevelMeshes {
     return out;
   }
 
-  /** A piece of furniture: its catalogue boxes, scaled, one merged mesh per material. */
-  private buildItem(item: Item, elevation: number): THREE.Mesh[] {
+  /**
+   * A piece of furniture: its model, scaled to the item's size, or else its catalogue boxes,
+   * scaled, one merged mesh per material (a model still loading shows as its box).
+   */
+  private buildItem(item: Item, elevation: number): THREE.Object3D[] {
     const kind = furnitureKind(item.assetId);
     if (!kind) return [];
     const k = item.scale;
+    const model = kind.model ? this.opts.models?.get(kind.model) : null;
+    if (model) {
+      const g = new THREE.Group();
+      g.add(model);
+      g.name = `item:${item.id}`;
+      // Model x is the width, y the height and z the depth, front +z, as the item's axes.
+      // An uploaded model is fitted to its catalogue size (it may be in centimetres).
+      const n = this.opts.models?.natural?.(kind.model ?? '');
+      const fit = (size: number, own: number | undefined) => (own && own > 1e-6 ? size / own : 1);
+      g.scale.set(
+        k.x * fit(kind.size.w, n?.x),
+        k.y * fit(kind.size.h, n?.y),
+        k.z * fit(kind.size.d, n?.z),
+      );
+      g.position.set(item.position.x, elevation + item.position.y, item.position.z);
+      g.rotation.y = -item.rotationY;
+      g.userData = { kind: 'item', itemId: item.id };
+      return [g];
+    }
     const byMaterial = new Map<FurnitureMaterial, THREE.BufferGeometry[]>();
     for (const part of kind.parts) {
       // Item axes (x across, y back to front, z up) to the mesh's (x, z, y).

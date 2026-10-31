@@ -9,12 +9,15 @@ import {
   calibrateUnderlay,
   clampOpeningT,
   drawWall,
+  moveVertex,
   placeOpening,
+  settleVertex,
+  snapCorner,
   snapPoint,
 } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { newWallOptions, useEditor } from '../editor';
-import { useStore } from '../store';
+import { currentLevel, useStore } from '../store';
 import { useUploadPicker } from '../ui/PlanImage';
 import { formatLength, parseLength } from '../units';
 import { type PlanPointer, type ToolContext, type ToolController, snapTolerance } from './tools';
@@ -47,6 +50,103 @@ const TURNS: { id: Turn; label: string }[] = [
 const turnFrom = (d: Vec2, t: Turn): Vec2 =>
   t === 'right' ? { x: -d.y, y: d.x } : t === 'left' ? { x: d.y, y: -d.x } : d;
 
+/**
+ * Handles on the corners of what a drawing tool just drew. A press on one drags that corner
+ * as in Select (snapped, joined to a corner it is dropped on, one undo step), showing its
+ * walls' lengths as it moves; a tap on one hands the corner back to the tool.
+ */
+function useCornerHandles(ctx: ToolContext) {
+  const ids = useRef<string[]>([]);
+  const grab = useRef<{ id: string; key: string; moved: boolean } | null>(null);
+  const [moving, setMoving] = useState<string | null>(null);
+  const under = (p: PlanPointer): string | null => {
+    let best: string | null = null;
+    let bestD = END_REACH;
+    for (const id of ids.current) {
+      const v = ctx.level.vertices[id];
+      if (!v) continue;
+      const s = worldToScreen(ctx.view, ctx.size, v);
+      const d = Math.hypot(s.x - p.screen.x, s.y - p.screen.y);
+      if (d <= bestD) {
+        best = id;
+        bestD = d;
+      }
+    }
+    return best;
+  };
+  return {
+    set: (v: string[]) => {
+      ids.current = v;
+    },
+    /** Takes the gesture if it starts on a handle. */
+    grab: (p: PlanPointer) => {
+      if (grab.current) return true;
+      const id = under(p);
+      grab.current = id ? { id, key: `corner:${id}:${Date.now()}`, moved: false } : null;
+      return id !== null;
+    },
+    held: () => grab.current !== null,
+    /** Moves the held corner; false when none is held. */
+    move: (p: PlanPointer) => {
+      const g = grab.current;
+      if (!g) return false;
+      const to = p.alt
+        ? p.world
+        : snapCorner(ctx.level, g.id, p.world, { tolerance: snapTolerance(ctx), grid: 0.05 });
+      ctx.dispatch(moveVertex(ctx.level.id, g.id, to), { coalesceKey: g.key });
+      g.moved = true;
+      setMoving(g.id);
+      return true;
+    },
+    /** Lets go; returns the corner if it was tapped rather than dragged. */
+    release: (): string | null => {
+      const g = grab.current;
+      grab.current = null;
+      setMoving(null);
+      if (!g) return null;
+      if (!g.moved) return g.id;
+      const level = currentLevel();
+      if (level) ctx.dispatch(settleVertex(level, g.id), { coalesceKey: g.key });
+      return null;
+    },
+    overlay: (view: ToolContext['view'], size: ToolContext['size']) => {
+      const level = ctx.level;
+      const lengths = moving
+        ? Object.values(level.walls).filter((w) => w.a === moving || w.b === moving)
+        : [];
+      return (
+        <>
+          {ids.current.map((id) => {
+            const v = level.vertices[id];
+            if (!v) return null;
+            const s = worldToScreen(view, size, v);
+            return <circle key={id} className="end-handle" cx={s.x} cy={s.y} r={9} />;
+          })}
+          {lengths.map((w) => {
+            const a = level.vertices[w.a];
+            const b = level.vertices[w.b];
+            if (!a || !b) return null;
+            const sa = worldToScreen(view, size, a);
+            const sb = worldToScreen(view, size, b);
+            return (
+              <g
+                key={w.id}
+                className="handle-length"
+                transform={`translate(${(sa.x + sb.x) / 2} ${(sa.y + sb.y) / 2 - 18})`}
+              >
+                <rect x={-34} y={-11} width={68} height={22} rx={4} />
+                <text textAnchor="middle" y={4} className="num">
+                  {formatLength(Math.hypot(b.x - a.x, b.y - a.y))}
+                </text>
+              </g>
+            );
+          })}
+        </>
+      );
+    },
+  };
+}
+
 export function useWallTool(ctx: ToolContext): ToolController {
   const [from, setFrom] = useState<WallEnd | null>(null);
   const [first, setFirst] = useState<string | null>(null);
@@ -65,6 +165,12 @@ export function useWallTool(ctx: ToolContext): ToolController {
   const steps = useRef<{ start: string; entry: HistoryEntry | undefined }[]>([]);
   /** The direction of the last wall, for a typed length with no pointer to aim by. */
   const lastDir = useRef<Vec2>({ x: 1, y: 0 });
+  /** Where a finger drag that will draw the first wall began, to preview it from. */
+  const [dragFrom, setDragFrom] = useState<SnapResult | null>(null);
+  /** The ends of the wall drawn last, which can be dragged to adjust it. */
+  const handles = useCornerHandles(ctx);
+  /** Where a press (mouse, or a finger's tap) went down: a drag draws from here on release. */
+  const press = useRef<PlanPointer | null>(null);
   /** Ends the chain in progress. */
   const finish = () => {
     setFrom(null);
@@ -87,7 +193,10 @@ export function useWallTool(ctx: ToolContext): ToolController {
   // Leaving the tool abandons the chain in progress.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reacts to the tool only
   useEffect(() => {
-    if (tool !== 'wall') finish();
+    if (tool !== 'wall') {
+      finish();
+      handles.set([]);
+    }
   }, [tool]);
 
   const snapAt = (p: PlanPointer): SnapResult =>
@@ -106,7 +215,7 @@ export function useWallTool(ctx: ToolContext): ToolController {
   const commit = (end: WallEnd, start: WallEnd | null = from) => {
     if (!start) return;
     try {
-      const level = useStore.getState().editor.doc.levels[0] ?? ctx.level;
+      const level = currentLevel() ?? ctx.level;
       const existed = new Set(Object.keys(level.vertices));
       const r = drawWall(level, start, end, newWallOptions(thickness));
       ctx.dispatch(r.command);
@@ -115,7 +224,9 @@ export function useWallTool(ctx: ToolContext): ToolController {
       setSnap(null);
       const past = useStore.getState().editor.history.past;
       steps.current.push({ start: r.startVertexId, entry: past[past.length - 1] });
-      const after = useStore.getState().editor.doc.levels[0];
+      handles.set([r.startVertexId, r.endVertexId]);
+      setDragFrom(null);
+      const after = currentLevel();
       const a = after?.vertices[r.startVertexId];
       const b = after?.vertices[r.endVertexId];
       if (a && b && Math.hypot(b.x - a.x, b.y - a.y) > 1e-9) {
@@ -167,7 +278,7 @@ export function useWallTool(ctx: ToolContext): ToolController {
     }
     setTyped('');
     // Landing on a corner (closing the outline, say) joins it, which also ends the chain.
-    const level = useStore.getState().editor.doc.levels[0] ?? ctx.level;
+    const level = currentLevel() ?? ctx.level;
     const onto = Object.values(level.vertices).find(
       (v) => Math.hypot(v.x - end.x, v.y - end.y) < 0.02,
     );
@@ -181,57 +292,110 @@ export function useWallTool(ctx: ToolContext): ToolController {
   };
 
   /**
-   * Takes back the chain's last wall and carries on from where it started. Only while that
-   * wall is still the latest undo step; after any other edit it just ends the chain.
+   * Takes back the chain's last step and carries on: its last wall (drawing on from where it
+   * started), or an end just dragged.
    */
   const undoLast = () => {
-    const step = steps.current.pop();
     const past = useStore.getState().editor.history.past;
-    if (!step || past[past.length - 1] !== step.entry) {
-      finish();
+    const latest = past[past.length - 1];
+    const step = steps.current[steps.current.length - 1];
+    if (step && latest === step.entry) {
+      steps.current.pop();
+      useStore.getState().undo();
+      const level = currentLevel();
+      if (level?.vertices[step.start]) setFrom({ vertexId: step.start });
+      else finish();
       return;
     }
-    useStore.getState().undo();
-    const level = useStore.getState().editor.doc.levels[0];
-    if (level?.vertices[step.start]) setFrom({ vertexId: step.start });
-    else finish();
+    if (latest && steps.current.length > 0) {
+      // An end dragged since: take that back, and keep drawing.
+      useStore.getState().undo();
+      if (from && !posOf(ctx, from)) finish();
+      return;
+    }
+    finish();
+  };
+
+  /** A wall drawn by dragging from `a` to `b`: from where the drag began, wherever that is. */
+  const drawDrag = (a: PlanPointer, b: PlanPointer) => {
+    setDragFrom(null);
+    const s0 = snapAt(a);
+    const s1 = snapPoint(ctx.level, b.world, {
+      tolerance: snapTolerance(ctx),
+      grid: 0.1,
+      from: s0.point,
+    });
+    // Starting on the chain's own end carries the chain on; anywhere else starts afresh.
+    if (from && 'vertexId' in from && s0.vertexId === from.vertexId) {
+      commit(endFor(s1));
+      return;
+    }
+    setFirst(s0.vertexId ?? null);
+    chain.current = new Set(s0.vertexId ? [s0.vertexId] : []);
+    commit(endFor(s1), endFor(s0));
+  };
+
+  /** A tap or click at `p`: the first corner, or the next wall of the chain. */
+  const click = (p: PlanPointer) => {
+    const s = snapAt(p);
+    if (!from) {
+      setFrom(endFor(s));
+      setFirst(s.vertexId ?? null);
+      chain.current = new Set(s.vertexId ? [s.vertexId] : []);
+      return;
+    }
+    commit(endFor(s));
   };
 
   return {
     cursor: 'crosshair',
-    touchDrag: (start, end) => {
-      // A finger dragged from one corner to another draws that wall.
-      if (from) {
-        commit(endFor(snapAt(end)));
-        return;
-      }
-      const s0 = snapAt(start);
-      const s1 = snapPoint(ctx.level, end.world, {
-        tolerance: snapTolerance(ctx),
-        grid: 0.1,
-        from: s0.point,
-      });
-      setFirst(s0.vertexId ?? null);
-      chain.current = new Set(s0.vertexId ? [s0.vertexId] : []);
-      commit(endFor(s1), endFor(s0));
-    },
+    // A finger on an end of the wall just drawn adjusts it, as in Select.
+    grabs: (p) => handles.grab(p),
+    touchCancel: () => setDragFrom(null),
+    touchDrag: drawDrag,
     down: (p) => {
-      const s = snapAt(p);
       if (p.clicks === 2) {
         finish();
         return true;
       }
-      if (!from) {
-        setFrom(endFor(s));
-        setFirst(s.vertexId ?? null);
-        chain.current = new Set(s.vertexId ? [s.vertexId] : []);
-        return true;
-      }
-      commit(endFor(s));
+      if (handles.held() || handles.grab(p)) return true;
+      // What a press does is known on release: a click places a corner, a drag draws a wall.
+      press.current = p;
       return true;
     },
-    move: (p) => setSnap(snapAt(p)),
-    up: () => {},
+    move: (p, dragging, start) => {
+      if (dragging && handles.move(p)) return;
+      // A drag in progress (a finger's, or a mouse held down) previews from where it began.
+      const origin = start ?? (dragging ? press.current : null);
+      const s0 = origin ? snapAt(origin) : null;
+      setDragFrom(s0);
+      setSnap(
+        s0
+          ? snapPoint(ctx.level, p.world, {
+              tolerance: snapTolerance(ctx),
+              grid: 0.1,
+              from: s0.point,
+            })
+          : snapAt(p),
+      );
+    },
+    up: (p) => {
+      if (handles.held()) {
+        // A tap on a corner of the last wall carries on drawing from it.
+        const tapped = handles.release();
+        if (tapped) {
+          setFrom({ vertexId: tapped });
+          setFirst(tapped);
+          chain.current = new Set([tapped]);
+        }
+        return;
+      }
+      const a = press.current;
+      press.current = null;
+      if (!a) return;
+      if (Math.hypot(p.screen.x - a.screen.x, p.screen.y - a.screen.y) > 8) drawDrag(a, p);
+      else click(a);
+    },
     key: (e) => {
       if (from && /^[0-9.,]$|^m$|^c$/i.test(e.key)) {
         setTyped((t) => t + e.key);
@@ -257,8 +421,10 @@ export function useWallTool(ctx: ToolContext): ToolController {
       const planned = typed ? typedEnd(typed) : null;
       const at = planned ?? snap?.point;
       const s1 = at && worldToScreen(view, size, at);
-      const s0 = fromPos && worldToScreen(view, size, fromPos);
-      const len = fromPos && at ? Math.hypot(at.x - fromPos.x, at.y - fromPos.y) : 0;
+      const startAt = dragFrom?.point ?? fromPos ?? null;
+      const pending = fromPos && !dragFrom ? worldToScreen(view, size, fromPos) : null;
+      const s0 = startAt && worldToScreen(view, size, startAt);
+      const len = startAt && at ? Math.hypot(at.x - startAt.x, at.y - startAt.y) : 0;
       // A second row, once a length is typed: which way it goes, and any problem.
       // Turning needs a wall to turn from: not before the chain's first.
       const more = (!!typed && steps.current.length > 0) || !!error;
@@ -283,7 +449,8 @@ export function useWallTool(ctx: ToolContext): ToolController {
                   e.preventDefault();
                   // Read the field itself: a tap can land before the typing re-rendered.
                   const field = e.currentTarget.elements.namedItem('length');
-                  addTyped(field instanceof HTMLInputElement ? field.value : typed);
+                  const value = field instanceof HTMLInputElement ? field.value : typed;
+                  if (value.trim()) addTyped(value);
                 }}
               >
                 <span className="draw-bar-row">
@@ -300,7 +467,9 @@ export function useWallTool(ctx: ToolContext): ToolController {
                       setError(null);
                     }}
                   />
-                  <button type="submit" className="btn" disabled={!typed}>
+                  {/* Never disabled: a tap right after typing can come before the re-render
+                      that would enable it, and a disabled button drops the tap. */}
+                  <button type="submit" className="btn" aria-disabled={!typed}>
                     Add
                   </button>
                   <button
@@ -368,6 +537,9 @@ export function useWallTool(ctx: ToolContext): ToolController {
               </g>
             </>
           )}
+          {handles.overlay(view, size)}
+          {/* The corner the chain draws from, even before a pointer moves (a tap on a phone). */}
+          {pending && <circle className="pending-corner" cx={pending.x} cy={pending.y} r={6} />}
           {s1 && !planned && <SnapMarker snap={snap} at={s1} />}
           {s1 && error && (
             <g transform={`translate(${Math.min(s1.x + 14, size.width - 270)} ${s1.y + 22})`}>
@@ -389,6 +561,9 @@ export function useWallTool(ctx: ToolContext): ToolController {
     },
   };
 }
+
+/** How near (screen pixels) a finger must land to an end to take it: a fingertip's reach. */
+const END_REACH = 22;
 
 function SnapMarker({ snap, at }: { snap: SnapResult | null; at: Vec2 }) {
   if (!snap) return null;
@@ -574,6 +749,8 @@ export function useCalibrateTool(ctx: ToolContext): ToolController {
   const [typed, setTyped] = useState('');
   const [error, setError] = useState<string | null>(null);
   const tool = useEditor((s) => s.tool);
+  /** Where a finger drag marking both ends began, to show the line before it lifts. */
+  const [dragFrom, setDragFrom] = useState<Vec2 | null>(null);
   /** The end being dragged to adjust it, once both are placed. */
   const grab = useRef<number | null>(null);
   const endAt = (p: PlanPointer): number | null => {
@@ -644,8 +821,10 @@ export function useCalibrateTool(ctx: ToolContext): ToolController {
     // A finger dragged along the dimension line marks both ends at once.
     touchDrag: (a, b) => {
       setPoints([a.world, b.world]);
+      setDragFrom(null);
       setError(null);
     },
+    touchCancel: () => setDragFrom(null),
     down: (p) => {
       // Both ends placed: pressing on one drags it; anywhere else starts over.
       const end = endAt(p);
@@ -658,8 +837,9 @@ export function useCalibrateTool(ctx: ToolContext): ToolController {
       setError(null);
       return true;
     },
-    move: (p, dragging) => {
+    move: (p, dragging, from) => {
       setCursor(p.world);
+      setDragFrom(from ? from.world : null);
       if (dragging && grab.current !== null) moveEnd(grab.current, p.world);
     },
     up: () => {
@@ -686,8 +866,9 @@ export function useCalibrateTool(ctx: ToolContext): ToolController {
       return false;
     },
     overlay: ({ view, size }) => {
-      const a = points[0];
-      const b = points[1] ?? cursor;
+      // A finger drag in progress marks the line from where it began.
+      const a = dragFrom ?? points[0];
+      const b = dragFrom ? cursor : (points[1] ?? cursor);
       const step = !ctx.level || points.length === 0 ? 1 : points.length === 1 ? 1 : 2;
       if (!useStoreUnderlay()) {
         // Nothing to scale yet: the way to get a plan image, right here.
@@ -831,12 +1012,20 @@ export function useRoomTool(ctx: ToolContext): ToolController {
   const [start, setStart] = useState<SnapResult | null>(null);
   const [snap, setSnap] = useState<SnapResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Where a finger drag drawing the room began, to preview the room before it lifts. */
+  const [dragFrom, setDragFrom] = useState<SnapResult | null>(null);
+  /** The corners of the room just drawn, which can be dragged to adjust it. */
+  const handles = useCornerHandles(ctx);
+  /** Where a press went down: a drag draws the room on release, a click sets a corner. */
+  const press = useRef<PlanPointer | null>(null);
   const thickness = useEditor((s) => s.wallThickness);
   const tool = useEditor((s) => s.tool);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reacts to the tool only
   useEffect(() => {
     if (tool !== 'room') {
       setStart(null);
       setError(null);
+      handles.set([]);
     }
   }, [tool]);
 
@@ -856,17 +1045,20 @@ export function useRoomTool(ctx: ToolContext): ToolController {
     const key = `room:${Date.now()}`;
     let from: WallEnd = endFor(a);
     let first: string | null = null;
+    const made: string[] = [];
     try {
       for (let i = 1; i <= 4; i++) {
-        const level = useStore.getState().editor.doc.levels[0];
+        const level = currentLevel();
         if (!level) return;
         const to: WallEnd =
           i === 4 && first ? { vertexId: first } : { point: corners[i % 4] as Vec2 };
         const r = drawWall(level, from, to, newWallOptions(thickness));
         ctx.dispatch(r.command, { coalesceKey: key });
         first ??= r.startVertexId;
+        made.push(r.startVertexId);
         from = { vertexId: r.endVertexId };
       }
+      handles.set(made);
       setError(null);
     } catch (e) {
       // All four walls or none: take back the ones already added.
@@ -881,12 +1073,40 @@ export function useRoomTool(ctx: ToolContext): ToolController {
     cursor: 'crosshair',
     // A finger dragged corner to corner draws the room in one go, from where it went down
     // (not from a corner an earlier stray tap left waiting).
+    grabs: (p) => handles.grab(p),
     touchDrag: (a, b) => {
       build(snapAt(a), snapAt(b).point);
       setStart(null);
+      setDragFrom(null);
     },
+    touchCancel: () => setDragFrom(null),
     down: (p) => {
-      const s = snapAt(p);
+      if (handles.held() || handles.grab(p)) return true;
+      press.current = p;
+      return true;
+    },
+    move: (p, dragging, from) => {
+      if (dragging && handles.move(p)) return;
+      const origin = from ?? (dragging ? press.current : null);
+      setDragFrom(origin ? snapAt(origin) : null);
+      setSnap(snapAt(p));
+    },
+    up: (p) => {
+      if (handles.held()) {
+        handles.release();
+        return;
+      }
+      const a = press.current;
+      press.current = null;
+      if (!a) return;
+      // A drag draws the room corner to corner; a click sets a corner, then the opposite one.
+      if (Math.hypot(p.screen.x - a.screen.x, p.screen.y - a.screen.y) > 8) {
+        build(snapAt(a), snapAt(p).point);
+        setStart(null);
+        setDragFrom(null);
+        return;
+      }
+      const s = snapAt(a);
       if (!start) {
         setStart(s);
         setError(null);
@@ -894,10 +1114,7 @@ export function useRoomTool(ctx: ToolContext): ToolController {
         build(start, s.point);
         setStart(null);
       }
-      return true;
     },
-    move: (p) => setSnap(snapAt(p)),
-    up: () => {},
     key: (e) => {
       if (e.key === 'Escape' && start) {
         setStart(null);
@@ -938,22 +1155,26 @@ export function useRoomTool(ctx: ToolContext): ToolController {
         </foreignObject>
       );
       const corner = start && worldToScreen(view, size, start.point);
-      if (!start || !at || !s1) {
+      // The room grows from a corner set by a tap, or from where a finger drag began.
+      const origin = start ?? dragFrom;
+      if (!origin || !at || !s1) {
         return (
           <g className="draw-overlay" pointerEvents="none">
+            {handles.overlay(view, size)}
             {corner && <circle className="pending-corner" cx={corner.x} cy={corner.y} r={6} />}
             {s1 && <SnapMarker snap={snap} at={s1} />}
             <g pointerEvents="auto">{notice}</g>
           </g>
         );
       }
-      const s0 = worldToScreen(view, size, start.point);
+      const s0 = worldToScreen(view, size, origin.point);
       const x = Math.min(s0.x, s1.x);
       const y = Math.min(s0.y, s1.y);
-      const w = Math.abs(at.x - start.point.x);
-      const h = Math.abs(at.y - start.point.y);
+      const w = Math.abs(at.x - origin.point.x);
+      const h = Math.abs(at.y - origin.point.y);
       return (
         <g className="draw-overlay" pointerEvents="none">
+          {handles.overlay(view, size)}
           <rect
             className="ghost-room"
             x={x}

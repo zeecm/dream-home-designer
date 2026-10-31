@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { shareLink } from '../keys';
 import { useProject, useStore } from '../store';
+import { track } from '../telemetry';
 import { icons } from './icons';
 
 function CopyField({ label, value }: { label: string; value: string }) {
@@ -111,6 +112,8 @@ function ShareBody() {
     <>
       <CopyField label="View-only link" value={shareLink(id)} />
       <p className="note">Anyone with this link can look around and walk through the plan.</p>
+      <CopyField label="Walk-through link" value={shareLink(id, null, true)} />
+      <p className="note">The same, but it opens straight into a walk, on a phone too.</p>
       {owner && (
         <>
           <label className="check-row">
@@ -173,7 +176,10 @@ export function ShareMenu() {
         className="btn btn-small share-btn"
         aria-expanded={open}
         aria-label="Share"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          if (!open) track('share');
+          setOpen((o) => !o);
+        }}
       >
         <span className="share-btn-icon">{icons.share}</span>
         <span className="share-btn-label">Share</span>

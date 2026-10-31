@@ -143,7 +143,32 @@ export type Site = z.infer<typeof Site>;
 /** Singapore, with north up the plan: what a project without a site gets. */
 export const DEFAULT_SITE: Site = { north: 0, latitude: 1.35, longitude: 103.82, utcOffset: 8 };
 
-export const SCHEMA_VERSION = 4;
+/**
+ * A renovation: the same flat as it is planned to be. It starts as a copy of the project's
+ * levels with the same element ids (each level's id gets AFTER_SUFFIX), so the two can be
+ * compared wall by wall.
+ */
+export const Renovation = z.object({ levels: z.array(Level).min(1) });
+export type Renovation = z.infer<typeof Renovation>;
+
+/**
+ * A furniture model someone uploaded to this project (a binary glTF file, kept by the API
+ * and named by its SHA-256). It joins the catalogue while the project is open; items made
+ * from it have `assetId` = its id.
+ */
+export const CustomModel = z.object({
+  id: z.string(),
+  name: z.string().min(1).max(80),
+  /** Hex SHA-256 of the GLB. */
+  hash: z.string().regex(/^[0-9a-f]{64}$/),
+  /** A catalogue category name (FurnitureCategory). */
+  category: z.string(),
+  /** Its size in metres at scale 1: width (x), depth and height, as measured on upload. */
+  size: z.object({ w: z.number().positive(), d: z.number().positive(), h: z.number().positive() }),
+});
+export type CustomModel = z.infer<typeof CustomModel>;
+
+export const SCHEMA_VERSION = 6;
 
 export const Project = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
@@ -155,6 +180,10 @@ export const Project = z.object({
   underlay: Underlay.nullable(),
   /** Absent means DEFAULT_SITE. */
   site: Site.optional(),
+  /** The flat as it is in `levels`; with a renovation, as it will be here. */
+  renovation: Renovation.optional(),
+  /** Furniture models uploaded to this project, by id. */
+  models: z.record(z.string(), CustomModel).optional(),
   levels: z.array(Level).min(1),
 });
 export type Project = z.infer<typeof Project>;

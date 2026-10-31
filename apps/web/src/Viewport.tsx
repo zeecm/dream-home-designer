@@ -9,19 +9,23 @@ import {
   sunDirection,
   sunPosition,
 } from '@dhd/core';
-import { LevelMeshes, MaterialCache } from '@dhd/render';
+import { LevelMeshes, MaterialCache, ModelLibrary } from '@dhd/render';
 import { OrbitControls } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useEditor } from './editor';
-import { useProject } from './store';
+import { registerScene3d } from './exports';
+import { configureLoader, fetchUploaded } from './models';
+import { useLevel, useProject } from './store';
 import { Joystick } from './walk/Joystick';
 import { MiniMap } from './walk/MiniMap';
 import { WalkControls, type WalkPose } from './walk/WalkControls';
 import { loadWalkPose, saveWalkPose } from './walk/pose';
 
 const materials = new MaterialCache();
+/** The furniture models, fetched once each for the session (Pages serves /models). */
+const models = new ModelLibrary('/models/', fetchUploaded, configureLoader);
 const FOV = 40;
 
 /**
@@ -29,12 +33,16 @@ const FOV = 40;
  * puts the ceilings on (the orbit view leaves them off to see in).
  */
 function LevelMesh({ ceilings }: { ceilings: boolean }) {
-  const level = useProject().levels[0];
-  const meshes = useMemo(() => new LevelMeshes(materials, { ceilings }), [ceilings]);
+  const level = useLevel();
+  const meshes = useMemo(() => new LevelMeshes(materials, { ceilings, models }), [ceilings]);
   useEffect(() => () => meshes.dispose(), [meshes]);
+  // A model arriving swaps its stand-in box for it.
+  const [arrived, setArrived] = useState(0);
+  useEffect(() => models.onLoad(() => setArrived((n) => n + 1)), []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `arrived` re-runs it for new models
   useLayoutEffect(() => {
     if (level) meshes.update(level);
-  }, [level, meshes]);
+  }, [level, meshes, arrived]);
   return <primitive object={meshes.group} />;
 }
 
@@ -184,11 +192,25 @@ function SunControl() {
   );
 }
 
+/** Lets the downloads draw this view on demand and reach the level's meshes. */
+function Capture() {
+  const { gl, scene, camera } = useThree();
+  useEffect(() => {
+    registerScene3d({
+      render: () => gl.render(scene, camera),
+      canvas: gl.domElement,
+      level: () => scene.getObjectByName('level'),
+    });
+    return () => registerScene3d(null);
+  }, [gl, scene, camera]);
+  return null;
+}
+
 const coarsePointer = () => window.matchMedia('(pointer: coarse)').matches;
 
 export function Viewport() {
   const project = useProject();
-  const level = project.levels[0];
+  const level = useLevel();
   const hasWalls = !!level && Object.keys(level.walls).length > 0;
   const hasRooms = !!level && Object.keys(level.rooms).length > 0;
   const dark = usePrefersDark();
@@ -261,6 +283,7 @@ export function Viewport() {
           shadow-camera-far={reach * 2.5}
         />
         {level && <Lamps level={level} />}
+        <Capture />
         <mesh rotation-x={-Math.PI / 2} position={[frame.x, -0.01, frame.z]} receiveShadow>
           <planeGeometry args={[200, 200]} />
           <meshStandardMaterial color={dark ? '#1a1c1e' : '#eef1f3'} />

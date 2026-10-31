@@ -17,15 +17,28 @@ type Memory struct {
 	onWrite func(rec Record, deleted bool) error
 	images  map[string]Image
 	// onImage persists an image change (nil deletes) while the lock is held.
-	onImage  func(id string, img *Image) error
-	access   map[string]Access
-	onAccess func(id string, a *Access) error
+	onImage func(id string, img *Image) error
+	models  map[string]map[string][]byte
+	// onModel persists a model (nil data deletes the project's models) while the lock is held.
+	onModel func(id, hash string, data []byte) error
+	// modelFile is where the file store keeps a model; its bytes aren't held in memory.
+	modelFile func(id, hash string) string
+	access    map[string]Access
+	onAccess  func(id string, a *Access) error
+	// history keeps, per project, the versions saves replaced (not persisted).
+	history map[string][]memoryVersion
+}
+
+type memoryVersion struct {
+	Version
+	doc []byte
 }
 
 func NewMemory() *Memory {
 	return &Memory{
 		records: map[string]Record{},
 		images:  map[string]Image{},
+		models:  map[string]map[string][]byte{},
 		access:  map[string]Access{},
 		now:     time.Now,
 	}
@@ -88,7 +101,39 @@ func (m *Memory) Update(_ context.Context, id string, expected int, name string,
 	if err := m.put(Record{ID: id, Name: name, Version: next, Doc: doc, UpdatedAt: m.now()}); err != nil {
 		return 0, err
 	}
+	if m.history == nil {
+		m.history = map[string][]memoryVersion{}
+	}
+	h := append(m.history[id], memoryVersion{Version{cur.Version, m.now()}, cur.Doc})
+	if len(h) > maxMemoryHistory {
+		h = h[len(h)-maxMemoryHistory:]
+	}
+	m.history[id] = h
 	return next, nil
+}
+
+func (m *Memory) Versions(_ context.Context, id string) ([]Version, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, ok := m.records[id]; !ok {
+		return nil, ErrNotFound
+	}
+	out := make([]Version, 0, len(m.history[id]))
+	for _, v := range m.history[id] {
+		out = append(out, v.Version)
+	}
+	return out, nil
+}
+
+func (m *Memory) GetVersion(_ context.Context, id string, version int) ([]byte, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, v := range m.history[id] {
+		if v.Version.Version == version {
+			return v.doc, nil
+		}
+	}
+	return nil, ErrNotFound
 }
 
 func (m *Memory) Delete(_ context.Context, id string) error {
@@ -105,7 +150,9 @@ func (m *Memory) Delete(_ context.Context, id string) error {
 		}
 	}
 	delete(m.records, id)
+	delete(m.history, id)
 	_ = m.deleteImage(id)
+	_ = m.deleteModels(id)
 	if _, ok := m.access[id]; ok {
 		_ = m.putAccess(id, nil)
 	}

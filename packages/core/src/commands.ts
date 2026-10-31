@@ -4,6 +4,7 @@ import { furnitureKind } from './furniture';
 import { clampOpeningT } from './geometry';
 import type { Command } from './history';
 import { newId } from './ids';
+import { draftLevel } from './levels';
 import { syncRooms } from './rooms';
 import {
   DEFAULT_SITE,
@@ -19,17 +20,32 @@ import {
 import { projectOnSegment, segmentIntersection } from './snap';
 import { endCapture, reclampOpenings, splitWallAt } from './topology';
 
-function level(draft: Draft<Project>, levelId: string): Draft<Level> {
-  const lvl = draft.levels.find((l) => l.id === levelId);
-  if (!lvl) throw new Error(`level ${levelId} not found`);
-  return lvl;
-}
+const level = draftLevel;
 
 export function renameProject(name: string): Command {
   return {
     label: 'Rename project',
     recipe: (d) => {
       d.name = name;
+    },
+  };
+}
+
+/**
+ * Puts the plan back as it was in `from` (an earlier saved version of the same project):
+ * its levels, renovation, plan image, site, uploaded models and name. One undoable step.
+ */
+export function restoreVersion(from: Project): Command {
+  return {
+    label: 'Restore an earlier version',
+    recipe: (d) => {
+      d.name = from.name;
+      d.levels = structuredClone(from.levels);
+      d.renovation = from.renovation && structuredClone(from.renovation);
+      d.underlay = from.underlay && structuredClone(from.underlay);
+      d.site = from.site && { ...from.site };
+      // Its uploaded models too, so its pieces have theirs (the files stay on the server).
+      d.models = from.models && structuredClone(from.models);
     },
   };
 }
@@ -159,6 +175,39 @@ export function deleteWall(levelId: string, wallId: string, snapshot?: Level): C
         if (!stillUsed.has(vid)) delete lvl.vertices[vid];
       }
       syncRooms(lvl);
+    },
+  };
+}
+
+/** The walls along a room's outline that no other room shares: what deleting it removes. */
+export function roomOwnWalls(level: Level, roomId: string): string[] {
+  const room = level.rooms[roomId];
+  if (!room) return [];
+  const edge = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  const edges = (loop: string[]) =>
+    loop.map((v, i) => edge(v, loop[(i + 1) % loop.length] as string));
+  const shared = new Set(
+    Object.values(level.rooms)
+      .filter((r) => r.id !== roomId)
+      .flatMap((r) => edges(r.loop)),
+  );
+  const mine = new Set(edges(room.loop).filter((e) => !shared.has(e)));
+  return Object.values(level.walls)
+    .filter((w) => mine.has(edge(w.a, w.b)))
+    .map((w) => w.id);
+}
+
+/**
+ * Deletes a room: the walls around it that no other room shares (and their doors and
+ * windows), in one undo step. Walls it shares with a neighbour stay, so the neighbour does.
+ */
+export function deleteRoom(levelId: string, roomId: string, snapshot: Level): Command {
+  const walls = roomOwnWalls(snapshot, roomId);
+  const name = snapshot.rooms[roomId]?.name ?? 'room';
+  return {
+    label: `Delete ${name.toLowerCase()}`,
+    recipe: (d) => {
+      for (const id of walls) deleteWall(levelId, id).recipe(d);
     },
   };
 }

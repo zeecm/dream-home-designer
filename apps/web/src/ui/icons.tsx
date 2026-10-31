@@ -127,6 +127,12 @@ export const icons = {
       <path d="M2.5 4.5h11M6 4.5V3h4v1.5M4 4.5l.7 9h6.6l.7-9" />
     </Icon>
   ),
+  user: (
+    <Icon>
+      <circle cx="8" cy="5.5" r="2.5" />
+      <path d="M3 13.5c.8-2.5 2.7-3.8 5-3.8s4.2 1.3 5 3.8" />
+    </Icon>
+  ),
   share: (
     <Icon>
       <path d="M8 10V2.5M5 5.5l3-3 3 3M3.5 8.5v5h9v-5" />
