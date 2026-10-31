@@ -453,9 +453,10 @@ the welcome page (and the app move) is the owner's call.
   original). No credentials are in the tracked files (only AWS's documentation example keys
   in a signing test).
 
-0. **Before merging:** the production API must accept schema 6 and serve uploaded models
-   (`/projects/{id}/models`). The preview API has it (30 Oct); the production deploy
-   (`pnpm --filter @dhd/edge run deploy`) was held back for the owner's go-ahead.
+0. **Done (31 Oct, at the owner's request):** migration `0002` applied to `dhd-auth-preview`
+   and `dhd-auth`, and the production edge deployed from main (`pnpm --filter @dhd/edge run
+   deploy`): schema 6 with uploaded models, the daily cap and the `%` guard are live (a write
+   with `%` in its path gets 400).
    Earlier: the production API must accept schema 4 (deployed with this branch).
    Earlier note: the production API must accept schema 2. It was deployed from this branch
    at the same time as the preview, and it still accepts version-1 documents from `main`.
@@ -478,7 +479,10 @@ the welcome page (and the app move) is the owner's call.
    redirect URIs the same origins plus `/api/auth/google/callback`), send the client id, and
    add the secrets `GOOGLE_CLIENT_SECRET` and `KEYS_SECRET` (a long random string, e.g.
    `openssl rand -base64 32`) to dhd-api and dhd-api-preview (Workers & Pages → Settings →
-   Variables and Secrets). This session isn't allowed to write secrets.
+   Variables and Secrets). This session's permission check refuses secret writes (even a
+   generated `KEYS_SECRET`; tried 31 Oct), unless the owner adds a permission rule allowing
+   `wrangler secret put`. `KEYS_SECRET` also keys the daily cap's address hashes, so it is
+   worth setting before sign-in.
 3. **Merge** the open PR when happy.
 
 **Furniture (Phase 3, first cut):** `core/furniture.ts` holds a catalogue of 27 pieces built
@@ -756,8 +760,8 @@ blocked by the network proxy and Sketchfab needs an API key.
    `KEYS_SECRET`, pruned after two days, and failing open (logged as `quotaUnavailable`) while
    the table is missing. Writes whose path holds a `%` are refused, since the API would decode
    one past these checks. A visitor refused by the cap (a busy shared network) gets their plan
-   kept in the browser instead (`createFrom` in `store.ts`). **The migration needs applying** to
-   `dhd-auth-preview` and `dhd-auth` (owner to-do: the permission check held it back).
+   kept in the browser instead (`createFrom` in `store.ts`). Migration `0002` is applied to
+   both databases (31 Oct). Until `KEYS_SECRET` is set, addresses are hashed with no secret.
 2. **Room matching by overlap (looked into, not adopted):** rooms are matched across edits by
    label point and shared corners. Sampled area overlap was tried; it gave the same results on
    splits, merges and a closet drawn mid-room (now a test), and disagrees only on odd shapes
@@ -865,7 +869,7 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
 
 - **Links are the capability.** A project is readable by anyone with its link; editing needs
   the owner or an edit key. Listing is off in production, and writes are rate-limited (and
-  capped per day once migration `0002` is applied). Google sign-in is built and off until the
+  capped per day). Google sign-in is built and off until the
   owner configures it.
 - **One plan image per project on the server.** Replacing it drops the old one, so undoing a
   replacement shows the old image only in browsers that still have it locally.
