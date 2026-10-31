@@ -808,13 +808,12 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
 
 ## 9. Known gaps and debts
 
-- **No auth.** A project is reachable by anyone with its link, so ids are the capability. Listing
-  is off in production, and writes are rate-limited. Auth arrives in Phase 4.
+- **Links are the capability.** A project is readable by anyone with its link; editing needs
+  the owner or an edit key. Listing is off in production, and writes are rate-limited (and
+  capped per day once migration `0002` is applied). Google sign-in is built and off until the
+  owner configures it.
 - **One plan image per project on the server.** Replacing it drops the old one, so undoing a
   replacement shows the old image only in browsers that still have it locally.
-- **Walls use one material for both faces.** `materialLeft` covers both, and per-side materials
-  come in Phase 3.
-- **No `project_versions` history yet.** It comes with accounts in Phase 4, on D1.
 - **Flaky phone e2e:** the first test in `mobile.spec.ts` still fails about one run in four
   locally (CI retries once): the Add tap or the finger-drawn room doesn't land when the run
   is slow. Four real causes were found and fixed on the way: Add was `disabled` until the
@@ -823,7 +822,9 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
   controls left `touch-action: auto` on the 3D canvas, so a phone cancelled sideways swipes
   in walk mode (the owner's "can't look around without moving"). Swipe-to-look turns half a
   circle per screen width on touch.
-- **Wall tool snapping:** it snaps hard to door and window ends, so a wall drawn across a room
-  past a door can come out slanted (seen in acceptance round 9).
+- **Wall tool snapping:** a point landing inside a door or window moves to the nearer jamb
+  (`jambSnap` in `snap.ts`), so an angle-snapped wall drawn to a doorway slants by up to half
+  the door's width. The alternative, ending the wall straight but short of the doorway and
+  unjoined, leaves the room open; not decided.
 - **Corner dimension lines** for walls that run into the room draw inside it; fine at plan scale,
   busy on short walls.
