@@ -245,7 +245,15 @@ export function App() {
         if (s.sync.kind === 'saved' && s.role !== 'viewer') keepWithAccount(s.editor.doc);
       });
     const id = initialProjectId();
-    const { load, openSample } = useStore.getState();
+    const { load, openSample, createProject } = useStore.getState();
+    // From the welcome page: "?new=<name>" starts a blank plan of that name.
+    const fresh = url.searchParams.get('new');
+    if (fresh !== null && !id) {
+      url.searchParams.delete('new');
+      window.history.replaceState(null, '', url);
+      void createProject(fresh.trim().slice(0, 80) || undefined);
+      return;
+    }
     void (id ? load(id) : openSample());
   }, []);
 
