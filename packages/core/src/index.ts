@@ -19,3 +19,4 @@ export * from './finishes';
 export * from './sun';
 export * from './levels';
 export * from './renovation';
+export * from './shiftWall';

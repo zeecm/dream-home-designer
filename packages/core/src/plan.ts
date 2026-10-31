@@ -73,6 +73,18 @@ export function openingSpan(f: WallFrame, o: Opening): [number, number] {
   return [Math.max(0, c - o.width / 2), Math.min(f.length, c + o.width / 2)];
 }
 
+/**
+ * The clear wall left on each side of an opening, measured along the wall from its inside
+ * corners (where both faces have begun, past any wall joining at that end) to the opening's
+ * edges: what a joiner or a wardrobe beside the door has to work with.
+ */
+export function openingClearances(f: WallFrame, o: Opening): { before: number; after: number } {
+  const [u0, u1] = openingSpan(f, o);
+  const start = Math.max(f.left[0], f.right[0]);
+  const end = Math.min(f.left[1], f.right[1]);
+  return { before: Math.max(0, u0 - start), after: Math.max(0, end - u1) };
+}
+
 export interface PlanWallPiece {
   wallId: string;
   polygon: Vec2[];

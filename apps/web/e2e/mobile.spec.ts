@@ -222,7 +222,13 @@ test('on a phone: the first wall shows under the finger, and its ends can be dra
   // (A level line has no height, so it counts as drawn, not as "visible".)
   await expect(page.locator('.ghost-wall')).toHaveCount(1);
   await expect(page.locator('.draw-overlay text.num').first()).toHaveText(/^\d+\.\d\d m$/);
+  // A magnifier shows the point under the finger, above it, until it lifts.
+  const loupe = page.getByTestId('loupe');
+  await expect(loupe).toHaveCount(1);
+  const lb = await loupe.locator('circle.loupe-ring').boundingBox();
+  expect((lb?.y ?? 999) + (lb?.height ?? 0)).toBeLessThan(r.y + r.height * 0.55);
   await f.lift();
+  await expect(loupe).toHaveCount(0);
   await expect(walls).toHaveText('1');
 
   // Its far end, dragged: the same wall gets longer, no new wall.
@@ -339,4 +345,73 @@ test('on a phone: a small piece moves under the finger, however close its handle
   expect((b?.x ?? 0) - a.x).toBeGreaterThan(20);
   await expect(page.getByLabel('Width')).toHaveValue(width);
   await expect(items).toHaveCount(1);
+});
+
+test('on a phone: a tapped wall drags sideways by finger; an untapped one pans', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.evaluate(() => document.fonts.ready);
+  // The Main bedroom's outside wall on the left, moved outwards (nothing in the way).
+  const wall = page.locator('[data-hit="wall:w_main-bedroom_outside-2"]').first();
+  const box = async () => {
+    const b = await wall.boundingBox();
+    if (!b) throw new Error('no wall');
+    return b;
+  };
+  // A drag from a wall not selected pans the whole plan (the wall moves on screen with it,
+  // but no wall is selected and nothing changes).
+  let b = await box();
+  await touches(
+    page,
+    line(
+      { x: b.x + b.width / 2, y: b.y + b.height / 2 },
+      { x: b.x + b.width / 2 + 30, y: b.y + b.height / 2 },
+      6,
+    ),
+  );
+  await expect(page.getByRole('heading', { name: 'Wall' })).toHaveCount(0);
+
+  // Tapped, then dragged: it moves, with the distance shown under the finger.
+  b = await box();
+  await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+  await expect(page.getByRole('heading', { name: 'Wall' })).toBeVisible();
+  b = await box();
+  const from = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  const f = await finger(page, from);
+  await f.moveTo({ x: from.x - 30, y: from.y });
+  await expect(page.locator('.wall-shift')).toBeVisible();
+  await f.lift();
+  const moved = await box();
+  expect(b.x - moved.x).toBeGreaterThan(20);
+});
+
+test('on a phone: a wall move whose touch is cancelled is taken back', async ({ page }) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.evaluate(() => document.fonts.ready);
+  const wall = page.locator('[data-hit="wall:w_bedroom_main-bedroom"]').first();
+  let b = await wall.boundingBox();
+  if (!b) throw new Error('no wall');
+  await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+  b = await wall.boundingBox();
+  if (!b) throw new Error('no wall');
+  const cdp = await page.context().newCDPSession(page);
+  const at = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ ...at, id: 0 }],
+  });
+  for (let i = 1; i <= 6; i++) {
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x: at.x + i * 6, y: at.y, id: 0 }],
+    });
+    await page.waitForTimeout(16);
+  }
+  await expect(page.locator('.wall-shift')).toBeVisible();
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+  await expect.poll(async () => (await wall.boundingBox())?.x ?? 0).toBeCloseTo(b.x, 0);
+  await expect(page.locator('.wall-shift')).toHaveCount(0);
 });
