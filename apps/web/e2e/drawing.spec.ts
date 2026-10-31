@@ -63,7 +63,7 @@ test('in the Door tool, dragging a door moves it; a room can be deleted, and und
   await expect(clear.first()).toHaveText(/^\d+\.\d\d m$/);
   expect(await clear.count()).toBeGreaterThanOrEqual(1);
   await page.mouse.up();
-  await expect(page.getByTestId('opening-clearances')).toHaveCount(0);
+  await expect(page.getByTestId('opening-clearances')).toHaveCount(0, { timeout: 500 });
   expect(await doors()).toBe(before);
   const moved = await page.locator(`[data-hit="${id}"]`).first().boundingBox();
   expect(Math.abs((moved?.x ?? 0) - box.x) + Math.abs((moved?.y ?? 0) - box.y)).toBeGreaterThan(5);

@@ -470,7 +470,8 @@ export function useSelectTool(ctx: ToolContext): ToolController {
     up: () => {
       const d = drag.current;
       drag.current = null;
-      if (d?.kind === 'resize' && d.moved) redraw((n) => n + 1);
+      // Labels drawn from the drag (sizes, clearances) go with it.
+      if (d?.moved) redraw((n) => n + 1);
       if (d?.kind === 'vertex' && d.moved) {
         // Merge, split and re-detect rooms once, at the end of the drag, in the same undo step.
         const level = currentLevel();
@@ -482,7 +483,8 @@ export function useSelectTool(ctx: ToolContext): ToolController {
           const level = currentLevel();
           if (level?.vertices[id]) ctx.dispatch(settleVertex(level, id), { coalesceKey: d.key });
         }
-        redraw((n) => n + 1);
+        // Dropped onto a wall already there, it merged into it: nothing left to select.
+        if (!currentLevel()?.walls[d.id]) select(null);
       }
     },
     key: (e) => {
@@ -493,7 +495,10 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         (d?.kind === 'resize' || d?.kind === 'rotate' || d?.kind === 'wall')
       ) {
         drag.current = null;
-        if (d.moved) useStore.getState().undo();
+        // Only if the drag recorded a step: one that changed nothing (a turn still on its 15°
+        // step) left none, and the step before it is someone else's.
+        const { editor, undo } = useStore.getState();
+        if (editor.history.past.at(-1)?.coalesceKey === d.key) undo();
         redraw((n) => n + 1);
         return true;
       }
