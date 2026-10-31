@@ -152,11 +152,11 @@
     }
   },
   "ottoman-leather": {
-    "file": "ottoman-leather.6b50084e93.glb",
+    "file": "ottoman-leather.deb1de96e7.glb",
     "size": {
-      "w": 0.885,
-      "d": 0.621,
-      "h": 0.624
+      "w": 0.663,
+      "d": 0.466,
+      "h": 0.468
     }
   },
   "coffee-table-industrial": {
@@ -176,7 +176,7 @@
     }
   },
   "pedestal-table-round": {
-    "file": "pedestal-table-round.d59ffe7c67.glb",
+    "file": "pedestal-table-round.60e706ab3a.glb",
     "size": {
       "w": 1.05,
       "d": 1.05,
@@ -184,7 +184,7 @@
     }
   },
   "metal-desk": {
-    "file": "metal-desk.4df07abb9f.glb",
+    "file": "metal-desk.d1fed8db83.glb",
     "size": {
       "w": 1.4,
       "d": 0.663,
@@ -192,7 +192,7 @@
     }
   },
   "steel-shelves": {
-    "file": "steel-shelves.567c9975fb.glb",
+    "file": "steel-shelves.8a6c9b023b.glb",
     "size": {
       "w": 1.411,
       "d": 0.433,
