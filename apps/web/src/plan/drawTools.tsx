@@ -78,6 +78,14 @@ function useCornerHandles(ctx: ToolContext) {
     set: (v: string[]) => {
       ids.current = v;
     },
+    /** The handle under the pointer, if any. */
+    under,
+    /** The handles' corners. */
+    ids: () => ids.current,
+    /** Takes this handle's corner, as a press on it does. */
+    take: (id: string) => {
+      grab.current = { id, key: `corner:${id}:${Date.now()}`, moved: false };
+    },
     /** Takes the gesture if it starts on a handle. */
     grab: (p: PlanPointer) => {
       if (grab.current) return true;
@@ -1023,6 +1031,29 @@ export function useRoomTool(ctx: ToolContext): ToolController {
   const handles = useCornerHandles(ctx);
   /** Where a press went down: a drag draws the room on release, a click sets a corner. */
   const press = useRef<PlanPointer | null>(null);
+  /** A press on a corner of the room just drawn, until its drag shows which way it goes. */
+  const onCorner = useRef<{ id: string; p: PlanPointer } | null>(null);
+  /** A room drawn from a corner of the one just drawn starts exactly there. */
+  const origin = useRef<SnapResult | null>(null);
+  /**
+   * Whether a drag from a corner of the room just drawn heads into that room (it adjusts the
+   * corner) rather than away from it (it draws a new room from the corner, sharing a wall).
+   */
+  const intoRoom = (id: string, v: Vec2) => {
+    const c = ctx.level.vertices[id];
+    const corners = handles
+      .ids()
+      .map((h) => ctx.level.vertices[h])
+      .filter((q) => !!q);
+    if (!c || corners.length === 0) return true;
+    const m = {
+      x: corners.reduce((sum, q) => sum + q.x, 0) / corners.length,
+      y: corners.reduce((sum, q) => sum + q.y, 0) / corners.length,
+    };
+    const l = Math.hypot(v.x, v.y) || 1;
+    // Neither part of the drag clearly heads out of the room (a little sideways is fine).
+    return v.x * Math.sign(m.x - c.x) > -0.3 * l && v.y * Math.sign(m.y - c.y) > -0.3 * l;
+  };
   const thickness = useEditor((s) => s.wallThickness);
   const tool = useEditor((s) => s.tool);
   // biome-ignore lint/correctness/useExhaustiveDependencies: reacts to the tool only
@@ -1078,35 +1109,64 @@ export function useRoomTool(ctx: ToolContext): ToolController {
     cursor: 'crosshair',
     // A finger dragged corner to corner draws the room in one go, from where it went down
     // (not from a corner an earlier stray tap left waiting).
-    grabs: (p) => handles.grab(p),
+    grabs: (p) => handles.held() || handles.under(p) !== null,
     touchDrag: (a, b) => {
       build(snapAt(a), snapAt(b).point);
       setStart(null);
       setDragFrom(null);
     },
-    touchCancel: () => setDragFrom(null),
+    touchCancel: () => {
+      setDragFrom(null);
+      onCorner.current = null;
+      origin.current = null;
+    },
     down: (p) => {
-      if (handles.held() || handles.grab(p)) return true;
+      if (handles.held()) return true;
+      const id = handles.under(p);
+      origin.current = null;
+      if (id) {
+        onCorner.current = { id, p };
+        return true;
+      }
       press.current = p;
       return true;
     },
     move: (p, dragging, from) => {
+      const c = onCorner.current;
+      if (dragging && c && Math.hypot(p.screen.x - c.p.screen.x, p.screen.y - c.p.screen.y) > 8) {
+        onCorner.current = null;
+        const v = ctx.level.vertices[c.id];
+        if (v && !intoRoom(c.id, { x: p.world.x - v.x, y: p.world.y - v.y })) {
+          press.current = c.p;
+          origin.current = { point: { x: v.x, y: v.y }, kind: 'vertex', vertexId: c.id };
+        } else {
+          handles.take(c.id);
+        }
+      }
       if (dragging && handles.move(p)) return;
-      const origin = from ?? (dragging ? press.current : null);
-      setDragFrom(origin ? snapAt(origin) : null);
+      if (dragging && onCorner.current) return;
+      const a = from ?? (dragging ? press.current : null);
+      setDragFrom(a ? (origin.current ?? snapAt(a)) : null);
       setSnap(snapAt(p));
     },
     up: (p) => {
+      if (onCorner.current) {
+        // A tap on a corner just drawn: nothing to do.
+        onCorner.current = null;
+        return;
+      }
       if (handles.held()) {
         handles.release();
         return;
       }
       const a = press.current;
       press.current = null;
+      const from = origin.current;
+      origin.current = null;
       if (!a) return;
       // A drag draws the room corner to corner; a click sets a corner, then the opposite one.
       if (Math.hypot(p.screen.x - a.screen.x, p.screen.y - a.screen.y) > 8) {
-        build(snapAt(a), snapAt(p).point);
+        build(from ?? snapAt(a), snapAt(p).point);
         setStart(null);
         setDragFrom(null);
         return;

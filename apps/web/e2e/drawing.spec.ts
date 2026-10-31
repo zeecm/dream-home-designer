@@ -225,3 +225,42 @@ test('a selected room moves by its handle, square to the flat, in one undo step;
   await expect.poll(async () => (await area.boundingBox())?.y ?? 0).toBeLessThan(before.y - 2);
   await expect(floorArea(page)).toHaveText(floor ?? '');
 });
+
+test('in the Room tool, a drag from a corner just drawn away from its room draws the next room; into it, adjusts the corner', async ({
+  page,
+}) => {
+  await newBlankPlan(page);
+  const walls = page.locator('.facts dd').first();
+  const rooms = page.locator('[data-hit^="room:"]');
+  const r = await page.locator('svg.plan-svg').boundingBox();
+  if (!r) throw new Error('no plan');
+  const at = (fx: number, fy: number) => ({ x: r.x + r.width * fx, y: r.y + r.height * fy });
+  const drag = async (a: { x: number; y: number }, b: { x: number; y: number }) => {
+    await page.mouse.move(a.x, a.y);
+    await page.mouse.down();
+    await page.mouse.move(b.x, b.y, { steps: 8 });
+    await page.mouse.up();
+  };
+  await page.keyboard.press('r');
+  await drag(at(0.2, 0.3), at(0.45, 0.6));
+  await expect(rooms).toHaveCount(1);
+  const first = await rooms.first().boundingBox();
+  // From its top-right corner, out to the right and down: a second room sharing its wall.
+  const corner = page.locator('.end-handle').nth(1);
+  const c = await corner.boundingBox();
+  if (!c || !first) throw new Error('no corner');
+  const from = { x: c.x + c.width / 2, y: c.y + c.height / 2 };
+  await drag(from, at(0.7, 0.6));
+  await expect(rooms).toHaveCount(2);
+  await expect(walls).toHaveText('7');
+  const firstAfter = await rooms.first().boundingBox();
+  expect(firstAfter?.width).toBeCloseTo(first.width, 0);
+  expect(firstAfter?.height).toBeCloseTo(first.height, 0);
+  // A drag from the new room's far corner into it adjusts that corner: no new room.
+  const far = await page.locator('.end-handle').nth(2).boundingBox();
+  if (!far) throw new Error('no far corner');
+  const f = { x: far.x + far.width / 2, y: far.y + far.height / 2 };
+  await drag(f, { x: f.x - 20, y: f.y - 15 });
+  await expect(rooms).toHaveCount(2);
+  await expect(walls).toHaveText('7');
+});
