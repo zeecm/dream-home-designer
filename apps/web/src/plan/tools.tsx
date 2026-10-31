@@ -100,7 +100,7 @@ export const TOOL_HINTS: Record<Tool, string> = {
   passage: 'Pick a width, then tap or click a wall to add an opening.',
   measure: 'Tap both ends, or drag between them, to measure.',
   furniture:
-    'Pick a piece, then tap or click to place it. Near a wall it backs onto it. Turn it in its details, or with R.',
+    'Pick a piece, then tap or click to place it. Near a wall it backs onto it; a table lamp or a light goes over a piece. Turn it in its details, or with R.',
   calibrate:
     'Tap both ends of a length you know on the plan image, or drag along it, then enter the real length.',
 };

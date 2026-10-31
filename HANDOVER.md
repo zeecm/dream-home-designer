@@ -888,7 +888,9 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
   (`jambSnap` in `snap.ts`), so an angle-snapped wall drawn to a doorway slants by up to half
   the door's width. The alternative, ending the wall straight but short of the doorway and
   unjoined, leaves the room open; not decided.
-- **Placing on furniture:** pieces that stand on a table (the succulent, the desk lamp) can't
-  be placed by clicking on the table, which selects it: place them beside it and drag them on.
+- **Placing on furniture:** a piece that stands on others or hangs above them (the succulent,
+  the desk lamp, ceiling lights) is placed by a click on a piece as anywhere else (`over` in
+  `placing()`, `PlanCanvas.tsx`); with one of those picked, a press on a piece doesn't move it
+  (switch to Select for that).
 - **Corner dimension lines** for walls that run into the room draw inside it; fine at plan scale,
   busy on short walls.
