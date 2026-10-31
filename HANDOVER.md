@@ -446,6 +446,13 @@ the welcome page (and the app move) is the owner's call.
 
 ## 5. Owner to-dos
 
+- **Before the repo goes public:** `apps/web/public/samples/hdb-3room-type4.pdf` (and its PNG
+  crop) is a real HDB floor plan (Blk 39A, 3-room Type 4). HDB likely holds its copyright;
+  the live app already serves it, but publishing the repo redistributes it. Decide whether
+  to keep it, ask HDB, or swap in a plan drawn from scratch (the 4-room reference plan is
+  original). No credentials are in the tracked files (only AWS's documentation example keys
+  in a signing test).
+
 0. **Before merging:** the production API must accept schema 6 and serve uploaded models
    (`/projects/{id}/models`). The preview API has it (30 Oct); the production deploy
    (`pnpm --filter @dhd/edge run deploy`) was held back for the owner's go-ahead.
