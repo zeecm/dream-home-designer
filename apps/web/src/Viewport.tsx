@@ -201,6 +201,8 @@ function Lamps({ level }: { level: Level }) {
       light.position.set(l.position.x, l.position.y, l.position.z);
       light.color.set(l.color);
       light.intensity = l.candela * LAMP_SCALE;
+      // How bright it is lit (comparing turns one version's lamps down for a while).
+      light.userData.lit = light.intensity;
     });
   };
   useFrame(({ camera, clock }) => {
@@ -299,42 +301,69 @@ function SunControl({ walking }: { walking: boolean }) {
   );
 }
 
+/** Turns a group's lamps off, or back on as bright as `Lamps` lit them. */
+function lampsOn(group: THREE.Object3D | null, on: boolean) {
+  group?.traverse((o) => {
+    if (o instanceof THREE.PointLight) o.intensity = on ? (o.userData.lit ?? 0) : 0;
+  });
+}
+
+/** One version's meshes and lamps, as compared. */
+interface Side {
+  meshes: MutableRefObject<THREE.Object3D | null>;
+  lamps: MutableRefObject<THREE.Object3D | null>;
+}
+
 /**
  * Comparing a renovation: the flat as it is left of the divider, the renovation right of it,
  * drawn in one view with one camera (each frame draws the scene twice, each time cut to its
- * side). Outside the frame, only the flat as it is shows (a download draws that).
+ * side, with only that side's meshes and lamps). Lamps are dimmed rather than hidden, so the
+ * number of lights (and the shaders built for it) stays the same. Outside the frame the
+ * version shown above the plan is the one there (a download draws it).
  */
 function CompareRender({
   split,
   before,
   after,
+  shown,
 }: {
   split: MutableRefObject<number>;
-  before: MutableRefObject<THREE.Object3D | null>;
-  after: MutableRefObject<THREE.Object3D | null>;
+  before: Side;
+  after: Side;
+  shown: 'before' | 'after';
 }) {
   useFrame(({ gl, scene, camera, size }) => {
-    const b = before.current;
-    const a = after.current;
+    const b = before.meshes.current;
+    const a = after.meshes.current;
     if (!b || !a) {
       gl.render(scene, camera);
       return;
     }
+    const side = (on: Side, off: Side) => {
+      if (on.meshes.current) on.meshes.current.visible = true;
+      if (off.meshes.current) off.meshes.current.visible = false;
+      lampsOn(on.lamps.current, true);
+      lampsOn(off.lamps.current, false);
+    };
     const x = Math.round(size.width * split.current);
     gl.setScissorTest(true);
-    a.visible = false;
+    side(before, after);
     gl.setScissor(0, 0, x, size.height);
     gl.render(scene, camera);
-    b.visible = false;
-    a.visible = true;
+    side(after, before);
     gl.setScissor(x, 0, size.width - x, size.height);
     gl.render(scene, camera);
     gl.setScissorTest(false);
-    a.visible = false;
-    b.visible = true;
+    if (shown === 'before') side(before, after);
+    // The version shown is the one a download finds by name.
+    b.name = shown === 'before' ? 'level' : 'level-compared';
+    a.name = shown === 'after' ? 'level' : 'level-compared';
   }, 1);
   return null;
 }
+
+/** How wide a side must be to show its label (px). */
+const LABEL_ROOM = 90;
 
 /** The divider between before and after, dragged (or moved with the arrow keys) across. */
 function CompareDivider({
@@ -345,10 +374,33 @@ function CompareDivider({
   onChange: (v: number) => void;
 }) {
   const clamp = (v: number) => Math.min(0.95, Math.max(0.05, v));
+  const self = useRef<HTMLDivElement>(null);
+  // A label shows only where its side is wide enough to hold it.
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const view = self.current?.parentElement;
+    if (!view) return;
+    const watch = new ResizeObserver(() => setWidth(view.clientWidth));
+    watch.observe(view);
+    setWidth(view.clientWidth);
+    return () => watch.disconnect();
+  }, []);
+  const keys: Record<string, number> = {
+    ArrowLeft: split - 0.05,
+    ArrowRight: split + 0.05,
+    PageDown: split - 0.25,
+    PageUp: split + 0.25,
+    Home: 0,
+    End: 1,
+  };
   return (
-    <div className="compare-divider" style={{ left: `${split * 100}%` }}>
-      <span className="compare-label compare-label-before">Before</span>
-      <span className="compare-label compare-label-after">After</span>
+    <div ref={self} className="compare-divider" style={{ left: `${split * 100}%` }}>
+      {width * split >= LABEL_ROOM && (
+        <span className="compare-label compare-label-before">Before</span>
+      )}
+      {width * (1 - split) >= LABEL_ROOM && (
+        <span className="compare-label compare-label-after">After</span>
+      )}
       <div
         className="compare-handle"
         role="slider"
@@ -365,17 +417,17 @@ function CompareDivider({
         onPointerMove={(e) => {
           if (e.currentTarget.hasPointerCapture(e.pointerId)) {
             e.stopPropagation();
-            const r = (
-              e.currentTarget.parentElement?.parentElement as HTMLElement
-            ).getBoundingClientRect();
+            const view = self.current?.parentElement;
+            if (!view) return;
+            const r = view.getBoundingClientRect();
             onChange(clamp((e.clientX - r.left) / r.width));
           }
         }}
         onKeyDown={(e) => {
-          if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-            e.preventDefault();
-            onChange(clamp(split + (e.key === 'ArrowLeft' ? -0.05 : 0.05)));
-          }
+          const to = keys[e.key];
+          if (to === undefined) return;
+          e.preventDefault();
+          onChange(clamp(to));
         }}
       />
     </div>
@@ -413,6 +465,14 @@ export function Viewport() {
   splitRef.current = split;
   const beforeGroup = useRef<THREE.Object3D | null>(null);
   const afterGroup = useRef<THREE.Object3D | null>(null);
+  const beforeLamps = useRef<THREE.Group | null>(null);
+  const afterLamps = useRef<THREE.Group | null>(null);
+  const variant = useEditor((s) => s.variant);
+  // A renovation ended (made the plan, discarded): nothing left to compare.
+  const renovating = !!project.renovation;
+  useEffect(() => {
+    if (!renovating) setComparing(false);
+  }, [renovating]);
   const versions = project.renovation
     ? { before: project.levels[0], after: project.renovation.levels[0] }
     : null;
@@ -483,7 +543,18 @@ export function Viewport() {
           shadow-camera-bottom={-frame.radius * 1.5}
           shadow-camera-far={reach * 2.5}
         />
-        {level && <Lamps level={level} />}
+        {compare && versions?.before && versions.after ? (
+          <>
+            <group ref={beforeLamps}>
+              <Lamps level={versions.before} />
+            </group>
+            <group ref={afterLamps}>
+              <Lamps level={versions.after} />
+            </group>
+          </>
+        ) : (
+          level && <Lamps level={level} />
+        )}
         <Capture />
         <mesh rotation-x={-Math.PI / 2} position={[frame.x, -0.01, frame.z]} receiveShadow>
           <planeGeometry args={[200, 200]} />
@@ -493,7 +564,12 @@ export function Viewport() {
           <>
             <LevelMesh ceilings={false} of={versions.before} group={beforeGroup} />
             <LevelMesh ceilings={false} of={versions.after} group={afterGroup} />
-            <CompareRender split={splitRef} before={beforeGroup} after={afterGroup} />
+            <CompareRender
+              split={splitRef}
+              before={{ meshes: beforeGroup, lamps: beforeLamps }}
+              after={{ meshes: afterGroup, lamps: afterLamps }}
+              shown={variant}
+            />
           </>
         ) : (
           <LevelMesh ceilings={walking} walker={walking ? pose : undefined} />
@@ -538,6 +614,8 @@ export function Viewport() {
         </>
       ) : (
         <>
+          {/* First, so the view's controls stay on top of it. */}
+          {compare && <CompareDivider split={split} onChange={setSplit} />}
           {hasRooms && (
             <button
               type="button"
@@ -560,7 +638,6 @@ export function Viewport() {
               {compare ? 'Stop comparing' : 'Compare before and after'}
             </button>
           )}
-          {compare && <CompareDivider split={split} onChange={setSplit} />}
           <p className="viewport-hint">
             {coarsePointer()
               ? 'Drag to orbit · pinch to zoom · two fingers to pan'

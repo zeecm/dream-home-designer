@@ -1,4 +1,11 @@
-import { furnitureKind, levelBounds, planGeometry, siteOf, underlayToWorld } from '@dhd/core';
+import {
+  furnitureKind,
+  furnitureLayer,
+  levelBounds,
+  planGeometry,
+  siteOf,
+  underlayToWorld,
+} from '@dhd/core';
 import type { Vec2 } from '@dhd/core';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { type PixelBox, inkBounds } from '../assets';
@@ -79,12 +86,10 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
      * Whether a piece is on the same level as the one picked (a lamp with a lamp, a light with
      * a light): a press on it selects it, rather than placing over it.
      */
-    const layer = (k: ReturnType<typeof furnitureKind>) =>
-      !k ? 'floor' : k.ceiling ? 'ceiling' : (k.elevation ?? 0) > 0 ? 'raised' : 'floor';
     const raised = (id: string) => {
       const it = ctx?.level.items[id];
       const picked = furnitureKind(useEditor.getState().furnitureKind);
-      return !!it && layer(furnitureKind(it.assetId)) === layer(picked);
+      return !!it && furnitureLayer(furnitureKind(it.assetId)) === furnitureLayer(picked);
     };
     const onOwn = (p: PlanPointer) =>
       (p.hit?.kind === kind && (!over() || raised(p.hit.id))) || handle(p);
@@ -190,6 +195,9 @@ if (typeof window !== 'undefined') {
   window.addEventListener('pointerup', lift, { capture: true });
   window.addEventListener('pointercancel', lift, { capture: true });
 }
+
+/** How much of the plan a coast keeps on screen (px). */
+const KEEP = 48;
 
 export function PlanCanvas() {
   const [wrapRef, size] = useElementSize<HTMLDivElement>();
@@ -366,15 +374,25 @@ export function PlanCanvas() {
       const dt = Math.min(32, now - last);
       last = now;
       const next = panBy(cur, vx * dt, vy * dt);
-      // It stops before the middle of the plan leaves the screen.
+      // It stops before the plan leaves the screen: some of it (KEEP px, or all of a plan
+      // smaller than that) stays in view, unless the coast is bringing it back.
       const lvl = currentLevel();
       const b = lvl && levelBounds(lvl);
       if (b) {
-        const c = {
-          x: (next.cx - (b.min.x + b.max.x) / 2) * -next.zoom + size.width / 2,
-          y: (next.cy - (b.min.y + b.max.y) / 2) * -next.zoom + size.height / 2,
+        const showing = (w: typeof next) => {
+          const along = (lo: number, hi: number, c: number, span: number) => {
+            const a = (lo - c) * w.zoom + span / 2;
+            const z = (hi - c) * w.zoom + span / 2;
+            const seen = Math.min(span, Math.max(a, z)) - Math.max(0, Math.min(a, z));
+            return seen / Math.min(KEEP, Math.abs(z - a) || KEEP);
+          };
+          return Math.min(
+            along(b.min.x, b.max.x, w.cx, size.width),
+            along(b.min.y, b.max.y, w.cy, size.height),
+          );
         };
-        if (c.x < 0 || c.y < 0 || c.x > size.width || c.y > size.height) {
+        const after = showing(next);
+        if (after < 1 && after < showing(cur)) {
           flingFrame.current = undefined;
           return;
         }

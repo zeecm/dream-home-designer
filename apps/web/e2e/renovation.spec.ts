@@ -162,12 +162,38 @@ test('the 3D view compares before and after across a divider', async ({ page }) 
   await divider.focus();
   await page.keyboard.press('ArrowLeft');
   await expect(divider).toHaveAttribute('aria-valuenow', '45');
+  // Home and End take it as far as it goes; the side left too narrow loses its label.
+  const after = page.locator('.compare-label-after');
+  await expect(after).toBeVisible();
+  await page.keyboard.press('End');
+  await expect(divider).toHaveAttribute('aria-valuenow', '95');
+  await expect(after).toHaveCount(0);
+  await page.keyboard.press('Home');
+  await expect(divider).toHaveAttribute('aria-valuenow', '5');
+  await expect(after).toBeVisible();
+  await expect(page.locator('.compare-label-before')).toHaveCount(0);
+  await page.keyboard.press('PageUp');
+  await expect(divider).toHaveAttribute('aria-valuenow', '30');
+  // The view's buttons stay clickable over the divider.
+  await expect(page.getByRole('button', { name: 'Stop comparing' })).toBeVisible();
   // Walking shows one version: the comparison goes, and comes back after.
   await page.getByRole('button', { name: 'Walk through' }).click();
   await expect(divider).toHaveCount(0);
   await page.getByRole('button', { name: 'Leave walk' }).click();
   await expect(divider).toBeVisible();
   await page.getByRole('button', { name: 'Stop comparing' }).click();
+  await expect(divider).toHaveCount(0);
+  // Comparing ends with the renovation.
+  await page.getByRole('button', { name: 'Compare before and after' }).click();
+  await expect(divider).toBeVisible();
+  await page.keyboard.press('1');
+  await page.getByRole('button', { name: 'Discard the renovation' }).click();
+  await expect(page.locator('.reno-bar')).toHaveCount(0);
+  await page.keyboard.press('3');
+  await expect(divider).toHaveCount(0);
+  await page.keyboard.press('1');
+  await page.getByRole('button', { name: 'Plan a renovation' }).click();
+  await page.keyboard.press('3');
   await expect(divider).toHaveCount(0);
   expect(errors).toEqual([]);
 });

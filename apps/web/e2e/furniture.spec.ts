@@ -298,3 +298,27 @@ test('a piece that stands on others (a succulent) is placed on a table by clicki
   await page.mouse.click(at.x, at.y);
   await expect(items).toHaveCount(2);
 });
+
+test('a table lamp put under a wall cabinet stands on the desk beneath it', async ({ page }) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await page.getByRole('button', { name: /^Furniture/ }).click();
+  const room = page.locator('[data-hit="room:rm_living-and-dining"]');
+  const box = await room.boundingBox();
+  if (!box) throw new Error('no room');
+  const at = { x: box.x + box.width * 0.5, y: box.y + box.height * 0.5 };
+  const items = page.locator('[data-hit^="item:"]');
+  await page.getByRole('button', { name: /^Desk 120/ }).click();
+  await page.mouse.click(at.x, at.y);
+  await page.getByRole('button', { name: /^Wall cabinet \d/ }).click();
+  await page.mouse.click(at.x, at.y);
+  await expect(items).toHaveCount(2);
+  // The cabinet hangs above the desk: a lamp clicked there is placed (not the cabinet
+  // selected), on the desk's top.
+  await page.getByRole('button', { name: /^Table lamp \d/ }).click();
+  await page.mouse.click(at.x, at.y);
+  await expect(items).toHaveCount(3);
+  await expect(page.getByRole('heading', { name: 'Table lamp' })).toBeVisible();
+  await expect(page.getByLabel('Above the floor')).toHaveValue('0.75 m');
+});

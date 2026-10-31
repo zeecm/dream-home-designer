@@ -3,11 +3,13 @@ import {
   deleteItem,
   duplicateOf,
   furnitureKind,
+  furnitureLayer,
   itemFootprint,
   itemSize,
   newId,
   newItem,
   placeFurniture,
+  standsOn,
 } from '@dhd/core';
 import { useEffect, useState } from 'react';
 import { useEditor } from '../editor';
@@ -42,17 +44,11 @@ export function useFurnitureTool(ctx: ToolContext): ToolController {
       const item = newItem(id, kind, spot.at, spot.rotation, ctx.level.ceilingHeight);
       // On a piece (a lamp on a desk, a TV on its console): on its top, whatever its
       // height. Pieces hung higher (a wall cabinet, a clock) keep their own height.
-      const under = p.hit?.kind === 'item' ? ctx.level.items[p.hit.id] : undefined;
-      const lift = kind.elevation ?? 0;
-      if (
-        under &&
-        lift > 0 &&
-        lift < 1.2 &&
-        !kind.ceiling &&
-        !furnitureKind(under.assetId)?.ceiling
-      ) {
-        item.position.y = under.position.y + itemSize(under).h;
-      }
+      const under =
+        furnitureLayer(kind) === 'tabletop'
+          ? standsOn(Object.values(ctx.level.items), spot.at)
+          : undefined;
+      if (under) item.position.y = under.position.y + itemSize(under).h;
       ctx.dispatch(addItem(ctx.level.id, item));
       useEditor.getState().select({ kind: 'item', id });
       // No preview over the piece just placed; the next pointer move brings it back.
