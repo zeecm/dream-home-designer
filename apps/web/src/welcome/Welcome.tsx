@@ -110,6 +110,15 @@ function Hero() {
   const ids = useMemo(() => shiftIds(sample, DIVIDER), []);
   const n = useMemo(() => wallNormal(sample, DIVIDER) ?? { x: 1, y: 0 }, []);
   const [offset, setOffset] = useState(0);
+  // How far the wall can go each way (a positive offset moves it left, into the main bedroom).
+  const limits = useMemo(() => {
+    const reach = (dir: number) => {
+      let o = 0;
+      while (Math.abs(o) < 2 && !shiftBlocked(sample, DIVIDER, o + dir * 0.01)) o += dir * 0.01;
+      return Math.round(o * 100) / 100;
+    };
+    return { left: reach(1), right: reach(-1) };
+  }, []);
   const level = useMemo(() => {
     if (offset === 0) return sample;
     const s = dispatch(
@@ -124,7 +133,7 @@ function Hero() {
 
   /** Moves the wall towards `want`, stopping where the app would (a door, a wall). */
   const moveTo = (want: number) => {
-    const target = Math.round(want / STEP) * STEP;
+    const target = Math.round(want * 100) / 100;
     let off = offset;
     const dir = Math.sign(target - off);
     while (dir !== 0 && (target - off) * dir > 1e-9) {
@@ -160,7 +169,7 @@ function Hero() {
             A free home planner in your browser: trace the floor plan you already have, furnish it,
             plan the renovation and walk through the result in 3D.
           </p>
-          <a className="button" href="/">
+          <a className="button" href="/?sample">
             Open the sample flat
           </a>
         </div>
@@ -185,7 +194,8 @@ function Hero() {
               level={level}
               offset={offset}
               svg={svg}
-              onKey={(d) => moveTo(offset + d * STEP)}
+              limits={limits}
+              onKey={(to) => moveTo(to)}
               onDown={(e) => {
                 const p = planPoint(e);
                 if (!p) return;
@@ -196,7 +206,9 @@ function Hero() {
                 const d = drag.current;
                 const p = planPoint(e);
                 if (!d || !p) return;
-                moveTo(d.start + (p.x - d.from.x) * n.x + (p.y - d.from.y) * n.y);
+                // A drag moves in 5 cm steps; the keys go exactly where they say.
+                const raw = d.start + (p.x - d.from.x) * n.x + (p.y - d.from.y) * n.y;
+                moveTo(Math.round(raw / STEP) * STEP);
               }}
               onUp={() => {
                 drag.current = null;
@@ -226,6 +238,7 @@ function WallGrip({
   level,
   offset,
   svg,
+  limits,
   onKey,
   onDown,
   onMove,
@@ -236,7 +249,8 @@ function WallGrip({
   level: Level;
   offset: number;
   svg: React.MutableRefObject<SVGSVGElement | null>;
-  onKey: (dir: number) => void;
+  limits: { left: number; right: number };
+  onKey: (to: number) => void;
   onDown: (e: PointerEvent) => void;
   onMove: (e: PointerEvent) => void;
   onUp: () => void;
@@ -256,15 +270,26 @@ function WallGrip({
       tabIndex={0}
       role="slider"
       aria-label="The wall between the bedrooms"
-      aria-valuemin={-1}
-      aria-valuemax={1}
-      aria-valuenow={Number(offset.toFixed(2))}
+      // Its value is how far it has moved to the right, in metres.
+      aria-valuemin={-limits.left}
+      aria-valuemax={-limits.right}
+      aria-valuenow={Number((-offset).toFixed(2)) || 0}
       aria-valuetext={`Main bedroom ${area(main)}, bedroom ${area(bed)}`}
       onKeyDown={(e) => {
-        const d = { ArrowLeft: 1, ArrowDown: 1, ArrowRight: -1, ArrowUp: -1 }[e.key];
-        if (d === undefined) return;
+        const to: Record<string, number> = {
+          ArrowLeft: offset + STEP,
+          ArrowDown: offset + STEP,
+          ArrowRight: offset - STEP,
+          ArrowUp: offset - STEP,
+          PageDown: offset + 4 * STEP,
+          PageUp: offset - 4 * STEP,
+          Home: limits.left,
+          End: limits.right,
+        };
+        const target = to[e.key];
+        if (target === undefined) return;
         e.preventDefault();
-        onKey(d);
+        onKey(target);
       }}
       onPointerDown={onDown}
       onPointerMove={onMove}
@@ -516,28 +541,32 @@ function Renovate() {
             extra={furnished ? BEDROOM_FURNITURE : []}
             title="The main bedroom, as you set it"
             style={{ aspectRatio: `${box[2]} / ${box[3]}` }}
-          >
-            {/* The paint: a band along the inside of the walls. */}
-            <defs>
-              {rings.map((ring, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: one or two rooms, in order
-                <clipPath key={i} id={`paint-${i}`}>
-                  <polygon points={ring.map((p) => `${p.x},${p.y}`).join(' ')} />
-                </clipPath>
-              ))}
-            </defs>
-            {rings.map((ring, i) => (
-              <polygon
-                // biome-ignore lint/suspicious/noArrayIndexKey: one or two rooms, in order
-                key={i}
-                points={ring.map((p) => `${p.x},${p.y}`).join(' ')}
-                clipPath={`url(#paint-${i})`}
-                fill="none"
-                stroke={paintColor}
-                strokeWidth={0.3}
-              />
-            ))}
-          </MiniPlan>
+            under={
+              <>
+                {/* The paint: a band along the inside of the walls. */}
+                <defs>
+                  {rings.map((ring, i) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: one or two rooms, in order
+                    <clipPath key={i} id={`paint-${i}`}>
+                      <polygon points={ring.map((p) => `${p.x},${p.y}`).join(' ')} />
+                    </clipPath>
+                  ))}
+                </defs>
+                {rings.map((ring, i) => (
+                  <polygon
+                    // biome-ignore lint/suspicious/noArrayIndexKey: one or two rooms, in order
+                    key={i}
+                    points={ring.map((p) => `${p.x},${p.y}`).join(' ')}
+                    clipPath={`url(#paint-${i})`}
+                    fill="none"
+                    stroke={paintColor}
+                    strokeWidth={0.3}
+                  />
+                ))}
+              </>
+            }
+          />
+
           <figcaption className="readout">
             <span>
               {knocked ? 'Main bedroom, opened up' : 'Main bedroom'} <b>{area(size)}</b>
@@ -586,15 +615,18 @@ function Renovate() {
           </fieldset>
         </div>
         <div className="block reveal">
-          <p className="block-say">Fit the bed in.</p>
-          <p>Pieces back onto the wall they are dropped beside, at their real sizes.</p>
+          <p className="block-say">Furnish it.</p>
+          <p>
+            A queen bed, a wardrobe and a bedside table, each backed onto the wall it was dropped
+            beside, at its real size.
+          </p>
           <button
             type="button"
             className="toggle"
             aria-pressed={furnished}
             onClick={() => setFurnished(!furnished)}
           >
-            {furnished ? 'Take the furniture out' : 'Put a queen bed in'}
+            Furnish the bedroom
           </button>
         </div>
         <div className="block reveal">
@@ -678,7 +710,7 @@ function Start() {
         action="/"
         onSubmit={(e) => {
           e.preventDefault();
-          window.location.href = `/?new=${encodeURIComponent(name.trim())}`;
+          window.location.href = `/?new=${encodeURIComponent(name.trim() || 'My flat')}`;
         }}
       >
         <h2 id="start-h" className="start-line">
@@ -688,7 +720,7 @@ function Start() {
             name="new"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="my flat"
+            placeholder="My flat"
             aria-label="Plan name"
             maxLength={80}
           />{' '}

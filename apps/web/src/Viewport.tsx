@@ -63,10 +63,10 @@ function LevelMesh({
 }
 
 /** Within this of a door it opens; beyond DOOR_CLOSE it shuts (between, it stays as it is). */
-const DOOR_OPEN = 1.6;
-const DOOR_CLOSE = 2.4;
+const DOOR_OPEN = 2;
+const DOOR_CLOSE = 2.8;
 /** How fast a door swings: the fraction of the way per second. */
-const DOOR_SPEED = 2.2;
+const DOOR_SPEED = 3;
 
 /**
  * Inside doors stand open in the orbit view, as the plan draws them. Walking through, they

@@ -726,7 +726,7 @@ blocked by the network proxy and Sketchfab needs an API key.
 - **Mini-map:** a small plan in the corner while walking shows where you are and which way you
   face (`walk/MiniMap.tsx`).
 - **Doors and footsteps (built):** inside doors stand open in the orbit view; walking
-  through, they start shut, swing open within 1.6 m of the walker and shut beyond 2.4 m
+  through, they start shut, swing open within 2 m of the walker and shut beyond 2.8 m (open in about a third of a second, so a run doesn't catch them half shut)
   (`useDoorSwings` in `Viewport.tsx`; render builds each inside leaf as a group pivoting at
   its hinge, `LevelMeshes.doors()` / `setDoorOpen`). A shut leaf sits flush with the face it
   hinges on. Collision is unchanged (doorways open, an open leaf solid). Soft footsteps,
