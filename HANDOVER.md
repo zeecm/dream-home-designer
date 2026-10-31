@@ -631,7 +631,9 @@ The Go API logs it locally (`POST /telemetry`, 204).
   line and measurement all preview mid-drag.
 - `useCornerHandles` (drawTools): the corners of the wall or room just drawn are handles; a
   press drags the corner (live lengths, snapped, settled, one undo step), a tap on a wall end
-  carries on drawing from it. The drawing bar's Undo also takes back an end dragged.
+  carries on drawing from it. In the Room tool, a drag from a corner just drawn that heads away
+  from that room draws the next room from the corner (sharing its wall); one heading into it
+  adjusts the corner (`intoRoom`, decided once the drag has gone 8 px). The drawing bar's Undo also takes back an end dragged.
 - A tapped first corner shows as a marker. Measure ends can be dragged; a tap starts afresh.
 - In the Door/Window/Opening and Furniture tools, a press on an existing piece of that kind
   goes to Select for the gesture (a drag moves it), via `placing()` in `PlanCanvas`.
@@ -868,8 +870,5 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
   (`jambSnap` in `snap.ts`), so an angle-snapped wall drawn to a doorway slants by up to half
   the door's width. The alternative, ending the wall straight but short of the doorway and
   unjoined, leaves the room open; not decided.
-- **Room tool from a corner just drawn:** a drag starting on a corner of the room just drawn
-  moves that corner (`useCornerHandles`), so a second room sharing a wall can't be started
-  from the shared corner; starting from its far corner and ending on the shared one works.
 - **Corner dimension lines** for walls that run into the room draw inside it; fine at plan scale,
   busy on short walls.
