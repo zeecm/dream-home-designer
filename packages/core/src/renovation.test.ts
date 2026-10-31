@@ -426,4 +426,60 @@ describe('carriedToRenovation', () => {
     expect(step2).toMatchObject({ conflict: true });
     expect(s.doc.renovation?.levels[0]).toEqual(at[0]);
   });
+
+  it('holds back what the renovation would make no sense of', () => {
+    const outcome: { carried?: boolean; conflict?: boolean } = {};
+    // A wall split where the renovation thickened and painted it: the new piece takes the
+    // renovation's thickness and paint too.
+    let s = dispatch(
+      renovating(),
+      updateWall(A, 'w_bed3_bed2', { thickness: 0.2, materialLeft: 'paint-sage' }),
+    );
+    s = dispatch(s, carriedToRenovation(wallAt(s, { x: 3.5, y: 6.5 }, { x: 2, y: 6.5 }), outcome));
+    expect(outcome).toMatchObject({ carried: true });
+    const after = s.doc.renovation?.levels[0];
+    const pieces = Object.values(after?.walls ?? {}).filter((w) => {
+      const a = after?.vertices[w.a];
+      const b = after?.vertices[w.b];
+      return a?.x === 3.5 && b?.x === 3.5;
+    });
+    expect(pieces.length).toBe(2);
+    for (const w of pieces) expect(w).toMatchObject({ thickness: 0.2, materialLeft: 'paint-sage' });
+    // The renovation renamed a room the edit merges away: held back.
+    s = dispatch(renovating(), updateRoom(A, 'rm_bed3', { name: 'Study' }));
+    s = dispatch(s, carriedToRenovation(deleteWall(L, 'w_bed3_bed2'), outcome));
+    expect(outcome).toMatchObject({ conflict: true });
+    expect(s.doc.renovation?.levels[0]?.rooms.rm_bed3?.name).toBe('Study');
+    // A split of a wall whose corner the renovation moved would bend it: held back.
+    s = dispatch(renovating(), moveVertex(A, 'v6', { x: 3.7, y: 8.5 }));
+    s = dispatch(s, carriedToRenovation(wallAt(s, { x: 3.5, y: 6.5 }, { x: 2, y: 6.5 }), outcome));
+    expect(outcome).toMatchObject({ conflict: true });
+    // A door added onto one the renovation put there: held back.
+    const own = addOpening(A, {
+      wallId: 'w_bed3_bed2',
+      kind: 'door',
+      t: 0.5,
+      width: 0.8,
+      height: 2.1,
+      sill: 0,
+    });
+    s = dispatch(renovating(), own.command);
+    const fix = addOpening(L, {
+      wallId: 'w_bed3_bed2',
+      kind: 'door',
+      t: 0.52,
+      width: 0.8,
+      height: 2.1,
+      sill: 0,
+    });
+    s = dispatch(s, carriedToRenovation(fix.command, outcome));
+    expect(outcome).toMatchObject({ conflict: true });
+    // A wall the flat as it is makes a boundary, where the renovation has its own door: held back.
+    s = dispatch(renovating(), own.command);
+    s = dispatch(
+      s,
+      carriedToRenovation(updateWall(L, 'w_bed3_bed2', { kind: 'boundary' }), outcome),
+    );
+    expect(outcome).toMatchObject({ conflict: true });
+  });
 });

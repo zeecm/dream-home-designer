@@ -13,6 +13,7 @@ import {
   deleteModel,
   duplicateOf,
   furnitureKind,
+  furnitureLayer,
   itemFootprint,
   itemLights,
   itemSize,
@@ -20,6 +21,7 @@ import {
   newItem,
   placeFurniture,
   setProjectModels,
+  standsOn,
   updateItem,
   updateModel,
 } from './furniture';
@@ -47,6 +49,28 @@ describe('the furniture catalogue', () => {
         for (const i of [0, 1, 2]) expect(p.max[i], k.id).toBeGreaterThan(p.min[i] as number);
       }
     }
+  });
+});
+
+describe('standsOn', () => {
+  it('sorts pieces by where they sit up and down', () => {
+    expect(furnitureLayer(kind('ceiling-light'))).toBe('ceiling');
+    expect(furnitureLayer(kind('kitchen-wall'))).toBe('high');
+    expect(furnitureLayer(kind('table-lamp'))).toBe('tabletop');
+    expect(furnitureLayer(kind('desk'))).toBe('floor');
+  });
+
+  it('finds the desk under a wall cabinet, and the top of a stack', () => {
+    const desk = newItem('d', kind('desk'), { x: 1, y: 1 });
+    const cabinet = newItem('c', kind('kitchen-wall'), { x: 1, y: 1 });
+    const light = newItem('l', kind('ceiling-light'), { x: 1, y: 1 }, 0, 2.6);
+    const rug = newItem('r', kind('rug'), { x: 1, y: 1 });
+    expect(standsOn([rug, cabinet, light, desk], { x: 1, y: 1 })?.id).toBe('d');
+    // On a TV on the desk, the TV's top is higher.
+    const tv = { ...newItem('t', kind('tv'), { x: 1, y: 1 }), position: { x: 1, y: 0.75, z: 1 } };
+    expect(standsOn([desk, tv], { x: 1, y: 1 })?.id).toBe('t');
+    // Off every piece: the floor.
+    expect(standsOn([desk, cabinet], { x: 5, y: 5 })).toBeUndefined();
   });
 });
 

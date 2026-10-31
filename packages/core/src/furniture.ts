@@ -1,4 +1,5 @@
 import type { Draft } from 'immer';
+import { pointInPolygon } from './geometry';
 import type { Command } from './history';
 import { draftLevel } from './levels';
 import { MODEL_KINDS } from './modelKinds.generated';
@@ -461,6 +462,42 @@ export function itemFootprint(item: Item, kind = furnitureKind(item.assetId)): V
     x: item.position.x + (x as number) * c - (y as number) * s,
     y: item.position.z + (x as number) * s + (y as number) * c,
   }));
+}
+
+/** Pieces hung this high or higher (a wall cabinet, a clock) keep their own height. */
+export const HUNG = 1.2;
+
+/**
+ * Where a kind of piece sits up and down: from the ceiling, hung on a wall, on a tabletop
+ * (a lamp, a TV: placed on a piece, it stands on that piece's top), or on the floor.
+ */
+export function furnitureLayer(kind?: FurnitureKind): 'ceiling' | 'high' | 'tabletop' | 'floor' {
+  if (!kind) return 'floor';
+  if (kind.ceiling) return 'ceiling';
+  const e = kind.elevation ?? 0;
+  return e >= HUNG ? 'high' : e > 0 ? 'tabletop' : 'floor';
+}
+
+/**
+ * What a tabletop piece put down at plan point `at` stands on: the highest piece standing
+ * on the floor or a tabletop whose footprint holds the point (under a wall cabinet, the desk
+ * beneath it).
+ */
+export function standsOn(items: Iterable<Item>, at: Vec2): Item | undefined {
+  let best: Item | undefined;
+  let top = Number.NEGATIVE_INFINITY;
+  for (const it of items) {
+    const kind = furnitureKind(it.assetId);
+    const layer = furnitureLayer(kind);
+    if (layer === 'ceiling' || layer === 'high') continue;
+    if (!pointInPolygon(at, itemFootprint(it, kind))) continue;
+    const h = it.position.y + itemSize(it, kind).h;
+    if (h > top) {
+      top = h;
+      best = it;
+    }
+  }
+  return best;
 }
 
 /**

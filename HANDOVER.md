@@ -555,11 +555,14 @@ field (`merge`: the edit's fields go over where the renovation's are as they wer
 renovation keeps fields it changed itself, so a repainted wall can still be split or
 thickened by a trace fix); a field both changed differently, or a record one removed and
 the other changed, holds it back; so does a door of the renovation's own on a wall whose
-ends the edit moves; and the result must hold together (every wall's corners and every
-opening's wall there, no wall drawn along another). Then the
+ends the edit moves (or makes a boundary), or a wall's end moved where the renovation moved
+that corner too; a piece of a split wall takes the renovation's fields for the wall; and the
+result must hold together (every wall's corners and every opening's wall there, no opening on
+a boundary, no wall drawn along another, no two doors overlapping). Then the
 renovation's rooms are found again, keeping a name or finish the edit gave a room where the
 renovation's was as it was (a new room's name only if free). Otherwise nothing is carried
-and a toast says so (a room the renovation renamed or refinished too counts). A drag or run
+and a toast says so (a room the renovation renamed or refinished too counts, as does a room
+the renovation made or changed that the edit would take away). A drag or run
 of nudges (one coalesce key) held back at any step goes back to how the drag found the
 renovation (`restore`), taking back its steps already carried, and stays held back. Restoring a version (or anything replacing the plan or renovation whole) carries
 nothing. One undo step, which shows Before (`touchedVariant`).
@@ -568,8 +571,12 @@ flat as it is left of a divider and the renovation right of it, in one view with
 (`CompareRender` in `Viewport.tsx` takes over drawing: each frame draws the scene twice, each
 time cut to its side with the scissor; the two versions are their own `LevelMesh`es). The
 divider drags by its handle (or the arrow keys, as a slider); walking shows one version and
-the comparison comes back after. Outside the frame only Before shows, so a 3D download while
-comparing draws the flat as it is.
+the comparison comes back after. Each side is lit by its own lamps (the other's are turned
+down for that pass, not hidden, so the count of lights and the shaders stay the same).
+Outside the frame the version picked above the plan shows and is the one named `level`, so a
+3D download while comparing draws that one. The divider sits under the view's buttons; Home,
+End, Page Up and Down move it too; a side under 90 px loses its label; its handle is a 44 px
+target, white with a dark edge for night and dark mode. Comparing ends with the renovation.
 
 **Downloads (Phase 4):** the project menu's Download section (`exports.ts`): the plan as a
 PNG (the plan SVG cloned with its computed styles inlined, handles and grid removed, the plan
@@ -685,7 +692,8 @@ The Go API logs it locally (`POST /telemetry`, 204).
   finger (it used to lose the moves between renders and slip behind); a finger let go while
   moving coasts and slows to a stop (`fling` in `PlanCanvas.tsx`: speed smoothed over the last
   moves, capped at 2.5 px/ms, two thirds lost every 325 ms; only after 40 px of real panning,
-  so not from what's left of a pinch; it stops before the plan's middle leaves the screen,
+  so not from what's left of a pinch; it stops before the plan leaves the screen (48 px of
+it, or all of a smaller plan, stays in view, unless the coast is bringing it back),
   when anything else moves the view (Fit), and at any press or wheel, and a tap that stops
   it does nothing else); one finger left down after a pinch pans on; in 3D, two fingers (or right-drag) pan over the floor
   (`screenSpacePanning={false}`) rather than up and down the screen.
@@ -928,8 +936,10 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
 - **Placing on furniture:** a piece that stands on others or hangs above them (the succulent,
   the desk lamp, ceiling lights) is placed by a click on a piece as anywhere else (`over` in
   `placing()`, `PlanCanvas.tsx`); a tabletop piece (under 1.2 m: a lamp, the succulent, the
-  TV) stands on that piece's top (`furnitureTool.tsx`), higher ones (a wall cabinet) keep
-  their height; a press on a piece of the same level (a lamp with a lamp picked, a light with
-  a light) selects it, one on a floor piece doesn't (switch to Select for that).
+  TV) stands on the top of the highest floor or tabletop piece under the point (`standsOn`
+  in core: so under a wall cabinet, on the desk beneath it), higher ones (a wall cabinet)
+  keep their height; a press on a piece of the same layer (`furnitureLayer`: ceiling, high,
+  tabletop, floor; a lamp with a lamp picked, a light with a light) selects it, one on a
+  piece of another layer doesn't (switch to Select for that).
 - **Corner dimension lines** for walls that run into the room draw inside it; fine at plan scale,
   busy on short walls.

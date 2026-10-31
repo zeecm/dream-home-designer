@@ -128,22 +128,47 @@ function planCarry(old: Level, now: Level, there: Level): Change[] | 'none' | 'c
     }
   }
   if (changes.length === 0) return 'none';
-  // Walls whose ends the edit moves to other corners (a split, a merge).
+  // Walls whose ends the edit moves to other corners (a split, a merge), or that it makes
+  // a boundary.
   const reended = new Set(
     Object.values(now.walls)
       .filter((w) => {
         const o = old.walls[w.id];
-        return o && (o.a !== w.a || o.b !== w.b);
+        return o && (o.a !== w.a || o.b !== w.b || (isBoundary(w) && !isBoundary(o)));
       })
       .map((w) => w.id),
   );
+  for (const id of reended) {
+    // A wall split where the renovation moved one of its ends would bend at the split.
+    const o = old.walls[id];
+    if (o && [o.a, o.b].some((v) => !same(has.vertices[v], was.vertices[v]))) return 'conflict';
+  }
   const merged = new Set(changes.filter((c) => c.key === 'openings').map((c) => c.id));
   for (const o of Object.values(there.openings)) {
     // The renovation's own (or own-changed) door, left where it was on a wall now ending
-    // elsewhere, would slide.
+    // elsewhere (or no longer a wall), would slide or float.
     if (reended.has(o.wallId) && !same(o, old.openings[o.id]) && !merged.has(o.id)) {
       return 'conflict';
     }
+  }
+  // A piece of a wall the edit split takes on what the renovation made of the wall (its
+  // thickness, its paint), not the flat's.
+  for (const c of changes) {
+    if (c.key !== 'walls' || old.walls[c.id] || !c.to) continue;
+    const piece = c.to as Wall;
+    const a = now.vertices[piece.a];
+    const b = now.vertices[piece.b];
+    if (!a || !b) continue;
+    const from = [...reended].find((id) => {
+      const o = old.walls[id];
+      const oa = o && old.vertices[o.a];
+      const ob = o && old.vertices[o.b];
+      return !!oa && !!ob && overlapping([oa, ob], [a, b]);
+    });
+    if (!from) continue;
+    const parent = (changes.find((x) => x.key === 'walls' && x.id === from)?.to ??
+      has.walls[from]) as Wall | undefined;
+    if (parent) c.to = { ...parent, id: piece.id, a: piece.a, b: piece.b };
   }
   // Tried on a copy: it must hold together.
   const trial = {
@@ -160,8 +185,21 @@ function planCarry(old: Level, now: Level, there: Level): Change[] | 'none' | 'c
   const vs = trial.vertices as Level['vertices'];
   const ws = trial.walls as Level['walls'];
   if (Object.values(ws).some((w) => !vs[w.a] || !vs[w.b])) return 'conflict';
-  if (Object.values(trial.openings as Level['openings']).some((o) => !ws[o.wallId])) {
-    return 'conflict';
+  const ops = Object.values(trial.openings as Level['openings']);
+  if (ops.some((o) => !ws[o.wallId] || isBoundary(ws[o.wallId] as Wall))) return 'conflict';
+  // No door or window added or moved by the edit overlapping another on its wall.
+  for (const c of changes) {
+    if (c.key !== 'openings' || !c.to) continue;
+    const o = c.to as Level['openings'][string];
+    const w = ws[o.wallId];
+    const a = w && vs[w.a];
+    const b = w && vs[w.b];
+    if (!a || !b) continue;
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    for (const q of ops) {
+      if (q.id === o.id || q.wallId !== o.wallId) continue;
+      if (Math.abs(q.t - o.t) * len < (q.width + o.width) / 2 - 1e-6) return 'conflict';
+    }
   }
   const ends = (w: Wall): [Vec2, Vec2] | null => {
     const a = vs[w.a];
@@ -223,6 +261,7 @@ export function carriedToRenovation(
           }
           return;
         }
+        const keep = structuredClone(current(after));
         if (plan !== 'none') {
           for (const c of plan) {
             const into: Record<string, unknown> = after[c.key];
@@ -238,6 +277,21 @@ export function carriedToRenovation(
         if (changed) {
           reclampOpenings(after);
           syncRooms(after);
+          // A room the renovation made or changed itself (renamed, refinished) gone with the
+          // edit (two rooms merged): held back, the renovation as it was.
+          const lost = Object.values(keep.rooms).some((r) => {
+            const o = old.rooms[r.id];
+            const own = !o || ROOM_FIELDS.some((f) => !same(r[f], o[f]));
+            return own && !after.rooms[r.id];
+          });
+          if (lost) {
+            for (const key of [...CARRIED, 'rooms'] as const) {
+              (after as Record<string, unknown>)[key] = keep[key];
+            }
+            after.ceilingHeight = keep.ceilingHeight;
+            outcome.conflict = true;
+            return;
+          }
         }
         // Rooms: what the edit changed of one (a name, a floor) where the renovation's is as it
         // was, and a new room's name and finishes on the same room there, if the name is free.
