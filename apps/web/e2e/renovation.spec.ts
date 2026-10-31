@@ -144,3 +144,30 @@ test('an edit to the flat as it is that the renovation changed too is not carrie
   await bar.getByRole('button', { name: 'After' }).click();
   await expect(page.locator(WALL).first()).toBeVisible();
 });
+
+test('the 3D view compares before and after across a divider', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('3');
+  // Only a plan with a renovation has two versions to compare.
+  await expect(page.getByRole('button', { name: 'Compare before and after' })).toHaveCount(0);
+  await page.keyboard.press('1');
+  await page.getByRole('button', { name: 'Plan a renovation' }).click();
+  await page.keyboard.press('3');
+  await page.getByRole('button', { name: 'Compare before and after' }).click();
+  const divider = page.getByRole('slider', { name: /Divider/ });
+  await expect(divider).toHaveAttribute('aria-valuenow', '50');
+  await divider.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(divider).toHaveAttribute('aria-valuenow', '45');
+  // Walking shows one version: the comparison goes, and comes back after.
+  await page.getByRole('button', { name: 'Walk through' }).click();
+  await expect(divider).toHaveCount(0);
+  await page.getByRole('button', { name: 'Leave walk' }).click();
+  await expect(divider).toBeVisible();
+  await page.getByRole('button', { name: 'Stop comparing' }).click();
+  await expect(divider).toHaveCount(0);
+  expect(errors).toEqual([]);
+});

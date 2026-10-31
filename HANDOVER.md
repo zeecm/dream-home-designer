@@ -560,7 +560,13 @@ renovation's was as it was (a new room's name only if free). Otherwise nothing i
 and a toast says so. A drag or run of nudges (one coalesce key) held back once stays held
 back. Restoring a version (or anything replacing the plan or renovation whole) carries
 nothing. One undo step, which shows Before (`touchedVariant`).
-**Not yet:** a side-by-side 3D compare.
+**Comparing in 3D:** with a renovation, the 3D view offers "Compare before and after": the
+flat as it is left of a divider and the renovation right of it, in one view with one camera
+(`CompareRender` in `Viewport.tsx` takes over drawing: each frame draws the scene twice, each
+time cut to its side with the scissor; the two versions are their own `LevelMesh`es). The
+divider drags by its handle (or the arrow keys, as a slider); walking shows one version and
+the comparison comes back after. Outside the frame only Before shows, so a 3D download while
+comparing draws the flat as it is.
 
 **Downloads (Phase 4):** the project menu's Download section (`exports.ts`): the plan as a
 PNG (the plan SVG cloned with its computed styles inlined, handles and grid removed, the plan
