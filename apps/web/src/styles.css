@@ -1493,10 +1493,18 @@ h3.field-label {
   font-size: var(--fs-small);
 }
 .size-handle,
-.turn-handle {
+.turn-handle,
+.move-handle {
   fill: var(--surface);
   stroke: var(--accent);
   stroke-width: 2px;
+}
+.move-glyph {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.6px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .loupe-bg {
   fill: var(--surface);

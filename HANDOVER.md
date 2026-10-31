@@ -640,7 +640,7 @@ The Go API logs it locally (`POST /telemetry`, 204).
 - Corners are 32 px targets on touch screens; the scale bar lets drags through; a swipe in a
   walk moves the scene with the finger; the guide is worded for phones too, keeps a fixed
   height, and step 1 offers "Draw instead".
-- **Not yet (from the round):** dragging a whole room.
+- Dragging a whole room: built since (**Moving a room** below).
 
 **Magnifier:** while a finger places a point (Wall, Room, Measure, Set scale, or dragging a
 corner in Select), a 2.5x loupe shows the plan under it with a crosshair, above the finger or
@@ -664,6 +664,29 @@ as the drag began on every move:
   splits the wall (double-click).
 - Dragging a wall not selected still pans, by mouse or finger. The distance moved shows
   beside it (`.wall-shift`, in mm for an Alt move).
+
+**Moving a room:** a selected room shows a move handle (a four-way arrow in a circle, placed
+inside the room clear of its label and door swings: `roomHandleAt` in `plan/layers.tsx`).
+Dragging it, by mouse or finger, moves the room (1 cm steps, 1 mm with Alt); the arrow keys
+move a selected room too (1 cm, 10 cm with Shift). A drag elsewhere in the room still pans.
+Core: `moveRoom.ts`, applied afresh to the level as the drag began on every move:
+- The room's corners, everything inside its outline (walls, enclosures, furniture by centre)
+  and the doors and windows on its walls go with it (`planRoomMove`).
+- A room standing alone moves anywhere. A room joined to others (`roomJoined`: a wall with
+  one end on it) moves along one axis at a time, the one the pointer has gone further (with
+  some hysteresis), so no joined wall slants. Joined walls running the way it moves stretch;
+  where one runs across the move, its corner stays and the room's walls leave it with a
+  short step along the move (`steps`); a corner on a straight stretch of the room's wall
+  running the way it moves stays as the wall slides through it (`stays`). Shared walls move
+  with the room, so neighbours grow or shrink; doors and windows on walls with one end moved
+  keep their distance from the end that stayed.
+- `moveBlocked` checks the moved geometry (a scratch copy) as `shiftBlocked` does: no wall
+  closer to another than their half thicknesses (unless joined, or already that close and
+  not getting closer), no stretching wall shrunk past its doors or turned back.
+  `moveTowards` marches in 1 cm steps to the pointer and, moving freely, slides along a wall
+  in the way.
+- One undo step per drag; back where it began, nothing is kept; Escape, a cancelled touch or
+  a second finger takes it back. The distance shows under the handle (`← 0.45 m   ↓ 0.10 m`).
 
 **Door and window clearances:** while one is dragged (Select or its own tool), the clear wall
 on each side of it to the inside corners shows as a dimension off the wall

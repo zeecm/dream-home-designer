@@ -1,9 +1,11 @@
 import {
+  type Axis,
   type Command,
   type DispatchOptions,
   type Item,
   type Level,
   type PlanGeometry,
+  type RoomMove,
   type ShiftIds,
   type Vec2,
   addItem,
@@ -16,11 +18,15 @@ import {
   furnitureKind,
   itemFootprint,
   itemSize,
+  moveRoom,
+  moveTowards,
   moveVertex,
   newId,
   openingClearances,
   openingSpan,
   placeFurniture,
+  planRoomMove,
+  roomJoined,
   settleVertex,
   shiftBlocked,
   shiftIds,
@@ -35,6 +41,7 @@ import { type Selection, type Tool, useEditor } from '../editor';
 import { currentLevel, useStore } from '../store';
 import { formatLength } from '../units';
 import { cycle, movedVertices, nudge, objectPoint, planObjects } from './keyboard';
+import { roomHandleAt } from './layers';
 import { type Size, type View, panBy, reveal, worldToScreen } from './view';
 
 export interface PlanPointer {
@@ -85,7 +92,7 @@ export interface ToolController {
 
 export const TOOL_HINTS: Record<Tool, string> = {
   select:
-    'Tap or click to select; drag a corner or a door to move it. Tab and the arrow keys work too; double-click a wall to add a corner.',
+    'Tap or click to select; drag a corner or a door to move it, or a selected room by its handle. Tab and the arrow keys work too; double-click a wall to add a corner.',
   wall: 'Tap or click each corner, or drag from corner to corner. Type a length for an exact wall. Drag an end of the wall you just drew to adjust it. Joining an existing wall, or Done, finishes.',
   room: 'Drag from one corner to the opposite one, or tap both, to draw a rectangular room.',
   door: 'Pick a width, then tap or click a wall to add a door.',
@@ -176,7 +183,24 @@ type Drag =
       key: string;
     }
   /** The turn handle in front of a selected piece. */
-  | { kind: 'rotate'; id: string; start: Vec2; moved: boolean; key: string };
+  | { kind: 'rotate'; id: string; start: Vec2; moved: boolean; key: string }
+  /** A selected room's move handle: the room and what it carries move together. */
+  | {
+      kind: 'room';
+      id: string;
+      /** Where the pointer and the handle were as the drag began (plan metres). */
+      from: Vec2;
+      handle: Vec2;
+      delta: Vec2;
+      /** The level as the drag began: each move is applied to it afresh. */
+      level: Level;
+      /** Joined to other rooms: it moves along one axis at a time. */
+      joined: boolean;
+      move: RoomMove;
+      start: Vec2;
+      moved: boolean;
+      key: string;
+    };
 
 /** How far in front of a selected piece (screen px) its turn handle sits. */
 const TURN_HANDLE_GAP = 30;
@@ -219,6 +243,48 @@ export function onDrawnHandle(ctx: ToolContext, p: PlanPointer): boolean {
   const near = (q: Vec2 | undefined, r: number) =>
     !!q && Math.hypot(q.x - p.screen.x, q.y - p.screen.y) <= r;
   return near(h.turn, 11) || h.corners.some((q) => near(q, HANDLE_SIZE * 0.75));
+}
+
+/** How near (screen px) a press must land to a selected room's move handle. */
+const ROOM_HANDLE_REACH = 18;
+
+/** A selected room's move handle on screen, if a room is selected. */
+function roomHandle(ctx: ToolContext): { id: string; at: Vec2 } | null {
+  const sel = useEditor.getState().selection;
+  if (sel?.kind !== 'room') return null;
+  const at = roomHandleAt(ctx.level, ctx.geom, ctx.view.zoom, sel.id);
+  return at ? { id: sel.id, at: worldToScreen(ctx.view, ctx.size, at) } : null;
+}
+
+/** Whether a press lands on the selected room's move handle (a corner or door comes first). */
+function onRoomHandle(ctx: ToolContext, p: PlanPointer): string | null {
+  if (p.hit && (p.hit.kind === 'vertex' || p.hit.kind === 'opening' || p.hit.kind === 'item'))
+    return null;
+  const h = roomHandle(ctx);
+  return h && Math.hypot(h.at.x - p.screen.x, h.at.y - p.screen.y) <= ROOM_HANDLE_REACH
+    ? h.id
+    : null;
+}
+
+/** One room-move step for the arrow keys: `delta` metres, or none if a wall is in the way. */
+function nudgeRoom(level: Level, id: string, delta: Vec2): Command | null {
+  const axis: Axis | null = !roomJoined(level, id) ? null : delta.x !== 0 ? 'x' : 'y';
+  const move = planRoomMove(level, id, axis);
+  if (move.vertices.length === 0 && move.steps.length === 0) return null;
+  const to = moveTowards(level, move, { x: 0, y: 0 }, delta);
+  return Math.hypot(to.x, to.y) < 1e-9 ? null : moveRoom(level, move, to);
+}
+
+/**
+ * The axis a joined room's drag follows: the way the pointer has gone further, keeping the
+ * current one until the other is clearly ahead, so a drag near the diagonal doesn't flicker.
+ */
+function dragAxis(raw: Vec2, current: Axis | null): Axis {
+  const ax = Math.abs(raw.x);
+  const ay = Math.abs(raw.y);
+  if (current === 'x') return ay > ax * 1.25 + 0.02 ? 'y' : 'x';
+  if (current === 'y') return ax > ay * 1.25 + 0.02 ? 'x' : 'y';
+  return ax >= ay ? 'x' : 'y';
 }
 
 interface NudgeRun {
@@ -310,7 +376,7 @@ export function useSelectTool(ctx: ToolContext): ToolController {
   return {
     cursor: 'default',
     // On a touch screen, a finger on a selected piece's handle takes it at once.
-    grabs: (p) => handleAt(p) !== null,
+    grabs: (p) => handleAt(p) !== null || onRoomHandle(ctx, p) !== null,
     // The system took the touch, or a second finger came down to pinch: take the drag back.
     touchCancel: () => {
       const d = drag.current;
@@ -332,6 +398,25 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         drag.current = anchor
           ? { kind: 'resize', id: handle.id, anchor, keepDepth, start: p.screen, moved: false, key }
           : { kind: 'rotate', id: handle.id, start: p.screen, moved: false, key };
+        return true;
+      }
+      const roomId = onRoomHandle(ctx, p);
+      const handleAtStart = roomId && roomHandleAt(ctx.level, ctx.geom, ctx.view.zoom, roomId);
+      if (roomId && handleAtStart) {
+        const joined = roomJoined(ctx.level, roomId);
+        drag.current = {
+          kind: 'room',
+          id: roomId,
+          from: p.world,
+          handle: handleAtStart,
+          delta: { x: 0, y: 0 },
+          level: ctx.level,
+          joined,
+          move: planRoomMove(ctx.level, roomId, joined ? 'x' : null),
+          start: p.screen,
+          moved: false,
+          key: `drag:${roomId}:${Date.now()}`,
+        };
         return true;
       }
       const h = p.hit;
@@ -452,6 +537,28 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         );
         return;
       }
+      if (d.kind === 'room') {
+        // In 1 cm steps (1 mm with Alt), towards the pointer until a wall is in the way, then
+        // sliding along it.
+        // A joined room goes along the axis the pointer has gone further, starting afresh from
+        // where it began when that changes.
+        const step = p.alt ? 0.001 : 0.01;
+        const raw = { x: p.world.x - d.from.x, y: p.world.y - d.from.y };
+        const want = { x: Math.round(raw.x / step) * step, y: Math.round(raw.y / step) * step };
+        let have = d.delta;
+        if (d.joined) {
+          const axis = dragAxis(raw, d.moved && have.x === 0 && have.y === 0 ? null : d.move.axis);
+          if (axis !== d.move.axis) {
+            d.move = planRoomMove(d.level, d.id, axis);
+            have = { x: 0, y: 0 };
+          }
+        }
+        const to = moveTowards(d.level, d.move, have, want, Math.min(step, 0.01));
+        if (Math.hypot(to.x - d.delta.x, to.y - d.delta.y) < 1e-9) return;
+        d.delta = to;
+        ctx.dispatch(moveRoom(d.level, d.move, to), { coalesceKey: d.key });
+        return;
+      }
       if (d.kind === 'wall') {
         const raw = (p.world.x - d.from.x) * d.n.x + (p.world.y - d.from.y) * d.n.y;
         const step = p.alt ? 0.001 : 0.01;
@@ -524,6 +631,11 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         ctx.dispatch(r.command);
         select({ kind: 'vertex', id: r.vertexId });
       }
+      if (d?.kind === 'room' && d.moved && Math.hypot(d.delta.x, d.delta.y) < 1e-9) {
+        // Back where it began: nothing to keep.
+        cancelDrag(d);
+        return;
+      }
       if (d?.kind === 'wall' && d.moved) {
         // Back where it began: nothing to keep.
         if (Math.abs(d.offset) < 1e-9) {
@@ -544,7 +656,7 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       const d = drag.current;
       if (
         e.key === 'Escape' &&
-        (d?.kind === 'resize' || d?.kind === 'rotate' || d?.kind === 'wall')
+        (d?.kind === 'resize' || d?.kind === 'rotate' || d?.kind === 'wall' || d?.kind === 'room')
       ) {
         drag.current = null;
         cancelDrag(d);
@@ -574,8 +686,8 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         return true;
       }
       if (arrow && (onCanvas || e.target === document.body) && !e.ctrlKey && !e.metaKey) {
-        // Corners, walls and openings move; with nothing movable selected, arrows pan.
-        if (!sel || sel.kind === 'room') {
+        // Corners, walls, openings, furniture and rooms move; with nothing selected, arrows pan.
+        if (!sel) {
           const px = e.shiftKey ? 200 : 40;
           useEditor.getState().setView(panBy(ctx.view, -arrow.x * px, -arrow.y * px), true);
           return true;
@@ -583,8 +695,10 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         // Read the live document: key repeat can outrun React's re-render. 1 cm per press,
         // 10 cm with Shift. Corners only move during a run; they merge or split once it ends.
         const step = e.shiftKey ? 0.1 : 0.01;
-        const cmds = nudge(live(), sel, { x: arrow.x * step, y: arrow.y * step });
-        if (cmds.length === 0) return true; // e.g. a door nudged across its wall
+        const delta = { x: arrow.x * step, y: arrow.y * step };
+        const moveBy = sel.kind === 'room' ? nudgeRoom(live(), sel.id, delta) : null;
+        const cmds = sel.kind === 'room' ? (moveBy ? [moveBy] : []) : nudge(live(), sel, delta);
+        if (cmds.length === 0) return true; // e.g. a door nudged across its wall, a room into one
         if (!run.current) {
           run.current = {
             sel,
@@ -678,6 +792,8 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         );
       }
       if (dw?.kind === 'opening' && dw.moved) return <OpeningClearances ctx={o} id={dw.id} />;
+      if (dw?.kind === 'room') return <RoomMoveHandle ctx={o} drag={dw} />;
+      if (sel?.kind === 'room') return <RoomMoveHandle ctx={o} />;
       const it = sel?.kind === 'item' ? o.level.items[sel.id] : undefined;
       if (!it) return null;
       const h = itemHandles(o, it);
@@ -716,6 +832,62 @@ export function useSelectTool(ctx: ToolContext): ToolController {
  * While a door or window is dragged: the clear wall left on each side of it, to the inside
  * corners, drawn as a dimension just off the wall.
  */
+/** The four-way arrow drawn in a room's move handle, centred on 0, 0. */
+const MOVE_GLYPH =
+  'M0 -7V7M-7 0H7M-2.5 -4.5L0 -7L2.5 -4.5M-2.5 4.5L0 7L2.5 4.5M-4.5 -2.5L-7 0L-4.5 2.5M4.5 -2.5L7 0L4.5 2.5';
+
+/**
+ * The selected room's move handle, and while it is dragged, how far the room has gone
+ * (across, then up or down the plan).
+ */
+function RoomMoveHandle({
+  ctx,
+  drag,
+}: { ctx: ToolContext; drag?: Extract<Drag, { kind: 'room' }> }) {
+  const sel = useEditor.getState().selection;
+  const world = drag
+    ? { x: drag.handle.x + drag.delta.x, y: drag.handle.y + drag.delta.y }
+    : sel?.kind === 'room'
+      ? roomHandleAt(ctx.level, ctx.geom, ctx.view.zoom, sel.id)
+      : null;
+  if (!world) return null;
+  const c = worldToScreen(ctx.view, ctx.size, world);
+  const dx = drag?.delta.x ?? 0;
+  const dy = drag?.delta.y ?? 0;
+  // A move in millimetres (Alt) says so; whole centimetres read as metres.
+  const fmt = (v: number) =>
+    Math.abs(v * 100 - Math.round(v * 100)) > 1e-6
+      ? `${Math.round(Math.abs(v) * 1000)} mm`
+      : formatLength(Math.abs(v));
+  const parts = [
+    ...(Math.abs(dx) > 1e-9 ? [`${dx > 0 ? '→' : '←'} ${fmt(dx)}`] : []),
+    ...(Math.abs(dy) > 1e-9 ? [`${dy > 0 ? '↓' : '↑'} ${fmt(dy)}`] : []),
+  ];
+  const text = parts.join('   ');
+  const width = text.length * 7 + 20;
+  // Below the handle, kept inside the plan.
+  const at = {
+    x: Math.min(ctx.size.width - width / 2 - 4, Math.max(width / 2 + 4, c.x)),
+    y: Math.min(ctx.size.height - 16, c.y + 34),
+  };
+  return (
+    <g pointerEvents="none">
+      <g className="room-move" transform={`translate(${c.x} ${c.y})`}>
+        <circle r={13} className="move-handle" />
+        <path d={MOVE_GLYPH} className="move-glyph" />
+      </g>
+      {text && (
+        <g className="handle-length" transform={`translate(${at.x} ${at.y})`}>
+          <rect x={-width / 2} y={-11} width={width} height={22} rx={4} />
+          <text textAnchor="middle" y={4} className="num">
+            {text}
+          </text>
+        </g>
+      )}
+    </g>
+  );
+}
+
 function OpeningClearances({ ctx, id }: { ctx: ToolContext; id: string }) {
   const op = ctx.level.openings[id];
   const f = op && ctx.geom.frames[op.wallId];
