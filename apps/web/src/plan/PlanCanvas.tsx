@@ -75,7 +75,14 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
       const k = kind === 'item' && furnitureKind(useEditor.getState().furnitureKind);
       return !!k && (!!k.ceiling || (k.elevation ?? 0) > 0);
     };
-    const onOwn = (p: PlanPointer) => (p.hit?.kind === kind && !over()) || handle(p);
+    /** A piece that itself stands on others or hangs (a lamp, a light): still its own. */
+    const raised = (id: string) => {
+      const it = ctx?.level.items[id];
+      const k = it && furnitureKind(it.assetId);
+      return !!k && (!!k.ceiling || (k.elevation ?? 0) > 0);
+    };
+    const onOwn = (p: PlanPointer) =>
+      (p.hit?.kind === kind && (!over() || raised(p.hit.id))) || handle(p);
     return {
       ...own,
       grabs: (p) => onOwn(p) || (own.grabs?.(p) ?? false),

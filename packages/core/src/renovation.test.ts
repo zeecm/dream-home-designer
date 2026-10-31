@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addOpening,
   deleteOpening,
   deleteWall,
   drawWall,
   moveVertex,
+  restoreVersion,
   splitWall,
   updateOpening,
   updateRoom,
@@ -284,5 +286,104 @@ describe('carriedToRenovation', () => {
     const back = undo(s);
     expect(back.doc.renovation?.levels[0]?.walls.w_bed2_master).toBeDefined();
     expect(back.doc.levels[0]?.walls.w_bed2_master).toBeDefined();
+  });
+
+  const wallAt = (s: EditorDoc, from: { x: number; y: number }, to: { x: number; y: number }) => {
+    const l = s.doc.levels[0];
+    if (!l) throw new Error('no level');
+    return drawWall(l, { point: from }, { point: to }, { thickness: 0.1 }).command;
+  };
+
+  it('carries nothing where the renovation changed a wall the edit splits or shortens', () => {
+    // The renovation paints the living room's partition; the flat as it is gets a wall
+    // meeting it in a T (splitting it).
+    let s = dispatch(renovating(), updateWall(A, 'w_mid_2', { materialLeft: 'paint-sage' }));
+    const outcome = {};
+    s = dispatch(s, carriedToRenovation(wallAt(s, { x: 4.2, y: 4.5 }, { x: 4.2, y: 2 }), outcome));
+    expect(outcome).toEqual({ carried: false, conflict: true });
+    const after = s.doc.renovation?.levels[0];
+    expect(after?.walls.w_mid_2?.materialLeft).toBe('paint-sage');
+    expect(Object.keys(after?.walls ?? {}).length).toBe(
+      Object.keys(renovating().doc.levels[0]?.walls ?? {}).length,
+    );
+    expect(changesOf(s).some((c) => c.kind === 'room')).toBe(false);
+  });
+
+  it('never leaves the renovation a door on a missing wall, or a door moved by a split', () => {
+    // The renovation adds a door to a wall; the flat as it is loses that wall.
+    const door = addOpening(A, {
+      wallId: 'w_bed3_bed2',
+      kind: 'door',
+      t: 0.7,
+      width: 0.8,
+      height: 2.1,
+      sill: 0,
+    });
+    let s = dispatch(renovating(), door.command);
+    const outcome = {};
+    s = dispatch(s, carriedToRenovation(deleteWall(L, 'w_bed3_bed2'), outcome));
+    expect(outcome).toMatchObject({ conflict: true });
+    const after = s.doc.renovation?.levels[0];
+    expect(after?.walls.w_bed3_bed2).toBeDefined();
+    expect(after?.openings[door.openingId]?.wallId).toBe('w_bed3_bed2');
+    // A wall split in the flat as it is, where the renovation has its own door: not carried.
+    s = dispatch(renovating(), door.command);
+    s = dispatch(s, carriedToRenovation(wallAt(s, { x: 3.5, y: 7 }, { x: 2, y: 7 }), outcome));
+    expect(outcome).toMatchObject({ conflict: true });
+    expect(s.doc.renovation?.levels[0]?.openings[door.openingId]?.t).toBe(0.7);
+  });
+
+  it('carries no wall drawn where the renovation already drew one', () => {
+    let s = renovating();
+    const after = s.doc.renovation?.levels[0];
+    if (!after) throw new Error('no renovation');
+    s = dispatch(
+      s,
+      drawWall(after, { point: { x: 1, y: 1 } }, { point: { x: 2.5, y: 1 } }, { thickness: 0.1 })
+        .command,
+    );
+    const outcome = {};
+    s = dispatch(s, carriedToRenovation(wallAt(s, { x: 1, y: 1 }, { x: 2.5, y: 1 }), outcome));
+    expect(outcome).toMatchObject({ conflict: true });
+    const walls = Object.values(s.doc.renovation?.levels[0]?.walls ?? {});
+    expect(walls.length).toBe(Object.keys(after.walls).length + 1);
+  });
+
+  it('carries nothing of a restored version, and gives a new room a free name', () => {
+    const start = renovating();
+    let s = dispatch(start, updateWall(A, 'w_bed3_bed2', { height: 1 }));
+    const outcome = {};
+    s = dispatch(s, carriedToRenovation(restoreVersion(start.doc), outcome));
+    expect(outcome).toEqual({ carried: false, conflict: false });
+    expect(s.doc.renovation?.levels[0]?.walls.w_bed3_bed2?.height).toBeUndefined();
+    // The renovation divides a room ("Room 1"); the flat as it is divides another: the
+    // renovation doesn't end up with two rooms called Room 1.
+    s = dispatch(
+      start,
+      (() => {
+        const a = start.doc.renovation?.levels[0];
+        if (!a) throw new Error('no renovation');
+        return drawWall(
+          a,
+          { point: { x: 8, y: 0 } },
+          { point: { x: 8, y: 4.5 } },
+          { thickness: 0.1 },
+        ).command;
+      })(),
+    );
+    expect(Object.values(s.doc.renovation?.levels[0]?.rooms ?? {}).map((r) => r.name)).toContain(
+      'Room 1',
+    );
+    s = dispatch(s, carriedToRenovation(wallAt(s, { x: 0, y: 6.5 }, { x: 3.5, y: 6.5 })));
+    const names = Object.values(s.doc.renovation?.levels[0]?.rooms ?? {}).map((r) => r.name);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it('takes an edit the renovation already has as done, not as a conflict', () => {
+    let s = dispatch(renovating(), deleteWall(A, 'w_bed3_bed2'));
+    const outcome = {};
+    s = dispatch(s, carriedToRenovation(deleteWall(L, 'w_bed3_bed2'), outcome));
+    expect(outcome).toMatchObject({ conflict: false });
+    expect(changesOf(s)).toEqual([]);
   });
 });

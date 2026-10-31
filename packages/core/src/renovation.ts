@@ -52,40 +52,141 @@ export function endRenovation(keep: Variant): Command {
   };
 }
 
-/** The parts of a level an edit to the flat as it is carries over to the renovation. */
-const CARRIED = ['vertices', 'walls', 'openings', 'items', 'rooms'] as const;
+/** The records an edit to the flat as it is carries over (rooms follow from the walls). */
+const CARRIED = ['vertices', 'walls', 'openings', 'items'] as const;
+type Carried = (typeof CARRIED)[number];
+/** What a room keeps of its own when carried: the rest (its outline) is found again. */
+const ROOM_FIELDS = ['name', 'floorMaterial', 'ceilingMaterial', 'ceilingHeight'] as const;
 
 const same = (p: unknown, q: unknown) => JSON.stringify(p) === JSON.stringify(q);
 
+/** What became of an edit carried to the renovation: carried, or held back by a conflict. */
+export interface Carry {
+  carried?: boolean;
+  conflict?: boolean;
+}
+
+type Records = Record<Carried, Record<string, unknown>>;
+type Change = { key: Carried; id: string; to: unknown };
+
+/** Whether two walls' centre lines run along each other for more than a point. */
+function overlapping(p: [Vec2, Vec2], q: [Vec2, Vec2]): boolean {
+  const d = { x: p[1].x - p[0].x, y: p[1].y - p[0].y };
+  const len = Math.hypot(d.x, d.y);
+  if (len < 1e-9) return false;
+  const u = { x: d.x / len, y: d.y / len };
+  const off = (v: Vec2) => Math.abs((v.x - p[0].x) * -u.y + (v.y - p[0].y) * u.x);
+  if (off(q[0]) > 0.005 || off(q[1]) > 0.005) return false;
+  const t = (v: Vec2) => (v.x - p[0].x) * u.x + (v.y - p[0].y) * u.y;
+  const lo = Math.max(0, Math.min(t(q[0]), t(q[1])));
+  const hi = Math.min(len, Math.max(t(q[0]), t(q[1])));
+  return hi - lo > 0.01;
+}
+
+/**
+ * The changes an edit made to a level (`old` to `now`), if the renovation's copy (`there`)
+ * can take them all: each record changed is still there as it was; nothing the renovation
+ * added or changed itself hangs on one (a door on a wall, a wall on a corner); and the result
+ * holds together (every wall's corners and every opening's wall there, no wall added along
+ * another). 'conflict' if not; 'none' for no change.
+ */
+function planCarry(old: Level, now: Level, there: Level): Change[] | 'none' | 'conflict' {
+  const changes: Change[] = [];
+  for (const key of CARRIED) {
+    const a: Record<string, unknown> = old[key];
+    const b: Record<string, unknown> = now[key];
+    for (const id of new Set([...Object.keys(a), ...Object.keys(b)])) {
+      if (!same(a[id], b[id])) changes.push({ key, id, to: b[id] });
+    }
+  }
+  const was = old as unknown as Records;
+  const has = there as unknown as Records;
+  // What the renovation already has (a wall it took out too) needs nothing.
+  const todo = changes.filter((c) => !same(has[c.key][c.id], c.to));
+  if (todo.length === 0) return 'none';
+  changes.splice(0, changes.length, ...todo);
+  if (changes.some((c) => !same(has[c.key][c.id], was[c.key][c.id]))) return 'conflict';
+  const touched = (key: Carried) => new Set(changes.filter((c) => c.key === key).map((c) => c.id));
+  const tv = touched('vertices');
+  const tw = touched('walls');
+  const own = (key: Carried, id: string) => !same(has[key][id], was[key][id]);
+  for (const w of Object.values(there.walls)) {
+    if (!tw.has(w.id) && (tv.has(w.a) || tv.has(w.b)) && own('walls', w.id)) return 'conflict';
+  }
+  for (const o of Object.values(there.openings)) {
+    if (tw.has(o.wallId) && !touched('openings').has(o.id) && own('openings', o.id)) {
+      return 'conflict';
+    }
+  }
+  // Tried on a copy: it must hold together.
+  const trial = {
+    vertices: { ...there.vertices },
+    walls: { ...there.walls },
+    openings: { ...there.openings },
+  } as Record<string, Record<string, unknown>>;
+  for (const c of changes) {
+    if (c.key === 'items') continue;
+    const into = trial[c.key] as Record<string, unknown>;
+    if (c.to === undefined) delete into[c.id];
+    else into[c.id] = c.to;
+  }
+  const vs = trial.vertices as Level['vertices'];
+  const ws = trial.walls as Level['walls'];
+  if (Object.values(ws).some((w) => !vs[w.a] || !vs[w.b])) return 'conflict';
+  if (Object.values(trial.openings as Level['openings']).some((o) => !ws[o.wallId])) {
+    return 'conflict';
+  }
+  const ends = (w: Wall): [Vec2, Vec2] | null => {
+    const a = vs[w.a];
+    const b = vs[w.b];
+    return a && b ? [a, b] : null;
+  };
+  for (const id of tw) {
+    const w = ws[id];
+    const p = w && !old.walls[id] ? ends(w) : null;
+    if (!p) continue;
+    for (const o of Object.values(ws)) {
+      const q = o.id !== id ? ends(o) : null;
+      if (q && overlapping(p, q)) return 'conflict';
+    }
+  }
+  return changes;
+}
+
 /**
  * An edit to the flat as it is (a trace fixed, a wall found), carried over to the renovation
- * wherever the renovation hasn't changed that part itself: each corner, wall, door, piece of
- * furniture or room the edit changes, adds or removes is changed the same way in the
- * renovation if it is there just as it was before the edit (or, added, isn't there). What
- * the renovation changed stays as it is. One command, so one undo step.
+ * where the renovation hasn't changed that part itself: all of it or none (`planCarry`).
+ * Rooms are found again from the walls, keeping what the edit gave them (a name, a floor)
+ * where the renovation hadn't changed it. A command that replaces the plan or the renovation
+ * whole (restoring a version, starting or ending a renovation) carries nothing. One command,
+ * so one undo step; `outcome` says what happened.
  */
-export function carriedToRenovation(cmd: Command): Command {
+export function carriedToRenovation(cmd: Command, outcome: Carry = {}): Command {
   return {
     ...cmd,
     recipe: (d) => {
-      const was = d.renovation ? d.levels.map((l) => structuredClone(current(l))) : [];
+      outcome.carried = false;
+      outcome.conflict = false;
+      const reno = d.renovation;
+      const levels = d.levels;
+      const was = reno ? d.levels.map((l) => structuredClone(current(l))) : [];
       cmd.recipe(d);
+      if (!reno || d.renovation !== reno || d.levels !== levels) return;
       d.levels.forEach((l, i) => {
         const old = was[i];
-        const after = old && d.renovation?.levels.find((a) => a.id === `${old.id}${AFTER_SUFFIX}`);
+        const after = old && reno.levels.find((a) => a.id === `${old.id}${AFTER_SUFFIX}`);
         if (!old || !after) return;
         const now = isDraft(l) ? current(l) : l;
+        const plan = planCarry(old, now, current(after));
         let changed = false;
-        for (const key of CARRIED) {
-          const before: Record<string, unknown> = old[key];
-          const edited: Record<string, unknown> = now[key];
-          const there: Record<string, unknown> = after[key];
-          for (const id of new Set([...Object.keys(before), ...Object.keys(edited)])) {
-            if (same(before[id], edited[id]) || !same(there[id], before[id])) continue;
-            if (edited[id] === undefined) delete there[id];
-            else there[id] = structuredClone(edited[id]);
-            changed = true;
+        if (plan === 'conflict') outcome.conflict = true;
+        else if (plan !== 'none') {
+          for (const c of plan) {
+            const into: Record<string, unknown> = after[c.key];
+            if (c.to === undefined) delete into[c.id];
+            else into[c.id] = structuredClone(c.to);
           }
+          changed = true;
         }
         if (old.ceilingHeight !== now.ceilingHeight && after.ceilingHeight === old.ceilingHeight) {
           after.ceilingHeight = now.ceilingHeight;
@@ -95,6 +196,33 @@ export function carriedToRenovation(cmd: Command): Command {
           reclampOpenings(after);
           syncRooms(after);
         }
+        // Rooms: what the edit changed of one (a name, a floor) where the renovation's is as it
+        // was, and a new room's name and finishes on the same room there, if the name is free.
+        for (const r of Object.values(now.rooms)) {
+          const before = old.rooms[r.id];
+          const loop = new Set(r.loop);
+          const target =
+            after.rooms[r.id] ??
+            (before
+              ? undefined
+              : Object.values(after.rooms).find(
+                  (q) => q.loop.length === loop.size && q.loop.every((v) => loop.has(v)),
+                ));
+          if (!target) continue;
+          for (const f of ROOM_FIELDS) {
+            if (same(r[f], before ? before[f] : target[f])) continue;
+            if (before && !same(target[f], before[f])) continue;
+            if (
+              f === 'name' &&
+              Object.values(after.rooms).some((q) => q.id !== target.id && q.name === r.name)
+            ) {
+              continue;
+            }
+            (target as Record<string, unknown>)[f] = structuredClone(r[f]);
+            changed = true;
+          }
+        }
+        if (changed) outcome.carried = true;
       });
     },
   };

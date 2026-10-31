@@ -293,4 +293,8 @@ test('a piece that stands on others (a succulent) is placed on a table by clicki
   await page.mouse.click(at.x, at.y);
   await expect(items).toHaveCount(2);
   await expect(page.getByRole('heading', { name: 'Succulent, on a table' })).toBeVisible();
+  // A click on the succulent itself (a piece that stands on others) selects it: no second
+  // one stacked on it.
+  await page.mouse.click(at.x, at.y);
+  await expect(items).toHaveCount(2);
 });

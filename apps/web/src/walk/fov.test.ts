@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { verticalFov } from './fov';
+import { verticalFov, widestFov } from './fov';
 
 const across = (vertical: number, aspect: number) =>
   (2 * Math.atan(Math.tan((vertical * Math.PI) / 360) * aspect) * 180) / Math.PI;
@@ -17,5 +17,11 @@ describe('verticalFov', () => {
     expect(across(verticalFov(100, 0.46), 0.46)).toBeGreaterThan(55);
     // The split screen's taller view keeps most of it.
     expect(across(verticalFov(100, 0.8), 0.8)).toBeGreaterThan(85);
+  });
+
+  it('says how wide a view fits, so the slider stops there', () => {
+    expect(widestFov(16 / 9)).toBe(120);
+    expect(widestFov(1.08)).toBe(100);
+    expect(widestFov(390 / 614)).toBe(70);
   });
 });

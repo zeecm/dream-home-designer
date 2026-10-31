@@ -4,6 +4,7 @@ import {
   duplicateOf,
   furnitureKind,
   itemFootprint,
+  itemSize,
   newId,
   newItem,
   placeFurniture,
@@ -38,9 +39,18 @@ export function useFurnitureTool(ctx: ToolContext): ToolController {
       const spot = place(p);
       if (!kind || !spot) return true;
       const id = newId('it');
-      ctx.dispatch(
-        addItem(ctx.level.id, newItem(id, kind, spot.at, spot.rotation, ctx.level.ceilingHeight)),
-      );
+      const item = newItem(id, kind, spot.at, spot.rotation, ctx.level.ceilingHeight);
+      // On a piece (a lamp on a desk): on its top, whatever its height.
+      const under = p.hit?.kind === 'item' ? ctx.level.items[p.hit.id] : undefined;
+      if (
+        under &&
+        (kind.elevation ?? 0) > 0 &&
+        !kind.ceiling &&
+        !furnitureKind(under.assetId)?.ceiling
+      ) {
+        item.position.y = under.position.y + itemSize(under).h;
+      }
+      ctx.dispatch(addItem(ctx.level.id, item));
       useEditor.getState().select({ kind: 'item', id });
       // No preview over the piece just placed; the next pointer move brings it back.
       setAt(null);

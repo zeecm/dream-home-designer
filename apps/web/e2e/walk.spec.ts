@@ -70,7 +70,7 @@ test('footsteps can be turned off while walking, and stay off', async ({ page })
   );
 });
 
-test('the walk’s field of view starts near the eye’s, can be widened, and stays so', async ({
+test('the walk’s field of view starts near the eye’s, can be changed, and stays so', async ({
   page,
 }) => {
   await page.goto('/');
@@ -80,11 +80,13 @@ test('the walk’s field of view starts near the eye’s, can be widened, and st
   await page.getByRole('button', { name: 'Walk through' }).click();
   const fov = page.getByLabel('Field of view');
   await expect(fov).toHaveValue('100');
-  await fov.fill('115');
-  await expect(page.locator('.sun-control')).toContainText('115°');
+  // The slider stops at what the view's shape allows (a tall view can't show as wide).
+  expect(Number(await fov.getAttribute('max'))).toBeGreaterThanOrEqual(100);
+  await fov.fill('80');
+  await expect(page.locator('.sun-control')).toContainText('80°');
   await page.reload();
   await waitSaved(page);
   await page.keyboard.press('3');
   await page.getByRole('button', { name: 'Walk through' }).click();
-  await expect(page.getByLabel('Field of view')).toHaveValue('115');
+  await expect(page.getByLabel('Field of view')).toHaveValue('80');
 });

@@ -1,4 +1,5 @@
 import {
+  type Carry,
   type Command,
   type DispatchOptions,
   type EditorDoc,
@@ -210,6 +211,8 @@ export const canEdit = (s: { sync: SyncStatus; role: Role }) =>
   EDITABLE.has(s.sync.kind) && s.role !== 'viewer';
 
 export const useStore = create<State>((set, get) => {
+  /** The gesture (coalesce key) last dispatched, and whether its carry-over was held back. */
+  let carry: { key?: string; held: boolean } = { held: false };
   const commit = (editor: EditorDoc) => {
     set({ editor, canUndo: canUndo(editor), canRedo: canRedo(editor) });
     if (get().sync.kind === 'conflict') return;
@@ -311,16 +314,32 @@ export const useStore = create<State>((set, get) => {
       if (!canEdit(get())) return;
       const editorBefore = get().editor;
       // An edit to the flat as it is carries over to the renovation, where that hasn't
-      // changed the same thing itself.
-      const carried =
-        editorBefore.doc.renovation && useEditor.getState().variant === 'before'
-          ? carriedToRenovation(cmd)
-          : cmd;
-      const next = coreDispatch(editorBefore, carried, opts);
+      // changed the same thing itself. A drag or a run of nudges (one coalesce key) once held
+      // back stays so, even where it later passes through the renovation's own version.
+      const key = opts?.coalesceKey;
+      const going = key !== undefined && carry.key === key;
+      const outcome: Carry = {};
+      const carrying =
+        !!editorBefore.doc.renovation &&
+        useEditor.getState().variant === 'before' &&
+        !(going && carry.held);
+      const next = coreDispatch(
+        editorBefore,
+        carrying ? carriedToRenovation(cmd, outcome) : cmd,
+        opts,
+      );
       if (next === get().editor) return;
+      if (!going) carry = { key, held: false };
+      let held = false;
+      if (outcome.conflict && !carry.held) {
+        carry.held = true;
+        held = true;
+      }
       commit(next);
       countUsage(cmd.label, editorBefore, next);
-      const text = toastFor(cmd.label);
+      const text = held
+        ? 'Not carried over to the renovation, which changed the same part'
+        : toastFor(cmd.label);
       if (text) set({ toast: { text, at: Date.now() } });
     },
     undo: () => {

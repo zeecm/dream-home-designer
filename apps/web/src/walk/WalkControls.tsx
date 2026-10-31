@@ -4,7 +4,7 @@ import { type MutableRefObject, useEffect, useMemo, useRef } from 'react';
 import type { PerspectiveCamera, PointLight } from 'three';
 import { useEditor } from '../editor';
 import { footstep } from './footsteps';
-import { useWalkFov, verticalFov } from './fov';
+import { setWalkAspect, useWalkFov, verticalFov } from './fov';
 
 /** Joystick input, each axis -1..1: x strafes right, y walks forward. */
 export type StickInput = MutableRefObject<Vec2>;
@@ -84,7 +84,9 @@ export function WalkControls({
   useEffect(() => {
     const cam = camera as PerspectiveCamera;
     const fov = cam.fov;
-    cam.fov = verticalFov(across, view.width / Math.max(view.height, 1));
+    const shape = view.width / Math.max(view.height, 1);
+    setWalkAspect(shape);
+    cam.fov = verticalFov(across, shape);
     cam.updateProjectionMatrix();
     return () => {
       cam.fov = fov;
