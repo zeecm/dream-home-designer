@@ -212,7 +212,7 @@ export const canEdit = (s: { sync: SyncStatus; role: Role }) =>
 
 export const useStore = create<State>((set, get) => {
   /** The gesture (coalesce key) last dispatched, and whether its carry-over was held back. */
-  let carry: { key?: string; held: boolean } = { held: false };
+  let carry: { key?: string; held: boolean; start?: readonly Level[] } = { held: false };
   const commit = (editor: EditorDoc) => {
     set({ editor, canUndo: canUndo(editor), canRedo: canRedo(editor) });
     if (get().sync.kind === 'conflict') return;
@@ -323,13 +323,15 @@ export const useStore = create<State>((set, get) => {
         !!editorBefore.doc.renovation &&
         useEditor.getState().variant === 'before' &&
         !(going && carry.held);
+      // The renovation as the drag found it, so a step held back can take back the rest.
+      const start = going ? carry.start : editorBefore.doc.renovation?.levels;
       const next = coreDispatch(
         editorBefore,
-        carrying ? carriedToRenovation(cmd, outcome) : cmd,
+        carrying ? carriedToRenovation(cmd, outcome, start) : cmd,
         opts,
       );
       if (next === get().editor) return;
-      if (!going) carry = { key, held: false };
+      if (!going) carry = { key, held: false, start };
       let held = false;
       if (outcome.conflict && !carry.held) {
         carry.held = true;

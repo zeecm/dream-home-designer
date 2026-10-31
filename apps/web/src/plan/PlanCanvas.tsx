@@ -75,11 +75,16 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
       const k = kind === 'item' && furnitureKind(useEditor.getState().furnitureKind);
       return !!k && (!!k.ceiling || (k.elevation ?? 0) > 0);
     };
-    /** A piece that itself stands on others or hangs (a lamp, a light): still its own. */
+    /**
+     * Whether a piece is on the same level as the one picked (a lamp with a lamp, a light with
+     * a light): a press on it selects it, rather than placing over it.
+     */
+    const layer = (k: ReturnType<typeof furnitureKind>) =>
+      !k ? 'floor' : k.ceiling ? 'ceiling' : (k.elevation ?? 0) > 0 ? 'raised' : 'floor';
     const raised = (id: string) => {
       const it = ctx?.level.items[id];
-      const k = it && furnitureKind(it.assetId);
-      return !!k && (!!k.ceiling || (k.elevation ?? 0) > 0);
+      const picked = furnitureKind(useEditor.getState().furnitureKind);
+      return !!it && layer(furnitureKind(it.assetId)) === layer(picked);
     };
     const onOwn = (p: PlanPointer) =>
       (p.hit?.kind === kind && (!over() || raised(p.hit.id))) || handle(p);
@@ -316,7 +321,7 @@ export function PlanCanvas() {
    * A finger pan let go while moving carries on and slows to a stop, as a map does: its speed
    * (screen px per ms, smoothed over the last moves) and when it last moved.
    */
-  const fling = useRef<{ vx: number; vy: number; at: number } | null>(null);
+  const fling = useRef<{ vx: number; vy: number; at: number; dist: number } | null>(null);
   const flingFrame = useRef<number | undefined>(undefined);
   const trackFling = (dx: number, dy: number) => {
     // A lift where the last move ended says nothing about the speed.
@@ -329,6 +334,7 @@ export function PlanCanvas() {
       vx: (f?.vx ?? 0) * (1 - k) + (dx / dt) * k,
       vy: (f?.vy ?? 0) * (1 - k) + (dy / dt) * k,
       at: now,
+      dist: (f?.dist ?? 0) + Math.hypot(dx, dy),
     };
   };
   const stopFling = () => {
@@ -339,17 +345,42 @@ export function PlanCanvas() {
   const startFling = () => {
     const f = fling.current;
     fling.current = null;
-    // Only a finger still moving as it lifts (not one that stopped, then lifted).
-    if (!f || performance.now() - f.at > 60 || Math.hypot(f.vx, f.vy) < 0.25) return;
+    // Only a finger that really panned (not what's left of a pinch, lifting a frame after
+    // the other) and is still moving as it lifts (not one that stopped, then lifted).
+    if (!f || f.dist < 40 || performance.now() - f.at > 60 || Math.hypot(f.vx, f.vy) < 0.25) {
+      return;
+    }
     // No faster than a brisk flick (2.5 px/ms coasts about 800 px).
     const k = Math.min(1, 2.5 / Math.hypot(f.vx, f.vy));
     let vx = f.vx * k;
     let vy = f.vy * k;
     let last = performance.now();
+    let mine = useEditor.getState().view;
     const step = (now: number) => {
+      const cur = useEditor.getState().view ?? v;
+      // Something else moved the view (Fit, a zoom button): it wins.
+      if (cur !== mine) {
+        flingFrame.current = undefined;
+        return;
+      }
       const dt = Math.min(32, now - last);
       last = now;
-      setView(panBy(useEditor.getState().view ?? v, vx * dt, vy * dt), true);
+      const next = panBy(cur, vx * dt, vy * dt);
+      // It stops before the middle of the plan leaves the screen.
+      const lvl = currentLevel();
+      const b = lvl && levelBounds(lvl);
+      if (b) {
+        const c = {
+          x: (next.cx - (b.min.x + b.max.x) / 2) * -next.zoom + size.width / 2,
+          y: (next.cy - (b.min.y + b.max.y) / 2) * -next.zoom + size.height / 2,
+        };
+        if (c.x < 0 || c.y < 0 || c.x > size.width || c.y > size.height) {
+          flingFrame.current = undefined;
+          return;
+        }
+      }
+      setView(next, true);
+      mine = useEditor.getState().view;
       // Slows by about two thirds every 325 ms, as a phone's scrolling does.
       const decay = Math.exp(-dt / 325);
       vx *= decay;
@@ -372,7 +403,11 @@ export function PlanCanvas() {
     moved: boolean;
     /** Handed to the tool as a press (Select dragging a corner or door). */
     claimed: boolean;
+    /** It stopped the plan coasting: a tap then does only that. */
+    stopped?: boolean;
   } | null>(null);
+  /** Whether the press now going down stopped a coast. */
+  const stoppedCoast = useRef(false);
   const gesture = useRef<{ dist: number; mid: Vec2 } | null>(null);
   /** Where a finger placing a point is: the magnifier shows the plan under it. */
   const [loupe, setLoupe] = useState<Vec2 | null>(null);
@@ -425,7 +460,7 @@ export function PlanCanvas() {
     }
     if (gesture.current) return; // still lifting fingers from a pinch
     const start = pointer(e);
-    touch.current = { start, moved: false, claimed: false };
+    touch.current = { start, moved: false, claimed: false, stopped: stoppedCoast.current };
     // Held still on the spot it will place (or on a corner in Select): magnify it.
     window.clearTimeout(loupeHold.current);
     if (placesPoint(start, true)) {
@@ -510,7 +545,7 @@ export function PlanCanvas() {
         gesture.current = null;
         touch.current = { start: pointer(e), moved: true, claimed: false };
         pan.current = rest;
-        fling.current = { vx: 0, vy: 0, at: performance.now() };
+        fling.current = { vx: 0, vy: 0, at: performance.now(), dist: 0 };
       }
       return;
     }
@@ -528,6 +563,8 @@ export function PlanCanvas() {
       else active.touchCancel?.();
       return;
     }
+    // A tap that stopped the plan coasting does only that, as on a phone's lists and maps.
+    if (t.stopped && !t.moved && !t.claimed) return;
     const end = pointer(e);
     if (t.claimed) {
       active.up(end);
@@ -555,6 +592,7 @@ export function PlanCanvas() {
   // Pointer events don't reliably carry a click count, so detect double-clicks here.
   const lastDown = useRef({ t: 0, x: 0, y: 0 });
   const onPointerDown = (e: React.PointerEvent) => {
+    stoppedCoast.current = flingFrame.current !== undefined;
     stopFling();
     lastPointer.current = Date.now();
     setRing(false);

@@ -493,14 +493,16 @@ test('on a phone: the plan stays under a fast finger, coasts after a swipe, and 
   await page.waitForTimeout(300);
   expect(await x()).toBeCloseTo(x0 + 120, 0);
   // Let go while moving (a swipe): it carries on further, then stops.
+  // (Leftwards: the plan is already well right of centre, and a coast stops before the
+  // plan's middle leaves the screen.)
   const x1 = await x();
   await send('touchStart', [from]);
   for (let i = 1; i <= 6; i++) {
-    await send('touchMove', [{ x: from.x + i * 12, y: from.y }]);
+    await send('touchMove', [{ x: from.x - i * 12, y: from.y }]);
     await page.waitForTimeout(8);
   }
   await send('touchEnd', []);
-  await expect.poll(x).toBeGreaterThan(x1 + 72 + 20);
+  await expect.poll(x).toBeLessThan(x1 - 72 - 20);
   await page.waitForTimeout(1500);
   const settled = await x();
   await page.waitForTimeout(300);
@@ -545,4 +547,19 @@ test('on a phone: the plan stays under a fast finger, coasts after a swipe, and 
   await page.waitForTimeout(100);
   await send('touchEnd', []);
   expect(before - (await x())).toBeGreaterThan(30);
+
+  // A swipe, then a tap while the plan coasts: the tap only stops it (selects nothing).
+  await send('touchStart', [from]);
+  for (let i = 1; i <= 6; i++) {
+    await send('touchMove', [{ x: from.x + i * 14, y: from.y }]);
+    await page.waitForTimeout(8);
+  }
+  await send('touchEnd', []);
+  await page.waitForTimeout(60);
+  await send('touchStart', [from]);
+  await send('touchEnd', []);
+  const stopped = await x();
+  await page.waitForTimeout(400);
+  expect(await x()).toBeCloseTo(stopped, 0);
+  await expect(page.getByRole('heading', { name: 'Room', exact: true })).toHaveCount(0);
 });
