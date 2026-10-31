@@ -119,6 +119,12 @@ async function build(entry) {
   const pivot = doc.createNode('pivot');
   const turn = ((entry.turn ?? 0) * Math.PI) / 180;
   pivot.setRotation([0, Math.sin(turn / 2), 0, Math.cos(turn / 2)]);
+  // Some models come larger than a flat's furniture: `scale` shrinks them (a number, or
+  // [across, up, deep] for one that is only too wide).
+  if (entry.scale !== undefined) {
+    const k = entry.scale;
+    pivot.setScale(Array.isArray(k) ? k : [k, k, k]);
+  }
   const offset = doc
     .createNode('offset')
     .setTranslation([-(b.min[0] + b.max[0]) / 2, -b.min[1], -(b.min[2] + b.max[2]) / 2]);
@@ -169,7 +175,7 @@ for (const f of await readdir(outDir)) {
 
 const kinds = catalogue
   .filter((e) => built[e.id])
-  .map(({ polyhaven, turn, maxTriangles, simplifyError, glow, ...e }) => ({
+  .map(({ polyhaven, turn, scale, maxTriangles, simplifyError, glow, ...e }) => ({
     ...e,
     model: built[e.id].file,
     size: built[e.id].size,

@@ -588,6 +588,11 @@ to `FURNITURE` with a stand-in box (`placeholder`); render's `ModelLibrary` load
 once and `LevelMeshes` swaps the box for a copy when it arrives (copies share geometry, marked
 `userData.shared`). No modern beds or TVs on Poly Haven, so those stay box-built.
 Rebuild a few with `pnpm --filter @dhd/models build <id…>` (`built.json` remembers the rest).
+26 models since October (seven added: a leather ottoman, a steel-and-wood side table, a tall
+side table, a round pedestal table, a metal desk, steel-frame shelves and a tabletop
+succulent). Most of Poly Haven's other furniture is antique or ornate. A catalogue entry's
+`scale` shrinks a model that comes larger than a flat's furniture (a number, or
+`[across, up, deep]`; the desk and shelves are only narrowed).
 **Thumbnails:** `pnpm --filter @dhd/models thumbs` serves `apps/web/thumbs.html` (dev only,
 not in the build) with Vite, renders every catalogue piece through `LevelMeshes` and the
 model library, and writes 96 px WebPs to `apps/web/public/models/thumbs/`; the catalogue
