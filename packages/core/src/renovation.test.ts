@@ -427,6 +427,36 @@ describe('carriedToRenovation', () => {
     expect(s.doc.renovation?.levels[0]).toEqual(at[0]);
   });
 
+  it('takes back a drag already carried when a later step merges away a room the renovation renamed', () => {
+    const start = dispatch(renovating(), updateRoom(A, 'rm_bed3', { name: 'Study' }));
+    const at = start.doc.renovation?.levels ?? [];
+    const step1 = {};
+    let s = dispatch(
+      start,
+      carriedToRenovation(moveVertex(L, 'v10', { x: 7.1, y: 4.5 }), step1, at),
+      { coalesceKey: 'drag' },
+    );
+    expect(step1).toMatchObject({ carried: true });
+    const step2 = {};
+    s = dispatch(s, carriedToRenovation(deleteWall(L, 'w_bed3_bed2'), step2, at), {
+      coalesceKey: 'drag',
+    });
+    expect(step2).toMatchObject({ conflict: true });
+    expect(s.doc.renovation?.levels[0]).toEqual(at[0]);
+  });
+
+  it('carries a wall made a boundary where the renovation moved its corner: nothing bends', () => {
+    const outcome = {};
+    let s = dispatch(renovating(), moveVertex(A, 'v6', { x: 3.7, y: 8.5 }));
+    s = dispatch(
+      s,
+      carriedToRenovation(updateWall(L, 'w_bed3_bed2', { kind: 'boundary' }), outcome),
+    );
+    expect(outcome).toMatchObject({ carried: true });
+    expect(s.doc.renovation?.levels[0]?.walls.w_bed3_bed2?.kind).toBe('boundary');
+    expect(s.doc.renovation?.levels[0]?.vertices.v6?.x).toBe(3.7);
+  });
+
   it('holds back what the renovation would make no sense of', () => {
     const outcome: { carried?: boolean; conflict?: boolean } = {};
     // A wall split where the renovation thickened and painted it: the new piece takes the

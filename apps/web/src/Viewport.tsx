@@ -180,9 +180,10 @@ const LAMP_SCALE = 0.05;
  * The number of lights changes only when lamps are added or removed, so shaders aren't
  * rebuilt as you walk.
  */
-function Lamps({ level }: { level: Level }) {
+/** `max`: half each while comparing, so the two versions together stay in budget. */
+function Lamps({ level, max = MAX_LAMPS }: { level: Level; max?: number }) {
   const lamps = useMemo(() => itemLights(level), [level]);
-  const count = Math.min(MAX_LAMPS, lamps.length);
+  const count = Math.min(max, lamps.length);
   const refs = useRef<(THREE.PointLight | null)[]>([]);
   const last = useRef(-1);
   const place = (camera: THREE.Camera) => {
@@ -194,7 +195,7 @@ function Lamps({ level }: { level: Level }) {
         ),
       }))
       .sort((a, b) => a.d - b.d)
-      .slice(0, MAX_LAMPS);
+      .slice(0, max);
     nearest.forEach(({ l }, i) => {
       const light = refs.current[i];
       if (!light) return;
@@ -546,10 +547,10 @@ export function Viewport() {
         {compare && versions?.before && versions.after ? (
           <>
             <group ref={beforeLamps}>
-              <Lamps level={versions.before} />
+              <Lamps level={versions.before} max={MAX_LAMPS / 2} />
             </group>
             <group ref={afterLamps}>
-              <Lamps level={versions.after} />
+              <Lamps level={versions.after} max={MAX_LAMPS / 2} />
             </group>
           </>
         ) : (
