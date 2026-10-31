@@ -702,9 +702,13 @@ blocked by the network proxy and Sketchfab needs an API key.
   block like windows, so the walk stays inside the flat.
 - **Mini-map:** a small plan in the corner while walking shows where you are and which way you
   face (`walk/MiniMap.tsx`).
-- **Next:**
-  - footstep sound, kept subtle;
-  - opening and closing doors by walking up to them.
+- **Doors and footsteps (built):** inside doors stand open in the orbit view; walking
+  through, they start shut, swing open within 1.6 m of the walker and shut beyond 2.4 m
+  (`useDoorSwings` in `Viewport.tsx`; render builds each inside leaf as a group pivoting at
+  its hinge, `LevelMeshes.doors()` / `setDoorOpen`). A shut leaf sits flush with the face it
+  hinges on. Collision is unchanged (doorways open, an open leaf solid). Soft footsteps,
+  synthesised with Web Audio (`walk/footsteps.ts`), play with each step, louder running;
+  "Footsteps on/off" in the walk view, remembered per browser.
 - **Built since:**
   - door leaves in 3D (`doorLeaf` in core): open square to the wall on the swing side as the
     plan symbol shows, and solid to the walker; doors to the outside (`outsideOpenings`) are

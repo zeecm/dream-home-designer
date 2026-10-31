@@ -7,9 +7,11 @@ import {
   type Vec2,
   type WallFrame,
   doorLeaf,
+  doorSwing,
   framePoint,
   furnitureKind,
   isBoundary,
+  openingSpan,
   openingsOnWall,
   outsideOpenings,
   roomShapes,
@@ -151,7 +153,8 @@ export class LevelMeshes {
       put(`wall:${wall.id}`, key, () => this.buildWall(f, height, level.elevation, openings));
       for (const o of openings) {
         if (o.kind !== 'door') continue;
-        const leaf = doorLeaf(f, o, !outside.has(o.id));
+        const shut = outside.has(o.id);
+        const leaf = doorLeaf(f, o, !shut);
         const top = level.elevation + Math.min(o.height, height);
         put(`door:${o.id}`, `${pointsKey(leaf)}/${r(level.elevation)}/${r(top)}`, () => {
           const mesh = new THREE.Mesh(
@@ -161,7 +164,25 @@ export class LevelMeshes {
           mesh.name = `door:${o.id}`;
           mesh.castShadow = true;
           mesh.receiveShadow = true;
-          return [mesh];
+          if (shut) return [mesh];
+          // An inside door turns about its hinge: built standing open, it can swing shut
+          // by `swing` radians (in plan) and back (setDoorOpen).
+          const s = doorSwing(f, o);
+          const open = { x: s.leafEnd.x - s.hinge.x, y: s.leafEnd.y - s.hinge.y };
+          const closed = { x: s.arcEnd.x - s.hinge.x, y: s.arcEnd.y - s.hinge.y };
+          const swing = Math.atan2(
+            open.x * closed.y - open.y * closed.x,
+            open.x * closed.x + open.y * closed.y,
+          );
+          const pivot = new THREE.Group();
+          pivot.name = `door:${o.id}`;
+          pivot.position.set(s.hinge.x, 0, s.hinge.y);
+          mesh.position.set(-s.hinge.x, 0, -s.hinge.y);
+          pivot.add(mesh);
+          const [u0, u1] = openingSpan(f, o);
+          const centre = framePoint(f, (u0 + u1) / 2, 0);
+          pivot.userData = { door: o.id, swing, centre };
+          return [pivot];
         });
       }
     }
@@ -225,6 +246,24 @@ export class LevelMeshes {
       stats.removed++;
     }
     return stats;
+  }
+
+  /** The inside doors that can swing, with where their doorway's middle is (plan x, y). */
+  doors(): { id: string; centre: { x: number; y: number } }[] {
+    const out: { id: string; centre: { x: number; y: number } }[] = [];
+    for (const o of this.group.children) {
+      if (o.userData.door) out.push({ id: o.userData.door, centre: o.userData.centre });
+    }
+    return out;
+  }
+
+  /** Swings an inside door: 1 standing open (as built and drawn in plan), 0 shut. */
+  setDoorOpen(id: string, open: number): void {
+    const part = this.parts.get(`door:${id}`);
+    const pivot = part?.objects[0];
+    if (!pivot?.userData.door) return;
+    // A plan angle θ (counter-clockwise in x, y) is a turn of -θ about world +Y (x, z).
+    pivot.rotation.y = -(pivot.userData.swing as number) * (1 - Math.min(1, Math.max(0, open)));
   }
 
   dispose(): void {

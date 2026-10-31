@@ -141,13 +141,31 @@ describe('door leaves', () => {
     expect(front.size).toBe(1);
     // A shut leaf sits on the wall's centre line; an open one stands a half width off it.
     const g = planGeometry(l);
-    for (const o of doors) {
+    const offset = (o: (typeof doors)[number]) => {
       const f = g.frames[o.wallId]!;
-      const geom = (m.group.getObjectByName(`door:${o.id}`) as THREE.Mesh).geometry;
-      geom.computeBoundingBox();
-      const c = geom.boundingBox!.getCenter(new Vector3());
-      const off = Math.abs((c.x - f.a.x) * f.n.x + (c.z - f.a.y) * f.n.y);
+      m.group.updateMatrixWorld(true);
+      const obj = m.group.getObjectByName(`door:${o.id}`)!;
+      const c = new Box3().setFromObject(obj).getCenter(new Vector3());
+      return { off: Math.abs((c.x - f.a.x) * f.n.x + (c.z - f.a.y) * f.n.y), f };
+    };
+    for (const o of doors) {
+      const { off, f } = offset(o);
       expect(off, o.id).toBeCloseTo(front.has(o.id) ? 0 : f.half + o.width / 2, 2);
+    }
+    // An inside door swings shut into its wall (flush with the face it hinges on), and open
+    // again.
+    const inside = doors.filter((o) => !front.has(o.id));
+    expect(
+      m
+        .doors()
+        .map((d) => d.id)
+        .sort(),
+    ).toEqual(inside.map((o) => o.id).sort());
+    for (const o of inside) {
+      m.setDoorOpen(o.id, 0);
+      expect(offset(o).off, o.id).toBeLessThan(offset(o).f.half);
+      m.setDoorOpen(o.id, 1);
+      expect(offset(o).off, o.id).toBeCloseTo(offset(o).f.half + o.width / 2, 2);
     }
   });
 });

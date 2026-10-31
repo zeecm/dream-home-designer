@@ -12,7 +12,14 @@ import {
 import { LevelMeshes, MaterialCache, ModelLibrary } from '@dhd/render';
 import { OrbitControls } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  type MutableRefObject,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import * as THREE from 'three';
 import { useEditor } from './editor';
 import { registerScene3d } from './exports';
@@ -21,6 +28,7 @@ import { useLevel, useProject } from './store';
 import { Joystick } from './walk/Joystick';
 import { MiniMap } from './walk/MiniMap';
 import { WalkControls, type WalkPose } from './walk/WalkControls';
+import { setSound, useSound } from './walk/footsteps';
 import { loadWalkPose, saveWalkPose } from './walk/pose';
 
 const materials = new MaterialCache();
@@ -32,9 +40,17 @@ const FOV = 40;
  * Keeps one incremental mesh set per project; each edit rebuilds only what changed. Walking
  * puts the ceilings on (the orbit view leaves them off to see in).
  */
-function LevelMesh({ ceilings }: { ceilings: boolean }) {
+function LevelMesh({
+  ceilings,
+  walker,
+}: {
+  ceilings: boolean;
+  /** While walking, where the walker is: doors swing open as they come near. */
+  walker?: MutableRefObject<WalkPose | null>;
+}) {
   const level = useLevel();
   const meshes = useMemo(() => new LevelMeshes(materials, { ceilings, models }), [ceilings]);
+  useDoorSwings(meshes, walker);
   useEffect(() => () => meshes.dispose(), [meshes]);
   // A model arriving swaps its stand-in box for it.
   const [arrived, setArrived] = useState(0);
@@ -44,6 +60,44 @@ function LevelMesh({ ceilings }: { ceilings: boolean }) {
     if (level) meshes.update(level);
   }, [level, meshes, arrived]);
   return <primitive object={meshes.group} />;
+}
+
+/** Within this of a door it opens; beyond DOOR_CLOSE it shuts (between, it stays as it is). */
+const DOOR_OPEN = 1.6;
+const DOOR_CLOSE = 2.4;
+/** How fast a door swings: the fraction of the way per second. */
+const DOOR_SPEED = 2.2;
+
+/**
+ * Inside doors stand open in the orbit view, as the plan draws them. Walking through, they
+ * start shut, swing open as the walker comes near and shut again behind (at once with
+ * reduced motion).
+ */
+function useDoorSwings(meshes: LevelMeshes, walker?: MutableRefObject<WalkPose | null>) {
+  const open = useRef(new Map<string, number>());
+  const want = useRef(new Map<string, number>());
+  const instant = useMemo(
+    () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
+    [],
+  );
+  useFrame((_, dt) => {
+    const at = walker?.current?.at;
+    for (const d of meshes.doors()) {
+      let target = 1;
+      if (at) {
+        const dist = Math.hypot(d.centre.x - at.x, d.centre.y - at.y);
+        const was = want.current.get(d.id) ?? 0;
+        target = dist < DOOR_OPEN ? 1 : dist > DOOR_CLOSE ? 0 : was;
+      }
+      want.current.set(d.id, target);
+      const cur = open.current.get(d.id) ?? (at ? 0 : 1);
+      const step = instant ? 1 : Math.min(dt, 0.1) * DOOR_SPEED;
+      const next = cur + Math.max(-step, Math.min(step, target - cur));
+      open.current.set(d.id, next);
+      // Every frame: a door rebuilt by an edit starts standing open.
+      meshes.setDoorOpen(d.id, next);
+    }
+  });
 }
 
 interface Frame {
@@ -288,7 +342,7 @@ export function Viewport() {
           <planeGeometry args={[200, 200]} />
           <meshStandardMaterial color={dark ? '#1a1c1e' : '#eef1f3'} />
         </mesh>
-        <LevelMesh ceilings={walking} />
+        <LevelMesh ceilings={walking} walker={walking ? pose : undefined} />
         {walking && level ? (
           <WalkControls
             level={level}
@@ -316,6 +370,7 @@ export function Viewport() {
           <button type="button" className="btn viewport-action" onClick={stopWalk}>
             Leave walk
           </button>
+          <SoundToggle />
           {level && <MiniMap level={level} pose={pose} />}
           {coarsePointer() && <Joystick stick={stick} />}
           <p className="viewport-hint">
@@ -339,5 +394,20 @@ export function Viewport() {
         </>
       )}
     </div>
+  );
+}
+
+/** Footsteps on or off while walking (remembered in this browser). */
+function SoundToggle() {
+  const sound = useSound();
+  return (
+    <button
+      type="button"
+      className="btn viewport-sound"
+      aria-pressed={sound}
+      onClick={() => setSound(!sound)}
+    >
+      {sound ? 'Footsteps on' : 'Footsteps off'}
+    </button>
   );
 }

@@ -853,6 +853,17 @@ select {
   top: 12px;
   right: 12px;
 }
+/* Below Leave walk: quieter, as a setting. */
+.viewport-sound {
+  position: absolute;
+  top: 60px;
+  right: 12px;
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+.viewport-sound[aria-pressed="true"] {
+  color: var(--text);
+}
 .sun-control {
   position: absolute;
   top: 12px;

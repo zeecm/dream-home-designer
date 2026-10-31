@@ -3,6 +3,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { type MutableRefObject, useEffect, useMemo, useRef } from 'react';
 import type { PerspectiveCamera, PointLight } from 'three';
 import { useEditor } from '../editor';
+import { footstep } from './footsteps';
 
 /** Joystick input, each axis -1..1: x strafes right, y walks forward. */
 export type StickInput = MutableRefObject<Vec2>;
@@ -224,7 +225,10 @@ export function WalkControls({
     // A gentle head bob with each step, easing in and out as walking starts and stops.
     const moved = Math.hypot(p.at.x - was.x, p.at.y - was.y);
     const b = bob.current;
+    const stepsBefore = Math.floor(b.phase / Math.PI);
     b.phase += (moved / STEP_LENGTH) * Math.PI;
+    // A footstep each time a foot comes down (half a bob).
+    if (Math.floor(b.phase / Math.PI) > stepsBefore) footstep(speed === RUN_SPEED ? 1.4 : 1);
     const target = moved > 1e-4 && !reducedMotion ? BOB_HEIGHT : 0;
     b.amp += (target - b.amp) * Math.min(1, dt * 8);
     const eye = level.elevation + EYE_HEIGHT + Math.sin(b.phase) * b.amp;
