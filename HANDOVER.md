@@ -535,8 +535,14 @@ lengths, and matches doors and windows by position and size. Undo and redo switc
 version they change (`touchedVariant` on the step's patches); switching versions remounts the
 plan, dropping a half-drawn wall; the bar says which version edits go to and hides while
 walking; `loadProject` gives a renovation level that clashes with the plan's id its own.
-**Not yet:** a side-by-side 3D compare; listing changes room by room; applying an edit to
-both versions at once (a trace fix in "before" shows as built wall in the after).
+The details also list the changes room by room (`renovationChanges` in core, `ChangeList` in
+`ui/Renovation.tsx`): wall hacked and built (summed per place), doors, windows and openings
+added, closed up, moved or resized, floors refinished, rooms grown or shrunk, and rooms new or
+gone, each placed by the rooms either side of it (just past each face; "outside wall" where
+one side has none), in the version it belongs to. "Copy list" puts them on the clipboard as
+text, a line per place, for a contractor.
+**Not yet:** a side-by-side 3D compare; applying an edit to both versions at once (a trace fix
+in "before" shows as built wall in the after).
 
 **Downloads (Phase 4):** the project menu's Download section (`exports.ts`): the plan as a
 PNG (the plan SVG cloned with its computed styles inlined, handles and grid removed, the plan

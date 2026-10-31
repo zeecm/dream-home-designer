@@ -1,7 +1,9 @@
 import { current } from 'immer';
+import { finish } from './finishes';
+import { pointInPolygon } from './geometry';
 import type { Command } from './history';
 import { AFTER_SUFFIX, type Variant } from './levels';
-import { roomArea } from './rooms';
+import { roomArea, roomShapes } from './rooms';
 import { type Level, type Vec2, type Wall, isBoundary, wallFaces } from './schema';
 
 /**
@@ -245,4 +247,165 @@ export function renovationDiff(before: Level, after: Level): RenovationDiff {
     areaBefore: area(before),
     areaAfter: area(after),
   };
+}
+
+/** Where a change is: the rooms either side of it (by name, sorted), and whether one side is outside. */
+export interface ChangePlace {
+  rooms: string[];
+  outside: boolean;
+}
+
+/** One change a renovation makes, placed by the rooms it touches. */
+export type RenovationChange = ChangePlace &
+  (
+    | { kind: 'hack' | 'build'; length: number }
+    | {
+        kind: 'opening';
+        change: 'added' | 'removed' | 'changed';
+        opening: 'door' | 'window' | 'passage';
+        width: number;
+        /** For one changed: its width before. */
+        widthBefore?: number;
+      }
+    | { kind: 'floor'; from: string; to: string }
+    | { kind: 'area'; before: number; after: number }
+    | { kind: 'room'; change: 'added' | 'removed'; area: number }
+  );
+
+/** How far past a wall's face to look for the room on that side. */
+const PROBE = 0.05;
+
+/** The rooms of a level containing each point: names, sorted, and whether a point found none. */
+function placeOf(level: Level, points: Vec2[]): ChangePlace {
+  const shapes = roomShapes(level);
+  const names = new Set<string>();
+  let outside = false;
+  for (const p of points) {
+    const room = Object.values(level.rooms).find((r) => {
+      const s = shapes.get(r.id);
+      return !!s && pointInPolygon(p, s.outer) && !s.holes.some((h) => pointInPolygon(p, h));
+    });
+    if (room) names.add(room.name);
+    else outside = true;
+  }
+  return { rooms: [...names].sort(), outside };
+}
+
+/** The points just past each face of a stretch, at its middle. */
+function besideStretch(s: WallStretch): Vec2[] {
+  const [l0, l1, r1, r0] = s.polygon as [Vec2, Vec2, Vec2, Vec2];
+  const len = Math.hypot(s.to.x - s.from.x, s.to.y - s.from.y) || 1;
+  const n = { x: -(s.to.y - s.from.y) / len, y: (s.to.x - s.from.x) / len };
+  return [
+    { x: (l0.x + l1.x) / 2 + n.x * PROBE, y: (l0.y + l1.y) / 2 + n.y * PROBE },
+    { x: (r0.x + r1.x) / 2 - n.x * PROBE, y: (r0.y + r1.y) / 2 - n.y * PROBE },
+  ];
+}
+
+/** The points just past each face of a wall at an opening's middle. */
+function besideOpening(level: Level, id: string): Vec2[] {
+  const o = level.openings[id];
+  const w = o && level.walls[o.wallId];
+  const a = w && level.vertices[w.a];
+  const b = w && level.vertices[w.b];
+  if (!o || !w || !a || !b) return [];
+  const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const n = { x: -(b.y - a.y) / len, y: (b.x - a.x) / len };
+  const c = { x: a.x + (b.x - a.x) * o.t, y: a.y + (b.y - a.y) * o.t };
+  const f = wallFaces(w);
+  return [
+    { x: c.x + n.x * (f.left + PROBE), y: c.y + n.y * (f.left + PROBE) },
+    { x: c.x - n.x * (f.right + PROBE), y: c.y - n.y * (f.right + PROBE) },
+  ];
+}
+
+const placeKey = (p: ChangePlace) => `${p.rooms.join('\u0000')}|${p.outside}`;
+
+/**
+ * What a renovation changes, item by item, each placed by the rooms it touches (the rooms
+ * of the version it is in: the flat as it is for what goes, the renovation for what's new),
+ * in order of place: wall hacked and built (lengths summed per place), doors, windows and
+ * openings added, removed or changed, floors refinished, rooms that grow or shrink, and rooms
+ * new or gone. For a list to discuss with a contractor.
+ */
+export function renovationChanges(
+  before: Level,
+  after: Level,
+  diff: RenovationDiff = renovationDiff(before, after),
+): RenovationChange[] {
+  const out: RenovationChange[] = [];
+  const walls = (kind: 'hack' | 'build', level: Level, stretches: WallStretch[]) => {
+    const byPlace = new Map<string, { place: ChangePlace; length: number }>();
+    for (const s of stretches) {
+      const place = placeOf(level, besideStretch(s));
+      const k = placeKey(place);
+      const cur = byPlace.get(k);
+      if (cur) cur.length += s.length;
+      else byPlace.set(k, { place, length: s.length });
+    }
+    for (const { place, length } of byPlace.values()) out.push({ ...place, kind, length });
+  };
+  walls('hack', before, diff.demolished);
+  walls('build', after, diff.built);
+  const kindOf = (k: string) => (k === 'door' || k === 'window' ? k : 'passage');
+  for (const id of diff.openingsAdded) {
+    const o = after.openings[id];
+    if (!o) continue;
+    const was = diff.openingsRemoved.includes(id) ? before.openings[id] : undefined;
+    out.push({
+      ...placeOf(after, besideOpening(after, id)),
+      kind: 'opening',
+      change: was ? 'changed' : 'added',
+      opening: kindOf(o.kind),
+      width: o.width,
+      ...(was ? { widthBefore: was.width } : {}),
+    });
+  }
+  for (const id of diff.openingsRemoved) {
+    const o = before.openings[id];
+    if (!o || diff.openingsAdded.includes(id)) continue;
+    out.push({
+      ...placeOf(before, besideOpening(before, id)),
+      kind: 'opening',
+      change: 'removed',
+      opening: kindOf(o.kind),
+      width: o.width,
+    });
+  }
+  for (const r of Object.values(after.rooms)) {
+    const was = before.rooms[r.id];
+    const place = { rooms: [r.name], outside: false };
+    if (!was) {
+      out.push({ ...place, kind: 'room', change: 'added', area: roomArea(after, r) });
+      continue;
+    }
+    if (was.floorMaterial !== r.floorMaterial) {
+      const name = (id: string) => finish(id)?.name ?? id;
+      out.push({
+        ...place,
+        kind: 'floor',
+        from: name(was.floorMaterial),
+        to: name(r.floorMaterial),
+      });
+    }
+    const a0 = roomArea(before, was);
+    const a1 = roomArea(after, r);
+    if (Math.abs(a1 - a0) >= 0.05) out.push({ ...place, kind: 'area', before: a0, after: a1 });
+  }
+  for (const r of Object.values(before.rooms)) {
+    if (after.rooms[r.id]) continue;
+    out.push({
+      rooms: [r.name],
+      outside: false,
+      kind: 'room',
+      change: 'removed',
+      area: roomArea(before, r),
+    });
+  }
+  // By place, keeping each place's changes in the order above.
+  const order = (c: RenovationChange) => `${c.rooms.join(', ')}|${c.outside ? 1 : 0}`;
+  return out
+    .map((c, i) => ({ c, i }))
+    .sort((p, q) => order(p.c).localeCompare(order(q.c)) || p.i - q.i)
+    .map(({ c }) => c);
 }

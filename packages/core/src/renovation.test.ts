@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { deleteWall, moveVertex, splitWall, updateOpening, updateWall } from './commands';
+import {
+  deleteOpening,
+  deleteWall,
+  moveVertex,
+  splitWall,
+  updateOpening,
+  updateRoom,
+  updateWall,
+} from './commands';
+import { finish } from './finishes';
 import { hdb4RoomProject } from './fixtures/hdb4room';
 import { type EditorDoc, dispatch, emptyHistory, undo } from './history';
 import { AFTER_SUFFIX, findLevel, touchedVariant, variantLevels } from './levels';
 import { loadProject } from './migrate';
-import { endRenovation, renovationDiff, startRenovation } from './renovation';
+import { endRenovation, renovationChanges, renovationDiff, startRenovation } from './renovation';
 import { Project } from './schema';
 
 const L = 'lvl_ground';
@@ -131,5 +140,72 @@ describe('renovationDiff', () => {
     const thick = diffOf(dispatch(renovating(), updateWall(A, 'w_bed3_bed2', { thickness: 0.2 })));
     expect(thick.demolishedLength).toBeCloseTo(4);
     expect(thick.builtLength).toBeCloseTo(4);
+  });
+});
+
+const changesOf = (s: EditorDoc) => {
+  const before = s.doc.levels[0];
+  const after = s.doc.renovation?.levels[0];
+  if (!before || !after) throw new Error('no renovation');
+  return renovationChanges(before, after);
+};
+
+describe('renovationChanges', () => {
+  it('lists nothing for an untouched copy', () => {
+    expect(changesOf(renovating())).toEqual([]);
+  });
+
+  it('places a wall taken out between the rooms it divided, with its doorway and the merge', () => {
+    const changes = changesOf(dispatch(renovating(), deleteWall(A, 'w_living_kitchen')));
+    const between = changes.filter((c) => c.rooms.join() === 'Kitchen,Living');
+    expect(between.map((c) => c.kind)).toEqual(['hack', 'opening']);
+    expect(between[0]).toMatchObject({ kind: 'hack', outside: false });
+    expect(between[0]?.kind === 'hack' && between[0].length).toBeCloseTo(2.9);
+    expect(between[1]).toMatchObject({ kind: 'opening', change: 'removed' });
+    // One of the two rooms is gone and the other grew into it.
+    expect(changes.filter((c) => c.kind === 'room' && c.change === 'removed')).toHaveLength(1);
+    expect(changes.filter((c) => c.kind === 'area')).toHaveLength(1);
+  });
+
+  it('places doors and windows by the rooms either side, outside included', () => {
+    let s = dispatch(renovating(), updateOpening(A, 'op_bed2', { width: 1.2 }));
+    s = dispatch(s, deleteOpening(A, 'op_win_bed3'));
+    const changes = changesOf(s);
+    expect(changes).toContainEqual({
+      rooms: ['Bedroom 2', 'Living'],
+      outside: false,
+      kind: 'opening',
+      change: 'changed',
+      opening: 'door',
+      width: 1.2,
+      widthBefore: s.doc.levels[0]?.openings.op_bed2?.width,
+    });
+    expect(changes).toContainEqual({
+      rooms: ['Bedroom 3'],
+      outside: true,
+      kind: 'opening',
+      change: 'removed',
+      opening: 'window',
+      width: 1.4,
+    });
+  });
+
+  it('lists a floor refinished, by the finishes’ names, and orders changes by place', () => {
+    let s = dispatch(renovating(), updateRoom(A, 'rm_kitchen', { floorMaterial: 'wood-oak' }));
+    s = dispatch(s, updateWall(A, 'w_bed3_bed2', { height: 1 }));
+    const changes = changesOf(s);
+    // The wall cut down is hacked, and built again lower.
+    expect(changes.map((c) => [c.rooms.join(', '), c.kind])).toEqual([
+      ['Bedroom 2, Bedroom 3', 'hack'],
+      ['Bedroom 2, Bedroom 3', 'build'],
+      ['Kitchen', 'floor'],
+    ]);
+    expect(changes[2]).toEqual({
+      rooms: ['Kitchen'],
+      outside: false,
+      kind: 'floor',
+      from: finish('tile-grey')?.name,
+      to: finish('wood-oak')?.name,
+    });
   });
 });
