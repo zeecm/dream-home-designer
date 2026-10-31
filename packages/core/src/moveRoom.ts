@@ -311,15 +311,50 @@ export function moveRoom(from: Level, move: RoomMove, delta: Vec2): Command {
   };
 }
 
-/** How many rooms a level's walls enclose, cached per level. */
-const roomCounts = new WeakMap<Level, number>();
-function roomCount(level: Level): number {
-  let n = roomCounts.get(level);
-  if (n === undefined) {
-    n = detectFaces(level).length;
-    roomCounts.set(level, n);
+/**
+ * A room narrower than this (about: twice its area over its perimeter, which for a long
+ * strip is its width) is too thin to use: a move doesn't squeeze one this far.
+ */
+const THIN = 0.3;
+
+interface RoomsShape {
+  /** How many rooms the walls enclose. */
+  count: number;
+  /** How many of them are thin, and the thinnest one's width (Infinity if none). */
+  thin: number;
+  thinnest: number;
+}
+
+function roomsShape(level: Pick<Level, 'vertices' | 'walls'>): RoomsShape {
+  const faces = detectFaces(level);
+  let thin = 0;
+  let thinnest = Number.POSITIVE_INFINITY;
+  for (const loop of faces) {
+    const pts = loop.map((id) => level.vertices[id] as Vec2);
+    let area = 0;
+    let perimeter = 0;
+    pts.forEach((p, i) => {
+      const q = pts[(i + 1) % pts.length] as Vec2;
+      area += p.x * q.y - q.x * p.y;
+      perimeter += Math.hypot(q.x - p.x, q.y - p.y);
+    });
+    const width = perimeter > 0 ? Math.abs(area) / perimeter : 0;
+    if (width < THIN) {
+      thin++;
+      thinnest = Math.min(thinnest, width);
+    }
   }
-  return n;
+  return { count: faces.length, thin, thinnest };
+}
+
+const shapes = new WeakMap<Level, RoomsShape>();
+function startShape(level: Level): RoomsShape {
+  let s = shapes.get(level);
+  if (!s) {
+    s = roomsShape(level);
+    shapes.set(level, s);
+  }
+  return s;
 }
 
 /**
@@ -429,8 +464,34 @@ export function moveBlocked(from: Level, move: RoomMove, delta: Vec2): boolean {
       if (now < segmentDistance(pw.p, pw.q, qw.p, qw.q) - 1e-9) return true;
     }
   }
-  // No room squeezed out of existence or merged into another.
-  return detectFaces(after).length < roomCount(from);
+  // No room squeezed out of existence, merged into another or squeezed thin (one already
+  // thin may not get thinner).
+  const was = startShape(from);
+  const now = roomsShape(after);
+  return (
+    now.count < was.count ||
+    now.thin > was.thin ||
+    (now.thin > 0 && now.thinnest < Math.min(was.thinnest, THIN) - 1e-9)
+  );
+}
+
+/**
+ * Along the move's axis, the distances at which a wall with one end moving closes up (its
+ * moving end reaching its other end): a move stopping just short of one would leave a stub.
+ */
+function closingPoints(from: Level, move: RoomMove): number[] {
+  if (!move.axis) return [];
+  const d = dirOf(move.axis);
+  const movers = new Set([...move.vertices, ...move.steps.map((s) => s.corner)]);
+  const out: number[] = [];
+  for (const w of Object.values(from.walls)) {
+    if (movers.has(w.a) === movers.has(w.b)) continue;
+    const m = from.vertices[movers.has(w.a) ? w.a : w.b];
+    const s = from.vertices[movers.has(w.a) ? w.b : w.a];
+    if (!m || !s || !along(m, s, d)) continue;
+    out.push((s.x - m.x) * d.x + (s.y - m.y) * d.y);
+  }
+  return out;
 }
 
 /**
@@ -440,6 +501,8 @@ export function moveBlocked(from: Level, move: RoomMove, delta: Vec2): boolean {
  */
 export function moveTowards(from: Level, move: RoomMove, have: Vec2, want: Vec2): Vec2 {
   const step = 0.01;
+  const closing = closingPoints(from, move);
+  const d = move.axis ? dirOf(move.axis) : null;
   const march = (p: Vec2, to: Vec2): Vec2 => {
     const dist = Math.hypot(to.x - p.x, to.y - p.y);
     const n = Math.ceil(dist / step - 1e-9);
@@ -447,8 +510,27 @@ export function moveTowards(from: Level, move: RoomMove, have: Vec2, want: Vec2)
     for (let i = 1; i <= n; i++) {
       const next =
         i === n ? to : { x: p.x + ((to.x - p.x) * i) / n, y: p.y + ((to.y - p.y) * i) / n };
-      if (moveBlocked(from, move, next)) break;
-      cur = next;
+      if (!moveBlocked(from, move, next)) {
+        cur = next;
+        continue;
+      }
+      // Stopped: a wall closing up between here and there is as far as it goes, not a
+      // stub of a few millimetres short of it.
+      if (d) {
+        const a = cur.x * d.x + cur.y * d.y;
+        const b = next.x * d.x + next.y * d.y;
+        const between = closing
+          .filter((c) => (c - a) * (b - a) > 1e-12 && (c - b) * (a - b) > 1e-12)
+          .sort((u, v) => Math.abs(v - a) - Math.abs(u - a));
+        for (const c of between) {
+          const at = { x: d.x * c, y: d.y * c };
+          if (!moveBlocked(from, move, at)) {
+            cur = at;
+            break;
+          }
+        }
+      }
+      break;
     }
     return cur;
   };

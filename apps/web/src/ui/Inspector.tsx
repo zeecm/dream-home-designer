@@ -826,8 +826,8 @@ function RoomInspector({ level, id }: { level: Level; id: string }) {
         onCommit={(v) => dispatch(updateRoom(level.id, id, { ceilingHeight: v }))}
       />
       <p className="field-hint">
-        To move the room, drag the handle in it on the plan, or use the arrow keys. Its furniture
-        goes with it; walls joined to it stretch.
+        To move the room, drag the handle in it on the plan (zoom in on a small room to see it), or
+        use the arrow keys. Its furniture goes with it; walls joined to it stretch.
       </p>
       {roomOwnWalls(level, id).length > 0 ? (
         <DeleteButton

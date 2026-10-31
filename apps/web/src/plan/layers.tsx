@@ -9,6 +9,7 @@ import {
   furnitureKind,
   itemFootprint,
   itemSize,
+  labelClearance,
   placeLabel,
   roomArea,
   roomShape,
@@ -331,6 +332,9 @@ const labelZoom = (zoom: number) => 2 ** (Math.round(Math.log2(zoom) * 8) / 8);
 /** Half the room move handle's size on screen (px), with room to spare around it. */
 const MOVE_HANDLE_HALF = 16;
 
+/** How far (screen px) the move handle keeps from the room's corners. */
+const CORNER_CLEAR = 16;
+
 const handleCache = new WeakMap<Level, Map<string, Vec2 | null>>();
 
 /**
@@ -364,8 +368,19 @@ export function roomHandleAt(
         return { c: { x: it.position.x, y: it.position.z }, r: Math.hypot(w, d) / 2 };
       }),
     ];
-    const half = MOVE_HANDLE_HALF / step + 0.1;
-    at = placeLabel(shape.outer, { x: half, y: half }, avoid, shape.holes);
+    // Clear of the room's corners, whose targets are large on a touch screen.
+    const corners = shape.outer.map((c) => ({ c, r: CORNER_CLEAR / step }));
+    const h = MOVE_HANDLE_HALF / step + 0.1;
+    const half = { x: h, y: h };
+    // Clear of everything if it can be, else of the corners, else just inside the room; in
+    // a room too small for it on screen, none (zoom in, or use the arrow keys).
+    for (const clear of [[...avoid, ...corners], corners, []]) {
+      const p = placeLabel(shape.outer, half, clear, shape.holes);
+      if (labelClearance(p, half, shape.outer, clear, shape.holes) >= 0) {
+        at = p;
+        break;
+      }
+    }
   }
   if (!cache) {
     cache = new Map();

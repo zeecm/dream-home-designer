@@ -192,6 +192,10 @@ type Drag =
       from: Vec2;
       handle: Vec2;
       delta: Vec2;
+      /** Where the pointer asked it to go: further than `delta` when a wall stopped it. */
+      want: Vec2;
+      /** Moved in millimetres (Alt). */
+      fine: boolean;
       /** The level as the drag began: each move is applied to it afresh. */
       level: Level;
       /** Joined to other rooms: it moves along one axis at a time. */
@@ -259,13 +263,14 @@ function roomHandle(ctx: ToolContext): { id: string; at: Vec2 } | null {
 /** The drawn handle's radius (screen px): a press on it beats a piece of furniture under it. */
 const ROOM_HANDLE_RADIUS = 13;
 
-/** Whether a press lands on the selected room's move handle (a corner or door comes first). */
+/** Whether a press lands on the selected room's move handle. */
 function onRoomHandle(ctx: ToolContext, p: PlanPointer): string | null {
-  if (p.hit && (p.hit.kind === 'vertex' || p.hit.kind === 'opening')) return null;
   const h = roomHandle(ctx);
   const dist = h ? Math.hypot(h.at.x - p.screen.x, h.at.y - p.screen.y) : Number.POSITIVE_INFINITY;
-  const reach = p.hit?.kind === 'item' ? ROOM_HANDLE_RADIUS : ROOM_HANDLE_REACH;
-  return h && dist <= reach ? h.id : null;
+  // On the drawn handle, it wins (over a corner's large touch target, or a piece under it);
+  // just beside it, only over the room or a wall.
+  const near = !p.hit || p.hit.kind === 'room' || p.hit.kind === 'wall';
+  return h && dist <= (near ? ROOM_HANDLE_REACH : ROOM_HANDLE_RADIUS) ? h.id : null;
 }
 
 /** One room-move step for the arrow keys: `delta` metres, or none if a wall is in the way. */
@@ -412,6 +417,8 @@ export function useSelectTool(ctx: ToolContext): ToolController {
           from: p.world,
           handle: handleAtStart,
           delta: { x: 0, y: 0 },
+          want: { x: 0, y: 0 },
+          fine: false,
           level: ctx.level,
           joined,
           move: planRoomMove(ctx.level, roomId, joined ? 'x' : null),
@@ -556,6 +563,17 @@ export function useSelectTool(ctx: ToolContext): ToolController {
           }
         }
         const to = moveTowards(d.level, d.move, have, want);
+        const axisWant =
+          d.move.axis === 'x'
+            ? { x: want.x, y: 0 }
+            : d.move.axis === 'y'
+              ? { x: 0, y: want.y }
+              : want;
+        const stopped = Math.hypot(axisWant.x - to.x, axisWant.y - to.y) > 0.015;
+        const wasStopped = Math.hypot(d.want.x - d.delta.x, d.want.y - d.delta.y) > 0.015;
+        d.want = axisWant;
+        d.fine = p.alt;
+        if (stopped !== wasStopped) redraw((n) => n + 1);
         if (Math.hypot(to.x - d.delta.x, to.y - d.delta.y) < 1e-9) return;
         d.delta = to;
         ctx.dispatch(moveRoom(d.level, d.move, to), { coalesceKey: d.key });
@@ -665,7 +683,8 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         return true;
       }
       const arrow = ARROWS[e.key];
-      if (!arrow) settleRun();
+      // A modifier on its own (Shift pressed between arrows) carries on the run.
+      if (!arrow && !['Shift', 'Alt', 'Control', 'Meta'].includes(e.key)) settleRun();
       const sel = useEditor.getState().selection;
       if (
         run.current &&
@@ -856,16 +875,20 @@ function RoomMoveHandle({
   const c = worldToScreen(ctx.view, ctx.size, world);
   const dx = drag?.delta.x ?? 0;
   const dy = drag?.delta.y ?? 0;
-  // A move in millimetres (Alt) says so; whole centimetres read as metres.
+  // A move in millimetres (Alt) says so; otherwise metres.
   const fmt = (v: number) =>
-    Math.abs(v * 100 - Math.round(v * 100)) > 1e-6
-      ? `${Math.round(Math.abs(v) * 1000)} mm`
-      : formatLength(Math.abs(v));
+    drag?.fine ? `${Math.round(Math.abs(v) * 1000)} mm` : formatLength(Math.abs(v));
   const parts = [
-    ...(Math.abs(dx) > 1e-9 ? [`${dx > 0 ? '→' : '←'} ${fmt(dx)}`] : []),
-    ...(Math.abs(dy) > 1e-9 ? [`${dy > 0 ? '↓' : '↑'} ${fmt(dy)}`] : []),
+    ...(Math.abs(dx) > 5e-4 ? [`${dx > 0 ? '→' : '←'} ${fmt(dx)}`] : []),
+    ...(Math.abs(dy) > 5e-4 ? [`${dy > 0 ? '↓' : '↑'} ${fmt(dy)}`] : []),
   ];
-  const text = parts.join('   ');
+  // Stopped short of the pointer (a wall in the way, or a neighbour as small as it goes).
+  const stopped = !!drag?.moved && Math.hypot(drag.want.x - dx, drag.want.y - dy) > 0.015;
+  const text = stopped
+    ? parts.length > 0
+      ? `${parts.join('   ')} · stopped`
+      : "Can't move this way"
+    : parts.join('   ');
   const width = text.length * 7 + 20;
   // Below the handle, kept inside the plan.
   const at = {

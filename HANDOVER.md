@@ -666,8 +666,9 @@ as the drag began on every move:
   beside it (`.wall-shift`, in mm for an Alt move).
 
 **Moving a room:** a selected room shows a move handle (a four-way arrow in a circle, placed
-inside the room clear of its label, door swings and furniture: `roomHandleAt` in
-`plan/layers.tsx`; a press on the drawn handle beats a piece under it). Dragging it, by mouse
+inside the room clear of its label, door swings, furniture and corners where it can be, else
+just inside the room, and not at all in a room too small for it on screen: `roomHandleAt` in
+`plan/layers.tsx`; a press on the drawn handle beats a corner or a piece under it). Dragging it, by mouse
 or finger, moves the room (1 cm steps, 1 mm with Alt); the arrow keys move a selected room too
 (1 cm, 10 cm with Shift). A drag elsewhere in the room still pans. Core: `moveRoom.ts`, applied
 afresh to the level as the drag began on every move (vertices, wall ends, rooms, furniture and
@@ -692,12 +693,16 @@ openings put back first, anything added before dropped):
     joined to it.
 - `moveBlocked` checks the moved geometry (a scratch copy): no wall closer to another than
   their half thicknesses (unless joined at a corner or by one wall, or already that close and
-  not getting closer), no wall turned back or shrunk past its doors, and no room squeezed out
-  or merged (`detectFaces` counts the rooms). About 0.3 ms a check on the sample.
+  not getting closer), no wall turned back or shrunk past its doors, and no room squeezed out,
+  merged or squeezed thinner than about 0.3 m (twice its area over its perimeter; one already
+  that thin may not get thinner). About 0.3 ms a check on the sample.
   `moveTowards` checks every centimetre to the pointer and, moving freely, slides along a wall
-  in the way.
+  in the way; stopped, it goes on to where a shrinking wall closes up exactly, if that lies
+  within the last centimetre, rather than leaving a stub of a few millimetres.
 - One undo step per drag; back where it began, nothing is kept; Escape, a cancelled touch or
-  a second finger takes it back. The distance shows under the handle (`← 0.45 m   ↓ 0.10 m`).
+  a second finger takes it back. The distance shows under the handle (`← 0.45 m   ↓ 0.10 m`),
+  with "· stopped" when something stopped it short of the pointer ("Can't move this way" if
+  it couldn't move at all). Shift pressed between arrow presses keeps the run (one undo step).
 - Not handled: corners merging where a move lands them on another corner or wall (nothing is
   settled at the end); a room with a closet carved into a corner counts as joined (the
   closet's outer corner is off its outline), so the closet stretches rather than moving.
@@ -863,5 +868,8 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
   (`jambSnap` in `snap.ts`), so an angle-snapped wall drawn to a doorway slants by up to half
   the door's width. The alternative, ending the wall straight but short of the doorway and
   unjoined, leaves the room open; not decided.
+- **Room tool from a corner just drawn:** a drag starting on a corner of the room just drawn
+  moves that corner (`useCornerHandles`), so a second room sharing a wall can't be started
+  from the shared corner; starting from its far corner and ending on the shared one works.
 - **Corner dimension lines** for walls that run into the room draw inside it; fine at plan scale,
   busy on short walls.

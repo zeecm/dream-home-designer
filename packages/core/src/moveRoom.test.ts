@@ -161,7 +161,8 @@ describe('moveRoom', () => {
     const slid = moveTowards(start, move, { x: 0, y: 0 }, { x: 2, y: 0.5 });
     expect(slid.x).toBeLessThan(0.91);
     expect(slid.y).toBeCloseTo(0.5, 6);
-    // Two rooms sharing a wall: the left one can't squash the right one away.
+    // Two rooms sharing a wall: the left one can't squash the right one thinner than about
+    // 0.3 m (its area over half its perimeter).
     const g = plan(box(0, 0, 6, 4), [
       { x: 3, y: 0 },
       { x: 3, y: 4 },
@@ -169,8 +170,8 @@ describe('moveRoom', () => {
     const gl = g.roomWith({ x: 1, y: 1 });
     const gs = g.lvl();
     const gm = planRoomMove(gs, gl.id, 'x');
-    expect(moveBlocked(gs, gm, { x: 2.85, y: 0 })).toBe(false);
-    expect(moveBlocked(gs, gm, { x: 2.96, y: 0 })).toBe(true);
+    expect(moveBlocked(gs, gm, { x: 2.6, y: 0 })).toBe(false);
+    expect(moveBlocked(gs, gm, { x: 2.75, y: 0 })).toBe(true);
     // Held to its axis: the part of a drag across it is ignored.
     expect(moveTowards(gs, gm, { x: 0, y: 0 }, { x: 0.5, y: 0.7 })).toEqual({ x: 0.5, y: 0 });
   });
@@ -297,10 +298,9 @@ describe('moveRoom', () => {
     const left = f.roomWith({ x: 1, y: 1 });
     const start = f.lvl();
     const move = planRoomMove(start, left.id, 'x');
-    // The store keeps more than the smallest room's area (0.25 m², so 0.125 m wide).
+    // The store stays wide enough to use: about 0.35 m (2 m long).
     const to = moveTowards(start, move, { x: 0, y: 0 }, { x: 2, y: 0 });
-    expect(to.x).toBeLessThan(0.875);
-    expect(to.x).toBeGreaterThan(0.8);
+    expect(to.x).toBeCloseTo(0.64, 6);
     f.apply(moveRoom(start, move, to), 'drag');
     f.apply(moveRoom(start, move, { x: 0.3, y: 0 }), 'drag');
     const l = f.lvl();
@@ -441,5 +441,38 @@ describe('moveRoom', () => {
     const b = w && l.vertices[w.b];
     if (!o || !a || !b) throw new Error('lost the door');
     expect(a.y + (b.y - a.y) * o.t).toBeCloseTo(0.1, 6);
+  });
+
+  it('stops on a corner it reaches, not a few millimetres short of it', () => {
+    // A room below a long wall whose T-junctions are off the centimetre grid: moved right,
+    // its top-right corner reaches the long wall's end (at 6.004) exactly.
+    const f = plan(
+      [
+        { x: -2, y: 0 },
+        { x: 6.004, y: 0 },
+        { x: 6.004, y: -3 },
+      ],
+      [
+        { x: 0, y: 0 },
+        { x: 0, y: 3 },
+        { x: 4, y: 3 },
+        { x: 4, y: 0 },
+      ],
+    );
+    const room = f.roomWith({ x: 2, y: 1 });
+    const start = f.lvl();
+    const move = planRoomMove(start, room.id, 'x');
+    const to = moveTowards(start, move, { x: 0, y: 0 }, { x: 3, y: 0 });
+    expect(to.x).toBeCloseTo(2.004, 9);
+    f.apply(moveRoom(start, move, to));
+    const l = f.lvl();
+    const shortest = Math.min(
+      ...Object.values(l.walls).map((w) => {
+        const a = l.vertices[w.a] as Vec2;
+        const b = l.vertices[w.b] as Vec2;
+        return Math.hypot(b.x - a.x, b.y - a.y);
+      }),
+    );
+    expect(shortest).toBeGreaterThan(0.5);
   });
 });
