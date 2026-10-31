@@ -675,9 +675,14 @@ blocked by the network proxy and Sketchfab needs an API key.
 ## 6. Next
 
 **Finish Phase 1**, in order:
-1. **Public-deployment safety:** sharing and recovery copies are done (see §4). Still open: a
-   cap on how many projects one visitor can create (the Worker's per-IP write limit is the only
-   brake today).
+1. **Public-deployment safety:** sharing and recovery copies are done (see §4). A visitor may
+   start at most 40 plans a day (`apps/edge/src/quota.ts`), on top of the per-minute limits:
+   counted in D1 (`create_quota`, migration `0002`) by an HMAC of the day and address under
+   `KEYS_SECRET`, pruned after two days, and failing open (logged as `quotaUnavailable`) while
+   the table is missing. Writes whose path holds a `%` are refused, since the API would decode
+   one past these checks. A visitor refused by the cap (a busy shared network) gets their plan
+   kept in the browser instead (`createFrom` in `store.ts`). **The migration needs applying** to
+   `dhd-auth-preview` and `dhd-auth` (owner to-do: the permission check held it back).
 2. **Room matching by overlap (looked into, not adopted):** rooms are matched across edits by
    label point and shared corners. Sampled area overlap was tried; it gave the same results on
    splits, merges and a closet drawn mid-room (now a test), and disagrees only on odd shapes
@@ -700,9 +705,13 @@ blocked by the network proxy and Sketchfab needs an API key.
   block like windows, so the walk stays inside the flat.
 - **Mini-map:** a small plan in the corner while walking shows where you are and which way you
   face (`walk/MiniMap.tsx`).
-- **Next:**
-  - footstep sound, kept subtle;
-  - opening and closing doors by walking up to them.
+- **Doors and footsteps (built):** inside doors stand open in the orbit view; walking
+  through, they start shut, swing open within 1.6 m of the walker and shut beyond 2.4 m
+  (`useDoorSwings` in `Viewport.tsx`; render builds each inside leaf as a group pivoting at
+  its hinge, `LevelMeshes.doors()` / `setDoorOpen`). A shut leaf sits flush with the face it
+  hinges on. Collision is unchanged (doorways open, an open leaf solid). Soft footsteps,
+  synthesised with Web Audio (`walk/footsteps.ts`), play with each step, louder running;
+  "Footsteps on/off" in the walk view, remembered per browser.
 - **Built since:**
   - door leaves in 3D (`doorLeaf` in core): open square to the wall on the swing side as the
     plan symbol shows, and solid to the walker; doors to the outside (`outsideOpenings`) are

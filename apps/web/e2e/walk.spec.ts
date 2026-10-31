@@ -50,3 +50,22 @@ test('a walk-through link opens straight into a walk', async ({ page }) => {
   // Taken out of the address, so a later plan opened here doesn't start walking too.
   expect(new URL(page.url()).searchParams.get('walk')).toBeNull();
 });
+
+test('footsteps can be turned off while walking, and stay off', async ({ page }) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('3');
+  await page.getByRole('button', { name: 'Walk through' }).click();
+  const sound = page.getByRole('button', { name: /^Footsteps/ });
+  await expect(sound).toHaveAttribute('aria-pressed', 'true');
+  await sound.click();
+  await expect(sound).toHaveText('Footsteps off');
+  await page.reload();
+  await waitSaved(page);
+  await page.keyboard.press('3');
+  await page.getByRole('button', { name: 'Walk through' }).click();
+  await expect(page.getByRole('button', { name: /^Footsteps/ })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+});
