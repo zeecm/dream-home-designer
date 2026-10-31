@@ -198,7 +198,7 @@ function segmentDistance(p: Vec2, a: Vec2, b: Vec2): number {
  * from its outline (sampled at corners and edge midpoints) to the polygon's edges and to the
  * circles. Negative when it pokes outside the polygon or into a circle.
  */
-function labelClearance(
+export function labelClearance(
   p: Vec2,
   half: Vec2,
   poly: readonly Vec2[],

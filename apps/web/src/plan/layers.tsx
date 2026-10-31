@@ -9,6 +9,7 @@ import {
   furnitureKind,
   itemFootprint,
   itemSize,
+  labelClearance,
   placeLabel,
   roomArea,
   roomShape,
@@ -271,6 +272,8 @@ interface RoomLabel {
   name: string;
   area: string | null;
   at: Vec2;
+  /** Half the label's size, in metres. */
+  half: Vec2;
 }
 
 /**
@@ -318,15 +321,78 @@ function roomLabels(level: Level, geom: PlanGeometry, zoom: number): RoomLabel[]
     // Keep 10 cm clear of the walls' centre lines, so a label never sits on a thick wall.
     const half = { x: halfPx.x / zoom + 0.1, y: halfPx.y / zoom + 0.1 };
     const at = placeLabel(poly, half, swings, shape.holes);
-    out.push({ id: r.id, name, area: areaFits ? area : null, at });
+    out.push({ id: r.id, name, area: areaFits ? area : null, at, half });
   }
   return out;
 }
 
+/** Labels are fitted to zoom in steps of about 9%, so a wheel zoom doesn't re-place them. */
+const labelZoom = (zoom: number) => 2 ** (Math.round(Math.log2(zoom) * 8) / 8);
+
+/** Half the room move handle's size on screen (px), with room to spare around it. */
+const MOVE_HANDLE_HALF = 16;
+
+/** How far (screen px) the move handle keeps from the room's corners. */
+const CORNER_CLEAR = 16;
+
+const handleCache = new WeakMap<Level, Map<string, Vec2 | null>>();
+
+/**
+ * Where a selected room's move handle goes (plan metres): inside the room, clear of its
+ * label, its holes and the door swings, as a label is placed. Null for a room with no shape.
+ */
+export function roomHandleAt(
+  level: Level,
+  geom: PlanGeometry,
+  zoom: number,
+  roomId: string,
+): Vec2 | null {
+  const step = labelZoom(zoom);
+  const key = `${roomId}:${step}`;
+  let cache = handleCache.get(level);
+  const hit = cache?.get(key);
+  if (hit !== undefined) return hit;
+  const room = level.rooms[roomId];
+  const shape = room && roomShapes(level).get(roomId);
+  let at: Vec2 | null = null;
+  if (shape && shape.outer.length >= 3) {
+    const label = roomLabels(level, geom, step).find((l) => l.id === roomId);
+    const avoid = [
+      ...geom.openings
+        .filter((o) => o.kind === 'door')
+        .map((o) => swingZone(doorSwing(o.frame, o.opening))),
+      ...(label ? [{ c: label.at, r: Math.hypot(label.half.x, label.half.y) }] : []),
+      // Furniture too, so a press on the handle never lands on a piece instead.
+      ...Object.values(level.items).map((it) => {
+        const { w, d } = itemSize(it);
+        return { c: { x: it.position.x, y: it.position.z }, r: Math.hypot(w, d) / 2 };
+      }),
+    ];
+    // Clear of the room's corners, whose targets are large on a touch screen.
+    const corners = shape.outer.map((c) => ({ c, r: CORNER_CLEAR / step }));
+    const h = MOVE_HANDLE_HALF / step + 0.1;
+    const half = { x: h, y: h };
+    // Clear of everything if it can be, else of the corners, else just inside the room; in
+    // a room too small for it on screen, none (zoom in, or use the arrow keys).
+    for (const clear of [[...avoid, ...corners], corners, []]) {
+      const p = placeLabel(shape.outer, half, clear, shape.holes);
+      if (labelClearance(p, half, shape.outer, clear, shape.holes) >= 0) {
+        at = p;
+        break;
+      }
+    }
+  }
+  if (!cache) {
+    cache = new Map();
+    handleCache.set(level, cache);
+  }
+  cache.set(key, at);
+  return at;
+}
+
 export const RoomLabels = memo(function RoomLabels({ level, geom, view, size }: ScreenProps) {
   // Placement depends on zoom, not on panning, so a pan reuses it.
-  // Fit labels to zoom in steps of about 9%, so a wheel zoom doesn't re-place them every tick.
-  const zoomStep = 2 ** (Math.round(Math.log2(view.zoom) * 8) / 8);
+  const zoomStep = labelZoom(view.zoom);
   const labels = useMemo(() => roomLabels(level, geom, zoomStep), [level, geom, zoomStep]);
   return (
     <g className="room-labels" pointerEvents="none">

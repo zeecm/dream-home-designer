@@ -387,6 +387,54 @@ test('on a phone: a tapped wall drags sideways by finger; an untapped one pans',
   expect(b.x - moved.x).toBeGreaterThan(20);
 });
 
+test('on a phone: a tapped room moves by its handle; a drag elsewhere in it pans', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.evaluate(() => document.fonts.ready);
+  const area = page.locator('[data-hit="room:rm_main-bedroom"]');
+  let b = await area.boundingBox();
+  if (!b) throw new Error('no room');
+  await page.touchscreen.tap(b.x + b.width * 0.2, b.y + b.height * 0.8);
+  await expect(page.getByRole('heading', { name: 'Room', exact: true })).toBeVisible();
+  await planBox(page);
+  const handle = page.locator('.room-move circle');
+  await expect(handle).toBeVisible();
+  b = await area.boundingBox();
+  const h = await handle.boundingBox();
+  if (!b || !h) throw new Error('no handle');
+  const from = { x: h.x + h.width / 2, y: h.y + h.height / 2 };
+  const f = await finger(page, from);
+  await f.moveTo({ x: from.x - 25, y: from.y });
+  await expect(page.locator('.handle-length')).toBeVisible();
+  await f.lift();
+  const moved = await area.boundingBox();
+  expect(b.x - (moved?.x ?? 0)).toBeGreaterThan(10);
+  // Still selected; a drag from elsewhere in the room pans the plan, moving nothing.
+  await expect(page.getByRole('heading', { name: 'Room', exact: true })).toBeVisible();
+  const room = await area.boundingBox();
+  const handleNow = await handle.boundingBox();
+  if (!room || !handleNow) throw new Error('lost the room');
+  // The corner of the room furthest from its handle.
+  const hc = { x: handleNow.x + handleNow.width / 2, y: handleNow.y + handleNow.height / 2 };
+  const start = [0.25, 0.75]
+    .flatMap((fx) =>
+      [0.25, 0.75].map((fy) => ({ x: room.x + room.width * fx, y: room.y + room.height * fy })),
+    )
+    .sort((p, q) => Math.hypot(q.x - hc.x, q.y - hc.y) - Math.hypot(p.x - hc.x, p.y - hc.y))[0];
+  if (!start) throw new Error('no spot');
+  const g = await finger(page, start);
+  await g.moveTo({ x: start.x + 30, y: start.y });
+  await g.lift();
+  const panned = await area.boundingBox();
+  const handlePanned = await handle.boundingBox();
+  // The room and its handle moved on screen together: a pan, not a move.
+  expect((panned?.x ?? 0) - room.x).toBeGreaterThan(20);
+  expect((handlePanned?.x ?? 0) - handleNow.x).toBeCloseTo((panned?.x ?? 0) - room.x, 0);
+  await expect(page.locator('.handle-length')).toHaveCount(0);
+});
+
 test('on a phone: a wall move whose touch is cancelled is taken back', async ({ page }) => {
   await page.goto('/');
   await waitSaved(page);

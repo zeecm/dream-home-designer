@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { newBlankPlan, waitSaved } from './helpers';
+import { floorArea, newBlankPlan, waitSaved } from './helpers';
 
 test('with a mouse, a drag draws a wall from where it starts, and a room corner to corner', async ({
   page,
@@ -174,4 +174,54 @@ test('moving a wall: the piece carrying on in line stays straight, windows stay 
   expect((moved?.x ?? 0) - w.x).toBeLessThan(door.x - w.x);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('button', { name: /^Bedroom\b/ })).toHaveCount(1);
+});
+
+test('a selected room moves by its handle, square to the flat, in one undo step; arrows move it too', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  const area = page.locator('[data-hit="room:rm_main-bedroom"]');
+  const before = await area.boundingBox();
+  if (!before) throw new Error('no room');
+  // Selected (near its bottom-left, clear of its label and door): its move handle shows.
+  await page.mouse.click(before.x + before.width * 0.15, before.y + before.height * 0.85);
+  const handle = page.locator('.room-move circle');
+  await expect(handle).toBeVisible();
+  const floor = await floorArea(page).textContent();
+  const h = await handle.boundingBox();
+  if (!h) throw new Error('no handle');
+  const at = { x: h.x + h.width / 2, y: h.y + h.height / 2 };
+
+  // Dragged left and a little down: joined to the flat, it goes straight left, showing how far.
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(at.x - 20, at.y + 4, { steps: 4 });
+  await page.mouse.move(at.x - 40, at.y + 8, { steps: 4 });
+  await expect(page.locator('.handle-length text')).toHaveText(/^← \d+\.\d\d m$/);
+  await page.mouse.up();
+  await expect(page.locator('.handle-length')).toHaveCount(0);
+  const moved = await area.boundingBox();
+  expect(before.x - (moved?.x ?? 0)).toBeGreaterThan(20);
+  expect(moved?.y).toBeCloseTo(before.y, 0);
+  expect(moved?.width).toBeCloseTo(before.width, 0);
+  await expect(floorArea(page)).toHaveText(floor ?? '');
+  // No wall slants: every wall piece is as wide or as tall as its thickness at most.
+  const slanted = await page.locator('[data-hit^="wall:"]').evaluateAll(
+    (els) =>
+      els.filter((el) => {
+        const b = (el as SVGGraphicsElement).getBBox();
+        return Math.min(b.width, b.height) > 0.31;
+      }).length,
+  );
+  expect(slanted).toBe(0);
+
+  await page.keyboard.press('Control+z');
+  await expect.poll(async () => (await area.boundingBox())?.x ?? 0).toBeCloseTo(before.x, 0);
+
+  // Shift+Arrow moves the selected room 10 cm.
+  await page.keyboard.press('Shift+ArrowUp');
+  await expect.poll(async () => (await area.boundingBox())?.y ?? 0).toBeLessThan(before.y - 2);
+  await expect(floorArea(page)).toHaveText(floor ?? '');
 });

@@ -1,3 +1,4 @@
+import type { Draft } from 'immer';
 import type { Command } from './history';
 import { newId } from './ids';
 import { draftLevel } from './levels';
@@ -94,6 +95,7 @@ export function shiftWall(from: Level, wallId: string, offset: number, ids: Shif
       const wall = lvl.walls[wallId];
       if (!wall) throw new Error(`wall ${wallId} not found`);
       const moved = (p: Vec2) => ({ x: p.x + n.x * offset, y: p.y + n.y * offset });
+      const followed = new Map<string, Vec2>();
       for (const end of ['a', 'b'] as const) {
         const vid = w0[end];
         const v = start.vertices[vid];
@@ -126,30 +128,48 @@ export function shiftWall(from: Level, wallId: string, offset: number, ids: Shif
         const to = moved(v);
         cur.x = to.x;
         cur.y = to.y;
-        // Openings on the walls that follow keep their distance from those walls' far ends.
-        for (const o0 of Object.values(start.openings)) {
-          const ow = start.walls[o0.wallId];
-          if (!ow || ow.id === wallId || (ow.a !== vid && ow.b !== vid)) continue;
-          const pa = start.vertices[ow.a];
-          const pb = start.vertices[ow.b];
-          if (!pa || !pb) continue;
-          const na = ow.a === vid ? to : pa;
-          const nb = ow.b === vid ? to : pb;
-          const before = Math.hypot(pb.x - pa.x, pb.y - pa.y);
-          const after = Math.hypot(nb.x - na.x, nb.y - na.y);
-          const o = lvl.openings[o0.id];
-          if (!o || after < 1e-9) continue;
-          o.t = ow.a === vid ? 1 - ((1 - o0.t) * before) / after : (o0.t * before) / after;
-        }
+        followed.set(vid, to);
       }
+      keepFromFarEnds(lvl, start, followed, wallId);
       reclampOpenings(lvl);
       syncRooms(lvl);
     },
   };
 }
 
+/**
+ * In a recipe: doors and windows on walls with one end moved (`moved` maps those corners to
+ * where they went, from where they were in `start`) keep their distance from the walls' far
+ * ends instead of sliding. `skip` names a wall that moved whole.
+ */
+export function keepFromFarEnds(
+  lvl: Draft<Level>,
+  start: Level,
+  moved: ReadonlyMap<string, Vec2>,
+  skip?: string,
+): void {
+  for (const o0 of Object.values(start.openings)) {
+    const ow = start.walls[o0.wallId];
+    if (!ow || ow.id === skip) continue;
+    const toA = moved.get(ow.a);
+    const toB = moved.get(ow.b);
+    // Neither end moved, or both did (by the same amount): it keeps its place.
+    if (!toA === !toB) continue;
+    const pa = start.vertices[ow.a];
+    const pb = start.vertices[ow.b];
+    if (!pa || !pb) continue;
+    const na = toA ?? pa;
+    const nb = toB ?? pb;
+    const before = Math.hypot(pb.x - pa.x, pb.y - pa.y);
+    const after = Math.hypot(nb.x - na.x, nb.y - na.y);
+    const o = lvl.openings[o0.id];
+    if (!o || after < 1e-9) continue;
+    o.t = toA ? 1 - ((1 - o0.t) * before) / after : (o0.t * before) / after;
+  }
+}
+
 /** The shortest distance between two segments. */
-function segmentDistance(p1: Vec2, p2: Vec2, q1: Vec2, q2: Vec2): number {
+export function segmentDistance(p1: Vec2, p2: Vec2, q1: Vec2, q2: Vec2): number {
   const d1 = sub(p2, p1);
   const d2 = sub(q2, q1);
   const cross = (u: Vec2, v: Vec2) => u.x * v.y - u.y * v.x;
@@ -169,7 +189,7 @@ function segmentDistance(p1: Vec2, p2: Vec2, q1: Vec2, q2: Vec2): number {
 }
 
 /** A wall's true centre line (off its line when it lies to one side) and half its thickness. */
-function band(w: Wall, p: Vec2, q: Vec2): { p: Vec2; q: Vec2; half: number } {
+export function band(w: Wall, p: Vec2, q: Vec2): { p: Vec2; q: Vec2; half: number } {
   const f = wallFaces(w);
   const l = Math.hypot(q.x - p.x, q.y - p.y) || 1;
   const n = { x: -(q.y - p.y) / l, y: (q.x - p.x) / l };
@@ -179,7 +199,7 @@ function band(w: Wall, p: Vec2, q: Vec2): { p: Vec2; q: Vec2; half: number } {
 }
 
 /** Shorter than this, a joined wall is about to vanish: the move stops first. */
-const MIN_JOINED = 0.05;
+export const MIN_JOINED = 0.05;
 
 /**
  * Whether moving the wall by `offset` would run it into another wall (closer than their
