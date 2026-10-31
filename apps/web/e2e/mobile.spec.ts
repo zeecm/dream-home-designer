@@ -410,18 +410,33 @@ test('on a phone: a tapped room moves by its handle; a drag elsewhere in it pans
   await expect(page.locator('.handle-length')).toBeVisible();
   await f.lift();
   const moved = await area.boundingBox();
-  expect(b.x - (moved?.x ?? 0)).toBeGreaterThan(10);
+  // It goes left until a wall stops it 0.55 m on (about 9 px at a phone's zoom).
+  expect(b.x - (moved?.x ?? 0)).toBeGreaterThan(5);
   // Still selected; a drag from elsewhere in the room pans the plan, moving nothing.
   await expect(page.getByRole('heading', { name: 'Room', exact: true })).toBeVisible();
   const room = await area.boundingBox();
   const handleNow = await handle.boundingBox();
   if (!room || !handleNow) throw new Error('lost the room');
-  // The corner of the room furthest from its handle.
+  // The spot in the room (not on a door or a piece in it) furthest from its handle: how
+  // big the room shows depends on the zoom the plan opened at.
   const hc = { x: handleNow.x + handleNow.width / 2, y: handleNow.y + handleNow.height / 2 };
-  const start = [0.25, 0.75]
-    .flatMap((fx) =>
-      [0.25, 0.75].map((fy) => ({ x: room.x + room.width * fx, y: room.y + room.height * fy })),
-    )
+  const spots = [0.15, 0.3, 0.5, 0.7, 0.85].flatMap((fx) =>
+    [0.15, 0.3, 0.5, 0.7, 0.85].map((fy) => ({
+      x: room.x + room.width * fx,
+      y: room.y + room.height * fy,
+    })),
+  );
+  const inRoom = await page.evaluate(
+    (ps) =>
+      ps.map(
+        (q) =>
+          (document.elementFromPoint(q.x, q.y)?.closest('[data-hit]') as HTMLElement | null)
+            ?.dataset.hit === 'room:rm_main-bedroom',
+      ),
+    spots,
+  );
+  const start = spots
+    .filter((_, i) => inRoom[i])
     .sort((p, q) => Math.hypot(q.x - hc.x, q.y - hc.y) - Math.hypot(p.x - hc.x, p.y - hc.y))[0];
   if (!start) throw new Error('no spot');
   const g = await finger(page, start);

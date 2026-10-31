@@ -383,6 +383,8 @@ export function PlanCanvas() {
           const along = (lo: number, hi: number, c: number, span: number) => {
             const a = (lo - c) * w.zoom + span / 2;
             const z = (hi - c) * w.zoom + span / 2;
+            // A plan flat this way (one straight wall): in view, or how far off.
+            if (z - a < 1) return a >= 0 && a <= span ? 1 : -(a < 0 ? -a : a - span) / KEEP;
             const seen = Math.min(span, Math.max(a, z)) - Math.max(0, Math.min(a, z));
             return seen / Math.min(KEEP, Math.abs(z - a) || KEEP);
           };

@@ -562,7 +562,9 @@ a boundary, no wall drawn along another, no two doors overlapping). Then the
 renovation's rooms are found again, keeping a name or finish the edit gave a room where the
 renovation's was as it was (a new room's name only if free). Otherwise nothing is carried
 and a toast says so (a room the renovation renamed or refinished too counts, as does a room
-the renovation made or changed that the edit would take away). A drag or run
+the renovation made or changed that the edit would take away; a room split off in the flat
+whose name was taken in the renovation counts as the renovation's own, so a later edit
+merging it back is held back too, a cautious answer left as it is). A drag or run
 of nudges (one coalesce key) held back at any step goes back to how the drag found the
 renovation (`restore`), taking back its steps already carried, and stays held back. Restoring a version (or anything replacing the plan or renovation whole) carries
 nothing. One undo step, which shows Before (`touchedVariant`).
@@ -571,8 +573,9 @@ flat as it is left of a divider and the renovation right of it, in one view with
 (`CompareRender` in `Viewport.tsx` takes over drawing: each frame draws the scene twice, each
 time cut to its side with the scissor; the two versions are their own `LevelMesh`es). The
 divider drags by its handle (or the arrow keys, as a slider); walking shows one version and
-the comparison comes back after. Each side is lit by its own lamps (the other's are turned
-down for that pass, not hidden, so the count of lights and the shaders stay the same).
+the comparison comes back after. Each side is lit by its own lamps, the nearest four each
+so the two stay within the budget of eight (the other's are turned down for that pass, not
+hidden, so the count of lights and the shaders stay the same).
 Outside the frame the version picked above the plan shows and is the one named `level`, so a
 3D download while comparing draws that one. The divider sits under the view's buttons; Home,
 End, Page Up and Down move it too; a side under 90 px loses its label; its handle is a 44 px
@@ -693,7 +696,8 @@ The Go API logs it locally (`POST /telemetry`, 204).
   moving coasts and slows to a stop (`fling` in `PlanCanvas.tsx`: speed smoothed over the last
   moves, capped at 2.5 px/ms, two thirds lost every 325 ms; only after 40 px of real panning,
   so not from what's left of a pinch; it stops before the plan leaves the screen (48 px of
-it, or all of a smaller plan, stays in view, unless the coast is bringing it back),
+it, or all of a smaller plan, stays in view, unless the coast is bringing it back; a plan
+of one straight wall counts as in view while the wall's line is),
   when anything else moves the view (Fit), and at any press or wheel, and a tap that stops
   it does nothing else); one finger left down after a pinch pans on; in 3D, two fingers (or right-drag) pan over the floor
   (`screenSpacePanning={false}`) rather than up and down the screen.
@@ -921,9 +925,12 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
   owner configures it.
 - **One plan image per project on the server.** Replacing it drops the old one, so undoing a
   replacement shows the old image only in browsers that still have it locally.
-- **Flaky phone e2e:** the first test in `mobile.spec.ts` still fails about one run in four
-  locally (CI retries once): the Add tap or the finger-drawn room doesn't land when the run
-  is slow. Four real causes were found and fixed on the way: Add was `disabled` until the
+- **Flaky phone e2e:** the first test in `mobile.spec.ts` used to fail about one run in four
+  locally (CI retries once); it has passed 20 runs in a row since (31 Oct). Another, the
+  room-handle test, failed whenever the plan opened at a smaller zoom (the room's move is
+  stopped by a wall 0.55 m on, under 10 px there, and the pan's start landed off the room):
+  it now expects 5 px and picks a spot that hits the room. When the Add tap or the
+  finger-drawn room doesn't land, the run is slow. Four real causes were found and fixed on the way: Add was `disabled` until the
   typing re-rendered (a quick tap was dropped); a busy page merges a quick drag's moves into
   the lift (the plan and the walk now play the lift's position as a last move); and the orbit
   controls left `touch-action: auto` on the 3D canvas, so a phone cancelled sideways swipes

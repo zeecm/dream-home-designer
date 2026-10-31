@@ -141,7 +141,9 @@ function planCarry(old: Level, now: Level, there: Level): Change[] | 'none' | 'c
   for (const id of reended) {
     // A wall split where the renovation moved one of its ends would bend at the split.
     const o = old.walls[id];
-    if (o && [o.a, o.b].some((v) => !same(has.vertices[v], was.vertices[v]))) return 'conflict';
+    const w = now.walls[id];
+    if (!o || !w || (o.a === w.a && o.b === w.b)) continue;
+    if ([o.a, o.b].some((v) => !same(has.vertices[v], was.vertices[v]))) return 'conflict';
   }
   const merged = new Set(changes.filter((c) => c.key === 'openings').map((c) => c.id));
   for (const o of Object.values(there.openings)) {
@@ -249,16 +251,19 @@ export function carriedToRenovation(
         const now = isDraft(l) ? current(l) : l;
         const plan = planCarry(old, now, current(after));
         let changed = false;
-        if (plan === 'conflict') {
+        // Held back: the renovation as it was, or, part of a drag already carried, as the
+        // drag found it.
+        const start = restore?.find((r) => r.id === after.id);
+        const holdBack = (back: Level | undefined) => {
           outcome.conflict = true;
-          // Part of a drag already carried: the renovation goes back to how the drag found it.
-          const start = restore?.find((r) => r.id === after.id);
-          if (start) {
-            for (const key of [...CARRIED, 'rooms'] as const) {
-              (after as Record<string, unknown>)[key] = structuredClone(start[key]);
-            }
-            after.ceilingHeight = start.ceilingHeight;
+          if (!back) return;
+          for (const key of [...CARRIED, 'rooms'] as const) {
+            (after as Record<string, unknown>)[key] = structuredClone(back[key]);
           }
+          after.ceilingHeight = back.ceilingHeight;
+        };
+        if (plan === 'conflict') {
+          holdBack(start);
           return;
         }
         const keep = structuredClone(current(after));
@@ -285,11 +290,7 @@ export function carriedToRenovation(
             return own && !after.rooms[r.id];
           });
           if (lost) {
-            for (const key of [...CARRIED, 'rooms'] as const) {
-              (after as Record<string, unknown>)[key] = keep[key];
-            }
-            after.ceilingHeight = keep.ceilingHeight;
-            outcome.conflict = true;
+            holdBack(start ?? keep);
             return;
           }
         }
