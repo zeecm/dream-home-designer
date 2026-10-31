@@ -110,6 +110,9 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
             {!overOwn.current && !routed.current && own.overlay(o)}
             {select.overlay(o)}
           </>
+        ) : routed.current ? (
+          // Dragging a door shows Select's clearances to the corners, not a new door's ghost.
+          select.overlay(o)
         ) : (
           own.overlay(o)
         ),
@@ -359,8 +362,12 @@ export function PlanCanvas() {
         // Dragging a corner or a door moves it; dragging anything else pans the plan,
         // without selecting what the finger started on.
         const kind = t.start.hit?.kind;
+        // A wall moves only once selected: dragging another pans, as rooms do.
+        const sel = useEditor.getState().selection;
+        const selectedWall = kind === 'wall' && sel?.kind === 'wall' && sel.id === t.start.hit?.id;
         t.claimed =
-          (kind === 'vertex' || kind === 'opening' || kind === 'item') && active.down(t.start);
+          (kind === 'vertex' || kind === 'opening' || kind === 'item' || selectedWall) &&
+          active.down(t.start);
         if (!t.claimed) pan.current = t.start.screen;
       } else if (active.grabs?.(t.start)) {
         t.claimed = active.down(t.start);

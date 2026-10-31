@@ -340,3 +340,42 @@ test('on a phone: a small piece moves under the finger, however close its handle
   await expect(page.getByLabel('Width')).toHaveValue(width);
   await expect(items).toHaveCount(1);
 });
+
+test('on a phone: a tapped wall drags sideways by finger; an untapped one pans', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.evaluate(() => document.fonts.ready);
+  const wall = page.locator('[data-hit="wall:w_bedroom_main-bedroom"]').first();
+  const box = async () => {
+    const b = await wall.boundingBox();
+    if (!b) throw new Error('no wall');
+    return b;
+  };
+  // A drag from a wall not selected pans the whole plan (the wall moves on screen with it,
+  // but no wall is selected and nothing changes).
+  let b = await box();
+  await touches(
+    page,
+    line(
+      { x: b.x + b.width / 2, y: b.y + b.height / 2 },
+      { x: b.x + b.width / 2 + 30, y: b.y + b.height / 2 },
+      6,
+    ),
+  );
+  await expect(page.getByRole('heading', { name: 'Wall' })).toHaveCount(0);
+
+  // Tapped, then dragged: it moves, with the distance shown under the finger.
+  b = await box();
+  await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+  await expect(page.getByRole('heading', { name: 'Wall' })).toBeVisible();
+  b = await box();
+  const from = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  const f = await finger(page, from);
+  await f.moveTo({ x: from.x + 30, y: from.y });
+  await expect(page.locator('.wall-shift')).toBeVisible();
+  await f.lift();
+  const moved = await box();
+  expect(moved.x - b.x).toBeGreaterThan(20);
+});

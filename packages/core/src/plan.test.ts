@@ -11,6 +11,7 @@ import {
   doorLeaf,
   doorSwing,
   framePoint,
+  openingClearances,
   placeOpening,
   planGeometry,
 } from './plan';
@@ -271,5 +272,46 @@ describe('placeOpening overlap', () => {
     if (!o) throw new Error('fixture');
     const mid = framePoint(o.frame, (o.span[0] + o.span[1]) / 2, 0);
     expect(placeOpening(geom, mid, 0.9, 0.3)?.fits).toBe(false);
+  });
+});
+
+describe('openingClearances', () => {
+  it('measures the clear wall either side of a door from the inside corners', () => {
+    let s: EditorDoc = { doc: blankProject('t', 'prj_t'), history: emptyHistory() };
+    const lvl = () => s.doc.levels[0] as Level;
+    const c = [
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+      { x: 4, y: 3 },
+      { x: 0, y: 3 },
+    ];
+    for (let i = 0; i < 4; i++) {
+      const a = c[i] as Vec2;
+      const b = c[(i + 1) % 4] as Vec2;
+      s = dispatch(s, drawWall(lvl(), { point: a }, { point: b }, { thickness: 0.2 }).command);
+    }
+    const bottom = Object.values(lvl().walls).find((w) => {
+      const a = lvl().vertices[w.a];
+      const b = lvl().vertices[w.b];
+      return a && b && a.y === 0 && b.y === 0;
+    });
+    if (!bottom) throw new Error('no bottom wall');
+    const f = planGeometry(lvl()).frames[bottom.id];
+    if (!f) throw new Error('no frame');
+    // A 0.9 m door centred 1 m from vertex a (which may be either end).
+    const t = 1 / 4;
+    const o = {
+      id: 'op',
+      wallId: bottom.id,
+      kind: 'door' as const,
+      t,
+      width: 0.9,
+      height: 2.1,
+      sill: 0,
+    };
+    const { before, after } = openingClearances(f, o);
+    // 4 m between centre lines, less half of each 0.2 m end wall: 3.8 m of clear wall.
+    expect(before + after + 0.9).toBeCloseTo(3.8, 6);
+    expect(before).toBeCloseTo(1 - 0.45 - 0.1, 6);
   });
 });

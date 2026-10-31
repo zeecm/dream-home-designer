@@ -620,8 +620,16 @@ The Go API logs it locally (`POST /telemetry`, 204).
 - Corners are 32 px targets on touch screens; the scale bar lets drags through; a swipe in a
   walk moves the scene with the finger; the guide is worded for phones too, keeps a fixed
   height, and step 1 offers "Draw instead".
-- **Not yet (from the round):** dragging a whole wall or room; distances to neighbours while
-  dragging a door; a magnifier.
+- **Not yet (from the round):** dragging a whole room; a magnifier.
+
+**Moving a wall:** in Select, a wall already selected drags sideways (along its normal, 1 cm
+steps, 1 mm with Alt), its joined walls following; its corners settle (merge or split) at the
+end, in one undo step, and Escape takes the drag back. Dragging a wall not selected still
+pans, by mouse or finger. The distance moved shows beside it (`.wall-shift`).
+
+**Door and window clearances:** while one is dragged (Select or its own tool), the clear wall
+on each side of it to the inside corners shows as a dimension off the wall
+(`openingClearances` in core: from where both faces have begun, past a joining wall).
 
 **Furniture handles:** a selected piece shows four corner handles and a turn handle in front
 (`itemHandles` in `plan/tools.tsx`), in Select and in Furniture straight after placing (the

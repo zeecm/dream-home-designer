@@ -1473,6 +1473,10 @@ h3.field-label {
   stroke: var(--accent);
   stroke-width: 2px;
 }
+.opening-clearance line {
+  stroke: var(--accent);
+  stroke-width: 1.5px;
+}
 .turn-stem {
   stroke: var(--accent);
   stroke-width: 1.5px;

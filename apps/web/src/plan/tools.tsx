@@ -11,11 +11,14 @@ import {
   deleteVertex,
   deleteWall,
   duplicateOf,
+  framePoint,
   furnitureKind,
   itemFootprint,
   itemSize,
   moveVertex,
   newId,
+  openingClearances,
+  openingSpan,
   placeFurniture,
   settleVertex,
   snapCorner,
@@ -138,6 +141,19 @@ type Drag =
       key: string;
     }
   | { kind: 'opening'; id: string; wallId: string; start: Vec2; moved: boolean; key: string }
+  /** A selected wall, moved sideways: its ends start at a and b, it moves along n. */
+  | {
+      kind: 'wall';
+      id: string;
+      a: Vec2;
+      b: Vec2;
+      n: Vec2;
+      from: Vec2;
+      offset: number;
+      start: Vec2;
+      moved: boolean;
+      key: string;
+    }
   /** A corner handle of a selected piece: resizes it, the opposite corner staying put. */
   | {
       kind: 'resize';
@@ -305,6 +321,29 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         select({ kind: 'vertex', id: r.vertexId });
         return true;
       }
+      // A wall already selected moves sideways when dragged (its joined walls follow).
+      const before = useEditor.getState().selection;
+      if (h.kind === 'wall' && before?.kind === 'wall' && before.id === h.id) {
+        const w = ctx.level.walls[h.id];
+        const a = w && ctx.level.vertices[w.a];
+        const b = w && ctx.level.vertices[w.b];
+        const len = a && b ? Math.hypot(b.x - a.x, b.y - a.y) : 0;
+        if (a && b && len > 1e-9) {
+          drag.current = {
+            kind: 'wall',
+            id: h.id,
+            a: { x: a.x, y: a.y },
+            b: { x: b.x, y: b.y },
+            n: { x: -(b.y - a.y) / len, y: (b.x - a.x) / len },
+            from: p.world,
+            offset: 0,
+            start: p.screen,
+            moved: false,
+            key: `drag:${h.id}:${Date.now()}`,
+          };
+          return true;
+        }
+      }
       select(h);
       if (h.kind === 'room' && p.clicks === 2) {
         // After this press's default action, which focuses the canvas, has run.
@@ -386,6 +425,17 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         );
         return;
       }
+      if (d.kind === 'wall') {
+        const w = ctx.level.walls[d.id];
+        if (!w) return;
+        const raw = (p.world.x - d.from.x) * d.n.x + (p.world.y - d.from.y) * d.n.y;
+        const step = p.alt ? 0.001 : 0.01;
+        d.offset = Math.round(raw / step) * step;
+        const at = (q: Vec2) => ({ x: q.x + d.n.x * d.offset, y: q.y + d.n.y * d.offset });
+        ctx.dispatch(moveVertex(levelId, w.a, at(d.a)), { coalesceKey: d.key });
+        ctx.dispatch(moveVertex(levelId, w.b, at(d.b)), { coalesceKey: d.key });
+        return;
+      }
       if (d.kind === 'vertex') {
         const to = p.alt
           ? p.world
@@ -426,11 +476,22 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         const level = currentLevel();
         if (level) ctx.dispatch(settleVertex(level, d.id), { coalesceKey: d.key });
       }
+      if (d?.kind === 'wall' && d.moved) {
+        const w = currentLevel()?.walls[d.id];
+        for (const id of w ? [w.a, w.b] : []) {
+          const level = currentLevel();
+          if (level?.vertices[id]) ctx.dispatch(settleVertex(level, id), { coalesceKey: d.key });
+        }
+        redraw((n) => n + 1);
+      }
     },
     key: (e) => {
       // Escape mid-drag on a handle takes the drag back; the rest of it does nothing.
       const d = drag.current;
-      if (e.key === 'Escape' && (d?.kind === 'resize' || d?.kind === 'rotate')) {
+      if (
+        e.key === 'Escape' &&
+        (d?.kind === 'resize' || d?.kind === 'rotate' || d?.kind === 'wall')
+      ) {
         drag.current = null;
         if (d.moved) useStore.getState().undo();
         redraw((n) => n + 1);
@@ -528,6 +589,35 @@ export function useSelectTool(ctx: ToolContext): ToolController {
     },
     overlay: (o) => {
       const sel = useEditor.getState().selection;
+      const dw = drag.current;
+      if (dw?.kind === 'wall' && dw.moved) {
+        // How far the wall has moved, beside its middle on the side it moves to.
+        const mid = {
+          x: (dw.a.x + dw.b.x) / 2 + dw.n.x * dw.offset,
+          y: (dw.a.y + dw.b.y) / 2 + dw.n.y * dw.offset,
+        };
+        const s = worldToScreen(o.view, o.size, mid);
+        const side = dw.offset < 0 ? -1 : 1;
+        const t = worldToScreen(o.view, o.size, {
+          x: mid.x + dw.n.x * side * 0.1,
+          y: mid.y + dw.n.y * side * 0.1,
+        });
+        const k = Math.hypot(t.x - s.x, t.y - s.y) || 1;
+        const at = { x: s.x + ((t.x - s.x) / k) * 30, y: s.y + ((t.y - s.y) / k) * 30 };
+        return (
+          <g
+            className="handle-length wall-shift"
+            pointerEvents="none"
+            transform={`translate(${at.x} ${at.y})`}
+          >
+            <rect x={-46} y={-11} width={92} height={22} rx={4} />
+            <text textAnchor="middle" y={4} className="num">
+              {formatLength(Math.abs(dw.offset))}
+            </text>
+          </g>
+        );
+      }
+      if (dw?.kind === 'opening' && dw.moved) return <OpeningClearances ctx={o} id={dw.id} />;
       const it = sel?.kind === 'item' ? o.level.items[sel.id] : undefined;
       if (!it) return null;
       const h = itemHandles(o, it);
@@ -560,6 +650,52 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       );
     },
   };
+}
+
+/**
+ * While a door or window is dragged: the clear wall left on each side of it, to the inside
+ * corners, drawn as a dimension just off the wall.
+ */
+function OpeningClearances({ ctx, id }: { ctx: ToolContext; id: string }) {
+  const op = ctx.level.openings[id];
+  const f = op && ctx.geom.frames[op.wallId];
+  if (!op || !f) return null;
+  const { before, after } = openingClearances(f, op);
+  const [u0, u1] = openingSpan(f, op);
+  const start = u0 - before;
+  const end = u1 + after;
+  // Beyond the wall's left face, by 18 px on screen.
+  const toScreen = (u: number) => worldToScreen(ctx.view, ctx.size, framePoint(f, u, 1));
+  const a = toScreen(0);
+  const n = worldToScreen(ctx.view, ctx.size, {
+    x: f.a.x + f.n.x * (f.half + 1),
+    y: f.a.y + f.n.y * (f.half + 1),
+  });
+  const k = Math.hypot(n.x - a.x, n.y - a.y) || 1;
+  const off = { x: ((n.x - a.x) / k) * 18, y: ((n.y - a.y) / k) * 18 };
+  const dim = (from: number, to: number, length: number, name: string) => {
+    if (to - from < 1e-3) return null;
+    const p = toScreen(from);
+    const q = toScreen(to);
+    const m = { x: (p.x + q.x) / 2 + off.x * 1.9, y: (p.y + q.y) / 2 + off.y * 1.9 };
+    return (
+      <g key={name} className="opening-clearance">
+        <line x1={p.x + off.x} y1={p.y + off.y} x2={q.x + off.x} y2={q.y + off.y} />
+        <g transform={`translate(${m.x} ${m.y})`} className="handle-length">
+          <rect x={-34} y={-11} width={68} height={22} rx={4} />
+          <text textAnchor="middle" y={4} className="num">
+            {formatLength(length)}
+          </text>
+        </g>
+      </g>
+    );
+  };
+  return (
+    <g pointerEvents="none" data-testid="opening-clearances">
+      {dim(start, u0, before, 'before')}
+      {dim(u1, end, after, 'after')}
+    </g>
+  );
 }
 
 /** How near (screen px) a press must land to a handle to take it: a fingertip's reach. */

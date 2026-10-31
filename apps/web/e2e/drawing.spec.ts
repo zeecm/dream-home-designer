@@ -58,7 +58,12 @@ test('in the Door tool, dragging a door moves it; a room can be deleted, and und
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2 + 20, box.y + box.height / 2 + 1, { steps: 6 });
+  // Mid-drag: the clear wall either side of it, to the inside corners.
+  const clear = page.getByTestId('opening-clearances').locator('text');
+  await expect(clear.first()).toHaveText(/^\d+\.\d\d m$/);
+  expect(await clear.count()).toBeGreaterThanOrEqual(1);
   await page.mouse.up();
+  await expect(page.getByTestId('opening-clearances')).toHaveCount(0);
   expect(await doors()).toBe(before);
   const moved = await page.locator(`[data-hit="${id}"]`).first().boundingBox();
   expect(Math.abs((moved?.x ?? 0) - box.x) + Math.abs((moved?.y ?? 0) - box.y)).toBeGreaterThan(5);
@@ -72,4 +77,37 @@ test('in the Door tool, dragging a door moves it; a room can be deleted, and und
   await expect(page.locator('.toast')).toContainText('deleted');
   await page.locator('.toast').getByRole('button', { name: 'Undo' }).click();
   await expect(page.locator('[data-hit="room:rm_main-bedroom"]')).toHaveCount(1);
+});
+
+test('a selected wall drags sideways, its joined walls following, in one undo step', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  const wall = page.locator('[data-hit="wall:w_bedroom_main-bedroom"]').first();
+  const area = page.locator('[data-hit="room:rm_main-bedroom"]');
+  const before = await wall.boundingBox();
+  const roomBefore = await area.boundingBox();
+  if (!before || !roomBefore) throw new Error('no wall');
+  const at = { x: before.x + before.width / 2, y: before.y + before.height / 2 };
+
+  await wall.click({ force: true });
+  // (A second press straight after is a double-click, which splits the wall.)
+  await page.waitForTimeout(400);
+  // Selected: a drag moves it, showing how far mid-drag.
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(at.x + 20, at.y, { steps: 4 });
+  await page.mouse.move(at.x + 40, at.y, { steps: 4 });
+  await expect(page.locator('.wall-shift')).toBeVisible();
+  await expect(page.locator('.wall-shift text')).toHaveText(/^\d+\.\d\d m$/);
+  await page.mouse.up();
+  await expect(page.locator('.wall-shift')).toHaveCount(0);
+  const after = await wall.boundingBox();
+  expect((after?.x ?? 0) - before.x).toBeGreaterThan(30);
+  // The main bedroom beside it grew with it.
+  expect((await area.boundingBox())?.width ?? 0).toBeGreaterThan(roomBefore.width + 30);
+  await page.keyboard.press('Control+z');
+  await expect.poll(async () => (await wall.boundingBox())?.x ?? 0).toBeCloseTo(before.x, 0);
 });
