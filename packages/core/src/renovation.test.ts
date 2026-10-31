@@ -277,8 +277,11 @@ describe('carriedToRenovation', () => {
   it('leaves what the renovation changed itself, and undoes in one step, on the flat as it is', () => {
     let s = dispatch(renovating(), updateWall(A, 'w_bed3_bed2', { height: 1 }));
     s = dispatch(s, carriedToRenovation(updateWall(L, 'w_bed3_bed2', { thickness: 0.2 })));
-    expect(s.doc.renovation?.levels[0]?.walls.w_bed3_bed2).toMatchObject({ height: 1 });
-    expect(s.doc.renovation?.levels[0]?.walls.w_bed3_bed2?.thickness).not.toBe(0.2);
+    // Field by field: the fix's thickness goes over, the renovation keeps its height.
+    expect(s.doc.renovation?.levels[0]?.walls.w_bed3_bed2).toMatchObject({
+      height: 1,
+      thickness: 0.2,
+    });
     // A wall taken out of the flat as it is goes from the renovation too, where it was kept.
     s = dispatch(s, carriedToRenovation(deleteWall(L, 'w_bed2_master')));
     expect(s.doc.renovation?.levels[0]?.walls.w_bed2_master).toBeUndefined();
@@ -294,19 +297,27 @@ describe('carriedToRenovation', () => {
     return drawWall(l, { point: from }, { point: to }, { thickness: 0.1 }).command;
   };
 
-  it('carries nothing where the renovation changed a wall the edit splits or shortens', () => {
+  it('splits a wall the renovation repainted, keeping its paint; both changing a field holds it back', () => {
     // The renovation paints the living room's partition; the flat as it is gets a wall
-    // meeting it in a T (splitting it).
+    // meeting it in a T (splitting it): carried, the paint kept.
     let s = dispatch(renovating(), updateWall(A, 'w_mid_2', { materialLeft: 'paint-sage' }));
     const outcome = {};
-    s = dispatch(s, carriedToRenovation(wallAt(s, { x: 4.2, y: 4.5 }, { x: 4.2, y: 2 }), outcome));
-    expect(outcome).toEqual({ carried: false, conflict: true });
+    s = dispatch(
+      s,
+      carriedToRenovation(wallAt(s, { x: 3.65, y: 4.5 }, { x: 3.65, y: 2 }), outcome),
+    );
+    expect(outcome).toMatchObject({ carried: true, conflict: false });
     const after = s.doc.renovation?.levels[0];
     expect(after?.walls.w_mid_2?.materialLeft).toBe('paint-sage');
-    expect(Object.keys(after?.walls ?? {}).length).toBe(
-      Object.keys(renovating().doc.levels[0]?.walls ?? {}).length,
+    expect(Object.keys(after?.walls ?? {}).sort()).toEqual(
+      Object.keys(s.doc.levels[0]?.walls ?? {}).sort(),
     );
-    expect(changesOf(s).some((c) => c.kind === 'room')).toBe(false);
+    expect(changesOf(s).filter((c) => c.kind !== 'build' && c.kind !== 'hack')).toEqual([]);
+    // Both versions give the same wall a different thickness: not carried.
+    s = dispatch(renovating(), updateWall(A, 'w_mid_2', { thickness: 0.2 }));
+    s = dispatch(s, carriedToRenovation(updateWall(L, 'w_mid_2', { thickness: 0.15 }), outcome));
+    expect(outcome).toMatchObject({ conflict: true });
+    expect(s.doc.renovation?.levels[0]?.walls.w_mid_2?.thickness).toBe(0.2);
   });
 
   it('never leaves the renovation a door on a missing wall, or a door moved by a split', () => {
@@ -385,5 +396,34 @@ describe('carriedToRenovation', () => {
     s = dispatch(s, carriedToRenovation(deleteWall(L, 'w_bed3_bed2'), outcome));
     expect(outcome).toMatchObject({ conflict: false });
     expect(changesOf(s)).toEqual([]);
+  });
+
+  it('takes back the steps of a drag already carried when a later step is held back', () => {
+    // The renovation adds its own door to a wall; a drag in the flat as it is first moves a
+    // corner (carried), then removes that wall (held back: the door would be left hanging).
+    const door = addOpening(A, {
+      wallId: 'w_bed3_bed2',
+      kind: 'door',
+      t: 0.7,
+      width: 0.8,
+      height: 2.1,
+      sill: 0,
+    });
+    const start = dispatch(renovating(), door.command);
+    const at = start.doc.renovation?.levels ?? [];
+    const step1 = {};
+    let s = dispatch(
+      start,
+      carriedToRenovation(moveVertex(L, 'v10', { x: 7.2, y: 4.5 }), step1, at),
+      { coalesceKey: 'drag' },
+    );
+    expect(step1).toMatchObject({ carried: true });
+    expect(s.doc.renovation?.levels[0]?.vertices.v10?.x).toBe(7.2);
+    const step2 = {};
+    s = dispatch(s, carriedToRenovation(deleteWall(L, 'w_bed3_bed2'), step2, at), {
+      coalesceKey: 'drag',
+    });
+    expect(step2).toMatchObject({ conflict: true });
+    expect(s.doc.renovation?.levels[0]).toEqual(at[0]);
   });
 });

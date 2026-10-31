@@ -40,11 +40,14 @@ export function useFurnitureTool(ctx: ToolContext): ToolController {
       if (!kind || !spot) return true;
       const id = newId('it');
       const item = newItem(id, kind, spot.at, spot.rotation, ctx.level.ceilingHeight);
-      // On a piece (a lamp on a desk): on its top, whatever its height.
+      // On a piece (a lamp on a desk, a TV on its console): on its top, whatever its
+      // height. Pieces hung higher (a wall cabinet, a clock) keep their own height.
       const under = p.hit?.kind === 'item' ? ctx.level.items[p.hit.id] : undefined;
+      const lift = kind.elevation ?? 0;
       if (
         under &&
-        (kind.elevation ?? 0) > 0 &&
+        lift > 0 &&
+        lift < 1.2 &&
         !kind.ceiling &&
         !furnitureKind(under.assetId)?.ceiling
       ) {

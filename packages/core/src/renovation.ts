@@ -84,37 +84,64 @@ function overlapping(p: [Vec2, Vec2], q: [Vec2, Vec2]): boolean {
 }
 
 /**
- * The changes an edit made to a level (`old` to `now`), if the renovation's copy (`there`)
- * can take them all: each record changed is still there as it was; nothing the renovation
- * added or changed itself hangs on one (a door on a wall, a wall on a corner); and the result
+ * One record of an edit merged into the renovation's copy, field by field: each field the
+ * edit changed goes over where the renovation's is as it was (or already as the edit made it),
+ * and the renovation keeps the fields it changed itself (a wall's paint, a door's width).
+ * 'conflict' where both changed the same field differently, or one removed what the other
+ * changed; 'same' where the renovation already has it.
+ */
+function merge(was: unknown, edited: unknown, there: unknown): unknown | 'conflict' | 'same' {
+  if (same(there, edited)) return 'same';
+  if (was === undefined) return there === undefined ? edited : 'conflict';
+  if (edited === undefined) return same(there, was) ? undefined : 'conflict';
+  if (there === undefined) return 'conflict';
+  const a = was as Record<string, unknown>;
+  const b = edited as Record<string, unknown>;
+  const out = { ...(there as Record<string, unknown>) };
+  for (const f of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    if (same(a[f], b[f])) continue;
+    if (!same(out[f], a[f]) && !same(out[f], b[f])) return 'conflict';
+    if (b[f] === undefined) delete out[f];
+    else out[f] = b[f];
+  }
+  return out;
+}
+
+/**
+ * The changes an edit made to a level (`old` to `now`), merged into the renovation's copy
+ * (`there`), if it can take them all: each record merges (`merge`); no door or window of the
+ * renovation's own sits on a wall the edit moves an end of (it would slide); and the result
  * holds together (every wall's corners and every opening's wall there, no wall added along
- * another). 'conflict' if not; 'none' for no change.
+ * another). 'conflict' if not; 'none' for nothing to do.
  */
 function planCarry(old: Level, now: Level, there: Level): Change[] | 'none' | 'conflict' {
+  const was = old as unknown as Records;
+  const edited = now as unknown as Records;
+  const has = there as unknown as Records;
   const changes: Change[] = [];
   for (const key of CARRIED) {
-    const a: Record<string, unknown> = old[key];
-    const b: Record<string, unknown> = now[key];
-    for (const id of new Set([...Object.keys(a), ...Object.keys(b)])) {
-      if (!same(a[id], b[id])) changes.push({ key, id, to: b[id] });
+    for (const id of new Set([...Object.keys(was[key]), ...Object.keys(edited[key])])) {
+      if (same(was[key][id], edited[key][id])) continue;
+      const to = merge(was[key][id], edited[key][id], has[key][id]);
+      if (to === 'conflict') return 'conflict';
+      if (to !== 'same') changes.push({ key, id, to });
     }
   }
-  const was = old as unknown as Records;
-  const has = there as unknown as Records;
-  // What the renovation already has (a wall it took out too) needs nothing.
-  const todo = changes.filter((c) => !same(has[c.key][c.id], c.to));
-  if (todo.length === 0) return 'none';
-  changes.splice(0, changes.length, ...todo);
-  if (changes.some((c) => !same(has[c.key][c.id], was[c.key][c.id]))) return 'conflict';
-  const touched = (key: Carried) => new Set(changes.filter((c) => c.key === key).map((c) => c.id));
-  const tv = touched('vertices');
-  const tw = touched('walls');
-  const own = (key: Carried, id: string) => !same(has[key][id], was[key][id]);
-  for (const w of Object.values(there.walls)) {
-    if (!tw.has(w.id) && (tv.has(w.a) || tv.has(w.b)) && own('walls', w.id)) return 'conflict';
-  }
+  if (changes.length === 0) return 'none';
+  // Walls whose ends the edit moves to other corners (a split, a merge).
+  const reended = new Set(
+    Object.values(now.walls)
+      .filter((w) => {
+        const o = old.walls[w.id];
+        return o && (o.a !== w.a || o.b !== w.b);
+      })
+      .map((w) => w.id),
+  );
+  const merged = new Set(changes.filter((c) => c.key === 'openings').map((c) => c.id));
   for (const o of Object.values(there.openings)) {
-    if (tw.has(o.wallId) && !touched('openings').has(o.id) && own('openings', o.id)) {
+    // The renovation's own (or own-changed) door, left where it was on a wall now ending
+    // elsewhere, would slide.
+    if (reended.has(o.wallId) && !same(o, old.openings[o.id]) && !merged.has(o.id)) {
       return 'conflict';
     }
   }
@@ -141,12 +168,12 @@ function planCarry(old: Level, now: Level, there: Level): Change[] | 'none' | 'c
     const b = vs[w.b];
     return a && b ? [a, b] : null;
   };
-  for (const id of tw) {
-    const w = ws[id];
-    const p = w && !old.walls[id] ? ends(w) : null;
+  for (const c of changes) {
+    const w = c.key === 'walls' && !old.walls[c.id] ? ws[c.id] : undefined;
+    const p = w ? ends(w) : null;
     if (!p) continue;
     for (const o of Object.values(ws)) {
-      const q = o.id !== id ? ends(o) : null;
+      const q = o.id !== c.id ? ends(o) : null;
       if (q && overlapping(p, q)) return 'conflict';
     }
   }
@@ -159,9 +186,14 @@ function planCarry(old: Level, now: Level, there: Level): Change[] | 'none' | 'c
  * Rooms are found again from the walls, keeping what the edit gave them (a name, a floor)
  * where the renovation hadn't changed it. A command that replaces the plan or the renovation
  * whole (restoring a version, starting or ending a renovation) carries nothing. One command,
- * so one undo step; `outcome` says what happened.
+ * so one undo step; `outcome` says what happened. `restore` is the renovation as a drag found
+ * it: a step of the drag held back puts it back so, taking back the steps already carried.
  */
-export function carriedToRenovation(cmd: Command, outcome: Carry = {}): Command {
+export function carriedToRenovation(
+  cmd: Command,
+  outcome: Carry = {},
+  restore?: readonly Level[],
+): Command {
   return {
     ...cmd,
     recipe: (d) => {
@@ -179,8 +211,19 @@ export function carriedToRenovation(cmd: Command, outcome: Carry = {}): Command 
         const now = isDraft(l) ? current(l) : l;
         const plan = planCarry(old, now, current(after));
         let changed = false;
-        if (plan === 'conflict') outcome.conflict = true;
-        else if (plan !== 'none') {
+        if (plan === 'conflict') {
+          outcome.conflict = true;
+          // Part of a drag already carried: the renovation goes back to how the drag found it.
+          const start = restore?.find((r) => r.id === after.id);
+          if (start) {
+            for (const key of [...CARRIED, 'rooms'] as const) {
+              (after as Record<string, unknown>)[key] = structuredClone(start[key]);
+            }
+            after.ceilingHeight = start.ceilingHeight;
+          }
+          return;
+        }
+        if (plan !== 'none') {
           for (const c of plan) {
             const into: Record<string, unknown> = after[c.key];
             if (c.to === undefined) delete into[c.id];
@@ -211,7 +254,11 @@ export function carriedToRenovation(cmd: Command, outcome: Carry = {}): Command 
           if (!target) continue;
           for (const f of ROOM_FIELDS) {
             if (same(r[f], before ? before[f] : target[f])) continue;
-            if (before && !same(target[f], before[f])) continue;
+            if (before && !same(target[f], before[f])) {
+              // The renovation renamed or refinished it too.
+              if (!same(target[f], r[f])) outcome.conflict = true;
+              continue;
+            }
             if (
               f === 'name' &&
               Object.values(after.rooms).some((q) => q.id !== target.id && q.name === r.name)

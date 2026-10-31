@@ -550,15 +550,18 @@ drawn again can give a room a new id. "Copy list" puts them on the clipboard as
 text, a line per place, for a contractor.
 An edit to the flat as it is (Before shown) carries over to the renovation
 (`carriedToRenovation` in core, applied in the store's dispatch), all of it or none
-(`planCarry`): every corner, wall, door or piece it changes, adds or removes must be in the
-renovation as it was before the edit (or already as the edit leaves it); nothing the
-renovation added or changed itself may hang on one (its own door on a wall the edit splits
-or removes, its own wall on a corner it moves); and the result must hold together (every
-wall's corners and every opening's wall there, no wall drawn along another). Then the
+(`planCarry`): each corner, wall, door or piece it changes, adds or removes merges field by
+field (`merge`: the edit's fields go over where the renovation's are as they were, and the
+renovation keeps fields it changed itself, so a repainted wall can still be split or
+thickened by a trace fix); a field both changed differently, or a record one removed and
+the other changed, holds it back; so does a door of the renovation's own on a wall whose
+ends the edit moves; and the result must hold together (every wall's corners and every
+opening's wall there, no wall drawn along another). Then the
 renovation's rooms are found again, keeping a name or finish the edit gave a room where the
 renovation's was as it was (a new room's name only if free). Otherwise nothing is carried
-and a toast says so. A drag or run of nudges (one coalesce key) held back once stays held
-back. Restoring a version (or anything replacing the plan or renovation whole) carries
+and a toast says so (a room the renovation renamed or refinished too counts). A drag or run
+of nudges (one coalesce key) held back at any step goes back to how the drag found the
+renovation (`restore`), taking back its steps already carried, and stays held back. Restoring a version (or anything replacing the plan or renovation whole) carries
 nothing. One undo step, which shows Before (`touchedVariant`).
 **Comparing in 3D:** with a renovation, the 3D view offers "Compare before and after": the
 flat as it is left of a divider and the renovation right of it, in one view with one camera
@@ -681,8 +684,10 @@ The Go API logs it locally (`POST /telemetry`, 204).
   view as it is now (`liveView`), not as of the last render, so the plan stays under a fast
   finger (it used to lose the moves between renders and slip behind); a finger let go while
   moving coasts and slows to a stop (`fling` in `PlanCanvas.tsx`: speed smoothed over the last
-  moves, capped at 2.5 px/ms, two thirds lost every 325 ms; any press or wheel stops it); one
-  finger left down after a pinch pans on; in 3D, two fingers (or right-drag) pan over the floor
+  moves, capped at 2.5 px/ms, two thirds lost every 325 ms; only after 40 px of real panning,
+  so not from what's left of a pinch; it stops before the plan's middle leaves the screen,
+  when anything else moves the view (Fit), and at any press or wheel, and a tap that stops
+  it does nothing else); one finger left down after a pinch pans on; in 3D, two fingers (or right-drag) pan over the floor
   (`screenSpacePanning={false}`) rather than up and down the screen.
 - Dragging a whole room: built since (**Moving a room** below).
 
@@ -922,8 +927,9 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
   unjoined, leaves the room open; not decided.
 - **Placing on furniture:** a piece that stands on others or hangs above them (the succulent,
   the desk lamp, ceiling lights) is placed by a click on a piece as anywhere else (`over` in
-  `placing()`, `PlanCanvas.tsx`), standing on that piece's top (`furnitureTool.tsx`); a press
-  on a lamp or light still selects and moves it, but one on a floor piece doesn't (switch to
-  Select for that).
+  `placing()`, `PlanCanvas.tsx`); a tabletop piece (under 1.2 m: a lamp, the succulent, the
+  TV) stands on that piece's top (`furnitureTool.tsx`), higher ones (a wall cabinet) keep
+  their height; a press on a piece of the same level (a lamp with a lamp picked, a light with
+  a light) selects it, one on a floor piece doesn't (switch to Select for that).
 - **Corner dimension lines** for walls that run into the room draw inside it; fine at plan scale,
   busy on short walls.

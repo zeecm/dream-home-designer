@@ -29,7 +29,7 @@ import { Joystick } from './walk/Joystick';
 import { MiniMap } from './walk/MiniMap';
 import { WalkControls, type WalkPose } from './walk/WalkControls';
 import { setSound, unlockAudio, useSound } from './walk/footsteps';
-import { FOV_MIN, setWalkFov, useWalkAspect, useWalkFov, widestFov } from './walk/fov';
+import { FOV_MIN, fittingFov, setWalkFov, useWalkAspect, useWalkFov, widestFov } from './walk/fov';
 import { loadWalkPose, saveWalkPose } from './walk/pose';
 
 const materials = new MaterialCache();
@@ -250,9 +250,12 @@ function SunControl({ walking }: { walking: boolean }) {
   const hour = useEditor((s) => s.sunHour);
   const setHour = useEditor((s) => s.setSunHour);
   const wanted = useWalkFov();
-  // A tall view (a phone held upright) can't show as wide a view: the slider stops there.
-  const widest = widestFov(useWalkAspect());
+  // A tall view (a phone held upright) can't show as wide a view: the slider stops there,
+  // and says the angle it really shows.
+  const aspect = useWalkAspect();
+  const widest = widestFov(aspect);
   const fov = Math.min(wanted, widest);
+  const shown = Math.round(Math.min(wanted, fittingFov(aspect)));
   return (
     <div className="sun-control">
       <label className="sun-control-row">
@@ -273,7 +276,7 @@ function SunControl({ walking }: { walking: boolean }) {
       {walking && (
         <label className="sun-control-row">
           <span className="sun-control-label">
-            View <span className="num">{fov}°</span>
+            View <span className="num">{shown}°</span>
           </span>
           <input
             type="range"
@@ -282,8 +285,13 @@ function SunControl({ walking }: { walking: boolean }) {
             step={5}
             value={fov}
             aria-label="Field of view"
-            aria-valuetext={`${fov} degrees across`}
-            onChange={(e) => setWalkFov(Number(e.target.value))}
+            aria-valuetext={`${shown} degrees across`}
+            onChange={(e) => {
+              // At the end of the range a tall view allows, keep a wider choice made on a
+              // wider screen.
+              const v = Number(e.target.value);
+              setWalkFov(v >= widest ? Math.max(v, wanted) : v);
+            }}
           />
         </label>
       )}
