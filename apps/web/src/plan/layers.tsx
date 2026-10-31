@@ -358,6 +358,11 @@ export function roomHandleAt(
         .filter((o) => o.kind === 'door')
         .map((o) => swingZone(doorSwing(o.frame, o.opening))),
       ...(label ? [{ c: label.at, r: Math.hypot(label.half.x, label.half.y) }] : []),
+      // Furniture too, so a press on the handle never lands on a piece instead.
+      ...Object.values(level.items).map((it) => {
+        const { w, d } = itemSize(it);
+        return { c: { x: it.position.x, y: it.position.z }, r: Math.hypot(w, d) / 2 };
+      }),
     ];
     const half = MOVE_HANDLE_HALF / step + 0.1;
     at = placeLabel(shape.outer, { x: half, y: half }, avoid, shape.holes);

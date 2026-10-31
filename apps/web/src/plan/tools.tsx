@@ -256,14 +256,16 @@ function roomHandle(ctx: ToolContext): { id: string; at: Vec2 } | null {
   return at ? { id: sel.id, at: worldToScreen(ctx.view, ctx.size, at) } : null;
 }
 
+/** The drawn handle's radius (screen px): a press on it beats a piece of furniture under it. */
+const ROOM_HANDLE_RADIUS = 13;
+
 /** Whether a press lands on the selected room's move handle (a corner or door comes first). */
 function onRoomHandle(ctx: ToolContext, p: PlanPointer): string | null {
-  if (p.hit && (p.hit.kind === 'vertex' || p.hit.kind === 'opening' || p.hit.kind === 'item'))
-    return null;
+  if (p.hit && (p.hit.kind === 'vertex' || p.hit.kind === 'opening')) return null;
   const h = roomHandle(ctx);
-  return h && Math.hypot(h.at.x - p.screen.x, h.at.y - p.screen.y) <= ROOM_HANDLE_REACH
-    ? h.id
-    : null;
+  const dist = h ? Math.hypot(h.at.x - p.screen.x, h.at.y - p.screen.y) : Number.POSITIVE_INFINITY;
+  const reach = p.hit?.kind === 'item' ? ROOM_HANDLE_RADIUS : ROOM_HANDLE_REACH;
+  return h && dist <= reach ? h.id : null;
 }
 
 /** One room-move step for the arrow keys: `delta` metres, or none if a wall is in the way. */
@@ -553,7 +555,7 @@ export function useSelectTool(ctx: ToolContext): ToolController {
             have = { x: 0, y: 0 };
           }
         }
-        const to = moveTowards(d.level, d.move, have, want, Math.min(step, 0.01));
+        const to = moveTowards(d.level, d.move, have, want);
         if (Math.hypot(to.x - d.delta.x, to.y - d.delta.y) < 1e-9) return;
         d.delta = to;
         ctx.dispatch(moveRoom(d.level, d.move, to), { coalesceKey: d.key });
@@ -873,7 +875,7 @@ function RoomMoveHandle({
   return (
     <g pointerEvents="none">
       <g className="room-move" transform={`translate(${c.x} ${c.y})`}>
-        <circle r={13} className="move-handle" />
+        <circle r={ROOM_HANDLE_RADIUS} className="move-handle" />
         <path d={MOVE_GLYPH} className="move-glyph" />
       </g>
       {text && (

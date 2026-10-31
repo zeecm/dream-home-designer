@@ -218,4 +218,228 @@ describe('moveRoom', () => {
     // One undo step for the whole drag.
     expect(undo(f.s).doc.levels[0]?.walls).toEqual(start.walls);
   });
+
+  /** Every wall runs straight across or straight down the plan. */
+  const square = (l: Level) =>
+    Object.values(l.walls).every((w) => {
+      const a = l.vertices[w.a] as Vec2;
+      const b = l.vertices[w.b] as Vec2;
+      return Math.abs(a.x - b.x) < 1e-9 || Math.abs(a.y - b.y) < 1e-9;
+    });
+  /** No two walls lie along each other (overlapping for more than a point). */
+  const noOverlaps = (l: Level) => {
+    const ws = Object.values(l.walls).map((w) => [l.vertices[w.a], l.vertices[w.b]] as Vec2[]);
+    for (let i = 0; i < ws.length; i++) {
+      for (let j = i + 1; j < ws.length; j++) {
+        const [p, q] = ws[i] as Vec2[];
+        const [r, t] = ws[j] as Vec2[];
+        if (!p || !q || !r || !t) continue;
+        const horizontal = p.y === q.y && r.y === t.y && p.y === r.y;
+        const vertical = p.x === q.x && r.x === t.x && p.x === r.x;
+        const [lo1, hi1, lo2, hi2] = horizontal
+          ? [Math.min(p.x, q.x), Math.max(p.x, q.x), Math.min(r.x, t.x), Math.max(r.x, t.x)]
+          : [Math.min(p.y, q.y), Math.max(p.y, q.y), Math.min(r.y, t.y), Math.max(r.y, t.y)];
+        if ((horizontal || vertical) && Math.min(hi1, hi2) - Math.max(lo1, lo2) > 1e-9)
+          return false;
+      }
+    }
+    return true;
+  };
+
+  it('at a crossing of walls, the step never lies along another wall, and every room survives', () => {
+    // Four 4 m rooms in a square: the top-left one moves right and down.
+    const f = plan(
+      box(0, 0, 8, 8),
+      [
+        { x: 4, y: 0 },
+        { x: 4, y: 8 },
+      ],
+      [
+        { x: 0, y: 4 },
+        { x: 8, y: 4 },
+      ],
+    );
+    const start = f.lvl();
+    const names = Object.values(start.rooms).map((r) => [r.id, r.name]);
+    const room = f.roomWith({ x: 1, y: 1 });
+    for (const [axis, delta] of [
+      ['x', { x: 0.5, y: 0 }],
+      ['y', { x: 0, y: 1 }],
+      ['x', { x: -0.5, y: 0 }],
+    ] as const) {
+      const move = planRoomMove(start, room.id, axis);
+      expect(moveTowards(start, move, { x: 0, y: 0 }, delta)).toEqual(delta);
+      f.apply(moveRoom(start, move, delta), 'drag');
+      const l = f.lvl();
+      expect(square(l)).toBe(true);
+      expect(noOverlaps(l)).toBe(true);
+      expect(Object.values(l.rooms).map((r) => [r.id, r.name])).toEqual(names);
+      expect(roomArea(l, l.rooms[room.id] ?? room)).toBeCloseTo(16, 6);
+    }
+  });
+
+  it('never squeezes a neighbour out, and a neighbour shrunk mid-drag keeps its name', () => {
+    const f = plan(box(0, 0, 4, 2), [
+      { x: 3, y: 0 },
+      { x: 3, y: 2 },
+    ]);
+    const store = f.roomWith({ x: 3.5, y: 1 });
+    f.apply({
+      label: 'name it',
+      recipe: (d) => {
+        const r = d.levels[0]?.rooms[store.id];
+        if (r) {
+          r.name = 'Store';
+          r.floorMaterial = 'tile-white';
+        }
+      },
+    });
+    const left = f.roomWith({ x: 1, y: 1 });
+    const start = f.lvl();
+    const move = planRoomMove(start, left.id, 'x');
+    // The store keeps more than the smallest room's area (0.25 m², so 0.125 m wide).
+    const to = moveTowards(start, move, { x: 0, y: 0 }, { x: 2, y: 0 });
+    expect(to.x).toBeLessThan(0.875);
+    expect(to.x).toBeGreaterThan(0.8);
+    f.apply(moveRoom(start, move, to), 'drag');
+    f.apply(moveRoom(start, move, { x: 0.3, y: 0 }), 'drag');
+    const l = f.lvl();
+    expect(l.rooms[store.id]).toMatchObject({ name: 'Store', floorMaterial: 'tile-white' });
+    expect(roomArea(l, l.rooms[store.id] ?? store)).toBeCloseTo(1.4, 6);
+  });
+
+  it('takes a step back as it came: moving back closes the step up, one move after another', () => {
+    // A 4 by 3 m room hanging below a long wall, the room's top corners T-junctions on it.
+    const f = plan(
+      [
+        { x: -2, y: 0 },
+        { x: 6, y: 0 },
+      ],
+      [
+        { x: 0, y: 0 },
+        { x: 0, y: 3 },
+        { x: 4, y: 3 },
+        { x: 4, y: 0 },
+      ],
+    );
+    const room = f.roomWith({ x: 2, y: 1 });
+    const start = f.lvl();
+    const walls = Object.keys(start.walls).length;
+    // As arrow keys do: each move planned afresh from the plan as it then is.
+    const press = (axis: 'x' | 'y', delta: Vec2) => {
+      const l = f.lvl();
+      const move = planRoomMove(l, room.id, axis);
+      const to = moveTowards(l, move, { x: 0, y: 0 }, delta);
+      f.apply(moveRoom(l, move, to));
+      return to;
+    };
+    expect(press('y', { x: 0, y: 0.1 })).toEqual({ x: 0, y: 0.1 });
+    expect(Object.keys(f.lvl().walls).length).toBe(walls + 2);
+    expect(press('y', { x: 0, y: -0.1 })).toEqual({ x: 0, y: -0.1 });
+    expect(Object.keys(f.lvl().walls).length).toBe(walls);
+    expect(square(f.lvl())).toBe(true);
+    // Across and down, then back up and across: back as it began.
+    press('x', { x: 0.01, y: 0 });
+    press('y', { x: 0, y: 0.01 });
+    expect(press('y', { x: 0, y: -0.01 })).toEqual({ x: 0, y: -0.01 });
+    expect(press('x', { x: -0.01, y: 0 })).toEqual({ x: -0.01, y: 0 });
+    const l = f.lvl();
+    expect(Object.keys(l.walls).length).toBe(walls);
+    expect(roomArea(l, l.rooms[room.id] ?? room)).toBeCloseTo(12, 6);
+  });
+
+  it('gives a step the side and faces of the wall it continues', () => {
+    const f = plan(
+      [
+        { x: -2, y: 0 },
+        { x: 6, y: 0 },
+      ],
+      [
+        { x: 0, y: 3 },
+        { x: 0, y: 0 },
+      ],
+      [
+        { x: 0, y: 3 },
+        { x: 4, y: 3 },
+        { x: 4, y: 0 },
+      ],
+    );
+    const room = f.roomWith({ x: 2, y: 1 });
+    const l0 = f.lvl();
+    // The room's left wall, drawn upwards, lies to its right of its line, with blue inside.
+    const leftWall = Object.values(l0.walls).find(
+      (w) => l0.vertices[w.a]?.x === 0 && l0.vertices[w.b]?.x === 0,
+    );
+    if (!leftWall) throw new Error('no left wall');
+    f.apply({
+      label: 'side',
+      recipe: (d) => {
+        const w = d.levels[0]?.walls[leftWall.id];
+        if (w) {
+          w.side = 'right';
+          w.materialRight = 'paint-blue';
+        }
+      },
+    });
+    const start = f.lvl();
+    const move = planRoomMove(start, room.id, 'y');
+    f.apply(moveRoom(start, move, { x: 0, y: 0.5 }));
+    const l = f.lvl();
+    const step =
+      l.walls[
+        move.steps.find((s) => s.corner === leftWall.b || s.corner === leftWall.a)?.wall ?? ''
+      ];
+    const lw = l.walls[leftWall.id];
+    if (!step || !lw) throw new Error('no step');
+    const dir = (w: typeof lw) => {
+      const a = l.vertices[w.a] as Vec2;
+      const b = l.vertices[w.b] as Vec2;
+      return { x: b.x - a.x, y: b.y - a.y };
+    };
+    expect(dir(step).x * dir(lw).x + dir(step).y * dir(lw).y).toBeGreaterThan(0);
+    expect(step).toMatchObject({ side: 'right', materialRight: 'paint-blue' });
+  });
+
+  it('carries a door on its own wall past a T-junction on that wall', () => {
+    // A 4 m room, a neighbour joined to its right wall at a T 2 m down, and a 0.8 m door
+    // centred 0.6 m down that wall.
+    const f = plan(box(0, 0, 4, 4), [
+      { x: 4, y: 2 },
+      { x: 6, y: 2 },
+      { x: 6, y: 4 },
+      { x: 4, y: 4 },
+    ]);
+    const l0 = f.lvl();
+    const upper = Object.values(l0.walls).find((w) => {
+      const ys = [l0.vertices[w.a]?.y, l0.vertices[w.b]?.y];
+      return (
+        l0.vertices[w.a]?.x === 4 && l0.vertices[w.b]?.x === 4 && ys.includes(0) && ys.includes(2)
+      );
+    });
+    if (!upper) throw new Error('no wall');
+    const door = addOpening(l0.id, {
+      wallId: upper.id,
+      kind: 'door',
+      t: l0.vertices[upper.a]?.y === 0 ? 0.3 : 0.7,
+      width: 0.8,
+      height: 2.1,
+      sill: 0,
+    });
+    f.apply(door.command);
+    const room = f.roomWith({ x: 1, y: 1 });
+    const start = f.lvl();
+    const move = planRoomMove(start, room.id, 'y');
+    // Down, the door goes with the room until it reaches the T.
+    const down = moveTowards(start, move, { x: 0, y: 0 }, { x: 0, y: 2 });
+    expect(down.y).toBeCloseTo(0.95, 6);
+    // Up, it goes with the room.
+    f.apply(moveRoom(start, move, { x: 0, y: -0.5 }));
+    const l = f.lvl();
+    const w = l.walls[upper.id];
+    const o = l.openings[door.openingId];
+    const a = w && l.vertices[w.a];
+    const b = w && l.vertices[w.b];
+    if (!o || !a || !b) throw new Error('lost the door');
+    expect(a.y + (b.y - a.y) * o.t).toBeCloseTo(0.1, 6);
+  });
 });

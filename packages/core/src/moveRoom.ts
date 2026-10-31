@@ -2,7 +2,7 @@ import { pointInPolygon } from './geometry';
 import type { Command } from './history';
 import { newId } from './ids';
 import { draftLevel } from './levels';
-import { roomShapes, syncRooms } from './rooms';
+import { detectFaces, roomShapes, syncRooms } from './rooms';
 import type { Item, Level, Opening, Room, Vec2, Vertex, Wall } from './schema';
 import { MIN_JOINED, band, segmentDistance } from './shiftWall';
 import { reclampOpenings } from './topology';
@@ -131,52 +131,69 @@ interface Movable {
 const held = (move: RoomMove, delta: Vec2): Vec2 =>
   move.axis === 'x' ? { x: delta.x, y: 0 } : move.axis === 'y' ? { x: 0, y: delta.y } : delta;
 
+/** The room's corners in a move: carried, staying or stepping. */
+const cornersOf = (move: RoomMove) =>
+  new Set([...move.vertices, ...move.stays, ...move.steps.map((s) => s.corner)]);
+
+/** Shorter than this, a wall a move shrinks has closed up: its ends merge. */
+const CLOSED = 1e-6;
+
+/**
+ * Where a door or window on a wall with one end moved keeps its distance from: the end that
+ * moved on one of the room's own walls (it goes with the room), the end that stayed on a wall
+ * joined to it.
+ */
+function anchorEnd(w0: Wall, corners: Set<string>, movedA: boolean): 'a' | 'b' {
+  const ours = corners.has(w0.a) && corners.has(w0.b);
+  return ours === movedA ? 'a' : 'b';
+}
+
+/** An opening's new `t`, kept its distance from the anchor end of a wall now `after` long. */
+function keptT(anchor: 'a' | 'b', t0: number, before: number, after: number): number {
+  return anchor === 'a' ? (t0 * before) / after : 1 - ((1 - t0) * before) / after;
+}
+
 /**
  * Puts `lvl` (a copy or draft of `start`) back as it was in `start`, then applies the move
- * by `delta`: corners and furniture, steps, and the doors and windows on walls with one end
- * moved (kept their distance from the end that stayed).
+ * by `delta`: corners and furniture, steps, walls the move closed up, and the doors and
+ * windows on walls with one end moved.
  */
 function applyMove(lvl: Movable, start: Level, move: RoomMove, delta: Vec2): void {
+  // Back to the start, dropping anything an earlier application (along either axis) added.
+  for (const id of Object.keys(lvl.walls)) if (!start.walls[id]) delete lvl.walls[id];
+  for (const id of Object.keys(lvl.vertices)) if (!start.vertices[id]) delete lvl.vertices[id];
+  for (const id of Object.keys(lvl.rooms)) if (!start.rooms[id]) delete lvl.rooms[id];
   for (const [id, v] of Object.entries(start.vertices)) {
     const cur = lvl.vertices[id];
-    if (cur) {
+    if (!cur) lvl.vertices[id] = { ...v };
+    else if (cur.x !== v.x || cur.y !== v.y) {
       cur.x = v.x;
       cur.y = v.y;
     }
   }
   for (const [id, w] of Object.entries(start.walls)) {
     const cur = lvl.walls[id];
-    if (cur) {
+    if (!cur) lvl.walls[id] = structuredClone(w);
+    else if (cur.a !== w.a || cur.b !== w.b) {
       cur.a = w.a;
       cur.b = w.b;
     }
   }
-  // Steps from earlier in the drag (along this axis or the other) go. Rooms keep their
-  // identity through that: in their outlines, a step's corner takes its new corner's place.
-  const stepCorner = new Map<string, string>();
-  for (const w of Object.values(lvl.walls)) {
-    if (start.walls[w.id]) continue;
-    if (!start.vertices[w.b]) stepCorner.set(w.b, w.a);
-    delete lvl.walls[w.id];
-  }
-  for (const id of Object.keys(lvl.vertices)) if (!start.vertices[id]) delete lvl.vertices[id];
-  for (const r of Object.values(lvl.rooms)) {
-    if (r.loop.every((id) => lvl.vertices[id])) continue;
-    const loop = r.loop
-      .map((id) => stepCorner.get(id) ?? id)
-      .filter((id, i, all) => lvl.vertices[id] && id !== all[(i + 1) % all.length]);
-    if (loop.length >= 3) r.loop = loop;
+  for (const [id, r] of Object.entries(start.rooms)) {
+    const cur = lvl.rooms[id];
+    if (!cur) lvl.rooms[id] = structuredClone(r);
+    else if (cur.loop.join() !== r.loop.join()) cur.loop = [...r.loop];
   }
   for (const [id, it] of Object.entries(start.items)) {
     const cur = lvl.items[id];
-    if (cur) {
+    if (cur && (cur.position.x !== it.position.x || cur.position.z !== it.position.z)) {
       cur.position.x = it.position.x;
       cur.position.z = it.position.z;
     }
   }
   for (const [id, o] of Object.entries(start.openings)) {
     const cur = lvl.openings[id];
-    if (cur) cur.t = o.t;
+    if (cur && cur.t !== o.t) cur.t = o.t;
   }
   if (Math.hypot(delta.x, delta.y) < 1e-9) return;
 
@@ -192,38 +209,70 @@ function applyMove(lvl: Movable, start: Level, move: RoomMove, delta: Vec2): voi
     it.position.x += delta.x;
     it.position.z += delta.y;
   }
+  const corners = cornersOf(move);
   const d = move.axis ? dirOf(move.axis) : null;
-  const room = new Set([...move.vertices, ...move.stays, ...move.steps.map((t) => t.corner)]);
   for (const s of move.steps) {
     const c = start.vertices[s.corner];
     if (!c || !d) continue;
-    const to = { x: c.x + delta.x, y: c.y + delta.y };
-    // The room's walls at the corner leave it for the new one: those running across the
-    // move, and the one running the way it moves, towards where it goes (the step takes
-    // its first stretch). A wall running away from where it goes stays, the step extending
-    // it.
-    const inside = Object.values(start.walls).filter(
-      (w) => (w.a === s.corner || w.b === s.corner) && room.has(otherEnd(w, s.corner)),
-    );
+    // Walls at the corner leave it for the new one: the room's walls running across the
+    // move, and any wall running the way it moves towards where it goes (the step takes
+    // its first stretch, so it never lies along another wall). The rest stay.
     let template: Wall | undefined;
-    for (const w0 of inside) {
-      const o = start.vertices[otherEnd(w0, s.corner)];
+    for (const w0 of Object.values(start.walls)) {
+      if (w0.a !== s.corner && w0.b !== s.corner) continue;
+      const other = otherEnd(w0, s.corner);
+      const o = start.vertices[other];
       const w = lvl.walls[w0.id];
       if (!o || !w) continue;
       const runs = along(c, o, d);
-      if (runs) template ??= w0;
-      const ahead = (o.x - c.x) * delta.x + (o.y - c.y) * delta.y > 0;
-      if (runs && !ahead) continue;
+      const ours = corners.has(other);
+      if (runs && (ours || !template)) template = w0;
+      const leaves = runs ? (o.x - c.x) * delta.x + (o.y - c.y) * delta.y > 0 : ours;
+      if (!leaves) continue;
       if (w.a === s.corner) w.a = s.vertex;
       else w.b = s.vertex;
     }
-    template ??= inside[0];
+    template ??= Object.values(start.walls).find(
+      (w) => (w.a === s.corner || w.b === s.corner) && corners.has(otherEnd(w, s.corner)),
+    );
     if (!template) continue;
-    lvl.vertices[s.vertex] = { id: s.vertex, x: to.x, y: to.y };
-    lvl.walls[s.wall] = { ...structuredClone(template), id: s.wall, a: s.corner, b: s.vertex };
+    lvl.vertices[s.vertex] = { id: s.vertex, x: c.x + delta.x, y: c.y + delta.y };
+    // Running the same way as the wall it copies, so its side and faces match.
+    const ta = start.vertices[template.a];
+    const tb = start.vertices[template.b];
+    const same = !ta || !tb || (tb.x - ta.x) * delta.x + (tb.y - ta.y) * delta.y >= 0;
+    lvl.walls[s.wall] = {
+      ...structuredClone(template),
+      id: s.wall,
+      a: same ? s.corner : s.vertex,
+      b: same ? s.vertex : s.corner,
+    };
   }
-  // Doors and windows: carried with a wall that moved whole, and kept their distance from
-  // the end that stayed on a wall that stretched or shrank.
+  // A wall the move closed up (a step taken back): its ends merge into the one that stayed.
+  for (const id of Object.keys(lvl.walls)) {
+    const w = lvl.walls[id];
+    const pa = w && lvl.vertices[w.a];
+    const pb = w && lvl.vertices[w.b];
+    if (!w || !pa || !pb || Math.hypot(pb.x - pa.x, pb.y - pa.y) >= CLOSED) continue;
+    if (Object.values(start.openings).some((o) => o.wallId === w.id)) continue;
+    const keep = !move.vertices.includes(w.a) && start.vertices[w.a] ? w.a : w.b;
+    const drop = keep === w.a ? w.b : w.a;
+    delete lvl.walls[w.id];
+    for (const o of Object.values(lvl.walls)) {
+      if (o.a === drop) o.a = keep;
+      if (o.b === drop) o.b = keep;
+    }
+    delete lvl.vertices[drop];
+    for (const r of Object.values(lvl.rooms)) {
+      if (!r.loop.includes(drop)) continue;
+      const loop = r.loop
+        .map((id) => (id === drop ? keep : id))
+        .filter((id, i, all) => id !== all[(i + 1) % all.length]);
+      if (loop.length >= 3) r.loop = loop;
+    }
+  }
+  // Doors and windows: carried with a wall that moved whole; on a wall with one end moved,
+  // kept their distance from its anchor end (anchorEnd).
   for (const [id, o0] of Object.entries(start.openings)) {
     const w0 = start.walls[o0.wallId];
     const w = lvl.walls[o0.wallId];
@@ -232,14 +281,14 @@ function applyMove(lvl: Movable, start: Level, move: RoomMove, delta: Vec2): voi
     const pb = w0 && start.vertices[w0.b];
     const na = w && lvl.vertices[w.a];
     const nb = w && lvl.vertices[w.b];
-    if (!o || !pa || !pb || !na || !nb) continue;
+    if (!w0 || !o || !pa || !pb || !na || !nb) continue;
     const movedA = Math.hypot(na.x - pa.x, na.y - pa.y) > 1e-9;
     const movedB = Math.hypot(nb.x - pb.x, nb.y - pb.y) > 1e-9;
     if (movedA === movedB) continue;
     const before = Math.hypot(pb.x - pa.x, pb.y - pa.y);
     const after = Math.hypot(nb.x - na.x, nb.y - na.y);
     if (after < 1e-9) continue;
-    o.t = movedA ? 1 - ((1 - o0.t) * before) / after : (o0.t * before) / after;
+    o.t = keptT(anchorEnd(w0, corners, movedA), o0.t, before, after);
   }
 }
 
@@ -262,10 +311,21 @@ export function moveRoom(from: Level, move: RoomMove, delta: Vec2): Command {
   };
 }
 
+/** How many rooms a level's walls enclose, cached per level. */
+const roomCounts = new WeakMap<Level, number>();
+function roomCount(level: Level): number {
+  let n = roomCounts.get(level);
+  if (n === undefined) {
+    n = detectFaces(level).length;
+    roomCounts.set(level, n);
+  }
+  return n;
+}
+
 /**
  * Whether moving the room by `delta` would bring a wall closer to another than their half
  * thicknesses allow (unless they are joined, or were already that close and are not getting
- * closer), or shrink or turn back a wall that stretches.
+ * closer), shrink a wall past its doors or turn it back, or squeeze a room out of existence.
  */
 export function moveBlocked(from: Level, move: RoomMove, delta: Vec2): boolean {
   const by = held(move, delta);
@@ -277,6 +337,7 @@ export function moveBlocked(from: Level, move: RoomMove, delta: Vec2): boolean {
     rooms: {},
   };
   applyMove(after, from, move, by);
+  const corners = cornersOf(move);
   interface Seg {
     w: Wall;
     was: [Vec2, Vec2];
@@ -292,9 +353,10 @@ export function moveBlocked(from: Level, move: RoomMove, delta: Vec2): boolean {
     const nb = after.vertices[w.b];
     if (!na || !nb) continue;
     const w0 = from.walls[w.id];
-    const pa = w0 ? from.vertices[w0.a] : from.vertices[w.a];
     // A step starts as nothing, at the corner it leaves.
-    const pb = w0 ? from.vertices[w0.b] : pa;
+    const corner = from.vertices[w.a] ?? from.vertices[w.b];
+    const pa = w0 ? from.vertices[w0.a] : corner;
+    const pb = w0 ? from.vertices[w0.b] : corner;
     if (!pa || !pb) continue;
     const moved = (p: Vec2, n: Vec2) => same({ x: p.x + by.x, y: p.y + by.y }, n);
     const changed = !same(pa, na) || !same(pb, nb);
@@ -306,28 +368,56 @@ export function moveBlocked(from: Level, move: RoomMove, delta: Vec2): boolean {
       changed,
     });
     if (!w0 || !changed || same(pa, na) === same(pb, nb)) continue;
-    // One end moved: the wall must keep some length, not turn back on itself, and keep its
-    // doors and windows their distance from the end that stayed.
+    // One end moved: the wall must not turn back on itself, and must keep room for its doors
+    // and windows (each kept from its anchor end). One without any may shrink to nothing,
+    // closing up (a room squeezed out is caught below).
     const before = { x: pb.x - pa.x, y: pb.y - pa.y };
     const now = { x: nb.x - na.x, y: nb.y - na.y };
     if (before.x * now.x + before.y * now.y <= 0) return true;
     const length0 = Math.hypot(before.x, before.y);
-    const movingA = !same(pa, na);
-    let need = MIN_JOINED;
+    const anchor = anchorEnd(w0, corners, !same(pa, na));
+    let need = 0;
     for (const op of Object.values(from.openings)) {
       if (op.wallId !== w.id) continue;
-      const fromFar = movingA ? (1 - op.t) * length0 : op.t * length0;
-      need = Math.max(need, fromFar + op.width / 2 + MIN_JOINED);
+      const fromAnchor = anchor === 'a' ? op.t * length0 : (1 - op.t) * length0;
+      need = Math.max(need, fromAnchor + op.width / 2 + MIN_JOINED);
     }
     if (Math.hypot(now.x, now.y) < Math.min(need, length0)) return true;
   }
-  const joined = (p: Wall, q: Wall) => p.a === q.a || p.a === q.b || p.b === q.a || p.b === q.b;
+  // Walls meeting at a corner, or at the two ends of one wall (a step), may come as close as
+  // that wall lets them.
+  const next = new Map<string, Set<string>>();
+  for (const w of Object.values(after.walls)) {
+    next.set(w.a, (next.get(w.a) ?? new Set()).add(w.b));
+    next.set(w.b, (next.get(w.b) ?? new Set()).add(w.a));
+  }
+  const joined = (p: Wall, q: Wall) =>
+    [p.a, p.b].some(
+      (u) => u === q.a || u === q.b || next.get(u)?.has(q.a) || next.get(u)?.has(q.b),
+    );
+  const box = (s: Seg) => {
+    const xs = [s.now[0].x, s.now[1].x];
+    const ys = [s.now[0].y, s.now[1].y];
+    return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+  };
+  const boxes = segs.map(box);
+  // No two walls are thicker together than this: pairs further apart can't be too close.
+  const reach = 2 * Math.max(0.01, ...segs.map((s) => s.w.thickness)) + 0.01;
   for (let i = 0; i < segs.length; i++) {
     const p = segs[i] as Seg;
+    const pb = boxes[i] as ReturnType<typeof box>;
     for (let j = i + 1; j < segs.length; j++) {
       const q = segs[j] as Seg;
       // Only pairs whose gap can change.
       if ((!p.changed && !q.changed) || (p.carried && q.carried)) continue;
+      const qb = boxes[j] as ReturnType<typeof box>;
+      if (
+        pb.x0 > qb.x1 + reach ||
+        qb.x0 > pb.x1 + reach ||
+        pb.y0 > qb.y1 + reach ||
+        qb.y0 > pb.y1 + reach
+      )
+        continue;
       if (joined(p.w, q.w)) continue;
       const pn = band(p.w, ...p.now);
       const qn = band(q.w, ...q.now);
@@ -339,21 +429,17 @@ export function moveBlocked(from: Level, move: RoomMove, delta: Vec2): boolean {
       if (now < segmentDistance(pw.p, pw.q, qw.p, qw.q) - 1e-9) return true;
     }
   }
-  return false;
+  // No room squeezed out of existence or merged into another.
+  return detectFaces(after).length < roomCount(from);
 }
 
 /**
- * How far towards `want` the room can go from `have`, in steps no longer than `step`:
- * straight towards it while nothing is in the way, then (moving freely) along each axis
- * alone, so a room pushed against a wall slides along it.
+ * How far towards `want` the room can go from `have`, checked every centimetre: straight
+ * towards it while nothing is in the way, then (moving freely) along each axis alone, so a
+ * room pushed against a wall slides along it.
  */
-export function moveTowards(
-  from: Level,
-  move: RoomMove,
-  have: Vec2,
-  want: Vec2,
-  step = 0.01,
-): Vec2 {
+export function moveTowards(from: Level, move: RoomMove, have: Vec2, want: Vec2): Vec2 {
+  const step = 0.01;
   const march = (p: Vec2, to: Vec2): Vec2 => {
     const dist = Math.hypot(to.x - p.x, to.y - p.y);
     const n = Math.ceil(dist / step - 1e-9);

@@ -666,27 +666,41 @@ as the drag began on every move:
   beside it (`.wall-shift`, in mm for an Alt move).
 
 **Moving a room:** a selected room shows a move handle (a four-way arrow in a circle, placed
-inside the room clear of its label and door swings: `roomHandleAt` in `plan/layers.tsx`).
-Dragging it, by mouse or finger, moves the room (1 cm steps, 1 mm with Alt); the arrow keys
-move a selected room too (1 cm, 10 cm with Shift). A drag elsewhere in the room still pans.
-Core: `moveRoom.ts`, applied afresh to the level as the drag began on every move:
+inside the room clear of its label, door swings and furniture: `roomHandleAt` in
+`plan/layers.tsx`; a press on the drawn handle beats a piece under it). Dragging it, by mouse
+or finger, moves the room (1 cm steps, 1 mm with Alt); the arrow keys move a selected room too
+(1 cm, 10 cm with Shift). A drag elsewhere in the room still pans. Core: `moveRoom.ts`, applied
+afresh to the level as the drag began on every move (vertices, wall ends, rooms, furniture and
+openings put back first, anything added before dropped):
 - The room's corners, everything inside its outline (walls, enclosures, furniture by centre)
   and the doors and windows on its walls go with it (`planRoomMove`).
 - A room standing alone moves anywhere. A room joined to others (`roomJoined`: a wall with
   one end on it) moves along one axis at a time, the one the pointer has gone further (with
-  some hysteresis), so no joined wall slants. Joined walls running the way it moves stretch;
-  where one runs across the move, its corner stays and the room's walls leave it with a
-  short step along the move (`steps`); a corner on a straight stretch of the room's wall
-  running the way it moves stays as the wall slides through it (`stays`). Shared walls move
-  with the room, so neighbours grow or shrink; doors and windows on walls with one end moved
-  keep their distance from the end that stayed.
-- `moveBlocked` checks the moved geometry (a scratch copy) as `shiftBlocked` does: no wall
-  closer to another than their half thicknesses (unless joined, or already that close and
-  not getting closer), no stretching wall shrunk past its doors or turned back.
-  `moveTowards` marches in 1 cm steps to the pointer and, moving freely, slides along a wall
+  some hysteresis), so no joined wall slants:
+  - joined walls running the way it moves stretch or shrink;
+  - where one runs across the move, its corner stays and the room's walls leave it with a
+    short step along the move (`steps`). Walls at that corner running the way it moves,
+    towards where it goes, leave with them, so a step never lies along another wall; the step
+    copies the wall it continues, running the same way (side and faces match);
+  - a corner on a straight stretch of the room's wall running the way it moves stays as the
+    wall slides through it (`stays`);
+  - shared walls move with the room, so neighbours grow or shrink;
+  - a wall shrunk to nothing (a step taken back) closes up, its ends merging, so moves are
+    reversible one after another (arrow presses plan each move afresh);
+  - doors and windows on a wall with one end moved keep their distance from the end that
+    moved on the room's own walls (they go with the room), from the end that stayed on walls
+    joined to it.
+- `moveBlocked` checks the moved geometry (a scratch copy): no wall closer to another than
+  their half thicknesses (unless joined at a corner or by one wall, or already that close and
+  not getting closer), no wall turned back or shrunk past its doors, and no room squeezed out
+  or merged (`detectFaces` counts the rooms). About 0.3 ms a check on the sample.
+  `moveTowards` checks every centimetre to the pointer and, moving freely, slides along a wall
   in the way.
 - One undo step per drag; back where it began, nothing is kept; Escape, a cancelled touch or
   a second finger takes it back. The distance shows under the handle (`← 0.45 m   ↓ 0.10 m`).
+- Not handled: corners merging where a move lands them on another corner or wall (nothing is
+  settled at the end); a room with a closet carved into a corner counts as joined (the
+  closet's outer corner is off its outline), so the closet stretches rather than moving.
 
 **Door and window clearances:** while one is dragged (Select or its own tool), the clear wall
 on each side of it to the inside corners shows as a dimension off the wall
