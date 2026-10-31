@@ -4,6 +4,7 @@ import { type MutableRefObject, useEffect, useMemo, useRef } from 'react';
 import type { PerspectiveCamera, PointLight } from 'three';
 import { useEditor } from '../editor';
 import { footstep } from './footsteps';
+import { useWalkFov, verticalFov } from './fov';
 
 /** Joystick input, each axis -1..1: x strafes right, y walks forward. */
 export type StickInput = MutableRefObject<Vec2>;
@@ -19,7 +20,6 @@ const WALK_SPEED = 1.4; // m/s, an ordinary walk
 const RUN_SPEED = 3;
 const LOOK_SPEED = 0.0025; // radians per pixel
 const MAX_PITCH = 1.3;
-const WALK_FOV = 70;
 /** Head bob: up and down once per step of this length, by this much. */
 const STEP_LENGTH = 0.7;
 const BOB_HEIGHT = 0.02;
@@ -56,6 +56,8 @@ export function WalkControls({
   onLeave?: (pose: WalkPose) => void;
 }) {
   const { camera, gl } = useThree();
+  const view = useThree((s) => s.size);
+  const across = useWalkFov();
   const segments = useMemo(() => collisionSegments(level), [level]);
   if (!pose.current) {
     const start = walkStart(level);
@@ -77,17 +79,18 @@ export function WalkControls({
     };
   }, [pose]);
 
-  // A wider lens indoors; the orbit view's lens comes back on leaving.
+  // The eye's field of view, set across the view whatever its shape; the orbit view's lens
+  // comes back on leaving.
   useEffect(() => {
     const cam = camera as PerspectiveCamera;
     const fov = cam.fov;
-    cam.fov = WALK_FOV;
+    cam.fov = verticalFov(across, view.width / Math.max(view.height, 1));
     cam.updateProjectionMatrix();
     return () => {
       cam.fov = fov;
       cam.updateProjectionMatrix();
     };
-  }, [camera]);
+  }, [camera, across, view.width, view.height]);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {

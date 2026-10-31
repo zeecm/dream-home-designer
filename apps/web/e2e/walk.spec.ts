@@ -69,3 +69,22 @@ test('footsteps can be turned off while walking, and stay off', async ({ page })
     'false',
   );
 });
+
+test('the walk’s field of view starts near the eye’s, can be widened, and stays so', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('3');
+  await expect(page.getByLabel('Field of view')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Walk through' }).click();
+  const fov = page.getByLabel('Field of view');
+  await expect(fov).toHaveValue('100');
+  await fov.fill('115');
+  await expect(page.locator('.sun-control')).toContainText('115°');
+  await page.reload();
+  await waitSaved(page);
+  await page.keyboard.press('3');
+  await page.getByRole('button', { name: 'Walk through' }).click();
+  await expect(page.getByLabel('Field of view')).toHaveValue('115');
+});
