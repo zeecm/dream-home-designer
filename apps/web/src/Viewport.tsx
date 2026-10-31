@@ -44,15 +44,29 @@ const FOV = 40;
 function LevelMesh({
   ceilings,
   walker,
+  of,
+  group,
 }: {
   ceilings: boolean;
   /** While walking, where the walker is: doors swing open as they come near. */
   walker?: MutableRefObject<WalkPose | null>;
+  /** A level of its own to show (comparing before and after) instead of the one shown. */
+  of?: Level;
+  /** Handed the meshes' group, to show or hide it. */
+  group?: MutableRefObject<THREE.Object3D | null>;
 }) {
-  const level = useLevel();
+  const shown = useLevel();
+  const level = of ?? shown;
   const meshes = useMemo(() => new LevelMeshes(materials, { ceilings, models }), [ceilings]);
   useDoorSwings(meshes, walker);
   useEffect(() => () => meshes.dispose(), [meshes]);
+  useEffect(() => {
+    if (!group) return;
+    group.current = meshes.group;
+    return () => {
+      group.current = null;
+    };
+  }, [group, meshes]);
   // A model arriving swaps its stand-in box for it.
   const [arrived, setArrived] = useState(0);
   useEffect(() => models.onLoad(() => setArrived((n) => n + 1)), []);
@@ -277,6 +291,89 @@ function SunControl({ walking }: { walking: boolean }) {
   );
 }
 
+/**
+ * Comparing a renovation: the flat as it is left of the divider, the renovation right of it,
+ * drawn in one view with one camera (each frame draws the scene twice, each time cut to its
+ * side). Outside the frame, only the flat as it is shows (a download draws that).
+ */
+function CompareRender({
+  split,
+  before,
+  after,
+}: {
+  split: MutableRefObject<number>;
+  before: MutableRefObject<THREE.Object3D | null>;
+  after: MutableRefObject<THREE.Object3D | null>;
+}) {
+  useFrame(({ gl, scene, camera, size }) => {
+    const b = before.current;
+    const a = after.current;
+    if (!b || !a) {
+      gl.render(scene, camera);
+      return;
+    }
+    const x = Math.round(size.width * split.current);
+    gl.setScissorTest(true);
+    a.visible = false;
+    gl.setScissor(0, 0, x, size.height);
+    gl.render(scene, camera);
+    b.visible = false;
+    a.visible = true;
+    gl.setScissor(x, 0, size.width - x, size.height);
+    gl.render(scene, camera);
+    gl.setScissorTest(false);
+    a.visible = false;
+    b.visible = true;
+  }, 1);
+  return null;
+}
+
+/** The divider between before and after, dragged (or moved with the arrow keys) across. */
+function CompareDivider({
+  split,
+  onChange,
+}: {
+  split: number;
+  onChange: (v: number) => void;
+}) {
+  const clamp = (v: number) => Math.min(0.95, Math.max(0.05, v));
+  return (
+    <div className="compare-divider" style={{ left: `${split * 100}%` }}>
+      <span className="compare-label compare-label-before">Before</span>
+      <span className="compare-label compare-label-after">After</span>
+      <div
+        className="compare-handle"
+        role="slider"
+        tabIndex={0}
+        aria-label="Divider between before and after"
+        aria-valuemin={5}
+        aria-valuemax={95}
+        aria-valuenow={Math.round(split * 100)}
+        aria-valuetext={`${Math.round(split * 100)}% before`}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          e.stopPropagation();
+        }}
+        onPointerMove={(e) => {
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+            e.stopPropagation();
+            const r = (
+              e.currentTarget.parentElement?.parentElement as HTMLElement
+            ).getBoundingClientRect();
+            onChange(clamp((e.clientX - r.left) / r.width));
+          }
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+            e.preventDefault();
+            onChange(clamp(split + (e.key === 'ArrowLeft' ? -0.05 : 0.05)));
+          }
+        }}
+      />
+    </div>
+  );
+}
+
 /** Lets the downloads draw this view on demand and reach the level's meshes. */
 function Capture() {
   const { gl, scene, camera } = useThree();
@@ -301,6 +398,17 @@ export function Viewport() {
   const dark = usePrefersDark();
   const walking = useEditor((s) => !!s.walking);
   const { startWalk, stopWalk } = useEditor.getState();
+  // Comparing a renovation's before and after, side by side across a divider.
+  const [comparing, setComparing] = useState(false);
+  const [split, setSplit] = useState(0.5);
+  const splitRef = useRef(0.5);
+  splitRef.current = split;
+  const beforeGroup = useRef<THREE.Object3D | null>(null);
+  const afterGroup = useRef<THREE.Object3D | null>(null);
+  const versions = project.renovation
+    ? { before: project.levels[0], after: project.renovation.levels[0] }
+    : null;
+  const compare = comparing && !walking && !!versions?.before && !!versions.after;
   const stick = useRef<Vec2>({ x: 0, y: 0 });
   const projectId = project.id;
   const pose = useRef<WalkPose | null>(null);
@@ -373,7 +481,15 @@ export function Viewport() {
           <planeGeometry args={[200, 200]} />
           <meshStandardMaterial color={dark ? '#1a1c1e' : '#eef1f3'} />
         </mesh>
-        <LevelMesh ceilings={walking} walker={walking ? pose : undefined} />
+        {compare && versions?.before && versions.after ? (
+          <>
+            <LevelMesh ceilings={false} of={versions.before} group={beforeGroup} />
+            <LevelMesh ceilings={false} of={versions.after} group={afterGroup} />
+            <CompareRender split={splitRef} before={beforeGroup} after={afterGroup} />
+          </>
+        ) : (
+          <LevelMesh ceilings={walking} walker={walking ? pose : undefined} />
+        )}
         {walking && level ? (
           <WalkControls
             level={level}
@@ -426,6 +542,17 @@ export function Viewport() {
               Walk through
             </button>
           )}
+          {versions && (
+            <button
+              type="button"
+              className="btn viewport-compare"
+              aria-pressed={compare}
+              onClick={() => setComparing(!compare)}
+            >
+              {compare ? 'Stop comparing' : 'Compare before and after'}
+            </button>
+          )}
+          {compare && <CompareDivider split={split} onChange={setSplit} />}
           <p className="viewport-hint">
             {coarsePointer()
               ? 'Drag to orbit · pinch to zoom · two fingers to pan'

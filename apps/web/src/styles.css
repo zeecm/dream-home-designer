@@ -903,6 +903,56 @@ select {
 .viewport-sound[aria-pressed="true"] {
   color: var(--text);
 }
+.viewport-compare {
+  position: absolute;
+  top: 60px;
+  right: 12px;
+  font-size: var(--fs-small);
+}
+/* Comparing before and after: a line across the view, dragged by its handle. */
+.compare-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 25%, transparent);
+  pointer-events: none;
+}
+.compare-handle {
+  position: absolute;
+  top: 50%;
+  left: -1px;
+  width: 32px;
+  height: 32px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--accent);
+  cursor: ew-resize;
+  pointer-events: auto;
+  touch-action: none;
+}
+.compare-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.compare-label {
+  position: absolute;
+  top: 112px;
+  padding: 2px 8px;
+  font-size: var(--fs-small);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  white-space: nowrap;
+}
+.compare-label-before {
+  right: 8px;
+}
+.compare-label-after {
+  left: 8px;
+}
 .sun-control {
   position: absolute;
   top: 12px;
