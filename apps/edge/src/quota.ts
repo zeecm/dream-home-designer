@@ -51,9 +51,20 @@ export function memoryQuota(): QuotaStore & { rows: Map<string, number> } {
 
 const dayOf = (t: number) => new Date(t).toISOString().slice(0, 10);
 
-async function hash(s: string): Promise<string> {
-  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`dhd-quota:${s}`));
-  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
+/**
+ * The visitor's key for the day: an HMAC of the day and their address under a server secret,
+ * so the table can't be turned back into addresses (an IPv4 address alone is guessable).
+ */
+async function hash(secret: string, day: string, client: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(`dhd-quota:${secret}`),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${day}|${client}`));
+  return [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 /**
@@ -63,17 +74,21 @@ async function hash(s: string): Promise<string> {
 export async function allowCreate(
   store: QuotaStore,
   client: string,
-  now = Date.now(),
-  random = Math.random,
+  opts: { secret?: string; now?: number; random?: () => number } = {},
 ): Promise<boolean> {
+  const now = opts.now ?? Date.now();
   const day = dayOf(now);
+  let count: number;
   try {
-    const count = await store.bump(await hash(client), day);
-    if (random() < 0.02) await store.prune(dayOf(now - 2 * 86_400_000));
-    return count <= DAILY_CREATES;
+    count = await store.bump(await hash(opts.secret ?? '', day, client), day);
   } catch (e) {
     // No table yet (its migration not applied) or D1 down: the per-minute limit still holds.
-    console.warn('create quota unavailable', e);
+    // Tagged, so a cap that is off for good shows up in the logs.
+    console.error('quotaUnavailable', e);
     return true;
   }
+  if ((opts.random ?? Math.random)() < 0.02) {
+    await store.prune(dayOf(now - 2 * 86_400_000)).catch((e) => console.error('quotaPrune', e));
+  }
+  return count <= DAILY_CREATES;
 }

@@ -111,6 +111,9 @@ export default {
     url.pathname = url.pathname.replace(/^\/api(?=\/|$)/, '') || '/';
 
     if (request.method !== 'GET' && request.method !== 'HEAD') {
+      // No id or route has an escape in it; the API would decode one (/project%73 is
+      // /projects) and so slip past the create limits below.
+      if (url.pathname.includes('%')) return json({ error: 'bad path' }, 400);
       const client = clientKey(request.headers.get('CF-Connecting-IP'));
       const write = await env.WRITE_LIMIT.limit({ key: client });
       if (!write.success) return json({ error: 'too many writes, slow down' }, 429);
@@ -118,7 +121,7 @@ export default {
         const create = await env.CREATE_LIMIT.limit({ key: client });
         if (!create.success)
           return json({ error: 'too many new projects, try again in a minute' }, 429);
-        if (env.DB && !(await allowCreate(d1Quota(env.DB), client))) {
+        if (env.DB && !(await allowCreate(d1Quota(env.DB), client, { secret: env.KEYS_SECRET }))) {
           return json({ error: 'you have started a lot of plans today; try again tomorrow' }, 429);
         }
       }

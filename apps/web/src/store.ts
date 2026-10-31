@@ -273,6 +273,22 @@ export const useStore = create<State>((set, get) => {
       if (backend.kind === 'local' && !get().notice) set({ notice: localNotice });
       open(await backend.create(doc), sample);
     } catch (e) {
+      // The server's daily cap for this network (an office or school shares one address):
+      // keep this plan in the browser instead of opening nothing.
+      if (e instanceof Error && /^429 /.test(e.message) && get().backend?.kind === 'remote') {
+        try {
+          const local = localBackend();
+          set({
+            backend: local,
+            notice:
+              'A lot of new plans have come from your network today, so this one is kept in this browser for now.',
+          });
+          open(await local.create(doc), sample);
+          return;
+        } catch {
+          // Fall through to the error below.
+        }
+      }
       set({ sync: { kind: 'error', message: errorMessage('Could not create a project', e) } });
     }
   };

@@ -55,12 +55,26 @@ function stepBuffer(ctx: AudioContext): AudioBuffer {
   return buf;
 }
 
+/**
+ * Makes the audio ready: call it from a tap or click (starting a walk, the toggle), since
+ * some browsers (iPhones) only let sound start from one.
+ */
+export function unlockAudio() {
+  if (!on || typeof AudioContext === 'undefined') return;
+  try {
+    audio ??= new AudioContext();
+    if (audio.state === 'suspended') audio.resume().catch(() => {});
+  } catch {
+    // No audio here: walking stays silent.
+  }
+}
+
 /** Plays one footstep (`weight` above 1 for running). Silent if sound is off or unavailable. */
 export function footstep(weight = 1) {
   if (!on || typeof AudioContext === 'undefined') return;
   try {
     audio ??= new AudioContext();
-    if (audio.state === 'suspended') void audio.resume();
+    if (audio.state === 'suspended') audio.resume().catch(() => {});
     noise ??= stepBuffer(audio);
     const src = audio.createBufferSource();
     src.buffer = noise;

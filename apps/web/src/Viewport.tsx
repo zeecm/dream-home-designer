@@ -28,7 +28,7 @@ import { useLevel, useProject } from './store';
 import { Joystick } from './walk/Joystick';
 import { MiniMap } from './walk/MiniMap';
 import { WalkControls, type WalkPose } from './walk/WalkControls';
-import { setSound, useSound } from './walk/footsteps';
+import { setSound, unlockAudio, useSound } from './walk/footsteps';
 import { loadWalkPose, saveWalkPose } from './walk/pose';
 
 const materials = new MaterialCache();
@@ -80,6 +80,12 @@ function useDoorSwings(meshes: LevelMeshes, walker?: MutableRefObject<WalkPose |
     () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
     [],
   );
+  // A walk starts with the doors shut (not swinging shut), and ends with them open.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on starting or ending a walk
+  useEffect(() => {
+    open.current.clear();
+    want.current.clear();
+  }, [!!walker]);
   useFrame((_, dt) => {
     const at = walker?.current?.at;
     for (const d of meshes.doors()) {
@@ -382,7 +388,14 @@ export function Viewport() {
       ) : (
         <>
           {hasRooms && (
-            <button type="button" className="btn viewport-action" onClick={startWalk}>
+            <button
+              type="button"
+              className="btn viewport-action"
+              onClick={() => {
+                unlockAudio();
+                startWalk();
+              }}
+            >
               Walk through
             </button>
           )}
@@ -405,7 +418,10 @@ function SoundToggle() {
       type="button"
       className="btn viewport-sound"
       aria-pressed={sound}
-      onClick={() => setSound(!sound)}
+      onClick={() => {
+        setSound(!sound);
+        unlockAudio();
+      }}
     >
       {sound ? 'Footsteps on' : 'Footsteps off'}
     </button>
