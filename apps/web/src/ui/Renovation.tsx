@@ -1,5 +1,13 @@
-import { type RenovationDiff, endRenovation, renovationDiff, startRenovation } from '@dhd/core';
-import { useMemo } from 'react';
+import {
+  type ChangePlace,
+  type RenovationChange,
+  type RenovationDiff,
+  endRenovation,
+  renovationChanges,
+  renovationDiff,
+  startRenovation,
+} from '@dhd/core';
+import { useMemo, useState } from 'react';
 import { useEditor } from '../editor';
 import { pts } from '../plan/layers';
 import { useProject, useStore } from '../store';
@@ -12,6 +20,111 @@ export function useRenovationDiff(): RenovationDiff | null {
   const before = doc.levels[0];
   const after = doc.renovation?.levels[0];
   return useMemo(() => (before && after ? renovationDiff(before, after) : null), [before, after]);
+}
+
+/** The renovation's changes, room by room, or null without one. */
+function useRenovationChanges(diff: RenovationDiff | null): RenovationChange[] | null {
+  const doc = useProject();
+  const before = doc.levels[0];
+  const after = doc.renovation?.levels[0];
+  return useMemo(
+    () => (before && after && diff ? renovationChanges(before, after, diff) : null),
+    [before, after, diff],
+  );
+}
+
+/** Where a change is, in words: "Kitchen", "Kitchen, outside wall", "Between A and B". */
+export function placeText(p: ChangePlace): string {
+  const [one, two, ...more] = p.rooms;
+  if (!one) return 'Outside';
+  if (!two) return p.outside ? `${one}, outside wall` : one;
+  return more.length ? `Between ${p.rooms.join(', ')}` : `Between ${one} and ${two}`;
+}
+
+const OPENING_NAMES = { door: 'door', window: 'window', passage: 'opening' } as const;
+
+/** What a change is, in words. */
+export function changeText(c: RenovationChange): string {
+  switch (c.kind) {
+    case 'hack':
+      return `Hack ${formatLength(c.length)} of wall`;
+    case 'build':
+      return `Build ${formatLength(c.length)} of wall`;
+    case 'opening': {
+      const what = OPENING_NAMES[c.opening];
+      if (c.change === 'added') return `New ${what}, ${formatLength(c.width)} wide`;
+      if (c.change === 'removed') return `Close up the ${what} (${formatLength(c.width)} wide)`;
+      const was = c.widthBefore ?? c.width;
+      const What = what[0]?.toUpperCase() + what.slice(1);
+      if (Math.abs(was - c.width) < 0.005) return `${What} moved`;
+      return `${What} ${c.width > was ? 'widened' : 'narrowed'} from ${formatLength(was)} to ${formatLength(c.width)}`;
+    }
+    case 'floor':
+      return `Floor: ${c.from} to ${c.to}`;
+    case 'area':
+      return `Floor area ${formatArea(c.before)} to ${formatArea(c.after)}`;
+    case 'room':
+      return c.change === 'added'
+        ? `New room, ${formatArea(c.area)}`
+        : `No longer a room of its own (was ${formatArea(c.area)})`;
+  }
+}
+
+/** Changes grouped by place, in order (renovationChanges sorts them by place). */
+function byPlace(changes: RenovationChange[]): { place: string; items: string[] }[] {
+  const out: { place: string; items: string[] }[] = [];
+  for (const c of changes) {
+    const place = placeText(c);
+    const last = out[out.length - 1];
+    if (last?.place === place) last.items.push(changeText(c));
+    else out.push({ place, items: [changeText(c)] });
+  }
+  return out;
+}
+
+/** The renovation's changes as plain text, a line per place, to send to a contractor. */
+export function changesAsText(changes: RenovationChange[]): string {
+  return byPlace(changes)
+    .map((g) => `${g.place}: ${g.items.join('; ')}`)
+    .join('\n');
+}
+
+/** The changes, room by room, with a button to copy them as text. */
+function ChangeList({ changes }: { changes: RenovationChange[] }) {
+  const [copied, setCopied] = useState(false);
+  if (changes.length === 0) return null;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(changesAsText(changes));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // No clipboard access: the list itself can be selected.
+    }
+  };
+  return (
+    <div className="reno-changes">
+      <span className="reno-changes-head">
+        <h4 className="section-title">Changes, room by room</h4>
+        <button type="button" className="btn btn-small" onClick={() => void copy()}>
+          {copied ? 'Copied' : 'Copy list'}
+        </button>
+      </span>
+      <ul>
+        {byPlace(changes).map((g) => (
+          <li key={g.place}>
+            <span className="reno-place">{g.place}</span>
+            <ul>
+              {g.items.map((t, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: a place's changes have no ids
+                <li key={i}>{t}</li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 /** One line for the bar: what's hacked and what's built. */
@@ -126,6 +239,7 @@ export function RenovationSection() {
   const dispatch = useStore((s) => s.dispatch);
   const setVariant = useEditor((s) => s.setVariant);
   const diff = useRenovationDiff();
+  const changes = useRenovationChanges(diff);
   if (!diff) {
     return (
       <section className="reno-section" aria-labelledby="reno-h">
@@ -188,6 +302,7 @@ export function RenovationSection() {
           </dd>
         </div>
       </dl>
+      {changes && <ChangeList changes={changes} />}
       <p className="field-hint">
         Edits go to the version shown above the plan. Moving a wall counts as hacking it and
         building it anew. Once the work is done, make the renovation the plan; either step can be

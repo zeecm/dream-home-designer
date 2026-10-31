@@ -830,6 +830,34 @@ select {
 .reno-facts dd {
   margin: 0;
 }
+.reno-changes {
+  display: grid;
+  gap: 6px;
+}
+.reno-changes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.reno-changes-head .section-title {
+  margin: 0;
+}
+.reno-changes ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+.reno-changes ul ul {
+  gap: 2px;
+  padding-left: 12px;
+  color: var(--muted);
+}
+.reno-place {
+  font-weight: 500;
+}
 
 .toast {
   position: absolute;

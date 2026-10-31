@@ -25,6 +25,16 @@ test('renovation: hack a wall in the after, compare with before, then keep or di
   await expect(bar).toContainText('of wall hacked');
   await expect(page.locator('.reno-hack')).toHaveCount(1);
 
+  // The plan details list the changes room by room, ready to copy for a contractor.
+  const list = page.locator('.reno-changes');
+  await expect(list).toContainText('Between Bedroom and Living and dining');
+  await expect(list).toContainText(/Hack \d+\.\d\d m of wall/);
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await list.getByRole('button', { name: 'Copy list' }).click();
+  await expect(list.getByRole('button', { name: 'Copied' })).toBeVisible();
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copied).toMatch(/^Between Bedroom and Living and dining: Hack \d+\.\d\d m of wall/m);
+
   // Before still has it, marked for hacking.
   await bar.getByRole('button', { name: 'Before' }).click();
   await expect(page.locator(WALL).first()).toBeVisible();
