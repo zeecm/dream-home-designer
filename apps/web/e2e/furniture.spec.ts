@@ -272,3 +272,25 @@ test('handles: Escape takes a drag back; a tap on the turn handle adds nothing; 
   await expect(width).not.toHaveValue(w0);
   await expect(depth).toHaveValue(d0);
 });
+
+test('a piece that stands on others (a succulent) is placed on a table by clicking on the table', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await page.getByRole('button', { name: /^Furniture/ }).click();
+  await page.getByRole('button', { name: /Round pedestal table/ }).click();
+  const room = page.locator('[data-hit="room:rm_living-and-dining"]');
+  const box = await room.boundingBox();
+  if (!box) throw new Error('no room');
+  const at = { x: box.x + box.width * 0.5, y: box.y + box.height * 0.5 };
+  await page.mouse.click(at.x, at.y);
+  const items = page.locator('[data-hit^="item:"]');
+  await expect(items).toHaveCount(1);
+  // On the table just placed: a second piece, not the table selected.
+  await page.getByRole('button', { name: /Succulent/ }).click();
+  await page.mouse.click(at.x, at.y);
+  await expect(items).toHaveCount(2);
+  await expect(page.getByRole('heading', { name: 'Succulent, on a table' })).toBeVisible();
+});

@@ -1,4 +1,4 @@
-import { levelBounds, planGeometry, siteOf, underlayToWorld } from '@dhd/core';
+import { furnitureKind, levelBounds, planGeometry, siteOf, underlayToWorld } from '@dhd/core';
 import type { Vec2 } from '@dhd/core';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { type PixelBox, inkBounds } from '../assets';
@@ -65,12 +65,17 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
    * goes to Select for that gesture (a drag moves it, a tap selects it), instead of adding
    * another one beside it. Furniture just placed shows its resize and turn handles: a drag
    * from one goes to Select too, but a tap there still places the next piece (beside a
-   * chair, the next chair).
+   * chair, the next chair). A piece that goes on top of others or above them (a table lamp,
+   * a ceiling light) is placed over a piece as anywhere else.
    */
   const placing = (own: ToolController, kind: 'item' | 'opening'): ToolController => {
     const handle = (p: PlanPointer) =>
       kind === 'item' && p.hit?.kind !== kind && (select.grabs?.(p) ?? false);
-    const onOwn = (p: PlanPointer) => p.hit?.kind === kind || handle(p);
+    const over = () => {
+      const k = kind === 'item' && furnitureKind(useEditor.getState().furnitureKind);
+      return !!k && (!!k.ceiling || (k.elevation ?? 0) > 0);
+    };
+    const onOwn = (p: PlanPointer) => (p.hit?.kind === kind && !over()) || handle(p);
     return {
       ...own,
       grabs: (p) => onOwn(p) || (own.grabs?.(p) ?? false),
