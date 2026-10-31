@@ -120,10 +120,11 @@ async function build(entry) {
   const turn = ((entry.turn ?? 0) * Math.PI) / 180;
   pivot.setRotation([0, Math.sin(turn / 2), 0, Math.cos(turn / 2)]);
   // Some models come larger than a flat's furniture: `scale` shrinks them (a number, or
-  // [across, up, deep] for one that is only too wide).
+  // [across, up, deep] for one that is only too wide), in the item's axes, after the turn.
+  const fit = doc.createNode('fit');
   if (entry.scale !== undefined) {
     const k = entry.scale;
-    pivot.setScale(Array.isArray(k) ? k : [k, k, k]);
+    fit.setScale(Array.isArray(k) ? k : [k, k, k]);
   }
   const offset = doc
     .createNode('offset')
@@ -133,7 +134,8 @@ async function build(entry) {
     offset.addChild(child);
   }
   pivot.addChild(offset);
-  scene.addChild(pivot);
+  fit.addChild(pivot);
+  scene.addChild(fit);
   const nb = getBounds(scene);
   const size = {
     w: +(nb.max[0] - nb.min[0]).toFixed(3),

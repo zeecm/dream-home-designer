@@ -48,7 +48,8 @@
     "polyhaven": "Ottoman_01",
     "id": "ottoman-leather",
     "name": "Ottoman, leather",
-    "category": "Living"
+    "category": "Living",
+    "scale": 0.75
   },
   {
     "polyhaven": "industrial_coffee_table",

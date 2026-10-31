@@ -93,11 +93,11 @@ export const MODEL_KINDS: ModelKind[] = [
     id: 'ottoman-leather',
     name: 'Ottoman, leather',
     category: 'Living',
-    model: 'ottoman-leather.6b50084e93.glb',
+    model: 'ottoman-leather.deb1de96e7.glb',
     size: {
-      w: 0.885,
-      d: 0.621,
-      h: 0.624,
+      w: 0.663,
+      d: 0.466,
+      h: 0.468,
     },
     source: 'https://polyhaven.com/a/Ottoman_01',
   },
@@ -153,7 +153,7 @@ export const MODEL_KINDS: ModelKind[] = [
     id: 'pedestal-table-round',
     name: 'Round pedestal table',
     category: 'Dining',
-    model: 'pedestal-table-round.d59ffe7c67.glb',
+    model: 'pedestal-table-round.60e706ab3a.glb',
     size: {
       w: 1.05,
       d: 1.05,
@@ -179,7 +179,7 @@ export const MODEL_KINDS: ModelKind[] = [
     name: 'Metal desk with drawers',
     category: 'Bedroom',
     againstWall: true,
-    model: 'metal-desk.4df07abb9f.glb',
+    model: 'metal-desk.d1fed8db83.glb',
     size: {
       w: 1.4,
       d: 0.663,
@@ -218,7 +218,7 @@ export const MODEL_KINDS: ModelKind[] = [
     name: 'Steel-frame shelves',
     category: 'Storage',
     againstWall: true,
-    model: 'steel-shelves.567c9975fb.glb',
+    model: 'steel-shelves.8a6c9b023b.glb',
     size: {
       w: 1.411,
       d: 0.433,

@@ -541,9 +541,12 @@ plan, dropping a half-drawn wall; the bar says which version edits go to and hid
 walking; `loadProject` gives a renovation level that clashes with the plan's id its own.
 The details also list the changes room by room (`renovationChanges` in core, `ChangeList` in
 `ui/Renovation.tsx`): wall hacked and built (summed per place), doors, windows and openings
-added, closed up, moved or resized, floors refinished, rooms grown or shrunk, and rooms new or
-gone, each placed by the rooms either side of it (just past each face; "outside wall" where
-one side has none), in the version it belongs to. "Copy list" puts them on the clipboard as
+added, closed up (or gone with a hacked wall), moved, resized or changed in kind, rooms
+renamed, refinished, grown or shrunk, and rooms new or gone, each placed by the rooms either
+side of it (just past each face; "outside wall" where one side has none), in the version it
+belongs to and named as the room is in the renovation. Rooms are matched between the versions
+by where they are (each one's inside point in the other), not by id, since a wall hacked and
+drawn again can give a room a new id. "Copy list" puts them on the clipboard as
 text, a line per place, for a contractor.
 **Not yet:** a side-by-side 3D compare; applying an edit to both versions at once (a trace fix
 in "before" shows as built wall in the after).
@@ -885,5 +888,7 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
   (`jambSnap` in `snap.ts`), so an angle-snapped wall drawn to a doorway slants by up to half
   the door's width. The alternative, ending the wall straight but short of the doorway and
   unjoined, leaves the room open; not decided.
+- **Placing on furniture:** pieces that stand on a table (the succulent, the desk lamp) can't
+  be placed by clicking on the table, which selects it: place them beside it and drag them on.
 - **Corner dimension lines** for walls that run into the room draw inside it; fine at plan scale,
   busy on short walls.

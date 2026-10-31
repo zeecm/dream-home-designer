@@ -11,6 +11,7 @@ import {
   drawWall,
   moveVertex,
   placeOpening,
+  pointInPolygon,
   settleVertex,
   snapCorner,
   snapPoint,
@@ -59,10 +60,12 @@ function useCornerHandles(ctx: ToolContext) {
   const ids = useRef<string[]>([]);
   const grab = useRef<{ id: string; key: string; moved: boolean } | null>(null);
   const [moving, setMoving] = useState<string | null>(null);
+  /** The handles, while what they belong to is still there (an undo can take it away). */
+  const live = () => (ids.current.every((id) => ctx.level.vertices[id]) ? ids.current : []);
   const under = (p: PlanPointer): string | null => {
     let best: string | null = null;
     let bestD = END_REACH;
-    for (const id of ids.current) {
+    for (const id of live()) {
       const v = ctx.level.vertices[id];
       if (!v) continue;
       const s = worldToScreen(ctx.view, ctx.size, v);
@@ -81,7 +84,7 @@ function useCornerHandles(ctx: ToolContext) {
     /** The handle under the pointer, if any. */
     under,
     /** The handles' corners. */
-    ids: () => ids.current,
+    ids: live,
     /** Takes this handle's corner, as a press on it does. */
     take: (id: string) => {
       grab.current = { id, key: `corner:${id}:${Date.now()}`, moved: false };
@@ -124,7 +127,7 @@ function useCornerHandles(ctx: ToolContext) {
         : [];
       return (
         <>
-          {ids.current.map((id) => {
+          {live().map((id) => {
             const v = level.vertices[id];
             if (!v) return null;
             const s = worldToScreen(view, size, v);
@@ -1040,19 +1043,22 @@ export function useRoomTool(ctx: ToolContext): ToolController {
    * corner) rather than away from it (it draws a new room from the corner, sharing a wall).
    */
   const intoRoom = (id: string, v: Vec2) => {
-    const c = ctx.level.vertices[id];
-    const corners = handles
-      .ids()
-      .map((h) => ctx.level.vertices[h])
-      .filter((q) => !!q);
-    if (!c || corners.length === 0) return true;
-    const m = {
-      x: corners.reduce((sum, q) => sum + q.x, 0) / corners.length,
-      y: corners.reduce((sum, q) => sum + q.y, 0) / corners.length,
-    };
-    const l = Math.hypot(v.x, v.y) || 1;
-    // Neither part of the drag clearly heads out of the room (a little sideways is fine).
-    return v.x * Math.sign(m.x - c.x) > -0.3 * l && v.y * Math.sign(m.y - c.y) > -0.3 * l;
+    const ring = handles.ids();
+    const corners = ring.map((h) => ctx.level.vertices[h]).filter((q) => !!q);
+    const i = ring.indexOf(id);
+    const c = corners[i];
+    const l = Math.hypot(v.x, v.y);
+    if (!c || corners.length < 3 || l < 1e-9) return true;
+    const u = { x: v.x / l, y: v.y / l };
+    // Into the room (between the corner's two walls, whatever its angle), or close along
+    // one of them towards the next corner.
+    if (pointInPolygon({ x: c.x + u.x * 1e-3, y: c.y + u.y * 1e-3 }, corners)) return true;
+    const n = corners.length;
+    return [corners[(i + n - 1) % n], corners[(i + 1) % n]].some((q) => {
+      if (!q) return false;
+      const e = Math.hypot(q.x - c.x, q.y - c.y) || 1;
+      return ((q.x - c.x) * u.x + (q.y - c.y) * u.y) / e > Math.cos((17 * Math.PI) / 180);
+    });
   };
   const thickness = useEditor((s) => s.wallThickness);
   const tool = useEditor((s) => s.tool);
@@ -1119,6 +1125,7 @@ export function useRoomTool(ctx: ToolContext): ToolController {
       setDragFrom(null);
       onCorner.current = null;
       origin.current = null;
+      press.current = null;
     },
     down: (p) => {
       if (handles.held()) return true;
@@ -1164,8 +1171,14 @@ export function useRoomTool(ctx: ToolContext): ToolController {
       const from = origin.current;
       origin.current = null;
       if (!a) return;
+      const dragged = Math.hypot(p.screen.x - a.screen.x, p.screen.y - a.screen.y) > 8;
+      // A drag from a corner just drawn that came back (or was cut short): nothing.
+      if (from && !dragged) {
+        setDragFrom(null);
+        return;
+      }
       // A drag draws the room corner to corner; a click sets a corner, then the opposite one.
-      if (Math.hypot(p.screen.x - a.screen.x, p.screen.y - a.screen.y) > 8) {
+      if (dragged) {
         build(from ?? snapAt(a), snapAt(p).point);
         setStart(null);
         setDragFrom(null);

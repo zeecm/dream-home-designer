@@ -253,6 +253,17 @@ test('in the Room tool, a drag from a corner just drawn away from its room draws
   await drag(from, at(0.7, 0.6));
   await expect(rooms).toHaveCount(2);
   await expect(walls).toHaveText('7');
+  // Out from a corner and back to it before letting go: nothing drawn, nothing left waiting.
+  const back = await page.locator('.end-handle').nth(1).boundingBox();
+  if (!back) throw new Error('no corner');
+  const b0 = { x: back.x + back.width / 2, y: back.y + back.height / 2 };
+  await page.mouse.move(b0.x, b0.y);
+  await page.mouse.down();
+  await page.mouse.move(b0.x + 40, b0.y - 30, { steps: 5 });
+  await page.mouse.move(b0.x + 2, b0.y, { steps: 5 });
+  await page.mouse.up();
+  await expect(rooms).toHaveCount(2);
+  await expect(page.locator('.draw-bar-notice')).toHaveCount(0);
   const firstAfter = await rooms.first().boundingBox();
   expect(firstAfter?.width).toBeCloseTo(first.width, 0);
   expect(firstAfter?.height).toBeCloseTo(first.height, 0);

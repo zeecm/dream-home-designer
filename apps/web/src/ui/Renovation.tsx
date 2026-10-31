@@ -43,6 +43,9 @@ export function placeText(p: ChangePlace): string {
 
 const OPENING_NAMES = { door: 'door', window: 'window', passage: 'opening' } as const;
 
+const cap = (w: string) => `${w[0]?.toUpperCase() ?? ''}${w.slice(1)}`;
+const an = (w: string) => `${/^[aeiou]/.test(w) ? 'an' : 'a'} ${w}`;
+
 /** What a change is, in words. */
 export function changeText(c: RenovationChange): string {
   switch (c.kind) {
@@ -52,15 +55,30 @@ export function changeText(c: RenovationChange): string {
       return `Build ${formatLength(c.length)} of wall`;
     case 'opening': {
       const what = OPENING_NAMES[c.opening];
+      const What = cap(what);
       if (c.change === 'added') return `New ${what}, ${formatLength(c.width)} wide`;
       if (c.change === 'removed') return `Close up the ${what} (${formatLength(c.width)} wide)`;
-      const was = c.widthBefore ?? c.width;
-      const What = what[0]?.toUpperCase() + what.slice(1);
-      if (Math.abs(was - c.width) < 0.005) return `${What} moved`;
-      return `${What} ${c.width > was ? 'widened' : 'narrowed'} from ${formatLength(was)} to ${formatLength(c.width)}`;
+      if (c.change === 'with-wall') return `${What} goes with the wall`;
+      const b = c.before ?? {};
+      const parts: string[] = [];
+      if (b.width !== undefined)
+        parts.push(
+          `${c.width > b.width ? 'widened' : 'narrowed'} from ${formatLength(b.width)} to ${formatLength(c.width)}`,
+        );
+      if (b.height !== undefined && c.height !== undefined)
+        parts.push(
+          `made ${c.height > b.height ? 'taller' : 'shorter'}, ${formatLength(b.height)} to ${formatLength(c.height)}`,
+        );
+      if (b.sill !== undefined && c.sill !== undefined)
+        parts.push(`sill ${c.sill > b.sill ? 'raised' : 'lowered'} to ${formatLength(c.sill)}`);
+      if (c.moved) parts.push('moved');
+      const head = b.opening ? `${cap(OPENING_NAMES[b.opening])} made ${an(what)}` : What;
+      return parts.length ? `${head}${b.opening ? ',' : ''} ${parts.join(', ')}` : head;
     }
+    case 'rename':
+      return `Renamed (was ${c.from})`;
     case 'floor':
-      return `Floor: ${c.from} to ${c.to}`;
+      return `Floor from ${c.from} to ${c.to}`;
     case 'area':
       return `Floor area ${formatArea(c.before)} to ${formatArea(c.after)}`;
     case 'room':
@@ -91,23 +109,34 @@ export function changesAsText(changes: RenovationChange[]): string {
 
 /** The changes, room by room, with a button to copy them as text. */
 function ChangeList({ changes }: { changes: RenovationChange[] }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
   if (changes.length === 0) return null;
   const copy = async () => {
+    const text = changesAsText(changes);
+    let done = false;
     try {
-      await navigator.clipboard.writeText(changesAsText(changes));
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      await navigator.clipboard.writeText(text);
+      done = true;
     } catch {
-      // No clipboard access: the list itself can be selected.
+      // No clipboard API here (an insecure page, say): the old way, through a selection.
+      const area = document.createElement('textarea');
+      area.value = text;
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.append(area);
+      area.select();
+      done = document.execCommand('copy');
+      area.remove();
     }
+    setCopied(done ? 'Copied' : "Couldn't copy");
+    setTimeout(() => setCopied(null), done ? 1500 : 4000);
   };
   return (
     <div className="reno-changes">
       <span className="reno-changes-head">
         <h4 className="section-title">Changes, room by room</h4>
         <button type="button" className="btn btn-small" onClick={() => void copy()}>
-          {copied ? 'Copied' : 'Copy list'}
+          {copied ?? 'Copy list'}
         </button>
       </span>
       <ul>

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   deleteOpening,
   deleteWall,
+  drawWall,
   moveVertex,
   splitWall,
   updateOpening,
@@ -161,7 +162,8 @@ describe('renovationChanges', () => {
     expect(between.map((c) => c.kind)).toEqual(['hack', 'opening']);
     expect(between[0]).toMatchObject({ kind: 'hack', outside: false });
     expect(between[0]?.kind === 'hack' && between[0].length).toBeCloseTo(2.9);
-    expect(between[1]).toMatchObject({ kind: 'opening', change: 'removed' });
+    // Its doorway went with it: not something to close up.
+    expect(between[1]).toMatchObject({ kind: 'opening', change: 'with-wall' });
     // One of the two rooms is gone and the other grew into it.
     expect(changes.filter((c) => c.kind === 'room' && c.change === 'removed')).toHaveLength(1);
     expect(changes.filter((c) => c.kind === 'area')).toHaveLength(1);
@@ -178,7 +180,10 @@ describe('renovationChanges', () => {
       change: 'changed',
       opening: 'door',
       width: 1.2,
-      widthBefore: s.doc.levels[0]?.openings.op_bed2?.width,
+      before: { width: s.doc.levels[0]?.openings.op_bed2?.width },
+      height: s.doc.levels[0]?.openings.op_bed2?.height,
+      sill: 0,
+      moved: false,
     });
     expect(changes).toContainEqual({
       rooms: ['Bedroom 3'],
@@ -207,5 +212,33 @@ describe('renovationChanges', () => {
       from: finish('tile-grey')?.name,
       to: finish('wood-oak')?.name,
     });
+  });
+
+  it('matches rooms by where they are: a wall hacked and drawn again changes no room', () => {
+    let s = dispatch(renovating(), deleteWall(A, 'w_bed3_bed2'));
+    const l = s.doc.renovation?.levels[0];
+    if (!l) throw new Error('no renovation');
+    s = dispatch(
+      s,
+      drawWall(l, { vertexId: 'v11' }, { vertexId: 'v6' }, { thickness: 0.1 }).command,
+    );
+    const changes = changesOf(s);
+    expect(changes.filter((c) => c.kind === 'room' || c.kind === 'area')).toEqual([]);
+  });
+
+  it('lists a room renamed, and names the room as renamed wherever it is', () => {
+    let s = dispatch(renovating(), updateRoom(A, 'rm_bed2', { name: 'Study' }));
+    s = dispatch(s, updateOpening(A, 'op_bed2', { height: 2.4 }));
+    const changes = changesOf(s);
+    expect(changes).toContainEqual({
+      rooms: ['Study'],
+      outside: false,
+      kind: 'rename',
+      from: 'Bedroom 2',
+    });
+    // The door changed in height only: not "moved".
+    expect(changes).toContainEqual(
+      expect.objectContaining({ rooms: ['Living', 'Study'], kind: 'opening', moved: false }),
+    );
   });
 });
