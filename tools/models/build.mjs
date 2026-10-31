@@ -91,6 +91,16 @@ async function build(entry) {
     }
     ext.dispose();
   }
+  // Parts not worth drawing (a picture frame's glass, which hides the picture): `drop` names
+  // their material.
+  if (entry.drop) {
+    for (const mesh of doc.getRoot().listMeshes()) {
+      for (const prim of mesh.listPrimitives()) {
+        if (prim.getMaterial()?.getName().includes(entry.drop)) prim.dispose();
+      }
+    }
+    await doc.transform(prune());
+  }
   // A lamp's shade or bulb glows, as the box-built lamps' shades do.
   if (entry.glow) {
     for (const m of doc.getRoot().listMaterials()) {
@@ -177,7 +187,7 @@ for (const f of await readdir(outDir)) {
 
 const kinds = catalogue
   .filter((e) => built[e.id])
-  .map(({ polyhaven, turn, scale, maxTriangles, simplifyError, glow, ...e }) => ({
+  .map(({ polyhaven, turn, scale, maxTriangles, simplifyError, glow, drop, ...e }) => ({
     ...e,
     model: built[e.id].file,
     size: built[e.id].size,

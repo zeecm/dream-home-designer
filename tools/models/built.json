@@ -206,5 +206,205 @@
       "d": 0.185,
       "h": 0.267
     }
+  },
+  "leather-sofa-rolled": {
+    "file": "leather-sofa-rolled.6c1d4565ed.glb",
+    "size": {
+      "w": 2.185,
+      "d": 0.74,
+      "h": 0.895
+    }
+  },
+  "chinese-armchair": {
+    "file": "chinese-armchair.5044470d94.glb",
+    "size": {
+      "w": 0.594,
+      "d": 0.552,
+      "h": 1.111
+    }
+  },
+  "chinese-bench": {
+    "file": "chinese-bench.fb09c852ba.glb",
+    "size": {
+      "w": 1.943,
+      "d": 0.824,
+      "h": 0.731
+    }
+  },
+  "chinese-tea-table": {
+    "file": "chinese-tea-table.ab7cb4bbf0.glb",
+    "size": {
+      "w": 0.841,
+      "d": 0.836,
+      "h": 0.499
+    }
+  },
+  "chinese-stool": {
+    "file": "chinese-stool.8f3efe2ff8.glb",
+    "size": {
+      "w": 0.449,
+      "d": 0.38,
+      "h": 0.473
+    }
+  },
+  "chinese-console": {
+    "file": "chinese-console.9fb57e3b59.glb",
+    "size": {
+      "w": 1.72,
+      "d": 0.339,
+      "h": 0.661
+    }
+  },
+  "chinese-cabinet": {
+    "file": "chinese-cabinet.a7e4dfbeef.glb",
+    "size": {
+      "w": 0.821,
+      "d": 0.354,
+      "h": 1.867
+    }
+  },
+  "folding-screen": {
+    "file": "folding-screen.96dc227930.glb",
+    "size": {
+      "w": 1.294,
+      "d": 0.377,
+      "h": 1.603
+    }
+  },
+  "counter-stool": {
+    "file": "counter-stool.c4a5eab031.glb",
+    "size": {
+      "w": 0.448,
+      "d": 0.473,
+      "h": 0.458
+    }
+  },
+  "bar-stool-backed": {
+    "file": "bar-stool-backed.dcf067140c.glb",
+    "size": {
+      "w": 0.461,
+      "d": 0.471,
+      "h": 1.023
+    }
+  },
+  "plastic-chair": {
+    "file": "plastic-chair.662605d3b8.glb",
+    "size": {
+      "w": 0.642,
+      "d": 0.628,
+      "h": 0.88
+    }
+  },
+  "bistro-set": {
+    "file": "bistro-set.f518ce4ba6.glb",
+    "size": {
+      "w": 0.742,
+      "d": 1.717,
+      "h": 0.859
+    }
+  },
+  "folding-stool": {
+    "file": "folding-stool.aaf7e7fb13.glb",
+    "size": {
+      "w": 0.528,
+      "d": 0.547,
+      "h": 0.442
+    }
+  },
+  "chest-of-drawers": {
+    "file": "chest-of-drawers.4eea5d6fff.glb",
+    "size": {
+      "w": 1.201,
+      "d": 0.503,
+      "h": 0.927
+    }
+  },
+  "steel-shelves-narrow": {
+    "file": "steel-shelves-narrow.8ede07c433.glb",
+    "size": {
+      "w": 0.504,
+      "d": 0.427,
+      "h": 1.82
+    }
+  },
+  "wicker-baskets": {
+    "file": "wicker-baskets.09043dc380.glb",
+    "size": {
+      "w": 0.347,
+      "d": 0.254,
+      "h": 0.2
+    }
+  },
+  "enamel-pendant": {
+    "file": "enamel-pendant.337173d6a6.glb",
+    "size": {
+      "w": 0.44,
+      "d": 0.44,
+      "h": 1.084
+    }
+  },
+  "pipe-desk-lamp": {
+    "file": "pipe-desk-lamp.cd162e4242.glb",
+    "size": {
+      "w": 0.183,
+      "d": 0.262,
+      "h": 0.364
+    }
+  },
+  "vase-tall-white": {
+    "file": "vase-tall-white.6e373b93dd.glb",
+    "size": {
+      "w": 0.204,
+      "d": 0.204,
+      "h": 0.4
+    }
+  },
+  "vase-round-white": {
+    "file": "vase-round-white.f7210f1d3c.glb",
+    "size": {
+      "w": 0.218,
+      "d": 0.218,
+      "h": 0.309
+    }
+  },
+  "jug-vase": {
+    "file": "jug-vase.b18aa1672b.glb",
+    "size": {
+      "w": 0.181,
+      "d": 0.181,
+      "h": 0.342
+    }
+  },
+  "photo-frame": {
+    "file": "photo-frame.ac12080bf7.glb",
+    "size": {
+      "w": 0.201,
+      "d": 0.1,
+      "h": 0.25
+    }
+  },
+  "framed-picture": {
+    "file": "framed-picture.6d2381f9a3.glb",
+    "size": {
+      "w": 0.752,
+      "d": 0.033,
+      "h": 0.5
+    }
+  },
+  "alarm-clock": {
+    "file": "alarm-clock.935a404227.glb",
+    "size": {
+      "w": 0.132,
+      "d": 0.067,
+      "h": 0.174
+    }
+  },
+  "chess-set": {
+    "file": "chess-set.8070774094.glb",
+    "size": {
+      "w": 0.553,
+      "d": 0.552,
+      "h": 0.112
+    }
   }
 }
