@@ -246,12 +246,15 @@ export function App() {
       });
     const id = initialProjectId();
     const { load, openSample, createProject } = useStore.getState();
-    // From the welcome page: "?new=<name>" starts a blank plan of that name.
+    // From the welcome page: "?new=<name>" starts a blank plan of that name, "?sample" a
+    // copy of the sample flat, even when this browser would reopen its last plan.
     const fresh = url.searchParams.get('new');
-    if (fresh !== null && !id) {
+    const sample = url.searchParams.has('sample');
+    if ((fresh !== null || sample) && !url.searchParams.get('p')) {
       url.searchParams.delete('new');
+      url.searchParams.delete('sample');
       window.history.replaceState(null, '', url);
-      void createProject(fresh.trim().slice(0, 80) || undefined);
+      void (fresh !== null ? createProject(fresh.trim().slice(0, 80) || undefined) : openSample());
       return;
     }
     void (id ? load(id) : openSample());

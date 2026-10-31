@@ -1,25 +1,50 @@
 # Dream Home Designer
 
-Upload a floor plan, trace the walls, furnish the rooms, and walk through your home in
-first person. Free, browser-based, and your project is plain JSON you own.
+A free home planner in the browser: trace the floor plan you already have, furnish it, plan
+the renovation, and walk through it in 3D. Made with Singapore HDB flats in mind, and works
+for any plan.
 
-> Status: **Phase 0 (foundation)**. A reference 4-room HDB plan renders in 3D, edits go
-> through an undoable command store, and projects save to and reload from the API.
+**Try it:** <https://dream-home-designer.pages.dev> (the app opens on a sample 3-room flat)
+· what it does: <https://dream-home-designer.pages.dev/welcome/>
 
-See `HANDOVER.md` for decisions, current state and next steps.
+> Status: **beta.** Everything below works and is tested; accounts (Google sign-in) are built
+> and switched off until the server is configured. `HANDOVER.md` has the full state, the
+> decisions behind it and what comes next.
+
+## What it does
+
+- **Trace a plan.** Upload an image or PDF of a floor plan, mark one length you know to set
+  the scale, and draw walls over it (by mouse, keyboard or finger, with snapping and typed
+  lengths). Rooms are found from the walls and measured as you go.
+- **Doors, windows and openings**, with clearances to the corners shown as you place them.
+- **Furnish** from a catalogue of box-built pieces and real models (CC0, from Poly Haven), or
+  upload your own `.glb`. Pieces back onto walls, resize and turn by their handles.
+- **Before and after.** Plan the renovation beside the flat as it is: hacked walls show
+  dashed, and the changes are totalled.
+- **3D and a walk-through.** Every edit appears in 3D at once, lit by the sun at the hour
+  and orientation you choose. Walk through in first person; doors open as you reach them.
+- **Share, download, history.** View-only or editable links, plan PNG/print, 3D PNG, GLB and
+  project-file downloads, and earlier versions to restore.
+- **Phones too:** finger drawing with a magnifier, pinch zoom, a thumb stick for walking, and
+  a layout for phones on their side.
 
 ## Layout
 
 ```
 apps/
-  web/        Vite + React + React Three Fiber single-page app
-  api/        Go REST API (standard library only for now)
+  web/        Vite + React 18 + React Three Fiber + Zustand: the app (/) and the welcome page (/welcome/)
+  api/        Go (standard library only): projects as opaque JSON with If-Match versioning;
+              plan images, uploaded models and version history in R2
+  edge/       Cloudflare Worker that runs apps/api as a Container; rate limits, sign-in (D1)
 packages/
-  core/       Project schema (zod), commands + undo/redo, geometry. Pure TS, no React/three
-  render/     Project -> three.js meshes (walls split around openings, floors per room)
+  core/       zod schema, commands with undo (Immer patches), all geometry. Pure TypeScript
+  render/     project -> three.js meshes, rebuilt incrementally
+functions/    the Pages Function that routes /api to the Worker
+tools/models/ the pipeline that builds the furniture models from Poly Haven
 ```
 
-The rule: `core` knows nothing about React or three.js; everything else depends on it.
+`core` knows nothing about React or three.js; everything else depends on it. Every change to
+a project goes through a `Command` in `packages/core`, so everything can be undone.
 
 ## Run it
 
@@ -27,50 +52,37 @@ Requires Node 22, pnpm 9 and Go 1.24.
 
 ```sh
 pnpm install
-
-# terminal 1: API on :8080, projects saved under apps/api/data/
-cd apps/api && go run ./cmd/api
-
-# terminal 2: web on :5173, /api proxied to :8080
-pnpm dev
+cd apps/api && go run ./cmd/api      # terminal 1: API on :8080 (STORE=memory to skip disk)
+pnpm dev                             # terminal 2: web on :5173, /api proxied to :8080
 ```
 
-Open http://localhost:5173. Drag the slider, undo with Ctrl/⌘ Z, wait 2 s for the
-autosave, then press **Reload** to confirm the edit came back from the server. Without
-the API running the app works offline from the built-in reference plan.
+Open <http://localhost:5173>. Without the API the app still works, keeping plans in the
+browser.
 
 ## Test
 
 ```sh
-pnpm test            # core + render (Vitest)
-pnpm typecheck
+pnpm test && pnpm typecheck && pnpm lint   # Vitest (core, render, web, edge), tsc, Biome
+pnpm --filter @dhd/web e2e                 # Playwright against the production build + Go API
 cd apps/api && go test -race ./...
 ```
 
-## API
+CI runs all of these on every pull request. The end-to-end suite includes touch gestures on
+phone-sized screens, checked mid-gesture.
 
-| Method | Path | Notes |
-| --- | --- | --- |
-| GET | /projects | Summaries, newest first |
-| POST | /projects | Full document; stored as version 1 |
-| GET | /projects/{id} | Document, `ETag: "<version>"` |
-| PUT | /projects/{id} | Requires `If-Match: "<version>"`; 409 with the current version if stale |
-| DELETE | /projects/{id} | |
+## Conventions
 
-The API validates only the envelope (`schemaVersion`, `id`, `version`, `name`,
-`levels`) and stores the rest as opaque JSON. The zod schema in `packages/core` is the
-source of truth.
+Metres and radians. Plan `(x, y)` is world `(x, 0, y)`, with +Y up. Walls share vertex ids, so
+moving a corner moves every wall at it. Strict TypeScript, Biome (single quotes, 100
+columns), gofmt. A schema change bumps `SCHEMA_VERSION` (TypeScript) and `SchemaVersion`
+(Go) together. More in `CLAUDE.md` and `HANDOVER.md` §7.
 
-## Model notes
+## Licence and credits
 
-- Units are metres. Plan space is 2D (x right, y down as drawn); world space maps plan
-  `(x, y)` to `(x, 0, y)` with +Y up.
-- Walls reference shared vertex ids, so dragging a corner moves every wall that meets it.
-- Openings are rectangular, so walls are built as boxes around them instead of CSG.
-- Every edit is a command recorded as Immer patches; undo applies the inverse patches.
-  Drags coalesce into one undo step via a `coalesceKey`.
+MIT (see `LICENSE`).
 
-## Next (Phase 1)
-
-2D SVG plan editor with image underlay, scale calibration, wall and opening tools,
-snapping, mitred corners, and room detection from closed wall loops.
+- Furniture models: [Poly Haven](https://polyhaven.com), CC0. Each model's source page is in
+  `packages/core/src/modelKinds.generated.ts`.
+- Typeface: IBM Plex Sans, SIL Open Font License.
+- Welcome page photograph: [“Kovan HDB flats”](https://commons.wikimedia.org/w/index.php?curid=3495359)
+  by Angcr, CC BY 3.0, via Wikimedia Commons.

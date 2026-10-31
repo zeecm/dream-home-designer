@@ -43,6 +43,8 @@ export interface MiniPlanProps {
   /** Label size in metres (the plan scales with its box). */
   labelSize?: number;
   children?: ReactNode;
+  /** Drawn over the rooms and under the furniture and walls (a paint band, say). */
+  under?: ReactNode;
   className?: string;
   style?: CSSProperties;
   title: string;
@@ -63,6 +65,7 @@ export function MiniPlan({
   extra = [],
   labelSize = 0.34,
   children,
+  under,
   className,
   style,
   title,
@@ -105,6 +108,7 @@ export function MiniPlan({
             />
           );
         })}
+      {under}
       {show.items &&
         items.map((it) => (
           <polygon key={it.id} points={pts(itemFootprint(it))} className="mp-item" />

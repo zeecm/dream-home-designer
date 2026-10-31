@@ -114,8 +114,8 @@ video {
 .mp-hacked {
   fill: #ffffff;
   stroke: #c4242a;
-  stroke-width: 0.04;
-  stroke-dasharray: 0.12 0.08;
+  stroke-width: 0.07;
+  stroke-dasharray: 0.2 0.12;
 }
 .mp-window {
   fill: #ffffff;
@@ -164,6 +164,7 @@ video {
 /* ------------------------------------------------------------------------------- hero */
 
 .hero {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr 1fr;
   min-height: 100svh;
@@ -226,11 +227,12 @@ video {
   display: block;
   width: 100%;
   aspect-ratio: 1 / 1;
-  touch-action: none;
 }
+/* Only the wall takes the finger; anywhere else on the plan scrolls the page. */
 .grip {
   cursor: ew-resize;
   outline: none;
+  touch-action: none;
 }
 .grip-hit {
   stroke: transparent;
@@ -254,23 +256,53 @@ video {
   .hero {
     grid-template-columns: 1fr;
   }
+  /* The name, the plan, the headline and the button all on the first screen. */
   .hero-stage {
     order: -1;
-    min-height: 58svh;
-    padding: 64px var(--m) 24px;
+    padding: 50px var(--m) 12px;
+  }
+  .hero-fragment {
+    width: min(100%, 32svh);
   }
   .hero-link {
-    top: 20px;
+    top: 18px;
     right: var(--m);
   }
   .hero-copy {
-    padding: 32px var(--m) 48px;
-    gap: 32px;
+    padding: 20px var(--m) 32px;
+  }
+  .hero-sub {
+    margin: 16px 0 20px;
   }
   .mark {
     position: absolute;
-    top: 18px;
+    top: 14px;
     left: var(--m);
+    z-index: 1;
+  }
+}
+/* A phone on its side: the two halves stay side by side, the plan sized to the height. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .hero {
+    grid-template-columns: 1fr 1fr;
+    min-height: 100svh;
+  }
+  .hero-stage {
+    order: 0;
+    padding: 48px var(--m) 12px;
+  }
+  .hero-fragment {
+    width: min(100%, calc(100svh - 110px));
+  }
+  .hero-copy {
+    padding: 52px var(--m) 20px;
+    justify-content: flex-end;
+  }
+  .hero-title {
+    font-size: 28px;
+  }
+  .hero-sub {
+    margin: 12px 0 16px;
   }
 }
 
@@ -444,8 +476,8 @@ video {
 .board {
   display: grid;
   gap: 4px;
-  margin: 0 0 -36px;
-  padding: 0;
+  margin: 0;
+  padding: 0 0 12px;
   list-style: none;
 }
 .row {
@@ -606,6 +638,10 @@ video {
   outline: 1px solid rgba(19, 20, 22, 0.15);
   outline-offset: -1px;
   transition: transform 150ms var(--ease);
+}
+.swatch:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 3px;
 }
 .swatch[aria-pressed="true"] {
   outline: 3px solid var(--accent);

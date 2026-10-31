@@ -446,6 +446,13 @@ the welcome page (and the app move) is the owner's call.
 
 ## 5. Owner to-dos
 
+- **Before the repo goes public:** `apps/web/public/samples/hdb-3room-type4.pdf` (and its PNG
+  crop) is a real HDB floor plan (Blk 39A, 3-room Type 4). HDB likely holds its copyright;
+  the live app already serves it, but publishing the repo redistributes it. Decide whether
+  to keep it, ask HDB, or swap in a plan drawn from scratch (the 4-room reference plan is
+  original). No credentials are in the tracked files (only AWS's documentation example keys
+  in a signing test).
+
 0. **Before merging:** the production API must accept schema 6 and serve uploaded models
    (`/projects/{id}/models`). The preview API has it (30 Oct); the production deploy
    (`pnpm --filter @dhd/edge run deploy`) was held back for the owner's go-ahead.
@@ -719,7 +726,7 @@ blocked by the network proxy and Sketchfab needs an API key.
 - **Mini-map:** a small plan in the corner while walking shows where you are and which way you
   face (`walk/MiniMap.tsx`).
 - **Doors and footsteps (built):** inside doors stand open in the orbit view; walking
-  through, they start shut, swing open within 1.6 m of the walker and shut beyond 2.4 m
+  through, they start shut, swing open within 2 m of the walker and shut beyond 2.8 m (open in about a third of a second, so a run doesn't catch them half shut)
   (`useDoorSwings` in `Viewport.tsx`; render builds each inside leaf as a group pivoting at
   its hinge, `LevelMeshes.doors()` / `setDoorOpen`). A shut leaf sits flush with the face it
   hinges on. Collision is unchanged (doorways open, an open leaf solid). Soft footsteps,
@@ -801,13 +808,12 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
 
 ## 9. Known gaps and debts
 
-- **No auth.** A project is reachable by anyone with its link, so ids are the capability. Listing
-  is off in production, and writes are rate-limited. Auth arrives in Phase 4.
+- **Links are the capability.** A project is readable by anyone with its link; editing needs
+  the owner or an edit key. Listing is off in production, and writes are rate-limited (and
+  capped per day once migration `0002` is applied). Google sign-in is built and off until the
+  owner configures it.
 - **One plan image per project on the server.** Replacing it drops the old one, so undoing a
   replacement shows the old image only in browsers that still have it locally.
-- **Walls use one material for both faces.** `materialLeft` covers both, and per-side materials
-  come in Phase 3.
-- **No `project_versions` history yet.** It comes with accounts in Phase 4, on D1.
 - **Flaky phone e2e:** the first test in `mobile.spec.ts` still fails about one run in four
   locally (CI retries once): the Add tap or the finger-drawn room doesn't land when the run
   is slow. Four real causes were found and fixed on the way: Add was `disabled` until the
@@ -816,7 +822,9 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
   controls left `touch-action: auto` on the 3D canvas, so a phone cancelled sideways swipes
   in walk mode (the owner's "can't look around without moving"). Swipe-to-look turns half a
   circle per screen width on touch.
-- **Wall tool snapping:** it snaps hard to door and window ends, so a wall drawn across a room
-  past a door can come out slanted (seen in acceptance round 9).
+- **Wall tool snapping:** a point landing inside a door or window moves to the nearer jamb
+  (`jambSnap` in `snap.ts`), so an angle-snapped wall drawn to a doorway slants by up to half
+  the door's width. The alternative, ending the wall straight but short of the doorway and
+  unjoined, leaves the room open; not decided.
 - **Corner dimension lines** for walls that run into the room draw inside it; fine at plan scale,
   busy on short walls.
