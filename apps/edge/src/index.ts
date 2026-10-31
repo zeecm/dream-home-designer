@@ -1,5 +1,6 @@
 import { Container, getContainer } from '@cloudflare/containers';
 import { type AuthEnv, d1Store, handleAuth } from './auth';
+import { allowCreate, d1Quota } from './quota';
 
 export interface Env extends AuthEnv {
   /** Accounts (D1): people, sessions and the plans they keep. */
@@ -117,6 +118,9 @@ export default {
         const create = await env.CREATE_LIMIT.limit({ key: client });
         if (!create.success)
           return json({ error: 'too many new projects, try again in a minute' }, 429);
+        if (env.DB && !(await allowCreate(d1Quota(env.DB), client))) {
+          return json({ error: 'you have started a lot of plans today; try again tomorrow' }, 429);
+        }
       }
     }
 

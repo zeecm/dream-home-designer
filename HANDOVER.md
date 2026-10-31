@@ -675,9 +675,11 @@ blocked by the network proxy and Sketchfab needs an API key.
 ## 6. Next
 
 **Finish Phase 1**, in order:
-1. **Public-deployment safety:** sharing and recovery copies are done (see §4). Still open: a
-   cap on how many projects one visitor can create (the Worker's per-IP write limit is the only
-   brake today).
+1. **Public-deployment safety:** sharing and recovery copies are done (see §4). A visitor may
+   start at most 40 plans a day (`apps/edge/src/quota.ts`), on top of the per-minute limits:
+   counted in D1 (`create_quota`, migration `0002`) by a hash of the address, pruned after two
+   days, and failing open while the table is missing. **The migration needs applying** to
+   `dhd-auth-preview` and `dhd-auth` (owner to-do: the permission check held it back).
 2. **Room matching by overlap (looked into, not adopted):** rooms are matched across edits by
    label point and shared corners. Sampled area overlap was tried; it gave the same results on
    splits, merges and a closet drawn mid-room (now a test), and disagrees only on odd shapes
