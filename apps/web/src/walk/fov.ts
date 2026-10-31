@@ -51,6 +51,31 @@ export function useWalkFov(): number {
   );
 }
 
+/** The widest view across that fits a view of this aspect, in whole steps of 5°. */
+export function widestFov(aspect: number): number {
+  const half = (MAX_VERTICAL * Math.PI) / 360;
+  const across = (2 * Math.atan(Math.tan(half) * aspect) * 180) / Math.PI;
+  return Math.max(FOV_MIN, Math.min(FOV_MAX, Math.floor(across / 5) * 5));
+}
+
+/** The walk view's shape (width over height), as the walk last measured it. */
+let aspect = 16 / 9;
+const aspectListeners = new Set<() => void>();
+export function setWalkAspect(value: number) {
+  if (Math.abs(value - aspect) < 1e-3) return;
+  aspect = value;
+  for (const fn of aspectListeners) fn();
+}
+export function useWalkAspect(): number {
+  return useSyncExternalStore(
+    (fn) => {
+      aspectListeners.add(fn);
+      return () => aspectListeners.delete(fn);
+    },
+    () => aspect,
+  );
+}
+
 /** The camera's (vertical) angle for `across` degrees across a view of this aspect. */
 export function verticalFov(across: number, aspect: number): number {
   const half = (across * Math.PI) / 360;

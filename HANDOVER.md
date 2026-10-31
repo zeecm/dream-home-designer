@@ -549,11 +549,17 @@ by where they are (each one's inside point in the other), not by id, since a wal
 drawn again can give a room a new id. "Copy list" puts them on the clipboard as
 text, a line per place, for a contractor.
 An edit to the flat as it is (Before shown) carries over to the renovation
-(`carriedToRenovation` in core, applied in the store's dispatch): each corner, wall, door,
-piece or room it changes, adds or removes is changed the same way in the renovation where
-that is still as it was (or, added, absent), then the renovation's rooms are re-found; what
-the renovation changed itself is left alone. One undo step, which shows Before
-(`touchedVariant` counts an edit to the plan's own levels as Before's).
+(`carriedToRenovation` in core, applied in the store's dispatch), all of it or none
+(`planCarry`): every corner, wall, door or piece it changes, adds or removes must be in the
+renovation as it was before the edit (or already as the edit leaves it); nothing the
+renovation added or changed itself may hang on one (its own door on a wall the edit splits
+or removes, its own wall on a corner it moves); and the result must hold together (every
+wall's corners and every opening's wall there, no wall drawn along another). Then the
+renovation's rooms are found again, keeping a name or finish the edit gave a room where the
+renovation's was as it was (a new room's name only if free). Otherwise nothing is carried
+and a toast says so. A drag or run of nudges (one coalesce key) held back once stays held
+back. Restoring a version (or anything replacing the plan or renovation whole) carries
+nothing. One undo step, which shows Before (`touchedVariant`).
 **Not yet:** a side-by-side 3D compare.
 
 **Downloads (Phase 4):** the project menu's Download section (`exports.ts`): the plan as a
@@ -803,7 +809,8 @@ blocked by the network proxy and Sketchfab needs an API key.
   view (the split screen, a phone held upright) isn't cut to a slit: 100° by default (people
   see about 114° across with both eyes; past ~100° a flat screen stretches the edges), 60–120°
   on the "View" slider under Time while walking, remembered per browser (`walk/fov.ts`,
-  `verticalFov`). Up and down it is capped at 100°, so a tall view gets less across (about
+  `verticalFov`); the slider stops at what the view's shape allows (`widestFov`), showing
+  the angle in effect. Up and down it is capped at 100°, so a tall view gets less across (about
   87° in the split screen, 57° on a phone held upright). It was 70° up and down, which was
   about 100° across on a wide screen but 35–60° in narrow views.
 - **Doors and footsteps (built):** inside doors stand open in the orbit view; walking
@@ -909,7 +916,8 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
   unjoined, leaves the room open; not decided.
 - **Placing on furniture:** a piece that stands on others or hangs above them (the succulent,
   the desk lamp, ceiling lights) is placed by a click on a piece as anywhere else (`over` in
-  `placing()`, `PlanCanvas.tsx`); with one of those picked, a press on a piece doesn't move it
-  (switch to Select for that).
+  `placing()`, `PlanCanvas.tsx`), standing on that piece's top (`furnitureTool.tsx`); a press
+  on a lamp or light still selects and moves it, but one on a floor piece doesn't (switch to
+  Select for that).
 - **Corner dimension lines** for walls that run into the room draw inside it; fine at plan scale,
   busy on short walls.

@@ -29,7 +29,7 @@ import { Joystick } from './walk/Joystick';
 import { MiniMap } from './walk/MiniMap';
 import { WalkControls, type WalkPose } from './walk/WalkControls';
 import { setSound, unlockAudio, useSound } from './walk/footsteps';
-import { FOV_MAX, FOV_MIN, setWalkFov, useWalkFov } from './walk/fov';
+import { FOV_MIN, setWalkFov, useWalkAspect, useWalkFov, widestFov } from './walk/fov';
 import { loadWalkPose, saveWalkPose } from './walk/pose';
 
 const materials = new MaterialCache();
@@ -235,7 +235,10 @@ export function clockTime(h: number): string {
 function SunControl({ walking }: { walking: boolean }) {
   const hour = useEditor((s) => s.sunHour);
   const setHour = useEditor((s) => s.setSunHour);
-  const fov = useWalkFov();
+  const wanted = useWalkFov();
+  // A tall view (a phone held upright) can't show as wide a view: the slider stops there.
+  const widest = widestFov(useWalkAspect());
+  const fov = Math.min(wanted, widest);
   return (
     <div className="sun-control">
       <label className="sun-control-row">
@@ -261,7 +264,7 @@ function SunControl({ walking }: { walking: boolean }) {
           <input
             type="range"
             min={FOV_MIN}
-            max={FOV_MAX}
+            max={widest}
             step={5}
             value={fov}
             aria-label="Field of view"

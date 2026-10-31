@@ -122,3 +122,25 @@ test('a fix to the flat as it is carries over to the renovation: no false change
   await expect(page.locator(WALL).first()).toBeVisible();
   await expect(bar).toContainText('No changes yet');
 });
+
+test('an edit to the flat as it is that the renovation changed too is not carried over, and says so', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await page.getByRole('button', { name: 'Plan a renovation' }).click();
+  const bar = page.locator('.reno-bar');
+  // The renovation repaints the wall.
+  await page.locator(WALL).first().click({ force: true });
+  await page.getByRole('button', { name: 'Paint, Bedroom side: Sage' }).click();
+  await page.keyboard.press('Escape');
+  // The flat as it is loses it: the renovation keeps its repainted wall.
+  await bar.getByRole('button', { name: 'Before' }).click();
+  await page.locator(WALL).first().click({ force: true });
+  await page.keyboard.press('Delete');
+  await expect(page.locator('.toast')).toContainText('Not carried over to the renovation');
+  await expect(page.locator(WALL)).toHaveCount(0);
+  await bar.getByRole('button', { name: 'After' }).click();
+  await expect(page.locator(WALL).first()).toBeVisible();
+});
