@@ -385,6 +385,8 @@ export function Viewport() {
             <OrbitControls
               target={[frame.x, 0, frame.z]}
               makeDefault
+              // Panning glides over the floor (as a map does), not up and down the screen.
+              screenSpacePanning={false}
               maxPolarAngle={Math.PI / 2 - 0.05}
               minDistance={2}
               maxDistance={80}

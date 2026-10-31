@@ -665,6 +665,13 @@ The Go API logs it locally (`POST /telemetry`, 204).
 - Corners are 32 px targets on touch screens; the scale bar lets drags through; a swipe in a
   walk moves the scene with the finger; the guide is worded for phones too, keeps a fixed
   height, and step 1 offers "Draw instead".
+- **Panning (31 Oct, owner: "unintuitive on mobile"):** a one-finger (or mouse) pan moves the
+  view as it is now (`liveView`), not as of the last render, so the plan stays under a fast
+  finger (it used to lose the moves between renders and slip behind); a finger let go while
+  moving coasts and slows to a stop (`fling` in `PlanCanvas.tsx`: speed smoothed over the last
+  moves, capped at 2.5 px/ms, two thirds lost every 325 ms; any press or wheel stops it); one
+  finger left down after a pinch pans on; in 3D, two fingers (or right-drag) pan over the floor
+  (`screenSpacePanning={false}`) rather than up and down the screen.
 - Dragging a whole room: built since (**Moving a room** below).
 
 **Magnifier:** while a finger places a point (Wall, Room, Measure, Set scale, or dragging a

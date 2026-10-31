@@ -215,6 +215,8 @@ export function PlanCanvas() {
   const lastTab = useRef(0);
   const lastPointer = useRef(0);
   const v = view ?? { cx: 0, cy: 0, zoom: 50 };
+  /** The view now: a fast drag can move again before React re-renders with the last move. */
+  const liveView = () => useEditor.getState().view ?? v;
 
   const viewAdjusted = useEditor((s) => s.viewAdjusted);
   /** When the plan was last fitted, and what to: a resize soon after still refits. */
@@ -303,6 +305,54 @@ export function PlanCanvas() {
   // started to where it lifts; a second finger turns it into pinch-zoom and two-finger pan,
   // in every tool, without ever placing anything.
   const touches = useRef(new Map<number, Vec2>());
+  /**
+   * A finger pan let go while moving carries on and slows to a stop, as a map does: its speed
+   * (screen px per ms, smoothed over the last moves) and when it last moved.
+   */
+  const fling = useRef<{ vx: number; vy: number; at: number } | null>(null);
+  const flingFrame = useRef<number | undefined>(undefined);
+  const trackFling = (dx: number, dy: number) => {
+    // A lift where the last move ended says nothing about the speed.
+    if (dx === 0 && dy === 0) return;
+    const now = performance.now();
+    const f = fling.current;
+    const dt = f ? Math.max(1, now - f.at) : 16;
+    const k = f ? 0.7 : 1;
+    fling.current = {
+      vx: (f?.vx ?? 0) * (1 - k) + (dx / dt) * k,
+      vy: (f?.vy ?? 0) * (1 - k) + (dy / dt) * k,
+      at: now,
+    };
+  };
+  const stopFling = () => {
+    if (flingFrame.current !== undefined) cancelAnimationFrame(flingFrame.current);
+    flingFrame.current = undefined;
+    fling.current = null;
+  };
+  const startFling = () => {
+    const f = fling.current;
+    fling.current = null;
+    // Only a finger still moving as it lifts (not one that stopped, then lifted).
+    if (!f || performance.now() - f.at > 60 || Math.hypot(f.vx, f.vy) < 0.25) return;
+    // No faster than a brisk flick (2.5 px/ms coasts about 800 px).
+    const k = Math.min(1, 2.5 / Math.hypot(f.vx, f.vy));
+    let vx = f.vx * k;
+    let vy = f.vy * k;
+    let last = performance.now();
+    const step = (now: number) => {
+      const dt = Math.min(32, now - last);
+      last = now;
+      setView(panBy(useEditor.getState().view ?? v, vx * dt, vy * dt), true);
+      // Slows by about two thirds every 325 ms, as a phone's scrolling does.
+      const decay = Math.exp(-dt / 325);
+      vx *= decay;
+      vy *= decay;
+      flingFrame.current = Math.hypot(vx, vy) > 0.02 ? requestAnimationFrame(step) : undefined;
+    };
+    flingFrame.current = requestAnimationFrame(step);
+  };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: stopFling reads only refs
+  useEffect(() => () => stopFling(), []);
   /** Tools whose finger drags (corners, walls, doors, pieces) are taken back on a cancel. */
   const takesBack =
     tool === 'select' ||
@@ -416,14 +466,20 @@ export function PlanCanvas() {
         t.claimed =
           (kind === 'vertex' || kind === 'opening' || kind === 'item' || selectedWall) &&
           active.down(t.start);
-        if (!t.claimed) pan.current = t.start.screen;
+        if (!t.claimed) {
+          pan.current = t.start.screen;
+          fling.current = null;
+        }
       } else if (active.grabs?.(t.start)) {
         t.claimed = active.down(t.start);
       }
     }
     if (pan.current) {
-      setView(panBy(v, p.screen.x - pan.current.x, p.screen.y - pan.current.y), true);
+      const dx = p.screen.x - pan.current.x;
+      const dy = p.screen.y - pan.current.y;
+      setView(panBy(liveView(), dx, dy), true);
       pan.current = p.screen;
+      trackFling(dx, dy);
       return;
     }
     // Placing a point (drawing, or dragging a corner), the finger hides it: magnify it.
@@ -441,12 +497,21 @@ export function PlanCanvas() {
     touches.current.delete(e.pointerId);
     if (gesture.current) {
       if (touches.current.size === 0) gesture.current = null;
+      // One finger left of a pinch: it carries on moving the plan, as on a map.
+      const [rest] = [...touches.current.values()];
+      if (touches.current.size === 1 && rest) {
+        gesture.current = null;
+        touch.current = { start: pointer(e), moved: true, claimed: false };
+        pan.current = rest;
+        fling.current = { vx: 0, vy: 0, at: performance.now() };
+      }
       return;
     }
     const t = touch.current;
     touch.current = null;
     if (pan.current) {
       pan.current = null;
+      startFling();
       return;
     }
     if (!t || !ctx) return;
@@ -483,6 +548,7 @@ export function PlanCanvas() {
   // Pointer events don't reliably carry a click count, so detect double-clicks here.
   const lastDown = useRef({ t: 0, x: 0, y: 0 });
   const onPointerDown = (e: React.PointerEvent) => {
+    stopFling();
     lastPointer.current = Date.now();
     setRing(false);
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
@@ -512,7 +578,7 @@ export function PlanCanvas() {
     }
     const p = pointer(e);
     if (pan.current) {
-      setView(panBy(v, p.screen.x - pan.current.x, p.screen.y - pan.current.y), true);
+      setView(panBy(liveView(), p.screen.x - pan.current.x, p.screen.y - pan.current.y), true);
       pan.current = p.screen;
       return;
     }
@@ -533,11 +599,13 @@ export function PlanCanvas() {
   };
 
   // ---- wheel: pinch or ctrl+wheel zooms; trackpad scroll pans; a mouse wheel zooms
+  // biome-ignore lint/correctness/useExhaustiveDependencies: stopFling reads only refs
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      stopFling();
       const r = svg.getBoundingClientRect();
       const at = { x: e.clientX - r.left, y: e.clientY - r.top };
       const cur = useEditor.getState().view ?? v;
