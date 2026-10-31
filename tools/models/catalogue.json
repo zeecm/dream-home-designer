@@ -45,6 +45,24 @@
     "againstWall": true
   },
   {
+    "polyhaven": "Ottoman_01",
+    "id": "ottoman-leather",
+    "name": "Ottoman, leather",
+    "category": "Living"
+  },
+  {
+    "polyhaven": "industrial_coffee_table",
+    "id": "coffee-table-industrial",
+    "name": "Side table, steel and wood",
+    "category": "Living"
+  },
+  {
+    "polyhaven": "side_table_tall_01",
+    "id": "side-table-tall",
+    "name": "Tall side table",
+    "category": "Living"
+  },
+  {
     "polyhaven": "wooden_table_02",
     "id": "wooden-table",
     "name": "Wooden table",
@@ -57,11 +75,26 @@
     "category": "Dining"
   },
   {
+    "polyhaven": "round_wooden_table_01",
+    "id": "pedestal-table-round",
+    "name": "Round pedestal table",
+    "category": "Dining",
+    "scale": 0.75
+  },
+  {
     "polyhaven": "painted_wooden_nightstand",
     "id": "nightstand-painted",
     "name": "Nightstand, painted",
     "category": "Bedroom",
     "againstWall": true
+  },
+  {
+    "polyhaven": "metal_office_desk",
+    "id": "metal-desk",
+    "name": "Metal desk with drawers",
+    "category": "Bedroom",
+    "againstWall": true,
+    "scale": [0.7, 1, 0.7]
   },
   {
     "polyhaven": "drawer_cabinet",
@@ -77,6 +110,14 @@
     "category": "Storage",
     "againstWall": true,
     "turn": -90
+  },
+  {
+    "polyhaven": "steel_frame_shelves_03",
+    "id": "steel-shelves",
+    "name": "Steel-frame shelves",
+    "category": "Storage",
+    "againstWall": true,
+    "scale": [0.6, 0.85, 0.6]
   },
   {
     "polyhaven": "desk_lamp_arm_01",
@@ -145,5 +186,13 @@
     "name": "Air-con compressors",
     "category": "Decor",
     "againstWall": true
+  },
+  {
+    "polyhaven": "potted_plant_04",
+    "id": "potted-succulent",
+    "name": "Succulent, on a table",
+    "category": "Decor",
+    "elevation": 0.75,
+    "walkThrough": true
   }
 ]

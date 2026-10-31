@@ -150,5 +150,61 @@
       "d": 0.374,
       "h": 0.928
     }
+  },
+  "ottoman-leather": {
+    "file": "ottoman-leather.6b50084e93.glb",
+    "size": {
+      "w": 0.885,
+      "d": 0.621,
+      "h": 0.624
+    }
+  },
+  "coffee-table-industrial": {
+    "file": "coffee-table-industrial.6fbb5addfc.glb",
+    "size": {
+      "w": 0.772,
+      "d": 0.754,
+      "h": 0.637
+    }
+  },
+  "side-table-tall": {
+    "file": "side-table-tall.e0a242474a.glb",
+    "size": {
+      "w": 0.384,
+      "d": 0.384,
+      "h": 0.761
+    }
+  },
+  "pedestal-table-round": {
+    "file": "pedestal-table-round.d59ffe7c67.glb",
+    "size": {
+      "w": 1.05,
+      "d": 1.05,
+      "h": 0.754
+    }
+  },
+  "metal-desk": {
+    "file": "metal-desk.4df07abb9f.glb",
+    "size": {
+      "w": 1.4,
+      "d": 0.663,
+      "h": 0.788
+    }
+  },
+  "steel-shelves": {
+    "file": "steel-shelves.567c9975fb.glb",
+    "size": {
+      "w": 1.411,
+      "d": 0.433,
+      "h": 1.965
+    }
+  },
+  "potted-succulent": {
+    "file": "potted-succulent.e301fe92fc.glb",
+    "size": {
+      "w": 0.168,
+      "d": 0.185,
+      "h": 0.267
+    }
   }
 }

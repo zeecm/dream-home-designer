@@ -90,6 +90,42 @@ export const MODEL_KINDS: ModelKind[] = [
     source: 'https://polyhaven.com/a/modern_wooden_cabinet',
   },
   {
+    id: 'ottoman-leather',
+    name: 'Ottoman, leather',
+    category: 'Living',
+    model: 'ottoman-leather.6b50084e93.glb',
+    size: {
+      w: 0.885,
+      d: 0.621,
+      h: 0.624,
+    },
+    source: 'https://polyhaven.com/a/Ottoman_01',
+  },
+  {
+    id: 'coffee-table-industrial',
+    name: 'Side table, steel and wood',
+    category: 'Living',
+    model: 'coffee-table-industrial.6fbb5addfc.glb',
+    size: {
+      w: 0.772,
+      d: 0.754,
+      h: 0.637,
+    },
+    source: 'https://polyhaven.com/a/industrial_coffee_table',
+  },
+  {
+    id: 'side-table-tall',
+    name: 'Tall side table',
+    category: 'Living',
+    model: 'side-table-tall.e0a242474a.glb',
+    size: {
+      w: 0.384,
+      d: 0.384,
+      h: 0.761,
+    },
+    source: 'https://polyhaven.com/a/side_table_tall_01',
+  },
+  {
     id: 'wooden-table',
     name: 'Wooden table',
     category: 'Dining',
@@ -114,6 +150,18 @@ export const MODEL_KINDS: ModelKind[] = [
     source: 'https://polyhaven.com/a/dining_chair_02',
   },
   {
+    id: 'pedestal-table-round',
+    name: 'Round pedestal table',
+    category: 'Dining',
+    model: 'pedestal-table-round.d59ffe7c67.glb',
+    size: {
+      w: 1.05,
+      d: 1.05,
+      h: 0.754,
+    },
+    source: 'https://polyhaven.com/a/round_wooden_table_01',
+  },
+  {
     id: 'nightstand-painted',
     name: 'Nightstand, painted',
     category: 'Bedroom',
@@ -125,6 +173,19 @@ export const MODEL_KINDS: ModelKind[] = [
       h: 0.616,
     },
     source: 'https://polyhaven.com/a/painted_wooden_nightstand',
+  },
+  {
+    id: 'metal-desk',
+    name: 'Metal desk with drawers',
+    category: 'Bedroom',
+    againstWall: true,
+    model: 'metal-desk.4df07abb9f.glb',
+    size: {
+      w: 1.4,
+      d: 0.663,
+      h: 0.788,
+    },
+    source: 'https://polyhaven.com/a/metal_office_desk',
   },
   {
     id: 'shelf-with-drawers',
@@ -151,6 +212,19 @@ export const MODEL_KINDS: ModelKind[] = [
       h: 1.556,
     },
     source: 'https://polyhaven.com/a/wooden_display_shelves_01',
+  },
+  {
+    id: 'steel-shelves',
+    name: 'Steel-frame shelves',
+    category: 'Storage',
+    againstWall: true,
+    model: 'steel-shelves.567c9975fb.glb',
+    size: {
+      w: 1.411,
+      d: 0.433,
+      h: 1.965,
+    },
+    source: 'https://polyhaven.com/a/steel_frame_shelves_03',
   },
   {
     id: 'desk-lamp',
@@ -255,5 +329,19 @@ export const MODEL_KINDS: ModelKind[] = [
       h: 0.928,
     },
     source: 'https://polyhaven.com/a/exterior_aircon_unit',
+  },
+  {
+    id: 'potted-succulent',
+    name: 'Succulent, on a table',
+    category: 'Decor',
+    elevation: 0.75,
+    walkThrough: true,
+    model: 'potted-succulent.e301fe92fc.glb',
+    size: {
+      w: 0.168,
+      d: 0.185,
+      h: 0.267,
+    },
+    source: 'https://polyhaven.com/a/potted_plant_04',
   },
 ];
