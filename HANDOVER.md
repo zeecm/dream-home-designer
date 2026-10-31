@@ -620,7 +620,13 @@ The Go API logs it locally (`POST /telemetry`, 204).
 - Corners are 32 px targets on touch screens; the scale bar lets drags through; a swipe in a
   walk moves the scene with the finger; the guide is worded for phones too, keeps a fixed
   height, and step 1 offers "Draw instead".
-- **Not yet (from the round):** dragging a whole room; a magnifier.
+- **Not yet (from the round):** dragging a whole room.
+
+**Magnifier:** while a finger places a point (Wall, Room, Measure, Set scale, or dragging a
+corner in Select), a 2.5x loupe shows the plan under it with a crosshair, above the finger or
+beside it near the top (`Loupe` in `PlanCanvas.tsx`). It is a `<use>` of the scene group
+(`plan-scene…`), so plan CSS must not depend on ancestors outside that group: a `<use>` copy
+matches selectors from its own root (hence `[id^="plan-scene"] *` beside `.plan-svg *`).
 
 **Moving a wall:** in Select, a wall already selected drags sideways (along its normal, 1 cm
 steps, 1 mm with Alt), its joined walls following; its corners settle (merge or split) at the

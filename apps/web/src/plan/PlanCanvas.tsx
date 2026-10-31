@@ -1,6 +1,6 @@
 import { levelBounds, planGeometry, siteOf, underlayToWorld } from '@dhd/core';
 import type { Vec2 } from '@dhd/core';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { type PixelBox, inkBounds } from '../assets';
 import { type Tool, useEditor } from '../editor';
 import { currentLevel, useLevel, useProject, useStore } from '../store';
@@ -298,6 +298,10 @@ export function PlanCanvas() {
     claimed: boolean;
   } | null>(null);
   const gesture = useRef<{ dist: number; mid: Vec2 } | null>(null);
+  /** Where a finger placing a point is: the magnifier shows the plan under it. */
+  const [loupe, setLoupe] = useState<Vec2 | null>(null);
+  // (Without useId's colons, which SVG url(#…) references don't take.)
+  const sceneId = `plan-scene${useId().replace(/:/g, '')}`;
   const screenOf = (e: { clientX: number; clientY: number }): Vec2 => {
     const r = svgRef.current?.getBoundingClientRect();
     return { x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0) };
@@ -318,6 +322,7 @@ export function PlanCanvas() {
     }
     touches.current.set(e.pointerId, screenOf(e));
     if (touches.current.size >= 2) {
+      setLoupe(null);
       // A second finger: whatever the first one was starting is called off.
       if (touch.current?.claimed && ctx) active.up(touch.current.start);
       touch.current = null;
@@ -378,6 +383,14 @@ export function PlanCanvas() {
       pan.current = p.screen;
       return;
     }
+    // Placing a point (drawing, or dragging a corner), the finger hides it: magnify it.
+    const placingPoint =
+      tool === 'wall' ||
+      tool === 'room' ||
+      tool === 'measure' ||
+      tool === 'calibrate' ||
+      (tool === 'select' && t.claimed && t.start.hit?.kind === 'vertex');
+    setLoupe(placingPoint ? p.screen : null);
     // Drawing tools follow the finger as they follow a hovering mouse, and see where a drag
     // they'll get whole (touchDrag) began, to preview it.
     active.move(p, t.claimed, !t.claimed && active.touchDrag ? t.start : undefined);
@@ -386,6 +399,7 @@ export function PlanCanvas() {
     // A busy page can merge a quick drag's moves into the lift: play its last stretch as a
     // move first, so a drag that arrived all at once is still a drag, not a tap.
     onTouchMove(e);
+    setLoupe(null);
     touches.current.delete(e.pointerId);
     if (gesture.current) {
       if (touches.current.size === 0) gesture.current = null;
@@ -417,6 +431,7 @@ export function PlanCanvas() {
 
   /** The system took the touch (a back swipe, a long press): end it without acting. */
   const onTouchCancel = (e: React.PointerEvent) => {
+    setLoupe(null);
     touches.current.delete(e.pointerId);
     if (touches.current.size === 0) gesture.current = null;
     const t = touch.current;
@@ -600,71 +615,74 @@ export function PlanCanvas() {
             />
           </pattern>
         </defs>
-        <rect
-          width={size.width}
-          height={size.height}
-          fill="url(#grid-minor)"
-          pointerEvents="none"
-        />
-        <g transform={transform}>
-          {underlay && image.status === 'ready' && (
-            <image
-              className="underlay"
-              href={image.url}
-              width={image.width}
-              height={image.height}
-              opacity={underlay.opacity}
-              transform={`translate(${underlay.origin.x} ${underlay.origin.y}) rotate(${(underlay.rotation * 180) / Math.PI}) scale(${underlay.scale})`}
-              pointerEvents="none"
-              preserveAspectRatio="none"
-            />
-          )}
-          <PlanShapes
-            level={level}
-            geom={geom}
-            interactive={
-              tool === 'select'
-                ? true
-                : tool === 'furniture'
-                  ? 'items'
-                  : tool === 'door' || tool === 'window' || tool === 'passage'
-                    ? 'openings'
-                    : false
-            }
+        <g id={sceneId}>
+          <rect
+            width={size.width}
+            height={size.height}
+            fill="url(#grid-minor)"
+            pointerEvents="none"
           />
-          <RenovationMarks />
-          <PlanHighlights
-            level={level}
-            geom={geom}
-            hover={tool === 'select' ? hover : null}
-            selection={selection}
-          />
-        </g>
-        <RoomLabels level={level} geom={geom} view={v} size={size} />
-        {selection?.kind === 'wall' && (
-          <WallDimension level={level} geom={geom} view={v} size={size} wallId={selection.id} />
-        )}
-        {selection?.kind === 'vertex' &&
-          Object.values(level.walls)
-            .filter((w) => w.a === selection.id || w.b === selection.id)
-            .map((w) => (
-              <WallDimension
-                key={w.id}
-                level={level}
-                geom={geom}
-                view={v}
-                size={size}
-                wallId={w.id}
+          <g transform={transform}>
+            {underlay && image.status === 'ready' && (
+              <image
+                className="underlay"
+                href={image.url}
+                width={image.width}
+                height={image.height}
+                opacity={underlay.opacity}
+                transform={`translate(${underlay.origin.x} ${underlay.origin.y}) rotate(${(underlay.rotation * 180) / Math.PI}) scale(${underlay.scale})`}
+                pointerEvents="none"
+                preserveAspectRatio="none"
               />
-            ))}
-        <VertexHandles
-          level={level}
-          view={v}
-          size={size}
-          shown={tool === 'wall' || tool === 'room' ? 'all' : shownVertices}
-          interactive={tool === 'select'}
-        />
-        {active.overlay(ctx)}
+            )}
+            <PlanShapes
+              level={level}
+              geom={geom}
+              interactive={
+                tool === 'select'
+                  ? true
+                  : tool === 'furniture'
+                    ? 'items'
+                    : tool === 'door' || tool === 'window' || tool === 'passage'
+                      ? 'openings'
+                      : false
+              }
+            />
+            <RenovationMarks />
+            <PlanHighlights
+              level={level}
+              geom={geom}
+              hover={tool === 'select' ? hover : null}
+              selection={selection}
+            />
+          </g>
+          <RoomLabels level={level} geom={geom} view={v} size={size} />
+          {selection?.kind === 'wall' && (
+            <WallDimension level={level} geom={geom} view={v} size={size} wallId={selection.id} />
+          )}
+          {selection?.kind === 'vertex' &&
+            Object.values(level.walls)
+              .filter((w) => w.a === selection.id || w.b === selection.id)
+              .map((w) => (
+                <WallDimension
+                  key={w.id}
+                  level={level}
+                  geom={geom}
+                  view={v}
+                  size={size}
+                  wallId={w.id}
+                />
+              ))}
+          <VertexHandles
+            level={level}
+            view={v}
+            size={size}
+            shown={tool === 'wall' || tool === 'room' ? 'all' : shownVertices}
+            interactive={tool === 'select'}
+          />
+          {active.overlay(ctx)}
+        </g>
+        {loupe && <Loupe at={loupe} size={size} scene={sceneId} />}
       </svg>
 
       <p id="plan-keys" className="visually-hidden">
@@ -779,5 +797,43 @@ function ScaleBar({ zoom }: { zoom: number }) {
       <span className="scale-bar-line" style={{ width: metres * zoom }} />
       <span className="num">{metres} m</span>
     </div>
+  );
+}
+
+/** How much the magnifier enlarges, and its radius (screen px). */
+const LOUPE_ZOOM = 2.5;
+const LOUPE_R = 52;
+
+/**
+ * A magnifier above the finger: the plan around the point it is placing, enlarged, with a
+ * crosshair on the point. Near the top it moves beside the finger, and keeps to the screen.
+ */
+function Loupe({ at, size, scene }: { at: Vec2; size: Size; scene: string }) {
+  const clip = `loupe${useId().replace(/:/g, '')}`;
+  const gap = LOUPE_R + 44;
+  const edge = LOUPE_R + 6;
+  const clamp = (n: number, max: number) => Math.min(max - edge, Math.max(edge, n));
+  // Above the finger; with no room there, beside it (never below, under the hand).
+  const above = at.y - gap >= edge;
+  const x = above ? clamp(at.x, size.width) : at.x - gap >= edge ? at.x - gap : at.x + gap;
+  const y = above ? at.y - gap : clamp(at.y, size.height);
+  return (
+    <g className="loupe" pointerEvents="none" data-testid="loupe">
+      <clipPath id={clip}>
+        <circle cx={x} cy={y} r={LOUPE_R} />
+      </clipPath>
+      <circle cx={x} cy={y} r={LOUPE_R} className="loupe-bg" />
+      <g clipPath={`url(#${clip})`}>
+        <use
+          href={`#${scene}`}
+          transform={`translate(${x} ${y}) scale(${LOUPE_ZOOM}) translate(${-at.x} ${-at.y})`}
+        />
+      </g>
+      <circle cx={x} cy={y} r={LOUPE_R} className="loupe-ring" />
+      <path
+        d={`M ${x - 10} ${y} H ${x + 10} M ${x} ${y - 10} V ${y + 10}`}
+        className="loupe-cross"
+      />
+    </g>
   );
 }

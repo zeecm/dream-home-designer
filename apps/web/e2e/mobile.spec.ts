@@ -222,7 +222,13 @@ test('on a phone: the first wall shows under the finger, and its ends can be dra
   // (A level line has no height, so it counts as drawn, not as "visible".)
   await expect(page.locator('.ghost-wall')).toHaveCount(1);
   await expect(page.locator('.draw-overlay text.num').first()).toHaveText(/^\d+\.\d\d m$/);
+  // A magnifier shows the point under the finger, above it, until it lifts.
+  const loupe = page.getByTestId('loupe');
+  await expect(loupe).toHaveCount(1);
+  const lb = await loupe.locator('circle.loupe-ring').boundingBox();
+  expect((lb?.y ?? 999) + (lb?.height ?? 0)).toBeLessThan(r.y + r.height * 0.55);
   await f.lift();
+  await expect(loupe).toHaveCount(0);
   await expect(walls).toHaveText('1');
 
   // Its far end, dragged: the same wall gets longer, no new wall.
