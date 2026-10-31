@@ -625,6 +625,17 @@ to `FURNITURE` with a stand-in box (`placeholder`); render's `ModelLibrary` load
 once and `LevelMeshes` swaps the box for a copy when it arrives (copies share geometry, marked
 `userData.shared`). No modern beds or TVs on Poly Haven, so those stay box-built.
 Rebuild a few with `pnpm --filter @dhd/models build <id…>` (`built.json` remembers the rest).
+51 models since 31 Oct (25 added, chosen for a Singapore flat: a rolled-arm leather sofa; a
+rosewood set of Chinese armchair, daybed, tea table, stool, console, display cabinet and a
+folding screen; a backed bar stool, a metal-and-wood stool, the plastic monobloc chair, a
+bistro set and a folding stool; a chest of drawers, narrow steel shelves, wicker baskets; an
+enamel pendant and a pipe desk lamp (both lit); three white vases, a photo frame, a framed
+picture, an alarm clock and a chess set). Left out: models the simplifier can't bring under
+12k triangles (a wooden bar stool, a game console), the book set (no glTF), plants that come
+as several variants in one file, and the antique and gothic pieces. A catalogue entry's `drop`
+names a material whose parts are left out (the frames' glass, which hid the picture once its
+texture was compressed); oversized models are scaled (the Chinese cabinet came 2.9 m tall,
+the drawers 1 m deep).
 26 models since October (seven added: a leather ottoman, a steel-and-wood side table, a tall
 side table, a round pedestal table, a metal desk, steel-frame shelves and a tabletop
 succulent). Most of Poly Haven's other furniture is antique or ornate. A catalogue entry's

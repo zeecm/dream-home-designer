@@ -23,7 +23,7 @@
     "id": "coffee-table-wood-stone",
     "name": "Coffee table, wood and stone",
     "category": "Living",
-    "turn": 90
+    "turn": -90
   },
   {
     "polyhaven": "coffee_table_round_01",
@@ -192,6 +192,202 @@
     "polyhaven": "potted_plant_04",
     "id": "potted-succulent",
     "name": "Succulent, on a table",
+    "category": "Decor",
+    "elevation": 0.75,
+    "walkThrough": true
+  },
+  {
+    "polyhaven": "sofa_03",
+    "id": "leather-sofa-rolled",
+    "name": "Leather sofa, rolled arms",
+    "category": "Living",
+    "againstWall": true,
+    "scale": 0.8
+  },
+  {
+    "polyhaven": "chinese_armchair",
+    "id": "chinese-armchair",
+    "name": "Chinese armchair, rosewood",
+    "category": "Living",
+    "scale": 0.7
+  },
+  {
+    "polyhaven": "chinese_sofa",
+    "id": "chinese-bench",
+    "name": "Chinese daybed, rosewood",
+    "category": "Living",
+    "againstWall": true,
+    "scale": 0.85
+  },
+  {
+    "polyhaven": "chinese_tea_table",
+    "id": "chinese-tea-table",
+    "name": "Chinese tea table",
+    "category": "Living"
+  },
+  {
+    "polyhaven": "chinese_stool",
+    "id": "chinese-stool",
+    "name": "Chinese stool",
+    "category": "Living",
+    "scale": 0.75
+  },
+  {
+    "polyhaven": "chinese_console_table",
+    "id": "chinese-console",
+    "name": "Chinese console table",
+    "category": "Living",
+    "againstWall": true
+  },
+  {
+    "polyhaven": "chinese_cabinet",
+    "id": "chinese-cabinet",
+    "name": "Chinese display cabinet",
+    "category": "Storage",
+    "againstWall": true,
+    "scale": 0.65
+  },
+  {
+    "polyhaven": "chinese_screen_panels",
+    "id": "folding-screen",
+    "name": "Folding screen",
+    "category": "Living"
+  },
+  {
+    "polyhaven": "metal_stool_02",
+    "id": "counter-stool",
+    "name": "Stool, metal and wood",
+    "category": "Dining"
+  },
+  {
+    "polyhaven": "metal_stool_03",
+    "id": "bar-stool-backed",
+    "name": "Bar stool with back",
+    "category": "Dining"
+  },
+  {
+    "polyhaven": "plastic_monobloc_chair_01",
+    "id": "plastic-chair",
+    "name": "Plastic chair",
+    "category": "Dining"
+  },
+  {
+    "polyhaven": "outdoor_table_chair_set_01",
+    "id": "bistro-set",
+    "name": "Bistro table and chairs",
+    "category": "Dining"
+  },
+  {
+    "polyhaven": "folding_wooden_stool",
+    "id": "folding-stool",
+    "name": "Folding stool",
+    "category": "Dining"
+  },
+  {
+    "polyhaven": "vintage_wooden_drawer_01",
+    "id": "chest-of-drawers",
+    "name": "Chest of drawers",
+    "category": "Bedroom",
+    "againstWall": true,
+    "scale": [0.7, 0.85, 0.5]
+  },
+  {
+    "polyhaven": "steel_frame_shelves_02",
+    "id": "steel-shelves-narrow",
+    "name": "Steel-frame shelves, narrow",
+    "category": "Storage",
+    "againstWall": true,
+    "scale": 0.85
+  },
+  {
+    "polyhaven": "wicker_basket_02",
+    "id": "wicker-baskets",
+    "name": "Wicker baskets",
+    "category": "Decor"
+  },
+  {
+    "polyhaven": "hanging_industrial_lamp",
+    "id": "enamel-pendant",
+    "name": "Enamel pendant",
+    "category": "Lighting",
+    "ceiling": true,
+    "walkThrough": true,
+    "light": {
+      "at": [0, 0, 0.1],
+      "color": "#ffe6c4",
+      "candela": 60
+    },
+    "scale": 0.8
+  },
+  {
+    "polyhaven": "industrial_pipe_lamp",
+    "id": "pipe-desk-lamp",
+    "name": "Pipe desk lamp",
+    "category": "Lighting",
+    "elevation": 0.75,
+    "walkThrough": true,
+    "light": {
+      "at": [0, 0, 0.3],
+      "color": "#ffd9a0",
+      "candela": 25
+    }
+  },
+  {
+    "polyhaven": "ceramic_vase_01",
+    "id": "vase-tall-white",
+    "name": "Tall white vase",
+    "category": "Decor",
+    "elevation": 0.75,
+    "walkThrough": true
+  },
+  {
+    "polyhaven": "ceramic_vase_02",
+    "id": "vase-round-white",
+    "name": "Round white vase",
+    "category": "Decor",
+    "elevation": 0.75,
+    "walkThrough": true
+  },
+  {
+    "polyhaven": "ceramic_vase_04",
+    "id": "jug-vase",
+    "name": "Jug vase",
+    "category": "Decor",
+    "elevation": 0.75,
+    "walkThrough": true
+  },
+  {
+    "polyhaven": "standing_picture_frame_01",
+    "id": "photo-frame",
+    "name": "Photo frame",
+    "category": "Decor",
+    "elevation": 0.75,
+    "walkThrough": true,
+    "turn": -90,
+    "drop": "_glass"
+  },
+  {
+    "polyhaven": "hanging_picture_frame_02",
+    "id": "framed-picture",
+    "name": "Framed picture",
+    "category": "Decor",
+    "elevation": 1.4,
+    "againstWall": true,
+    "walkThrough": true,
+    "drop": "_glass"
+  },
+  {
+    "polyhaven": "alarm_clock_01",
+    "id": "alarm-clock",
+    "name": "Alarm clock",
+    "category": "Decor",
+    "elevation": 0.5,
+    "walkThrough": true
+  },
+  {
+    "polyhaven": "chess_set",
+    "id": "chess-set",
+    "name": "Chess set",
     "category": "Decor",
     "elevation": 0.75,
     "walkThrough": true
