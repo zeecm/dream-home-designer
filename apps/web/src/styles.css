@@ -1910,7 +1910,7 @@ h3.field-label {
   .sample-banner {
     flex-wrap: wrap;
     gap: 6px;
-    padding: 6px 8px 6px 12px;
+    padding: 6px 8px 6px 16px;
   }
   .sample-banner .btn {
     white-space: nowrap;
@@ -1989,7 +1989,7 @@ h3.field-label {
   }
   /* One line, not three, for the sample notice. */
   .sample-banner {
-    padding: 4px 6px 4px 12px;
+    padding: 4px 8px 4px 16px;
     font-size: var(--fs-small);
   }
   .sample-banner span {
