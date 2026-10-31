@@ -8,6 +8,7 @@ import {
   blankProject,
   canRedo,
   canUndo,
+  carriedToRenovation,
   dispatch as coreDispatch,
   redo as coreRedo,
   undo as coreUndo,
@@ -309,7 +310,13 @@ export const useStore = create<State>((set, get) => {
       // Nothing is edited until a real project is open (not while loading or unreachable).
       if (!canEdit(get())) return;
       const editorBefore = get().editor;
-      const next = coreDispatch(editorBefore, cmd, opts);
+      // An edit to the flat as it is carries over to the renovation, where that hasn't
+      // changed the same thing itself.
+      const carried =
+        editorBefore.doc.renovation && useEditor.getState().variant === 'before'
+          ? carriedToRenovation(cmd)
+          : cmd;
+      const next = coreDispatch(editorBefore, carried, opts);
       if (next === get().editor) return;
       commit(next);
       countUsage(cmd.label, editorBefore, next);

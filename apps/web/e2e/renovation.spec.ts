@@ -95,3 +95,30 @@ test('undo shows the version it changes, and switching versions drops a half-dra
   await expect(bar).toContainText('No changes yet');
   await expect(page.locator('[data-hit^="wall:"]')).toHaveCount(walls);
 });
+
+test('a fix to the flat as it is carries over to the renovation: no false change', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await page.getByRole('button', { name: 'Plan a renovation' }).click();
+  const bar = page.locator('.reno-bar');
+  await bar.getByRole('button', { name: 'Before' }).click();
+  // The wall turns out not to be there: taken out of the flat as it is, it goes from the
+  // renovation too, so nothing reads as hacked.
+  await page.locator(WALL).first().click({ force: true });
+  await page.keyboard.press('Delete');
+  await page.keyboard.press('Escape');
+  await expect(page.locator(WALL)).toHaveCount(0);
+  await expect(bar).toContainText('No changes yet');
+  await bar.getByRole('button', { name: 'After' }).click();
+  await expect(page.locator(WALL)).toHaveCount(0);
+  // One undo puts it back in both, showing the flat as it is.
+  await page.keyboard.press('Control+z');
+  await expect(bar.getByRole('button', { name: 'Before' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator(WALL).first()).toBeVisible();
+  await bar.getByRole('button', { name: 'After' }).click();
+  await expect(page.locator(WALL).first()).toBeVisible();
+  await expect(bar).toContainText('No changes yet');
+});

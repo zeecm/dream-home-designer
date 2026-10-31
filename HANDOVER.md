@@ -548,8 +548,13 @@ belongs to and named as the room is in the renovation. Rooms are matched between
 by where they are (each one's inside point in the other), not by id, since a wall hacked and
 drawn again can give a room a new id. "Copy list" puts them on the clipboard as
 text, a line per place, for a contractor.
-**Not yet:** a side-by-side 3D compare; applying an edit to both versions at once (a trace fix
-in "before" shows as built wall in the after).
+An edit to the flat as it is (Before shown) carries over to the renovation
+(`carriedToRenovation` in core, applied in the store's dispatch): each corner, wall, door,
+piece or room it changes, adds or removes is changed the same way in the renovation where
+that is still as it was (or, added, absent), then the renovation's rooms are re-found; what
+the renovation changed itself is left alone. One undo step, which shows Before
+(`touchedVariant` counts an edit to the plan's own levels as Before's).
+**Not yet:** a side-by-side 3D compare.
 
 **Downloads (Phase 4):** the project menu's Download section (`exports.ts`): the plan as a
 PNG (the plan SVG cloned with its computed styles inlined, handles and grid removed, the plan

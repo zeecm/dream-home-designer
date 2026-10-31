@@ -215,7 +215,9 @@ export function RenovationBar() {
         <span className="reno-summary-text">
           {/* Edits go to the version shown; say which, so a fix to the trace isn't a surprise. */}
           <span className="reno-editing">
-            {variant === 'before' ? 'Editing the flat as it is. ' : 'Editing the renovation. '}
+            {variant === 'before'
+              ? 'Editing the flat as it is (and the renovation, where it is the same). '
+              : 'Editing the renovation. '}
           </span>
           {diffLine(diff)}
         </span>
@@ -333,9 +335,10 @@ export function RenovationSection() {
       </dl>
       {changes && <ChangeList changes={changes} />}
       <p className="field-hint">
-        Edits go to the version shown above the plan. Moving a wall counts as hacking it and
-        building it anew. Once the work is done, make the renovation the plan; either step can be
-        undone.
+        Edits go to the version shown above the plan; one to the flat as it is (a fix to the trace)
+        carries over to the renovation, unless it changed the same thing. Moving a wall counts as
+        hacking it and building it anew. Once the work is done, make the renovation the plan; either
+        step can be undone.
       </p>
       <span className="button-row">
         <button

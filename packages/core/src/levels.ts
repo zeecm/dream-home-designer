@@ -32,7 +32,10 @@ export function variantLevels(p: Pick<Project, 'levels' | 'renovation'>, v: Vari
  * name, the site, the plan image).
  */
 export function touchedVariant(patches: readonly Patch[]): Variant | null {
-  if (patches.some((p) => p.path[0] === 'renovation')) return 'after';
+  // Starting or ending a renovation shows it; an edit to the flat as it is, carried over to
+  // the renovation too, is the flat's.
+  if (patches.some((p) => p.path[0] === 'renovation' && p.path.length === 1)) return 'after';
   if (patches.some((p) => p.path[0] === 'levels')) return 'before';
+  if (patches.some((p) => p.path[0] === 'renovation')) return 'after';
   return null;
 }

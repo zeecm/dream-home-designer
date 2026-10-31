@@ -1,10 +1,11 @@
-import { current } from 'immer';
+import { current, isDraft } from 'immer';
 import { finish } from './finishes';
 import { placeLabel, pointInPolygon } from './geometry';
 import type { Command } from './history';
 import { AFTER_SUFFIX, type Variant } from './levels';
-import { roomArea, roomShapes } from './rooms';
+import { roomArea, roomShapes, syncRooms } from './rooms';
 import { type Level, type Vec2, type Wall, isBoundary, wallFaces } from './schema';
+import { reclampOpenings } from './topology';
 
 /**
  * Before and after: a renovation is a second copy of the flat, compared with the first
@@ -47,6 +48,54 @@ export function endRenovation(keep: Variant): Command {
         });
       }
       d.renovation = undefined;
+    },
+  };
+}
+
+/** The parts of a level an edit to the flat as it is carries over to the renovation. */
+const CARRIED = ['vertices', 'walls', 'openings', 'items', 'rooms'] as const;
+
+const same = (p: unknown, q: unknown) => JSON.stringify(p) === JSON.stringify(q);
+
+/**
+ * An edit to the flat as it is (a trace fixed, a wall found), carried over to the renovation
+ * wherever the renovation hasn't changed that part itself: each corner, wall, door, piece of
+ * furniture or room the edit changes, adds or removes is changed the same way in the
+ * renovation if it is there just as it was before the edit (or, added, isn't there). What
+ * the renovation changed stays as it is. One command, so one undo step.
+ */
+export function carriedToRenovation(cmd: Command): Command {
+  return {
+    ...cmd,
+    recipe: (d) => {
+      const was = d.renovation ? d.levels.map((l) => structuredClone(current(l))) : [];
+      cmd.recipe(d);
+      d.levels.forEach((l, i) => {
+        const old = was[i];
+        const after = old && d.renovation?.levels.find((a) => a.id === `${old.id}${AFTER_SUFFIX}`);
+        if (!old || !after) return;
+        const now = isDraft(l) ? current(l) : l;
+        let changed = false;
+        for (const key of CARRIED) {
+          const before: Record<string, unknown> = old[key];
+          const edited: Record<string, unknown> = now[key];
+          const there: Record<string, unknown> = after[key];
+          for (const id of new Set([...Object.keys(before), ...Object.keys(edited)])) {
+            if (same(before[id], edited[id]) || !same(there[id], before[id])) continue;
+            if (edited[id] === undefined) delete there[id];
+            else there[id] = structuredClone(edited[id]);
+            changed = true;
+          }
+        }
+        if (old.ceilingHeight !== now.ceilingHeight && after.ceilingHeight === old.ceilingHeight) {
+          after.ceilingHeight = now.ceilingHeight;
+          changed = true;
+        }
+        if (changed) {
+          reclampOpenings(after);
+          syncRooms(after);
+        }
+      });
     },
   };
 }
