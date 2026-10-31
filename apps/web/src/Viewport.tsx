@@ -29,6 +29,7 @@ import { Joystick } from './walk/Joystick';
 import { MiniMap } from './walk/MiniMap';
 import { WalkControls, type WalkPose } from './walk/WalkControls';
 import { setSound, unlockAudio, useSound } from './walk/footsteps';
+import { FOV_MAX, FOV_MIN, setWalkFov, useWalkFov } from './walk/fov';
 import { loadWalkPose, saveWalkPose } from './walk/pose';
 
 const materials = new MaterialCache();
@@ -231,24 +232,45 @@ export function clockTime(h: number): string {
 }
 
 /** The time of day the 3D view is lit for. */
-function SunControl() {
+function SunControl({ walking }: { walking: boolean }) {
   const hour = useEditor((s) => s.sunHour);
   const setHour = useEditor((s) => s.setSunHour);
+  const fov = useWalkFov();
   return (
-    <label className="sun-control">
-      <span className="sun-control-label">
-        Time <span className="num">{clockTime(hour)}</span>
-      </span>
-      <input
-        type="range"
-        min={6}
-        max={22}
-        step={0.25}
-        value={hour}
-        aria-valuetext={clockTime(hour)}
-        onChange={(e) => setHour(Number(e.target.value))}
-      />
-    </label>
+    <div className="sun-control">
+      <label className="sun-control-row">
+        <span className="sun-control-label">
+          Time <span className="num">{clockTime(hour)}</span>
+        </span>
+        <input
+          type="range"
+          min={6}
+          max={22}
+          step={0.25}
+          value={hour}
+          aria-valuetext={clockTime(hour)}
+          onChange={(e) => setHour(Number(e.target.value))}
+        />
+      </label>
+      {/* While walking: how wide the eye sees, across (about 114° for people). */}
+      {walking && (
+        <label className="sun-control-row">
+          <span className="sun-control-label">
+            View <span className="num">{fov}°</span>
+          </span>
+          <input
+            type="range"
+            min={FOV_MIN}
+            max={FOV_MAX}
+            step={5}
+            value={fov}
+            aria-label="Field of view"
+            aria-valuetext={`${fov} degrees across`}
+            onChange={(e) => setWalkFov(Number(e.target.value))}
+          />
+        </label>
+      )}
+    </div>
   );
 }
 
@@ -370,7 +392,7 @@ export function Viewport() {
           </>
         )}
       </Canvas>
-      <SunControl />
+      <SunControl walking={walking} />
       {walking ? (
         <>
           <button type="button" className="btn viewport-action" onClick={stopWalk}>

@@ -917,6 +917,10 @@ select {
   font-size: var(--fs-small);
   color: var(--muted);
 }
+.sun-control-row {
+  display: grid;
+  gap: 2px;
+}
 .sun-control-label {
   display: flex;
   justify-content: space-between;

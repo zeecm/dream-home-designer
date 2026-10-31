@@ -14,7 +14,13 @@ import { hdb4RoomProject } from './fixtures/hdb4room';
 import { type EditorDoc, dispatch, emptyHistory, undo } from './history';
 import { AFTER_SUFFIX, findLevel, touchedVariant, variantLevels } from './levels';
 import { loadProject } from './migrate';
-import { endRenovation, renovationChanges, renovationDiff, startRenovation } from './renovation';
+import {
+  carriedToRenovation,
+  endRenovation,
+  renovationChanges,
+  renovationDiff,
+  startRenovation,
+} from './renovation';
 import { Project } from './schema';
 
 const L = 'lvl_ground';
@@ -240,5 +246,43 @@ describe('renovationChanges', () => {
     expect(changes).toContainEqual(
       expect.objectContaining({ rooms: ['Living', 'Study'], kind: 'opening', moved: false }),
     );
+  });
+});
+
+describe('carriedToRenovation', () => {
+  it('carries a fix to the flat as it is over to the renovation: no false change', () => {
+    let s = renovating();
+    s = dispatch(s, carriedToRenovation(moveVertex(L, 'v10', { x: 7.2, y: 4.5 })));
+    expect(s.doc.renovation?.levels[0]?.vertices.v10).toMatchObject({ x: 7.2, y: 4.5 });
+    expect(diffOf(s).demolished).toEqual([]);
+    expect(diffOf(s).built).toEqual([]);
+    // A wall found and drawn in the flat as it is appears in the renovation too.
+    const l = s.doc.levels[0];
+    if (!l) throw new Error('no level');
+    s = dispatch(
+      s,
+      carriedToRenovation(
+        drawWall(l, { point: { x: 1, y: 1 } }, { point: { x: 2, y: 1 } }, { thickness: 0.1 })
+          .command,
+      ),
+    );
+    expect(Object.keys(s.doc.renovation?.levels[0]?.walls ?? {})).toEqual(
+      Object.keys(s.doc.levels[0]?.walls ?? {}),
+    );
+    expect(changesOf(s)).toEqual([]);
+  });
+
+  it('leaves what the renovation changed itself, and undoes in one step, on the flat as it is', () => {
+    let s = dispatch(renovating(), updateWall(A, 'w_bed3_bed2', { height: 1 }));
+    s = dispatch(s, carriedToRenovation(updateWall(L, 'w_bed3_bed2', { thickness: 0.2 })));
+    expect(s.doc.renovation?.levels[0]?.walls.w_bed3_bed2).toMatchObject({ height: 1 });
+    expect(s.doc.renovation?.levels[0]?.walls.w_bed3_bed2?.thickness).not.toBe(0.2);
+    // A wall taken out of the flat as it is goes from the renovation too, where it was kept.
+    s = dispatch(s, carriedToRenovation(deleteWall(L, 'w_bed2_master')));
+    expect(s.doc.renovation?.levels[0]?.walls.w_bed2_master).toBeUndefined();
+    expect(touchedVariant(s.history.past.at(-1)?.inverse ?? [])).toBe('before');
+    const back = undo(s);
+    expect(back.doc.renovation?.levels[0]?.walls.w_bed2_master).toBeDefined();
+    expect(back.doc.levels[0]?.walls.w_bed2_master).toBeDefined();
   });
 });
