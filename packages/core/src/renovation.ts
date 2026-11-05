@@ -586,6 +586,8 @@ export type RenovationChange = ChangePlace & {
       }
     | {
         kind: 'opening';
+        /** The opening: in the renovation, or (closed up) in the flat as it is. */
+        id: string;
         /** 'with-wall': it went with the wall it was in, hacked. */
         change: 'added' | 'removed' | 'with-wall' | 'changed';
         opening: OpeningKind;
@@ -865,6 +867,7 @@ export function renovationChanges(
     const base = {
       ...place,
       kind: 'opening' as const,
+      id,
       opening: kindOf(o.kind),
       width: o.width,
       ...guard(wallBefore(before, after, id)),
@@ -902,6 +905,7 @@ export function renovationChanges(
     out.push({
       ...placeOf(inAfter, besideOpening(after, o.id)),
       kind: 'opening',
+      id: o.id,
       opening: 'door',
       width: o.width,
       ...guard(wallBefore(before, after, o.id)),
@@ -921,6 +925,7 @@ export function renovationChanges(
     out.push({
       ...placeOf(inBefore, besideOpening(before, id)),
       kind: 'opening',
+      id,
       change: at && !wallRunsThrough(after, at.c, at.d) ? 'with-wall' : 'removed',
       opening: kindOf(o.kind),
       width: o.width,

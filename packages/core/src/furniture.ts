@@ -49,7 +49,8 @@ export type FurnitureCategory =
   | 'Storage'
   | 'Lighting'
   | 'Decor'
-  | 'People';
+  | 'People'
+  | 'Built-in';
 
 /** The catalogue's categories, in the order the palette lists them. */
 export const CATEGORIES: FurnitureCategory[] = [
@@ -62,6 +63,7 @@ export const CATEGORIES: FurnitureCategory[] = [
   'Lighting',
   'Decor',
   'People',
+  'Built-in',
 ];
 
 export interface FurnitureKind {
@@ -85,6 +87,11 @@ export interface FurnitureKind {
    * once it has loaded. Its natural size is `size`, so an item's scale stretches it too.
    */
   model?: string;
+  /**
+   * Built-in carpentry, priced per foot run: a full-height wardrobe, a tall cabinet, a low
+   * cabinet, a kitchen base run (with its countertop) or a wall cabinet run.
+   */
+  carpentry?: 'wardrobe' | 'tall' | 'low' | 'base' | 'wall';
   /** Where the model comes from (its licence page). */
   source?: string;
   parts: FurniturePart[];
@@ -186,6 +193,59 @@ function cabinet(
   };
 }
 
+/** Built-in carpentry: made to measure by a carpenter, priced per foot run. */
+const BUILT_IN_HEIGHT = 2.6;
+const builtIns: FurnitureKind[] = [
+  {
+    ...cabinet(
+      'built-in-wardrobe',
+      'Built-in wardrobe',
+      'Built-in',
+      1.8,
+      0.6,
+      BUILT_IN_HEIGHT,
+      'white',
+    ),
+    carpentry: 'wardrobe',
+  },
+  {
+    ...cabinet(
+      'built-in-shoe-cabinet',
+      'Full-height shoe cabinet',
+      'Built-in',
+      0.9,
+      0.35,
+      BUILT_IN_HEIGHT,
+      'white',
+    ),
+    carpentry: 'tall',
+  },
+  {
+    ...cabinet('built-in-tv-console', 'Built-in TV console', 'Built-in', 2.4, 0.4, 0.45, 'wood'),
+    carpentry: 'low',
+  },
+  {
+    ...cabinet(
+      'built-in-kitchen-base',
+      'Kitchen base run',
+      'Built-in',
+      2.4,
+      0.6,
+      0.9,
+      'white',
+      'charcoal',
+    ),
+    carpentry: 'base',
+  },
+  {
+    ...cabinet('built-in-kitchen-wall', 'Kitchen wall run', 'Built-in', 2.4, 0.35, 0.7, 'white'),
+    elevation: 1.5,
+    walkThrough: true,
+    carpentry: 'wall',
+    parts: [box(-1.2, 1.2, -0.175, 0.175, 0, 0.7, 'white')],
+  },
+];
+
 export const FURNITURE: FurnitureKind[] = [
   // Bedroom
   bed('bed-single', 'Single bed', 0.92),
@@ -277,9 +337,13 @@ export const FURNITURE: FurnitureKind[] = [
     ],
   },
   // Kitchen
-  cabinet('kitchen-base', 'Base cabinet', 'Kitchen', 0.6, 0.6, 0.9, 'white', 'charcoal'),
+  {
+    ...cabinet('kitchen-base', 'Base cabinet', 'Kitchen', 0.6, 0.6, 0.9, 'white', 'charcoal'),
+    carpentry: 'base',
+  },
   {
     ...cabinet('kitchen-sink', 'Sink cabinet', 'Kitchen', 0.8, 0.6, 0.9, 'white', 'charcoal'),
+    carpentry: 'base',
     parts: [
       ...cabinet('x', 'x', 'Kitchen', 0.8, 0.6, 0.9, 'white', 'charcoal').parts,
       box(-0.25, 0.25, -0.2, 0.2, 0.88, 0.905, 'metal'),
@@ -287,6 +351,7 @@ export const FURNITURE: FurnitureKind[] = [
   },
   {
     ...cabinet('kitchen-hob', 'Hob cabinet', 'Kitchen', 0.8, 0.6, 0.9, 'white', 'charcoal'),
+    carpentry: 'base',
     parts: [
       ...cabinet('x', 'x', 'Kitchen', 0.8, 0.6, 0.9, 'white', 'charcoal').parts,
       box(-0.3, 0.3, -0.22, 0.22, 0.9, 0.91, 'glass'),
@@ -296,6 +361,7 @@ export const FURNITURE: FurnitureKind[] = [
     ...cabinet('kitchen-wall', 'Wall cabinet', 'Kitchen', 0.6, 0.35, 0.7, 'white'),
     elevation: 1.45,
     walkThrough: true,
+    carpentry: 'wall',
     parts: [box(-0.3, 0.3, -0.175, 0.175, 0, 0.7, 'white')],
   },
   cabinet('fridge', 'Fridge', 'Kitchen', 0.7, 0.7, 1.8, 'metal'),
@@ -423,6 +489,7 @@ export const FURNITURE: FurnitureKind[] = [
     walkThrough: true,
     parts: person(1.2),
   },
+  ...builtIns,
 ];
 
 /** A catalogue entry made from a model (tools/models builds these). */

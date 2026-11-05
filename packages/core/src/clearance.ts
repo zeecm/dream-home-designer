@@ -19,6 +19,9 @@ export interface ClearanceRule {
 /** Common practice (Neufert; NKBA for kitchens; BS 6465-2 for bathrooms). */
 export const CLEARANCE_RULES: Record<string, ClearanceRule> = {
   wardrobe: { side: 'front', need: 0.6, what: 'Wardrobe doors need' },
+  'built-in-wardrobe': { side: 'front', need: 0.6, what: 'Wardrobe doors need' },
+  'built-in-shoe-cabinet': { side: 'front', need: 0.6, what: 'Cabinet doors need' },
+  'built-in-kitchen-base': { side: 'front', need: 0.9, what: 'Cabinet doors need' },
   'chest-of-drawers': { side: 'front', need: 0.75, what: 'Drawers need' },
   'shelf-with-drawers': { side: 'front', need: 0.75, what: 'Drawers need' },
   desk: { side: 'front', need: 0.8, what: 'A desk chair needs' },
@@ -56,7 +59,8 @@ export type ClearanceIssue =
 const SEAT = /dining-chair|stool|plastic-chair/;
 const TABLE = /table|desk|dining-\d/;
 /** Pieces of a kitchen run: cabinets, and the fridge and washer that stand in line with them. */
-const isKitchen = (id: string) => id.startsWith('kitchen-') || id === 'fridge' || id === 'washer';
+const isKitchen = (id: string) =>
+  id.startsWith('kitchen-') || id === 'built-in-kitchen-base' || id === 'fridge' || id === 'washer';
 
 /** How much of a bed's side is the head end, where a bedside table goes. */
 const HEAD_END = 0.55;
