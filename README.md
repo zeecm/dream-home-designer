@@ -54,10 +54,10 @@ for any plan.
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
 
 ### Planned
-- Clearance checks, slice 2: walkways from the main door, dining chairs, labels on the plan.
 1. Carpentry builder and a renovation cost estimate.
 2. "My furniture" and a delivery-path fit check.
-3. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
+3. Clearance checks, slice 2: walkways from the main door, dining chairs, labels on the plan.
+4. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
 
 ## What it does
 
