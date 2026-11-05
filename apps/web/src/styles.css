@@ -1194,6 +1194,11 @@ input[type="range"] {
   stroke: var(--wall);
   stroke-width: 1.5;
 }
+.door-arrow {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1px;
+}
 .door-slide {
   stroke: var(--muted);
   stroke-width: 1.5;
@@ -2512,4 +2517,19 @@ h3.field-label {
   display: grid;
   gap: 12px;
   padding: 0 20px 20px;
+}
+
+/* Checkboxes in the details panel: a whole row to tap on a touch screen. */
+@media (pointer: coarse) {
+  .check-row {
+    min-height: 44px;
+    align-items: center;
+  }
+  .check-row input[type="checkbox"] {
+    width: 22px;
+    height: 22px;
+  }
+}
+.warning-text {
+  color: #9a3412;
 }

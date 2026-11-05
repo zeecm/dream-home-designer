@@ -164,6 +164,24 @@ describe('renovationChanges', () => {
     expect(changesOf(renovating())).toEqual([]);
   });
 
+  it('lists a door that now opens another way, or has glass leaves', () => {
+    const door = Object.values(renovating().doc.levels[0]!.openings).find(
+      (o) => o.kind === 'door',
+    )!;
+    const s = dispatch(
+      renovating(),
+      updateOpening(A, door.id, { style: 'bifold', glazed: 'frosted' }),
+    );
+    const changes = changesOf(s).filter((c) => c.kind === 'opening');
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({
+      change: 'changed',
+      style: 'bifold',
+      glazed: 'frosted',
+      before: { style: 'swing', glazed: 'solid' },
+    });
+  });
+
   it('lists a wall swapped for glass, and one cut down to a half wall with glass above', () => {
     let s = dispatch(renovating(), updateWall(A, 'w_living_kitchen', { build: 'glass' }));
     let changes = changesOf(s).filter((c) => c.kind === 'hack' || c.kind === 'build');
@@ -180,6 +198,10 @@ describe('renovationChanges', () => {
     s = dispatch(s, updateWall(A, 'w_living_kitchen', { height: undefined }));
     expect(s.doc.renovation?.levels[0]?.walls.w_living_kitchen?.glassAbove).toBeUndefined();
     expect(changesOf(s)).toEqual([]);
+    // A half wall with glass above made a glass wall: the glass above goes too.
+    s = dispatch(renovating(), updateWall(A, 'w_living_kitchen', { height: 1, glassAbove: true }));
+    s = dispatch(s, updateWall(A, 'w_living_kitchen', { build: 'glass' }));
+    expect(s.doc.renovation?.levels[0]?.walls.w_living_kitchen?.glassAbove).toBeUndefined();
   });
 
   it('places a wall taken out between the rooms it divided, with its doorway and the merge', () => {

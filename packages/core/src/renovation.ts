@@ -574,7 +574,18 @@ export type RenovationChange = ChangePlace &
         opening: OpeningKind;
         width: number;
         /** For one changed: what it was, where that differs, and whether it moved. */
-        before?: { opening?: OpeningKind; width?: number; height?: number; sill?: number };
+        before?: {
+          opening?: OpeningKind;
+          width?: number;
+          height?: number;
+          sill?: number;
+          /** How a door opened, where that changed (swing to bi-fold, solid to glass). */
+          style?: string;
+          glazed?: string;
+        };
+        /** How the door opens now, where that changed. */
+        style?: string;
+        glazed?: string;
         height?: number;
         sill?: number;
         moved?: boolean;
@@ -759,6 +770,29 @@ export function renovationChanges(
       height: o.height,
       sill: o.sill,
       moved: !!p0 && !!p1 && Math.hypot(p1.x - p0.x, p1.y - p0.y) > 0.01,
+    });
+  }
+  // The same door, opening another way or glazed differently (same place, same size).
+  for (const o of Object.values(after.openings)) {
+    const was = before.openings[o.id];
+    if (!was || diff.openingsAdded.includes(o.id) || o.kind !== 'door' || was.kind !== 'door') {
+      continue;
+    }
+    const style = (x: typeof o) => x.style ?? 'swing';
+    const glazed = (x: typeof o) => x.glazed ?? 'solid';
+    if (style(was) === style(o) && glazed(was) === glazed(o)) continue;
+    out.push({
+      ...placeOf(inAfter, besideOpening(after, o.id)),
+      kind: 'opening',
+      opening: 'door',
+      width: o.width,
+      change: 'changed',
+      before: {
+        ...(style(was) !== style(o) ? { style: style(was) } : {}),
+        ...(glazed(was) !== glazed(o) ? { glazed: glazed(was) } : {}),
+      },
+      ...(style(was) !== style(o) ? { style: style(o) } : {}),
+      ...(glazed(was) !== glazed(o) ? { glazed: glazed(o) } : {}),
     });
   }
   for (const id of diff.openingsRemoved) {

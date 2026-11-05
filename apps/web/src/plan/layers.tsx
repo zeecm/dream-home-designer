@@ -246,18 +246,50 @@ function DoorSymbol({ geom }: { geom: PlanGeometry['openings'][number] }) {
     const shut = doorLeaves(f, o, 0);
     // Where a single leaf slides to (into the wall, or along its face), dashed.
     const away = shut.length === 1 ? doorLeaves(f, o, 1) : [];
+    // An arrow the way the leaves slide, beside the opening on its swing side.
+    const [u0, u1] = geom.span;
+    const toA = (o.stack ?? 'a') === 'a';
+    const side = (o.swing ?? 'leftIn').endsWith('In') ? 1 : -1;
+    const at = (u: number) => {
+      const c = framePoint(f, u, side);
+      return { x: c.x + f.n.x * side * 0.12, y: c.y + f.n.y * side * 0.12 };
+    };
+    const mid = (u0 + u1) / 2;
+    const reach = Math.min(0.3, (u1 - u0) / 3);
+    const from = at(mid + (toA ? reach : -reach));
+    const to = at(mid - (toA ? reach : -reach));
+    const head = (k: number) => {
+      const back = at(mid - (toA ? reach - 0.08 : -reach + 0.08));
+      return { x: back.x + f.n.x * k * 0.05, y: back.y + f.n.y * k * 0.05 };
+    };
+    const h1 = head(1);
+    const h2 = head(-1);
     return (
       <>
         <polygon className="door-hit" points={pts(geom.polygon)} />
         {shut.map((l, i) => seg(l, 'door-leaf', `s${i}`))}
         {away.map((l, i) => seg(l, 'door-slide', `a${i}`))}
+        <path
+          className="door-arrow"
+          d={`M ${from.x} ${from.y} L ${to.x} ${to.y} M ${h1.x} ${h1.y} L ${to.x} ${to.y} L ${h2.x} ${h2.y}`}
+        />
       </>
     );
   }
-  // Bi-fold and folding: the panels half folded, a zigzag out to the swing side.
+  // Bi-fold and folding: the panels half folded, a zigzag out to the swing side, and the
+  // sweep of the first panel from the stack side, so it reads as folding, not a double door.
   const half = doorLeaves(f, o, 0.5);
   const zig = [half[0]?.a, ...half.map((l) => l.b)].filter((p): p is Vec2 => !!p);
   const [u0, u1] = geom.span;
+  const first0 = doorLeaves(f, o, 0)[0];
+  const first1 = doorLeaves(f, o, 1)[0];
+  let sweep: string | null = null;
+  if (first0 && first1) {
+    const r = Math.hypot(first0.b.x - first0.a.x, first0.b.y - first0.a.y);
+    const c = first0.a;
+    const cross = (first0.b.x - c.x) * (first1.b.y - c.y) - (first0.b.y - c.y) * (first1.b.x - c.x);
+    sweep = `M ${first0.b.x} ${first0.b.y} A ${r} ${r} 0 0 ${cross > 0 ? 1 : 0} ${first1.b.x} ${first1.b.y}`;
+  }
   return (
     <>
       <polygon
@@ -265,6 +297,7 @@ function DoorSymbol({ geom }: { geom: PlanGeometry['openings'][number] }) {
         points={pts([...zig, framePoint(f, u1, 0), framePoint(f, u0, 0)])}
       />
       <polygon className="door-hit" points={pts(geom.polygon)} />
+      {sweep && <path className="door-arc" d={sweep} />}
       {half.map((l, i) => seg(l, 'door-leaf', `f${i}`))}
     </>
   );
@@ -516,10 +549,18 @@ export const WallTags = memo(function WallTags({ level, geom, view, size }: Scre
       {Object.values(level.walls).map((w) => {
         const f = geom.frames[w.id];
         if (!f || !isHalfWall(w, level.ceilingHeight) || f.length * view.zoom < 48) return null;
-        const c = worldToScreen(view, size, framePoint(f, f.length / 2, 0));
+        // Beside the wall (its left face), clear of the wall and its doors' arcs.
+        const c = worldToScreen(view, size, framePoint(f, f.length / 2, 1));
+        const n = { x: f.n.x, y: f.n.y };
         const text = `HW ${formatLength(w.height ?? 0)}${hasGlassAbove(w, level.ceilingHeight) ? ' + glass' : ''}`;
         return (
-          <text key={w.id} className="wall-tag num" x={c.x} y={c.y + 3} textAnchor="middle">
+          <text
+            key={w.id}
+            className="wall-tag num"
+            x={c.x + n.x * 10}
+            y={c.y + n.y * 10 + 3}
+            textAnchor={Math.abs(n.x) > 0.7 ? (n.x > 0 ? 'start' : 'end') : 'middle'}
+          >
             {text}
           </text>
         );

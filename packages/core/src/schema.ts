@@ -57,7 +57,10 @@ export const isGlass = (w: Pick<Wall, 'build'>): boolean => w.build === 'glass';
 
 /** A solid wall lower than the ceiling (a counter or bar-height divider). */
 export const isHalfWall = (w: Pick<Wall, 'build' | 'height' | 'kind'>, ceiling: number): boolean =>
-  !isGlass(w) && w.kind !== 'boundary' && w.height !== undefined && ceiling - w.height > 0.05;
+  !isGlass(w) &&
+  w.kind !== 'boundary' &&
+  w.height !== undefined &&
+  ceiling - w.height >= 0.1 - 1e-9;
 
 /** Whether a wall has fixed glass over it: only a half wall can. */
 export const hasGlassAbove = (w: Wall, ceiling: number): boolean =>

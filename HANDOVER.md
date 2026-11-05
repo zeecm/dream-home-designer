@@ -629,8 +629,13 @@ pocket, half folded for bi-fold and folding, two arcs for double), the 3D leaves
 `placeLeaves` moves to its pose; the walk's door swing drives it, `setDoorOpen`) and walk
 collision (open leaves solid) all come from it. Door details: "Opens by", leaves/panels
 stepper, Solid / Glass / Frosted, Flip side (for leaves that stack) or Flip hinge. Folding
-partitions open on approach like any door (the spec's tap-to-toggle for wide ones is not
-built).
+partitions open on approach like any door. Sliding and pocket leaves travel only as far
+as the wall beside the opening goes (a short wall leaves them part open). Panels are never
+under 25 cm (bi-fold in pairs). The renovation change list names a door that now opens
+another way or has glass leaves. Plan symbols: sliding has a travel arrow, bi-fold and
+folding the first panel's sweep. A wall beside a room named "…shelter" warns that HDB
+doesn't allow it changed; choosing glass makes a wall over 100 mm 80 mm thick. Not built yet
+from the spec: the Play button, "Fill the wall", and tap or E to open a wide partition.
 
 **Comparing in 3D:** with a renovation, the 3D view offers "Compare before and after": the
 flat as it is left of a divider and the renovation right of it, in one view with one camera

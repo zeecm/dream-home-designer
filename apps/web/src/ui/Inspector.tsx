@@ -377,6 +377,8 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
   const onWall = Object.values(level.openings).filter((o) => o.wallId === id).length;
   const boundary = isBoundary(wall);
   const glass = isGlass(wall);
+  // A wall of the household shelter (named so on HDB plans), which can't be changed.
+  const shelter = roomsBeside(level, id).some((r) => !!r && /shelter/i.test(r));
   // A wall lower than the ceiling: a half wall (counter or bar height).
   const half = isHalfWall(wall, level.ceilingHeight);
   const heightPreset =
@@ -401,6 +403,11 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
         <p className="note">
           A boundary divides rooms without a wall, such as an open kitchen and the living room. It
           isn’t built in 3D.
+        </p>
+      )}
+      {shelter && (
+        <p className="note warning-text">
+          A household shelter wall: HDB doesn’t allow it to be hacked, cut down or replaced.
         </p>
       )}
       {!boundary && onWall > 0 && (
@@ -443,7 +450,15 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
                 { value: 'solid', label: 'Solid', title: 'Brick or board, painted' },
                 { value: 'glass', label: 'Glass', title: 'A framed glass partition' },
               ]}
-              onChange={(build) => dispatch(updateWall(level.id, id, { build }))}
+              onChange={(build) =>
+                dispatch(
+                  updateWall(level.id, id, {
+                    build,
+                    // A framed glass partition is 40–100 mm, whatever the wall was.
+                    ...(build === 'glass' && wall.thickness > 0.1 ? { thickness: 0.08 } : {}),
+                  }),
+                )
+              }
             />
           </div>
           {!glass && <WallPaint level={level} id={id} />}
@@ -470,7 +485,7 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
           {!glass && (
             <div className="field">
               <span className="field-label" aria-hidden="true">
-                Half wall
+                Half wall, mm
               </span>
               <Segmented
                 fill
@@ -480,7 +495,7 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
                   { value: 'full', label: 'Full', title: 'Up to the ceiling' },
                   ...HALF_WALLS.map((h) => ({
                     value: String(h),
-                    label: formatLength(h),
+                    label: String(Math.round(h * 1000)),
                     title: `A half wall ${formatLength(h)} high`,
                   })),
                 ]}
@@ -939,7 +954,14 @@ function DoorStyleFields({
   const style = doorStyle(o);
   const counted = style === 'sliding' || style === 'bifold' || style === 'folding';
   const panels = doorPanels(o);
-  const [min, max] = style === 'bifold' ? [2, 4] : style === 'sliding' ? [1, 4] : [3, 10];
+  // No panel narrower than 25 cm.
+  const most = Math.max(1, Math.floor(o.width / 0.25));
+  const [min, max] =
+    style === 'bifold'
+      ? [2, most >= 4 ? 4 : 2] // in pairs
+      : style === 'sliding'
+        ? [1, Math.min(4, most)]
+        : [Math.min(3, most), Math.min(10, most)];
   return (
     <>
       <div className="field">

@@ -391,8 +391,9 @@ export class LevelMeshes {
     // The frame follows the wall's mitred ends, as solid wall does; panes stop square.
     const box = (g: WallPiece, k: WallFrame) => {
       const mitre = k === f;
+      // Inset a hair at the wall's ends, where it meets the next wall's face (no flicker).
       const end = (u: number, s: [number, number]) =>
-        !mitre ? u : u === 0 ? s[0] : u === f.length ? s[1] : u;
+        !mitre ? u : u === 0 ? s[0] + 0.002 : u === f.length ? s[1] - 0.002 : u;
       return extrudePolygon(
         [
           framePoint(k, end(g.u0, f.left), 1),

@@ -77,6 +77,22 @@ export function changeText(c: RenovationChange): string {
       if (b.sill !== undefined && c.sill !== undefined)
         parts.push(`sill ${c.sill > b.sill ? 'raised' : 'lowered'} to ${formatLength(c.sill)}`);
       if (c.moved) parts.push('moved');
+      const styleName = (st: string) =>
+        ({
+          swing: 'swing',
+          double: 'double',
+          sliding: 'sliding',
+          pocket: 'pocket',
+          bifold: 'bi-fold',
+          folding: 'folding',
+        })[st] ?? st;
+      if (b.style && c.style) parts.push(`from ${styleName(b.style)} to ${styleName(c.style)}`);
+      if (b.glazed && c.glazed)
+        parts.push(
+          c.glazed === 'solid'
+            ? 'solid leaves'
+            : `${c.glazed === 'clear' ? 'glass' : 'frosted glass'} leaves`,
+        );
       const head = b.opening ? `${cap(OPENING_NAMES[b.opening])} made ${an(what)}` : What;
       return parts.length ? `${head}${b.opening ? ',' : ''} ${parts.join(', ')}` : head;
     }

@@ -19,7 +19,7 @@ test('a wall becomes a glass partition, or a half wall with glass above; each on
   // Back to solid, then a 1.00 m half wall with fixed glass above: tagged in the plan.
   await page.getByRole('button', { name: 'Solid', exact: true }).click();
   await expect(page.locator('polygon.wall-glass')).toHaveCount(0);
-  await page.getByRole('button', { name: '1.00 m', exact: true }).click();
+  await page.getByRole('button', { name: '1000', exact: true }).click();
   await expect(page.locator('polygon.wall-half').first()).toBeVisible();
   await expect(page.locator('.wall-tag')).toHaveText('HW 1.00 m');
   await page.getByLabel('Fixed glass above, up to the ceiling').check();
@@ -63,17 +63,22 @@ test('a door slides, folds or goes into its pocket: its plan symbol follows, one
   await expect(door.locator('.door-arc')).toHaveCount(0);
   await expect(door.locator('.door-slide')).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Flip side' })).toBeVisible();
-  // A bi-fold: two leaves, then four, drawn half folded; frosted glass.
+  // A bi-fold: two leaves drawn half folded (four only where each would be 25 cm or more:
+  // not on this 0.8 m door); frosted glass.
   await style.selectOption('bifold');
   await expect(door.locator('.door-leaf')).toHaveCount(2);
-  await page.getByRole('button', { name: 'More' }).click();
-  await expect(door.locator('.door-leaf')).toHaveCount(4);
+  await expect(page.getByRole('button', { name: 'More' })).toBeDisabled();
   await page.getByRole('button', { name: 'Frosted', exact: true }).click();
+  // A folding partition: panels of about half a metre, at least three, none under 25 cm.
+  await style.selectOption('folding');
+  await expect(door.locator('.door-leaf')).toHaveCount(3);
+  await expect(page.getByRole('button', { name: 'More' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Fewer' })).toBeDisabled();
   // Each a step back.
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.press('Control+z');
-  await page.keyboard.press('Control+z');
   await expect(door.locator('.door-leaf')).toHaveCount(2);
+  await page.keyboard.press('Control+z');
   await page.keyboard.press('Control+z');
   await expect(door.locator('.door-slide')).toHaveCount(1);
   await page.keyboard.press('Control+z');

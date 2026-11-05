@@ -312,7 +312,9 @@ export function doorLeaves(f: WallFrame, o: Opening, open: number): LeafPose[] {
   if (style === 'pocket' || (style === 'sliding' && n === 1)) {
     // Into the wall (pocket), or along its face (a sliding barn door), past the stack jamb.
     const v = style === 'pocket' ? 0 : side * (f.half + th);
-    const s0 = -w * t;
+    // As far as the wall beside the opening goes (a short wall leaves the leaf part open).
+    const room = Math.max(0, (fromA ? u0 : f.length - u1) - 0.02);
+    const s0 = -Math.min(w, room) * t;
     return [{ a: P(U(s0), v), b: P(U(s0 + w), v) }];
   }
   if (style === 'sliding') {

@@ -138,12 +138,19 @@ describe('doorLeaves', () => {
   });
 
   it('slides a pocket door into the wall and a barn door along its face, clear of the opening', () => {
+    // Only 0.35 m of wall before this door: the leaf goes 0.33 m in, the rest stays open.
     const [pocket] = doorLeaves(door.frame, style('pocket'), 1);
-    expect(Math.max(pocket!.a.x, pocket!.b.x)).toBeCloseTo(7.35);
+    expect(Math.max(pocket!.a.x, pocket!.b.x)).toBeCloseTo(8.25 - 0.33);
     expect(pocket!.a.y).toBeCloseTo(4.5);
     const [barn] = doorLeaves(door.frame, style('sliding', { stack: 'b', panels: 1 }), 1);
     expect(Math.min(barn!.a.x, barn!.b.x)).toBeCloseTo(8.25);
     expect(Math.abs(barn!.a.y - 4.5)).toBeGreaterThan(0.05);
+  });
+
+  it('slides a pocket door no further than the wall beside it goes', () => {
+    // 0.35 m of wall before the door at its start: the leaf goes only that far in.
+    const [pocket] = doorLeaves(door.frame, style('pocket'), 1);
+    expect(Math.min(pocket!.a.x, pocket!.b.x)).toBeGreaterThanOrEqual(7 - 1e-6);
   });
 
   it('stacks sliding leaves behind the first, each on its own track', () => {
