@@ -18,6 +18,7 @@ import {
   furnitureKind,
   loadProject,
   newId,
+  renovationGuard,
   sampleFlatProject,
   setProjectModels,
   touchedVariant,
@@ -77,7 +78,8 @@ interface State {
   notice: string | null;
   dismissNotice: () => void;
   /** A short confirmation after a destructive edit, offering Undo. */
-  toast: { text: string; at: number } | null;
+  /** A short message; with Undo unless `undo` is false. */
+  toast: { text: string; at: number; undo?: boolean } | null;
   /** What this browser may do with the open project; a viewer can't change it. */
   role: Role;
   /** Opens a copy of the open project as a new plan of this browser's own. */
@@ -192,6 +194,10 @@ function countUsage(label: string, before: EditorDoc, after: EditorDoc) {
   else if (label === 'Plan a renovation') track('renovation');
   else if (label === 'Restore an earlier version') track('restore-version');
 }
+
+export const SHELTER_REFUSED = 'Household shelter walls can’t be changed. HDB doesn’t allow it.';
+export const STRUCTURAL_WARNING =
+  'That’s a structural wall. HDB generally doesn’t allow hacking it.';
 
 /** Commands that remove things get an Undo toast; this is its text, or null for none. */
 function toastFor(label: string): string | null {
@@ -322,6 +328,7 @@ export const useStore = create<State>((set, get) => {
       const carrying =
         !!editorBefore.doc.renovation &&
         useEditor.getState().variant === 'before' &&
+        cmd.carry !== false &&
         !(going && carry.held);
       // The renovation as the drag found it, so a step held back can take back the rest.
       const start = going ? carry.start : editorBefore.doc.renovation?.levels;
@@ -331,6 +338,18 @@ export const useStore = create<State>((set, get) => {
         opts,
       );
       if (next === get().editor) return;
+      // In the renovation: the household shelter's walls stay as they are (the edit isn't
+      // made; a drag stays put), and a structural wall changed is kept with a warning.
+      let warn: string | null = null;
+      // (Marking a wall structural or not changes no wall: nothing to warn about.)
+      if (useEditor.getState().variant === 'after' && cmd.carry !== false) {
+        const guard = renovationGuard(editorBefore.doc, next.doc);
+        if (guard === 'refuse') {
+          set({ toast: { text: SHELTER_REFUSED, at: Date.now(), undo: false } });
+          return;
+        }
+        if (guard === 'warn') warn = STRUCTURAL_WARNING;
+      }
       if (!going) carry = { key, held: false, start };
       let held = false;
       if (outcome.conflict && !carry.held) {
@@ -341,7 +360,7 @@ export const useStore = create<State>((set, get) => {
       countUsage(cmd.label, editorBefore, next);
       const text = held
         ? 'Not carried over to the renovation, which changed the same part'
-        : toastFor(cmd.label);
+        : (warn ?? toastFor(cmd.label));
       if (text) set({ toast: { text, at: Date.now() } });
     },
     undo: () => {

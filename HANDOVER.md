@@ -568,6 +568,113 @@ merging it back is held back too, a cautious answer left as it is). A drag or ru
 of nudges (one coalesce key) held back at any step goes back to how the drag found the
 renovation (`restore`), taking back its steps already carried, and stays held back. Restoring a version (or anything replacing the plan or renovation whole) carries
 nothing. One undo step, which shows Before (`touchedVariant`).
+**AI: walls from a plan image (stage 1, 5 Nov):** bring your own key. Project menu "AI
+assistant…" (`ai/AiSettingsDialog.tsx`): Claude, OpenAI or Gemini, key and model (defaults
+`claude-opus-5-5`, `gpt-5`, `gemini-2.5-pro`), Test, Forget; kept in this tab
+(sessionStorage), or on this device if ticked (`ai/credentials.ts`, key `dhd-ai`), never
+in a project, export, share link or `/api` request (e2e checks). Calls go straight from the
+browser to the provider (`ai/providers.ts`: the Anthropic SDK, lazy-loaded, with
+`dangerouslyAllowBrowser`, JSON-schema output, effort high, the server-side refusal fallback,
+no retries, adaptive thinking with summaries streamed; stuck after 120 s with no event, and
+OpenAI and Gemini stopped at 300 s; OpenAI chat completions with a strict JSON
+schema; Gemini generateContent with `responseJsonSchema`). "Trace walls with AI" in the plan
+image panel sends the plan image (at most 1568 px) and asks for wall centre lines, openings
+(with a door's hinge and arc), room labels and the printed area, in image pixels
+(`ai/trace.ts`). Core (`trace.ts`) turns the reading into metres with the plan's own
+calibration and cleans it as a person tracing would: straightened onto the axes, the two
+faces of a thick wall made one centre line, a wall broken at its doors joined through them,
+ends within 8 cm one corner, ends just short of a wall taken onto it, thickness to 25 mm
+(`readingToPlan`); then built with the Wall tool's own `drawWall` (T-junctions split, rooms
+found), doors swung the way the plan shows, rooms named from the labels inside them
+(`tracedLevel`). The draft shows over the plan with counts and the area (vs the printed one):
+Accept builds it again on the plan as it is then and puts it in as one undo step
+(`importTrace`, `applyLevel` patches; it replaces walls already drawn), Try again, Discard.
+A Content-Security-Policy (`public/_headers`, the same in `vite preview` for the e2e suite)
+limits scripts to the site and connections to our API and the three providers; no
+violations in 3D, the walk, models or PDF upload. Keys are kept per provider (`credentials.ts`: one in use for
+reading plans, others kept), so Claude can read plans while an OpenAI or Gemini key makes
+pictures. Each key has its own "remember" (device or this tab). A trace belongs to the
+project and level it was started on (`ai/draft.ts`, `traceWhere`): opening another one
+cancels it or puts the draft away. Models' enum answers are lower-cased before the zod
+parse (`lowerEnums`).
+UX review fixes (5 Nov): the AI dialogs scroll in the middle (`.dialog-body`) with their
+title and actions fixed (`.dialog-foot`); a dialog's `onClose` checks `e.target` (React
+passes a nested dialog's close up the tree). While a draft waits the plan fades
+(`:has(.ai-draft)`), the tool goes to Select, and a refused key offers AI settings. Saving a
+key from the Trace button starts the trace. The AI assistant can keep the plan reader while
+adding an image key ("Use … to trace plans", `saveAi(settings, readsPlans)`); from Render it
+opens on OpenAI. Renders switch between the render and the 3D view. Layout thumbnails show
+rooms, new or changed walls in the accent colour and walls taken down dashed; an option with
+nothing applicable has no Use button. Touch: 44 px buttons in dialogs and the trace bar.
+
+**Photo-real renders (5 Nov):** "Photo-real render" on the 3D view (and, with a mouse, while
+walking) takes a picture of the view as it is (`capture3d`) and sends it, with a look (as
+designed, warm modern, Scandinavian, modern luxe, industrial), to the person's image model
+(`ai/render.ts`: OpenAI `images/edits` with `gpt-image-1`, or Gemini
+`gemini-2.5-flash-image` generateContent with image output; Claude makes no pictures). The
+picture shows in the dialog to download. The prompt keeps the camera, room and furniture
+and asks only for materials and light. 
+
+**AI: suggested layouts (stage 2, 5 Nov):** "Suggest layouts with AI" in the plan's
+Renovation section opens a brief (who lives here, eight common wishes, anything else) and
+sends the flat as it is (`planForModel` in core: walls by id with the rooms either side,
+locked ones marked, openings, rooms with areas; no image) to the model in use, asking for up
+to three layouts as operations: remove wall, half wall, glass wall, add wall, add door (with
+a style), remove opening, rename room (`ai/layouts.ts`, `LayoutSuggestions` schema).
+`applyLayout` in core applies each with the app's own commands to a copy of Before; outside
+walls, the household shelter's and bathrooms' walls and walls with windows are locked
+(`lockedWalls`), windows can't be closed up, and whatever is refused is listed in words
+("remove wall between Bedroom and outside: an outside, shelter or bathroom wall"). Each
+option shows a small plan, its reasons and its change list (`renovationChanges`); "Use this"
+makes it the renovation, starting one if there is none, as one undo step (`adoptLayout`),
+then shows After. Each option keeps its operations and "Use this" applies them again to
+Before as it is then. Next: a recorded real reading and real layouts as tests; the rules the
+spec lists that aren't checked yet (bedroom windows, corridor widths, the work triangle).
+
+**Wall colours and wallpapers (5 Nov):** a wall side's paint can be any colour (the
+browser's colour picker, after the preset swatches; stored as `paint-#rrggbb`, `customPaint`
+and `finish` in core) or one of eight wallpapers (`WALLPAPERS`: pinstripe, linen, fine grid,
+herringbone, botanical, white brick, fluted wood, terrazzo). Wallpapers are drawn on a canvas
+(`render/src/wallpaper.ts`, no downloads), tiled at 0.6 m on the wall faces (whose UVs run
+in metres; the pattern restarts at each stretch between openings), and shown as swatches. No
+schema change: a side's material id was already free text.
+
+**People for scale (5 Nov):** the catalogue's People: a person 1.70 m and a child 1.20 m,
+box-built in one grey (`person()` in furniture.ts, material `figure`), placed, moved, turned
+and resized like any piece, and walked through rather than into.
+
+**Glass walls and half walls (schema 7, 5 Nov):** a wall's `build` is solid (absent) or
+`'glass'`: a framed glass partition (`glassPartition` in core: 40 mm aluminium frame round
+each stretch between openings, mullions so no pane is over 1.2 m, a transom of glass over a
+door; render draws the frame full thickness in `aluminium` and the panes 10 mm thick in the
+shared transparent glass). A wall lower than the ceiling is a half wall; `glassAbove` adds
+fixed glass from its top to the ceiling. Wall details: "Built of" Solid / Glass, "Half wall"
+Full / 0.90 / 1.00 / 1.20 m, and the glass-above check. Plan: glass pale with a pane line,
+half walls lighter with a tag "HW 1.00 m (+ glass)" (`WallTags`). Both still block walking. The
+renovation diff counts a wall swapped for glass, cut down, or given glass above as hacked and
+built again, and the change list says which ("Put up 2.40 m of glass partition", "Build … of
+half wall, 1.00 m high, with glass above"). Schema 7 also adds `structural` (for HDB hacking
+warnings, not used yet). Junction blocks take the tallest wall's height (aluminium where
+only glass meets). Not handled yet: a window in a glass wall draws as a window; fixed glass
+goes to the level's ceiling even under a room's lower one.
+
+**Door styles (schema 7):** a door's `style`: swing (absent), double, sliding, pocket, bifold
+or folding, with `panels` (a count for sliding, bi-fold and folding; else sized from the
+width: `doorPanels`), `glazed` (clear or frosted leaves) and `stack` (which end leaves slide
+or fold to). `doorLeaves(frame, opening, open)` in core gives every leaf's centre line at any
+amount open, for every style: the plan symbol (leaves shut and a dashed slide for sliding and
+pocket, half folded for bi-fold and folding, two arcs for double), the 3D leaves (each a box
+`placeLeaves` moves to its pose; the walk's door swing drives it, `setDoorOpen`) and walk
+collision (open leaves solid) all come from it. Door details: "Opens by", leaves/panels
+stepper, Solid / Glass / Frosted, Flip side (for leaves that stack) or Flip hinge. Folding
+partitions open on approach like any door. Sliding and pocket leaves travel only as far
+as the wall beside the opening goes (a short wall leaves them part open). Panels are never
+under 25 cm (bi-fold in pairs). The renovation change list names a door that now opens
+another way or has glass leaves. Plan symbols: sliding has a travel arrow, bi-fold and
+folding the first panel's sweep. A wall beside a room named "…shelter" warns that HDB
+doesn't allow it changed; choosing glass makes a wall over 100 mm 80 mm thick. Not built yet
+from the spec: the Play button, "Fill the wall", and tap or E to open a wide partition.
+
 **Comparing in 3D:** with a renovation, the 3D view offers "Compare before and after": the
 flat as it is left of a divider and the renovation right of it, in one view with one camera
 (`CompareRender` in `Viewport.tsx` takes over drawing: each frame draws the scene twice, each
@@ -919,8 +1026,8 @@ cd apps/api && go test -race ./...
 R2_TEST_ENDPOINT=https://<account>.r2.cloudflarestorage.com R2_TEST_BUCKET=dhd-test \
   R2_TEST_ACCESS_KEY=... R2_TEST_SECRET_KEY=... go test -run TestR2Live ./internal/store
 # API Worker + Container (needs Docker and CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID)
-pnpm --filter @dhd/edge deploy           # production: dhd-api
-pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
+pnpm --filter @dhd/edge run deploy           # production: dhd-api
+pnpm --filter @dhd/edge run deploy:preview   # previews: dhd-api-preview
 ```
 
 **Cloudflare resources:**
@@ -964,3 +1071,42 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
   piece of another layer doesn't (switch to Select for that).
 - **Corner dimension lines** for walls that run into the room draw inside it; fine at plan scale,
   busy on short walls.
+
+**Structural and shelter walls (5 Nov, spec `docs/specs/structural-walls.md`):** core
+`structural.ts`: `wallStatus` (shelter from the room beside it, whatever the mark; structural
+when marked; `likely` when unmarked and 200 mm or thicker), `wallStatuses`, `markStructural`
+(both versions, one undo step), `sidesOf` (moved from layouts). The sample marks its 200 mm+
+walls structural and the rest not. `renovationBreaches(before, after)` lists Before walls a
+renovation hacks, moves, thickens, cuts down, glasses or cuts an opening into (or closes,
+moves, restyles one in); `renovationChanges` marks such lines `guard`. The store checks every
+edit made in After (cached per level): a new shelter breach isn't committed ("Household
+shelter walls can't be changed…", toast without Undo, so a drag stays put); a new structural
+one is kept with a warning and Undo. Before stays free. Plan: structural and shelter walls
+hatched (`#structural-hatch`, in metres, in PNG/print too). Inspector: a Structural wall
+switch, a Yes/No suggestion for a likely wall, the shelter note; plan details: "N walls look
+structural [Mark them]" (Before). The change list adds "(structural)", a count banner and the
+permit note (and Copy list). AI layouts lock structural and likely walls. No schema change.
+
+**Clearance checks (5 Nov, spec `docs/specs/clearance-checks.md`, slice 1):** core
+`clearance.ts`: `CLEARANCE_RULES` by catalogue id (wardrobe 0.60 m in front, drawers 0.75,
+desks 0.80, fridge and kitchen cabinets 0.90, washer 0.70, toilet 0.60, vanity 0.70; queen
+and king beds 0.60 each long side, single beds one side), `clearanceIssues(level)` →
+`zone` (room short off a side, measured to the nearest wall, hub or floor piece by clipping
+them to the zone), `door` (a floor piece in a door's sweep: `doorSweep` hulls `doorLeaves`
+sampled shut to open, every style), `overlap` (> 20 mm; seats under tables and desks
+allowed) and `wall` (> 10 mm into a solid wall piece). Rugs, people and pieces off the floor
+are left out; cabinets of one connected kitchen run don't block each other. Bounding-box
+pre-checks; about 5 ms for 80 pieces packed into the sample. Web `clearance/clearance.tsx`:
+`useClearanceOn` (remembered, key `dhd-clearance`), `issuesOf` cached per level,
+`ClearanceLayer` over the plan (red dashed zones and sweeps, red footprints for clashes, the
+selected piece's clear zones faint; `data-export="skip"`), the Inspector's Clearances section
+for a piece, and in plan details the switch, the count and Show next. Advice only: no edit
+is blocked. Review fixes: a bed's sides count from the foot to the bedside table; barn doors' slides
+are checked (leaves have thickness); a U kitchen's arms block each other, an L's legs don't;
+windows count as wall for "into a wall"; overlaps over 40 mm (a snap's rounding is fine);
+walls, hubs and sweeps cached by the walls/vertices/openings objects; Show next remembers
+where it was (`useClearanceOn.shown`) and centres the piece; the Clearances section is first
+in a piece's details. Not yet (spec): labels in the plan, live zones for the piece being
+placed (before it's dropped), zones cut at walls, the drop announcement, walkways and the
+rest of slice 2.
+

@@ -6,6 +6,7 @@ import {
   underlayToWorld,
 } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
+import { TraceWithAi } from '../ai/TracePanel';
 import {
   type AssetState,
   bundledAsset,
@@ -323,6 +324,7 @@ export function PlanImagePanel() {
         Set scale
       </button>
       <p className="field-hint num">1 m on the plan = {Math.round(1 / mPerPx)} image px</p>
+      <TraceWithAi />
       <div className="button-row">
         <button type="button" className="btn btn-small" onClick={open} disabled={busy}>
           Replace

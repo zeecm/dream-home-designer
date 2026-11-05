@@ -1,12 +1,18 @@
 import {
+  type LeafPose,
   type Level,
   type PlanGeometry,
   type RoomShape,
   type Vec2,
+  doorLeaves,
+  doorStyle,
   doorSwing,
   finish,
   framePoint,
   furnitureKind,
+  hasGlassAbove,
+  isGlass,
+  isHalfWall,
   itemFootprint,
   itemSize,
   labelClearance,
@@ -44,9 +50,12 @@ export const PlanShapes = memo(function PlanShapes({
   level,
   geom,
   interactive,
+  guarded,
 }: {
   level: Level;
   geom: PlanGeometry;
+  /** Walls drawn hatched: structural, or the household shelter's. */
+  guarded?: ReadonlySet<string>;
   /**
    * What can be pointed at: everything (Select), or only the pieces a placing tool can also
    * move (furniture in Furniture; doors, windows and openings in their tools).
@@ -57,7 +66,20 @@ export const PlanShapes = memo(function PlanShapes({
   const peItems = interactive === true || interactive === 'items' ? undefined : 'none';
   const peOpenings = interactive === true || interactive === 'openings' ? undefined : 'none';
   return (
-    <g>
+    <g className="plan-shapes">
+      <defs>
+        {/* Concrete, as plans draw it: hatched (in metres, so it scales with the plan). */}
+        <pattern
+          id="structural-hatch"
+          width={0.12}
+          height={0.12}
+          patternUnits="userSpaceOnUse"
+          patternTransform="rotate(45)"
+        >
+          <rect className="hatch-ground" width={0.12} height={0.12} />
+          <line className="hatch-line" x1={0.06} y1={0} x2={0.06} y2={0.12} />
+        </pattern>
+      </defs>
       <g className="rooms">
         {Object.values(level.rooms).map((r) => (
           <path
@@ -78,12 +100,29 @@ export const PlanShapes = memo(function PlanShapes({
         {geom.pieces.map((p, i) => (
           <polygon
             key={`${p.wallId}:${i}`}
-            className="wall"
+            className={`wall${wallLook(level, p.wallId)}${guarded?.has(p.wallId) ? ' wall-structural' : ''}`}
             points={pts(p.polygon)}
             data-hit={hit({ kind: 'wall', id: p.wallId })}
             pointerEvents={pe}
           />
         ))}
+        {/* A glass partition: the pane, a thin line down the middle of each stretch. */}
+        {geom.pieces.map((p, i) => {
+          const w = level.walls[p.wallId];
+          const [l0, l1, r1, r0] = p.polygon;
+          if (!w || !isGlass(w) || !l0 || !l1 || !r1 || !r0) return null;
+          return (
+            <line
+              key={`glass:${p.wallId}:${i}`}
+              className="glass-pane"
+              x1={(l0.x + r0.x) / 2}
+              y1={(l0.y + r0.y) / 2}
+              x2={(l1.x + r1.x) / 2}
+              y2={(l1.y + r1.y) / 2}
+              pointerEvents="none"
+            />
+          );
+        })}
         {geom.boundaries.map((id) => {
           const f = geom.frames[id];
           if (!f) return null;
@@ -184,7 +223,103 @@ export const PlanShapes = memo(function PlanShapes({
   );
 });
 
+/**
+ * A door's plan symbol, by how it opens: a swing door's leaf and arc (two for a double door);
+ * sliding and pocket leaves shut in the opening, with dashed where they slide to; bi-fold and
+ * folding panels drawn half folded.
+ */
 function DoorSymbol({ geom }: { geom: PlanGeometry['openings'][number] }) {
+  const style = doorStyle(geom.opening);
+  if (style === 'swing') return <SwingSymbol geom={geom} />;
+  const f = geom.frame;
+  const o = geom.opening;
+  const seg = (l: LeafPose, cls: string, key: string) => (
+    <line key={key} className={cls} x1={l.a.x} y1={l.a.y} x2={l.b.x} y2={l.b.y} />
+  );
+  if (style === 'double') {
+    const open = doorLeaves(f, o, 1);
+    const shut = doorLeaves(f, o, 0);
+    return (
+      <>
+        {open.map((l, i) => {
+          const end = shut[i]?.b ?? l.b;
+          const r = Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y);
+          const cross = (l.b.x - l.a.x) * (end.y - l.a.y) - (l.b.y - l.a.y) * (end.x - l.a.x);
+          const arc = `A ${r} ${r} 0 0 ${cross > 0 ? 1 : 0} ${end.x} ${end.y}`;
+          return (
+            // biome-ignore lint/suspicious/noArrayIndexKey: a door's fixed leaves
+            <g key={i}>
+              <path className="door-hit" d={`M ${l.a.x} ${l.a.y} L ${l.b.x} ${l.b.y} ${arc} Z`} />
+              {seg(l, 'door-leaf', 'leaf')}
+              <path className="door-arc" d={`M ${l.b.x} ${l.b.y} ${arc}`} />
+            </g>
+          );
+        })}
+      </>
+    );
+  }
+  if (style === 'sliding' || style === 'pocket') {
+    const shut = doorLeaves(f, o, 0);
+    // Where a single leaf slides to (into the wall, or along its face), dashed.
+    const away = shut.length === 1 ? doorLeaves(f, o, 1) : [];
+    // An arrow the way the leaves slide, beside the opening on its swing side.
+    const [u0, u1] = geom.span;
+    const toA = (o.stack ?? 'a') === 'a';
+    const side = (o.swing ?? 'leftIn').endsWith('In') ? 1 : -1;
+    const at = (u: number) => {
+      const c = framePoint(f, u, side);
+      return { x: c.x + f.n.x * side * 0.12, y: c.y + f.n.y * side * 0.12 };
+    };
+    const mid = (u0 + u1) / 2;
+    const reach = Math.min(0.3, (u1 - u0) / 3);
+    const from = at(mid + (toA ? reach : -reach));
+    const to = at(mid - (toA ? reach : -reach));
+    const head = (k: number) => {
+      const back = at(mid - (toA ? reach - 0.08 : -reach + 0.08));
+      return { x: back.x + f.n.x * k * 0.05, y: back.y + f.n.y * k * 0.05 };
+    };
+    const h1 = head(1);
+    const h2 = head(-1);
+    return (
+      <>
+        <polygon className="door-hit" points={pts(geom.polygon)} />
+        {shut.map((l, i) => seg(l, 'door-leaf', `s${i}`))}
+        {away.map((l, i) => seg(l, 'door-slide', `a${i}`))}
+        <path
+          className="door-arrow"
+          d={`M ${from.x} ${from.y} L ${to.x} ${to.y} M ${h1.x} ${h1.y} L ${to.x} ${to.y} L ${h2.x} ${h2.y}`}
+        />
+      </>
+    );
+  }
+  // Bi-fold and folding: the panels half folded, a zigzag out to the swing side, and the
+  // sweep of the first panel from the stack side, so it reads as folding, not a double door.
+  const half = doorLeaves(f, o, 0.5);
+  const zig = [half[0]?.a, ...half.map((l) => l.b)].filter((p): p is Vec2 => !!p);
+  const [u0, u1] = geom.span;
+  const first0 = doorLeaves(f, o, 0)[0];
+  const first1 = doorLeaves(f, o, 1)[0];
+  let sweep: string | null = null;
+  if (first0 && first1) {
+    const r = Math.hypot(first0.b.x - first0.a.x, first0.b.y - first0.a.y);
+    const c = first0.a;
+    const cross = (first0.b.x - c.x) * (first1.b.y - c.y) - (first0.b.y - c.y) * (first1.b.x - c.x);
+    sweep = `M ${first0.b.x} ${first0.b.y} A ${r} ${r} 0 0 ${cross > 0 ? 1 : 0} ${first1.b.x} ${first1.b.y}`;
+  }
+  return (
+    <>
+      <polygon
+        className="door-hit"
+        points={pts([...zig, framePoint(f, u1, 0), framePoint(f, u0, 0)])}
+      />
+      <polygon className="door-hit" points={pts(geom.polygon)} />
+      {sweep && <path className="door-arc" d={sweep} />}
+      {half.map((l, i) => seg(l, 'door-leaf', `f${i}`))}
+    </>
+  );
+}
+
+function SwingSymbol({ geom }: { geom: PlanGeometry['openings'][number] }) {
   const s = doorSwing(geom.frame, geom.opening);
   return (
     <>
@@ -409,6 +544,41 @@ export const RoomLabels = memo(function RoomLabels({ level, geom, view, size }: 
               </text>
             )}
           </g>
+        );
+      })}
+    </g>
+  );
+});
+
+/** How a wall draws in plan: a glass partition, a half wall, or a wall. */
+function wallLook(level: Level, id: string): string {
+  const w = level.walls[id];
+  if (!w) return '';
+  if (isGlass(w)) return ' wall-glass';
+  return isHalfWall(w, level.ceilingHeight) ? ' wall-half' : '';
+}
+
+/** Half walls' heights ("HW 1.00 m"), beside the wall in screen pixels. */
+export const WallTags = memo(function WallTags({ level, geom, view, size }: ScreenProps) {
+  return (
+    <g className="wall-tags" pointerEvents="none">
+      {Object.values(level.walls).map((w) => {
+        const f = geom.frames[w.id];
+        if (!f || !isHalfWall(w, level.ceilingHeight) || f.length * view.zoom < 48) return null;
+        // Beside the wall (its left face), clear of the wall and its doors' arcs.
+        const c = worldToScreen(view, size, framePoint(f, f.length / 2, 1));
+        const n = { x: f.n.x, y: f.n.y };
+        const text = `HW ${formatLength(w.height ?? 0)}${hasGlassAbove(w, level.ceilingHeight) ? ' + glass' : ''}`;
+        return (
+          <text
+            key={w.id}
+            className="wall-tag num"
+            x={c.x + n.x * 10}
+            y={c.y + n.y * 10 + 3}
+            textAnchor={Math.abs(n.x) > 0.7 ? (n.x > 0 ? 'start' : 'end') : 'middle'}
+          >
+            {text}
+          </text>
         );
       })}
     </g>

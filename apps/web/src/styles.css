@@ -59,8 +59,9 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* Dark, unless a light picture is being drawn (a plan PNG sets data-theme="light"). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --ground: #000000;
     --surface: #111111;
     --raised: #0a0a0a;
@@ -512,6 +513,23 @@ select {
   gap: 8px;
   padding: 12px 20px 16px;
   border-top: 1px solid var(--border);
+}
+.dialog-foot > .button-row {
+  margin: 0;
+}
+/* A dialog's middle scrolls; its title and its actions stay in sight, however short the
+   screen. */
+.dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.dialog-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .dialog-foot > .btn {
   justify-self: start;
@@ -1194,10 +1212,55 @@ input[type="range"] {
   stroke: var(--wall);
   stroke-width: 1.5;
 }
+.door-arrow {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1px;
+}
+.door-slide {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
+}
 .door-arc {
   fill: none;
   stroke: var(--muted);
   stroke-width: 1;
+}
+/* A glass partition: pale, framed, a line for the pane. */
+.wall-glass {
+  fill: color-mix(in srgb, #8fc1dc 45%, var(--surface));
+}
+.glass-pane {
+  stroke: var(--wall);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+/* Structural and household-shelter walls: hatched, as concrete is on a plan. */
+.wall-structural {
+  fill: url(#structural-hatch);
+}
+.hatch-ground {
+  fill: var(--wall);
+}
+.plan-svg .hatch-line {
+  /* In metres, scaling with the plan (the plan's other strokes keep their screen width). */
+  vector-effect: none;
+  stroke: var(--surface);
+  stroke-width: 0.03;
+  opacity: 0.7;
+}
+/* A half wall: lighter than a full one, its height tagged beside it. */
+.wall-half {
+  fill: color-mix(in srgb, var(--wall) 45%, var(--surface));
+}
+.wall-tag {
+  font-size: 11px;
+  fill: var(--text);
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
 }
 .boundary {
   stroke: var(--muted);
@@ -2176,6 +2239,30 @@ h3.field-label {
   cursor: pointer;
   padding: 0;
 }
+/* Any colour: a rainbow ring until a colour is chosen; the browser's picker underneath. */
+.swatch-any {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  background: conic-gradient(#e86a5c, #e8c25c, #7fc47a, #5cb3e8, #9b7fe8, #e86a5c);
+}
+.swatch-any input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.swatch-any:focus-within,
+.swatch-on {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.swatches-paper {
+  margin-top: 6px;
+}
+.swatches-paper .swatch {
+  border-radius: 6px;
+}
 .swatch[aria-pressed="true"] {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -2402,5 +2489,313 @@ h3.field-label {
   }
   .app-walking .viewport-hint {
     display: none;
+  }
+}
+
+/* A count with − and + either side (a door's leaves or panels). */
+.stepper {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.stepper .btn {
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
+}
+.stepper .num {
+  min-width: 2ch;
+  text-align: center;
+}
+
+/* An AI trace waiting to be accepted: drawn over the plan in the accent colour. */
+.ai-draft-wall {
+  fill: color-mix(in srgb, var(--accent) 55%, transparent);
+  stroke: var(--accent);
+  stroke-width: 1px;
+}
+.ai-draft-opening {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 1px;
+  stroke-dasharray: 3 2;
+}
+.ai-trace {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+/* Over the plan while a trace runs or waits to be accepted. */
+.trace-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  font-size: var(--fs-small);
+}
+.trace-bar > span {
+  flex: 1 1 240px;
+}
+.trace-actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+.trace-key {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+  vertical-align: -1px;
+}
+/* While a trace waits: the plan as it is fades, so the traced walls read. */
+.plan-svg:has(.ai-draft) .plan-shapes,
+.plan-svg:has(.ai-draft) .room-labels,
+.plan-svg:has(.ai-draft) .wall-tags {
+  opacity: 0.3;
+}
+.trace-bar-error {
+  background: color-mix(in srgb, #c0392b 8%, var(--surface));
+}
+.ai-form {
+  display: grid;
+  gap: 12px;
+  padding: 0 20px 20px;
+}
+
+/* Checkboxes in the details panel: a whole row to tap on a touch screen. */
+@media (pointer: coarse) {
+  .check-row {
+    min-height: 44px;
+    align-items: center;
+  }
+  .check-row input[type="checkbox"] {
+    width: 22px;
+    height: 22px;
+  }
+}
+.warning-text {
+  color: #9a3412;
+}
+
+/* Under Compare (or in its place): a photo-real render of the view. */
+.viewport-render {
+  position: absolute;
+  top: 60px;
+  right: 12px;
+  font-size: var(--fs-small);
+}
+.viewport-render-low {
+  top: 108px;
+}
+.render-dialog {
+  width: min(760px, calc(100vw - 32px));
+}
+.render-pictures {
+  padding: 0 20px 12px;
+}
+.render-pictures .segmented {
+  margin-bottom: 8px;
+}
+.render-pictures img {
+  display: block;
+  width: 100%;
+  max-height: min(40vh, 360px);
+  object-fit: contain;
+  background: var(--bg, #f4f4f2);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border);
+}
+.render-wait {
+  display: grid;
+  place-items: center;
+  height: min(40vh, 360px);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-card);
+  color: var(--muted);
+  font-size: var(--fs-small);
+}
+
+/* While walking (mouse and keyboard): under Footsteps. */
+.viewport-render-walk {
+  top: 108px;
+}
+
+.layouts-dialog {
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(860px, calc(100dvh - 32px));
+}
+.wish-list {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.layout-options {
+  list-style: none;
+  margin: 0;
+  padding: 0 20px 20px;
+  display: grid;
+  gap: 12px;
+}
+.layout-option {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+.layout-option h3 {
+  margin: 0 0 4px;
+  font-size: var(--fs-body, 15px);
+}
+.layout-option p {
+  margin: 0 0 6px;
+}
+.layout-reasons {
+  margin: 0 0 6px;
+  padding-left: 18px;
+  font-size: var(--fs-small);
+}
+.mini-layout {
+  width: 140px;
+  height: 140px;
+}
+.mini-layout polygon {
+  fill: var(--wall);
+}
+.mini-layout .mini-room {
+  fill: var(--accent-soft);
+}
+.mini-layout .mini-new {
+  fill: var(--accent);
+}
+.mini-layout .mini-gone {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 0.04;
+  stroke-dasharray: 0.12 0.08;
+}
+.mini-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 4px 0 0;
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+.mini-key i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 4px;
+  border-radius: 2px;
+  vertical-align: -1px;
+  background: var(--accent);
+}
+.mini-key .mini-key-gone {
+  background: none;
+  border: 1px dashed var(--accent);
+}
+.layout-option h3:focus {
+  outline: none;
+}
+@media (max-width: 560px) {
+  .layout-option {
+    grid-template-columns: 1fr;
+  }
+  .mini-layout {
+    width: 100%;
+    height: 180px;
+  }
+}
+/* A two-line wish: its box level with the first line. */
+.wish-list .check-row {
+  align-items: flex-start;
+}
+.wish-list .check-row input {
+  margin-top: 2px;
+}
+@media (pointer: coarse) {
+  .wish-list .check-row {
+    padding-top: 10px;
+  }
+}
+
+/* Dialogs and the trace bar on touch screens: buttons a finger can hit (after the top bar's
+   short landscape buttons, as a dialog may open from the top bar). */
+@media (pointer: coarse) {
+  .dialog .btn,
+  .dialog .icon-btn,
+  .trace-bar .btn {
+    height: auto;
+    min-height: 44px;
+  }
+  .dialog .icon-btn {
+    min-width: 44px;
+  }
+  .dialog .link-btn,
+  .trace-bar .link-btn {
+    padding: 12px 0;
+    margin: -12px 0;
+  }
+}
+
+/* A suggestion to mark walls structural: the words, then the buttons. */
+.structural-guess {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.reno-guard {
+  margin: 0 0 8px;
+}
+
+@media (pointer: coarse) {
+  .structural-guess .btn {
+    min-height: 44px;
+  }
+}
+
+/* Clearance checks over the plan: red where room is short, faint where it's fine. */
+.clearance-short {
+  fill: color-mix(in srgb, #d92d20 16%, transparent);
+  stroke: #d92d20;
+  stroke-width: 1px;
+  stroke-dasharray: 4 3;
+}
+.clearance-clash {
+  fill: color-mix(in srgb, #d92d20 22%, transparent);
+  stroke: #d92d20;
+  stroke-width: 1.5px;
+}
+.clearance-fine {
+  fill: color-mix(in srgb, var(--muted) 10%, transparent);
+  stroke: var(--muted);
+  stroke-width: 1px;
+  stroke-dasharray: 3 3;
+}
+.clearance-list {
+  margin: 0;
+  padding-left: 18px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .clearance-short {
+    fill: color-mix(in srgb, #ff6b5e 26%, transparent);
+    stroke: #ff6b5e;
+  }
+  :root:not([data-theme="light"]) .clearance-fine {
+    fill: color-mix(in srgb, var(--muted) 18%, transparent);
   }
 }

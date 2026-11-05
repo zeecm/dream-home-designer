@@ -101,7 +101,11 @@ export function mergeVertex(l: Mut, from: string, into: string): void {
         if (o.wallId !== w.id) continue;
         if (twin && !isBoundary(l.walls[twin.id] ?? {})) {
           o.wallId = twin.id;
-          if (twin.a !== w.a) o.t = 1 - o.t; // the twin runs the other way
+          if (twin.a !== w.a) {
+            // The twin runs the other way: its start and its left side are the other ones.
+            o.t = 1 - o.t;
+            if (o.swing) o.swing = flipSwing(o.swing);
+          }
         } else {
           delete l.openings[o.id];
         }
@@ -118,7 +122,15 @@ export function mergeVertex(l: Mut, from: string, into: string): void {
 }
 
 /** Copies `next`'s records onto the draft, touching only what differs (small patches). */
-function applyLevel(d: Draft<Level>, next: Level): void {
+/** A door's swing seen from a wall drawn the other way: hinge end and side both swap. */
+export function flipSwing<S extends 'leftIn' | 'leftOut' | 'rightIn' | 'rightOut'>(s: S): S {
+  const hinge = s.startsWith('left') ? 'right' : 'left';
+  const side = s.endsWith('In') ? 'Out' : 'In';
+  return `${hinge}${side}` as S;
+}
+
+/** Makes a level draft equal to `next`, record by record (small undo patches). */
+export function applyLevel(d: Draft<Level>, next: Level): void {
   for (const key of ['vertices', 'walls', 'openings', 'rooms'] as const) {
     const cur = d[key] as Record<string, unknown>;
     const want = next[key] as Record<string, unknown>;

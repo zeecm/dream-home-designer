@@ -26,6 +26,9 @@ const MIGRATIONS: Record<number, (doc: Record<string, unknown>) => Record<string
   4: (doc) => doc,
   // 6 adds the optional Project.models (furniture models uploaded to the project).
   5: (doc) => doc,
+  // 7 adds the optional Wall.build and Wall.glassAbove, and Opening.style, panels, glazed and
+  // stack: every version-6 wall is solid, every door a swing door.
+  6: (doc) => doc,
 };
 
 export function migrate(input: unknown): unknown {

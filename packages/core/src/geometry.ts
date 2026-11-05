@@ -91,6 +91,49 @@ export function wallPieces(
   return pieces;
 }
 
+/** Aluminium frame width around glass (m). */
+export const GLASS_FRAME = 0.04;
+/** Glass panes wider than this get a mullion between them (m). */
+const MAX_PANE = 1.2;
+
+/**
+ * A framed glass partition from `y0` to `y1` along a wall, around its openings (a door
+ * through a glass wall, or into the wall under fixed glass): the panes (thin glass) and the
+ * frame (full thickness: a rail along the bottom and top of each stretch, a post at each end,
+ * and mullions so no pane is wider than 1.2 m). A stretch too narrow for glass is all frame.
+ */
+export function glassPartition(
+  wallLength: number,
+  y0: number,
+  y1: number,
+  openings: readonly Opening[],
+  frame = GLASS_FRAME,
+): { panes: WallPiece[]; frame: WallPiece[] } {
+  const panes: WallPiece[] = [];
+  const bars: WallPiece[] = [];
+  for (const p of wallPieces(wallLength, y1, openings)) {
+    const lo = Math.max(y0, p.y0);
+    if (p.y1 - lo < 1e-6) continue;
+    const { u0, u1 } = p;
+    if (u1 - u0 <= 2 * frame + 0.01 || p.y1 - lo <= 2 * frame + 0.01) {
+      bars.push({ u0, u1, y0: lo, y1: p.y1 });
+      continue;
+    }
+    bars.push({ u0, u1, y0: lo, y1: lo + frame }, { u0, u1, y0: p.y1 - frame, y1: p.y1 });
+    const inner = u1 - u0 - 2 * frame;
+    const n = Math.max(1, Math.ceil((inner - 1e-6) / MAX_PANE));
+    const step = (inner - (n - 1) * frame) / n;
+    let u = u0;
+    for (let i = 0; i <= n; i++) {
+      bars.push({ u0: u, u1: u + frame, y0: lo + frame, y1: p.y1 - frame });
+      if (i < n)
+        panes.push({ u0: u + frame, u1: u + frame + step, y0: lo + frame, y1: p.y1 - frame });
+      u += frame + step;
+    }
+  }
+  return { panes, frame: bars };
+}
+
 export function openingsOnWall(level: Level, wallId: string): Opening[] {
   return Object.values(level.openings).filter((o) => o.wallId === wallId);
 }

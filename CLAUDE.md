@@ -44,6 +44,10 @@ your own PRs once CI is green, and keep going. The owner checks in now and then 
 - **Flow per feature:** spec (project-manager) → design (ux-reviewer, tech-lead for anything
   structural) → build with tests → reviews (tech-lead on the diff, ux-reviewer and
   qa-acceptance on the running app) → fix findings → PR → merge when green.
+- **Production deploys are authorised** (owner, 5 Nov 2026): deploy as needed without asking,
+  e.g. the API with `pnpm --filter @dhd/edge run deploy` (needs Docker running; note `run`:
+  plain `pnpm deploy` is pnpm's own command). Deploy the API before merging a web change that
+  needs it (a schema bump), then check production accepts it.
 - **Human-only actions** (secrets, accounts, billing, legal) and decisions only the owner can
   make: open a GitHub issue labelled `owner` (or say so in chat if issues can't be made), and
   carry on with other work. Stop only for an urgent blocker, with an issue saying so.

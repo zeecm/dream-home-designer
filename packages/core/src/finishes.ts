@@ -33,7 +33,31 @@ export const PAINTS: Finish[] = [
   { id: 'paint-charcoal', name: 'Charcoal', color: '#4b4e52', roughness: 0.85 },
 ];
 
-const all = new Map([...PAINTS, ...FLOOR_FINISHES].map((f) => [f.id, f]));
+/**
+ * Wallpapers for wall sides: patterns drawn in the browser (no downloads), tiled at their
+ * real size; `color` is the paper's main colour, for swatches and the plan.
+ */
+export const WALLPAPERS: Finish[] = [
+  { id: 'wallpaper-pinstripe', name: 'Pinstripe', color: '#e9e3d6', roughness: 0.85 },
+  { id: 'wallpaper-linen', name: 'Linen', color: '#e2dacb', roughness: 0.95 },
+  { id: 'wallpaper-grid', name: 'Fine grid', color: '#eef0ef', roughness: 0.85 },
+  { id: 'wallpaper-herringbone', name: 'Herringbone', color: '#d9cfbf', roughness: 0.85 },
+  { id: 'wallpaper-botanical', name: 'Botanical', color: '#dfe6da', roughness: 0.85 },
+  { id: 'wallpaper-brick', name: 'White brick', color: '#ece8e1', roughness: 0.95 },
+  { id: 'wallpaper-fluted', name: 'Fluted wood', color: '#b98c5f', roughness: 0.6 },
+  { id: 'wallpaper-terrazzo', name: 'Terrazzo', color: '#e8e4dc', roughness: 0.4 },
+];
 
-/** A finish by id, for floors, ceilings and wall sides. */
-export const finish = (id: string): Finish | undefined => all.get(id);
+/** A paint mixed to any colour: its id carries the colour, `paint-#rrggbb`. */
+export const customPaint = (hex: string): string => `paint-${hex.toLowerCase()}`;
+const CUSTOM = /^paint-(#[0-9a-f]{6})$/;
+
+const all = new Map([...PAINTS, ...FLOOR_FINISHES, ...WALLPAPERS].map((f) => [f.id, f]));
+
+/** A finish by id, for floors, ceilings and wall sides (a custom paint too). */
+export const finish = (id: string): Finish | undefined => {
+  const known = all.get(id);
+  if (known) return known;
+  const hex = CUSTOM.exec(id)?.[1];
+  return hex ? { id, name: `Colour ${hex}`, color: hex, roughness: 0.9 } : undefined;
+};

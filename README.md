@@ -31,22 +31,33 @@ for any plan.
 - Sharing (view or edit links), downloads (PNG, print, GLB, project file), version history.
 - Go API on Cloudflare Containers with R2 storage, rate limits and a daily cap; Google
   sign-in built, waiting for the owner's keys.
+- Walk-through: a 110° field of view on every screen (60–120°), touch look that turns the
+  way you swipe, and a look stick.
+- Glass walls, half walls (with fixed glass above), and doors that slide, fold, go into a
+  pocket or open double, animated in the walk-through.
+  [spec](docs/specs/wall-and-door-types.md)
+- People for scale (a person and a child) in the furniture catalogue.
+- Any wall colour (a colour picker) and eight wallpapers.
+- AI with your own key (Claude, OpenAI or Gemini): trace walls from a plan image, looked over
+  before it goes in. [spec](docs/specs/ai-layouts.md)
+- Photo-real renders of any 3D or walk-through view, with your own OpenAI or Gemini key.
+- AI suggested layouts from a short brief: up to three, checked against what HDB lets you
+  change, one click to make one the renovation.
+- Structural and household-shelter walls marked (hatched), with hacking warnings: shelter
+  walls can't be changed in a renovation, structural ones warn.
+  [spec](docs/specs/structural-walls.md)
+- Clearance checks: room to open wardrobes, drawers, fridge and cabinets, to sit at a desk
+  and get into bed; door swings, overlaps and pieces in walls, shown in red as you arrange.
+  [spec](docs/specs/clearance-checks.md)
 
 ### In progress
-- Walk-through: a realistic 110° field of view on every screen (60–120°), touch look that
-  turns the way you swipe, and a look stick.
+- Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
 
 ### Planned
-1. Sliding, pocket, bi-fold and folding glass doors (animated); half walls; glass walls.
-   [spec](docs/specs/wall-and-door-types.md)
-2. AI with your own key (Claude, OpenAI, Gemini): trace walls from a plan image.
-   [spec](docs/specs/ai-layouts.md)
-3. AI suggested layouts from a short brief, compared as before and after.
-4. Structural and household-shelter walls marked, with hacking warnings.
-5. Live clearance and furniture-fit checks.
-6. Carpentry builder and a renovation cost estimate.
-7. "My furniture" and a delivery-path fit check.
-8. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
+1. Carpentry builder and a renovation cost estimate.
+2. "My furniture" and a delivery-path fit check.
+3. Clearance checks, slice 2: walkways from the main door, dining chairs, labels on the plan.
+4. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
 
 ## What it does
 

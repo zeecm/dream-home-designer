@@ -21,10 +21,11 @@ import {
   useState,
 } from 'react';
 import * as THREE from 'three';
+import { RenderDialog } from './ai/RenderDialog';
 import { useEditor } from './editor';
 import { registerScene3d } from './exports';
 import { configureLoader, fetchUploaded } from './models';
-import { useLevel, useProject } from './store';
+import { useLevel, useProject, useStore } from './store';
 import { Joystick } from './walk/Joystick';
 import { MiniMap } from './walk/MiniMap';
 import { WalkControls, type WalkPose } from './walk/WalkControls';
@@ -450,6 +451,8 @@ export function Viewport() {
   const { startWalk, stopWalk } = useEditor.getState();
   // Comparing a renovation's before and after, side by side across a divider.
   const [comparing, setComparing] = useState(false);
+  const [rendering, setRendering] = useState(false);
+  const viewer = useStore((st) => st.role === 'viewer');
   const [split, setSplit] = useState(0.5);
   const splitRef = useRef(0.5);
   splitRef.current = split;
@@ -591,12 +594,26 @@ export function Viewport() {
         )}
       </Canvas>
       <SunControl walking={walking} />
+      {rendering && <RenderDialog onClose={() => setRendering(false)} />}
       {walking ? (
         <>
           <button type="button" className="btn viewport-action" onClick={stopWalk}>
             Leave walk
           </button>
           <SoundToggle />
+          {!coarsePointer() && !viewer && (
+            <button
+              type="button"
+              className="btn viewport-render viewport-render-walk"
+              onClick={() => {
+                // The mouse back from the walk, to use the dialog.
+                if (document.pointerLockElement) document.exitPointerLock();
+                setRendering(true);
+              }}
+            >
+              Photo-real render
+            </button>
+          )}
           {level && <MiniMap level={level} pose={pose} />}
           {coarsePointer() && (
             <>
@@ -636,6 +653,16 @@ export function Viewport() {
               {compare ? 'Stop comparing' : 'Compare before and after'}
             </button>
           )}
+          {hasWalls && !viewer && (
+            <button
+              type="button"
+              className={`btn viewport-render${versions ? ' viewport-render-low' : ''}`}
+              onClick={() => setRendering(true)}
+            >
+              Photo-real render
+            </button>
+          )}
+
           <p className="viewport-hint">
             {coarsePointer()
               ? 'Drag to orbit · pinch to zoom · two fingers to pan'

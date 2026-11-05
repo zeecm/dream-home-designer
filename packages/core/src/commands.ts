@@ -16,6 +16,7 @@ import {
   type Vec2,
   Wall,
   isBoundary,
+  isHalfWall,
 } from './schema';
 import { projectOnSegment, segmentIntersection } from './snap';
 import { endCapture, reclampOpenings, splitWallAt } from './topology';
@@ -267,6 +268,8 @@ const WallPatch = Wall.pick({
   materialRight: true,
   kind: true,
   side: true,
+  build: true,
+  glassAbove: true,
 }).partial();
 export type WallPatch = z.input<typeof WallPatch>;
 
@@ -282,6 +285,10 @@ export function updateWall(levelId: string, wallId: string, patch: WallPatch): C
       if ('height' in patch && patch.height === undefined) delete w.height;
       if ('side' in patch && patch.side === undefined) delete w.side; // centred on its line
       if (w.kind === 'wall') delete w.kind; // absent means a wall
+      if (w.build === 'solid') delete w.build; // absent means solid
+      // Glass above anything but a half wall (a full wall, glass, a boundary) is nothing.
+      if (!w.glassAbove || !isHalfWall(w, level(d, levelId).ceilingHeight)) delete w.glassAbove;
+      if (w.kind === 'boundary') delete w.build;
       if (w.kind === 'boundary') {
         delete w.side; // a line has no faces to put to one side
         // A boundary has nothing to put a door or window in.
@@ -398,8 +405,17 @@ export function updateOpening(levelId: string, openingId: string, patch: Opening
       }
       Object.assign(o, p);
       if ('swing' in patch && patch.swing === undefined) delete o.swing;
-      if (o.kind !== 'door') delete o.swing;
-      else o.swing ??= 'leftIn';
+      if (o.kind !== 'door') {
+        delete o.swing;
+        // How a door opens means nothing to a window or a passage.
+        for (const k of ['style', 'panels', 'glazed', 'stack'] as const) delete o[k];
+      } else o.swing ??= 'leftIn';
+      if (o.style === 'swing') delete o.style; // absent means a swing door
+      // A count only where it varies; an explicit count left from another style goes.
+      if (o.style !== 'sliding' && o.style !== 'bifold' && o.style !== 'folding') delete o.panels;
+      for (const k of ['panels', 'glazed', 'stack'] as const) {
+        if (k in patch && patch[k] === undefined) delete o[k];
+      }
       if (o.kind !== 'window') o.sill = 0;
       o.t = clampOpeningT(length, o.width, o.t);
     },

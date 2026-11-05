@@ -54,10 +54,9 @@ test('paint each side of a wall, and pick a floor finish', async ({ page }) => {
   const sage = page.getByRole('button', { name: 'Paint, Main bedroom side: Sage' });
   await sage.click();
   await expect(sage).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('button', { name: 'Paint, Bedroom side: White' })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  );
+  await expect(
+    page.getByRole('button', { name: 'Paint, Bedroom side: White', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('Escape');
   await page.locator('[data-hit="room:rm_main-bedroom"]').click({ force: true });
   await page.getByLabel('Floor', { exact: true }).selectOption('marble');

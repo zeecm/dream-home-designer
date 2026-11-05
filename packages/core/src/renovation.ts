@@ -4,7 +4,18 @@ import { placeLabel, pointInPolygon } from './geometry';
 import type { Command } from './history';
 import { AFTER_SUFFIX, type Variant } from './levels';
 import { roomArea, roomShapes, syncRooms } from './rooms';
-import { type Level, type Vec2, type Wall, isBoundary, wallFaces } from './schema';
+import {
+  type Level,
+  type Project,
+  type Vec2,
+  type Wall,
+  hasGlassAbove,
+  isBoundary,
+  isGlass,
+  isHalfWall,
+  wallFaces,
+} from './schema';
+import { type WallStatus, wallStatuses } from './structural';
 import { reclampOpenings } from './topology';
 
 /**
@@ -363,6 +374,8 @@ interface Line {
   d: Vec2;
   length: number;
   height: number;
+  /** Fixed glass over it, a half wall. */
+  glassAbove: boolean;
   /** Face offsets along the left normal (-d.y, d.x): the left face at +left, the right at -right. */
   left: number;
   right: number;
@@ -370,7 +383,17 @@ interface Line {
   holes: [number, number][];
 }
 
+const linesCache = new WeakMap<Level, Line[]>();
+
 function linesOf(level: Level): Line[] {
+  const cached = linesCache.get(level);
+  if (cached) return cached;
+  const out = linesOfUncached(level);
+  if (!isDraft(level) && Object.isFrozen(level)) linesCache.set(level, out);
+  return out;
+}
+
+function linesOfUncached(level: Level): Line[] {
   const out: Line[] = [];
   for (const wall of Object.values(level.walls)) {
     if (isBoundary(wall)) continue;
@@ -392,6 +415,7 @@ function linesOf(level: Level): Line[] {
       d: { x: (b.x - a.x) / length, y: (b.y - a.y) / length },
       length,
       height: wall.height ?? level.ceilingHeight,
+      glassAbove: hasGlassAbove(wall, level.ceilingHeight),
       left,
       right,
       holes,
@@ -427,8 +451,11 @@ function overlap(line: Line, other: Line): [number, number] | null {
   const left = same ? other.left : other.right;
   const right = same ? other.right : other.left;
   if (Math.abs(left - line.left) > EPS || Math.abs(right - line.right) > EPS) return null;
-  // Cut down to a half-height wall is a hack too.
+  // Cut down to a half-height wall is a hack too, as is a wall swapped for glass, or glass
+  // put up over a half wall.
   if (Math.abs(other.height - line.height) > EPS) return null;
+  if (isGlass(other.wall) !== isGlass(line.wall)) return null;
+  if (other.glassAbove !== line.glassAbove) return null;
   const t = (p: Vec2) => (p.x - line.a.x) * line.d.x + (p.y - line.a.y) * line.d.y;
   const t0 = t(other.a);
   const t1 = t0 + (same ? other.length : -other.length);
@@ -539,10 +566,24 @@ export interface ChangePlace {
 
 type OpeningKind = 'door' | 'window' | 'passage';
 
+/** A change to a wall HDB guards: the household shelter's, or a structural one. */
+export type Guard = 'shelter' | 'structural';
+
 /** One change a renovation makes, placed by the rooms it touches. */
-export type RenovationChange = ChangePlace &
-  (
-    | { kind: 'hack' | 'build'; length: number }
+export type RenovationChange = ChangePlace & {
+  /** It touches a wall of the flat as it is that is structural (or probably so), or the shelter's. */
+  guard?: Guard;
+} & (
+    | {
+        kind: 'hack' | 'build';
+        length: number;
+        /**
+         * What is built, where it isn't a full wall: a glass partition, or a half wall (with
+         * fixed glass above it, or not) of `height`.
+         */
+        what?: 'glass' | 'half' | 'half-glass';
+        height?: number;
+      }
     | {
         kind: 'opening';
         /** 'with-wall': it went with the wall it was in, hacked. */
@@ -550,7 +591,18 @@ export type RenovationChange = ChangePlace &
         opening: OpeningKind;
         width: number;
         /** For one changed: what it was, where that differs, and whether it moved. */
-        before?: { opening?: OpeningKind; width?: number; height?: number; sill?: number };
+        before?: {
+          opening?: OpeningKind;
+          width?: number;
+          height?: number;
+          sill?: number;
+          /** How a door opened, where that changed (swing to bi-fold, solid to glass). */
+          style?: string;
+          glazed?: string;
+        };
+        /** How the door opens now, where that changed. */
+        style?: string;
+        glazed?: string;
         height?: number;
         sill?: number;
         moved?: boolean;
@@ -625,14 +677,100 @@ function besideOpening(level: Level, id: string): Vec2[] {
   ];
 }
 
-/** Whether a wall of `level` runs through `c` along `d` (so an opening there has a wall). */
-function wallRunsThrough(level: Level, c: Vec2, d: Vec2): boolean {
-  return linesOf(level).some((l) => {
+/** The wall of `level` that runs through `c` along `d` (so an opening there has a wall). */
+function wallThrough(level: Level, c: Vec2, d: Vec2): Wall | undefined {
+  return linesOf(level).find((l) => {
     if (Math.abs(l.d.x * d.y - l.d.y * d.x) > 1e-6) return false;
     const t = (c.x - l.a.x) * l.d.x + (c.y - l.a.y) * l.d.y;
     const off = Math.abs((c.x - l.a.x) * -l.d.y + (c.y - l.a.y) * l.d.x);
     return off < 0.01 && t > -EPS && t < l.length + EPS;
-  });
+  })?.wall;
+}
+const wallRunsThrough = (level: Level, c: Vec2, d: Vec2) => !!wallThrough(level, c, d);
+
+const guardOf = (s: WallStatus | undefined): Guard | undefined =>
+  s === 'shelter' ? 'shelter' : s ? 'structural' : undefined;
+
+/** The wall of the flat as it is that an opening of the renovation is cut into, if any. */
+function wallBefore(before: Level, after: Level, openingId: string): string | undefined {
+  const at = openingAt(after, openingId);
+  return at ? wallThrough(before, at.c, at.d)?.id : undefined;
+}
+
+/**
+ * Walls of the flat as it is (by id) that a renovation changes and HDB guards: the household
+ * shelter's, never to be changed, and structural ones (marked, or probably so), to warn
+ * about. A wall hacked, moved, thickened, cut down or made glass counts, as does an opening
+ * cut into it, closed up, moved, resized or restyled; paint, or a wall split in place, don't.
+ */
+export function renovationBreaches(
+  before: Level,
+  after: Level,
+  diff: RenovationDiff = renovationDiff(before, after),
+): { shelter: Set<string>; structural: Set<string> } {
+  const status = wallStatuses(before);
+  const shelter = new Set<string>();
+  const structural = new Set<string>();
+  const add = (id: string | undefined) => {
+    const g = guardOf(id ? status.get(id) : undefined);
+    if (id && g) (g === 'shelter' ? shelter : structural).add(id);
+  };
+  for (const s of diff.demolished) add(s.wallId);
+  for (const id of diff.openingsRemoved) add(before.openings[id]?.wallId);
+  for (const id of diff.openingsAdded) add(wallBefore(before, after, id));
+  // A door restyled or glazed differently, in the same place.
+  for (const o of Object.values(after.openings)) {
+    const was = before.openings[o.id];
+    if (!was || o.kind !== 'door' || was.kind !== 'door') continue;
+    if ((o.style ?? 'swing') !== (was.style ?? 'swing') || o.glazed !== was.glazed) {
+      add(wallBefore(before, after, o.id));
+    }
+  }
+  return { shelter, structural };
+}
+
+type Breaches = { shelter: Set<string>; structural: Set<string> };
+// By the flat as it is, then the renovation: the answer depends on both.
+const breachCache = new WeakMap<Level, WeakMap<Level, Breaches>>();
+
+/** Every level's breaches in a project (kept for frozen levels). */
+function projectBreaches(doc: Project): Breaches {
+  const shelter = new Set<string>();
+  const structural = new Set<string>();
+  for (const after of doc.renovation?.levels ?? []) {
+    const before = doc.levels.find((l) => after.id === `${l.id}${AFTER_SUFFIX}`);
+    if (!before) continue;
+    const frozen = Object.isFrozen(before) && Object.isFrozen(after);
+    let inner = frozen ? breachCache.get(before) : undefined;
+    let b = inner?.get(after);
+    if (!b) {
+      b = renovationBreaches(before, after);
+      if (frozen) {
+        if (!inner) {
+          inner = new WeakMap();
+          breachCache.set(before, inner);
+        }
+        inner.set(after, b);
+      }
+    }
+    for (const id of b.shelter) shelter.add(id);
+    for (const id of b.structural) structural.add(id);
+  }
+  return { shelter, structural };
+}
+
+/**
+ * What to do with an edit made in the renovation (`prev` to `next`): refuse it, when it
+ * changes a household shelter wall that wasn't changed already; warn, when it does so to a
+ * structural wall; or nothing.
+ */
+export function renovationGuard(prev: Project, next: Project): 'refuse' | 'warn' | null {
+  if (!next.renovation) return null;
+  const was = projectBreaches(prev);
+  const now = projectBreaches(next);
+  const added = (n: Set<string>, w: Set<string>) => [...n].some((id) => !w.has(id));
+  if (added(now.shelter, was.shelter)) return 'refuse';
+  return added(now.structural, was.structural) ? 'warn' : null;
 }
 
 /** A point well inside a room's floor (clear of its holes), as rooms are matched by. */
@@ -681,16 +819,39 @@ export function renovationChanges(
     name: (id) => after.rooms[afterOf.get(id) ?? '']?.name ?? before.rooms[id]?.name ?? '',
   };
   const out: RenovationChange[] = [];
+  type What = { what?: 'glass' | 'half' | 'half-glass'; height?: number };
+  const whatOf = (s: WallStretch): What => {
+    const w = after.walls[s.wallId];
+    if (!w) return {};
+    if (isGlass(w)) return { what: 'glass' };
+    if (isHalfWall(w, after.ceilingHeight)) {
+      const glass = hasGlassAbove(w, after.ceilingHeight);
+      return { what: glass ? 'half-glass' : 'half', height: w.height };
+    }
+    return {};
+  };
+  const status = wallStatuses(before);
+  const guard = (wallId: string | undefined) => {
+    const g = guardOf(wallId ? status.get(wallId) : undefined);
+    return g ? { guard: g } : {};
+  };
   const walls = (kind: 'hack' | 'build', rooms: Rooms, stretches: WallStretch[]) => {
-    const byPlace = new Map<string, { place: ChangePlace; length: number }>();
+    const byPlace = new Map<
+      string,
+      { place: ChangePlace; length: number; what: What; guard: { guard?: Guard } }
+    >();
     for (const s of stretches) {
       const place = placeOf(rooms, besideStretch(s));
-      const k = `${place.rooms.join('\u0000')}|${place.outside}`;
+      const what = kind === 'build' ? whatOf(s) : {};
+      const g = kind === 'hack' ? guard(s.wallId) : {};
+      const k = `${place.rooms.join('\u0000')}|${place.outside}|${what.what}|${what.height}|${g.guard}`;
       const cur = byPlace.get(k);
       if (cur) cur.length += s.length;
-      else byPlace.set(k, { place, length: s.length });
+      else byPlace.set(k, { place, length: s.length, what, guard: g });
     }
-    for (const { place, length } of byPlace.values()) out.push({ ...place, kind, length });
+    for (const { place, length, what, guard: g } of byPlace.values()) {
+      out.push({ ...place, kind, length, ...what, ...g });
+    }
   };
   walls('hack', inBefore, diff.demolished);
   walls('build', inAfter, diff.built);
@@ -701,7 +862,13 @@ export function renovationChanges(
     if (!o) continue;
     const was = diff.openingsRemoved.includes(id) ? before.openings[id] : undefined;
     const place = placeOf(inAfter, besideOpening(after, id));
-    const base = { ...place, kind: 'opening' as const, opening: kindOf(o.kind), width: o.width };
+    const base = {
+      ...place,
+      kind: 'opening' as const,
+      opening: kindOf(o.kind),
+      width: o.width,
+      ...guard(wallBefore(before, after, id)),
+    };
     if (!was) {
       out.push({ ...base, change: 'added' });
       continue;
@@ -723,6 +890,30 @@ export function renovationChanges(
       moved: !!p0 && !!p1 && Math.hypot(p1.x - p0.x, p1.y - p0.y) > 0.01,
     });
   }
+  // The same door, opening another way or glazed differently (same place, same size).
+  for (const o of Object.values(after.openings)) {
+    const was = before.openings[o.id];
+    if (!was || diff.openingsAdded.includes(o.id) || o.kind !== 'door' || was.kind !== 'door') {
+      continue;
+    }
+    const style = (x: typeof o) => x.style ?? 'swing';
+    const glazed = (x: typeof o) => x.glazed ?? 'solid';
+    if (style(was) === style(o) && glazed(was) === glazed(o)) continue;
+    out.push({
+      ...placeOf(inAfter, besideOpening(after, o.id)),
+      kind: 'opening',
+      opening: 'door',
+      width: o.width,
+      ...guard(wallBefore(before, after, o.id)),
+      change: 'changed',
+      before: {
+        ...(style(was) !== style(o) ? { style: style(was) } : {}),
+        ...(glazed(was) !== glazed(o) ? { glazed: glazed(was) } : {}),
+      },
+      ...(style(was) !== style(o) ? { style: style(o) } : {}),
+      ...(glazed(was) !== glazed(o) ? { glazed: glazed(o) } : {}),
+    });
+  }
   for (const id of diff.openingsRemoved) {
     const o = before.openings[id];
     if (!o || diff.openingsAdded.includes(id)) continue;
@@ -733,6 +924,7 @@ export function renovationChanges(
       change: at && !wallRunsThrough(after, at.c, at.d) ? 'with-wall' : 'removed',
       opening: kindOf(o.kind),
       width: o.width,
+      ...guard(o.wallId),
     });
   }
   for (const r of Object.values(after.rooms)) {

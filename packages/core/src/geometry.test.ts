@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { hdb4RoomLevel, hdb4RoomProject } from './fixtures/hdb4room';
 import {
+  GLASS_FRAME,
+  glassPartition,
   labelPoint,
   levelBounds,
   placeLabel,
@@ -199,5 +201,48 @@ describe('placeLabel', () => {
     const tiny = square.map((v) => ({ x: v.x / 4, y: v.y / 4 }));
     const p = placeLabel(tiny, half);
     expect(pointInPolygon(p, tiny)).toBe(true);
+  });
+});
+
+describe('glassPartition', () => {
+  const door = {
+    id: 'd',
+    wallId: 'w',
+    kind: 'door' as const,
+    t: 0.5,
+    width: 0.9,
+    height: 2.1,
+    sill: 0,
+  };
+  it('frames each stretch around a door, with mullions so no pane is over 1.2 m', () => {
+    const { panes, frame } = glassPartition(4, 0, 2.6, [door]);
+    // Either side of the door (1.55 m each): two panes each; a transom over the door.
+    const full = panes.filter((p) => p.y0 < 0.1);
+    expect(full.length).toBe(4);
+    for (const p of panes) expect(p.u1 - p.u0).toBeLessThanOrEqual(1.2 + 1e-9);
+    const transom = panes.filter((p) => p.y0 > 2);
+    expect(transom.length).toBe(1);
+    expect(transom[0]?.u0).toBeCloseTo(1.55 + GLASS_FRAME);
+    // Panes and frame never overlap, and together fill each stretch's outline.
+    const area = (r: { u0: number; u1: number; y0: number; y1: number }) =>
+      (r.u1 - r.u0) * (r.y1 - r.y0);
+    const total = [...panes, ...frame].reduce((n, r) => n + area(r), 0);
+    expect(total).toBeCloseTo(4 * 2.6 - 0.9 * 2.1, 6);
+  });
+
+  it('puts fixed glass over a half wall, cut only by what reaches above it', () => {
+    const { panes } = glassPartition(3, 1, 2.6, [
+      door,
+      { ...door, id: 'w2', kind: 'window', sill: 0.2, height: 0.5, t: 0.2 },
+    ]);
+    for (const p of panes) expect(p.y0).toBeGreaterThanOrEqual(1);
+    // The low window doesn't reach the glass; the door cuts it.
+    expect(panes.some((p) => p.u0 < 1.05 && p.u1 > 1.95 && p.y1 < 2.1)).toBe(false);
+  });
+
+  it('makes a stretch too narrow for glass all frame', () => {
+    const { panes, frame } = glassPartition(0.06, 0, 2.6, []);
+    expect(panes).toEqual([]);
+    expect(frame).toEqual([{ u0: 0, u1: 0.06, y0: 0, y1: 2.6 }]);
   });
 });

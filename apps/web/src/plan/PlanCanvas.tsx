@@ -1,14 +1,20 @@
 import {
+  AFTER_SUFFIX,
   furnitureKind,
   furnitureLayer,
+  isGlass,
+  isHalfWall,
   levelBounds,
   planGeometry,
   siteOf,
   underlayToWorld,
+  wallStatus,
 } from '@dhd/core';
 import type { Vec2 } from '@dhd/core';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { TraceDraftLayer } from '../ai/DraftLayer';
 import { type PixelBox, inkBounds } from '../assets';
+import { ClearanceLayer } from '../clearance/clearance';
 import { type Tool, useEditor } from '../editor';
 import { currentLevel, useLevel, useProject, useStore } from '../store';
 import { Compass, describeNorth } from '../ui/Compass';
@@ -24,6 +30,7 @@ import {
   RoomLabels,
   VertexHandles,
   WallDimension,
+  WallTags,
   parseHit,
 } from './layers';
 import {
@@ -214,6 +221,22 @@ export function PlanCanvas() {
   const { setView, fitDone, requestFit } = useEditor.getState();
 
   const geom = useMemo(() => (level ? planGeometry(level) : null), [level]);
+  // Structural and shelter walls, judged on the flat as it is (walls new in the renovation
+  // on the renovation).
+  const before = project.levels.find(
+    (l) => !!level && (l.id === level.id || `${l.id}${AFTER_SUFFIX}` === level.id),
+  );
+  const guarded = useMemo(() => {
+    const out = new Set<string>();
+    if (!level) return out;
+    for (const [id, w] of Object.entries(level.walls)) {
+      // Glass, or cut down, it is no longer concrete to draw (in the renovation, say).
+      if (isGlass(w) || isHalfWall(w, level.ceilingHeight)) continue;
+      const s = before?.walls[id] ? wallStatus(before, id) : wallStatus(level, id);
+      if (s === 'structural' || s === 'shelter') out.add(id);
+    }
+    return out;
+  }, [level, before]);
   const underlay = project.underlay;
   const image = usePlanImage();
   const imageUrl = image.status === 'ready' ? image.url : null;
@@ -810,6 +833,7 @@ export function PlanCanvas() {
             <PlanShapes
               level={level}
               geom={geom}
+              guarded={guarded}
               interactive={
                 tool === 'select'
                   ? true
@@ -821,6 +845,8 @@ export function PlanCanvas() {
               }
             />
             <RenovationMarks />
+            <ClearanceLayer level={level} />
+            <TraceDraftLayer />
             <PlanHighlights
               level={level}
               geom={geom}
@@ -829,6 +855,7 @@ export function PlanCanvas() {
             />
           </g>
           <RoomLabels level={level} geom={geom} view={v} size={size} />
+          <WallTags level={level} geom={geom} view={v} size={size} />
           {selection?.kind === 'wall' && (
             <WallDimension level={level} geom={geom} view={v} size={size} wallId={selection.id} />
           )}

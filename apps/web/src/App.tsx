@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Viewport } from './Viewport';
 import { keepWithAccount, pullFromAccount, useAccount } from './account';
+import { TraceBar } from './ai/TracePanel';
 import { type Tool, type ViewMode, useEditor } from './editor';
 import { absorbLinkKey } from './keys';
 import { useModelSync } from './models';
@@ -17,7 +18,10 @@ const isTyping = (t: EventTarget | null) =>
   // While a dialog is open, keys are the dialog's, not the plan's shortcuts.
   !!document.querySelector('dialog[open]') ||
   (t instanceof HTMLElement &&
-    (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)));
+    (t.isContentEditable ||
+      ['TEXTAREA', 'SELECT'].includes(t.tagName) ||
+      // A checkbox or radio takes no typing: Ctrl+Z still undoes what it did.
+      (t instanceof HTMLInputElement && t.type !== 'checkbox' && t.type !== 'radio')));
 
 const VIEW_KEYS: Record<string, ViewMode> = { '1': 'plan', '2': 'split', '3': '3d' };
 
@@ -25,6 +29,8 @@ function useShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return; // the active tool already handled it
+      // A dialog open over the app has the keys (no undo behind it, say).
+      if (document.querySelector('dialog[open]')) return;
       const { undo, redo, save } = useStore.getState();
       const ed = useEditor.getState();
       const mod = e.metaKey || e.ctrlKey;
@@ -197,16 +203,18 @@ function Toast() {
   return (
     <output className="toast">
       <span>{toast.text}</span>
-      <button
-        type="button"
-        className="link-btn"
-        onClick={() => {
-          undo();
-          setShown(null);
-        }}
-      >
-        Undo
-      </button>
+      {toast.undo !== false && (
+        <button
+          type="button"
+          className="link-btn"
+          onClick={() => {
+            undo();
+            setShown(null);
+          }}
+        >
+          Undo
+        </button>
+      )}
     </output>
   );
 }
@@ -286,6 +294,7 @@ export function App() {
           <SampleBanner />
           <ViewOnlyBanner />
           <RenovationBar />
+          <TraceBar />
           <Guide />
           <Notice />
           <Toast />

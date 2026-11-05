@@ -1,21 +1,32 @@
 import {
+  AFTER_SUFFIX,
+  CLEARANCE_RULES,
+  type DoorStyle,
   FLOOR_FINISHES,
   type ItemPatch,
   type Level,
   type Opening,
   PAINTS,
+  WALLPAPERS,
   addItem,
   cornerSpot,
+  customPaint,
   deleteItem,
   deleteModel,
   deleteOpening,
   deleteRoom,
   deleteVertex,
   deleteWall,
+  doorPanels,
+  doorStyle,
   duplicateOf,
+  finish,
   furnitureKind,
   isBoundary,
+  isGlass,
+  isHalfWall,
   itemSize,
+  markStructural,
   modelUses,
   moveVertex,
   newId,
@@ -33,8 +44,17 @@ import {
   updateRoom,
   updateWall,
   wallLine,
+  wallStatus,
+  wallStatuses,
 } from '@dhd/core';
-import { useEffect, useRef, useState } from 'react';
+import { wallpaperCanvas } from '@dhd/render';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import {
+  itemIssueLines,
+  itemsWithIssues,
+  useClearanceIssues,
+  useClearanceOn,
+} from '../clearance/clearance';
 import { useEditor } from '../editor';
 import { roomsBeside } from '../plan/keyboard';
 import { OPENING_PRESETS, ROOM_NAMES } from '../presets';
@@ -49,6 +69,18 @@ import { icons } from './icons';
 const FLOORS = FLOOR_FINISHES.map((f) => ({ value: f.id, label: f.name }));
 
 /** A row of paint swatches for one side of a wall. */
+/** A wallpaper's swatch: its pattern as an image, drawn once. */
+const swatchCache = new Map<string, string>();
+function wallpaperSwatch(id: string): string | undefined {
+  let url = swatchCache.get(id);
+  if (!url) {
+    url = wallpaperCanvas(id, 96)?.toDataURL();
+    if (url) swatchCache.set(id, url);
+  }
+  return url;
+}
+
+/** Paint for a wall side: a paint, any colour, or a wallpaper. */
 function PaintField({
   label,
   value,
@@ -58,6 +90,8 @@ function PaintField({
   value: string;
   onPick: (id: string) => void;
 }) {
+  const current = finish(value);
+  const custom = !PAINTS.some((p) => p.id === value) && !WALLPAPERS.some((p) => p.id === value);
   return (
     <div className="field">
       <span className="field-label">{label}</span>
@@ -74,10 +108,43 @@ function PaintField({
             onClick={() => onPick(p.id)}
           />
         ))}
+        {/* Any colour: the browser's picker, behind a swatch showing the one chosen. */}
+        <label
+          className={`swatch swatch-any${custom ? ' swatch-on' : ''}`}
+          title="Any colour"
+          style={custom && current ? { background: current.color } : undefined}
+        >
+          <input
+            type="color"
+            aria-label={`${label}: any colour`}
+            value={current?.color ?? '#ffffff'}
+            onChange={(e) => onPick(customPaint(e.target.value))}
+          />
+        </label>
+      </span>
+      <span className="swatches swatches-paper" aria-label={`${label}: wallpaper`}>
+        {WALLPAPERS.map((p) => {
+          const url = wallpaperSwatch(p.id);
+          return (
+            <button
+              key={p.id}
+              type="button"
+              className="swatch"
+              style={{ background: url ? `url(${url}) center / cover` : p.color }}
+              aria-label={`${label}: ${p.name} wallpaper`}
+              title={`${p.name} wallpaper`}
+              aria-pressed={value === p.id}
+              onClick={() => onPick(p.id)}
+            />
+          );
+        })}
       </span>
     </div>
   );
 }
+
+/** Half-wall heights: a low divider, a counter, a bar top. */
+const HALF_WALLS = [0.9, 1, 1.2];
 
 const THICKNESS_HINT = 'HDB walls are usually 0.10 m inside and 0.20 m on the outside.';
 
@@ -244,6 +311,8 @@ function PlanSummary({ level }: { level: Level }) {
           <dd className="num">{count('window')}</dd>
         </div>
       </dl>
+      <StructuralSuggestion />
+      <ClearanceSummary />
       <RenovationSection />
       <LengthField
         label="Ceiling height"
@@ -313,6 +382,158 @@ function NorthField() {
   );
 }
 
+/** A piece's clearances: what's short, in words, or that there's room to use it. */
+function ItemClearances({ level, id }: { level: Level; id: string }) {
+  const on = useClearanceOn((s) => s.on);
+  const issues = useClearanceIssues();
+  const h = useId();
+  if (!on) return null;
+  const lines = itemIssueLines(level, id, issues);
+  // A rug or a lamp has nothing to check: say nothing rather than "room to use it".
+  if (!lines.length && !CLEARANCE_RULES[level.items[id]?.assetId ?? '']) return null;
+  return (
+    <section className="stack" aria-labelledby={h}>
+      <h3 id={h} className="section-title">
+        Clearances
+      </h3>
+      {lines.length ? (
+        <ul className="clearance-list warning-text">
+          {lines.map((l) => (
+            <li key={l}>{l}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="field-hint">Room to use it.</p>
+      )}
+    </section>
+  );
+}
+
+/** In the plan details: the switch, how many pieces have a problem, and a way to each. */
+function ClearanceSummary() {
+  const { on, set } = useClearanceOn();
+  const issues = useClearanceIssues();
+  const pieces = itemsWithIssues(issues);
+  const level = useLevel();
+  const next = () => {
+    const at = pieces.indexOf(useClearanceOn.getState().shown ?? '');
+    const id = pieces[(at + 1) % pieces.length];
+    const it = id ? level?.items[id] : undefined;
+    if (!id || !it) return;
+    useClearanceOn.setState({ shown: id });
+    const ed = useEditor.getState();
+    // Into view, at the zoom it was.
+    if (ed.view) ed.setView({ ...ed.view, cx: it.position.x, cy: it.position.z }, true);
+    ed.select({ kind: 'item', id });
+  };
+  return (
+    <div className="field">
+      <label className="check-row">
+        <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} />
+        <span>Clearance checks</span>
+      </label>
+      {on && pieces.length > 0 && (
+        <div className="note structural-guess">
+          <span className="warning-text">
+            {pieces.length === 1
+              ? '1 piece is short of room'
+              : `${pieces.length} pieces are short of room`}{' '}
+            or in the way.
+          </span>
+          <button type="button" className="btn btn-small" onClick={next}>
+            Show next
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * In the flat as it is: walls thick enough to be structural that nobody has marked, to mark
+ * all at once (one undo step).
+ */
+function StructuralSuggestion() {
+  const dispatch = useStore((s) => s.dispatch);
+  const before = useEditor((s) => s.variant) === 'before';
+  const level = useLevel();
+  const likely = useMemo(
+    () =>
+      level ? [...wallStatuses(level)].filter(([, s]) => s === 'likely').map(([id]) => id) : [],
+    [level],
+  );
+  if (!before || !likely.length) return null;
+  return (
+    <div className="note structural-guess">
+      <span>
+        {likely.length === 1 ? '1 wall looks' : `${likely.length} walls look`} structural (200 mm or
+        thicker).
+      </span>
+      <button
+        type="button"
+        className="btn btn-small"
+        onClick={() => dispatch(markStructural(likely, true))}
+      >
+        Mark {likely.length === 1 ? 'it' : 'them'}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Structural or not: a switch, a suggestion for a thick wall nobody has marked, and the
+ * household shelter's walls shown as structural for good. Judged on the flat as it is.
+ */
+function StructuralField({ level, id }: { level: Level; id: string }) {
+  const dispatch = useStore((s) => s.dispatch);
+  const before = useStore((s) =>
+    s.editor.doc.levels.find((l) => l.id === level.id || `${l.id}${AFTER_SUFFIX}` === level.id),
+  );
+  const base = before?.walls[id] ? before : level;
+  const status = wallStatus(base, id);
+  const thickness = Math.round((base.walls[id]?.thickness ?? 0) * 1000);
+  return (
+    <div className="field">
+      <label className="check-row">
+        <input
+          type="checkbox"
+          checked={status === 'structural' || status === 'shelter'}
+          disabled={status === 'shelter'}
+          onChange={(e) => dispatch(markStructural([id], e.target.checked))}
+        />
+        <span>Structural wall</span>
+      </label>
+      {status === 'shelter' ? (
+        <p className="note warning-text">
+          A household shelter wall: HDB doesn’t allow it to be hacked, cut down or replaced.
+        </p>
+      ) : status === 'likely' ? (
+        <div className="note structural-guess">
+          <span>{thickness} mm thick, so probably structural.</span>
+          <span className="button-row">
+            <button
+              type="button"
+              className="btn btn-small"
+              onClick={() => dispatch(markStructural([id], true))}
+            >
+              Yes, structural
+            </button>
+            <button
+              type="button"
+              className="btn btn-small"
+              onClick={() => dispatch(markStructural([id], false))}
+            >
+              No
+            </button>
+          </span>
+        </div>
+      ) : (
+        <p className="field-hint">Load-bearing concrete. HDB plans draw these solid or hatched.</p>
+      )}
+    </div>
+  );
+}
+
 function WallInspector({ level, id }: { level: Level; id: string }) {
   const dispatch = useStore((s) => s.dispatch);
   const wall = level.walls[id];
@@ -320,6 +541,13 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
   const length = wallLine(level, wall).length;
   const onWall = Object.values(level.openings).filter((o) => o.wallId === id).length;
   const boundary = isBoundary(wall);
+  const glass = isGlass(wall);
+  // A wall lower than the ceiling: a half wall (counter or bar height).
+  const half = isHalfWall(wall, level.ceilingHeight);
+  const heightPreset =
+    wall.height === undefined
+      ? 'full'
+      : (HALF_WALLS.find((h) => Math.abs(h - (wall.height ?? 0)) < 0.004)?.toString() ?? '');
   // Near the middle, but beside a door or window rather than in it.
   const corner = cornerSpot(level, id);
   return (
@@ -340,6 +568,7 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
           isn’t built in 3D.
         </p>
       )}
+      {!boundary && <StructuralField level={level} id={id} />}
       {!boundary && onWall > 0 && (
         <p className="note">
           Making this a boundary removes its {onWall === 1 ? 'opening' : `${onWall} openings`}.
@@ -368,13 +597,36 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
               dispatch(updateWall(level.id, id, { side: v === 'centre' ? undefined : v }))
             }
           />
-          <WallPaint level={level} id={id} />
+          <div className="field">
+            <span className="field-label" aria-hidden="true">
+              Built of
+            </span>
+            <Segmented
+              fill
+              label="Built of"
+              value={glass ? 'glass' : 'solid'}
+              options={[
+                { value: 'solid', label: 'Solid', title: 'Brick or board, painted' },
+                { value: 'glass', label: 'Glass', title: 'A framed glass partition' },
+              ]}
+              onChange={(build) =>
+                dispatch(
+                  updateWall(level.id, id, {
+                    build,
+                    // A framed glass partition is 40–100 mm, whatever the wall was.
+                    ...(build === 'glass' && wall.thickness > 0.1 ? { thickness: 0.08 } : {}),
+                  }),
+                )
+              }
+            />
+          </div>
+          {!glass && <WallPaint level={level} id={id} />}
           <LengthField
             label="Thickness"
             value={wall.thickness}
             min={0.02}
             max={1}
-            hint={THICKNESS_HINT}
+            hint={glass ? 'Framed glass partitions are 40–100 mm.' : THICKNESS_HINT}
             onCommit={(v) =>
               v !== undefined && dispatch(updateWall(level.id, id, { thickness: v }))
             }
@@ -389,6 +641,43 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
             hint="Leave empty to follow the ceiling height."
             onCommit={(v) => dispatch(updateWall(level.id, id, { height: v }))}
           />
+          {!glass && (
+            <div className="field">
+              <span className="field-label" aria-hidden="true">
+                Half wall, mm
+              </span>
+              <Segmented
+                fill
+                label="Wall height: full, or a half wall"
+                value={heightPreset}
+                options={[
+                  { value: 'full', label: 'Full', title: 'Up to the ceiling' },
+                  ...HALF_WALLS.map((h) => ({
+                    value: String(h),
+                    label: String(Math.round(h * 1000)),
+                    title: `A half wall ${formatLength(h)} high`,
+                  })),
+                ]}
+                onChange={(v) =>
+                  dispatch(
+                    updateWall(level.id, id, { height: v === 'full' ? undefined : Number(v) }),
+                  )
+                }
+              />
+            </div>
+          )}
+          {!glass && half && (
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={!!wall.glassAbove}
+                onChange={(e) =>
+                  dispatch(updateWall(level.id, id, { glassAbove: e.target.checked }))
+                }
+              />
+              <span>Fixed glass above, up to the ceiling</span>
+            </label>
+          )}
         </>
       )}
       {onWall > 0 && (
@@ -418,8 +707,10 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
       <DeleteButton
         label={boundary ? 'Delete boundary' : 'Delete wall'}
         onClick={() => {
+          const was = useStore.getState().editor.doc;
           dispatch(deleteWall(level.id, id, level));
-          clear();
+          // Refused (a shelter wall in a renovation): still there, still selected.
+          if (useStore.getState().editor.doc !== was) clear();
         }}
       />
     </>
@@ -554,6 +845,8 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
   return (
     <>
       <Header title={kind?.name ?? 'Furniture'} onClose={clear} />
+      {/* First, so a phone's sheet shows it without scrolling. */}
+      <ItemClearances level={level} id={id} />
       <LengthField
         label="Width"
         value={size.w}
@@ -680,6 +973,9 @@ function OpeningInspector({ level, id }: { level: Level; id: string }) {
     dispatch(updateOpening(level.id, id, patch));
   const title = o.kind === 'door' ? 'Door' : o.kind === 'window' ? 'Window' : 'Opening';
   const swing = o.swing ?? 'leftIn';
+  const style = doorStyle(o);
+  // Leaves that slide or fold to one end (a double door has a hinge at each).
+  const stacks = style !== 'swing' && style !== 'double';
   return (
     <>
       <Header title={title} onClose={clear} />
@@ -750,20 +1046,32 @@ function OpeningInspector({ level, id }: { level: Level; id: string }) {
         hint="To the opening's centre."
         onCommit={(v) => v !== undefined && set({ t: v / length })}
       />
+      {o.kind === 'door' && <DoorStyleFields o={o} set={set} />}
       {o.kind === 'door' && (
         <div className="button-row">
-          <button
-            type="button"
-            className="btn"
-            onClick={() =>
-              set({
-                swing:
-                  `${swing.startsWith('left') ? 'right' : 'left'}${swing.endsWith('In') ? 'In' : 'Out'}` as Opening['swing'],
-              })
-            }
-          >
-            Flip hinge
-          </button>
+          {stacks ? (
+            <button
+              type="button"
+              className="btn"
+              title="Which end the leaves slide or fold to"
+              onClick={() => set({ stack: o.stack === 'b' ? 'a' : 'b' })}
+            >
+              Flip side
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn"
+              onClick={() =>
+                set({
+                  swing:
+                    `${swing.startsWith('left') ? 'right' : 'left'}${swing.endsWith('In') ? 'In' : 'Out'}` as Opening['swing'],
+                })
+              }
+            >
+              Flip hinge
+            </button>
+          )}
           <button
             type="button"
             className="btn"
@@ -785,6 +1093,103 @@ function OpeningInspector({ level, id }: { level: Level; id: string }) {
           clear();
         }}
       />
+    </>
+  );
+}
+
+const DOOR_STYLES: { value: DoorStyle; label: string; title: string }[] = [
+  { value: 'swing', label: 'Swing', title: 'One leaf on hinges' },
+  { value: 'double', label: 'Double', title: 'Two leaves, hinged at each side' },
+  { value: 'sliding', label: 'Sliding', title: 'Leaves slide along tracks' },
+  { value: 'pocket', label: 'Pocket', title: 'Slides into the wall' },
+  { value: 'bifold', label: 'Bi-fold', title: 'Two or four leaves fold to one side' },
+  { value: 'folding', label: 'Folding', title: 'A folding partition: a row of panels' },
+];
+
+/** How a door opens, how many leaves it has and whether they are glass. */
+function DoorStyleFields({
+  o,
+  set,
+}: {
+  o: Opening;
+  set: (patch: Parameters<typeof updateOpening>[2]) => void;
+}) {
+  const style = doorStyle(o);
+  const counted = style === 'sliding' || style === 'bifold' || style === 'folding';
+  const panels = doorPanels(o);
+  // No panel narrower than 25 cm.
+  const most = Math.max(1, Math.floor(o.width / 0.25));
+  const [min, max] =
+    style === 'bifold'
+      ? [2, most >= 4 ? 4 : 2] // in pairs
+      : style === 'sliding'
+        ? [1, Math.min(4, most)]
+        : [Math.min(3, most), Math.min(10, most)];
+  return (
+    <>
+      <div className="field">
+        <label className="field-label" htmlFor="door-style">
+          Opens by
+        </label>
+        <select
+          id="door-style"
+          className="input"
+          value={style}
+          onChange={(e) => set({ style: e.target.value as DoorStyle, panels: undefined })}
+        >
+          {DOOR_STYLES.map((d) => (
+            <option key={d.value} value={d.value} title={d.title}>
+              {d.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      {counted && (
+        <div className="field">
+          <span className="field-label" id="door-panels">
+            {style === 'folding' ? 'Panels' : 'Leaves'}
+          </span>
+          <fieldset className="stepper" aria-labelledby="door-panels">
+            <button
+              type="button"
+              className="btn"
+              aria-label="Fewer"
+              disabled={panels <= min}
+              onClick={() => set({ panels: Math.max(min, panels - (style === 'bifold' ? 2 : 1)) })}
+            >
+              −
+            </button>
+            <span className="num" aria-live="polite">
+              {panels}
+            </span>
+            <button
+              type="button"
+              className="btn"
+              aria-label="More"
+              disabled={panels >= max}
+              onClick={() => set({ panels: Math.min(max, panels + (style === 'bifold' ? 2 : 1)) })}
+            >
+              +
+            </button>
+          </fieldset>
+        </div>
+      )}
+      <div className="field">
+        <span className="field-label" aria-hidden="true">
+          Leaves of
+        </span>
+        <Segmented
+          fill
+          label="Leaves of"
+          value={o.glazed ?? 'solid'}
+          options={[
+            { value: 'solid', label: 'Solid' },
+            { value: 'clear', label: 'Glass', title: 'Clear glass' },
+            { value: 'frosted', label: 'Frosted', title: 'Frosted or fluted glass' },
+          ]}
+          onChange={(g) => set({ glazed: g === 'solid' ? undefined : g })}
+        />
+      </div>
     </>
   );
 }

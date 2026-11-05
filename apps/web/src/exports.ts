@@ -58,6 +58,8 @@ async function withView<T>(need: 'plan' | '3d', fn: () => Promise<T>): Promise<T
 
 /** Styles the plan's stylesheet gives its shapes, copied onto them for a standalone SVG. */
 const STYLE_PROPS = [
+  // Strokes that keep their width at any zoom (door leaves, the glass pane line).
+  'vector-effect',
   'fill',
   'fill-opacity',
   'stroke',
@@ -108,7 +110,16 @@ async function planPng(scale = 3): Promise<Blob> {
   const w = svg.width.baseVal.value;
   const h = svg.height.baseVal.value;
   const copy = svg.cloneNode(true) as SVGSVGElement;
-  inlineStyles(svg, copy);
+  // In the light theme's colours, whatever the screen's: a picture on white paper.
+  const root = document.documentElement;
+  const theme = root.dataset.theme;
+  root.dataset.theme = 'light';
+  try {
+    inlineStyles(svg, copy);
+  } finally {
+    if (theme === undefined) delete root.dataset.theme;
+    else root.dataset.theme = theme;
+  }
   // Corner handles, the grid and the north arrow's button aren't part of the drawing.
   for (const el of copy.querySelectorAll('.vertices, [data-export="skip"]')) el.remove();
   const grid = copy.querySelector('rect[fill="url(#grid-minor)"]');
@@ -197,9 +208,9 @@ export function registerScene3d(s: Scene3d | null) {
   scene3d = s;
 }
 
-export async function download3dImage() {
-  const name = useStore.getState().editor.doc.name;
-  const png = await withView('3d', async () => {
+/** The 3D view as it is now (the orbit view, or the walk), as a PNG. */
+export async function capture3d(): Promise<Blob> {
+  return withView('3d', async () => {
     await settle(10); // models and shadows settle
     const s = scene3d;
     if (!s) throw new Error('The 3D view isn’t on screen.');
@@ -209,7 +220,11 @@ export async function download3dImage() {
       s.canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('No picture'))), 'image/png'),
     );
   });
-  download(png, `${fileStem(name)}-3d.png`);
+}
+
+export async function download3dImage() {
+  const name = useStore.getState().editor.doc.name;
+  download(await capture3d(), `${fileStem(name)}-3d.png`);
 }
 
 /** The flat in 3D as a GLB file, for other 3D apps. */

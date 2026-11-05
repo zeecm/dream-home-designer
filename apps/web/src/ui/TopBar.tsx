@@ -1,6 +1,7 @@
 import { renameProject } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { signInUrl, useAccount } from '../account';
+import { AiSettingsDialog } from '../ai/AiSettingsDialog';
 import { type ViewMode, useEditor } from '../editor';
 import {
   download3dImage,
@@ -71,6 +72,7 @@ function ProjectName() {
 function ProjectMenu() {
   const [open, setOpen] = useState(false);
   const [managing, setManaging] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
   const [history, setHistory] = useState(false);
   // Past versions live on the server, and a view-only link doesn't see them.
   const canHistory = useStore((s) => !!s.backend?.versions && s.role !== 'viewer');
@@ -167,6 +169,9 @@ function ProjectMenu() {
           <button type="button" onClick={run(() => setManaging(true))}>
             Manage your plans…
           </button>
+          <button type="button" onClick={run(() => setAiOpen(true))}>
+            AI assistant…
+          </button>
           <a className="menu-link" href="/welcome/">
             About Dream Home
           </a>
@@ -184,6 +189,7 @@ function ProjectMenu() {
         }}
       />
       {managing && <PlansDialog onClose={() => setManaging(false)} />}
+      {aiOpen && <AiSettingsDialog onClose={() => setAiOpen(false)} />}
       {history && <HistoryDialog onClose={() => setHistory(false)} />}
     </div>
   );

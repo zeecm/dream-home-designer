@@ -8,6 +8,7 @@ import {
   startRenovation,
 } from '@dhd/core';
 import { useMemo, useState } from 'react';
+import { LayoutsDialog } from '../ai/LayoutsDialog';
 import { useEditor } from '../editor';
 import { pts } from '../plan/layers';
 import { useProject, useStore } from '../store';
@@ -48,10 +49,45 @@ const an = (w: string) => `${/^[aeiou]/.test(w) ? 'an' : 'a'} ${w}`;
 
 /** What a change is, in words. */
 export function changeText(c: RenovationChange): string {
+  const text = changeWords(c);
+  if (c.guard === 'shelter') return `${text} (household shelter: HDB doesn’t allow this)`;
+  return c.guard === 'structural' ? `${text} (structural)` : text;
+}
+
+/** How many changes touch structural walls, as a line to put first; null for none. */
+export function guardBanner(changes: RenovationChange[]): string | null {
+  const shelter = changes.filter((c) => c.guard === 'shelter').length;
+  const n = changes.filter((c) => c.guard === 'structural').length;
+  const lines = [
+    shelter &&
+      `${shelter} ${shelter === 1 ? 'change touches' : 'changes touch'} the household shelter, which HDB doesn’t allow.`,
+    n &&
+      `${n} ${n === 1 ? 'change touches' : 'changes touch'} structural walls. Check with HDB before you plan on ${n === 1 ? 'it' : 'them'}.`,
+  ].filter(Boolean);
+  return lines.length ? lines.join(' ') : null;
+}
+
+/** Wall hacked, or cut into for a new door or opening: work a permit covers. */
+const needsPermit = (changes: RenovationChange[]) =>
+  changes.some(
+    (c) =>
+      c.kind === 'hack' ||
+      (c.kind === 'opening' && c.change !== 'removed' && c.change !== 'with-wall'),
+  );
+
+export const PERMIT_NOTE =
+  'Hacking any wall needs an HDB renovation permit, applied for by your HDB-registered contractor.';
+
+function changeWords(c: RenovationChange): string {
   switch (c.kind) {
     case 'hack':
       return `Hack ${formatLength(c.length)} of wall`;
     case 'build':
+      if (c.what === 'glass') return `Put up ${formatLength(c.length)} of glass partition`;
+      if (c.what && c.height !== undefined) {
+        const glass = c.what === 'half-glass' ? ', with glass above' : '';
+        return `Build ${formatLength(c.length)} of half wall, ${formatLength(c.height)} high${glass}`;
+      }
       return `Build ${formatLength(c.length)} of wall`;
     case 'opening': {
       const what = OPENING_NAMES[c.opening];
@@ -72,6 +108,22 @@ export function changeText(c: RenovationChange): string {
       if (b.sill !== undefined && c.sill !== undefined)
         parts.push(`sill ${c.sill > b.sill ? 'raised' : 'lowered'} to ${formatLength(c.sill)}`);
       if (c.moved) parts.push('moved');
+      const styleName = (st: string) =>
+        ({
+          swing: 'swing',
+          double: 'double',
+          sliding: 'sliding',
+          pocket: 'pocket',
+          bifold: 'bi-fold',
+          folding: 'folding',
+        })[st] ?? st;
+      if (b.style && c.style) parts.push(`from ${styleName(b.style)} to ${styleName(c.style)}`);
+      if (b.glazed && c.glazed)
+        parts.push(
+          c.glazed === 'solid'
+            ? 'solid leaves'
+            : `${c.glazed === 'clear' ? 'glass' : 'frosted glass'} leaves`,
+        );
       const head = b.opening ? `${cap(OPENING_NAMES[b.opening])} made ${an(what)}` : What;
       return parts.length ? `${head}${b.opening ? ',' : ''} ${parts.join(', ')}` : head;
     }
@@ -102,9 +154,12 @@ function byPlace(changes: RenovationChange[]): { place: string; items: string[] 
 
 /** The renovation's changes as plain text, a line per place, to send to a contractor. */
 export function changesAsText(changes: RenovationChange[]): string {
-  return byPlace(changes)
-    .map((g) => `${g.place}: ${g.items.join('; ')}`)
-    .join('\n');
+  const banner = guardBanner(changes);
+  const lines = byPlace(changes).map((g) => `${g.place}: ${g.items.join('; ')}`);
+  const hacks = needsPermit(changes);
+  return [...(banner ? [banner, ''] : []), ...lines, ...(hacks ? ['', PERMIT_NOTE] : [])].join(
+    '\n',
+  );
 }
 
 /** The changes, room by room, with a button to copy them as text. */
@@ -139,6 +194,9 @@ function ChangeList({ changes }: { changes: RenovationChange[] }) {
           {copied ?? 'Copy list'}
         </button>
       </span>
+      {guardBanner(changes) && (
+        <p className="note warning-text reno-guard">{guardBanner(changes)}</p>
+      )}
       <ul>
         {byPlace(changes).map((g) => (
           <li key={g.place}>
@@ -152,6 +210,7 @@ function ChangeList({ changes }: { changes: RenovationChange[] }) {
           </li>
         ))}
       </ul>
+      {needsPermit(changes) && <p className="field-hint">{PERMIT_NOTE}</p>}
     </div>
   );
 }
@@ -291,6 +350,7 @@ export function RenovationSection() {
         >
           Plan a renovation
         </button>
+        <SuggestLayouts />
       </section>
     );
   }
@@ -362,6 +422,22 @@ export function RenovationSection() {
           Discard the renovation
         </button>
       </span>
+      <SuggestLayouts />
     </section>
+  );
+}
+
+/** Opens the suggested layouts (AI, with the person's key). */
+function SuggestLayouts() {
+  const [open, setOpen] = useState(false);
+  const viewer = useStore((s) => s.role === 'viewer');
+  if (viewer) return null;
+  return (
+    <>
+      <button type="button" className="btn" onClick={() => setOpen(true)}>
+        Suggest layouts with AI
+      </button>
+      {open && <LayoutsDialog onClose={() => setOpen(false)} />}
+    </>
   );
 }
