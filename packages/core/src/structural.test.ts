@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { addOpening, deleteWall, updateWall } from './commands';
+import { addOpening, deleteWall, renameRoom, updateWall } from './commands';
 import { sampleFlatProject } from './fixtures/sampleFlat';
 import { type EditorDoc, dispatch, emptyHistory, undo } from './history';
 import { applyLayout, lockedWalls } from './layouts';
 import { AFTER_SUFFIX } from './levels';
-import { renovationBreaches, renovationChanges, startRenovation } from './renovation';
+import {
+  renovationBreaches,
+  renovationChanges,
+  renovationGuard,
+  startRenovation,
+} from './renovation';
 import type { Level } from './schema';
 import { markStructural, wallStatus, wallStatuses } from './structural';
 
@@ -141,5 +146,39 @@ describe('structural and shelter walls', () => {
     const u = undo(s);
     expect(flat(u).walls[plain]?.structural).toBe(false);
     expect(reno(u).walls[plain]?.structural).toBe(false);
+  });
+
+  it('guard: refuses a new shelter change, warns on a new structural one, else nothing', () => {
+    const s0 = renovating();
+    const shelter = wallOf(flat(s0), 'shelter');
+    const structural = wallOf(flat(s0), 'structural');
+    const plain = plainWall(flat(s0));
+    const refused = dispatch(s0, deleteWall(A(), shelter, reno(s0)));
+    expect(renovationGuard(s0.doc, refused.doc)).toBe('refuse');
+    const warned = dispatch(s0, deleteWall(A(), structural, reno(s0)));
+    expect(renovationGuard(s0.doc, warned.doc)).toBe('warn');
+    // Once warned, another edit isn't warned again.
+    const later = dispatch(warned, updateWall(A(), plain, { materialLeft: 'paint-sage' }));
+    expect(renovationGuard(warned.doc, later.doc)).toBeNull();
+  });
+
+  it('guard: judged on both versions, so a change to the flat as it is is seen', () => {
+    // A wall hacked in the renovation; then the room beside it renamed a shelter in the
+    // flat as it is (the renovation untouched). The next edit in the renovation, elsewhere,
+    // isn't refused: nothing new was changed.
+    const s0 = renovating();
+    const plain = 'w_bedroom_living-and-dining';
+    const s1 = dispatch(s0, deleteWall(A(), plain, reno(s0)));
+    const bedroom = Object.values(flat(s1).rooms).find((r) => r.name === 'Bedroom');
+    if (!bedroom) throw new Error('no bedroom');
+    const s2 = dispatch(s1, renameRoom(L, bedroom.id, 'HS'));
+    expect(renovationBreaches(flat(s2), reno(s2)).shelter.has(plain)).toBe(true);
+    const other = plainWall(flat(s2));
+    const s3 = dispatch(s2, updateWall(A(), other, { materialLeft: 'paint-sage' }));
+    expect(renovationGuard(s2.doc, s3.doc)).toBeNull();
+  });
+
+  it('marking writes both versions itself, so it is not carried over again', () => {
+    expect(markStructural(['x'], true).carry).toBe(false);
   });
 });

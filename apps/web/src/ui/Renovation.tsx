@@ -61,6 +61,14 @@ export function guardBanner(changes: RenovationChange[]): string | null {
   return `${n} ${n === 1 ? 'change touches' : 'changes touch'} structural walls. Check with HDB before you plan on ${n === 1 ? 'it' : 'them'}.`;
 }
 
+/** Wall hacked, or cut into for a new door or opening: work a permit covers. */
+const needsPermit = (changes: RenovationChange[]) =>
+  changes.some(
+    (c) =>
+      c.kind === 'hack' ||
+      (c.kind === 'opening' && c.change !== 'removed' && c.change !== 'with-wall'),
+  );
+
 export const PERMIT_NOTE =
   'Hacking any wall needs an HDB renovation permit, applied for by your HDB-registered contractor.';
 
@@ -142,7 +150,7 @@ function byPlace(changes: RenovationChange[]): { place: string; items: string[] 
 export function changesAsText(changes: RenovationChange[]): string {
   const banner = guardBanner(changes);
   const lines = byPlace(changes).map((g) => `${g.place}: ${g.items.join('; ')}`);
-  const hacks = changes.some((c) => c.kind === 'hack');
+  const hacks = needsPermit(changes);
   return [...(banner ? [banner, ''] : []), ...lines, ...(hacks ? ['', PERMIT_NOTE] : [])].join(
     '\n',
   );
@@ -196,7 +204,7 @@ function ChangeList({ changes }: { changes: RenovationChange[] }) {
           </li>
         ))}
       </ul>
-      {changes.some((c) => c.kind === 'hack') && <p className="field-hint">{PERMIT_NOTE}</p>}
+      {needsPermit(changes) && <p className="field-hint">{PERMIT_NOTE}</p>}
     </div>
   );
 }

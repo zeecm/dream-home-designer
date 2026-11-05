@@ -2,6 +2,8 @@ import {
   AFTER_SUFFIX,
   furnitureKind,
   furnitureLayer,
+  isGlass,
+  isHalfWall,
   levelBounds,
   planGeometry,
   siteOf,
@@ -226,7 +228,9 @@ export function PlanCanvas() {
   const guarded = useMemo(() => {
     const out = new Set<string>();
     if (!level) return out;
-    for (const id of Object.keys(level.walls)) {
+    for (const [id, w] of Object.entries(level.walls)) {
+      // Glass, or cut down, it is no longer concrete to draw (in the renovation, say).
+      if (isGlass(w) || isHalfWall(w, level.ceilingHeight)) continue;
       const s = before?.walls[id] ? wallStatus(before, id) : wallStatus(level, id);
       if (s === 'structural' || s === 'shelter') out.add(id);
     }

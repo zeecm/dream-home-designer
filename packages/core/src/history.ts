@@ -10,6 +10,11 @@ enablePatches();
 export interface Command {
   label: string;
   recipe: (draft: Draft<Project>) => void;
+  /**
+   * False for an edit that writes the renovation itself as well as the flat as it is, so it
+   * isn't carried over to the renovation again (and can't be held back there).
+   */
+  carry?: false;
 }
 
 export interface HistoryEntry {

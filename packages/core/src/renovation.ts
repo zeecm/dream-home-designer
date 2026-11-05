@@ -6,6 +6,7 @@ import { AFTER_SUFFIX, type Variant } from './levels';
 import { roomArea, roomShapes, syncRooms } from './rooms';
 import {
   type Level,
+  type Project,
   type Vec2,
   type Wall,
   hasGlassAbove,
@@ -382,7 +383,17 @@ interface Line {
   holes: [number, number][];
 }
 
+const linesCache = new WeakMap<Level, Line[]>();
+
 function linesOf(level: Level): Line[] {
+  const cached = linesCache.get(level);
+  if (cached) return cached;
+  const out = linesOfUncached(level);
+  if (!isDraft(level) && Object.isFrozen(level)) linesCache.set(level, out);
+  return out;
+}
+
+function linesOfUncached(level: Level): Line[] {
   const out: Line[] = [];
   for (const wall of Object.values(level.walls)) {
     if (isBoundary(wall)) continue;
@@ -716,6 +727,50 @@ export function renovationBreaches(
     }
   }
   return { shelter, structural };
+}
+
+type Breaches = { shelter: Set<string>; structural: Set<string> };
+// By the flat as it is, then the renovation: the answer depends on both.
+const breachCache = new WeakMap<Level, WeakMap<Level, Breaches>>();
+
+/** Every level's breaches in a project (kept for frozen levels). */
+function projectBreaches(doc: Project): Breaches {
+  const shelter = new Set<string>();
+  const structural = new Set<string>();
+  for (const after of doc.renovation?.levels ?? []) {
+    const before = doc.levels.find((l) => after.id === `${l.id}${AFTER_SUFFIX}`);
+    if (!before) continue;
+    const frozen = Object.isFrozen(before) && Object.isFrozen(after);
+    let inner = frozen ? breachCache.get(before) : undefined;
+    let b = inner?.get(after);
+    if (!b) {
+      b = renovationBreaches(before, after);
+      if (frozen) {
+        if (!inner) {
+          inner = new WeakMap();
+          breachCache.set(before, inner);
+        }
+        inner.set(after, b);
+      }
+    }
+    for (const id of b.shelter) shelter.add(id);
+    for (const id of b.structural) structural.add(id);
+  }
+  return { shelter, structural };
+}
+
+/**
+ * What to do with an edit made in the renovation (`prev` to `next`): refuse it, when it
+ * changes a household shelter wall that wasn't changed already; warn, when it does so to a
+ * structural wall; or nothing.
+ */
+export function renovationGuard(prev: Project, next: Project): 'refuse' | 'warn' | null {
+  if (!next.renovation) return null;
+  const was = projectBreaches(prev);
+  const now = projectBreaches(next);
+  const added = (n: Set<string>, w: Set<string>) => [...n].some((id) => !w.has(id));
+  if (added(now.shelter, was.shelter)) return 'refuse';
+  return added(now.structural, was.structural) ? 'warn' : null;
 }
 
 /** A point well inside a room's floor (clear of its holes), as rooms are matched by. */
