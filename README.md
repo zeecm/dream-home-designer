@@ -31,25 +31,26 @@ for any plan.
 - Sharing (view or edit links), downloads (PNG, print, GLB, project file), version history.
 - Go API on Cloudflare Containers with R2 storage, rate limits and a daily cap; Google
   sign-in built, waiting for the owner's keys.
+- Walk-through: a 110° field of view on every screen (60–120°), touch look that turns the
+  way you swipe, and a look stick.
+- Glass walls, half walls (with fixed glass above), and doors that slide, fold, go into a
+  pocket or open double, animated in the walk-through.
+  [spec](docs/specs/wall-and-door-types.md)
+- People for scale (a person and a child) in the furniture catalogue.
 
 ### In progress
-- Walk-through: a realistic 110° field of view on every screen (60–120°), touch look that
-  turns the way you swipe, and a look stick.
+- AI with your own key (Claude, OpenAI, Gemini): trace walls from a plan image.
+  [spec](docs/specs/ai-layouts.md)
 
 ### Planned
-1. Sliding, pocket, bi-fold and folding glass doors (animated); half walls; glass walls.
-   [spec](docs/specs/wall-and-door-types.md)
-2. AI with your own key (Claude, OpenAI, Gemini): trace walls from a plan image.
-   [spec](docs/specs/ai-layouts.md)
-3. A person in the 3D view for scale, moved like furniture.
-4. Any wall colour (a colour picker) and wallpapers.
-5. AI suggested layouts from a short brief, compared as before and after.
-6. Photo-real renders of a room from the 3D view, with your own AI key.
-7. Structural and household-shelter walls marked, with hacking warnings.
-8. Live clearance and furniture-fit checks.
-9. Carpentry builder and a renovation cost estimate.
-10. "My furniture" and a delivery-path fit check.
-11. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
+1. Any wall colour (a colour picker) and wallpapers.
+2. AI suggested layouts from a short brief, compared as before and after.
+3. Photo-real renders of a room from the 3D view, with your own AI key.
+4. Structural and household-shelter walls marked, with hacking warnings.
+5. Live clearance and furniture-fit checks.
+6. Carpentry builder and a renovation cost estimate.
+7. "My furniture" and a delivery-path fit check.
+8. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
 
 ## What it does
 
