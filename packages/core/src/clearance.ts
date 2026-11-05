@@ -12,28 +12,28 @@ export interface ClearanceRule {
   /** Which side needs room: in front (+y), each long side, or one long side at least. */
   side: 'front' | 'sides' | 'either-side';
   need: number;
-  /** What needs the room, for a sentence: "Wardrobe doors". */
+  /** What needs the room, with its verb, for a sentence: "Wardrobe doors need". */
   what: string;
 }
 
 /** Common practice (Neufert; NKBA for kitchens; BS 6465-2 for bathrooms). */
 export const CLEARANCE_RULES: Record<string, ClearanceRule> = {
-  wardrobe: { side: 'front', need: 0.6, what: 'Wardrobe doors' },
-  'chest-of-drawers': { side: 'front', need: 0.75, what: 'Drawers' },
-  'shelf-with-drawers': { side: 'front', need: 0.75, what: 'Drawers' },
-  desk: { side: 'front', need: 0.8, what: 'A desk chair' },
-  'metal-desk': { side: 'front', need: 0.8, what: 'A desk chair' },
-  fridge: { side: 'front', need: 0.9, what: 'The fridge door' },
-  'kitchen-base': { side: 'front', need: 0.9, what: 'Cabinet doors' },
-  'kitchen-sink': { side: 'front', need: 0.9, what: 'Standing at the sink' },
-  'kitchen-hob': { side: 'front', need: 0.9, what: 'Standing at the hob' },
-  washer: { side: 'front', need: 0.7, what: 'The washer door' },
-  toilet: { side: 'front', need: 0.6, what: 'The toilet' },
-  vanity: { side: 'front', need: 0.7, what: 'The basin' },
-  'bed-queen': { side: 'sides', need: 0.6, what: 'Getting into bed' },
-  'bed-king': { side: 'sides', need: 0.6, what: 'Getting into bed' },
-  'bed-single': { side: 'either-side', need: 0.6, what: 'Getting into bed' },
-  'bed-super-single': { side: 'either-side', need: 0.6, what: 'Getting into bed' },
+  wardrobe: { side: 'front', need: 0.6, what: 'Wardrobe doors need' },
+  'chest-of-drawers': { side: 'front', need: 0.75, what: 'Drawers need' },
+  'shelf-with-drawers': { side: 'front', need: 0.75, what: 'Drawers need' },
+  desk: { side: 'front', need: 0.8, what: 'A desk chair needs' },
+  'metal-desk': { side: 'front', need: 0.8, what: 'A desk chair needs' },
+  fridge: { side: 'front', need: 0.9, what: 'The fridge door needs' },
+  'kitchen-base': { side: 'front', need: 0.9, what: 'Cabinet doors need' },
+  'kitchen-sink': { side: 'front', need: 0.9, what: 'Standing at the sink needs' },
+  'kitchen-hob': { side: 'front', need: 0.9, what: 'Standing at the hob needs' },
+  washer: { side: 'front', need: 0.7, what: 'The washer door needs' },
+  toilet: { side: 'front', need: 0.6, what: 'The toilet needs' },
+  vanity: { side: 'front', need: 0.7, what: 'The basin needs' },
+  'bed-queen': { side: 'sides', need: 0.6, what: 'Getting into bed needs' },
+  'bed-king': { side: 'sides', need: 0.6, what: 'Getting into bed needs' },
+  'bed-single': { side: 'either-side', need: 0.6, what: 'Getting into bed needs' },
+  'bed-super-single': { side: 'either-side', need: 0.6, what: 'Getting into bed needs' },
 };
 
 export type ClearanceIssue =
@@ -378,7 +378,8 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
         (SEAT.test(b.assetId) && TABLE.test(a.assetId));
       if (tucked) continue;
       const depth = overlapDepth(fps.get(a.id) as Vec2[], fps.get(b.id) as Vec2[]);
-      if (depth > 0.02) {
+      // A few centimetres is a snap's rounding, not a clash.
+      if (depth > 0.04) {
         out.push({ kind: 'overlap', itemId: a.id, otherId: b.id, depth });
         out.push({ kind: 'overlap', itemId: b.id, otherId: a.id, depth });
       }
@@ -429,7 +430,12 @@ function fixedParts(level: Level): Fixed {
     ...hubs,
   ];
   const geom = planGeometry(level, fw);
-  const solid = [...geom.pieces.map((p) => p.polygon), ...hubs];
+  // Solid wall, and windows (a piece can't stand in one); a doorway's door check covers it.
+  const solid = [
+    ...geom.pieces.map((p) => p.polygon),
+    ...hubs,
+    ...geom.openings.filter((o) => o.kind === 'window').map((o) => o.polygon),
+  ];
   const sweeps: [string, Vec2[][]][] = Object.values(level.openings)
     .filter((o) => o.kind === 'door')
     .map((o): [string, Vec2[][]] => [o.id, doorSweep(level, o.id, geom.frames)])

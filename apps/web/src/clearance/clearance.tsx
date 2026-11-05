@@ -17,7 +17,12 @@ import { formatLength } from '../units';
 const KEY = 'dhd-clearance';
 
 /** Whether clearance checks show (on unless switched off; remembered in this browser). */
-export const useClearanceOn = create<{ on: boolean; set: (on: boolean) => void }>((set) => {
+export const useClearanceOn = create<{
+  on: boolean;
+  set: (on: boolean) => void;
+  /** The piece Show next last went to (the selection goes when the plan details show). */
+  shown: string | null;
+}>((set) => {
   let on = true;
   try {
     on = window.localStorage.getItem(KEY) !== 'off';
@@ -26,6 +31,7 @@ export const useClearanceOn = create<{ on: boolean; set: (on: boolean) => void }
   }
   return {
     on,
+    shown: null,
     set: (v) => {
       try {
         window.localStorage.setItem(KEY, v ? 'on' : 'off');
@@ -63,7 +69,7 @@ export function issueText(level: Level, issue: ClearanceIssue, all: ClearanceIss
   switch (issue.kind) {
     case 'zone': {
       if (issue.side === 'front') {
-        return `${issue.what} need ${formatLength(issue.need)} in front; ${formatLength(issue.have)} here.`;
+        return `${issue.what} ${formatLength(issue.need)} in front; ${formatLength(issue.have)} here.`;
       }
       // A bed: both sides in one line.
       const sides = all.filter(

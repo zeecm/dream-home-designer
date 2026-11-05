@@ -151,7 +151,7 @@ describe('clearance checks', () => {
     expect(issues.some((i) => i.kind === 'door')).toBe(false);
   });
 
-  it('pieces overlapping more than 20 mm; a chair under a table is fine', () => {
+  it('pieces overlapping more than 40 mm; a chair under a table is fine', () => {
     const base = level(room());
     const sofa = furnitureKind('sofa-3');
     if (!sofa) throw new Error('no sofa');
@@ -163,7 +163,7 @@ describe('clearance checks', () => {
         ]),
       ).filter((i) => i.kind === 'overlap');
     expect(over(0.05)).toHaveLength(2);
-    expect(over(0.015)).toHaveLength(0);
+    expect(over(0.03)).toHaveLength(0);
     const tucked = clearanceIssues(
       withItems(base, [
         ['dining-4', { x: 2, y: 2 }],

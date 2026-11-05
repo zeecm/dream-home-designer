@@ -1101,6 +1101,12 @@ pre-checks; about 5 ms for 80 pieces packed into the sample. Web `clearance/clea
 `ClearanceLayer` over the plan (red dashed zones and sweeps, red footprints for clashes, the
 selected piece's clear zones faint; `data-export="skip"`), the Inspector's Clearances section
 for a piece, and in plan details the switch, the count and Show next. Advice only: no edit
-is blocked. Not yet (spec): labels in the plan, live zones for the piece being placed (before
-it's dropped), walkways and the rest of slice 2.
+is blocked. Review fixes: a bed's sides count from the foot to the bedside table; barn doors' slides
+are checked (leaves have thickness); a U kitchen's arms block each other, an L's legs don't;
+windows count as wall for "into a wall"; overlaps over 40 mm (a snap's rounding is fine);
+walls, hubs and sweeps cached by the walls/vertices/openings objects; Show next remembers
+where it was (`useClearanceOn.shown`) and centres the piece; the Clearances section is first
+in a piece's details. Not yet (spec): labels in the plan, live zones for the piece being
+placed (before it's dropped), zones cut at walls, the drop announcement, walkways and the
+rest of slice 2.
 

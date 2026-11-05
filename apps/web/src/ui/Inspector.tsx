@@ -414,11 +414,17 @@ function ClearanceSummary() {
   const { on, set } = useClearanceOn();
   const issues = useClearanceIssues();
   const pieces = itemsWithIssues(issues);
-  const selection = useEditor((s) => s.selection);
+  const level = useLevel();
   const next = () => {
-    const at = selection?.kind === 'item' ? pieces.indexOf(selection.id) : -1;
+    const at = pieces.indexOf(useClearanceOn.getState().shown ?? '');
     const id = pieces[(at + 1) % pieces.length];
-    if (id) useEditor.getState().select({ kind: 'item', id });
+    const it = id ? level?.items[id] : undefined;
+    if (!id || !it) return;
+    useClearanceOn.setState({ shown: id });
+    const ed = useEditor.getState();
+    // Into view, at the zoom it was.
+    if (ed.view) ed.setView({ ...ed.view, cx: it.position.x, cy: it.position.z }, true);
+    ed.select({ kind: 'item', id });
   };
   return (
     <div className="field">
@@ -839,6 +845,8 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
   return (
     <>
       <Header title={kind?.name ?? 'Furniture'} onClose={clear} />
+      {/* First, so a phone's sheet shows it without scrolling. */}
+      <ItemClearances level={level} id={id} />
       <LengthField
         label="Width"
         value={size.w}
@@ -922,7 +930,6 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
           clear();
         }}
       />
-      <ItemClearances level={level} id={id} />
       <OwnModel id={it.assetId} />
     </>
   );

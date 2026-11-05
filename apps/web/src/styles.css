@@ -2790,3 +2790,12 @@ h3.field-label {
   margin: 0;
   padding-left: 18px;
 }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .clearance-short {
+    fill: color-mix(in srgb, #ff6b5e 26%, transparent);
+    stroke: #ff6b5e;
+  }
+  :root:not([data-theme="light"]) .clearance-fine {
+    fill: color-mix(in srgb, var(--muted) 18%, transparent);
+  }
+}
