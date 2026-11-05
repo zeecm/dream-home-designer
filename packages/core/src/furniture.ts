@@ -27,6 +27,8 @@ export type FurnitureMaterial =
   | 'glass'
   | 'ceramic'
   | 'leaf'
+  /** A person for scale: one quiet grey, as architects draw them. */
+  | 'figure'
   /** A lit shade or diffuser: it glows. */
   | 'lamp'
   /** The stand-in for a model that is still loading. */
@@ -46,7 +48,8 @@ export type FurnitureCategory =
   | 'Bathroom'
   | 'Storage'
   | 'Lighting'
-  | 'Decor';
+  | 'Decor'
+  | 'People';
 
 /** The catalogue's categories, in the order the palette lists them. */
 export const CATEGORIES: FurnitureCategory[] = [
@@ -58,6 +61,7 @@ export const CATEGORIES: FurnitureCategory[] = [
   'Storage',
   'Lighting',
   'Decor',
+  'People',
 ];
 
 export interface FurnitureKind {
@@ -95,6 +99,25 @@ const box = (
   z1: number,
   material: FurnitureMaterial,
 ): FurniturePart => ({ min: [x0, y0, z0], max: [x1, y1, z1], material });
+
+/**
+ * A standing person `h` tall, facing front (+y), for judging scale: legs, body, arms and head
+ * in proportion (the head about an eighth of the height).
+ */
+const person = (h: number): FurniturePart[] => {
+  const k = h / 1.7;
+  const b = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number) =>
+    box(x0 * k, x1 * k, y0 * k, y1 * k, z0 * k, z1 * k, 'figure');
+  return [
+    b(-0.15, -0.03, -0.07, 0.07, 0, 0.84), // legs
+    b(0.03, 0.15, -0.07, 0.07, 0, 0.84),
+    b(-0.19, 0.19, -0.11, 0.11, 0.84, 1.42), // body
+    b(-0.27, -0.2, -0.05, 0.05, 0.78, 1.4), // arms
+    b(0.2, 0.27, -0.05, 0.05, 0.78, 1.4),
+    b(-0.05, 0.05, -0.05, 0.05, 1.42, 1.49), // neck
+    b(-0.09, 0.09, -0.1, 0.1, 1.49, 1.7), // head
+  ];
+};
 
 /** Four legs of size s just inside a w × d footprint, h tall. */
 const legs = (w: number, d: number, h: number, s: number, m: FurnitureMaterial) => {
@@ -382,6 +405,23 @@ export const FURNITURE: FurnitureKind[] = [
       box(-0.15, 0.15, -0.15, 0.15, 0, 0.35, 'ceramic'),
       box(-0.22, 0.22, -0.22, 0.22, 0.35, 1.2, 'leaf'),
     ],
+  },
+  // People: for scale, walked through rather than into.
+  {
+    id: 'person',
+    name: 'Person, 1.70 m',
+    category: 'People',
+    size: { w: 0.54, d: 0.22, h: 1.7 },
+    walkThrough: true,
+    parts: person(1.7),
+  },
+  {
+    id: 'person-child',
+    name: 'Child, 1.20 m',
+    category: 'People',
+    size: { w: 0.54 * (1.2 / 1.7), d: 0.22 * (1.2 / 1.7), h: 1.2 },
+    walkThrough: true,
+    parts: person(1.2),
   },
 ];
 

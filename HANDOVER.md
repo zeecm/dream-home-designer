@@ -568,6 +568,10 @@ merging it back is held back too, a cautious answer left as it is). A drag or ru
 of nudges (one coalesce key) held back at any step goes back to how the drag found the
 renovation (`restore`), taking back its steps already carried, and stays held back. Restoring a version (or anything replacing the plan or renovation whole) carries
 nothing. One undo step, which shows Before (`touchedVariant`).
+**People for scale (5 Nov):** the catalogue's People: a person 1.70 m and a child 1.20 m,
+box-built in one grey (`person()` in furniture.ts, material `figure`), placed, moved, turned
+and resized like any piece, and walked through rather than into.
+
 **Glass walls and half walls (schema 7, 5 Nov):** a wall's `build` is solid (absent) or
 `'glass'`: a framed glass partition (`glassPartition` in core: 40 mm aluminium frame round
 each stretch between openings, mullions so no pane is over 1.2 m, a transom of glass over a
