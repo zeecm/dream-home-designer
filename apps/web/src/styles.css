@@ -1019,6 +1019,14 @@ input[type="range"] {
   border-radius: var(--radius-card);
   pointer-events: none;
 }
+/* Touch screens: the sticks take both bottom corners, so the map sits top right, under
+   Leave walk and Footsteps. */
+@media (pointer: coarse) {
+  .minimap {
+    bottom: auto;
+    top: 104px;
+  }
+}
 .minimap-room {
   fill: var(--accent-soft);
 }
@@ -1047,6 +1055,10 @@ input[type="range"] {
   display: grid;
   place-items: center;
   touch-action: none;
+}
+.joystick-look {
+  left: auto;
+  right: 24px;
 }
 .joystick-knob {
   width: 48px;
@@ -2370,15 +2382,23 @@ h3.field-label {
     width: 140px;
     padding: 4px 10px;
   }
+  /* Top left, under the time: the right side has Leave walk and Footsteps, the bottom the
+     sticks. */
   .minimap {
-    right: 8px;
-    bottom: 8px;
-    transform: scale(0.62);
-    transform-origin: bottom right;
+    left: 8px;
+    right: auto;
+    top: 104px;
+    bottom: auto;
+    transform: scale(0.56);
+    transform-origin: top left;
   }
   .joystick {
     left: 16px;
     bottom: 16px;
+  }
+  .joystick-look {
+    left: auto;
+    right: 16px;
   }
   .app-walking .viewport-hint {
     display: none;

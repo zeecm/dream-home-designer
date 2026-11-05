@@ -4,7 +4,7 @@ import { type MutableRefObject, useEffect, useMemo, useRef } from 'react';
 import type { PerspectiveCamera, PointLight } from 'three';
 import { useEditor } from '../editor';
 import { footstep } from './footsteps';
-import { setWalkAspect, useWalkFov, verticalFov } from './fov';
+import { useWalkFov, verticalFov } from './fov';
 
 /** Joystick input, each axis -1..1: x strafes right, y walks forward. */
 export type StickInput = MutableRefObject<Vec2>;
@@ -20,6 +20,20 @@ const WALK_SPEED = 1.4; // m/s, an ordinary walk
 const RUN_SPEED = 3;
 const LOOK_SPEED = 0.0025; // radians per pixel
 const MAX_PITCH = 1.3;
+/**
+ * How fast a look stick's tilt (-1..1) turns, as a share of full speed: nothing in the middle
+ * (a resting thumb doesn't drift), then squared, so a small tilt turns slowly for aiming and a
+ * full one swings round.
+ */
+export function stickRate(tilt: number): number {
+  const DEAD = 0.12;
+  const a = Math.abs(tilt);
+  if (a <= DEAD) return 0;
+  const k = Math.min(1, (a - DEAD) / (1 - DEAD));
+  return Math.sign(tilt) * k * k;
+}
+/** The look stick at full tilt turns this fast (radians per second); gentler near the middle. */
+const STICK_TURN = 2.2;
 /** Head bob: up and down once per step of this length, by this much. */
 const STEP_LENGTH = 0.7;
 const BOB_HEIGHT = 0.02;
@@ -42,12 +56,15 @@ const isTyping = (t: EventTarget | null) =>
 export function WalkControls({
   level,
   stick,
+  lookStick,
   pose,
   initial,
   onLeave,
 }: {
   level: Level;
   stick: StickInput;
+  /** The look stick (touch screens): x turns right, y looks up. */
+  lookStick?: StickInput;
   /** Shared with the mini-map, which reads it every frame. */
   pose: MutableRefObject<WalkPose | null>;
   /** Where to start (the last walk's spot), or null for the plan's start point. */
@@ -84,12 +101,16 @@ export function WalkControls({
   useEffect(() => {
     const cam = camera as PerspectiveCamera;
     const fov = cam.fov;
+    const near = cam.near;
     const shape = view.width / Math.max(view.height, 1);
-    setWalkAspect(shape);
     cam.fov = verticalFov(across, shape);
+    // A wide view's near plane reaches further out at its corners: close enough in that
+    // looking down beside a wall doesn't clip it.
+    cam.near = 0.02;
     cam.updateProjectionMatrix();
     return () => {
       cam.fov = fov;
+      cam.near = near;
       cam.updateProjectionMatrix();
     };
   }, [camera, across, view.width, view.height]);
@@ -134,14 +155,11 @@ export function WalkControls({
     // so a phone can look all round in two swipes, standing still.
     const touchSpeed = () => Math.PI / Math.max(200, el.clientWidth);
     /**
-     * A drag's turn: a finger moves the scene with it, as in Street View (drag left, look
-     * right); a mouse drag turns the way it moves, as in a game.
+     * A drag's turn: the view turns the way the finger or mouse moves (right looks right, up
+     * looks up), as in a game, not dragging the scene along as a map does.
      */
     const turn = (d: { x: number; y: number; touch: boolean }, e: PointerEvent) => {
-      const dx = e.clientX - d.x;
-      const dy = e.clientY - d.y;
-      if (d.touch) look(-dx, -dy, touchSpeed());
-      else look(dx, dy, LOOK_SPEED);
+      look(e.clientX - d.x, e.clientY - d.y, d.touch ? touchSpeed() : LOOK_SPEED);
     };
     let drag: { id: number; x: number; y: number; touch: boolean } | null = null;
     const onDown = (e: PointerEvent) => {
@@ -206,6 +224,12 @@ export function WalkControls({
   useFrame((_, dt) => {
     const p = pose.current;
     if (!p) return;
+    const ls = lookStick?.current;
+    if (ls && (ls.x !== 0 || ls.y !== 0)) {
+      const t = Math.min(dt, 0.1) * STICK_TURN;
+      p.yaw += stickRate(ls.x) * t;
+      p.pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, p.pitch + stickRate(ls.y) * t * 0.6));
+    }
     const k = keys.current;
     const has = (set: Set<string>) => [...set].some((c) => k.has(c));
     let forward = (has(FORWARD) ? 1 : 0) - (has(BACK) ? 1 : 0) + stick.current.y;

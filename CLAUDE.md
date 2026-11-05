@@ -29,3 +29,23 @@ pnpm --filter @dhd/web e2e        # Playwright against the build + Go API
 cd apps/api && go run ./cmd/api   # STORE=memory to skip disk
 cd apps/api && go test -race ./...
 ```
+
+## Workflow (owner's standing instructions, 5 Nov 2026)
+Work autonomously until the owner says stop: plan features, build them, review and squash-merge
+your own PRs once CI is green, and keep going. The owner checks in now and then with bugs.
+- **Agents** (`.claude/agents/`), used on every feature:
+  - `project-manager` (also an expert architect and interior designer): specs with acceptance
+    criteria, priorities, and a steady stream of new feature ideas; keeps the README roadmap.
+  - `ux-reviewer`: designs interactions first, then reviews the built UI from screenshots on
+    desktop and phone.
+  - `qa-acceptance`: tests every flow end to end like a user, on all layouts, for bugs, edge
+    cases and visual issues.
+  - `tech-lead`: reviews the technical design before building and every diff before merging.
+- **Flow per feature:** spec (project-manager) → design (ux-reviewer, tech-lead for anything
+  structural) → build with tests → reviews (tech-lead on the diff, ux-reviewer and
+  qa-acceptance on the running app) → fix findings → PR → merge when green.
+- **Human-only actions** (secrets, accounts, billing, legal) and decisions only the owner can
+  make: open a GitHub issue labelled `owner` (or say so in chat if issues can't be made), and
+  carry on with other work. Stop only for an urgent blocker, with an issue saying so.
+- Keep README.md's **Roadmap** (planned / in progress / done, and the production link) current.
+- Don't make the repository public.

@@ -29,7 +29,7 @@ import { Joystick } from './walk/Joystick';
 import { MiniMap } from './walk/MiniMap';
 import { WalkControls, type WalkPose } from './walk/WalkControls';
 import { setSound, unlockAudio, useSound } from './walk/footsteps';
-import { FOV_MIN, fittingFov, setWalkFov, useWalkAspect, useWalkFov, widestFov } from './walk/fov';
+import { FOV_MAX, FOV_MIN, setWalkFov, useWalkFov } from './walk/fov';
 import { loadWalkPose, saveWalkPose } from './walk/pose';
 
 const materials = new MaterialCache();
@@ -252,13 +252,7 @@ export function clockTime(h: number): string {
 function SunControl({ walking }: { walking: boolean }) {
   const hour = useEditor((s) => s.sunHour);
   const setHour = useEditor((s) => s.setSunHour);
-  const wanted = useWalkFov();
-  // A tall view (a phone held upright) can't show as wide a view: the slider stops there,
-  // and says the angle it really shows.
-  const aspect = useWalkAspect();
-  const widest = widestFov(aspect);
-  const fov = Math.min(wanted, widest);
-  const shown = Math.round(Math.min(wanted, fittingFov(aspect)));
+  const fov = useWalkFov();
   return (
     <div className="sun-control">
       <label className="sun-control-row">
@@ -279,22 +273,17 @@ function SunControl({ walking }: { walking: boolean }) {
       {walking && (
         <label className="sun-control-row">
           <span className="sun-control-label">
-            View <span className="num">{shown}°</span>
+            View <span className="num">{fov}°</span>
           </span>
           <input
             type="range"
             min={FOV_MIN}
-            max={widest}
+            max={FOV_MAX}
             step={5}
             value={fov}
             aria-label="Field of view"
-            aria-valuetext={`${shown} degrees across`}
-            onChange={(e) => {
-              // At the end of the range a tall view allows, keep a wider choice made on a
-              // wider screen.
-              const v = Number(e.target.value);
-              setWalkFov(v >= widest ? Math.max(v, wanted) : v);
-            }}
+            aria-valuetext={`${fov} degrees across`}
+            onChange={(e) => setWalkFov(Number(e.target.value))}
           />
         </label>
       )}
@@ -479,6 +468,7 @@ export function Viewport() {
     : null;
   const compare = comparing && !walking && !!versions?.before && !!versions.after;
   const stick = useRef<Vec2>({ x: 0, y: 0 });
+  const lookStick = useRef<Vec2>({ x: 0, y: 0 });
   const projectId = project.id;
   const pose = useRef<WalkPose | null>(null);
   // Leaving a walk forgets the pose here (WalkControls hands it to saveWalkPose as it goes).
@@ -486,6 +476,7 @@ export function Viewport() {
     if (!walking) {
       pose.current = null;
       stick.current = { x: 0, y: 0 }; // a thumb still on the stick when the walk ended
+      lookStick.current = { x: 0, y: 0 };
     }
   }, [walking]);
   // Frame the plan when the view mounts (once per project), not on every edit; the
@@ -579,6 +570,7 @@ export function Viewport() {
           <WalkControls
             level={level}
             stick={stick}
+            lookStick={lookStick}
             pose={pose}
             initial={() => loadWalkPose(projectId, level)}
             onLeave={(p) => saveWalkPose(projectId, p)}
@@ -606,10 +598,15 @@ export function Viewport() {
           </button>
           <SoundToggle />
           {level && <MiniMap level={level} pose={pose} />}
-          {coarsePointer() && <Joystick stick={stick} />}
+          {coarsePointer() && (
+            <>
+              <Joystick stick={stick} />
+              <Joystick stick={lookStick} look />
+            </>
+          )}
           <p className="viewport-hint">
             {coarsePointer()
-              ? 'Thumb stick to walk · drag to look'
+              ? 'Left stick to walk · right stick or drag to look'
               : 'W A S D or arrows to walk · Shift to run · click to look with the mouse · Esc frees the mouse, Esc again leaves'}
           </p>
         </>

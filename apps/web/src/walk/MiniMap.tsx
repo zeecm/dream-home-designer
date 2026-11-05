@@ -1,6 +1,7 @@
 import { type Level, levelBounds, planGeometry, roomShapes } from '@dhd/core';
 import { type MutableRefObject, useEffect, useMemo, useRef } from 'react';
 import type { WalkPose } from './WalkControls';
+import { useWalkFov } from './fov';
 
 const SIZE = 168;
 const PAD = 8;
@@ -52,6 +53,9 @@ export function MiniMap({
     return () => cancelAnimationFrame(raf);
   }, [pose, scale, tx, ty]);
 
+  // The view cone spans the field of view across.
+  const half = (useWalkFov() * Math.PI) / 360;
+  const cone = { x: 24 * Math.cos(half), y: 24 * Math.sin(half) };
   return (
     <svg className="minimap" width={width} height={height} aria-hidden="true">
       <g transform={`translate(${tx} ${ty}) scale(${scale})`}>
@@ -61,7 +65,10 @@ export function MiniMap({
         <path d={drawing.walls} className="minimap-wall" />
       </g>
       <g ref={marker}>
-        <path d="M 0 0 L 22 -9 A 24 24 0 0 1 22 9 Z" className="minimap-view" />
+        <path
+          d={`M 0 0 L ${cone.x} ${-cone.y} A 24 24 0 0 1 ${cone.x} ${cone.y} Z`}
+          className="minimap-view"
+        />
         <circle r={4} className="minimap-you" />
       </g>
     </svg>

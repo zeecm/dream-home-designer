@@ -11,6 +11,43 @@ for any plan.
 > and switched off until the server is configured. `HANDOVER.md` has the full state, the
 > decisions behind it and what comes next.
 
+## Roadmap and status
+
+**Production:** <https://dream-home-designer.pages.dev> (deploys from `main`). Specs are in
+[`docs/specs/`](docs/specs/); things that need the owner are GitHub issues labelled `owner`.
+
+### Done
+- Trace a plan over an uploaded image or PDF: scale, snapping, typed lengths; rooms found
+  and measured from the walls.
+- Walls with mitred corners, one-sided walls, room boundaries; drag, split and move walls and
+  whole rooms. Doors, windows and openings with HDB widths and corner clearances.
+- Furniture: box-built pieces and 51 real models (Poly Haven, CC0); upload your own `.glb`;
+  handles to resize and turn; pieces stand on tables and desks.
+- Floor finishes, wall paint per side, lamps; sun and sky for any hour and orientation.
+- Before and after: a renovation version, hacked and new walls, a room-by-room change list,
+  side-by-side 3D compare.
+- 3D view and first-person walk with collision, opening doors, footsteps and a mini-map.
+- Phones: finger drawing with a magnifier, pinch and coasting pan, thumb sticks, landscape.
+- Sharing (view or edit links), downloads (PNG, print, GLB, project file), version history.
+- Go API on Cloudflare Containers with R2 storage, rate limits and a daily cap; Google
+  sign-in built, waiting for the owner's keys.
+
+### In progress
+- Walk-through: a realistic 110° field of view on every screen (60–120°), touch look that
+  turns the way you swipe, and a look stick.
+
+### Planned
+1. Sliding, pocket, bi-fold and folding glass doors (animated); half walls; glass walls.
+   [spec](docs/specs/wall-and-door-types.md)
+2. AI with your own key (Claude, OpenAI, Gemini): trace walls from a plan image.
+   [spec](docs/specs/ai-layouts.md)
+3. AI suggested layouts from a short brief, compared as before and after.
+4. Structural and household-shelter walls marked, with hacking warnings.
+5. Live clearance and furniture-fit checks.
+6. Carpentry builder and a renovation cost estimate.
+7. "My furniture" and a delivery-path fit check.
+8. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
+
 ## What it does
 
 - **Trace a plan.** Upload an image or PDF of a floor plan, mark one length you know to set

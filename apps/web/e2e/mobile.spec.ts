@@ -164,12 +164,33 @@ test('on a phone: a swipe looks around while standing still', async ({ page }) =
   await page.waitForTimeout(500);
   await touches(page, line(from, to));
   // The mini-map follows once a frame, and software rendering draws slowly: wait for it.
-  await expect
-    .poll(async () => {
-      const turned = Math.abs((await angle()) - before);
-      return Math.min(turned, 360 - turned);
-    })
-    .toBeGreaterThan(45);
+  // The view turns the way the finger goes (right to left looks left), as in a game.
+  const turned = async (from: number) => {
+    const d = (((await angle()) - from + 540) % 360) - 180;
+    return d;
+  };
+  await expect.poll(() => turned(before)).toBeLessThan(-45);
+  expect((await marker.getAttribute('transform'))?.split('rotate')[0]).toBe(
+    spot?.split('rotate')[0],
+  );
+  // The look stick (bottom right) turns too: held to the right, the view swings right.
+  const stick = page.getByTestId('look-stick');
+  await expect(stick).toBeVisible();
+  const s = await stick.boundingBox();
+  if (!s) throw new Error('no look stick');
+  const mid = { x: s.x + s.width / 2, y: s.y + s.height / 2 };
+  const held = await angle();
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ ...mid, id: 0 }],
+  });
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchMove',
+    touchPoints: [{ x: mid.x + 48, y: mid.y, id: 0 }],
+  });
+  await expect.poll(() => turned(held), { timeout: 10_000 }).toBeGreaterThan(20);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   expect((await marker.getAttribute('transform'))?.split('rotate')[0]).toBe(
     spot?.split('rotate')[0],
   );

@@ -79,9 +79,8 @@ test('the walk’s field of view starts near the eye’s, can be changed, and st
   await expect(page.getByLabel('Field of view')).toHaveCount(0);
   await page.getByRole('button', { name: 'Walk through' }).click();
   const fov = page.getByLabel('Field of view');
-  await expect(fov).toHaveValue('100');
-  // The slider stops at what the view's shape allows (a tall view can't show as wide).
-  expect(Number(await fov.getAttribute('max'))).toBeGreaterThanOrEqual(100);
+  await expect(fov).toHaveValue('110');
+  expect(await fov.getAttribute('max')).toBe('120');
   await fov.fill('80');
   await expect(page.locator('.sun-control')).toContainText('80°');
   await page.reload();

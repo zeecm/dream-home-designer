@@ -840,13 +840,16 @@ blocked by the network proxy and Sketchfab needs an API key.
 - **Mini-map:** a small plan in the corner while walking shows where you are and which way you
   face (`walk/MiniMap.tsx`).
 - **Field of view:** set across the view, not up and down (three.js's `fov`), so a narrow
-  view (the split screen, a phone held upright) isn't cut to a slit: 100° by default (people
-  see about 114° across with both eyes; past ~100° a flat screen stretches the edges), 60–120°
-  on the "View" slider under Time while walking, remembered per browser (`walk/fov.ts`,
-  `verticalFov`); the slider stops at what the view's shape allows (`widestFov`), showing
-  the angle in effect. Up and down it is capped at 100°, so a tall view gets less across (about
-  87° in the split screen, 57° on a phone held upright). It was 70° up and down, which was
-  about 100° across on a wide screen but 35–60° in narrow views.
+  view (the split screen, a phone held upright) gets the same width across as a wide one:
+  110° by default (people see about 114–120° across with both eyes), 60–120° on the "View"
+  slider under Time while walking, on every screen, remembered per browser (`walk/fov.ts`,
+  `verticalFov`, key `dhd-walk-fov-2`). Up and down it may reach 150° (a phone held upright at
+  120°). Until 5 Nov it was capped at 100° up and down, which cut a phone held upright to
+  about 57–70° across; the owner found that too narrow.
+- **Looking:** a drag (finger or mouse) turns the way it moves, as in a game: right looks
+  right, up looks up (until 5 Nov a finger dragged the scene, as Street View does; the owner
+  found that backwards). On touch screens a second thumb stick, bottom right, looks around
+  (`Joystick look`, `lookStick` in `WalkControls`: squared response, 2.2 rad/s at full tilt).
 - **Doors and footsteps (built):** inside doors stand open in the orbit view; walking
   through, they start shut, swing open within 2 m of the walker and shut beyond 2.8 m (open in about a third of a second, so a run doesn't catch them half shut)
   (`useDoorSwings` in `Viewport.tsx`; render builds each inside leaf as a group pivoting at
