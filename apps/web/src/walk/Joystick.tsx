@@ -3,8 +3,11 @@ import type { StickInput } from './WalkControls';
 
 const RADIUS = 48;
 
-/** A thumb stick for walking on touch screens: drag the knob; release to stop. */
-export function Joystick({ stick }: { stick: StickInput }) {
+/**
+ * A thumb stick for touch screens: drag the knob; release to stop. One walks (bottom left),
+ * the other looks (bottom right).
+ */
+export function Joystick({ stick, look = false }: { stick: StickInput; look?: boolean }) {
   const base = useRef<HTMLDivElement>(null);
   const [knob, setKnob] = useState({ x: 0, y: 0 });
   const active = useRef<number | null>(null);
@@ -38,8 +41,9 @@ export function Joystick({ stick }: { stick: StickInput }) {
   return (
     <div
       ref={base}
-      className="joystick"
+      className={look ? 'joystick joystick-look' : 'joystick'}
       role="presentation"
+      aria-label={look ? 'Look stick' : 'Walk stick'}
       onPointerDown={(e) => {
         active.current = e.pointerId;
         e.currentTarget.setPointerCapture(e.pointerId);

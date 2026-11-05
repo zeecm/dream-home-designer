@@ -1048,6 +1048,10 @@ input[type="range"] {
   place-items: center;
   touch-action: none;
 }
+.joystick-look {
+  left: auto;
+  right: 24px;
+}
 .joystick-knob {
   width: 48px;
   height: 48px;
@@ -2379,6 +2383,10 @@ h3.field-label {
   .joystick {
     left: 16px;
     bottom: 16px;
+  }
+  .joystick-look {
+    left: auto;
+    right: 16px;
   }
   .app-walking .viewport-hint {
     display: none;

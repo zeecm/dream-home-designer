@@ -3,26 +3,31 @@ import { useSyncExternalStore } from 'react';
 /**
  * The walk-through's field of view, as wide as the eye sees: set across the view (not up
  * and down, as three.js counts it), so a narrow view (the split screen, a phone held upright)
- * doesn't shrink it to a slit. People see about 114° across with both eyes; 100° keeps most
- * of that without stretching the edges of a flat screen. It can be changed while walking,
+ * gets the same width across as a wide one. People see about 114–120° across with both eyes;
+ * 110° by default, 60–120° on the slider, on every screen. It can be changed while walking,
  * and the choice is remembered in this browser.
  */
 
 export const FOV_MIN = 60;
 export const FOV_MAX = 120;
-export const FOV_DEFAULT = 100;
-/** Up and down, a tall narrow view would need more than this: past it the edges stretch. */
-const MAX_VERTICAL = 100;
+export const FOV_DEFAULT = 110;
+/**
+ * Up and down, a phone held upright at 120° across would need about 150°: as far as a camera
+ * sensibly goes (three.js breaks down near 180°).
+ */
+const MAX_VERTICAL = 150;
 
-const KEY = 'dhd-walk-fov';
+// A new key: choices made while a tall view capped the slider (about 70°) aren't kept.
+const KEY = 'dhd-walk-fov-2';
 const listeners = new Set<() => void>();
 
 const clamp = (v: number) => Math.min(FOV_MAX, Math.max(FOV_MIN, v));
 
 function stored(): number {
   try {
-    const v = Number(window.localStorage.getItem(KEY));
-    return Number.isFinite(v) && v > 0 ? clamp(v) : FOV_DEFAULT;
+    const raw = window.localStorage.getItem(KEY);
+    const v = Number(raw);
+    return raw !== null && Number.isFinite(v) && v > 0 ? clamp(v) : FOV_DEFAULT;
   } catch {
     return FOV_DEFAULT;
   }
@@ -48,35 +53,6 @@ export function useWalkFov(): number {
       return () => listeners.delete(fn);
     },
     () => fov,
-  );
-}
-
-/** The widest view across that fits a view of this aspect, in degrees. */
-export function fittingFov(aspect: number): number {
-  const half = (MAX_VERTICAL * Math.PI) / 360;
-  return (2 * Math.atan(Math.tan(half) * aspect) * 180) / Math.PI;
-}
-
-/** The widest view across that fits a view of this aspect, in whole steps of 5°. */
-export function widestFov(aspect: number): number {
-  return Math.max(FOV_MIN, Math.min(FOV_MAX, Math.floor(fittingFov(aspect) / 5) * 5));
-}
-
-/** The walk view's shape (width over height), as the walk last measured it. */
-let aspect = 16 / 9;
-const aspectListeners = new Set<() => void>();
-export function setWalkAspect(value: number) {
-  if (Math.abs(value - aspect) < 1e-3) return;
-  aspect = value;
-  for (const fn of aspectListeners) fn();
-}
-export function useWalkAspect(): number {
-  return useSyncExternalStore(
-    (fn) => {
-      aspectListeners.add(fn);
-      return () => aspectListeners.delete(fn);
-    },
-    () => aspect,
   );
 }
 
