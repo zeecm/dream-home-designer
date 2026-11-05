@@ -44,6 +44,15 @@ const LEFT = new Set(['KeyA', 'ArrowLeft']);
 const RIGHT = new Set(['KeyD', 'ArrowRight']);
 const MOVE_KEYS = new Set([...FORWARD, ...BACK, ...LEFT, ...RIGHT, 'ShiftLeft', 'ShiftRight']);
 
+/**
+ * Keys a focused control takes for itself: all of them in a text field, the arrows on a
+ * slider (the View or Time slider just used keeps focus; WASD and Esc still walk and leave).
+ */
+const ownsKey = (t: EventTarget | null, key: string) =>
+  t instanceof HTMLInputElement && t.type === 'range'
+    ? key.startsWith('Arrow') || key === 'Home' || key === 'End'
+    : isTyping(t);
+
 const isTyping = (t: EventTarget | null) =>
   t instanceof HTMLElement &&
   (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName));
@@ -78,7 +87,9 @@ export function WalkControls({
   const segments = useMemo(() => collisionSegments(level), [level]);
   if (!pose.current) {
     const start = walkStart(level);
-    pose.current = initial?.() ?? {
+    const resumed = initial?.();
+    // Back where the last walk ended, facing the same way but looking level.
+    pose.current = (resumed && { ...resumed, pitch: 0 }) ?? {
       at: start?.at ?? { x: 0, y: 0 },
       yaw: start?.heading ?? 0,
       pitch: 0,
@@ -117,7 +128,7 @@ export function WalkControls({
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if (isTyping(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (ownsKey(e.target, e.key) || e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === 'Escape') {
         // The first Esc only releases pointer lock (the browser does that itself).
         if (!document.pointerLockElement) useEditor.getState().stopWalk();
