@@ -52,12 +52,13 @@ for any plan.
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
+- Carpentry builder and a renovation cost estimate (slice 1: built-in pieces priced per foot
+  run, an estimate with editable Singapore rates). [spec](docs/specs/carpentry-cost.md)
 
 ### Planned
-1. Carpentry builder and a renovation cost estimate.
-2. "My furniture" and a delivery-path fit check.
-3. Clearance checks, slice 2: walkways from the main door, dining chairs, labels on the plan.
-4. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
+1. "My furniture" and a delivery-path fit check.
+2. Clearance checks, slice 2: walkways from the main door, dining chairs, labels on the plan.
+3. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
 
 ## What it does
 
