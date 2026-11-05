@@ -33,13 +33,16 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
     if (d && !d.open) d.showModal();
     // The view as it is when the dialog opens.
     let url = '';
+    let live = true;
     void capture3d()
       .then((blob) => {
+        if (!live) return; // closed before the picture was ready
         url = URL.createObjectURL(blob);
         setView({ blob, url });
       })
-      .catch(() => setStatus('Couldn’t take a picture of the 3D view.'));
+      .catch(() => live && setStatus('Couldn’t take a picture of the 3D view.'));
     return () => {
+      live = false;
       if (url) URL.revokeObjectURL(url);
     };
   }, []);

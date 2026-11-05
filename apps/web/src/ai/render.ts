@@ -1,5 +1,5 @@
 import type { AiSettings } from './credentials';
-import { AiError } from './providers';
+import { AiError, anySignal, timeoutSignal } from './providers';
 
 /** Looks of a render to choose from. */
 export const RENDER_STYLES = {
@@ -25,23 +25,50 @@ async function blobToBase64(b: Blob): Promise<string> {
   return btoa(s);
 }
 
+/** `png` scaled down to fit `max` pixels on its longer side (a high-DPI view is huge). */
+async function fitWithin(png: Blob, max: number): Promise<Blob> {
+  const img = await createImageBitmap(png);
+  const k = Math.min(1, max / Math.max(img.width, img.height));
+  if (k === 1) {
+    img.close();
+    return png;
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(img.width * k);
+  canvas.height = Math.round(img.height * k);
+  canvas.getContext('2d')?.drawImage(img, 0, 0, canvas.width, canvas.height);
+  img.close();
+  return await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('No picture'))), 'image/png'),
+  );
+}
+
 /** A photo-real picture of `view` (a PNG of the 3D view) by the person's image model. */
 export async function renderPhoto(
   ai: AiSettings,
-  view: Blob,
+  picture: Blob,
   style: RenderStyle,
   signal?: AbortSignal,
 ): Promise<Blob> {
-  const timeout = AbortSignal.timeout(TIMEOUT);
-  const both = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  const timeout = timeoutSignal(TIMEOUT);
+  const both = signal ? anySignal([signal, timeout]) : timeout;
   let res: Response;
+  let body: {
+    data?: { b64_json?: string }[];
+    candidates?: {
+      content?: { parts?: { inlineData?: { data?: string }; inline_data?: { data?: string } }[] };
+    }[];
+  };
   try {
+    const view = await fitWithin(picture, 1536);
     if (ai.provider === 'openai') {
       const form = new FormData();
       form.append('model', ai.model);
       form.append('image', view, 'view.png');
       form.append('prompt', prompt(style));
       form.append('size', 'auto');
+      // Keep the room as it is drawn (walls, furniture), not a loose impression of it.
+      form.append('input_fidelity', 'high');
       res = await fetch('https://api.openai.com/v1/images/edits', {
         method: 'POST',
         headers: { authorization: `Bearer ${ai.key}` },
@@ -75,30 +102,25 @@ export async function renderPhoto(
         'Renders need an OpenAI or Gemini key (Claude doesn’t make pictures).',
       );
     }
+    if (res.status === 401 || res.status === 403) {
+      throw new AiError('key', 'The key was refused. Check it in AI settings.');
+    }
+    if (res.status === 429) {
+      throw new AiError('quota', 'The key’s limit or quota is used up for now. Try again later.');
+    }
+    if (!res.ok) {
+      throw new AiError(
+        'unreadable',
+        `The provider turned the request down (${res.status}). Try again, or another look.`,
+      );
+    }
+    body = (await res.json()) as typeof body;
   } catch (e) {
     if (e instanceof AiError) throw e;
     if (signal?.aborted) throw new AiError('cancelled', 'Cancelled.');
     if (timeout.aborted) throw new AiError('timeout', 'The render took too long. Try again.');
     throw new AiError('network', 'Couldn’t reach the model. Check your connection and try again.');
   }
-  if (res.status === 401 || res.status === 403) {
-    throw new AiError('key', 'The key was refused. Check it in AI settings.');
-  }
-  if (res.status === 429) {
-    throw new AiError('quota', 'The key’s limit or quota is used up for now. Try again later.');
-  }
-  if (!res.ok) {
-    throw new AiError(
-      'unreadable',
-      `The provider turned the request down (${res.status}). Check the image model in AI settings.`,
-    );
-  }
-  const body = (await res.json()) as {
-    data?: { b64_json?: string }[];
-    candidates?: {
-      content?: { parts?: { inlineData?: { data?: string }; inline_data?: { data?: string } }[] };
-    }[];
-  };
   const b64 =
     body.data?.[0]?.b64_json ??
     body.candidates?.[0]?.content?.parts

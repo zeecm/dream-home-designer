@@ -26,6 +26,8 @@ function useShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return; // the active tool already handled it
+      // A dialog open over the app has the keys (no undo behind it, say).
+      if (document.querySelector('dialog[open]')) return;
       const { undo, redo, save } = useStore.getState();
       const ed = useEditor.getState();
       const mod = e.metaKey || e.ctrlKey;

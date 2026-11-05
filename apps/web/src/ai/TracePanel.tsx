@@ -5,7 +5,7 @@ import { usePlanImage } from '../ui/PlanImage';
 import { formatArea } from '../units';
 import { AiSettingsDialog } from './AiSettingsDialog';
 import { PROVIDERS, aiSettings, useAi } from './credentials';
-import { useTrace } from './draft';
+import { traceWhere, useTrace } from './draft';
 import { AiError } from './providers';
 import { readPlan } from './trace';
 
@@ -18,7 +18,7 @@ async function trace(url: string, width: number, height: number) {
   const { set, running } = useTrace.getState();
   running?.abort();
   const ctrl = new AbortController();
-  set({ running: ctrl, error: null, draft: null });
+  set({ running: ctrl, error: null, draft: null, at: traceWhere() });
   try {
     const reading = await readPlan(ai, url, width, height, ctrl.signal);
     const plan = readingToPlan(reading, underlay);
@@ -146,7 +146,7 @@ export function TraceBar() {
         onClick={() => {
           // Built again on the plan as it is now, so nothing done since is lost.
           const level = currentLevel();
-          if (level) {
+          if (level && useTrace.getState().at === traceWhere()) {
             const built = tracedLevel(level, draft.plan, newId, draft.replace).level;
             dispatch(importTrace(level.id, built));
           }

@@ -1,4 +1,11 @@
-import { type Level, adoptLayout, applyLayout, planGeometry, renovationChanges } from '@dhd/core';
+import {
+  type LayoutOp,
+  type Level,
+  adoptLayout,
+  applyLayout,
+  planGeometry,
+  renovationChanges,
+} from '@dhd/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useEditor } from '../editor';
 import { useProject, useStore } from '../store';
@@ -13,6 +20,8 @@ interface Option {
   name: string;
   summary: string;
   reasons: string[];
+  /** What the model asked for: applied again on Use, to the flat as it is then. */
+  ops: LayoutOp[];
   level: Level;
   refused: string[];
 }
@@ -76,10 +85,19 @@ export function LayoutsDialog({ onClose }: { onClose: () => void }) {
       setOptions(
         got.options.map((o) => {
           const { level: after, refused } = applyLayout(level, o.operations);
-          return { name: o.name, summary: o.summary, reasons: o.reasons, level: after, refused };
+          return {
+            name: o.name,
+            summary: o.summary,
+            reasons: o.reasons,
+            ops: o.operations,
+            level: after,
+            refused,
+          };
         }),
       );
-      setStatus('');
+      setStatus(
+        got.options.length === 1 ? '1 layout ready.' : `${got.options.length} layouts ready.`,
+      );
     } catch (e) {
       setStatus(e instanceof AiError ? e.message : 'Something went wrong. Try again.');
     }
@@ -89,7 +107,13 @@ export function LayoutsDialog({ onClose }: { onClose: () => void }) {
   const use = (o: Option) => {
     const level = before();
     if (!level) return;
-    dispatch(adoptLayout(level.id, o.level));
+    // Applied again to the flat as it is now (it may have changed since).
+    const { level: after } = applyLayout(level, o.ops);
+    if (!renovationChanges(level, after).length) {
+      setStatus('The plan has changed and this layout no longer applies. Suggest again.');
+      return;
+    }
+    dispatch(adoptLayout(level.id, after));
     setVariant('after');
     close();
   };
@@ -183,18 +207,20 @@ export function LayoutsDialog({ onClose }: { onClose: () => void }) {
       </div>
       {options.length > 0 && (
         <ol className="layout-options">
-          {options.map((o) => {
+          {options.map((o, i) => {
             const level = before();
             const changes = level ? renovationChanges(level, o.level) : [];
             return (
-              <li key={o.name} className="layout-option">
+              // biome-ignore lint/suspicious/noArrayIndexKey: one fixed answer's options
+              <li key={i} className="layout-option">
                 <MiniLayout level={o.level} />
                 <div>
-                  <h3>{o.name}</h3>
-                  <p>{o.summary}</p>
+                  <h3 id={`layout-${i}-h`}>{o.name}</h3>
+                  <p id={`layout-${i}-s`}>{o.summary}</p>
                   <ul className="layout-reasons">
-                    {o.reasons.map((r) => (
-                      <li key={r}>{r}</li>
+                    {o.reasons.map((r, j) => (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: fixed reasons
+                      <li key={j}>{r}</li>
                     ))}
                   </ul>
                   <p className="field-hint">
@@ -211,6 +237,7 @@ export function LayoutsDialog({ onClose }: { onClose: () => void }) {
                     type="button"
                     className="btn btn-small"
                     disabled={!changes.length}
+                    aria-describedby={`layout-${i}-h layout-${i}-s`}
                     onClick={() => use(o)}
                   >
                     {hasRenovation ? 'Use this instead of the renovation' : 'Use this'}

@@ -100,6 +100,7 @@ export function AiSettingsDialog({ onClose }: { onClose: () => void }) {
               setProvider(p);
               setKey(k?.key ?? '');
               setModel(k?.model ?? PROVIDERS[p].model);
+              setRemember(k?.remember ?? false);
               setStatus('');
             }}
           >
@@ -115,7 +116,10 @@ export function AiSettingsDialog({ onClose }: { onClose: () => void }) {
           <input
             className="input"
             type="password"
-            autoComplete="off"
+            // Not one for the browser's password manager (which may sync it elsewhere).
+            autoComplete="new-password"
+            data-1p-ignore
+            data-lpignore="true"
             spellCheck={false}
             placeholder={PROVIDERS[provider].keyHint}
             value={key}

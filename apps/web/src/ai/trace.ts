@@ -1,6 +1,6 @@
 import { PlanReading } from '@dhd/core';
 import type { AiSettings } from './credentials';
-import { AiError, type ModelImage, askForJson } from './providers';
+import { AiError, type ModelImage, askForJson, lowerEnums } from './providers';
 
 /** The longest side sent to a model: plenty for a plan, inside every provider's limits. */
 const MAX_SIDE = 1568;
@@ -102,7 +102,7 @@ export async function readPlan(
     READING_SCHEMA,
     signal,
   );
-  const parsed = PlanReading.safeParse(raw);
+  const parsed = PlanReading.safeParse(lowerEnums(raw, ['kind']));
   if (!parsed.success) {
     throw new AiError('unreadable', 'The model’s answer wasn’t a plan reading. Try again.');
   }

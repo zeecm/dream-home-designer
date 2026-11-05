@@ -575,7 +575,8 @@ assistant…" (`ai/AiSettingsDialog.tsx`): Claude, OpenAI or Gemini, key and mod
 in a project, export, share link or `/api` request (e2e checks). Calls go straight from the
 browser to the provider (`ai/providers.ts`: the Anthropic SDK, lazy-loaded, with
 `dangerouslyAllowBrowser`, JSON-schema output, effort high, the server-side refusal fallback,
-no retries, 45 s quiet / 180 s overall timeouts; OpenAI chat completions with a strict JSON
+no retries, adaptive thinking with summaries streamed; stuck after 120 s with no event, and
+OpenAI and Gemini stopped at 300 s; OpenAI chat completions with a strict JSON
 schema; Gemini generateContent with `responseJsonSchema`). "Trace walls with AI" in the plan
 image panel sends the plan image (at most 1568 px) and asks for wall centre lines, openings
 (with a door's hinge and arc), room labels and the printed area, in image pixels
@@ -592,7 +593,10 @@ A Content-Security-Policy (`public/_headers`, the same in `vite preview` for the
 limits scripts to the site and connections to our API and the three providers; no
 violations in 3D, the walk, models or PDF upload. Keys are kept per provider (`credentials.ts`: one in use for
 reading plans, others kept), so Claude can read plans while an OpenAI or Gemini key makes
-pictures.
+pictures. Each key has its own "remember" (device or this tab). A trace belongs to the
+project and level it was started on (`ai/draft.ts`, `traceWhere`): opening another one
+cancels it or puts the draft away. Models' enum answers are lower-cased before the zod
+parse (`lowerEnums`).
 
 **Photo-real renders (5 Nov):** "Photo-real render" on the 3D view (and, with a mouse, while
 walking) takes a picture of the view as it is (`capture3d`) and sends it, with a look (as
@@ -614,7 +618,8 @@ walls, the household shelter's and bathrooms' walls and walls with windows are l
 ("remove wall between Bedroom and outside: an outside, shelter or bathroom wall"). Each
 option shows a small plan, its reasons and its change list (`renovationChanges`); "Use this"
 makes it the renovation, starting one if there is none, as one undo step (`adoptLayout`),
-then shows After. Next: a recorded real reading and real layouts as tests; the rules the
+then shows After. Each option keeps its operations and "Use this" applies them again to
+Before as it is then. Next: a recorded real reading and real layouts as tests; the rules the
 spec lists that aren't checked yet (bedroom windows, corridor widths, the work triangle).
 
 **Wall colours and wallpapers (5 Nov):** a wall side's paint can be any colour (the

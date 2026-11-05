@@ -1,6 +1,6 @@
 import { LayoutSuggestions, type Level, planForModel } from '@dhd/core';
 import type { AiSettings } from './credentials';
-import { AiError, askForJson } from './providers';
+import { AiError, askForJson, lowerEnums } from './providers';
 
 /** What the household wants, from the brief. */
 export interface Brief {
@@ -124,7 +124,7 @@ export async function suggestLayouts(
   signal?: AbortSignal,
 ): Promise<LayoutSuggestions> {
   const raw = await askForJson(ai, layoutPrompt(level, brief), null, LAYOUT_SCHEMA, signal);
-  const parsed = LayoutSuggestions.safeParse(raw);
+  const parsed = LayoutSuggestions.safeParse(lowerEnums(raw, ['op', 'style']));
   if (!parsed.success || parsed.data.options.length === 0) {
     throw new AiError('unreadable', 'The model’s answer wasn’t a set of layouts. Try again.');
   }

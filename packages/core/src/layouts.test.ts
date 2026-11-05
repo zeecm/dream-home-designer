@@ -50,6 +50,19 @@ describe('suggested layouts', () => {
     expect(changes.some((c) => c.kind === 'hack')).toBe(true);
   });
 
+  it('keeps the shelter (labelled HS too) and bathrooms shut, however the model goes about it', () => {
+    const hs = {
+      ...before,
+      rooms: { ...before.rooms, rm_bed3: { ...before.rooms.rm_bed3!, name: 'HS' } },
+    };
+    expect(lockedWalls(hs).has('w_bed3_bed2')).toBe(true);
+    const { level, refused } = applyLayout(hs, [
+      op({ op: 'add_door', wallId: 'w_bed3_bed2', t: 0.5, width: 0.8 }),
+    ]);
+    expect(Object.keys(level.openings)).toEqual(Object.keys(hs.openings));
+    expect(refused).toHaveLength(1);
+  });
+
   it('becomes the renovation in one undo step', () => {
     let s = { doc: hdb4RoomProject(), history: emptyHistory() };
     const { level } = applyLayout(s.doc.levels[0]!, [

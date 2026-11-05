@@ -33,29 +33,44 @@ export const PROVIDERS: Record<
 
 interface Stored {
   active: Provider;
-  remember: boolean;
-  keys: Partial<Record<Provider, { key: string; model: string }>>;
+  /** Each key with its own choice: on this device (remember), or this tab only. */
+  keys: Partial<Record<Provider, { key: string; model: string; remember?: boolean }>>;
 }
 
 const KEY = 'dhd-ai';
 const listeners = new Set<() => void>();
 const isProvider = (p: unknown): p is Provider => typeof p === 'string' && p in PROVIDERS;
 
+function parse(raw: string | null, remember: boolean): Stored | null {
+  if (!raw) return null;
+  const v = JSON.parse(raw) as Partial<Stored> & Partial<AiSettings>;
+  // The first format: one provider's key.
+  if (isProvider(v.provider) && v.key) {
+    return {
+      active: v.provider,
+      keys: {
+        [v.provider]: { key: v.key, model: v.model || PROVIDERS[v.provider].model, remember },
+      },
+    };
+  }
+  if (!isProvider(v.active) || !v.keys) return null;
+  const keys: Stored['keys'] = {};
+  for (const [p, k] of Object.entries(v.keys)) {
+    if (isProvider(p) && k?.key) keys[p] = { ...k, remember };
+  }
+  return { active: v.active, keys };
+}
+
 function read(): Stored | null {
   try {
-    const raw = window.sessionStorage.getItem(KEY) ?? window.localStorage.getItem(KEY);
-    if (!raw) return null;
-    const v = JSON.parse(raw) as Partial<Stored> & Partial<AiSettings>;
-    // The first format: one provider's key.
-    if (isProvider(v.provider) && v.key) {
-      return {
-        active: v.provider,
-        remember: !!v.remember,
-        keys: { [v.provider]: { key: v.key, model: v.model || PROVIDERS[v.provider].model } },
-      };
-    }
-    if (!isProvider(v.active) || !v.keys) return null;
-    return { active: v.active, remember: !!v.remember, keys: v.keys };
+    // Keys kept on this device, and keys for this tab only (which win, being newer).
+    const device = parse(window.localStorage.getItem(KEY), true);
+    const tab = parse(window.sessionStorage.getItem(KEY), false);
+    if (!device && !tab) return null;
+    return {
+      active: tab?.active ?? device?.active ?? 'anthropic',
+      keys: { ...device?.keys, ...tab?.keys },
+    };
   } catch {
     return null;
   }
@@ -66,7 +81,7 @@ let current = active(stored);
 
 function active(s: Stored | null): AiSettings | null {
   const k = s?.keys[s.active];
-  return s && k ? { provider: s.active, key: k.key, model: k.model, remember: s.remember } : null;
+  return s && k ? { provider: s.active, key: k.key, model: k.model, remember: !!k.remember } : null;
 }
 
 function write(s: Stored | null) {
@@ -76,10 +91,18 @@ function write(s: Stored | null) {
     window.localStorage.removeItem(KEY);
     window.sessionStorage.removeItem(KEY);
     if (stored) {
-      (stored.remember ? window.localStorage : window.sessionStorage).setItem(
-        KEY,
-        JSON.stringify(stored),
-      );
+      // Each key where its owner chose to keep it.
+      for (const [storage, remember] of [
+        [window.localStorage, true],
+        [window.sessionStorage, false],
+      ] as const) {
+        const keys = Object.fromEntries(
+          Object.entries(stored.keys).filter(([, k]) => !!k?.remember === remember),
+        );
+        if (Object.keys(keys).length) {
+          storage.setItem(KEY, JSON.stringify({ active: stored.active, keys }));
+        }
+      }
     }
   } catch {
     // A private window may refuse: the keys hold for this visit.
@@ -92,10 +115,13 @@ export function saveAi(settings: AiSettings | null) {
   if (!settings) return write(null);
   write({
     active: settings.provider,
-    remember: !!settings.remember,
     keys: {
       ...stored?.keys,
-      [settings.provider]: { key: settings.key, model: settings.model },
+      [settings.provider]: {
+        key: settings.key,
+        model: settings.model,
+        remember: !!settings.remember,
+      },
     },
   });
 }
@@ -120,7 +146,7 @@ export function aiSettings(): AiSettings | null {
 /** A provider's saved key and model, if there is one. */
 export function keyFor(p: Provider): AiSettings | null {
   const k = stored?.keys[p];
-  return k ? { provider: p, key: k.key, model: k.model, remember: stored?.remember } : null;
+  return k ? { provider: p, key: k.key, model: k.model, remember: !!k.remember } : null;
 }
 
 /** The key to make pictures with: the one in use if it can, else another saved one that can. */

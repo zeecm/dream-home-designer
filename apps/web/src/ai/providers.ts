@@ -16,9 +16,55 @@ export class AiError extends Error {
   }
 }
 
-/** A dense plan can take a model a few minutes; one that has gone quiet this long is stuck. */
-const TIMEOUT = 180_000;
-const QUIET = 45_000;
+/**
+ * A dense plan can take a model a few minutes. One that has gone quiet this long (no word,
+ * not even a summary of its thinking) is stuck; the overall limit applies only until the
+ * answer starts to stream.
+ */
+const TIMEOUT = 300_000;
+const QUIET = 120_000;
+
+/** Aborts when any of `signals` does (AbortSignal.any, where the browser lacks it). */
+export function anySignal(signals: AbortSignal[]): AbortSignal {
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any(signals);
+  const ctrl = new AbortController();
+  for (const s of signals) {
+    if (s.aborted) {
+      ctrl.abort(s.reason);
+      break;
+    }
+    s.addEventListener('abort', () => ctrl.abort(s.reason), { once: true });
+  }
+  return ctrl.signal;
+}
+
+/** Fails as a timeout after `ms` (AbortSignal.timeout, where the browser lacks it). */
+export function timeoutSignal(ms: number): AbortSignal {
+  if (typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms);
+  const ctrl = new AbortController();
+  setTimeout(() => ctrl.abort(new DOMException('Timed out', 'TimeoutError')), ms);
+  return ctrl.signal;
+}
+
+/**
+ * `raw` with the string values of `keys` (anywhere in it) trimmed and in lower case: a
+ * model that answers "Door" or "REMOVE_WALL" still means door and remove_wall.
+ */
+export function lowerEnums(raw: unknown, keys: string[]): unknown {
+  if (Array.isArray(raw)) return raw.map((v) => lowerEnums(v, keys));
+  if (raw && typeof raw === 'object') {
+    return Object.fromEntries(
+      Object.entries(raw).map(([k, v]) => [
+        k,
+        typeof v === 'string' && keys.includes(k) ? v.trim().toLowerCase() : lowerEnums(v, keys),
+      ]),
+    );
+  }
+  return raw;
+}
+
+/** Thrown when a stream went quiet for too long. */
+class QuietError extends Error {}
 
 /**
  * Asks the person's model about an image and returns JSON matching `schema` (a JSON
@@ -32,12 +78,13 @@ export async function askForJson(
   schema: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<unknown> {
-  const timeout = AbortSignal.timeout(TIMEOUT);
-  const both = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  const timeout = timeoutSignal(TIMEOUT);
+  const both = signal ? anySignal([signal, timeout]) : timeout;
   try {
     const text =
       ai.provider === 'anthropic'
-        ? await anthropic(ai, prompt, image, schema, both)
+        ? // Streamed: stopped by Cancel or by going quiet, never mid-answer by the clock.
+          await anthropic(ai, prompt, image, schema, signal ?? new AbortController().signal)
         : ai.provider === 'openai'
           ? await openai(ai, prompt, image, schema, both)
           : await gemini(ai, prompt, image, schema, both);
@@ -49,7 +96,7 @@ export async function askForJson(
   } catch (e) {
     if (e instanceof AiError) throw e;
     if (signal?.aborted) throw new AiError('cancelled', 'Cancelled.');
-    if (timeout.aborted) {
+    if (timeout.aborted || e instanceof QuietError) {
       throw new AiError('timeout', 'The model took too long to answer. Try again.');
     }
     throw toAiError(e);
@@ -103,6 +150,8 @@ async function anthropic(
     {
       model: ai.model,
       max_tokens: 32000,
+      // Thinking summarised, so a long think streams (and isn't taken for a stuck request).
+      thinking: { type: 'adaptive', display: 'summarized' },
       output_config: { effort: 'high', format: { type: 'json_schema', schema } },
       betas: ['server-side-fallback-2026-07-01'],
       // A declined request is retried on Anthropic's recommended model, not failed.
@@ -130,13 +179,25 @@ async function anthropic(
     },
     { signal },
   );
-  // Gone quiet (no event for a while): stuck, not thinking.
-  let quiet = setTimeout(() => stream.abort(), QUIET);
+  // Gone quiet (no event, not even thinking, for a while): stuck.
+  let wentQuiet = false;
+  let quiet = setTimeout(() => {
+    wentQuiet = true;
+    stream.abort();
+  }, QUIET);
   stream.on('streamEvent', () => {
     clearTimeout(quiet);
-    quiet = setTimeout(() => stream.abort(), QUIET);
+    quiet = setTimeout(() => {
+      wentQuiet = true;
+      stream.abort();
+    }, QUIET);
   });
-  const message = await stream.finalMessage().finally(() => clearTimeout(quiet));
+  const message = await stream
+    .finalMessage()
+    .catch((e) => {
+      throw wentQuiet ? new QuietError() : e;
+    })
+    .finally(() => clearTimeout(quiet));
   if (message.stop_reason === 'refusal') {
     throw new AiError('refused', 'The model declined to read this image.');
   }

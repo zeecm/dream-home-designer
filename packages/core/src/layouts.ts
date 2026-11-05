@@ -59,7 +59,7 @@ export const LayoutSuggestions = z.object({
 export type LayoutSuggestions = z.infer<typeof LayoutSuggestions>;
 
 /** Rooms whose walls a renovation keeps: the household shelter and wet rooms. */
-const KEPT_ROOM = /shelter|bath|wc|toilet|shower/i;
+const KEPT_ROOM = /shelter|bomb|\bh\.?s\.?\b|bath|\bwc\b|toilet|shower/i;
 
 /** Room names either side of a wall (null where it faces outside). */
 export function sidesOf(level: Level, wallId: string): (string | null)[] {
@@ -159,8 +159,10 @@ export function planForModel(level: Level) {
  * out and listed in `refused` (in words), so a person sees what the model wanted.
  */
 export function applyLayout(before: Level, ops: LayoutOp[]): { level: Level; refused: string[] } {
-  const locked = lockedWalls(before);
+  const lockedAtStart = lockedWalls(before);
   let lvl: Level = before;
+  // Locked as the plan was, or as it is now (a wall split by a new one keeps no old id).
+  const locked = { has: (id: string) => lockedAtStart.has(id) || lockedWalls(lvl).has(id) };
   const refused: string[] = [];
   const apply = (cmd: Command) => {
     const doc = { levels: [lvl] } as unknown as Project;
@@ -187,8 +189,7 @@ export function applyLayout(before: Level, ops: LayoutOp[]): { level: Level; ref
         apply(drawWall(lvl, { point: o.a }, { point: o.b }, { thickness: 0.1 }).command);
       } else if (o.op === 'add_door') {
         if (!wall || !o.wallId) throw new Error('no such wall');
-        const sides = sidesOf(lvl, o.wallId);
-        if (sides.some((s) => s === null)) throw new Error('an outside wall');
+        if (locked.has(o.wallId)) throw new Error('an outside, shelter or bathroom wall');
         const a = lvl.vertices[wall.a];
         const b = lvl.vertices[wall.b];
         const len = a && b ? Math.hypot(b.x - a.x, b.y - a.y) : 0;
