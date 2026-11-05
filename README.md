@@ -48,13 +48,14 @@ for any plan.
   [spec](docs/specs/structural-walls.md)
 
 ### In progress
+- Live clearance and furniture-fit checks (first slice: wardrobes, drawers, kitchen, bathroom,
+  beds, door swings, overlaps). [spec](docs/specs/clearance-checks.md)
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
 
 ### Planned
-1. Live clearance and furniture-fit checks.
-2. Carpentry builder and a renovation cost estimate.
-3. "My furniture" and a delivery-path fit check.
-4. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
+1. Carpentry builder and a renovation cost estimate.
+2. "My furniture" and a delivery-path fit check.
+3. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
 
 ## What it does
 
