@@ -13,6 +13,7 @@ import type { Command } from './history';
 import { AFTER_SUFFIX, draftLevel } from './levels';
 import { roomArea, roomShapes } from './rooms';
 import { type Level, type Opening, type Project, type Vec2, isBoundary } from './schema';
+import { sidesOf, wallStatus } from './structural';
 import { applyLevel } from './topology';
 
 /**
@@ -59,38 +60,18 @@ export const LayoutSuggestions = z.object({
 export type LayoutSuggestions = z.infer<typeof LayoutSuggestions>;
 
 /** Rooms whose walls a renovation keeps: the household shelter and wet rooms. */
-const KEPT_ROOM = /shelter|bomb|\bh\.?s\.?\b|bath|\bwc\b|toilet|shower/i;
-
-/** Room names either side of a wall (null where it faces outside). */
-export function sidesOf(level: Level, wallId: string): (string | null)[] {
-  const w = level.walls[wallId];
-  const a = w && level.vertices[w.a];
-  const b = w && level.vertices[w.b];
-  if (!w || !a || !b) return [];
-  const len = Math.hypot(b.x - a.x, b.y - a.y);
-  if (len < 1e-9) return [];
-  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-  const n = { x: -(b.y - a.y) / len, y: (b.x - a.x) / len };
-  const off = w.thickness / 2 + 0.05;
-  const shapes = roomShapes(level);
-  return [1, -1].map((k) => {
-    const p = { x: mid.x + n.x * off * k, y: mid.y + n.y * off * k };
-    const room = Object.values(level.rooms).find((r) => {
-      const s = shapes.get(r.id);
-      return s && pointInPolygon(p, s.outer) && !s.holes.some((h) => pointInPolygon(p, h));
-    });
-    return room?.name ?? null;
-  });
-}
+const KEPT_ROOM = /bath|\bwc\b|toilet|shower/i;
 
 /**
- * Walls a renovation can't take down or change: outside walls (one side outside), and the
- * walls of the household shelter and of bathrooms (wet areas stay where they are).
+ * Walls a renovation can't take down or change: outside walls (one side outside), structural
+ * walls (marked, or probably so by their thickness), and the walls of the household shelter
+ * and of bathrooms (wet areas stay where they are).
  */
 export function lockedWalls(level: Level): Set<string> {
   const out = new Set<string>();
   for (const w of Object.values(level.walls)) {
     if (isBoundary(w)) continue;
+    if (wallStatus(level, w.id) !== 'none') out.add(w.id);
     const sides = sidesOf(level, w.id);
     if (sides.some((s) => s === null) || sides.some((s) => s && KEPT_ROOM.test(s))) out.add(w.id);
     // A wall with a window in it is an outside wall, whatever is on the other side.
@@ -174,7 +155,8 @@ export function applyLayout(before: Level, ops: LayoutOp[]): { level: Level; ref
       const wall = o.wallId ? lvl.walls[o.wallId] : undefined;
       if (o.op === 'remove_wall' || o.op === 'half_wall' || o.op === 'glass_wall') {
         if (!wall || !o.wallId) throw new Error('no such wall');
-        if (locked.has(o.wallId)) throw new Error('an outside, shelter or bathroom wall');
+        if (locked.has(o.wallId))
+          throw new Error('a structural, outside, shelter or bathroom wall');
         if (o.op === 'remove_wall') apply(deleteWall(id, o.wallId, lvl));
         else if (o.op === 'glass_wall') {
           apply(
@@ -189,7 +171,8 @@ export function applyLayout(before: Level, ops: LayoutOp[]): { level: Level; ref
         apply(drawWall(lvl, { point: o.a }, { point: o.b }, { thickness: 0.1 }).command);
       } else if (o.op === 'add_door') {
         if (!wall || !o.wallId) throw new Error('no such wall');
-        if (locked.has(o.wallId)) throw new Error('an outside, shelter or bathroom wall');
+        if (locked.has(o.wallId))
+          throw new Error('a structural, outside, shelter or bathroom wall');
         const a = lvl.vertices[wall.a];
         const b = lvl.vertices[wall.b];
         const len = a && b ? Math.hypot(b.x - a.x, b.y - a.y) : 0;
@@ -211,7 +194,9 @@ export function applyLayout(before: Level, ops: LayoutOp[]): { level: Level; ref
         const op = o.openingId ? lvl.openings[o.openingId] : undefined;
         if (!op || !o.openingId) throw new Error('no such opening');
         if (op.kind === 'window' || locked.has(op.wallId)) {
-          throw new Error('a window, or an opening in an outside, shelter or bathroom wall');
+          throw new Error(
+            'a window, or an opening in a structural, outside, shelter or bathroom wall',
+          );
         }
         apply(deleteOpening(id, o.openingId));
       } else if (o.op === 'rename_room') {

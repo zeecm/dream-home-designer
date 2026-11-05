@@ -200,16 +200,18 @@ function Toast() {
   return (
     <output className="toast">
       <span>{toast.text}</span>
-      <button
-        type="button"
-        className="link-btn"
-        onClick={() => {
-          undo();
-          setShown(null);
-        }}
-      >
-        Undo
-      </button>
+      {toast.undo !== false && (
+        <button
+          type="button"
+          className="link-btn"
+          onClick={() => {
+            undo();
+            setShown(null);
+          }}
+        >
+          Undo
+        </button>
+      )}
     </output>
   );
 }

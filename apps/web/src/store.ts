@@ -1,4 +1,5 @@
 import {
+  AFTER_SUFFIX,
   type Carry,
   type Command,
   type DispatchOptions,
@@ -18,6 +19,7 @@ import {
   furnitureKind,
   loadProject,
   newId,
+  renovationBreaches,
   sampleFlatProject,
   setProjectModels,
   touchedVariant,
@@ -77,7 +79,8 @@ interface State {
   notice: string | null;
   dismissNotice: () => void;
   /** A short confirmation after a destructive edit, offering Undo. */
-  toast: { text: string; at: number } | null;
+  /** A short message; with Undo unless `undo` is false. */
+  toast: { text: string; at: number; undo?: boolean } | null;
   /** What this browser may do with the open project; a viewer can't change it. */
   role: Role;
   /** Opens a copy of the open project as a new plan of this browser's own. */
@@ -194,6 +197,31 @@ function countUsage(label: string, before: EditorDoc, after: EditorDoc) {
 }
 
 /** Commands that remove things get an Undo toast; this is its text, or null for none. */
+/** Walls of the flat as it is that the renovation changes and HDB guards (cached by level). */
+const breachCache = new WeakMap<Level, { shelter: Set<string>; structural: Set<string> }>();
+function breaches(doc: Project) {
+  const shelter = new Set<string>();
+  const structural = new Set<string>();
+  for (const after of doc.renovation?.levels ?? []) {
+    let b = breachCache.get(after);
+    if (!b) {
+      const before = doc.levels.find((l) => after.id === `${l.id}${AFTER_SUFFIX}`);
+      b = before
+        ? renovationBreaches(before, after)
+        : { shelter: new Set(), structural: new Set() };
+      breachCache.set(after, b);
+    }
+    for (const id of b.shelter) shelter.add(id);
+    for (const id of b.structural) structural.add(id);
+  }
+  return { shelter, structural };
+}
+const added = (now: Set<string>, was: Set<string>) => [...now].some((id) => !was.has(id));
+
+export const SHELTER_REFUSED = 'Household shelter walls can’t be changed. HDB doesn’t allow it.';
+export const STRUCTURAL_WARNING =
+  'That’s a structural wall. HDB generally doesn’t allow hacking it.';
+
 function toastFor(label: string): string | null {
   if (label === 'Discard the renovation') return 'Renovation discarded';
   if (label === 'Make the renovation the plan') return 'The renovation is now the plan';
@@ -331,6 +359,18 @@ export const useStore = create<State>((set, get) => {
         opts,
       );
       if (next === get().editor) return;
+      // In the renovation: the household shelter's walls stay as they are (the edit isn't
+      // made; a drag stays put), and a structural wall changed is kept with a warning.
+      let warn: string | null = null;
+      if (useEditor.getState().variant === 'after' && next.doc.renovation) {
+        const was = breaches(editorBefore.doc);
+        const now = breaches(next.doc);
+        if (added(now.shelter, was.shelter)) {
+          set({ toast: { text: SHELTER_REFUSED, at: Date.now(), undo: false } });
+          return;
+        }
+        if (added(now.structural, was.structural)) warn = STRUCTURAL_WARNING;
+      }
       if (!going) carry = { key, held: false, start };
       let held = false;
       if (outcome.conflict && !carry.held) {
@@ -341,7 +381,7 @@ export const useStore = create<State>((set, get) => {
       countUsage(cmd.label, editorBefore, next);
       const text = held
         ? 'Not carried over to the renovation, which changed the same part'
-        : toastFor(cmd.label);
+        : (warn ?? toastFor(cmd.label));
       if (text) set({ toast: { text, at: Date.now() } });
     },
     undo: () => {

@@ -240,6 +240,8 @@ describe('renovationChanges', () => {
       change: 'removed',
       opening: 'window',
       width: 1.4,
+      // An outside wall this thick is probably structural.
+      guard: 'structural',
     });
   });
 

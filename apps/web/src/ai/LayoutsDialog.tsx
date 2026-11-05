@@ -198,9 +198,9 @@ export function LayoutsDialog({ onClose }: { onClose: () => void }) {
       <div className="dialog-body">
         <p className="dialog-note">
           Your AI model suggests up to three ways to renovate the flat as it is, for your household.
-          Outside walls, the household shelter and bathrooms stay as they are. Any you use becomes
-          the renovation, to look at in 3D, walk through and change further. Hacking walls needs HDB
-          approval and an HDB-registered contractor: these are ideas, not approvals.
+          Outside walls, structural walls, the household shelter and bathrooms stay as they are. Any
+          you use becomes the renovation, to look at in 3D, walk through and change further. Hacking
+          walls needs HDB approval and an HDB-registered contractor: these are ideas, not approvals.
         </p>
         <div className="ai-form">
           <label className="field">

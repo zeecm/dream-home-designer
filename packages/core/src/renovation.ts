@@ -14,6 +14,7 @@ import {
   isHalfWall,
   wallFaces,
 } from './schema';
+import { type WallStatus, wallStatuses } from './structural';
 import { reclampOpenings } from './topology';
 
 /**
@@ -554,9 +555,14 @@ export interface ChangePlace {
 
 type OpeningKind = 'door' | 'window' | 'passage';
 
+/** A change to a wall HDB guards: the household shelter's, or a structural one. */
+export type Guard = 'shelter' | 'structural';
+
 /** One change a renovation makes, placed by the rooms it touches. */
-export type RenovationChange = ChangePlace &
-  (
+export type RenovationChange = ChangePlace & {
+  /** It touches a wall of the flat as it is that is structural (or probably so), or the shelter's. */
+  guard?: Guard;
+} & (
     | {
         kind: 'hack' | 'build';
         length: number;
@@ -660,14 +666,56 @@ function besideOpening(level: Level, id: string): Vec2[] {
   ];
 }
 
-/** Whether a wall of `level` runs through `c` along `d` (so an opening there has a wall). */
-function wallRunsThrough(level: Level, c: Vec2, d: Vec2): boolean {
-  return linesOf(level).some((l) => {
+/** The wall of `level` that runs through `c` along `d` (so an opening there has a wall). */
+function wallThrough(level: Level, c: Vec2, d: Vec2): Wall | undefined {
+  return linesOf(level).find((l) => {
     if (Math.abs(l.d.x * d.y - l.d.y * d.x) > 1e-6) return false;
     const t = (c.x - l.a.x) * l.d.x + (c.y - l.a.y) * l.d.y;
     const off = Math.abs((c.x - l.a.x) * -l.d.y + (c.y - l.a.y) * l.d.x);
     return off < 0.01 && t > -EPS && t < l.length + EPS;
-  });
+  })?.wall;
+}
+const wallRunsThrough = (level: Level, c: Vec2, d: Vec2) => !!wallThrough(level, c, d);
+
+const guardOf = (s: WallStatus | undefined): Guard | undefined =>
+  s === 'shelter' ? 'shelter' : s ? 'structural' : undefined;
+
+/** The wall of the flat as it is that an opening of the renovation is cut into, if any. */
+function wallBefore(before: Level, after: Level, openingId: string): string | undefined {
+  const at = openingAt(after, openingId);
+  return at ? wallThrough(before, at.c, at.d)?.id : undefined;
+}
+
+/**
+ * Walls of the flat as it is (by id) that a renovation changes and HDB guards: the household
+ * shelter's, never to be changed, and structural ones (marked, or probably so), to warn
+ * about. A wall hacked, moved, thickened, cut down or made glass counts, as does an opening
+ * cut into it, closed up, moved, resized or restyled; paint, or a wall split in place, don't.
+ */
+export function renovationBreaches(
+  before: Level,
+  after: Level,
+  diff: RenovationDiff = renovationDiff(before, after),
+): { shelter: Set<string>; structural: Set<string> } {
+  const status = wallStatuses(before);
+  const shelter = new Set<string>();
+  const structural = new Set<string>();
+  const add = (id: string | undefined) => {
+    const g = guardOf(id ? status.get(id) : undefined);
+    if (id && g) (g === 'shelter' ? shelter : structural).add(id);
+  };
+  for (const s of diff.demolished) add(s.wallId);
+  for (const id of diff.openingsRemoved) add(before.openings[id]?.wallId);
+  for (const id of diff.openingsAdded) add(wallBefore(before, after, id));
+  // A door restyled or glazed differently, in the same place.
+  for (const o of Object.values(after.openings)) {
+    const was = before.openings[o.id];
+    if (!was || o.kind !== 'door' || was.kind !== 'door') continue;
+    if ((o.style ?? 'swing') !== (was.style ?? 'swing') || o.glazed !== was.glazed) {
+      add(wallBefore(before, after, o.id));
+    }
+  }
+  return { shelter, structural };
 }
 
 /** A point well inside a room's floor (clear of its holes), as rooms are matched by. */
@@ -727,18 +775,27 @@ export function renovationChanges(
     }
     return {};
   };
+  const status = wallStatuses(before);
+  const guard = (wallId: string | undefined) => {
+    const g = guardOf(wallId ? status.get(wallId) : undefined);
+    return g ? { guard: g } : {};
+  };
   const walls = (kind: 'hack' | 'build', rooms: Rooms, stretches: WallStretch[]) => {
-    const byPlace = new Map<string, { place: ChangePlace; length: number; what: What }>();
+    const byPlace = new Map<
+      string,
+      { place: ChangePlace; length: number; what: What; guard: { guard?: Guard } }
+    >();
     for (const s of stretches) {
       const place = placeOf(rooms, besideStretch(s));
       const what = kind === 'build' ? whatOf(s) : {};
-      const k = `${place.rooms.join('\u0000')}|${place.outside}|${what.what}|${what.height}`;
+      const g = kind === 'hack' ? guard(s.wallId) : {};
+      const k = `${place.rooms.join('\u0000')}|${place.outside}|${what.what}|${what.height}|${g.guard}`;
       const cur = byPlace.get(k);
       if (cur) cur.length += s.length;
-      else byPlace.set(k, { place, length: s.length, what });
+      else byPlace.set(k, { place, length: s.length, what, guard: g });
     }
-    for (const { place, length, what } of byPlace.values()) {
-      out.push({ ...place, kind, length, ...what });
+    for (const { place, length, what, guard: g } of byPlace.values()) {
+      out.push({ ...place, kind, length, ...what, ...g });
     }
   };
   walls('hack', inBefore, diff.demolished);
@@ -750,7 +807,13 @@ export function renovationChanges(
     if (!o) continue;
     const was = diff.openingsRemoved.includes(id) ? before.openings[id] : undefined;
     const place = placeOf(inAfter, besideOpening(after, id));
-    const base = { ...place, kind: 'opening' as const, opening: kindOf(o.kind), width: o.width };
+    const base = {
+      ...place,
+      kind: 'opening' as const,
+      opening: kindOf(o.kind),
+      width: o.width,
+      ...guard(wallBefore(before, after, id)),
+    };
     if (!was) {
       out.push({ ...base, change: 'added' });
       continue;
@@ -786,6 +849,7 @@ export function renovationChanges(
       kind: 'opening',
       opening: 'door',
       width: o.width,
+      ...guard(wallBefore(before, after, o.id)),
       change: 'changed',
       before: {
         ...(style(was) !== style(o) ? { style: style(was) } : {}),
@@ -805,6 +869,7 @@ export function renovationChanges(
       change: at && !wallRunsThrough(after, at.c, at.d) ? 'with-wall' : 'removed',
       opening: kindOf(o.kind),
       width: o.width,
+      ...guard(o.wallId),
     });
   }
   for (const r of Object.values(after.rooms)) {

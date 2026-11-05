@@ -1,4 +1,5 @@
 import {
+  AFTER_SUFFIX,
   type DoorStyle,
   FLOOR_FINISHES,
   type ItemPatch,
@@ -24,6 +25,7 @@ import {
   isGlass,
   isHalfWall,
   itemSize,
+  markStructural,
   modelUses,
   moveVertex,
   newId,
@@ -41,9 +43,11 @@ import {
   updateRoom,
   updateWall,
   wallLine,
+  wallStatus,
+  wallStatuses,
 } from '@dhd/core';
 import { wallpaperCanvas } from '@dhd/render';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useEditor } from '../editor';
 import { roomsBeside } from '../plan/keyboard';
 import { OPENING_PRESETS, ROOM_NAMES } from '../presets';
@@ -300,6 +304,7 @@ function PlanSummary({ level }: { level: Level }) {
           <dd className="num">{count('window')}</dd>
         </div>
       </dl>
+      <StructuralSuggestion />
       <RenovationSection />
       <LengthField
         label="Ceiling height"
@@ -369,6 +374,91 @@ function NorthField() {
   );
 }
 
+/**
+ * In the flat as it is: walls thick enough to be structural that nobody has marked, to mark
+ * all at once (one undo step).
+ */
+function StructuralSuggestion() {
+  const dispatch = useStore((s) => s.dispatch);
+  const before = useEditor((s) => s.variant) === 'before';
+  const level = useLevel();
+  const likely = useMemo(
+    () =>
+      level ? [...wallStatuses(level)].filter(([, s]) => s === 'likely').map(([id]) => id) : [],
+    [level],
+  );
+  if (!before || !likely.length) return null;
+  return (
+    <div className="note structural-guess">
+      <span>
+        {likely.length === 1 ? '1 wall looks' : `${likely.length} walls look`} structural (200 mm or
+        thicker).
+      </span>
+      <button
+        type="button"
+        className="btn btn-small"
+        onClick={() => dispatch(markStructural(likely, true))}
+      >
+        Mark {likely.length === 1 ? 'it' : 'them'}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Structural or not: a switch, a suggestion for a thick wall nobody has marked, and the
+ * household shelter's walls shown as structural for good. Judged on the flat as it is.
+ */
+function StructuralField({ level, id }: { level: Level; id: string }) {
+  const dispatch = useStore((s) => s.dispatch);
+  const before = useStore((s) =>
+    s.editor.doc.levels.find((l) => l.id === level.id || `${l.id}${AFTER_SUFFIX}` === level.id),
+  );
+  const base = before?.walls[id] ? before : level;
+  const status = wallStatus(base, id);
+  const thickness = Math.round((base.walls[id]?.thickness ?? 0) * 1000);
+  return (
+    <div className="field">
+      <label className="check-row">
+        <input
+          type="checkbox"
+          checked={status === 'structural' || status === 'shelter'}
+          disabled={status === 'shelter'}
+          onChange={(e) => dispatch(markStructural([id], e.target.checked))}
+        />
+        <span>Structural wall</span>
+      </label>
+      {status === 'shelter' ? (
+        <p className="note warning-text">
+          A household shelter wall: HDB doesn’t allow it to be hacked, cut down or replaced.
+        </p>
+      ) : status === 'likely' ? (
+        <div className="note structural-guess">
+          <span>{thickness} mm thick, so probably structural.</span>
+          <span className="button-row">
+            <button
+              type="button"
+              className="btn btn-small"
+              onClick={() => dispatch(markStructural([id], true))}
+            >
+              Yes, structural
+            </button>
+            <button
+              type="button"
+              className="btn btn-small"
+              onClick={() => dispatch(markStructural([id], false))}
+            >
+              No
+            </button>
+          </span>
+        </div>
+      ) : (
+        <p className="field-hint">Load-bearing concrete. HDB plans draw these solid or hatched.</p>
+      )}
+    </div>
+  );
+}
+
 function WallInspector({ level, id }: { level: Level; id: string }) {
   const dispatch = useStore((s) => s.dispatch);
   const wall = level.walls[id];
@@ -377,8 +467,6 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
   const onWall = Object.values(level.openings).filter((o) => o.wallId === id).length;
   const boundary = isBoundary(wall);
   const glass = isGlass(wall);
-  // A wall of the household shelter (named so on HDB plans), which can't be changed.
-  const shelter = roomsBeside(level, id).some((r) => !!r && /shelter/i.test(r));
   // A wall lower than the ceiling: a half wall (counter or bar height).
   const half = isHalfWall(wall, level.ceilingHeight);
   const heightPreset =
@@ -405,11 +493,7 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
           isn’t built in 3D.
         </p>
       )}
-      {shelter && (
-        <p className="note warning-text">
-          A household shelter wall: HDB doesn’t allow it to be hacked, cut down or replaced.
-        </p>
-      )}
+      {!boundary && <StructuralField level={level} id={id} />}
       {!boundary && onWall > 0 && (
         <p className="note">
           Making this a boundary removes its {onWall === 1 ? 'opening' : `${onWall} openings`}.

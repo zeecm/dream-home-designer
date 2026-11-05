@@ -336,7 +336,13 @@ function readableIds(project: Project): Project {
   const walls = Object.fromEntries(
     Object.values(level.walls).map((w) => {
       const id = wIds.get(w.id) as string;
-      return [id, { ...w, id, a: vIds.get(w.a) as string, b: vIds.get(w.b) as string }];
+      // Marked as the published plan draws them: the concrete walls (200 mm and over, the
+      // household shelter's among them) structural, the rest not.
+      const structural = w.kind === 'boundary' ? {} : { structural: w.thickness >= 0.2 };
+      return [
+        id,
+        { ...w, id, a: vIds.get(w.a) as string, b: vIds.get(w.b) as string, ...structural },
+      ];
     }),
   );
   const openings = Object.fromEntries(

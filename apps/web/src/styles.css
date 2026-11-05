@@ -1236,6 +1236,18 @@ input[type="range"] {
   stroke-width: 1px;
   vector-effect: non-scaling-stroke;
 }
+/* Structural and household-shelter walls: hatched, as concrete is on a plan. */
+.wall-structural {
+  fill: url(#structural-hatch);
+}
+.hatch-ground {
+  fill: var(--wall);
+}
+.hatch-line {
+  stroke: var(--surface);
+  stroke-width: 0.045;
+  opacity: 0.85;
+}
 /* A half wall: lighter than a full one, its height tagged beside it. */
 .wall-half {
   fill: color-mix(in srgb, var(--wall) 45%, var(--surface));
@@ -2734,4 +2746,15 @@ h3.field-label {
     padding: 12px 0;
     margin: -12px 0;
   }
+}
+
+/* A suggestion to mark walls structural: the words, then the buttons. */
+.structural-guess {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.reno-guard {
+  margin: 0 0 8px;
 }

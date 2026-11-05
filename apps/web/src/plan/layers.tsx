@@ -50,9 +50,12 @@ export const PlanShapes = memo(function PlanShapes({
   level,
   geom,
   interactive,
+  guarded,
 }: {
   level: Level;
   geom: PlanGeometry;
+  /** Walls drawn hatched: structural, or the household shelter's. */
+  guarded?: ReadonlySet<string>;
   /**
    * What can be pointed at: everything (Select), or only the pieces a placing tool can also
    * move (furniture in Furniture; doors, windows and openings in their tools).
@@ -64,6 +67,19 @@ export const PlanShapes = memo(function PlanShapes({
   const peOpenings = interactive === true || interactive === 'openings' ? undefined : 'none';
   return (
     <g className="plan-shapes">
+      <defs>
+        {/* Concrete, as plans draw it: hatched (in metres, so it scales with the plan). */}
+        <pattern
+          id="structural-hatch"
+          width={0.12}
+          height={0.12}
+          patternUnits="userSpaceOnUse"
+          patternTransform="rotate(45)"
+        >
+          <rect className="hatch-ground" width={0.12} height={0.12} />
+          <line className="hatch-line" x1={0.06} y1={0} x2={0.06} y2={0.12} />
+        </pattern>
+      </defs>
       <g className="rooms">
         {Object.values(level.rooms).map((r) => (
           <path
@@ -84,7 +100,7 @@ export const PlanShapes = memo(function PlanShapes({
         {geom.pieces.map((p, i) => (
           <polygon
             key={`${p.wallId}:${i}`}
-            className={`wall${wallLook(level, p.wallId)}`}
+            className={`wall${wallLook(level, p.wallId)}${guarded?.has(p.wallId) ? ' wall-structural' : ''}`}
             points={pts(p.polygon)}
             data-hit={hit({ kind: 'wall', id: p.wallId })}
             pointerEvents={pe}

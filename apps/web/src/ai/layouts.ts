@@ -98,7 +98,7 @@ export const LAYOUT_SCHEMA = {
 };
 
 export const layoutPrompt = (level: Level, brief: Brief) =>
-  `You are an experienced Singapore residential architect and interior designer. Here is an HDB flat as it is, as JSON (metres; walls by id with the rooms either side; "locked" walls are outside walls, the household shelter's or bathrooms' and must not be changed):
+  `You are an experienced Singapore residential architect and interior designer. Here is an HDB flat as it is, as JSON (metres; walls by id with the rooms either side; "locked" walls are outside walls, structural (load-bearing) walls, the household shelter's or bathrooms' and must not be changed):
 
 ${JSON.stringify(planForModel(level))}
 

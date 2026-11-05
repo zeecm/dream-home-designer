@@ -49,6 +49,22 @@ const an = (w: string) => `${/^[aeiou]/.test(w) ? 'an' : 'a'} ${w}`;
 
 /** What a change is, in words. */
 export function changeText(c: RenovationChange): string {
+  const text = changeWords(c);
+  if (c.guard === 'shelter') return `${text} (household shelter: HDB doesn’t allow this)`;
+  return c.guard === 'structural' ? `${text} (structural)` : text;
+}
+
+/** How many changes touch structural walls, as a line to put first; null for none. */
+export function guardBanner(changes: RenovationChange[]): string | null {
+  const n = changes.filter((c) => c.guard).length;
+  if (!n) return null;
+  return `${n} ${n === 1 ? 'change touches' : 'changes touch'} structural walls. Check with HDB before you plan on ${n === 1 ? 'it' : 'them'}.`;
+}
+
+export const PERMIT_NOTE =
+  'Hacking any wall needs an HDB renovation permit, applied for by your HDB-registered contractor.';
+
+function changeWords(c: RenovationChange): string {
   switch (c.kind) {
     case 'hack':
       return `Hack ${formatLength(c.length)} of wall`;
@@ -124,9 +140,12 @@ function byPlace(changes: RenovationChange[]): { place: string; items: string[] 
 
 /** The renovation's changes as plain text, a line per place, to send to a contractor. */
 export function changesAsText(changes: RenovationChange[]): string {
-  return byPlace(changes)
-    .map((g) => `${g.place}: ${g.items.join('; ')}`)
-    .join('\n');
+  const banner = guardBanner(changes);
+  const lines = byPlace(changes).map((g) => `${g.place}: ${g.items.join('; ')}`);
+  const hacks = changes.some((c) => c.kind === 'hack');
+  return [...(banner ? [banner, ''] : []), ...lines, ...(hacks ? ['', PERMIT_NOTE] : [])].join(
+    '\n',
+  );
 }
 
 /** The changes, room by room, with a button to copy them as text. */
@@ -161,6 +180,9 @@ function ChangeList({ changes }: { changes: RenovationChange[] }) {
           {copied ?? 'Copy list'}
         </button>
       </span>
+      {guardBanner(changes) && (
+        <p className="note warning-text reno-guard">{guardBanner(changes)}</p>
+      )}
       <ul>
         {byPlace(changes).map((g) => (
           <li key={g.place}>
@@ -174,6 +196,7 @@ function ChangeList({ changes }: { changes: RenovationChange[] }) {
           </li>
         ))}
       </ul>
+      {changes.some((c) => c.kind === 'hack') && <p className="field-hint">{PERMIT_NOTE}</p>}
     </div>
   );
 }

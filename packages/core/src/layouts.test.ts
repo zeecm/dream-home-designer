@@ -43,7 +43,7 @@ describe('suggested layouts', () => {
     expect(level.walls.w_front_l).toBeDefined();
     expect(level.walls.w_living_kitchen?.height).toBe(1);
     expect(refused).toHaveLength(2);
-    expect(refused[0]).toMatch(/^remove wall between .*outside.*: an outside/);
+    expect(refused[0]).toMatch(/^remove wall between .*outside.*: a structural, outside/);
     expect(Object.values(level.rooms).some((r) => r.name === 'Family room')).toBe(true);
     // Its change list is the renovation's.
     const changes = renovationChanges(before, level);

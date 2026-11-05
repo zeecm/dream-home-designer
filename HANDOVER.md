@@ -1071,3 +1071,19 @@ pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
   piece of another layer doesn't (switch to Select for that).
 - **Corner dimension lines** for walls that run into the room draw inside it; fine at plan scale,
   busy on short walls.
+
+**Structural and shelter walls (5 Nov, spec `docs/specs/structural-walls.md`):** core
+`structural.ts`: `wallStatus` (shelter from the room beside it, whatever the mark; structural
+when marked; `likely` when unmarked and 200 mm or thicker), `wallStatuses`, `markStructural`
+(both versions, one undo step), `sidesOf` (moved from layouts). The sample marks its 200 mm+
+walls structural and the rest not. `renovationBreaches(before, after)` lists Before walls a
+renovation hacks, moves, thickens, cuts down, glasses or cuts an opening into (or closes,
+moves, restyles one in); `renovationChanges` marks such lines `guard`. The store checks every
+edit made in After (cached per level): a new shelter breach isn't committed ("Household
+shelter walls can't be changed…", toast without Undo, so a drag stays put); a new structural
+one is kept with a warning and Undo. Before stays free. Plan: structural and shelter walls
+hatched (`#structural-hatch`, in metres, in PNG/print too). Inspector: a Structural wall
+switch, a Yes/No suggestion for a likely wall, the shelter note; plan details: "N walls look
+structural [Mark them]" (Before). The change list adds "(structural)", a count banner and the
+permit note (and Copy list). AI layouts lock structural and likely walls. No schema change.
+

@@ -1,10 +1,12 @@
 import {
+  AFTER_SUFFIX,
   furnitureKind,
   furnitureLayer,
   levelBounds,
   planGeometry,
   siteOf,
   underlayToWorld,
+  wallStatus,
 } from '@dhd/core';
 import type { Vec2 } from '@dhd/core';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -216,6 +218,20 @@ export function PlanCanvas() {
   const { setView, fitDone, requestFit } = useEditor.getState();
 
   const geom = useMemo(() => (level ? planGeometry(level) : null), [level]);
+  // Structural and shelter walls, judged on the flat as it is (walls new in the renovation
+  // on the renovation).
+  const before = project.levels.find(
+    (l) => !!level && (l.id === level.id || `${l.id}${AFTER_SUFFIX}` === level.id),
+  );
+  const guarded = useMemo(() => {
+    const out = new Set<string>();
+    if (!level) return out;
+    for (const id of Object.keys(level.walls)) {
+      const s = before?.walls[id] ? wallStatus(before, id) : wallStatus(level, id);
+      if (s === 'structural' || s === 'shelter') out.add(id);
+    }
+    return out;
+  }, [level, before]);
   const underlay = project.underlay;
   const image = usePlanImage();
   const imageUrl = image.status === 'ready' ? image.url : null;
@@ -812,6 +828,7 @@ export function PlanCanvas() {
             <PlanShapes
               level={level}
               geom={geom}
+              guarded={guarded}
               interactive={
                 tool === 'select'
                   ? true

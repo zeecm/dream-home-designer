@@ -41,13 +41,13 @@ for any plan.
 - AI with your own key (Claude, OpenAI or Gemini): trace walls from a plan image, looked over
   before it goes in. [spec](docs/specs/ai-layouts.md)
 - Photo-real renders of any 3D or walk-through view, with your own OpenAI or Gemini key.
-
 - AI suggested layouts from a short brief: up to three, checked against what HDB lets you
   change, one click to make one the renovation.
+- Structural and household-shelter walls marked (hatched), with hacking warnings: shelter
+  walls can't be changed in a renovation, structural ones warn.
+  [spec](docs/specs/structural-walls.md)
 
 ### In progress
-- Structural and household-shelter walls marked, with hacking warnings.
-  [spec](docs/specs/structural-walls.md)
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
 
 ### Planned
