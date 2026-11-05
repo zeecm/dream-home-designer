@@ -2767,3 +2767,26 @@ h3.field-label {
     min-height: 44px;
   }
 }
+
+/* Clearance checks over the plan: red where room is short, faint where it's fine. */
+.clearance-short {
+  fill: color-mix(in srgb, #d92d20 16%, transparent);
+  stroke: #d92d20;
+  stroke-width: 1px;
+  stroke-dasharray: 4 3;
+}
+.clearance-clash {
+  fill: color-mix(in srgb, #d92d20 22%, transparent);
+  stroke: #d92d20;
+  stroke-width: 1.5px;
+}
+.clearance-fine {
+  fill: color-mix(in srgb, var(--muted) 10%, transparent);
+  stroke: var(--muted);
+  stroke-width: 1px;
+  stroke-dasharray: 3 3;
+}
+.clearance-list {
+  margin: 0;
+  padding-left: 18px;
+}

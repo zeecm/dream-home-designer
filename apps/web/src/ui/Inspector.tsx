@@ -48,6 +48,12 @@ import {
 } from '@dhd/core';
 import { wallpaperCanvas } from '@dhd/render';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  itemIssueLines,
+  itemsWithIssues,
+  useClearanceIssues,
+  useClearanceOn,
+} from '../clearance/clearance';
 import { useEditor } from '../editor';
 import { roomsBeside } from '../plan/keyboard';
 import { OPENING_PRESETS, ROOM_NAMES } from '../presets';
@@ -305,6 +311,7 @@ function PlanSummary({ level }: { level: Level }) {
         </div>
       </dl>
       <StructuralSuggestion />
+      <ClearanceSummary />
       <RenovationSection />
       <LengthField
         label="Ceiling height"
@@ -371,6 +378,64 @@ function NorthField() {
       </div>
       <p className="field-hint">{describeFacing(north)}. The 3D view's sun follows it.</p>
     </section>
+  );
+}
+
+/** A piece's clearances: what's short, in words, or that there's room to use it. */
+function ItemClearances({ level, id }: { level: Level; id: string }) {
+  const on = useClearanceOn((s) => s.on);
+  const issues = useClearanceIssues();
+  if (!on) return null;
+  const lines = itemIssueLines(level, id, issues);
+  return (
+    <section className="stack" aria-labelledby="clearance-h">
+      <h3 id="clearance-h" className="section-title">
+        Clearances
+      </h3>
+      {lines.length ? (
+        <ul className="clearance-list warning-text">
+          {lines.map((l) => (
+            <li key={l}>{l}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="field-hint">Room to use it.</p>
+      )}
+    </section>
+  );
+}
+
+/** In the plan details: the switch, how many pieces have a problem, and a way to each. */
+function ClearanceSummary() {
+  const { on, set } = useClearanceOn();
+  const issues = useClearanceIssues();
+  const pieces = itemsWithIssues(issues);
+  const selection = useEditor((s) => s.selection);
+  const next = () => {
+    const at = selection?.kind === 'item' ? pieces.indexOf(selection.id) : -1;
+    const id = pieces[(at + 1) % pieces.length];
+    if (id) useEditor.getState().select({ kind: 'item', id });
+  };
+  return (
+    <div className="field">
+      <label className="check-row">
+        <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} />
+        <span>Clearance checks</span>
+      </label>
+      {on && pieces.length > 0 && (
+        <div className="note structural-guess">
+          <span className="warning-text">
+            {pieces.length === 1
+              ? '1 piece is short of room'
+              : `${pieces.length} pieces are short of room`}{' '}
+            or in the way.
+          </span>
+          <button type="button" className="btn btn-small" onClick={next}>
+            Show next
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -853,6 +918,7 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
           clear();
         }}
       />
+      <ItemClearances level={level} id={id} />
       <OwnModel id={it.assetId} />
     </>
   );

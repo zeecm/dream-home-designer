@@ -1087,3 +1087,20 @@ switch, a Yes/No suggestion for a likely wall, the shelter note; plan details: "
 structural [Mark them]" (Before). The change list adds "(structural)", a count banner and the
 permit note (and Copy list). AI layouts lock structural and likely walls. No schema change.
 
+**Clearance checks (5 Nov, spec `docs/specs/clearance-checks.md`, slice 1):** core
+`clearance.ts`: `CLEARANCE_RULES` by catalogue id (wardrobe 0.60 m in front, drawers 0.75,
+desks 0.80, fridge and kitchen cabinets 0.90, washer 0.70, toilet 0.60, vanity 0.70; queen
+and king beds 0.60 each long side, single beds one side), `clearanceIssues(level)` →
+`zone` (room short off a side, measured to the nearest wall, hub or floor piece by clipping
+them to the zone), `door` (a floor piece in a door's sweep: `doorSweep` hulls `doorLeaves`
+sampled shut to open, every style), `overlap` (> 20 mm; seats under tables and desks
+allowed) and `wall` (> 10 mm into a solid wall piece). Rugs, people and pieces off the floor
+are left out; cabinets of one connected kitchen run don't block each other. Bounding-box
+pre-checks; about 5 ms for 80 pieces packed into the sample. Web `clearance/clearance.tsx`:
+`useClearanceOn` (remembered, key `dhd-clearance`), `issuesOf` cached per level,
+`ClearanceLayer` over the plan (red dashed zones and sweeps, red footprints for clashes, the
+selected piece's clear zones faint; `data-export="skip"`), the Inspector's Clearances section
+for a piece, and in plan details the switch, the count and Show next. Advice only: no edit
+is blocked. Not yet (spec): labels in the plan, live zones for the piece being placed (before
+it's dropped), walkways and the rest of slice 2.
+

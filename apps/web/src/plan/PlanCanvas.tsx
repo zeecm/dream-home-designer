@@ -14,6 +14,7 @@ import type { Vec2 } from '@dhd/core';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { TraceDraftLayer } from '../ai/DraftLayer';
 import { type PixelBox, inkBounds } from '../assets';
+import { ClearanceLayer } from '../clearance/clearance';
 import { type Tool, useEditor } from '../editor';
 import { currentLevel, useLevel, useProject, useStore } from '../store';
 import { Compass, describeNorth } from '../ui/Compass';
@@ -844,6 +845,7 @@ export function PlanCanvas() {
               }
             />
             <RenovationMarks />
+            <ClearanceLayer level={level} />
             <TraceDraftLayer />
             <PlanHighlights
               level={level}

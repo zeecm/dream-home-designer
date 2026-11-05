@@ -24,3 +24,4 @@ export * from './moveRoom';
 export * from './trace';
 export * from './layouts';
 export * from './structural';
+export * from './clearance';
