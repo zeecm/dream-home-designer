@@ -55,6 +55,7 @@ import {
   useClearanceIssues,
   useClearanceOn,
 } from '../clearance/clearance';
+import { CarpentryLine, CostSummary } from '../cost/estimate';
 import { useEditor } from '../editor';
 import { roomsBeside } from '../plan/keyboard';
 import { OPENING_PRESETS, ROOM_NAMES } from '../presets';
@@ -314,6 +315,7 @@ function PlanSummary({ level }: { level: Level }) {
       <StructuralSuggestion />
       <ClearanceSummary />
       <RenovationSection />
+      <CostSummary />
       <LengthField
         label="Ceiling height"
         value={level.ceilingHeight}
@@ -847,6 +849,7 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
       <Header title={kind?.name ?? 'Furniture'} onClose={clear} />
       {/* First, so a phone's sheet shows it without scrolling. */}
       <ItemClearances level={level} id={id} />
+      <CarpentryLine item={it} />
       <LengthField
         label="Width"
         value={size.w}

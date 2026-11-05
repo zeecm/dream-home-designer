@@ -1110,3 +1110,17 @@ in a piece's details. Not yet (spec): labels in the plan, live zones for the pie
 placed (before it's dropped), zones cut at walls, the drop announcement, walkways and the
 rest of slice 2.
 
+**Carpentry and cost estimate (5 Nov, spec `docs/specs/carpentry-cost.md`, slice 1):** five
+built-ins in the catalogue's Built-in category (wardrobe and shoe cabinet 2.6 m high, TV
+console, kitchen base and wall runs), `carpentry` on their kinds and on the kitchen cabinets.
+Core `cost.ts`: `TYPICAL_RATES` (S$ low–high), `footRun`, `carpentryCost`, `costEstimate(before,
+after?, rates)` → grouped lines (walls hacked and built, glass, half walls and glass above,
+openings cut and closed, doors by style and glass leaves, windows, floors, repainting by
+centre-line perimeter × ceiling + ceiling, built-ins new or resized with countertops, debris,
+10% contingency), totals to $100. Renovation changes now carry the opening's `id`. Web
+`cost/estimate.tsx`: rates per browser (`dhd-rates`, merged over the typical ones), the plan
+details' "Cost estimate: about $X–Y" and See estimate, the dialog (groups, total, editable
+rates with toggles and Reset, Copy as text, Print in a window of its own), and the built-in's
+line in its details. Not yet: built-ins sized to the level's ceiling when placed, the
+estimate per level for multi-level projects (it prices the first), slice 2.
+
