@@ -1,0 +1,97 @@
+import { expect, test } from '@playwright/test';
+import { waitSaved } from './helpers';
+
+const KEY = 'sk-test-not-a-real-key-123';
+
+/** What a model might read from the sample's plan image: two rooms and a door. */
+const reading = {
+  walls: [
+    { a: { x: 100, y: 100 }, b: { x: 700, y: 102 }, thickness: 20 },
+    { a: { x: 700, y: 100 }, b: { x: 700, y: 500 }, thickness: 20 },
+    { a: { x: 700, y: 500 }, b: { x: 100, y: 500 }, thickness: 20 },
+    { a: { x: 100, y: 500 }, b: { x: 100, y: 100 }, thickness: 20 },
+    { a: { x: 400, y: 100 }, b: { x: 400, y: 500 }, thickness: 10 },
+  ],
+  openings: [
+    {
+      kind: 'door',
+      a: { x: 400, y: 250 },
+      b: { x: 400, y: 340 },
+      hinge: { x: 400, y: 250 },
+      arc: { x: 460, y: 290 },
+    },
+  ],
+  rooms: [
+    { name: 'Study', at: { x: 250, y: 300 } },
+    { name: 'Studio', at: { x: 550, y: 300 } },
+  ],
+  printedArea: null,
+};
+
+test('trace walls with an AI model: key kept in the browser, a draft to accept, one undo step', async ({
+  page,
+}) => {
+  const toOurApi: string[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('/api/')) toOurApi.push(`${r.url()} ${r.postData() ?? ''}`);
+  });
+  let calls = 0;
+  await page.route('https://api.openai.com/**', async (route) => {
+    calls++;
+    const auth = route.request().headers().authorization;
+    if (auth !== `Bearer ${KEY}`) return route.fulfill({ status: 401, body: '{}' });
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ choices: [{ message: { content: JSON.stringify(reading) } }] }),
+    });
+  });
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  // No key yet: the button asks for one.
+  await page.getByRole('button', { name: 'Trace walls with AI' }).click();
+  const dialog = page.getByRole('dialog', { name: 'AI assistant' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Provider').selectOption('openai');
+  await dialog.getByLabel('API key').fill(KEY);
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(dialog).toHaveCount(0);
+  const walls = page.locator('[data-hit^="wall:"]');
+  const before = await walls.count();
+  await page.getByRole('button', { name: 'Trace walls with AI' }).click();
+  const bar = page.locator('.trace-bar');
+  await expect(bar).toContainText('Found 7 walls, 1 door, 0 windows, 2 rooms');
+  await expect(bar).toContainText('Accepting replaces the walls drawn now.');
+  await expect(page.locator('.ai-draft-wall').first()).toBeVisible();
+  await bar.getByRole('button', { name: 'Accept' }).click();
+  await expect(bar).toHaveCount(0);
+  await expect(page.locator('.room-list li')).toHaveCount(2);
+  await expect(page.locator('.room-list')).toContainText('Study');
+  // The partition splits the walls it meets (5 read, 7 drawn). One undo step back.
+  await page.keyboard.press('Control+z');
+  await expect(walls).toHaveCount(before);
+  expect(calls).toBe(1);
+  await waitSaved(page);
+  // The key went to the provider only: never to our server.
+  expect(toOurApi.filter((r) => r.includes(KEY))).toEqual([]);
+});
+
+test('a refused key says so and leaves the plan as it was', async ({ page }) => {
+  await page.route('https://api.openai.com/**', (route) =>
+    route.fulfill({ status: 401, body: '{}' }),
+  );
+  await page.addInitScript(() => {
+    window.sessionStorage.setItem(
+      'dhd-ai',
+      JSON.stringify({ provider: 'openai', key: 'sk-bad', model: 'gpt-5' }),
+    );
+  });
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  const walls = await page.locator('[data-hit^="wall:"]').count();
+  await page.getByRole('button', { name: 'Trace walls with AI' }).click();
+  await expect(page.locator('.trace-bar-error')).toContainText('The key was refused');
+  await expect(page.locator('[data-hit^="wall:"]')).toHaveCount(walls);
+});

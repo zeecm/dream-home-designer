@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Viewport } from './Viewport';
 import { keepWithAccount, pullFromAccount, useAccount } from './account';
+import { TraceBar } from './ai/TracePanel';
 import { type Tool, type ViewMode, useEditor } from './editor';
 import { absorbLinkKey } from './keys';
 import { useModelSync } from './models';
@@ -286,6 +287,7 @@ export function App() {
           <SampleBanner />
           <ViewOnlyBanner />
           <RenovationBar />
+          <TraceBar />
           <Guide />
           <Notice />
           <Toast />

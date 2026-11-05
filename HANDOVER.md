@@ -568,6 +568,31 @@ merging it back is held back too, a cautious answer left as it is). A drag or ru
 of nudges (one coalesce key) held back at any step goes back to how the drag found the
 renovation (`restore`), taking back its steps already carried, and stays held back. Restoring a version (or anything replacing the plan or renovation whole) carries
 nothing. One undo step, which shows Before (`touchedVariant`).
+**AI: walls from a plan image (stage 1, 5 Nov):** bring your own key. Project menu "AI
+assistant…" (`ai/AiSettingsDialog.tsx`): Claude, OpenAI or Gemini, key and model (defaults
+`claude-opus-5-5`, `gpt-5`, `gemini-2.5-pro`), Test, Forget; kept in this tab
+(sessionStorage), or on this device if ticked (`ai/credentials.ts`, key `dhd-ai`), never
+in a project, export, share link or `/api` request (e2e checks). Calls go straight from the
+browser to the provider (`ai/providers.ts`: the Anthropic SDK, lazy-loaded, with
+`dangerouslyAllowBrowser`, JSON-schema output, effort high, the server-side refusal fallback,
+no retries, 45 s quiet / 180 s overall timeouts; OpenAI chat completions with a strict JSON
+schema; Gemini generateContent with `responseJsonSchema`). "Trace walls with AI" in the plan
+image panel sends the plan image (at most 1568 px) and asks for wall centre lines, openings
+(with a door's hinge and arc), room labels and the printed area, in image pixels
+(`ai/trace.ts`). Core (`trace.ts`) turns the reading into metres with the plan's own
+calibration and cleans it as a person tracing would: straightened onto the axes, the two
+faces of a thick wall made one centre line, a wall broken at its doors joined through them,
+ends within 8 cm one corner, ends just short of a wall taken onto it, thickness to 25 mm
+(`readingToPlan`); then built with the Wall tool's own `drawWall` (T-junctions split, rooms
+found), doors swung the way the plan shows, rooms named from the labels inside them
+(`tracedLevel`). The draft shows over the plan with counts and the area (vs the printed one):
+Accept builds it again on the plan as it is then and puts it in as one undo step
+(`importTrace`, `applyLevel` patches; it replaces walls already drawn), Try again, Discard.
+A Content-Security-Policy (`public/_headers`, the same in `vite preview` for the e2e suite)
+limits scripts to the site and connections to our API and the three providers; no
+violations in 3D, the walk, models or PDF upload. Next: suggested layouts (stage 2) and
+photo-real renders on the same providers; a recorded real reading of the sample as a test.
+
 **Wall colours and wallpapers (5 Nov):** a wall side's paint can be any colour (the
 browser's colour picker, after the preset swatches; stored as `paint-#rrggbb`, `customPaint`
 and `finish` in core) or one of eight wallpapers (`WALLPAPERS`: pinstripe, linen, fine grid,

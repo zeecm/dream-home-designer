@@ -8,6 +8,7 @@ import {
 } from '@dhd/core';
 import type { Vec2 } from '@dhd/core';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { TraceDraftLayer } from '../ai/DraftLayer';
 import { type PixelBox, inkBounds } from '../assets';
 import { type Tool, useEditor } from '../editor';
 import { currentLevel, useLevel, useProject, useStore } from '../store';
@@ -822,6 +823,7 @@ export function PlanCanvas() {
               }
             />
             <RenovationMarks />
+            <TraceDraftLayer />
             <PlanHighlights
               level={level}
               geom={geom}

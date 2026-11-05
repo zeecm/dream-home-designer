@@ -38,19 +38,19 @@ for any plan.
   [spec](docs/specs/wall-and-door-types.md)
 - People for scale (a person and a child) in the furniture catalogue.
 - Any wall colour (a colour picker) and eight wallpapers.
+- AI with your own key (Claude, OpenAI or Gemini): trace walls from a plan image, looked over
+  before it goes in. [spec](docs/specs/ai-layouts.md)
 
 ### In progress
-- AI with your own key (Claude, OpenAI, Gemini): trace walls from a plan image.
-  [spec](docs/specs/ai-layouts.md)
+- AI suggested layouts from a short brief, compared as before and after.
 
 ### Planned
-1. AI suggested layouts from a short brief, compared as before and after.
-2. Photo-real renders of a room from the 3D view, with your own AI key.
-3. Structural and household-shelter walls marked, with hacking warnings.
-4. Live clearance and furniture-fit checks.
-5. Carpentry builder and a renovation cost estimate.
-6. "My furniture" and a delivery-path fit check.
-7. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
+1. Photo-real renders of a room from the 3D view, with your own AI key.
+2. Structural and household-shelter walls marked, with hacking warnings.
+3. Live clearance and furniture-fit checks.
+4. Carpentry builder and a renovation cost estimate.
+5. "My furniture" and a delivery-path fit check.
+6. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
 
 ## What it does
 

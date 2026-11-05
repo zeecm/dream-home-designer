@@ -2473,3 +2473,43 @@ h3.field-label {
   min-width: 2ch;
   text-align: center;
 }
+
+/* An AI trace waiting to be accepted: drawn over the plan in the accent colour. */
+.ai-draft-wall {
+  fill: color-mix(in srgb, var(--accent) 55%, transparent);
+  stroke: var(--accent);
+  stroke-width: 1px;
+}
+.ai-draft-opening {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 1px;
+  stroke-dasharray: 3 2;
+}
+.ai-trace {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+/* Over the plan while a trace runs or waits to be accepted. */
+.trace-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  font-size: var(--fs-small);
+}
+.trace-bar > span {
+  flex: 1 1 240px;
+}
+.trace-bar-error {
+  background: color-mix(in srgb, #c0392b 8%, var(--surface));
+}
+.ai-form {
+  display: grid;
+  gap: 12px;
+  padding: 0 20px 20px;
+}

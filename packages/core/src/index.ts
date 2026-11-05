@@ -21,3 +21,4 @@ export * from './levels';
 export * from './renovation';
 export * from './shiftWall';
 export * from './moveRoom';
+export * from './trace';
