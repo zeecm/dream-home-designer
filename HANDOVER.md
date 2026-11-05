@@ -1026,8 +1026,8 @@ cd apps/api && go test -race ./...
 R2_TEST_ENDPOINT=https://<account>.r2.cloudflarestorage.com R2_TEST_BUCKET=dhd-test \
   R2_TEST_ACCESS_KEY=... R2_TEST_SECRET_KEY=... go test -run TestR2Live ./internal/store
 # API Worker + Container (needs Docker and CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID)
-pnpm --filter @dhd/edge deploy           # production: dhd-api
-pnpm --filter @dhd/edge deploy:preview   # previews: dhd-api-preview
+pnpm --filter @dhd/edge run deploy           # production: dhd-api
+pnpm --filter @dhd/edge run deploy:preview   # previews: dhd-api-preview
 ```
 
 **Cloudflare resources:**
