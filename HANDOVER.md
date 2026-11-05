@@ -600,8 +600,22 @@ designed, warm modern, Scandinavian, modern luxe, industrial), to the person's i
 (`ai/render.ts`: OpenAI `images/edits` with `gpt-image-1`, or Gemini
 `gemini-2.5-flash-image` generateContent with image output; Claude makes no pictures). The
 picture shows in the dialog to download. The prompt keeps the camera, room and furniture
-and asks only for materials and light. Next: suggested layouts (stage 2); a recorded real
-reading of the sample as a test.
+and asks only for materials and light. 
+
+**AI: suggested layouts (stage 2, 5 Nov):** "Suggest layouts with AI" in the plan's
+Renovation section opens a brief (who lives here, eight common wishes, anything else) and
+sends the flat as it is (`planForModel` in core: walls by id with the rooms either side,
+locked ones marked, openings, rooms with areas; no image) to the model in use, asking for up
+to three layouts as operations: remove wall, half wall, glass wall, add wall, add door (with
+a style), remove opening, rename room (`ai/layouts.ts`, `LayoutSuggestions` schema).
+`applyLayout` in core applies each with the app's own commands to a copy of Before; outside
+walls, the household shelter's and bathrooms' walls and walls with windows are locked
+(`lockedWalls`), windows can't be closed up, and whatever is refused is listed in words
+("remove wall between Bedroom and outside: an outside, shelter or bathroom wall"). Each
+option shows a small plan, its reasons and its change list (`renovationChanges`); "Use this"
+makes it the renovation, starting one if there is none, as one undo step (`adoptLayout`),
+then shows After. Next: a recorded real reading and real layouts as tests; the rules the
+spec lists that aren't checked yet (bedroom windows, corridor widths, the work triangle).
 
 **Wall colours and wallpapers (5 Nov):** a wall side's paint can be any colour (the
 browser's colour picker, after the preset swatches; stored as `paint-#rrggbb`, `customPaint`

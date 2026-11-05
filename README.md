@@ -42,8 +42,11 @@ for any plan.
   before it goes in. [spec](docs/specs/ai-layouts.md)
 - Photo-real renders of any 3D or walk-through view, with your own OpenAI or Gemini key.
 
+- AI suggested layouts from a short brief: up to three, checked against what HDB lets you
+  change, one click to make one the renovation.
+
 ### In progress
-- AI suggested layouts from a short brief, compared as before and after.
+- Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
 
 ### Planned
 1. Structural and household-shelter walls marked, with hacking warnings.

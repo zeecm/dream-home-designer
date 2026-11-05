@@ -28,7 +28,7 @@ const QUIET = 45_000;
 export async function askForJson(
   ai: AiSettings,
   prompt: string,
-  image: ModelImage,
+  image: ModelImage | null,
   schema: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<unknown> {
@@ -90,7 +90,7 @@ class HttpError extends Error {
 async function anthropic(
   ai: AiSettings,
   prompt: string,
-  image: ModelImage,
+  image: ModelImage | null,
   schema: Record<string, unknown>,
   signal: AbortSignal,
 ): Promise<string> {
@@ -111,11 +111,19 @@ async function anthropic(
         {
           role: 'user',
           content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: image.mediaType, data: image.data },
-            },
-            { type: 'text', text: prompt },
+            ...(image
+              ? [
+                  {
+                    type: 'image' as const,
+                    source: {
+                      type: 'base64' as const,
+                      media_type: image.mediaType,
+                      data: image.data,
+                    },
+                  },
+                ]
+              : []),
+            { type: 'text' as const, text: prompt },
           ],
         },
       ],
@@ -157,7 +165,7 @@ async function post(
 async function openai(
   ai: AiSettings,
   prompt: string,
-  image: ModelImage,
+  image: ModelImage | null,
   schema: Record<string, unknown>,
   signal: AbortSignal,
 ): Promise<string> {
@@ -175,10 +183,14 @@ async function openai(
           role: 'user',
           content: [
             { type: 'text', text: prompt },
-            {
-              type: 'image_url',
-              image_url: { url: `data:${image.mediaType};base64,${image.data}` },
-            },
+            ...(image
+              ? [
+                  {
+                    type: 'image_url',
+                    image_url: { url: `data:${image.mediaType};base64,${image.data}` },
+                  },
+                ]
+              : []),
           ],
         },
       ],
@@ -193,7 +205,7 @@ async function openai(
 async function gemini(
   ai: AiSettings,
   prompt: string,
-  image: ModelImage,
+  image: ModelImage | null,
   schema: Record<string, unknown>,
   signal: AbortSignal,
 ): Promise<string> {
@@ -205,7 +217,7 @@ async function gemini(
         {
           role: 'user',
           parts: [
-            { inline_data: { mime_type: image.mediaType, data: image.data } },
+            ...(image ? [{ inline_data: { mime_type: image.mediaType, data: image.data } }] : []),
             { text: prompt },
           ],
         },

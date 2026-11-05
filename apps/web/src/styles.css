@@ -2573,3 +2573,54 @@ h3.field-label {
 .viewport-render-walk {
   top: 108px;
 }
+
+.layouts-dialog {
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(860px, calc(100dvh - 32px));
+}
+.wish-list {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.layout-options {
+  list-style: none;
+  margin: 0;
+  padding: 0 20px 20px;
+  display: grid;
+  gap: 12px;
+}
+.layout-option {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+.layout-option h3 {
+  margin: 0 0 4px;
+  font-size: var(--fs-body, 15px);
+}
+.layout-option p {
+  margin: 0 0 6px;
+}
+.layout-reasons {
+  margin: 0 0 6px;
+  padding-left: 18px;
+  font-size: var(--fs-small);
+}
+.mini-layout {
+  width: 140px;
+  height: 140px;
+}
+.mini-layout polygon {
+  fill: var(--wall);
+}
+@media (max-width: 560px) {
+  .layout-option {
+    grid-template-columns: 1fr;
+  }
+}

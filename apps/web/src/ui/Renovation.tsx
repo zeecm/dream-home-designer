@@ -8,6 +8,7 @@ import {
   startRenovation,
 } from '@dhd/core';
 import { useMemo, useState } from 'react';
+import { LayoutsDialog } from '../ai/LayoutsDialog';
 import { useEditor } from '../editor';
 import { pts } from '../plan/layers';
 import { useProject, useStore } from '../store';
@@ -312,6 +313,7 @@ export function RenovationSection() {
         >
           Plan a renovation
         </button>
+        <SuggestLayouts />
       </section>
     );
   }
@@ -383,6 +385,22 @@ export function RenovationSection() {
           Discard the renovation
         </button>
       </span>
+      <SuggestLayouts />
     </section>
+  );
+}
+
+/** Opens the suggested layouts (AI, with the person's key). */
+function SuggestLayouts() {
+  const [open, setOpen] = useState(false);
+  const viewer = useStore((s) => s.role === 'viewer');
+  if (viewer) return null;
+  return (
+    <>
+      <button type="button" className="btn" onClick={() => setOpen(true)}>
+        Suggest layouts with AI
+      </button>
+      {open && <LayoutsDialog onClose={() => setOpen(false)} />}
+    </>
   );
 }

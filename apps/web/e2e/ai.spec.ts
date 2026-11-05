@@ -156,3 +156,80 @@ test('without an image model, a render asks for an OpenAI or Gemini key', async 
   await expect(dialog).toContainText('Renders need an OpenAI or Gemini key');
   await expect(dialog.getByRole('button', { name: 'Render' })).toBeDisabled();
 });
+
+const blank = {
+  wallId: null,
+  openingId: null,
+  a: null,
+  b: null,
+  height: null,
+  t: null,
+  width: null,
+  style: null,
+  at: null,
+  name: null,
+};
+
+test('suggested layouts from a brief: checked against what may change, one made the renovation', async ({
+  page,
+}) => {
+  let prompt = '';
+  await page.route('https://api.openai.com/v1/chat/completions', async (route) => {
+    prompt = JSON.stringify(route.request().postDataJSON());
+    const options = [
+      {
+        name: 'One big bedroom',
+        summary: 'The two bedrooms become one master suite.',
+        reasons: ['Room for a king bed and a desk'],
+        operations: [{ ...blank, op: 'remove_wall', wallId: 'w_bedroom_main-bedroom' }],
+      },
+      {
+        name: 'Glass study',
+        summary: 'The bedroom opens to the living room through glass.',
+        reasons: ['Light into the living room'],
+        operations: [{ ...blank, op: 'glass_wall', wallId: 'w_bedroom_living-and-dining' }],
+      },
+      {
+        name: 'Bigger windows',
+        summary: 'Take out an outside wall.',
+        reasons: ['More light'],
+        operations: [{ ...blank, op: 'remove_wall', wallId: 'w_bedroom_outside' }],
+      },
+    ];
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ choices: [{ message: { content: JSON.stringify({ options }) } }] }),
+    });
+  });
+  await page.addInitScript(() => {
+    window.sessionStorage.setItem(
+      'dhd-ai',
+      JSON.stringify({ provider: 'openai', key: 'sk-x', model: 'gpt-5' }),
+    );
+  });
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await page.getByRole('button', { name: 'Suggest layouts with AI' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Suggest layouts' });
+  await dialog.getByLabel('Who lives here').fill('a couple working from home');
+  await dialog.getByLabel('A study or home office').check();
+  await dialog.getByRole('button', { name: 'Suggest layouts' }).click();
+  const cards = dialog.locator('.layout-option');
+  await expect(cards).toHaveCount(3);
+  expect(prompt).toContain('a couple working from home');
+  expect(prompt).toContain('A study or home office');
+  await expect(cards.nth(0)).toContainText('Hack');
+  await expect(cards.nth(1)).toContainText('glass partition');
+  // An outside wall stays, whatever the model said.
+  await expect(cards.nth(2)).toContainText('Left out (1)');
+  await expect(cards.nth(2)).toContainText('No change to the walls.');
+  await cards.nth(0).getByRole('button', { name: 'Use this' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator('.reno-bar')).toBeVisible();
+  await expect(page.locator('.room-list li')).toHaveCount(8);
+  // One undo step back to no renovation.
+  await page.keyboard.press('Control+z');
+  await expect(page.locator('.reno-bar')).toHaveCount(0);
+});
