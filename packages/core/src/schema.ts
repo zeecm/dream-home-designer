@@ -44,11 +44,24 @@ export const Wall = z.object({
   build: z.enum(['solid', 'glass']).optional(),
   /** A wall lower than the ceiling with fixed glass from its top up to the ceiling. */
   glassAbove: z.boolean().optional(),
+  /**
+   * A structural wall (load-bearing, or the household shelter's): the renovation warns
+   * before taking it down.
+   */
+  structural: z.boolean().optional(),
 });
 export type Wall = z.infer<typeof Wall>;
 
 /** A framed glass partition. */
 export const isGlass = (w: Pick<Wall, 'build'>): boolean => w.build === 'glass';
+
+/** A solid wall lower than the ceiling (a counter or bar-height divider). */
+export const isHalfWall = (w: Pick<Wall, 'build' | 'height' | 'kind'>, ceiling: number): boolean =>
+  !isGlass(w) && w.kind !== 'boundary' && w.height !== undefined && ceiling - w.height > 0.05;
+
+/** Whether a wall has fixed glass over it: only a half wall can. */
+export const hasGlassAbove = (w: Wall, ceiling: number): boolean =>
+  !!w.glassAbove && isHalfWall(w, ceiling);
 
 export const isBoundary = (w: Pick<Wall, 'kind'>): boolean => w.kind === 'boundary';
 

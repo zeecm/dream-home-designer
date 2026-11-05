@@ -4,7 +4,16 @@ import { placeLabel, pointInPolygon } from './geometry';
 import type { Command } from './history';
 import { AFTER_SUFFIX, type Variant } from './levels';
 import { roomArea, roomShapes, syncRooms } from './rooms';
-import { type Level, type Vec2, type Wall, isBoundary, isGlass, wallFaces } from './schema';
+import {
+  type Level,
+  type Vec2,
+  type Wall,
+  hasGlassAbove,
+  isBoundary,
+  isGlass,
+  isHalfWall,
+  wallFaces,
+} from './schema';
 import { reclampOpenings } from './topology';
 
 /**
@@ -363,6 +372,8 @@ interface Line {
   d: Vec2;
   length: number;
   height: number;
+  /** Fixed glass over it, a half wall. */
+  glassAbove: boolean;
   /** Face offsets along the left normal (-d.y, d.x): the left face at +left, the right at -right. */
   left: number;
   right: number;
@@ -392,6 +403,7 @@ function linesOf(level: Level): Line[] {
       d: { x: (b.x - a.x) / length, y: (b.y - a.y) / length },
       length,
       height: wall.height ?? level.ceilingHeight,
+      glassAbove: hasGlassAbove(wall, level.ceilingHeight),
       left,
       right,
       holes,
@@ -431,7 +443,7 @@ function overlap(line: Line, other: Line): [number, number] | null {
   // put up over a half wall.
   if (Math.abs(other.height - line.height) > EPS) return null;
   if (isGlass(other.wall) !== isGlass(line.wall)) return null;
-  if (!!other.wall.glassAbove !== !!line.wall.glassAbove) return null;
+  if (other.glassAbove !== line.glassAbove) return null;
   const t = (p: Vec2) => (p.x - line.a.x) * line.d.x + (p.y - line.a.y) * line.d.y;
   const t0 = t(other.a);
   const t1 = t0 + (same ? other.length : -other.length);
@@ -698,9 +710,9 @@ export function renovationChanges(
     const w = after.walls[s.wallId];
     if (!w) return {};
     if (isGlass(w)) return { what: 'glass' };
-    const h = w.height ?? after.ceilingHeight;
-    if (after.ceilingHeight - h > 0.05) {
-      return { what: w.glassAbove ? 'half-glass' : 'half', height: h };
+    if (isHalfWall(w, after.ceilingHeight)) {
+      const glass = hasGlassAbove(w, after.ceilingHeight);
+      return { what: glass ? 'half-glass' : 'half', height: w.height };
     }
     return {};
   };

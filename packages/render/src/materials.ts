@@ -40,6 +40,15 @@ export class MaterialCache {
     depthWrite: false,
   });
 
+  /** Frosted or fluted glass in a door: light passes, the view doesn't. */
+  readonly frosted = new THREE.MeshStandardMaterial({
+    color: '#eef3f6',
+    transparent: true,
+    opacity: 0.72,
+    roughness: 0.6,
+    depthWrite: false,
+  });
+
   get(id: string): THREE.Material {
     let m = this.cache.get(id);
     if (!m) {
@@ -58,6 +67,7 @@ export class MaterialCache {
   dispose(): void {
     for (const m of this.cache.values()) m.dispose();
     this.glass.dispose();
+    this.frosted.dispose();
     this.cache.clear();
   }
 }

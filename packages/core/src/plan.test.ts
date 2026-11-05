@@ -9,13 +9,22 @@ import { loadProject } from './migrate';
 import {
   DOOR_LEAF_THICKNESS,
   doorLeaf,
+  doorLeaves,
+  doorPanels,
   doorSwing,
   framePoint,
   openingClearances,
   placeOpening,
   planGeometry,
 } from './plan';
-import { type Level, SCHEMA_VERSION, type Vec2, type Wall, isBoundary } from './schema';
+import {
+  type Level,
+  type Opening,
+  SCHEMA_VERSION,
+  type Vec2,
+  type Wall,
+  isBoundary,
+} from './schema';
 import { snapPoint } from './snap';
 
 const area = (p: { x: number; y: number }[]) => Math.abs(signedArea(p));
@@ -95,6 +104,62 @@ describe('doorLeaf', () => {
     expect((Math.max(...ys) + Math.min(...ys)) / 2).toBeCloseTo(4.5);
     const xs = leaf.map((p) => p.x);
     expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(0.9);
+  });
+});
+
+describe('doorLeaves', () => {
+  const door = planGeometry(hdb4RoomLevel()).openings.find((o) => o.opening.id === 'op_master')!;
+  // The door runs along y = 4.5 from x = 7.35 to 8.25 (0.9 m).
+  const xs = (ls: { a: Vec2; b: Vec2 }[]) => ls.flatMap((l) => [l.a.x, l.b.x]);
+  const len = (l: { a: Vec2; b: Vec2 }) => Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y);
+  const style = (s: Opening['style'], extra: Partial<Opening> = {}) => ({
+    ...door.opening,
+    style: s,
+    ...extra,
+  });
+
+  it('shuts every style across the whole opening', () => {
+    for (const s of ['swing', 'double', 'sliding', 'pocket', 'bifold', 'folding'] as const) {
+      const shut = doorLeaves(door.frame, style(s), 0);
+      expect(Math.min(...xs(shut)), s).toBeCloseTo(7.35, 2);
+      expect(Math.max(...xs(shut)), s).toBeGreaterThanOrEqual(8.25 - 1e-6);
+    }
+  });
+
+  it('opens a swing door square to the wall, and a double door from both jambs', () => {
+    const [leaf] = doorLeaves(door.frame, style('swing'), 1);
+    expect(leaf!.a.x).toBeCloseTo(leaf!.b.x);
+    expect(len(leaf!)).toBeCloseTo(0.9);
+    const two = doorLeaves(door.frame, style('double'), 1);
+    // Each hinged at its jamb, its thickness inside the doorway.
+    const th = DOOR_LEAF_THICKNESS / 2;
+    expect(two.map((l) => l.a.x)).toEqual([expect.closeTo(7.35 + th), expect.closeTo(8.25 - th)]);
+    for (const l of two) expect(len(l)).toBeCloseTo(0.45);
+  });
+
+  it('slides a pocket door into the wall and a barn door along its face, clear of the opening', () => {
+    const [pocket] = doorLeaves(door.frame, style('pocket'), 1);
+    expect(Math.max(pocket!.a.x, pocket!.b.x)).toBeCloseTo(7.35);
+    expect(pocket!.a.y).toBeCloseTo(4.5);
+    const [barn] = doorLeaves(door.frame, style('sliding', { stack: 'b', panels: 1 }), 1);
+    expect(Math.min(barn!.a.x, barn!.b.x)).toBeCloseTo(8.25);
+    expect(Math.abs(barn!.a.y - 4.5)).toBeGreaterThan(0.05);
+  });
+
+  it('stacks sliding leaves behind the first, each on its own track', () => {
+    const open = doorLeaves(door.frame, style('sliding', { panels: 2 }), 1);
+    expect(open[0]!.a.x).toBeCloseTo(open[1]!.a.x);
+    expect(open[0]!.a.y).not.toBeCloseTo(open[1]!.a.y);
+  });
+
+  it('folds bi-fold and folding panels up against the stack jamb', () => {
+    for (const s of ['bifold', 'folding'] as const) {
+      const open = doorLeaves(door.frame, style(s, { stack: 'b' }), 1);
+      expect(Math.min(...xs(open)), s).toBeGreaterThan(8.25 - 0.9 * 0.2);
+      for (const l of open) expect(len(l)).toBeCloseTo(0.9 / open.length);
+    }
+    expect(doorPanels(style('folding', { width: 2.4 }))).toBe(5);
+    expect(doorPanels(style('bifold'))).toBe(2);
   });
 });
 

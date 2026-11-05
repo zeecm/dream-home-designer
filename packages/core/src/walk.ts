@@ -1,6 +1,14 @@
 import { itemFootprint } from './furniture';
 import { pointInPolygon, signedArea } from './geometry';
-import { type PlanGeometry, doorLeaf, planGeometry } from './plan';
+import {
+  DOOR_LEAF_THICKNESS,
+  type LeafPose,
+  type PlanGeometry,
+  doorLeaf,
+  doorLeaves,
+  doorStyle,
+  planGeometry,
+} from './plan';
 import { roomShapes } from './rooms';
 import type { Level, Vec2 } from './schema';
 
@@ -60,7 +68,12 @@ export function collisionSegments(level: Level, geom: PlanGeometry = planGeometr
   const outside = outsideOpenings(level, geom);
   for (const o of geom.openings) {
     if (o.kind === 'window' || outside.has(o.opening.id)) ring(o.polygon);
-    else if (o.kind === 'door') ring(doorLeaf(o.frame, o.opening, true));
+    else if (o.kind === 'door' && doorStyle(o.opening) === 'swing') {
+      ring(doorLeaf(o.frame, o.opening, true));
+    } else if (o.kind === 'door') {
+      // Its leaves standing open: folded, stacked or slid aside, each a thin solid.
+      for (const l of doorLeaves(o.frame, o.opening, 1)) ring(leafOutline(l));
+    }
   }
   // Furniture standing on the floor is in the way; a rug or a wall cabinet isn't.
   for (const item of Object.values(level.items)) {
@@ -202,4 +215,17 @@ export function rayDistance(segments: readonly Segment[], p: Vec2, dir: Vec2): n
     if (t > 0 && u >= 0 && u <= 1) best = Math.min(best, t);
   }
   return best;
+}
+
+/** A leaf's outline in plan, its thickness either side of its centre line. */
+function leafOutline(l: LeafPose): Vec2[] {
+  const len = Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y) || 1;
+  const h = DOOR_LEAF_THICKNESS / 2;
+  const n = { x: (-(l.b.y - l.a.y) / len) * h, y: ((l.b.x - l.a.x) / len) * h };
+  return [
+    { x: l.a.x + n.x, y: l.a.y + n.y },
+    { x: l.b.x + n.x, y: l.b.y + n.y },
+    { x: l.b.x - n.x, y: l.b.y - n.y },
+    { x: l.a.x - n.x, y: l.a.y - n.y },
+  ];
 }

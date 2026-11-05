@@ -175,6 +175,11 @@ describe('renovationChanges', () => {
     // The same wall drawn again the same way is no change.
     s = dispatch(renovating(), updateWall(A, 'w_living_kitchen', { build: 'solid' }));
     expect(changesOf(s)).toEqual([]);
+    // Glass above goes with the half wall: back to full height, nothing has changed.
+    s = dispatch(renovating(), updateWall(A, 'w_living_kitchen', { height: 1, glassAbove: true }));
+    s = dispatch(s, updateWall(A, 'w_living_kitchen', { height: undefined }));
+    expect(s.doc.renovation?.levels[0]?.walls.w_living_kitchen?.glassAbove).toBeUndefined();
+    expect(changesOf(s)).toEqual([]);
   });
 
   it('places a wall taken out between the rooms it divided, with its doorway and the merge', () => {

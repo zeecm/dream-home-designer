@@ -1,17 +1,19 @@
 import {
+  DOOR_LEAF_THICKNESS,
   type FurnitureMaterial,
   type Item,
+  type LeafPose,
   type Level,
   type Opening,
   type RoomShape,
   type Vec2,
   type WallFrame,
   type WallPiece,
-  doorLeaf,
-  doorSwing,
+  doorLeaves,
   framePoint,
   furnitureKind,
   glassPartition,
+  hasGlassAbove,
   isBoundary,
   isGlass,
   openingSpan,
@@ -99,6 +101,18 @@ const pointsKey = (pts: readonly Vec2[]) => pts.map((p) => `${r(p.x)},${r(p.y)}`
  * (for a wall: its mitred outline, height, openings and material). `update` rebuilds only
  * the parts whose key changed, so dragging a corner touches the few walls that meet there.
  */
+/** Puts a door's leaf boxes where `poses` say (plan centre lines; world y is the leaves' middle). */
+function placeLeaves(group: THREE.Object3D, poses: LeafPose[]): void {
+  const y = group.userData.y as number;
+  poses.forEach((l, i) => {
+    const mesh = group.children[i];
+    if (!mesh) return;
+    mesh.position.set((l.a.x + l.b.x) / 2, y, (l.a.y + l.b.y) / 2);
+    // A plan angle θ (counter-clockwise in x, y) is a turn of -θ about world +Y (x, z).
+    mesh.rotation.y = -Math.atan2(l.b.y - l.a.y, l.b.x - l.a.x);
+  });
+}
+
 export class LevelMeshes {
   readonly group = new THREE.Group();
   private parts = new Map<string, Part>();
@@ -129,6 +143,7 @@ export class LevelMeshes {
 
     const footprints = wallFootprints(level);
     const hubHeight = new Map<string, number>();
+    const hubSolid = new Map<string, boolean>();
     // Doors to the outside are shown shut; the rest stand open, as the plan draws them.
     const outside = outsideOpenings(level);
 
@@ -138,7 +153,10 @@ export class LevelMeshes {
       if (!f) continue;
       const height = wall.height ?? level.ceilingHeight;
       for (const vid of [wall.a, wall.b]) {
-        hubHeight.set(vid, Math.min(hubHeight.get(vid) ?? Number.POSITIVE_INFINITY, height));
+        // As tall as the tallest wall there (a half wall meeting a full one leaves no notch),
+        // and glass-framed where only glass meets.
+        hubHeight.set(vid, Math.max(hubHeight.get(vid) ?? 0, height));
+        hubSolid.set(vid, (hubSolid.get(vid) ?? false) || !isGlass(wall));
       }
       const openings = openingsOnWall(level, wall.id).sort((p, q) => p.id.localeCompare(q.id));
       const key = [
@@ -161,46 +179,63 @@ export class LevelMeshes {
       for (const o of openings) {
         if (o.kind !== 'door') continue;
         const shut = outside.has(o.id);
-        const leaf = doorLeaf(f, o, !shut);
         const top = level.elevation + Math.min(o.height, height);
-        put(`door:${o.id}`, `${pointsKey(leaf)}/${r(level.elevation)}/${r(top)}`, () => {
-          const mesh = new THREE.Mesh(
-            extrudePolygon(leaf, level.elevation, top),
-            this.materials.get('door'),
-          );
-          mesh.name = `door:${o.id}`;
-          mesh.castShadow = true;
-          mesh.receiveShadow = true;
-          if (shut) return [mesh];
-          // An inside door turns about its hinge: built standing open, it can swing shut
-          // by `swing` radians (in plan) and back (setDoorOpen).
-          const s = doorSwing(f, o);
-          const open = { x: s.leafEnd.x - s.hinge.x, y: s.leafEnd.y - s.hinge.y };
-          const closed = { x: s.arcEnd.x - s.hinge.x, y: s.arcEnd.y - s.hinge.y };
-          const swing = Math.atan2(
-            open.x * closed.y - open.y * closed.x,
-            open.x * closed.x + open.y * closed.y,
-          );
-          const pivot = new THREE.Group();
-          pivot.name = `door:${o.id}`;
-          pivot.position.set(s.hinge.x, 0, s.hinge.y);
-          mesh.position.set(-s.hinge.x, 0, -s.hinge.y);
-          pivot.add(mesh);
+        // Each leaf a box along its centre line; `setDoorOpen` moves them to where the door
+        // is (`doorLeaves`), built standing open (doors to the outside, shut).
+        // A door to the outside is shut across the middle of its wall.
+        const onLine = (p: Vec2) => framePoint(f, (p.x - f.a.x) * f.d.x + (p.y - f.a.y) * f.d.y, 0);
+        const poses = shut
+          ? doorLeaves(f, o, 0).map((l) => ({ a: onLine(l.a), b: onLine(l.b) }))
+          : doorLeaves(f, o, 1);
+        const key = [
+          poses.map((l) => pointsKey([l.a, l.b])).join('|'),
+          r(f.half),
+          o.style ?? 'swing',
+          o.glazed ?? '',
+          r(level.elevation),
+          r(top),
+          shut,
+        ].join('/');
+        put(`door:${o.id}`, key, () => {
+          const group = new THREE.Group();
+          group.name = `door:${o.id}`;
+          const material =
+            o.glazed === 'clear'
+              ? this.materials.glass
+              : o.glazed
+                ? this.materials.frosted
+                : this.materials.get('door');
+          const h = top - level.elevation;
+          for (const l of poses) {
+            const len = Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y);
+            const mesh = new THREE.Mesh(
+              new THREE.BoxGeometry(Math.max(len, 0.001), h, DOOR_LEAF_THICKNESS),
+              material,
+            );
+            mesh.name = `door:${o.id}`;
+            mesh.castShadow = !o.glazed;
+            mesh.receiveShadow = true;
+            if (o.glazed) mesh.renderOrder = 1;
+            group.add(mesh);
+          }
           const [u0, u1] = openingSpan(f, o);
           const centre = framePoint(f, (u0 + u1) / 2, 0);
-          pivot.userData = { door: o.id, swing, centre };
-          return [pivot];
+          group.userData = { door: o.id, centre, frame: f, opening: o, y: level.elevation + h / 2 };
+          placeLeaves(group, poses);
+          if (shut) group.userData.door = undefined; // stays shut; not one to open
+          return [group];
         });
       }
     }
 
     for (const hub of footprints.hubs) {
       const h = hubHeight.get(hub.vertexId) ?? level.ceilingHeight;
-      const key = `${pointsKey(hub.polygon)}/${r(h)}/${r(level.elevation)}`;
+      const solid = hubSolid.get(hub.vertexId) ?? true;
+      const key = `${pointsKey(hub.polygon)}/${r(h)}/${r(level.elevation)}/${solid}`;
       put(`hub:${hub.vertexId}`, key, () => {
         const mesh = new THREE.Mesh(
           extrudePolygon(hub.polygon, level.elevation, level.elevation + h),
-          this.materials.get('paint-white'),
+          this.materials.get(solid ? 'paint-white' : 'aluminium'),
         );
         mesh.name = `hub:${hub.vertexId}`;
         mesh.castShadow = true;
@@ -264,13 +299,14 @@ export class LevelMeshes {
     return out;
   }
 
-  /** Swings an inside door: 1 standing open (as built and drawn in plan), 0 shut. */
+  /** Opens an inside door: 1 standing open (as built and drawn in plan), 0 shut. */
   setDoorOpen(id: string, open: number): void {
     const part = this.parts.get(`door:${id}`);
-    const pivot = part?.objects[0];
-    if (!pivot?.userData.door) return;
-    // A plan angle θ (counter-clockwise in x, y) is a turn of -θ about world +Y (x, z).
-    pivot.rotation.y = -(pivot.userData.swing as number) * (1 - Math.min(1, Math.max(0, open)));
+    const group = part?.objects[0];
+    if (!group?.userData.door) return;
+    if (group.userData.open === open) return;
+    group.userData.open = open;
+    placeLeaves(group, doorLeaves(group.userData.frame, group.userData.opening, open));
   }
 
   dispose(): void {
@@ -308,7 +344,7 @@ export class LevelMeshes {
       const g = glassPartition(f.length, 0, height, openings);
       glazing.panes.push(...g.panes);
       glazing.frame.push(...g.frame);
-    } else if (f.wall.glassAbove && ceiling - height > 0.05) {
+    } else if (hasGlassAbove(f.wall, ceiling)) {
       // Fixed glass from the top of a half wall up to the ceiling.
       const g = glassPartition(f.length, height, ceiling, openings);
       glazing.panes.push(...g.panes);
@@ -352,17 +388,22 @@ export class LevelMeshes {
     }
 
     // A glass wall's (or fixed glass's) frame, full thickness, and its panes, thin.
-    const box = (g: WallPiece, k: WallFrame) =>
-      extrudePolygon(
+    // The frame follows the wall's mitred ends, as solid wall does; panes stop square.
+    const box = (g: WallPiece, k: WallFrame) => {
+      const mitre = k === f;
+      const end = (u: number, s: [number, number]) =>
+        !mitre ? u : u === 0 ? s[0] : u === f.length ? s[1] : u;
+      return extrudePolygon(
         [
-          framePoint(k, g.u0, 1),
-          framePoint(k, g.u1, 1),
-          framePoint(k, g.u1, -1),
-          framePoint(k, g.u0, -1),
+          framePoint(k, end(g.u0, f.left), 1),
+          framePoint(k, end(g.u1, f.left), 1),
+          framePoint(k, end(g.u1, f.right), -1),
+          framePoint(k, end(g.u0, f.right), -1),
         ],
         elevation + g.y0,
         elevation + g.y1,
       );
+    };
     if (glazing.frame.length) {
       const bars = glazing.frame.map((g) => box(g, f));
       const geom = mergeGeometries(bars);

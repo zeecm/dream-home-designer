@@ -582,8 +582,22 @@ Full / 0.90 / 1.00 / 1.20 m, and the glass-above check. Plan: glass pale with a 
 half walls lighter with a tag "HW 1.00 m (+ glass)" (`WallTags`). Both still block walking. The
 renovation diff counts a wall swapped for glass, cut down, or given glass above as hacked and
 built again, and the change list says which ("Put up 2.40 m of glass partition", "Build … of
-half wall, 1.00 m high, with glass above"). Schema 7 also adds door `style`, `panels`, `glazed`
-and `stack` for sliding, pocket, bi-fold and folding doors (next).
+half wall, 1.00 m high, with glass above"). Schema 7 also adds `structural` (for HDB hacking
+warnings, not used yet). Junction blocks take the tallest wall's height (aluminium where
+only glass meets). Not handled yet: a window in a glass wall draws as a window; fixed glass
+goes to the level's ceiling even under a room's lower one.
+
+**Door styles (schema 7):** a door's `style`: swing (absent), double, sliding, pocket, bifold
+or folding, with `panels` (a count for sliding, bi-fold and folding; else sized from the
+width: `doorPanels`), `glazed` (clear or frosted leaves) and `stack` (which end leaves slide
+or fold to). `doorLeaves(frame, opening, open)` in core gives every leaf's centre line at any
+amount open, for every style: the plan symbol (leaves shut and a dashed slide for sliding and
+pocket, half folded for bi-fold and folding, two arcs for double), the 3D leaves (each a box
+`placeLeaves` moves to its pose; the walk's door swing drives it, `setDoorOpen`) and walk
+collision (open leaves solid) all come from it. Door details: "Opens by", leaves/panels
+stepper, Solid / Glass / Frosted, Flip side (for leaves that stack) or Flip hinge. Folding
+partitions open on approach like any door (the spec's tap-to-toggle for wide ones is not
+built).
 
 **Comparing in 3D:** with a renovation, the 3D view offers "Compare before and after": the
 flat as it is left of a divider and the renovation right of it, in one view with one camera

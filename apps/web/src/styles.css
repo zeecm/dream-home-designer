@@ -1194,6 +1194,12 @@ input[type="range"] {
   stroke: var(--wall);
   stroke-width: 1.5;
 }
+.door-slide {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
+}
 .door-arc {
   fill: none;
   stroke: var(--muted);
@@ -2423,4 +2429,23 @@ h3.field-label {
   .app-walking .viewport-hint {
     display: none;
   }
+}
+
+/* A count with − and + either side (a door's leaves or panels). */
+.stepper {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.stepper .btn {
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
+}
+.stepper .num {
+  min-width: 2ch;
+  text-align: center;
 }

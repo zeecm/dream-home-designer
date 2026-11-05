@@ -237,6 +237,105 @@ export function doorLeaf(f: WallFrame, o: Opening, open: boolean): Vec2[] {
   ];
 }
 
+export type DoorStyle = NonNullable<Opening['style']>;
+
+/** How a door opens (absent: a single swing door). */
+export const doorStyle = (o: Opening): DoorStyle => o.style ?? 'swing';
+
+/** How many leaves or panels a door has: its own count, or a sensible one for its width. */
+export function doorPanels(o: Opening): number {
+  const style = doorStyle(o);
+  if (style === 'swing' || style === 'pocket') return 1;
+  if (style === 'double') return 2;
+  if (o.panels) return o.panels;
+  if (style === 'sliding') return o.width > 2.4 ? 3 : o.width > 1.2 ? 2 : 1;
+  if (style === 'bifold') return o.width > 1.2 ? 4 : 2;
+  // A folding partition: panels of about half a metre.
+  return Math.max(3, Math.round(o.width / 0.5));
+}
+
+/** One leaf or panel of a door in plan: its centre line, from one edge to the other. */
+export interface LeafPose {
+  a: Vec2;
+  b: Vec2;
+}
+
+/**
+ * Where each leaf of a door is, `open` of the way from shut (0) to open (1), in plan:
+ * - swing and double: turned about the hinge (each jamb, for double) to square with the wall,
+ *   on its swing side;
+ * - sliding: one leaf slides along the wall face past the stack jamb (a barn door); two or
+ *   more run on tracks inside the opening and stack behind the one at the stack end;
+ * - pocket: slides into the wall past the stack jamb;
+ * - bifold and folding: panels fold in a zigzag towards the stack jamb, out to the swing side.
+ * The stack end is `stack` ('a' or 'b'); a swing door's hinge is set by `swing`.
+ */
+export function doorLeaves(f: WallFrame, o: Opening, open: number): LeafPose[] {
+  const t = Math.min(1, Math.max(0, open));
+  const [u0, u1] = openingSpan(f, o);
+  const w = u1 - u0;
+  const swing = o.swing ?? 'leftIn';
+  const side = swing.endsWith('In') ? 1 : -1;
+  // A point u along the wall, v off its centre line towards +n.
+  const P = (u: number, v: number): Vec2 => {
+    const c = framePoint(f, u, 0);
+    return { x: c.x + f.n.x * v, y: c.y + f.n.y * v };
+  };
+  const style = doorStyle(o);
+  const th = DOOR_LEAF_THICKNESS;
+  if (style === 'swing' || style === 'double') {
+    const hinges: [number, number][] =
+      style === 'double'
+        ? [
+            [u0, 1],
+            [u1, -1],
+          ]
+        : [swing.startsWith('left') ? [u0, 1] : [u1, -1]];
+    const len = style === 'double' ? w / 2 : w;
+    const angle = (t * Math.PI) / 2;
+    return hinges.map(([u, dir]) => {
+      // Hinged on the face of the swing side, as the plan symbol draws it; the leaf's
+      // thickness lies into the wall when shut (flush with that face) and towards the far
+      // jamb when open, so its centre line sits half a thickness off the hinge.
+      const v = side * f.half;
+      const off = { u: (dir * Math.sin(angle) * th) / 2, v: (-side * Math.cos(angle) * th) / 2 };
+      return {
+        a: P(u + off.u, v + off.v),
+        b: P(u + dir * len * Math.cos(angle) + off.u, v + side * len * Math.sin(angle) + off.v),
+      };
+    });
+  }
+  // Leaves stack at `stack`: measure s from that jamb into the opening.
+  const fromA = (o.stack ?? 'a') === 'a';
+  const U = (s: number) => (fromA ? u0 + s : u1 - s);
+  const n = doorPanels(o);
+  if (style === 'pocket' || (style === 'sliding' && n === 1)) {
+    // Into the wall (pocket), or along its face (a sliding barn door), past the stack jamb.
+    const v = style === 'pocket' ? 0 : side * (f.half + th);
+    const s0 = -w * t;
+    return [{ a: P(U(s0), v), b: P(U(s0 + w), v) }];
+  }
+  if (style === 'sliding') {
+    // Each leaf on its own track, overlapping its neighbour a little when shut; open, they all
+    // stack behind the first.
+    const lap = 0.03;
+    const leaf = (w + lap * (n - 1)) / n;
+    return Array.from({ length: n }, (_, i) => {
+      const shut = i * (leaf - lap);
+      const s = shut * (1 - t);
+      const v = (i - (n - 1) / 2) * th * 1.25;
+      return { a: P(U(s), v), b: P(U(s + leaf), v) };
+    });
+  }
+  // Bifold and folding: a zigzag from the stack jamb, its far end drawn back along the track.
+  const p = w / n;
+  const fold = (t * Math.PI * 85) / 180;
+  const along = p * Math.cos(fold);
+  const out = p * Math.sin(fold) * side;
+  const at = (i: number) => P(U(i * along), i % 2 === 1 ? out : 0);
+  return Array.from({ length: n }, (_, i) => ({ a: at(i), b: at(i + 1) }));
+}
+
 /** A circle covering the quarter disc a door leaf sweeps, for keeping labels clear of it. */
 export function swingZone(s: DoorSwing): Circle {
   return {

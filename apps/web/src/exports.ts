@@ -58,6 +58,8 @@ async function withView<T>(need: 'plan' | '3d', fn: () => Promise<T>): Promise<T
 
 /** Styles the plan's stylesheet gives its shapes, copied onto them for a standalone SVG. */
 const STYLE_PROPS = [
+  // Strokes that keep their width at any zoom (door leaves, the glass pane line).
+  'vector-effect',
   'fill',
   'fill-opacity',
   'stroke',

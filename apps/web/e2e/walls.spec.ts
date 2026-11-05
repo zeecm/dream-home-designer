@@ -43,3 +43,39 @@ test('a wall becomes a glass partition, or a half wall with glass above; each on
   await waitSaved(page);
   await expect(page.locator('polygon.wall-glass').first()).toBeVisible();
 });
+
+test('a door slides, folds or goes into its pocket: its plan symbol follows, one undo step each', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  const door = page.locator('[data-hit="opening:op_door_bath-wc-1_main-bedroom"]');
+  const box = await door.boundingBox();
+  if (!box) throw new Error('no door');
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(page.getByRole('heading', { name: 'Door', exact: true })).toBeVisible();
+  const style = page.getByLabel('Opens by');
+  await expect(style).toHaveValue('swing');
+  await expect(door.locator('.door-arc')).toHaveCount(1);
+  // A pocket door: its leaf shut in the opening and, dashed, where it slides into the wall.
+  await style.selectOption('pocket');
+  await expect(door.locator('.door-arc')).toHaveCount(0);
+  await expect(door.locator('.door-slide')).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Flip side' })).toBeVisible();
+  // A bi-fold: two leaves, then four, drawn half folded; frosted glass.
+  await style.selectOption('bifold');
+  await expect(door.locator('.door-leaf')).toHaveCount(2);
+  await page.getByRole('button', { name: 'More' }).click();
+  await expect(door.locator('.door-leaf')).toHaveCount(4);
+  await page.getByRole('button', { name: 'Frosted', exact: true }).click();
+  // Each a step back.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press('Control+z');
+  await page.keyboard.press('Control+z');
+  await expect(door.locator('.door-leaf')).toHaveCount(2);
+  await page.keyboard.press('Control+z');
+  await expect(door.locator('.door-slide')).toHaveCount(1);
+  await page.keyboard.press('Control+z');
+  await expect(door.locator('.door-arc')).toHaveCount(1);
+});

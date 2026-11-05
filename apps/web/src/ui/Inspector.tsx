@@ -1,4 +1,5 @@
 import {
+  type DoorStyle,
   FLOOR_FINISHES,
   type ItemPatch,
   type Level,
@@ -12,10 +13,13 @@ import {
   deleteRoom,
   deleteVertex,
   deleteWall,
+  doorPanels,
+  doorStyle,
   duplicateOf,
   furnitureKind,
   isBoundary,
   isGlass,
+  isHalfWall,
   itemSize,
   modelUses,
   moveVertex,
@@ -326,7 +330,7 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
   const boundary = isBoundary(wall);
   const glass = isGlass(wall);
   // A wall lower than the ceiling: a half wall (counter or bar height).
-  const half = wall.height !== undefined && level.ceilingHeight - wall.height > 0.05;
+  const half = isHalfWall(wall, level.ceilingHeight);
   const heightPreset =
     wall.height === undefined
       ? 'full'
@@ -743,6 +747,9 @@ function OpeningInspector({ level, id }: { level: Level; id: string }) {
     dispatch(updateOpening(level.id, id, patch));
   const title = o.kind === 'door' ? 'Door' : o.kind === 'window' ? 'Window' : 'Opening';
   const swing = o.swing ?? 'leftIn';
+  const style = doorStyle(o);
+  // Leaves that slide or fold to one end (a double door has a hinge at each).
+  const stacks = style !== 'swing' && style !== 'double';
   return (
     <>
       <Header title={title} onClose={clear} />
@@ -813,20 +820,32 @@ function OpeningInspector({ level, id }: { level: Level; id: string }) {
         hint="To the opening's centre."
         onCommit={(v) => v !== undefined && set({ t: v / length })}
       />
+      {o.kind === 'door' && <DoorStyleFields o={o} set={set} />}
       {o.kind === 'door' && (
         <div className="button-row">
-          <button
-            type="button"
-            className="btn"
-            onClick={() =>
-              set({
-                swing:
-                  `${swing.startsWith('left') ? 'right' : 'left'}${swing.endsWith('In') ? 'In' : 'Out'}` as Opening['swing'],
-              })
-            }
-          >
-            Flip hinge
-          </button>
+          {stacks ? (
+            <button
+              type="button"
+              className="btn"
+              title="Which end the leaves slide or fold to"
+              onClick={() => set({ stack: o.stack === 'b' ? 'a' : 'b' })}
+            >
+              Flip side
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn"
+              onClick={() =>
+                set({
+                  swing:
+                    `${swing.startsWith('left') ? 'right' : 'left'}${swing.endsWith('In') ? 'In' : 'Out'}` as Opening['swing'],
+                })
+              }
+            >
+              Flip hinge
+            </button>
+          )}
           <button
             type="button"
             className="btn"
@@ -848,6 +867,96 @@ function OpeningInspector({ level, id }: { level: Level; id: string }) {
           clear();
         }}
       />
+    </>
+  );
+}
+
+const DOOR_STYLES: { value: DoorStyle; label: string; title: string }[] = [
+  { value: 'swing', label: 'Swing', title: 'One leaf on hinges' },
+  { value: 'double', label: 'Double', title: 'Two leaves, hinged at each side' },
+  { value: 'sliding', label: 'Sliding', title: 'Leaves slide along tracks' },
+  { value: 'pocket', label: 'Pocket', title: 'Slides into the wall' },
+  { value: 'bifold', label: 'Bi-fold', title: 'Two or four leaves fold to one side' },
+  { value: 'folding', label: 'Folding', title: 'A folding partition: a row of panels' },
+];
+
+/** How a door opens, how many leaves it has and whether they are glass. */
+function DoorStyleFields({
+  o,
+  set,
+}: {
+  o: Opening;
+  set: (patch: Parameters<typeof updateOpening>[2]) => void;
+}) {
+  const style = doorStyle(o);
+  const counted = style === 'sliding' || style === 'bifold' || style === 'folding';
+  const panels = doorPanels(o);
+  const [min, max] = style === 'bifold' ? [2, 4] : style === 'sliding' ? [1, 4] : [3, 10];
+  return (
+    <>
+      <div className="field">
+        <label className="field-label" htmlFor="door-style">
+          Opens by
+        </label>
+        <select
+          id="door-style"
+          className="input"
+          value={style}
+          onChange={(e) => set({ style: e.target.value as DoorStyle, panels: undefined })}
+        >
+          {DOOR_STYLES.map((d) => (
+            <option key={d.value} value={d.value} title={d.title}>
+              {d.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      {counted && (
+        <div className="field">
+          <span className="field-label" id="door-panels">
+            {style === 'folding' ? 'Panels' : 'Leaves'}
+          </span>
+          <fieldset className="stepper" aria-labelledby="door-panels">
+            <button
+              type="button"
+              className="btn"
+              aria-label="Fewer"
+              disabled={panels <= min}
+              onClick={() => set({ panels: Math.max(min, panels - (style === 'bifold' ? 2 : 1)) })}
+            >
+              −
+            </button>
+            <span className="num" aria-live="polite">
+              {panels}
+            </span>
+            <button
+              type="button"
+              className="btn"
+              aria-label="More"
+              disabled={panels >= max}
+              onClick={() => set({ panels: Math.min(max, panels + (style === 'bifold' ? 2 : 1)) })}
+            >
+              +
+            </button>
+          </fieldset>
+        </div>
+      )}
+      <div className="field">
+        <span className="field-label" aria-hidden="true">
+          Leaves of
+        </span>
+        <Segmented
+          fill
+          label="Leaves of"
+          value={o.glazed ?? 'solid'}
+          options={[
+            { value: 'solid', label: 'Solid' },
+            { value: 'clear', label: 'Glass', title: 'Clear glass' },
+            { value: 'frosted', label: 'Frosted', title: 'Frosted or fluted glass' },
+          ]}
+          onChange={(g) => set({ glazed: g === 'solid' ? undefined : g })}
+        />
+      </div>
     </>
   );
 }
