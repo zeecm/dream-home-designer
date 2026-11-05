@@ -95,3 +95,64 @@ test('a refused key says so and leaves the plan as it was', async ({ page }) => 
   await expect(page.locator('.trace-bar-error')).toContainText('The key was refused');
   await expect(page.locator('[data-hit^="wall:"]')).toHaveCount(walls);
 });
+
+/** A 1 × 1 PNG, as an image model might send back (much smaller). */
+const PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=';
+
+test('a photo-real render of the 3D view with an image model, to download', async ({ page }) => {
+  let sent = 0;
+  await page.route('https://api.openai.com/v1/images/edits', async (route) => {
+    sent++;
+    expect(route.request().headers().authorization).toBe('Bearer sk-render');
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ data: [{ b64_json: PNG }] }),
+    });
+  });
+  // Claude reads plans; the OpenAI key makes pictures.
+  await page.addInitScript(() => {
+    window.sessionStorage.setItem(
+      'dhd-ai',
+      JSON.stringify({
+        active: 'anthropic',
+        remember: false,
+        keys: {
+          anthropic: { key: 'sk-ant-x', model: 'claude-opus-5-5' },
+          openai: { key: 'sk-render', model: 'gpt-5' },
+        },
+      }),
+    );
+  });
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('3');
+  await page.getByRole('button', { name: 'Photo-real render' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Photo-real render' });
+  await expect(dialog.getByRole('img', { name: 'The 3D view' })).toBeVisible();
+  await expect(dialog).toContainText('With OpenAI (gpt-image-1)');
+  await dialog.getByLabel('Look').selectOption('scandi');
+  await dialog.getByRole('button', { name: 'Render' }).click();
+  await expect(dialog.getByRole('img', { name: 'The render' })).toBeVisible();
+  expect(sent).toBe(1);
+  const save = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download' }).click();
+  expect((await save).suggestedFilename()).toMatch(/-render\.png$/);
+});
+
+test('without an image model, a render asks for an OpenAI or Gemini key', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.sessionStorage.setItem(
+      'dhd-ai',
+      JSON.stringify({ provider: 'anthropic', key: 'sk-ant-x', model: 'claude-opus-5-5' }),
+    );
+  });
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('3');
+  await page.getByRole('button', { name: 'Photo-real render' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Photo-real render' });
+  await expect(dialog).toContainText('Renders need an OpenAI or Gemini key');
+  await expect(dialog.getByRole('button', { name: 'Render' })).toBeDisabled();
+});

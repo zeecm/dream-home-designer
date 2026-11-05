@@ -40,17 +40,17 @@ for any plan.
 - Any wall colour (a colour picker) and eight wallpapers.
 - AI with your own key (Claude, OpenAI or Gemini): trace walls from a plan image, looked over
   before it goes in. [spec](docs/specs/ai-layouts.md)
+- Photo-real renders of any 3D or walk-through view, with your own OpenAI or Gemini key.
 
 ### In progress
 - AI suggested layouts from a short brief, compared as before and after.
 
 ### Planned
-1. Photo-real renders of a room from the 3D view, with your own AI key.
-2. Structural and household-shelter walls marked, with hacking warnings.
-3. Live clearance and furniture-fit checks.
-4. Carpentry builder and a renovation cost estimate.
-5. "My furniture" and a delivery-path fit check.
-6. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
+1. Structural and household-shelter walls marked, with hacking warnings.
+2. Live clearance and furniture-fit checks.
+3. Carpentry builder and a renovation cost estimate.
+4. "My furniture" and a delivery-path fit check.
+5. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
 
 ## What it does
 

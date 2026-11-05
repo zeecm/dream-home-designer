@@ -2533,3 +2533,43 @@ h3.field-label {
 .warning-text {
   color: #9a3412;
 }
+
+/* Under Compare (or in its place): a photo-real render of the view. */
+.viewport-render {
+  position: absolute;
+  top: 60px;
+  right: 12px;
+  font-size: var(--fs-small);
+}
+.viewport-render-low {
+  top: 108px;
+}
+.render-dialog {
+  width: min(760px, calc(100vw - 32px));
+}
+.render-pictures {
+  padding: 0 20px 12px;
+}
+.render-pictures img {
+  display: block;
+  width: 100%;
+  max-height: min(48vh, 420px);
+  object-fit: contain;
+  background: var(--bg, #f4f4f2);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border);
+}
+.render-wait {
+  display: grid;
+  place-items: center;
+  height: min(48vh, 420px);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-card);
+  color: var(--muted);
+  font-size: var(--fs-small);
+}
+
+/* While walking (mouse and keyboard): under Footsteps. */
+.viewport-render-walk {
+  top: 108px;
+}

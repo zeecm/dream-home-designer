@@ -49,9 +49,11 @@ const MOVE_KEYS = new Set([...FORWARD, ...BACK, ...LEFT, ...RIGHT, 'ShiftLeft', 
  * slider (the View or Time slider just used keeps focus; WASD and Esc still walk and leave).
  */
 const ownsKey = (t: EventTarget | null, key: string) =>
-  t instanceof HTMLInputElement && t.type === 'range'
+  // A dialog open over the walk (a render) has its keys to itself, Esc to close it included.
+  (t instanceof Element && !!t.closest('dialog')) ||
+  (t instanceof HTMLInputElement && t.type === 'range'
     ? key.startsWith('Arrow') || key === 'Home' || key === 'End'
-    : isTyping(t);
+    : isTyping(t));
 
 const isTyping = (t: EventTarget | null) =>
   t instanceof HTMLElement &&

@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { icons } from '../ui/icons';
-import { type AiSettings, PROVIDERS, type Provider, saveAi, useAi } from './credentials';
+import {
+  type AiSettings,
+  PROVIDERS,
+  type Provider,
+  forgetAi,
+  keyFor,
+  saveAi,
+  useAi,
+  useSavedProviders,
+} from './credentials';
 import { AiError, askForJson } from './providers';
 
 /** A 1 × 1 white PNG: enough for a model to answer a test. */
@@ -11,6 +20,7 @@ const DOT =
 export function AiSettingsDialog({ onClose }: { onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   const saved = useAi();
+  const savedKeys = useSavedProviders();
   const [provider, setProvider] = useState<Provider>(saved?.provider ?? 'anthropic');
   const [key, setKey] = useState(saved?.key ?? '');
   const [model, setModel] = useState(saved?.model ?? PROVIDERS[provider].model);
@@ -86,8 +96,10 @@ export function AiSettingsDialog({ onClose }: { onClose: () => void }) {
             value={provider}
             onChange={(e) => {
               const p = e.target.value as Provider;
+              const k = keyFor(p);
               setProvider(p);
-              setModel(PROVIDERS[p].model);
+              setKey(k?.key ?? '');
+              setModel(k?.model ?? PROVIDERS[p].model);
               setStatus('');
             }}
           >
@@ -130,6 +142,12 @@ export function AiSettingsDialog({ onClose }: { onClose: () => void }) {
           />
           <span>Remember the key on this device (otherwise only until this tab closes)</span>
         </label>
+        {savedKeys.length > 0 && (
+          <p className="field-hint">
+            Keys kept: {savedKeys.map((p) => PROVIDERS[p].name).join(', ')}. Saving makes this one
+            the one that reads plans; photo-real renders use an OpenAI or Gemini key.
+          </p>
+        )}
         <p className="field-hint" aria-live="polite">
           {status}
         </p>
@@ -140,12 +158,12 @@ export function AiSettingsDialog({ onClose }: { onClose: () => void }) {
           <button type="button" className="btn" onClick={test} disabled={!key.trim() || testing}>
             Test
           </button>
-          {saved && (
+          {savedKeys.includes(provider) && (
             <button
               type="button"
               className="btn"
               onClick={() => {
-                saveAi(null);
+                forgetAi(provider);
                 setKey('');
                 setStatus('Key forgotten in this browser.');
               }}

@@ -199,9 +199,9 @@ export function registerScene3d(s: Scene3d | null) {
   scene3d = s;
 }
 
-export async function download3dImage() {
-  const name = useStore.getState().editor.doc.name;
-  const png = await withView('3d', async () => {
+/** The 3D view as it is now (the orbit view, or the walk), as a PNG. */
+export async function capture3d(): Promise<Blob> {
+  return withView('3d', async () => {
     await settle(10); // models and shadows settle
     const s = scene3d;
     if (!s) throw new Error('The 3D view isn’t on screen.');
@@ -211,7 +211,11 @@ export async function download3dImage() {
       s.canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('No picture'))), 'image/png'),
     );
   });
-  download(png, `${fileStem(name)}-3d.png`);
+}
+
+export async function download3dImage() {
+  const name = useStore.getState().editor.doc.name;
+  download(await capture3d(), `${fileStem(name)}-3d.png`);
 }
 
 /** The flat in 3D as a GLB file, for other 3D apps. */

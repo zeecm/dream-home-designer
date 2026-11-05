@@ -590,8 +590,18 @@ Accept builds it again on the plan as it is then and puts it in as one undo step
 (`importTrace`, `applyLevel` patches; it replaces walls already drawn), Try again, Discard.
 A Content-Security-Policy (`public/_headers`, the same in `vite preview` for the e2e suite)
 limits scripts to the site and connections to our API and the three providers; no
-violations in 3D, the walk, models or PDF upload. Next: suggested layouts (stage 2) and
-photo-real renders on the same providers; a recorded real reading of the sample as a test.
+violations in 3D, the walk, models or PDF upload. Keys are kept per provider (`credentials.ts`: one in use for
+reading plans, others kept), so Claude can read plans while an OpenAI or Gemini key makes
+pictures.
+
+**Photo-real renders (5 Nov):** "Photo-real render" on the 3D view (and, with a mouse, while
+walking) takes a picture of the view as it is (`capture3d`) and sends it, with a look (as
+designed, warm modern, Scandinavian, modern luxe, industrial), to the person's image model
+(`ai/render.ts`: OpenAI `images/edits` with `gpt-image-1`, or Gemini
+`gemini-2.5-flash-image` generateContent with image output; Claude makes no pictures). The
+picture shows in the dialog to download. The prompt keeps the camera, room and furniture
+and asks only for materials and light. Next: suggested layouts (stage 2); a recorded real
+reading of the sample as a test.
 
 **Wall colours and wallpapers (5 Nov):** a wall side's paint can be any colour (the
 browser's colour picker, after the preset swatches; stored as `paint-#rrggbb`, `customPaint`
