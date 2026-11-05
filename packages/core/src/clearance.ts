@@ -1,6 +1,6 @@
 import { footprintPolygon, wallFootprints } from './footprints';
 import { furnitureKind, furnitureLayer, itemFootprint } from './furniture';
-import { doorLeaves, planGeometry } from './plan';
+import { DOOR_LEAF_THICKNESS, doorLeaves, planGeometry } from './plan';
 import { type Item, type Level, type Vec2, isBoundary } from './schema';
 
 /**
@@ -55,7 +55,11 @@ export type ClearanceIssue =
 /** Pieces that sit under a table or desk, and the tables and desks they sit under. */
 const SEAT = /dining-chair|stool|plastic-chair/;
 const TABLE = /table|desk|dining-\d/;
-const isKitchen = (id: string) => id.startsWith('kitchen-');
+/** Pieces of a kitchen run: cabinets, and the fridge and washer that stand in line with them. */
+const isKitchen = (id: string) => id.startsWith('kitchen-') || id === 'fridge' || id === 'washer';
+
+/** How much of a bed's side is the head end, where a bedside table goes. */
+const HEAD_END = 0.55;
 
 /** Pieces that stand on the floor and get in the way (not rugs, people or lamps above). */
 function blocks(item: Item): boolean {
@@ -196,7 +200,8 @@ interface Side {
 function sideOf(fp: Vec2[], side: 'front' | 'left' | 'right'): Side {
   const [bl, br, fr, fl] = fp as [Vec2, Vec2, Vec2, Vec2];
   const [a, b, inner] =
-    side === 'front' ? [fr, fl, br] : side === 'left' ? [fl, bl, fr] : [br, fr, bl];
+    // Each long side from the foot (front) to the head (back).
+    side === 'front' ? [fr, fl, br] : side === 'left' ? [fl, bl, fr] : [fr, br, fl];
   const width = Math.hypot(b.x - a.x, b.y - a.y) || 1;
   // Outward: away from the opposite side.
   const d = { x: (b.x - a.x) / width, y: (b.y - a.y) / width };
@@ -256,7 +261,14 @@ export function doorSweep(
   for (let i = 0; i <= steps; i++) {
     doorLeaves(f, o, i / steps).forEach((l, k) => {
       if (!leaves[k]) leaves[k] = [];
-      leaves[k].push(l.a, l.b);
+      // As thick as a leaf, so one that only slides (a barn door) still covers an area.
+      const len = Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y) || 1;
+      const h = DOOR_LEAF_THICKNESS / 2;
+      const nx = (-(l.b.y - l.a.y) / len) * h;
+      const ny = ((l.b.x - l.a.x) / len) * h;
+      for (const p of [l.a, l.b]) {
+        leaves[k].push({ x: p.x + nx, y: p.y + ny }, { x: p.x - nx, y: p.y - ny });
+      }
     });
   }
   return leaves.map(convexHull).filter((h) => h.length >= 3);
@@ -271,15 +283,7 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
   const out: ClearanceIssue[] = [];
   const items = Object.values(level.items).filter(blocks);
   const fps = new Map(items.map((it) => [it.id, itemFootprint(it)]));
-  const fw = wallFootprints(level);
-  const walls = Object.values(fw.walls)
-    .filter((w) => {
-      const wall = level.walls[w.wallId];
-      return !!wall && !isBoundary(wall);
-    })
-    .map(footprintPolygon);
-  const geom = planGeometry(level, fw);
-  const solid = geom.pieces.map((p) => p.polygon);
+  const { walls, solid, sweeps } = fixedParts(level);
 
   // Kitchen cabinets joined into one run (straight, L or U): one counter, not in each
   // other's way. Runs apart (a galley's two sides) still are.
@@ -296,7 +300,7 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
     for (let j = i + 1; j < kitchen.length; j++) {
       const a = kitchen[i] as Item;
       const b = kitchen[j] as Item;
-      if (overlapDepth(grow(fps.get(a.id) as Vec2[], 0.02), fps.get(b.id) as Vec2[]) > 0) {
+      if (overlapDepth(growRect(fps.get(a.id) as Vec2[], 0.02), fps.get(b.id) as Vec2[]) > 0) {
         run.set(find(a.id), find(b.id));
       }
     }
@@ -312,19 +316,31 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
         .filter((o) => {
           if (o.id === it.id) return false;
           if (TABLE.test(it.assetId) && SEAT.test(o.assetId)) return false;
-          if (isKitchen(it.assetId) && isKitchen(o.assetId)) return find(it.id) !== find(o.id);
+          if (isKitchen(it.assetId) && isKitchen(o.assetId) && find(it.id) === find(o.id)) {
+            return Math.cos(o.rotationY - it.rotationY) < -0.5;
+          }
           return true;
         })
         .map((o) => fps.get(o.id) as Vec2[]);
-      const obstacles = [...walls, ...fw.hubs.map((h) => h.polygon), ...others];
+      // Not a piece of its own kitchen run, unless it faces this one across the kitchen
+      // (a U's arms): an L's other leg or the next cabinet along is one counter.
+      const obstacles = [...walls, ...others];
       const check = (side: 'front' | 'left' | 'right') => {
-        const s = sideOf(fp, side);
+        let s = sideOf(fp, side);
+        // Beside a bed, what counts is the room from the foot to the bedside table.
+        if (side !== 'front' && s.width > HEAD_END + 0.3) s = shorten(s, s.width - HEAD_END);
         return { side, have: roomOff(s, rule.need, obstacles), zone: zoneOf(s, rule.need) };
       };
       const sides = rule.side === 'front' ? [check('front')] : [check('left'), check('right')];
       const short = sides.filter((s) => s.have < rule.need - 0.005);
-      // One good side is enough for a single bed (the other may be against a wall).
-      const report = rule.side === 'either-side' && short.length < sides.length ? [] : short;
+      // One good side is enough for a single bed (the other may be against a wall); short
+      // both sides, the better one is the one to fix.
+      const report =
+        rule.side !== 'either-side'
+          ? short
+          : short.length < sides.length
+            ? []
+            : [short.reduce((p, q) => (q.have > p.have ? q : p))];
       for (const s of report) {
         out.push({
           kind: 'zone',
@@ -343,13 +359,11 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
   }
 
   // A door's swing with a piece in it.
-  for (const o of Object.values(level.openings)) {
-    if (o.kind !== 'door') continue;
-    const sweep = doorSweep(level, o.id, geom.frames);
+  for (const [openingId, sweep] of sweeps) {
     for (const it of items) {
       const fp = fps.get(it.id) as Vec2[];
       if (sweep.some((s) => overlapDepth(fp, s) > 0.005)) {
-        out.push({ kind: 'door', itemId: it.id, openingId: o.id, sweep });
+        out.push({ kind: 'door', itemId: it.id, openingId, sweep });
       }
     }
   }
@@ -373,16 +387,56 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
   return out;
 }
 
-/** A convex polygon pushed out by `by` from its centre (enough to test touching). */
-function grow(poly: Vec2[], by: number): Vec2[] {
-  const c = poly.reduce((s, p) => ({ x: s.x + p.x / poly.length, y: s.y + p.y / poly.length }), {
-    x: 0,
-    y: 0,
+/** A piece's footprint (back-left, back-right, front-right, front-left) grown by `by` all round. */
+function growRect(fp: Vec2[], by: number): Vec2[] {
+  const [bl, br, fr, fl] = fp as [Vec2, Vec2, Vec2, Vec2];
+  const unit = (p: Vec2, q: Vec2) => {
+    const len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
+    return { x: ((q.x - p.x) / len) * by, y: ((q.y - p.y) / len) * by };
+  };
+  const ex = unit(bl, br);
+  const ey = unit(bl, fl);
+  const at = (p: Vec2, sx: number, sy: number) => ({
+    x: p.x + ex.x * sx + ey.x * sy,
+    y: p.y + ex.y * sx + ey.y * sy,
   });
-  return poly.map((p) => {
-    const dx = p.x - c.x;
-    const dy = p.y - c.y;
-    const len = Math.hypot(dx, dy) || 1;
-    return { x: p.x + (dx / len) * by * Math.SQRT2, y: p.y + (dy / len) * by * Math.SQRT2 };
-  });
+  return [at(bl, -1, -1), at(br, 1, -1), at(fr, 1, 1), at(fl, -1, 1)];
+}
+
+/** A side cut to its first `width` (from its start). */
+function shorten(s: Side, width: number): Side {
+  const k = width / s.width;
+  return { ...s, b: { x: s.a.x + (s.b.x - s.a.x) * k, y: s.a.y + (s.b.y - s.a.y) * k }, width };
+}
+
+type Fixed = { walls: Vec2[][]; solid: Vec2[][]; sweeps: [string, Vec2[][]][] };
+// Walls and doors don't change while furniture moves: kept by the walls, corners and openings
+// (Immer keeps those objects while only items change).
+const fixedCache = new WeakMap<object, { vertices: object; openings: object; fixed: Fixed }>();
+
+function fixedParts(level: Level): Fixed {
+  const hit = fixedCache.get(level.walls);
+  if (hit && hit.vertices === level.vertices && hit.openings === level.openings) return hit.fixed;
+  const fw = wallFootprints(level);
+  const hubs = fw.hubs.map((h) => h.polygon);
+  const walls = [
+    ...Object.values(fw.walls)
+      .filter((w) => {
+        const wall = level.walls[w.wallId];
+        return !!wall && !isBoundary(wall);
+      })
+      .map(footprintPolygon),
+    ...hubs,
+  ];
+  const geom = planGeometry(level, fw);
+  const solid = [...geom.pieces.map((p) => p.polygon), ...hubs];
+  const sweeps: [string, Vec2[][]][] = Object.values(level.openings)
+    .filter((o) => o.kind === 'door')
+    .map((o): [string, Vec2[][]] => [o.id, doorSweep(level, o.id, geom.frames)])
+    .filter(([, sw]) => sw.length > 0);
+  const fixed = { walls, solid, sweeps };
+  if (Object.isFrozen(level.walls)) {
+    fixedCache.set(level.walls, { vertices: level.vertices, openings: level.openings, fixed });
+  }
+  return fixed;
 }

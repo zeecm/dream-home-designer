@@ -1,5 +1,6 @@
 import {
   AFTER_SUFFIX,
+  CLEARANCE_RULES,
   type DoorStyle,
   FLOOR_FINISHES,
   type ItemPatch,
@@ -47,7 +48,7 @@ import {
   wallStatuses,
 } from '@dhd/core';
 import { wallpaperCanvas } from '@dhd/render';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   itemIssueLines,
   itemsWithIssues,
@@ -385,11 +386,14 @@ function NorthField() {
 function ItemClearances({ level, id }: { level: Level; id: string }) {
   const on = useClearanceOn((s) => s.on);
   const issues = useClearanceIssues();
+  const h = useId();
   if (!on) return null;
   const lines = itemIssueLines(level, id, issues);
+  // A rug or a lamp has nothing to check: say nothing rather than "room to use it".
+  if (!lines.length && !CLEARANCE_RULES[level.items[id]?.assetId ?? '']) return null;
   return (
-    <section className="stack" aria-labelledby="clearance-h">
-      <h3 id="clearance-h" className="section-title">
+    <section className="stack" aria-labelledby={h}>
+      <h3 id={h} className="section-title">
         Clearances
       </h3>
       {lines.length ? (

@@ -209,6 +209,90 @@ describe('clearance checks', () => {
     for (const g of galley) expect(g.kind === 'zone' && g.have).toBeCloseTo(0.85, 3);
   });
 
+  it('beds: bedside tables at the head don’t count; a single bed short both sides is one issue', () => {
+    const base = level(room());
+    const queen = furnitureKind('bed-queen');
+    const side = furnitureKind('bedside');
+    if (!queen || !side) throw new Error('no bed');
+    // Headboard on the top wall, a bedside table each side at the head, 1 m clear beyond.
+    const by = 0.05 + queen.size.d / 2;
+    const hy = 0.05 + side.size.d / 2;
+    const off = queen.size.w / 2 + side.size.w / 2;
+    const tables = clearanceIssues(
+      withItems(base, [
+        ['bed-queen', { x: 2, y: by }],
+        ['bedside', { x: 2 - off, y: hy }],
+        ['bedside', { x: 2 + off, y: hy }],
+      ]),
+    );
+    expect(zones(tables)).toHaveLength(0);
+    // A single bed in a 1.3 m wide alcove: 0.2 m one side, 0.18 m the other: one line.
+    const single = furnitureKind('bed-single');
+    if (!single) throw new Error('no single');
+    const lvl = withItems(base, [
+      ['bed-single', { x: 0.05 + 0.2 + single.size.w / 2, y: 2 }],
+      ['wardrobe', { x: 0.05 + 0.2 + single.size.w + 0.18 + 0.3, y: 2 }, Math.PI / 2],
+    ]);
+    const z = zones(clearanceIssues(lvl)).filter(
+      (x) => x.kind === 'zone' && lvl.items[x.itemId]?.assetId === 'bed-single',
+    );
+    expect(z).toHaveLength(1);
+    expect(z[0]?.kind === 'zone' && z[0].have).toBeCloseTo(0.2, 2);
+  });
+
+  it('a barn door’s slide is checked; a U kitchen’s facing arms are short', () => {
+    const s0 = room();
+    const bottom = Object.values(level(s0).walls).find((w) => {
+      const a = level(s0).vertices[w.a];
+      const b = level(s0).vertices[w.b];
+      return a && b && a.y === 4 && b.y === 4;
+    });
+    if (!bottom) throw new Error('no wall');
+    const d = addOpening(level(s0).id, {
+      wallId: bottom.id,
+      kind: 'door',
+      t: 0.5,
+      width: 0.8,
+      height: 2.1,
+      sill: 0,
+      swing: 'leftIn',
+      style: 'sliding',
+    });
+    const s = dispatch(s0, d.command);
+    const sweep = doorSweep(level(s), d.openingId);
+    expect(sweep.length).toBeGreaterThan(0);
+    const pts = sweep.flat();
+    const c = {
+      x: pts.reduce((t, p) => t + p.x, 0) / pts.length,
+      y: pts.reduce((t, p) => t + p.y, 0) / pts.length,
+    };
+    const issues = clearanceIssues(withItems(level(s), [['bedside', c]]));
+    expect(issues.some((i) => i.kind === 'door')).toBe(true);
+
+    // A U: top run, left leg, and a bottom arm facing the top run 0.85 m across.
+    const base = level(room());
+    const top: [string, Vec2, number][] = [0.35, 0.95, 1.55].map((x) => [
+      'kitchen-base',
+      { x, y: 0.35 },
+      0,
+    ]);
+    const leg: [string, Vec2, number][] = [0.95].map((y) => [
+      'kitchen-base',
+      { x: 0.35, y },
+      -Math.PI / 2,
+    ]);
+    const arm: [string, Vec2, number][] = [0.35, 0.95, 1.55].map((x) => [
+      'kitchen-base',
+      { x, y: 1.25 + 0.85 + 0.3 - 0.6 },
+      Math.PI,
+    ]);
+    // The arm's back sits on the leg's end (one run), facing the top across 0.85 m... and
+    // the leg's front faces nothing. Every top and arm cabinet is short except where the
+    // leg stands in front of a corner one.
+    const u = zones(clearanceIssues(withItems(base, [...top, ...leg, ...arm])));
+    expect(u.length).toBeGreaterThan(0);
+  });
+
   it('is quick: 80 pieces in a few milliseconds', () => {
     const base = level(room());
     const ids = ['wardrobe', 'sofa-3', 'desk', 'bedside', 'kitchen-base', 'armchair', 'bed-queen'];

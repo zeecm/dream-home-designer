@@ -5,6 +5,8 @@ import {
   clearanceZones,
   furnitureKind,
   itemFootprint,
+  pointInPolygon,
+  roomShapes,
 } from '@dhd/core';
 import { memo, useMemo } from 'react';
 import { create } from 'zustand';
@@ -77,7 +79,18 @@ export function issueText(level: Level, issue: ClearanceIssue, all: ClearanceIss
         .join(', ')}.`;
     }
     case 'door': {
-      return 'Blocks a door’s swing.';
+      // Named by the room it opens into (where its leaves sweep).
+      const pts = issue.sweep.flat();
+      const c = {
+        x: pts.reduce((t, p) => t + p.x, 0) / (pts.length || 1),
+        y: pts.reduce((t, p) => t + p.y, 0) / (pts.length || 1),
+      };
+      const shapes = roomShapes(level);
+      const room = Object.values(level.rooms).find((r) => {
+        const s = shapes.get(r.id);
+        return !!s && pointInPolygon(c, s.outer);
+      });
+      return room ? `Blocks the ${room.name} door.` : 'Blocks a door’s swing.';
     }
     case 'overlap':
       return `Overlaps the ${name(level, issue.otherId).toLowerCase()}.`;
@@ -135,6 +148,13 @@ export const ClearanceLayer = memo(function ClearanceLayer({ level }: { level: L
       ))}
       {issues.map((i, k) => {
         const key = `${i.kind}-${i.itemId}-${k}`;
+        // A door's sweep once, however many pieces are in it.
+        if (
+          i.kind === 'door' &&
+          issues.findIndex((j) => j.kind === 'door' && j.openingId === i.openingId) !== k
+        ) {
+          return null;
+        }
         if (i.kind === 'zone') {
           return <polygon key={key} className="clearance-short" points={pts(i.zone)} />;
         }
