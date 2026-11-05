@@ -59,11 +59,13 @@ test('trace walls with an AI model: key kept in the browser, a draft to accept, 
   await expect(dialog).toHaveCount(0);
   const walls = page.locator('[data-hit^="wall:"]');
   const before = await walls.count();
-  await page.getByRole('button', { name: 'Trace walls with AI' }).click();
+  // Saving the key starts the trace asked for.
   const bar = page.locator('.trace-bar');
   await expect(bar).toContainText('Found 7 walls, 1 door, 0 windows, 2 rooms');
-  await expect(bar).toContainText('Accepting replaces the walls drawn now.');
+  await expect(bar).toContainText('Accepting replaces the walls drawn now (faded).');
   await expect(page.locator('.ai-draft-wall').first()).toBeVisible();
+  // The plan as it is fades behind the draft.
+  await expect(page.locator('.plan-shapes')).toHaveCSS('opacity', '0.3');
   await bar.getByRole('button', { name: 'Accept' }).click();
   await expect(bar).toHaveCount(0);
   await expect(page.locator('.room-list li')).toHaveCount(2);
@@ -92,8 +94,13 @@ test('a refused key says so and leaves the plan as it was', async ({ page }) => 
   await page.keyboard.press('1');
   const walls = await page.locator('[data-hit^="wall:"]').count();
   await page.getByRole('button', { name: 'Trace walls with AI' }).click();
-  await expect(page.locator('.trace-bar-error')).toContainText('The key was refused');
+  const bar = page.locator('.trace-bar-error');
+  await expect(bar).toContainText('The key was refused');
   await expect(page.locator('[data-hit^="wall:"]')).toHaveCount(walls);
+  // Trying again won't help: the way on is the settings.
+  await expect(bar.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+  await bar.getByRole('button', { name: 'AI settings' }).click();
+  await expect(page.getByRole('dialog', { name: 'AI assistant' })).toBeVisible();
 });
 
 /** A 1 × 1 PNG, as an image model might send back (much smaller). */
@@ -136,6 +143,11 @@ test('a photo-real render of the 3D view with an image model, to download', asyn
   await dialog.getByRole('button', { name: 'Render' }).click();
   await expect(dialog.getByRole('img', { name: 'The render' })).toBeVisible();
   expect(sent).toBe(1);
+  // The view it was made from, to compare.
+  await dialog.getByRole('button', { name: '3D view', exact: true }).click();
+  await expect(dialog.getByRole('img', { name: 'The 3D view' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Render', exact: true }).click();
+  await expect(dialog.getByRole('img', { name: 'The render' })).toBeVisible();
   const save = page.waitForEvent('download');
   await dialog.getByRole('button', { name: 'Download' }).click();
   expect((await save).suggestedFilename()).toMatch(/-render\.png$/);
@@ -155,6 +167,18 @@ test('without an image model, a render asks for an OpenAI or Gemini key', async 
   const dialog = page.getByRole('dialog', { name: 'Photo-real render' });
   await expect(dialog).toContainText('Renders need an OpenAI or Gemini key');
   await expect(dialog.getByRole('button', { name: 'Render' })).toBeDisabled();
+  // Adding one starts on a provider that makes pictures, and keeps Claude reading plans.
+  await dialog.getByRole('button', { name: 'Add a key' }).click();
+  const settings = page.getByRole('dialog', { name: 'AI assistant' });
+  await expect(settings.getByLabel('Provider')).toHaveValue('openai');
+  await expect(
+    settings.getByLabel('Use OpenAI to trace plans and suggest layouts'),
+  ).not.toBeChecked();
+  await settings.getByLabel('API key').fill('sk-render');
+  await settings.getByRole('button', { name: 'Save' }).click();
+  await expect(dialog).toContainText('With OpenAI');
+  const stored = await page.evaluate(() => window.sessionStorage.getItem('dhd-ai'));
+  expect(JSON.parse(stored ?? '{}').active).toBe('anthropic');
 });
 
 const blank = {
@@ -224,7 +248,11 @@ test('suggested layouts from a brief: checked against what may change, one made 
   await expect(cards.nth(1)).toContainText('glass partition');
   // An outside wall stays, whatever the model said.
   await expect(cards.nth(2)).toContainText('Left out (1)');
-  await expect(cards.nth(2)).toContainText('No change to the walls.');
+  await expect(cards.nth(2)).toContainText('Nothing in this one could be applied');
+  await expect(cards.nth(2).getByRole('button')).toHaveCount(0);
+  // New and changed walls drawn in the accent colour, removed ones dashed.
+  await expect(cards.nth(0).locator('.mini-gone')).not.toHaveCount(0);
+  await expect(cards.nth(1).locator('.mini-new')).not.toHaveCount(0);
   await cards.nth(0).getByRole('button', { name: 'Use this' }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.locator('.reno-bar')).toBeVisible();

@@ -63,7 +63,7 @@ export const PlanShapes = memo(function PlanShapes({
   const peItems = interactive === true || interactive === 'items' ? undefined : 'none';
   const peOpenings = interactive === true || interactive === 'openings' ? undefined : 'none';
   return (
-    <g>
+    <g className="plan-shapes">
       <g className="rooms">
         {Object.values(level.rooms).map((r) => (
           <path

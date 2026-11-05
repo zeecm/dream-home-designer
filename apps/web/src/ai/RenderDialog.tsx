@@ -27,6 +27,8 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState<AbortController | null>(null);
   const [status, setStatus] = useState('');
   const [settings, setSettings] = useState(false);
+  // With a render made: show it, or the view it was made from, to compare.
+  const [showView, setShowView] = useState(false);
 
   useEffect(() => {
     const d = ref.current;
@@ -58,6 +60,7 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
     try {
       const blob = await renderPhoto(ai, view.blob, style, ctrl.signal);
       setPhoto({ blob, url: URL.createObjectURL(blob) });
+      setShowView(false);
       setStatus('');
     } catch (e) {
       setStatus(e instanceof AiError ? e.message : 'The render failed. Try again.');
@@ -71,7 +74,8 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
       className="dialog render-dialog"
       aria-labelledby="render-h"
       tabIndex={-1}
-      onClose={onClose}
+      // Only its own close: React passes a dialog opened inside it up the tree too.
+      onClose={(e) => e.target === e.currentTarget && onClose()}
     >
       <header className="dialog-head">
         <h2 id="render-h">Photo-real render</h2>
@@ -79,47 +83,65 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
           {icons.close}
         </button>
       </header>
-      <p className="dialog-note">
-        Your image model turns this view into a photograph-like picture, keeping the room and
-        furniture as they are. It’s an impression: details can differ. Best from inside a room: walk
-        through, look where you like, then render.
-      </p>
-      <div className="render-pictures">
-        {view ? (
-          <img src={(photo ?? view).url} alt={photo ? 'The render' : 'The 3D view'} />
-        ) : (
-          <div className="render-wait">Taking a picture of the view…</div>
-        )}
-      </div>
-      <div className="ai-form">
-        {ai ? (
-          <>
-            <label className="field">
-              <span className="field-label">Look</span>
-              <select
-                className="input"
-                value={style}
-                onChange={(e) => setStyle(e.target.value as RenderStyle)}
-              >
-                {(Object.keys(RENDER_STYLES) as RenderStyle[]).map((s) => (
-                  <option key={s} value={s}>
-                    {STYLE_NAMES[s]}
-                  </option>
-                ))}
-              </select>
-            </label>
+      <div className="dialog-body">
+        <p className="dialog-note">
+          Your image model turns this view into a photograph-like picture, keeping the room and
+          furniture as they are. It’s an impression: details can differ. Best from inside a room:
+          walk through, look where you like, then render.
+        </p>
+        <div className="render-pictures">
+          {photo && view && (
+            <fieldset className="segmented">
+              <legend className="visually-hidden">Show</legend>
+              <button type="button" aria-pressed={!showView} onClick={() => setShowView(false)}>
+                Render
+              </button>
+              <button type="button" aria-pressed={showView} onClick={() => setShowView(true)}>
+                3D view
+              </button>
+            </fieldset>
+          )}
+          {view ? (
+            <img
+              src={(photo && !showView ? photo : view).url}
+              alt={photo && !showView ? 'The render' : 'The 3D view'}
+            />
+          ) : (
+            <div className="render-wait">Taking a picture of the view…</div>
+          )}
+        </div>
+        <div className="ai-form">
+          {ai ? (
+            <>
+              <label className="field">
+                <span className="field-label">Look</span>
+                <select
+                  className="input"
+                  value={style}
+                  onChange={(e) => setStyle(e.target.value as RenderStyle)}
+                >
+                  {(Object.keys(RENDER_STYLES) as RenderStyle[]).map((s) => (
+                    <option key={s} value={s}>
+                      {STYLE_NAMES[s]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="field-hint">
+                With {PROVIDERS[ai.provider].name} ({ai.model}), on your key: a few cents a picture.
+              </p>
+            </>
+          ) : (
             <p className="field-hint">
-              With {PROVIDERS[ai.provider].name} ({ai.model}), on your key: a few cents a picture.
+              Renders need an OpenAI or Gemini key (Claude doesn’t make pictures).{' '}
+              <button type="button" className="link-btn" onClick={() => setSettings(true)}>
+                Add a key
+              </button>
             </p>
-          </>
-        ) : (
-          <p className="field-hint">
-            Renders need an OpenAI or Gemini key (Claude doesn’t make pictures).{' '}
-            <button type="button" className="link-btn" onClick={() => setSettings(true)}>
-              Add a key
-            </button>
-          </p>
-        )}
+          )}
+        </div>
+      </div>
+      <footer className="dialog-foot">
         <p className="field-hint" aria-live="polite">
           {status}
         </p>
@@ -143,8 +165,8 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
             </button>
           )}
         </div>
-      </div>
-      {settings && <AiSettingsDialog onClose={() => setSettings(false)} />}
+      </footer>
+      {settings && <AiSettingsDialog initial="openai" onClose={() => setSettings(false)} />}
     </dialog>
   );
 }

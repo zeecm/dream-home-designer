@@ -21,6 +21,8 @@ interface DraftState {
   draft: TraceDraft | null;
   running: AbortController | null;
   error: string | null;
+  /** The error was the key being refused: the way on is AI settings, not trying again. */
+  keyRefused?: boolean;
   /** The project and level the trace is for: another one opened ends it. */
   at: string | null;
   set: (s: Partial<Omit<DraftState, 'set'>>) => void;

@@ -5,6 +5,7 @@ import {
   applyLayout,
   planGeometry,
   renovationChanges,
+  roomShapes,
 } from '@dhd/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useEditor } from '../editor';
@@ -26,25 +27,78 @@ interface Option {
   refused: string[];
 }
 
-/** A small drawing of a layout: its walls, filled. */
-function MiniLayout({ level }: { level: Level }) {
+type P = { x: number; y: number };
+const pts = (ps: P[]) => ps.map((q) => `${q.x},${q.y}`).join(' ');
+
+/** The middle of a wall, and whether a wall of `level` runs through that point. */
+function middle(level: Level, id: string): P | null {
+  const w = level.walls[id];
+  const a = w && level.vertices[w.a];
+  const b = w && level.vertices[w.b];
+  return a && b ? { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } : null;
+}
+function onAWall(level: Level, p: P): boolean {
+  return Object.values(level.walls).some((w) => {
+    const a = level.vertices[w.a];
+    const b = level.vertices[w.b];
+    if (!a || !b) return false;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    if (len2 < 1e-9) return false;
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+    return Math.hypot(a.x + t * dx - p.x, a.y + t * dy - p.y) < Math.max(0.05, w.thickness / 2);
+  });
+}
+
+/**
+ * A small drawing of a layout: rooms faintly, walls filled; walls that are new or changed
+ * (glass, half height) in the accent colour, and walls taken down dashed.
+ */
+function MiniLayout({ before, level }: { before: Level; level: Level }) {
   const geom = useMemo(() => planGeometry(level), [level]);
-  const pts = geom.pieces.flatMap((p) => p.polygon);
-  if (!pts.length) return null;
-  const xs = pts.map((p) => p.x);
-  const ys = pts.map((p) => p.y);
+  const was = useMemo(() => planGeometry(before), [before]);
+  const rooms = useMemo(() => [...roomShapes(level).values()], [level]);
+  const all = geom.pieces.flatMap((p) => p.polygon);
+  if (!all.length) return null;
+  const changed = (id: string) => {
+    const old = before.walls[id];
+    const now = level.walls[id];
+    if (!old) {
+      // A piece of an old wall split by a new one isn't new.
+      const m = middle(level, id);
+      return !m || !onAWall(before, m);
+    }
+    return !!now && (old.build !== now.build || old.height !== now.height);
+  };
+  const gone = was.pieces.filter((p) => {
+    if (level.walls[p.wallId]) return false;
+    const m = middle(before, p.wallId);
+    return !m || !onAWall(level, m);
+  });
+  const xs = all.map((p) => p.x);
+  const ys = all.map((p) => p.y);
   const x0 = Math.min(...xs) - 0.3;
   const y0 = Math.min(...ys) - 0.3;
   const w = Math.max(...xs) - x0 + 0.3;
   const h = Math.max(...ys) - y0 + 0.3;
   return (
     <svg className="mini-layout" viewBox={`${x0} ${y0} ${w} ${h}`} aria-hidden="true">
+      {rooms.map((r, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: a fixed drawing
+        <polygon key={`r${i}`} className="mini-room" points={pts(r.outer)} />
+      ))}
       {geom.pieces.map((p, i) => (
         <polygon
           // biome-ignore lint/suspicious/noArrayIndexKey: a fixed drawing
           key={i}
-          points={p.polygon.map((q) => `${q.x},${q.y}`).join(' ')}
+          className={changed(p.wallId) ? 'mini-new' : undefined}
+          points={pts(p.polygon)}
         />
+      ))}
+      {gone.map((p, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: a fixed drawing
+        <polygon key={`g${i}`} className="mini-gone" points={pts(p.polygon)} />
       ))}
     </svg>
   );
@@ -62,6 +116,14 @@ export function LayoutsDialog({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState<AbortController | null>(null);
   const [status, setStatus] = useState('');
   const [settings, setSettings] = useState(false);
+  const listRef = useRef<HTMLOListElement>(null);
+  // New options: brought into sight, the first one's name focused (and so read out).
+  useEffect(() => {
+    if (!options.length) return;
+    const first = listRef.current?.firstElementChild;
+    first?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    first?.querySelector<HTMLElement>('h3')?.focus({ preventScroll: true });
+  }, [options]);
 
   useEffect(() => {
     const d = ref.current;
@@ -124,7 +186,8 @@ export function LayoutsDialog({ onClose }: { onClose: () => void }) {
       className="dialog layouts-dialog"
       aria-labelledby="layouts-h"
       tabIndex={-1}
-      onClose={onClose}
+      // Only its own close: React passes a dialog opened inside it up the tree too.
+      onClose={(e) => e.target === e.currentTarget && onClose()}
     >
       <header className="dialog-head">
         <h2 id="layouts-h">Suggest layouts</h2>
@@ -132,64 +195,128 @@ export function LayoutsDialog({ onClose }: { onClose: () => void }) {
           {icons.close}
         </button>
       </header>
-      <p className="dialog-note">
-        Your AI model suggests up to three ways to renovate the flat as it is, for your household.
-        Outside walls, the household shelter and bathrooms stay as they are. Any you use becomes the
-        renovation, to look at in 3D, walk through and change further. Hacking walls needs HDB
-        approval and an HDB-registered contractor: these are ideas, not approvals.
-      </p>
-      <div className="ai-form">
-        <label className="field">
-          <span className="field-label">Who lives here</span>
-          <input
-            className="input"
-            placeholder="e.g. a couple with a toddler, working from home"
-            value={brief.household}
-            onChange={(e) => setBrief({ ...brief, household: e.target.value })}
-          />
-        </label>
-        <fieldset className="wish-list">
-          <legend className="field-label">You’d like</legend>
-          {WISHES.map((w) => (
-            <label key={w} className="check-row">
-              <input
-                type="checkbox"
-                checked={brief.wishes.includes(w)}
-                onChange={(e) =>
-                  setBrief({
-                    ...brief,
-                    wishes: e.target.checked
-                      ? [...brief.wishes, w]
-                      : brief.wishes.filter((x) => x !== w),
-                  })
-                }
-              />
-              <span>{w}</span>
-            </label>
-          ))}
-        </fieldset>
-        <label className="field">
-          <span className="field-label">Anything else</span>
-          <input
-            className="input"
-            placeholder="e.g. keep the second bedroom; we cook a lot"
-            value={brief.notes}
-            onChange={(e) => setBrief({ ...brief, notes: e.target.value })}
-          />
-        </label>
-        {!ai && (
-          <p className="field-hint">
-            Needs your own AI key.{' '}
-            <button type="button" className="link-btn" onClick={() => setSettings(true)}>
-              Add a key
-            </button>
-          </p>
+      <div className="dialog-body">
+        <p className="dialog-note">
+          Your AI model suggests up to three ways to renovate the flat as it is, for your household.
+          Outside walls, the household shelter and bathrooms stay as they are. Any you use becomes
+          the renovation, to look at in 3D, walk through and change further. Hacking walls needs HDB
+          approval and an HDB-registered contractor: these are ideas, not approvals.
+        </p>
+        <div className="ai-form">
+          <label className="field">
+            <span className="field-label">Who lives here</span>
+            <input
+              className="input"
+              placeholder="e.g. a couple with a toddler, working from home"
+              value={brief.household}
+              onChange={(e) => setBrief({ ...brief, household: e.target.value })}
+            />
+          </label>
+          <fieldset className="wish-list">
+            <legend className="field-label">You’d like</legend>
+            {WISHES.map((w) => (
+              <label key={w} className="check-row">
+                <input
+                  type="checkbox"
+                  checked={brief.wishes.includes(w)}
+                  onChange={(e) =>
+                    setBrief({
+                      ...brief,
+                      wishes: e.target.checked
+                        ? [...brief.wishes, w]
+                        : brief.wishes.filter((x) => x !== w),
+                    })
+                  }
+                />
+                <span>{w}</span>
+              </label>
+            ))}
+          </fieldset>
+          <label className="field">
+            <span className="field-label">Anything else</span>
+            <input
+              className="input"
+              placeholder="e.g. keep the second bedroom; we cook a lot"
+              value={brief.notes}
+              onChange={(e) => setBrief({ ...brief, notes: e.target.value })}
+            />
+          </label>
+          {!ai && (
+            <p className="field-hint">
+              Needs your own AI key.{' '}
+              <button type="button" className="link-btn" onClick={() => setSettings(true)}>
+                Add a key
+              </button>
+            </p>
+          )}
+          {ai && (
+            <p className="field-hint">
+              With {PROVIDERS[ai.provider].name}, on your key: a few cents to a few tens of cents.
+            </p>
+          )}
+        </div>
+        {options.length > 0 && (
+          <ol className="layout-options" ref={listRef}>
+            {options.map((o, i) => {
+              const level = before();
+              const changes = level ? renovationChanges(level, o.level) : [];
+              return (
+                // biome-ignore lint/suspicious/noArrayIndexKey: one fixed answer's options
+                <li key={i} className="layout-option">
+                  <div>
+                    {level && <MiniLayout before={level} level={o.level} />}
+                    {changes.length > 0 && (
+                      <p className="mini-key" aria-hidden="true">
+                        <span>
+                          <i />
+                          New or changed
+                        </span>
+                        <span>
+                          <i className="mini-key-gone" />
+                          Taken down
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <h3 id={`layout-${i}-h`} tabIndex={-1}>
+                      {o.name}
+                    </h3>
+                    <p id={`layout-${i}-s`}>{o.summary}</p>
+                    <ul className="layout-reasons">
+                      {o.reasons.map((r, j) => (
+                        // biome-ignore lint/suspicious/noArrayIndexKey: fixed reasons
+                        <li key={j}>{r}</li>
+                      ))}
+                    </ul>
+                    <p className="field-hint">
+                      {changes.length
+                        ? changes.map((c) => changeText(c)).join(' · ')
+                        : 'Nothing in this one could be applied to your flat.'}
+                    </p>
+                    {o.refused.length > 0 && (
+                      <p className="field-hint">
+                        Left out ({o.refused.length}): {o.refused.join('; ')}
+                      </p>
+                    )}
+                    {changes.length > 0 && (
+                      <button
+                        type="button"
+                        className="btn btn-small"
+                        aria-describedby={`layout-${i}-h layout-${i}-s`}
+                        onClick={() => use(o)}
+                      >
+                        {hasRenovation ? 'Use this instead of the renovation' : 'Use this'}
+                      </button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
         )}
-        {ai && (
-          <p className="field-hint">
-            With {PROVIDERS[ai.provider].name}, on your key: a few cents to a few tens of cents.
-          </p>
-        )}
+      </div>
+      <footer className="dialog-foot">
         <p className="field-hint" aria-live="polite">
           {status}
         </p>
@@ -204,50 +331,7 @@ export function LayoutsDialog({ onClose }: { onClose: () => void }) {
             </button>
           )}
         </div>
-      </div>
-      {options.length > 0 && (
-        <ol className="layout-options">
-          {options.map((o, i) => {
-            const level = before();
-            const changes = level ? renovationChanges(level, o.level) : [];
-            return (
-              // biome-ignore lint/suspicious/noArrayIndexKey: one fixed answer's options
-              <li key={i} className="layout-option">
-                <MiniLayout level={o.level} />
-                <div>
-                  <h3 id={`layout-${i}-h`}>{o.name}</h3>
-                  <p id={`layout-${i}-s`}>{o.summary}</p>
-                  <ul className="layout-reasons">
-                    {o.reasons.map((r, j) => (
-                      // biome-ignore lint/suspicious/noArrayIndexKey: fixed reasons
-                      <li key={j}>{r}</li>
-                    ))}
-                  </ul>
-                  <p className="field-hint">
-                    {changes.length
-                      ? changes.map((c) => changeText(c)).join(' · ')
-                      : 'No change to the walls.'}
-                  </p>
-                  {o.refused.length > 0 && (
-                    <p className="field-hint">
-                      Left out ({o.refused.length}): {o.refused.join('; ')}
-                    </p>
-                  )}
-                  <button
-                    type="button"
-                    className="btn btn-small"
-                    disabled={!changes.length}
-                    aria-describedby={`layout-${i}-h layout-${i}-s`}
-                    onClick={() => use(o)}
-                  >
-                    {hasRenovation ? 'Use this instead of the renovation' : 'Use this'}
-                  </button>
-                </div>
-              </li>
-            );
-          })}
-        </ol>
-      )}
+      </footer>
       {settings && <AiSettingsDialog onClose={() => setSettings(false)} />}
     </dialog>
   );

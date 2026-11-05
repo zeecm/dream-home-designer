@@ -1,5 +1,6 @@
 import { type Level, importTrace, newId, readingToPlan, roomArea, tracedLevel } from '@dhd/core';
 import { useState } from 'react';
+import { useEditor } from '../editor';
 import { currentLevel, useProject, useStore } from '../store';
 import { usePlanImage } from '../ui/PlanImage';
 import { formatArea } from '../units';
@@ -18,7 +19,7 @@ async function trace(url: string, width: number, height: number) {
   const { set, running } = useTrace.getState();
   running?.abort();
   const ctrl = new AbortController();
-  set({ running: ctrl, error: null, draft: null, at: traceWhere() });
+  set({ running: ctrl, error: null, keyRefused: false, draft: null, at: traceWhere() });
   try {
     const reading = await readPlan(ai, url, width, height, ctrl.signal);
     const plan = readingToPlan(reading, underlay);
@@ -29,6 +30,8 @@ async function trace(url: string, width: number, height: number) {
     const now = currentLevel() ?? level;
     const replace = Object.keys(now.walls).length > 0;
     const { level: traced, skipped } = tracedLevel(now, plan, newId, replace);
+    // Select, so a tool's hint and handles don't sit over the draft.
+    useEditor.getState().setTool('select');
     set({
       running: null,
       draft: { level: traced, plan, skipped, printedArea: reading.printedArea ?? null, replace },
@@ -41,6 +44,7 @@ async function trace(url: string, width: number, height: number) {
     set({
       running: null,
       error: e instanceof AiError ? e.message : 'Something went wrong reading the plan.',
+      keyRefused: e instanceof AiError && e.kind === 'key',
     });
   }
 }
@@ -51,7 +55,8 @@ export function TraceWithAi() {
   const asset = usePlanImage();
   const viewer = useStore((s) => s.role === 'viewer');
   const running = useTrace((s) => !!s.running);
-  const [settings, setSettings] = useState(false);
+  // Open from the Trace button with no key: trace once a key is saved.
+  const [settings, setSettings] = useState<false | true | 'then-trace'>(false);
   if (viewer) return null;
   const ready = asset.status === 'ready';
   return (
@@ -61,7 +66,7 @@ export function TraceWithAi() {
         className="btn btn-block"
         disabled={running || (!!ai && !ready)}
         onClick={() => {
-          if (!ai) setSettings(true);
+          if (!ai) setSettings('then-trace');
           else if (asset.status === 'ready') void trace(asset.url, asset.width, asset.height);
         }}
       >
@@ -75,7 +80,15 @@ export function TraceWithAi() {
           {ai ? 'AI settings' : 'Add a key'}
         </button>
       </p>
-      {settings && <AiSettingsDialog onClose={() => setSettings(false)} />}
+      {settings && (
+        <AiSettingsDialog
+          onClose={() => {
+            const go = settings === 'then-trace' && aiSettings();
+            setSettings(false);
+            if (go && asset.status === 'ready') void trace(asset.url, asset.width, asset.height);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -97,7 +110,8 @@ function summary(level: Level): { text: string; area: number } {
 
 /** Over the plan while a trace runs or waits: what was found, and Accept, Try again, Discard. */
 export function TraceBar() {
-  const { draft, running, error, set } = useTrace();
+  const { draft, running, error, keyRefused, set } = useTrace();
+  const [settings, setSettings] = useState(false);
   const dispatch = useStore((s) => s.dispatch);
   const asset = usePlanImage();
   const project = useProject();
@@ -119,12 +133,28 @@ export function TraceBar() {
     return (
       <div className="trace-bar trace-bar-error" role="alert">
         <span>{error}</span>
-        <button type="button" className="btn btn-small" onClick={again}>
-          Try again
-        </button>
-        <button type="button" className="btn btn-small" onClick={() => set({ error: null })}>
-          Close
-        </button>
+        <span className="trace-actions">
+          {keyRefused ? (
+            <button type="button" className="btn btn-small" onClick={() => setSettings(true)}>
+              AI settings
+            </button>
+          ) : (
+            <button type="button" className="btn btn-small" onClick={again}>
+              Try again
+            </button>
+          )}
+          <button type="button" className="btn btn-small" onClick={() => set({ error: null })}>
+            Close
+          </button>
+        </span>
+        {settings && (
+          <AiSettingsDialog
+            onClose={() => {
+              setSettings(false);
+              if (aiSettings()) set({ error: null });
+            }}
+          />
+        )}
       </div>
     );
   }
@@ -136,31 +166,34 @@ export function TraceBar() {
   return (
     <output className="trace-bar">
       <span>
+        <span className="trace-key" aria-hidden="true" />
         Found {s.text}: {formatArea(s.area)}
         {printed}.{draft.skipped > 0 && ` ${draft.skipped} couldn’t be placed.`}{' '}
-        {draft.replace && 'Accepting replaces the walls drawn now.'}
+        {draft.replace && 'Accepting replaces the walls drawn now (faded).'}
       </span>
-      <button
-        type="button"
-        className="btn btn-small btn-primary"
-        onClick={() => {
-          // Built again on the plan as it is now, so nothing done since is lost.
-          const level = currentLevel();
-          if (level && useTrace.getState().at === traceWhere()) {
-            const built = tracedLevel(level, draft.plan, newId, draft.replace).level;
-            dispatch(importTrace(level.id, built));
-          }
-          set({ draft: null });
-        }}
-      >
-        Accept
-      </button>
-      <button type="button" className="btn btn-small" onClick={again}>
-        Try again
-      </button>
-      <button type="button" className="btn btn-small" onClick={() => set({ draft: null })}>
-        Discard
-      </button>
+      <span className="trace-actions">
+        <button
+          type="button"
+          className="btn btn-small btn-primary"
+          onClick={() => {
+            // Built again on the plan as it is now, so nothing done since is lost.
+            const level = currentLevel();
+            if (level && useTrace.getState().at === traceWhere()) {
+              const built = tracedLevel(level, draft.plan, newId, draft.replace).level;
+              dispatch(importTrace(level.id, built));
+            }
+            set({ draft: null });
+          }}
+        >
+          Accept
+        </button>
+        <button type="button" className="btn btn-small" onClick={again}>
+          Try again
+        </button>
+        <button type="button" className="btn btn-small" onClick={() => set({ draft: null })}>
+          Discard
+        </button>
+      </span>
     </output>
   );
 }

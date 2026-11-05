@@ -597,6 +597,15 @@ pictures. Each key has its own "remember" (device or this tab). A trace belongs 
 project and level it was started on (`ai/draft.ts`, `traceWhere`): opening another one
 cancels it or puts the draft away. Models' enum answers are lower-cased before the zod
 parse (`lowerEnums`).
+UX review fixes (5 Nov): the AI dialogs scroll in the middle (`.dialog-body`) with their
+title and actions fixed (`.dialog-foot`); a dialog's `onClose` checks `e.target` (React
+passes a nested dialog's close up the tree). While a draft waits the plan fades
+(`:has(.ai-draft)`), the tool goes to Select, and a refused key offers AI settings. Saving a
+key from the Trace button starts the trace. The AI assistant can keep the plan reader while
+adding an image key ("Use … to trace plans", `saveAi(settings, readsPlans)`); from Render it
+opens on OpenAI. Renders switch between the render and the 3D view. Layout thumbnails show
+rooms, new or changed walls in the accent colour and walls taken down dashed; an option with
+nothing applicable has no Use button. Touch: 44 px buttons in dialogs and the trace bar.
 
 **Photo-real renders (5 Nov):** "Photo-real render" on the 3D view (and, with a mouse, while
 walking) takes a picture of the view as it is (`capture3d`) and sends it, with a look (as

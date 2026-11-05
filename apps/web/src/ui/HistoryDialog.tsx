@@ -62,7 +62,8 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
       className="dialog"
       aria-labelledby="history-h"
       tabIndex={-1}
-      onClose={onClose}
+      // Only its own close: React passes a dialog opened inside it up the tree too.
+      onClose={(e) => e.target === e.currentTarget && onClose()}
     >
       <header className="dialog-head">
         <h2 id="history-h">Version history</h2>

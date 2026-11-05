@@ -52,7 +52,8 @@ export function PlansDialog({ onClose }: { onClose: () => void }) {
       className="dialog plans-dialog"
       aria-labelledby="plans-h"
       tabIndex={-1}
-      onClose={onClose}
+      // Only its own close: React passes a dialog opened inside it up the tree too.
+      onClose={(e) => e.target === e.currentTarget && onClose()}
     >
       <header className="dialog-head">
         <h2 id="plans-h">Your plans</h2>

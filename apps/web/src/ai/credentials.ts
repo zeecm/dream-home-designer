@@ -111,10 +111,11 @@ function write(s: Stored | null) {
 }
 
 /** Saves a provider's key and makes it the one in use; null forgets every key. */
-export function saveAi(settings: AiSettings | null) {
+export function saveAi(settings: AiSettings | null, readsPlans = true) {
   if (!settings) return write(null);
   write({
-    active: settings.provider,
+    // The one that reads plans and suggests layouts: this one, or the one before.
+    active: readsPlans || !stored?.keys[stored.active] ? settings.provider : stored.active,
     keys: {
       ...stored?.keys,
       [settings.provider]: {
