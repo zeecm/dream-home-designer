@@ -110,7 +110,16 @@ async function planPng(scale = 3): Promise<Blob> {
   const w = svg.width.baseVal.value;
   const h = svg.height.baseVal.value;
   const copy = svg.cloneNode(true) as SVGSVGElement;
-  inlineStyles(svg, copy);
+  // In the light theme's colours, whatever the screen's: a picture on white paper.
+  const root = document.documentElement;
+  const theme = root.dataset.theme;
+  root.dataset.theme = 'light';
+  try {
+    inlineStyles(svg, copy);
+  } finally {
+    if (theme === undefined) delete root.dataset.theme;
+    else root.dataset.theme = theme;
+  }
   // Corner handles, the grid and the north arrow's button aren't part of the drawing.
   for (const el of copy.querySelectorAll('.vertices, [data-export="skip"]')) el.remove();
   const grid = copy.querySelector('rect[fill="url(#grid-minor)"]');

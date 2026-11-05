@@ -769,8 +769,10 @@ export function useSelectTool(ctx: ToolContext): ToolController {
                   ? deleteVertex(levelId, sel.id)
                   : null;
         if (!cmd) return false;
+        const was = useStore.getState().editor.doc;
         ctx.dispatch(cmd);
-        select(null);
+        // Refused (a shelter wall in a renovation): it's still there, still selected.
+        if (useStore.getState().editor.doc !== was) select(null);
         return true;
       }
       return false;

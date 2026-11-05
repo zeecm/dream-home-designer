@@ -56,9 +56,15 @@ export function changeText(c: RenovationChange): string {
 
 /** How many changes touch structural walls, as a line to put first; null for none. */
 export function guardBanner(changes: RenovationChange[]): string | null {
-  const n = changes.filter((c) => c.guard).length;
-  if (!n) return null;
-  return `${n} ${n === 1 ? 'change touches' : 'changes touch'} structural walls. Check with HDB before you plan on ${n === 1 ? 'it' : 'them'}.`;
+  const shelter = changes.filter((c) => c.guard === 'shelter').length;
+  const n = changes.filter((c) => c.guard === 'structural').length;
+  const lines = [
+    shelter &&
+      `${shelter} ${shelter === 1 ? 'change touches' : 'changes touch'} the household shelter, which HDB doesn’t allow.`,
+    n &&
+      `${n} ${n === 1 ? 'change touches' : 'changes touch'} structural walls. Check with HDB before you plan on ${n === 1 ? 'it' : 'them'}.`,
+  ].filter(Boolean);
+  return lines.length ? lines.join(' ') : null;
 }
 
 /** Wall hacked, or cut into for a new door or opening: work a permit covers. */

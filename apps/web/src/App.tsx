@@ -18,7 +18,10 @@ const isTyping = (t: EventTarget | null) =>
   // While a dialog is open, keys are the dialog's, not the plan's shortcuts.
   !!document.querySelector('dialog[open]') ||
   (t instanceof HTMLElement &&
-    (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)));
+    (t.isContentEditable ||
+      ['TEXTAREA', 'SELECT'].includes(t.tagName) ||
+      // A checkbox or radio takes no typing: Ctrl+Z still undoes what it did.
+      (t instanceof HTMLInputElement && t.type !== 'checkbox' && t.type !== 'radio')));
 
 const VIEW_KEYS: Record<string, ViewMode> = { '1': 'plan', '2': 'split', '3': '3d' };
 

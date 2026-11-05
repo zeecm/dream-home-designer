@@ -48,6 +48,8 @@ test('in a renovation, shelter walls stay put and a structural wall hacked is wa
   // The sample's concrete walls are marked, so hatched.
   await expect(page.locator(`${SHELTER}.wall-structural`).first()).toBeVisible();
   await expect(page.locator(`${STRUCTURAL}.wall-structural`).first()).toBeVisible();
+  // The hatch's lines are in metres, so they show at any zoom (not hairlines).
+  await expect(page.locator('.hatch-line').first()).toHaveCSS('vector-effect', 'none');
 
   await page.getByRole('button', { name: 'Plan a renovation' }).click();
   const toast = page.locator('.toast');
@@ -58,6 +60,8 @@ test('in a renovation, shelter walls stay put and a structural wall hacked is wa
   await expect(toast.getByRole('button', { name: 'Undo' })).toHaveCount(0);
   await expect(page.locator(SHELTER).first()).toBeVisible();
   await expect(page.locator('.reno-bar')).toContainText('No changes yet');
+  // Still selected, to carry on from.
+  await expect(page.getByRole('heading', { name: 'Wall' })).toBeVisible();
 
   // A structural wall: hacked, with a warning to undo.
   await page.keyboard.press('Escape');
@@ -72,6 +76,17 @@ test('in a renovation, shelter walls stay put and a structural wall hacked is wa
   await toast.getByRole('button', { name: 'Undo' }).click();
   await expect(page.locator(STRUCTURAL).first()).toBeVisible();
   await expect(page.locator('.reno-bar')).toContainText('No changes yet');
+
+  // Marking a wall in the renovation changes no wall: no warning.
+  await page.keyboard.press('Escape');
+  await page.locator('[data-hit="wall:w_bedroom_main-bedroom"]').first().click({ force: true });
+  await page.getByLabel('Structural wall').check();
+  await expect(page.getByText('That’s a structural wall')).toHaveCount(0);
+  // Ctrl+Z from the checkbox undoes it.
+  await page.keyboard.press('Control+z');
+  await page.locator('[data-hit="wall:w_bedroom_main-bedroom"]').first().click({ force: true });
+  await expect(page.getByLabel('Structural wall')).not.toBeChecked();
+  await page.keyboard.press('Escape');
 
   // The flat as it is stays free to correct: the shelter's wall goes, no warning.
   await page.locator('.reno-bar').getByRole('button', { name: 'Before' }).click();

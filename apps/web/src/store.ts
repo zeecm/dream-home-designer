@@ -341,7 +341,8 @@ export const useStore = create<State>((set, get) => {
       // In the renovation: the household shelter's walls stay as they are (the edit isn't
       // made; a drag stays put), and a structural wall changed is kept with a warning.
       let warn: string | null = null;
-      if (useEditor.getState().variant === 'after') {
+      // (Marking a wall structural or not changes no wall: nothing to warn about.)
+      if (useEditor.getState().variant === 'after' && cmd.carry !== false) {
         const guard = renovationGuard(editorBefore.doc, next.doc);
         if (guard === 'refuse') {
           set({ toast: { text: SHELTER_REFUSED, at: Date.now(), undo: false } });

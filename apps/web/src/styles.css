@@ -59,8 +59,9 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* Dark, unless a light picture is being drawn (a plan PNG sets data-theme="light"). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --ground: #000000;
     --surface: #111111;
     --raised: #0a0a0a;
@@ -1243,10 +1244,12 @@ input[type="range"] {
 .hatch-ground {
   fill: var(--wall);
 }
-.hatch-line {
+.plan-svg .hatch-line {
+  /* In metres, scaling with the plan (the plan's other strokes keep their screen width). */
+  vector-effect: none;
   stroke: var(--surface);
-  stroke-width: 0.045;
-  opacity: 0.85;
+  stroke-width: 0.03;
+  opacity: 0.7;
 }
 /* A half wall: lighter than a full one, its height tagged beside it. */
 .wall-half {
@@ -2757,4 +2760,10 @@ h3.field-label {
 }
 .reno-guard {
   margin: 0 0 8px;
+}
+
+@media (pointer: coarse) {
+  .structural-guess .btn {
+    min-height: 44px;
+  }
 }

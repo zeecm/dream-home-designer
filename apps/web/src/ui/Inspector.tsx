@@ -632,8 +632,10 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
       <DeleteButton
         label={boundary ? 'Delete boundary' : 'Delete wall'}
         onClick={() => {
+          const was = useStore.getState().editor.doc;
           dispatch(deleteWall(level.id, id, level));
-          clear();
+          // Refused (a shelter wall in a renovation): still there, still selected.
+          if (useStore.getState().editor.doc !== was) clear();
         }}
       />
     </>
