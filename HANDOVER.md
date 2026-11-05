@@ -568,6 +568,14 @@ merging it back is held back too, a cautious answer left as it is). A drag or ru
 of nudges (one coalesce key) held back at any step goes back to how the drag found the
 renovation (`restore`), taking back its steps already carried, and stays held back. Restoring a version (or anything replacing the plan or renovation whole) carries
 nothing. One undo step, which shows Before (`touchedVariant`).
+**Wall colours and wallpapers (5 Nov):** a wall side's paint can be any colour (the
+browser's colour picker, after the preset swatches; stored as `paint-#rrggbb`, `customPaint`
+and `finish` in core) or one of eight wallpapers (`WALLPAPERS`: pinstripe, linen, fine grid,
+herringbone, botanical, white brick, fluted wood, terrazzo). Wallpapers are drawn on a canvas
+(`render/src/wallpaper.ts`, no downloads), tiled at 0.6 m on the wall faces (whose UVs run
+in metres; the pattern restarts at each stretch between openings), and shown as swatches. No
+schema change: a side's material id was already free text.
+
 **People for scale (5 Nov):** the catalogue's People: a person 1.70 m and a child 1.20 m,
 box-built in one grey (`person()` in furniture.ts, material `figure`), placed, moved, turned
 and resized like any piece, and walked through rather than into.

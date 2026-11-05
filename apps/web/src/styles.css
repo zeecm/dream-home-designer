@@ -2202,6 +2202,30 @@ h3.field-label {
   cursor: pointer;
   padding: 0;
 }
+/* Any colour: a rainbow ring until a colour is chosen; the browser's picker underneath. */
+.swatch-any {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  background: conic-gradient(#e86a5c, #e8c25c, #7fc47a, #5cb3e8, #9b7fe8, #e86a5c);
+}
+.swatch-any input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.swatch-any:focus-within,
+.swatch-on {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.swatches-paper {
+  margin-top: 6px;
+}
+.swatches-paper .swatch {
+  border-radius: 6px;
+}
 .swatch[aria-pressed="true"] {
   outline: 2px solid var(--accent);
   outline-offset: 2px;

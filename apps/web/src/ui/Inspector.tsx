@@ -5,8 +5,10 @@ import {
   type Level,
   type Opening,
   PAINTS,
+  WALLPAPERS,
   addItem,
   cornerSpot,
+  customPaint,
   deleteItem,
   deleteModel,
   deleteOpening,
@@ -16,6 +18,7 @@ import {
   doorPanels,
   doorStyle,
   duplicateOf,
+  finish,
   furnitureKind,
   isBoundary,
   isGlass,
@@ -39,6 +42,7 @@ import {
   updateWall,
   wallLine,
 } from '@dhd/core';
+import { wallpaperCanvas } from '@dhd/render';
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../editor';
 import { roomsBeside } from '../plan/keyboard';
@@ -54,6 +58,18 @@ import { icons } from './icons';
 const FLOORS = FLOOR_FINISHES.map((f) => ({ value: f.id, label: f.name }));
 
 /** A row of paint swatches for one side of a wall. */
+/** A wallpaper's swatch: its pattern as an image, drawn once. */
+const swatchCache = new Map<string, string>();
+function wallpaperSwatch(id: string): string | undefined {
+  let url = swatchCache.get(id);
+  if (!url) {
+    url = wallpaperCanvas(id, 96)?.toDataURL();
+    if (url) swatchCache.set(id, url);
+  }
+  return url;
+}
+
+/** Paint for a wall side: a paint, any colour, or a wallpaper. */
 function PaintField({
   label,
   value,
@@ -63,6 +79,8 @@ function PaintField({
   value: string;
   onPick: (id: string) => void;
 }) {
+  const current = finish(value);
+  const custom = !PAINTS.some((p) => p.id === value) && !WALLPAPERS.some((p) => p.id === value);
   return (
     <div className="field">
       <span className="field-label">{label}</span>
@@ -79,6 +97,36 @@ function PaintField({
             onClick={() => onPick(p.id)}
           />
         ))}
+        {/* Any colour: the browser's picker, behind a swatch showing the one chosen. */}
+        <label
+          className={`swatch swatch-any${custom ? ' swatch-on' : ''}`}
+          title="Any colour"
+          style={custom && current ? { background: current.color } : undefined}
+        >
+          <input
+            type="color"
+            aria-label={`${label}: any colour`}
+            value={current?.color ?? '#ffffff'}
+            onChange={(e) => onPick(customPaint(e.target.value))}
+          />
+        </label>
+      </span>
+      <span className="swatches swatches-paper" aria-label={`${label}: wallpaper`}>
+        {WALLPAPERS.map((p) => {
+          const url = wallpaperSwatch(p.id);
+          return (
+            <button
+              key={p.id}
+              type="button"
+              className="swatch"
+              style={{ background: url ? `url(${url}) center / cover` : p.color }}
+              aria-label={`${label}: ${p.name} wallpaper`}
+              title={`${p.name} wallpaper`}
+              aria-pressed={value === p.id}
+              onClick={() => onPick(p.id)}
+            />
+          );
+        })}
       </span>
     </div>
   );
