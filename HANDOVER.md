@@ -568,6 +568,19 @@ merging it back is held back too, a cautious answer left as it is). A drag or ru
 of nudges (one coalesce key) held back at any step goes back to how the drag found the
 renovation (`restore`), taking back its steps already carried, and stays held back. Restoring a version (or anything replacing the plan or renovation whole) carries
 nothing. One undo step, which shows Before (`touchedVariant`).
+**Glass walls and half walls (schema 7, 5 Nov):** a wall's `build` is solid (absent) or
+`'glass'`: a framed glass partition (`glassPartition` in core: 40 mm aluminium frame round
+each stretch between openings, mullions so no pane is over 1.2 m, a transom of glass over a
+door; render draws the frame full thickness in `aluminium` and the panes 10 mm thick in the
+shared transparent glass). A wall lower than the ceiling is a half wall; `glassAbove` adds
+fixed glass from its top to the ceiling. Wall details: "Built of" Solid / Glass, "Half wall"
+Full / 0.90 / 1.00 / 1.20 m, and the glass-above check. Plan: glass pale with a pane line,
+half walls lighter with a tag "HW 1.00 m (+ glass)" (`WallTags`). Both still block walking. The
+renovation diff counts a wall swapped for glass, cut down, or given glass above as hacked and
+built again, and the change list says which ("Put up 2.40 m of glass partition", "Build … of
+half wall, 1.00 m high, with glass above"). Schema 7 also adds door `style`, `panels`, `glazed`
+and `stack` for sliding, pocket, bi-fold and folding doors (next).
+
 **Comparing in 3D:** with a renovation, the 3D view offers "Compare before and after": the
 flat as it is left of a divider and the renovation right of it, in one view with one camera
 (`CompareRender` in `Viewport.tsx` takes over drawing: each frame draws the scene twice, each

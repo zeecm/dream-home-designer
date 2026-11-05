@@ -15,6 +15,7 @@ import {
   duplicateOf,
   furnitureKind,
   isBoundary,
+  isGlass,
   itemSize,
   modelUses,
   moveVertex,
@@ -78,6 +79,9 @@ function PaintField({
     </div>
   );
 }
+
+/** Half-wall heights: a low divider, a counter, a bar top. */
+const HALF_WALLS = [0.9, 1, 1.2];
 
 const THICKNESS_HINT = 'HDB walls are usually 0.10 m inside and 0.20 m on the outside.';
 
@@ -320,6 +324,13 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
   const length = wallLine(level, wall).length;
   const onWall = Object.values(level.openings).filter((o) => o.wallId === id).length;
   const boundary = isBoundary(wall);
+  const glass = isGlass(wall);
+  // A wall lower than the ceiling: a half wall (counter or bar height).
+  const half = wall.height !== undefined && level.ceilingHeight - wall.height > 0.05;
+  const heightPreset =
+    wall.height === undefined
+      ? 'full'
+      : (HALF_WALLS.find((h) => Math.abs(h - (wall.height ?? 0)) < 0.004)?.toString() ?? '');
   // Near the middle, but beside a door or window rather than in it.
   const corner = cornerSpot(level, id);
   return (
@@ -368,13 +379,28 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
               dispatch(updateWall(level.id, id, { side: v === 'centre' ? undefined : v }))
             }
           />
-          <WallPaint level={level} id={id} />
+          <div className="field">
+            <span className="field-label" aria-hidden="true">
+              Built of
+            </span>
+            <Segmented
+              fill
+              label="Built of"
+              value={glass ? 'glass' : 'solid'}
+              options={[
+                { value: 'solid', label: 'Solid', title: 'Brick or board, painted' },
+                { value: 'glass', label: 'Glass', title: 'A framed glass partition' },
+              ]}
+              onChange={(build) => dispatch(updateWall(level.id, id, { build }))}
+            />
+          </div>
+          {!glass && <WallPaint level={level} id={id} />}
           <LengthField
             label="Thickness"
             value={wall.thickness}
             min={0.02}
             max={1}
-            hint={THICKNESS_HINT}
+            hint={glass ? 'Framed glass partitions are 40–100 mm.' : THICKNESS_HINT}
             onCommit={(v) =>
               v !== undefined && dispatch(updateWall(level.id, id, { thickness: v }))
             }
@@ -389,6 +415,43 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
             hint="Leave empty to follow the ceiling height."
             onCommit={(v) => dispatch(updateWall(level.id, id, { height: v }))}
           />
+          {!glass && (
+            <div className="field">
+              <span className="field-label" aria-hidden="true">
+                Half wall
+              </span>
+              <Segmented
+                fill
+                label="Wall height: full, or a half wall"
+                value={heightPreset}
+                options={[
+                  { value: 'full', label: 'Full', title: 'Up to the ceiling' },
+                  ...HALF_WALLS.map((h) => ({
+                    value: String(h),
+                    label: formatLength(h),
+                    title: `A half wall ${formatLength(h)} high`,
+                  })),
+                ]}
+                onChange={(v) =>
+                  dispatch(
+                    updateWall(level.id, id, { height: v === 'full' ? undefined : Number(v) }),
+                  )
+                }
+              />
+            </div>
+          )}
+          {!glass && half && (
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={!!wall.glassAbove}
+                onChange={(e) =>
+                  dispatch(updateWall(level.id, id, { glassAbove: e.target.checked }))
+                }
+              />
+              <span>Fixed glass above, up to the ceiling</span>
+            </label>
+          )}
         </>
       )}
       {onWall > 0 && (

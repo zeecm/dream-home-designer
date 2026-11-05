@@ -267,6 +267,8 @@ const WallPatch = Wall.pick({
   materialRight: true,
   kind: true,
   side: true,
+  build: true,
+  glassAbove: true,
 }).partial();
 export type WallPatch = z.input<typeof WallPatch>;
 
@@ -282,6 +284,10 @@ export function updateWall(levelId: string, wallId: string, patch: WallPatch): C
       if ('height' in patch && patch.height === undefined) delete w.height;
       if ('side' in patch && patch.side === undefined) delete w.side; // centred on its line
       if (w.kind === 'wall') delete w.kind; // absent means a wall
+      if (w.build === 'solid') delete w.build; // absent means solid
+      // Glass above a glass wall, or above a boundary, is nothing.
+      if (!w.glassAbove || w.build === 'glass' || w.kind === 'boundary') delete w.glassAbove;
+      if (w.kind === 'boundary') delete w.build;
       if (w.kind === 'boundary') {
         delete w.side; // a line has no faces to put to one side
         // A boundary has nothing to put a door or window in.

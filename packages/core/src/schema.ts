@@ -37,8 +37,18 @@ export const Wall = z.object({
    * row keep a flush face this way, as an outside wall does where it thins at a window.
    */
   side: z.enum(['left', 'right']).optional(),
+  /**
+   * What it is built of: absent means solid (brick, board); 'glass' a framed glass partition,
+   * seen through in 3D, still a wall to walk into.
+   */
+  build: z.enum(['solid', 'glass']).optional(),
+  /** A wall lower than the ceiling with fixed glass from its top up to the ceiling. */
+  glassAbove: z.boolean().optional(),
 });
 export type Wall = z.infer<typeof Wall>;
+
+/** A framed glass partition. */
+export const isGlass = (w: Pick<Wall, 'build'>): boolean => w.build === 'glass';
 
 export const isBoundary = (w: Pick<Wall, 'kind'>): boolean => w.kind === 'boundary';
 
@@ -66,6 +76,18 @@ export const Opening = z.object({
   height: z.number().positive(),
   sill: z.number().min(0),
   swing: z.enum(['leftIn', 'leftOut', 'rightIn', 'rightOut']).optional(),
+  /**
+   * How a door opens: absent means a single swing door. 'double' swings two leaves; 'sliding'
+   * slides its leaves along the wall face; 'pocket' slides into the wall; 'bifold' folds two
+   * or four leaves; 'folding' folds a row of panels (a folding partition) to one side.
+   */
+  style: z.enum(['swing', 'double', 'sliding', 'pocket', 'bifold', 'folding']).optional(),
+  /** Leaves or panels, for sliding, bi-fold and folding doors. */
+  panels: z.number().int().min(1).max(12).optional(),
+  /** Glass in the leaves: absent means solid leaves. */
+  glazed: z.enum(['clear', 'frosted', 'fluted']).optional(),
+  /** Which end of the opening the leaves stack or slide to: 'a' (towards vertex a) or 'b'. */
+  stack: z.enum(['a', 'b']).optional(),
   assetId: z.string().optional(),
 });
 export type Opening = z.infer<typeof Opening>;
@@ -168,7 +190,7 @@ export const CustomModel = z.object({
 });
 export type CustomModel = z.infer<typeof CustomModel>;
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export const Project = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),

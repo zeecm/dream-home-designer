@@ -10,6 +10,8 @@ const palette: Record<string, { color: string; roughness: number; emissive?: str
     [...FLOOR_FINISHES, ...PAINTS].map((f) => [f.id, { color: f.color, roughness: f.roughness }]),
   ),
   door: { color: '#c9b08a', roughness: 0.6 },
+  // Glass partitions' and fixed glass's frames: powder-coated aluminium.
+  aluminium: { color: '#3d4247', roughness: 0.45 },
   'furniture-wood': { color: '#b98c5f', roughness: 0.6 },
   'furniture-wood-dark': { color: '#5b4030', roughness: 0.6 },
   'furniture-fabric': { color: '#7d8590', roughness: 0.95 },

@@ -52,6 +52,11 @@ export function changeText(c: RenovationChange): string {
     case 'hack':
       return `Hack ${formatLength(c.length)} of wall`;
     case 'build':
+      if (c.what === 'glass') return `Put up ${formatLength(c.length)} of glass partition`;
+      if (c.what && c.height !== undefined) {
+        const glass = c.what === 'half-glass' ? ', with glass above' : '';
+        return `Build ${formatLength(c.length)} of half wall, ${formatLength(c.height)} high${glass}`;
+      }
       return `Build ${formatLength(c.length)} of wall`;
     case 'opening': {
       const what = OPENING_NAMES[c.opening];

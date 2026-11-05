@@ -3,10 +3,12 @@ import {
   type PlanGeometry,
   type RoomShape,
   type Vec2,
+  type Wall,
   doorSwing,
   finish,
   framePoint,
   furnitureKind,
+  isGlass,
   itemFootprint,
   itemSize,
   labelClearance,
@@ -78,12 +80,30 @@ export const PlanShapes = memo(function PlanShapes({
         {geom.pieces.map((p, i) => (
           <polygon
             key={`${p.wallId}:${i}`}
-            className="wall"
+            className={`wall${wallLook(level, p.wallId)}`}
             points={pts(p.polygon)}
             data-hit={hit({ kind: 'wall', id: p.wallId })}
             pointerEvents={pe}
           />
         ))}
+        {/* A glass partition: the pane, a thin line down its middle. */}
+        {Object.values(level.walls).map((w) => {
+          const f = isGlass(w) ? geom.frames[w.id] : undefined;
+          if (!f) return null;
+          const a = framePoint(f, 0, 0);
+          const b = framePoint(f, f.length, 0);
+          return (
+            <line
+              key={`glass:${w.id}`}
+              className="glass-pane"
+              x1={a.x}
+              y1={a.y}
+              x2={b.x}
+              y2={b.y}
+              pointerEvents="none"
+            />
+          );
+        })}
         {geom.boundaries.map((id) => {
           const f = geom.frames[id];
           if (!f) return null;
@@ -409,6 +429,37 @@ export const RoomLabels = memo(function RoomLabels({ level, geom, view, size }: 
               </text>
             )}
           </g>
+        );
+      })}
+    </g>
+  );
+});
+
+/** How a wall draws in plan: a glass partition, a half wall, or a wall. */
+function wallLook(level: Level, id: string): string {
+  const w = level.walls[id];
+  if (!w) return '';
+  if (isGlass(w)) return ' wall-glass';
+  return isHalfWall(level, w) ? ' wall-half' : '';
+}
+
+/** A wall lower than the ceiling (a half wall). */
+const isHalfWall = (level: Level, w: Wall) =>
+  !isGlass(w) && w.height !== undefined && level.ceilingHeight - w.height > 0.05;
+
+/** Half walls' heights ("HW 1.00 m"), beside the wall in screen pixels. */
+export const WallTags = memo(function WallTags({ level, geom, view, size }: ScreenProps) {
+  return (
+    <g className="wall-tags" pointerEvents="none">
+      {Object.values(level.walls).map((w) => {
+        const f = geom.frames[w.id];
+        if (!f || !isHalfWall(level, w) || f.length * view.zoom < 48) return null;
+        const c = worldToScreen(view, size, framePoint(f, f.length / 2, 0));
+        const text = `HW ${formatLength(w.height ?? 0)}${w.glassAbove ? ' + glass' : ''}`;
+        return (
+          <text key={w.id} className="wall-tag num" x={c.x} y={c.y + 3} textAnchor="middle">
+            {text}
+          </text>
         );
       })}
     </g>

@@ -6,11 +6,14 @@ import {
   type RoomShape,
   type Vec2,
   type WallFrame,
+  type WallPiece,
   doorLeaf,
   doorSwing,
   framePoint,
   furnitureKind,
+  glassPartition,
   isBoundary,
+  isGlass,
   openingSpan,
   openingsOnWall,
   outsideOpenings,
@@ -148,9 +151,13 @@ export class LevelMeshes {
         r(level.elevation),
         wall.materialLeft,
         wall.materialRight,
+        wall.build ?? 'solid',
+        wall.glassAbove ? r(level.ceilingHeight) : '',
         openings.map((o) => [o.kind, r(o.t), r(o.width), r(o.height), r(o.sill)].join()).join('|'),
       ].join('/');
-      put(`wall:${wall.id}`, key, () => this.buildWall(f, height, level.elevation, openings));
+      put(`wall:${wall.id}`, key, () =>
+        this.buildWall(f, height, level.elevation, openings, level.ceilingHeight),
+      );
       for (const o of openings) {
         if (o.kind !== 'door') continue;
         const shut = outside.has(o.id);
@@ -292,9 +299,23 @@ export class LevelMeshes {
     height: number,
     elevation: number,
     openings: Opening[],
+    ceiling: number,
   ): THREE.Mesh[] {
+    const out: THREE.Mesh[] = [];
+    const glazing: { panes: WallPiece[]; frame: WallPiece[] } = { panes: [], frame: [] };
+    const glass = isGlass(f.wall);
+    if (glass) {
+      const g = glassPartition(f.length, 0, height, openings);
+      glazing.panes.push(...g.panes);
+      glazing.frame.push(...g.frame);
+    } else if (f.wall.glassAbove && ceiling - height > 0.05) {
+      // Fixed glass from the top of a half wall up to the ceiling.
+      const g = glassPartition(f.length, height, ceiling, openings);
+      glazing.panes.push(...g.panes);
+      glazing.frame.push(...g.frame);
+    }
     const pieces: THREE.BufferGeometry[] = [];
-    for (const p of wallPieces(f.length, height, openings)) {
+    for (const p of glass ? [] : wallPieces(f.length, height, openings)) {
       // End pieces follow the mitred outline; pieces between openings are plain boxes.
       const span = (s: [number, number]): [number, number] => {
         const u0 = p.u0 === 0 ? s[0] : p.u0;
@@ -312,7 +333,6 @@ export class LevelMeshes {
       ];
       pieces.push(extrudePolygon(poly, elevation + p.y0, elevation + p.y1));
     }
-    const out: THREE.Mesh[] = [];
     const merged = pieces.length ? mergeGeometries(pieces) : null;
     for (const g of pieces) g.dispose();
     if (merged) {
@@ -331,7 +351,32 @@ export class LevelMeshes {
       out.push(mesh);
     }
 
-    const glass: THREE.BufferGeometry[] = [];
+    // A glass wall's (or fixed glass's) frame, full thickness, and its panes, thin.
+    const box = (g: WallPiece, k: WallFrame) =>
+      extrudePolygon(
+        [
+          framePoint(k, g.u0, 1),
+          framePoint(k, g.u1, 1),
+          framePoint(k, g.u1, -1),
+          framePoint(k, g.u0, -1),
+        ],
+        elevation + g.y0,
+        elevation + g.y1,
+      );
+    if (glazing.frame.length) {
+      const bars = glazing.frame.map((g) => box(g, f));
+      const geom = mergeGeometries(bars);
+      for (const g of bars) g.dispose();
+      const mesh = new THREE.Mesh(geom, this.materials.get('aluminium'));
+      mesh.name = `wall:${f.wall.id}`;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData = { kind: 'wall', wallId: f.wall.id };
+      out.push(mesh);
+    }
+    const glassPieces: THREE.BufferGeometry[] = [];
+    const pane = { ...f, half: 0.005 };
+    for (const g of glazing.panes) glassPieces.push(box(g, pane));
     for (const o of openings) {
       if (o.kind !== 'window') continue;
       const c = o.t * f.length;
@@ -344,10 +389,10 @@ export class LevelMeshes {
         framePoint(thin, u1, -1),
         framePoint(thin, u0, -1),
       ];
-      glass.push(extrudePolygon(poly, elevation + o.sill, elevation + o.sill + o.height));
+      glassPieces.push(extrudePolygon(poly, elevation + o.sill, elevation + o.sill + o.height));
     }
-    const glassGeom = glass.length ? mergeGeometries(glass) : null;
-    for (const g of glass) g.dispose();
+    const glassGeom = glassPieces.length ? mergeGeometries(glassPieces) : null;
+    for (const g of glassPieces) g.dispose();
     if (glassGeom) {
       const mesh = new THREE.Mesh(glassGeom, this.materials.glass);
       mesh.name = `glass:${f.wall.id}`;

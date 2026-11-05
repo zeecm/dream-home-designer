@@ -4,7 +4,7 @@ import { placeLabel, pointInPolygon } from './geometry';
 import type { Command } from './history';
 import { AFTER_SUFFIX, type Variant } from './levels';
 import { roomArea, roomShapes, syncRooms } from './rooms';
-import { type Level, type Vec2, type Wall, isBoundary, wallFaces } from './schema';
+import { type Level, type Vec2, type Wall, isBoundary, isGlass, wallFaces } from './schema';
 import { reclampOpenings } from './topology';
 
 /**
@@ -427,8 +427,11 @@ function overlap(line: Line, other: Line): [number, number] | null {
   const left = same ? other.left : other.right;
   const right = same ? other.right : other.left;
   if (Math.abs(left - line.left) > EPS || Math.abs(right - line.right) > EPS) return null;
-  // Cut down to a half-height wall is a hack too.
+  // Cut down to a half-height wall is a hack too, as is a wall swapped for glass, or glass
+  // put up over a half wall.
   if (Math.abs(other.height - line.height) > EPS) return null;
+  if (isGlass(other.wall) !== isGlass(line.wall)) return null;
+  if (!!other.wall.glassAbove !== !!line.wall.glassAbove) return null;
   const t = (p: Vec2) => (p.x - line.a.x) * line.d.x + (p.y - line.a.y) * line.d.y;
   const t0 = t(other.a);
   const t1 = t0 + (same ? other.length : -other.length);
@@ -542,7 +545,16 @@ type OpeningKind = 'door' | 'window' | 'passage';
 /** One change a renovation makes, placed by the rooms it touches. */
 export type RenovationChange = ChangePlace &
   (
-    | { kind: 'hack' | 'build'; length: number }
+    | {
+        kind: 'hack' | 'build';
+        length: number;
+        /**
+         * What is built, where it isn't a full wall: a glass partition, or a half wall (with
+         * fixed glass above it, or not) of `height`.
+         */
+        what?: 'glass' | 'half' | 'half-glass';
+        height?: number;
+      }
     | {
         kind: 'opening';
         /** 'with-wall': it went with the wall it was in, hacked. */
@@ -681,16 +693,30 @@ export function renovationChanges(
     name: (id) => after.rooms[afterOf.get(id) ?? '']?.name ?? before.rooms[id]?.name ?? '',
   };
   const out: RenovationChange[] = [];
+  type What = { what?: 'glass' | 'half' | 'half-glass'; height?: number };
+  const whatOf = (s: WallStretch): What => {
+    const w = after.walls[s.wallId];
+    if (!w) return {};
+    if (isGlass(w)) return { what: 'glass' };
+    const h = w.height ?? after.ceilingHeight;
+    if (after.ceilingHeight - h > 0.05) {
+      return { what: w.glassAbove ? 'half-glass' : 'half', height: h };
+    }
+    return {};
+  };
   const walls = (kind: 'hack' | 'build', rooms: Rooms, stretches: WallStretch[]) => {
-    const byPlace = new Map<string, { place: ChangePlace; length: number }>();
+    const byPlace = new Map<string, { place: ChangePlace; length: number; what: What }>();
     for (const s of stretches) {
       const place = placeOf(rooms, besideStretch(s));
-      const k = `${place.rooms.join('\u0000')}|${place.outside}`;
+      const what = kind === 'build' ? whatOf(s) : {};
+      const k = `${place.rooms.join('\u0000')}|${place.outside}|${what.what}|${what.height}`;
       const cur = byPlace.get(k);
       if (cur) cur.length += s.length;
-      else byPlace.set(k, { place, length: s.length });
+      else byPlace.set(k, { place, length: s.length, what });
     }
-    for (const { place, length } of byPlace.values()) out.push({ ...place, kind, length });
+    for (const { place, length, what } of byPlace.values()) {
+      out.push({ ...place, kind, length, ...what });
+    }
   };
   walls('hack', inBefore, diff.demolished);
   walls('build', inAfter, diff.built);

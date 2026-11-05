@@ -24,6 +24,7 @@ import {
   RoomLabels,
   VertexHandles,
   WallDimension,
+  WallTags,
   parseHit,
 } from './layers';
 import {
@@ -829,6 +830,7 @@ export function PlanCanvas() {
             />
           </g>
           <RoomLabels level={level} geom={geom} view={v} size={size} />
+          <WallTags level={level} geom={geom} view={v} size={size} />
           {selection?.kind === 'wall' && (
             <WallDimension level={level} geom={geom} view={v} size={size} wallId={selection.id} />
           )}
