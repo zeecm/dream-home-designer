@@ -20,6 +20,18 @@ const WALK_SPEED = 1.4; // m/s, an ordinary walk
 const RUN_SPEED = 3;
 const LOOK_SPEED = 0.0025; // radians per pixel
 const MAX_PITCH = 1.3;
+/**
+ * How fast a look stick's tilt (-1..1) turns, as a share of full speed: nothing in the middle
+ * (a resting thumb doesn't drift), then squared, so a small tilt turns slowly for aiming and a
+ * full one swings round.
+ */
+export function stickRate(tilt: number): number {
+  const DEAD = 0.12;
+  const a = Math.abs(tilt);
+  if (a <= DEAD) return 0;
+  const k = Math.min(1, (a - DEAD) / (1 - DEAD));
+  return Math.sign(tilt) * k * k;
+}
 /** The look stick at full tilt turns this fast (radians per second); gentler near the middle. */
 const STICK_TURN = 2.2;
 /** Head bob: up and down once per step of this length, by this much. */
@@ -89,11 +101,16 @@ export function WalkControls({
   useEffect(() => {
     const cam = camera as PerspectiveCamera;
     const fov = cam.fov;
+    const near = cam.near;
     const shape = view.width / Math.max(view.height, 1);
     cam.fov = verticalFov(across, shape);
+    // A wide view's near plane reaches further out at its corners: close enough in that
+    // looking down beside a wall doesn't clip it.
+    cam.near = 0.02;
     cam.updateProjectionMatrix();
     return () => {
       cam.fov = fov;
+      cam.near = near;
       cam.updateProjectionMatrix();
     };
   }, [camera, across, view.width, view.height]);
@@ -209,13 +226,9 @@ export function WalkControls({
     if (!p) return;
     const ls = lookStick?.current;
     if (ls && (ls.x !== 0 || ls.y !== 0)) {
-      // Squared, so a small tilt turns slowly for aiming and a full one swings round.
       const t = Math.min(dt, 0.1) * STICK_TURN;
-      p.yaw += Math.sign(ls.x) * ls.x * ls.x * t;
-      p.pitch = Math.max(
-        -MAX_PITCH,
-        Math.min(MAX_PITCH, p.pitch + Math.sign(ls.y) * ls.y * ls.y * t * 0.6),
-      );
+      p.yaw += stickRate(ls.x) * t;
+      p.pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, p.pitch + stickRate(ls.y) * t * 0.6));
     }
     const k = keys.current;
     const has = (set: Set<string>) => [...set].some((c) => k.has(c));

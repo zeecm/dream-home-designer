@@ -42,8 +42,9 @@ export function Joystick({ stick, look = false }: { stick: StickInput; look?: bo
     <div
       ref={base}
       className={look ? 'joystick joystick-look' : 'joystick'}
-      role="presentation"
-      aria-label={look ? 'Look stick' : 'Walk stick'}
+      // Fingers only: keyboards walk with WASD and look with the mouse.
+      aria-hidden="true"
+      data-testid={look ? 'look-stick' : 'walk-stick'}
       onPointerDown={(e) => {
         active.current = e.pointerId;
         e.currentTarget.setPointerCapture(e.pointerId);

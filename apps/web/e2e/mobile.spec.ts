@@ -174,7 +174,7 @@ test('on a phone: a swipe looks around while standing still', async ({ page }) =
     spot?.split('rotate')[0],
   );
   // The look stick (bottom right) turns too: held to the right, the view swings right.
-  const stick = page.getByLabel('Look stick');
+  const stick = page.getByTestId('look-stick');
   await expect(stick).toBeVisible();
   const s = await stick.boundingBox();
   if (!s) throw new Error('no look stick');
