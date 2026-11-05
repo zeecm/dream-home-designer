@@ -46,14 +46,15 @@ for any plan.
   change, one click to make one the renovation.
 
 ### In progress
+- Structural and household-shelter walls marked, with hacking warnings.
+  [spec](docs/specs/structural-walls.md)
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
 
 ### Planned
-1. Structural and household-shelter walls marked, with hacking warnings.
-2. Live clearance and furniture-fit checks.
-3. Carpentry builder and a renovation cost estimate.
-4. "My furniture" and a delivery-path fit check.
-5. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
+1. Live clearance and furniture-fit checks.
+2. Carpentry builder and a renovation cost estimate.
+3. "My furniture" and a delivery-path fit check.
+4. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
 
 ## What it does
 
