@@ -176,29 +176,44 @@ export function providerMessage(body: unknown, key?: string): string | null {
   return clean.length > MESSAGE_MAX ? `${clean.slice(0, MESSAGE_MAX - 1).trimEnd()}…` : clean;
 }
 
-/** Whether Google said the key itself is wrong (it answers 400 for a bad key). */
-function badGoogleKey(body: unknown): boolean {
+/**
+ * Whether the provider said, in so many words, that the key itself is wrong: Google answers
+ * 400 for a bad key, with reason API_KEY_INVALID.
+ */
+function saysBadKey(body: unknown): boolean {
   const first = (Array.isArray(body) ? body[0] : body) as {
-    error?: { message?: unknown; details?: { reason?: unknown }[] };
+    error?: { message?: unknown; code?: unknown; details?: { reason?: unknown }[] };
   } | null;
   const message = first?.error?.message;
   return (
-    (typeof message === 'string' && /API key not valid/i.test(message)) ||
+    (typeof message === 'string' &&
+      /API key not valid|invalid api key|incorrect api key|invalid x-api-key/i.test(message)) ||
+    first?.error?.code === 'invalid_api_key' ||
     !!first?.error?.details?.some((d) => d?.reason === 'API_KEY_INVALID')
   );
 }
+
+/** What the AI-settings errors point to; left off inside AI settings (`inSettings`). */
+const TO_SETTINGS = ' Check it in AI settings.';
+
+/** An error's words as shown inside AI settings, where pointing to them is no help. */
+export const inSettings = (e: AiError) => e.message.replace(TO_SETTINGS, '');
+
+/** `text` ending as a sentence, so words of ours can follow it. */
+const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
 
 /** A failed response from `provider`, in words a person can act on, with what it said. */
 export function failure(provider: Provider, status: number, body: unknown, key?: string): AiError {
   const said = providerMessage(body, key);
   const name = PROVIDERS[provider].short;
-  const tail = said ? `: ${said}` : '.';
-  if (status === 401 || (status === 400 && provider === 'gemini' && badGoogleKey(body))) {
-    return new AiError('key', 'The key was refused. Check it in AI settings.');
+  const tail = said ? `: ${sentence(said)}` : '.';
+  // A key error only when it is one: a 401, or the provider saying the key is wrong.
+  if (status === 401 || ((status === 400 || status === 403) && saysBadKey(body))) {
+    return new AiError('key', `The key was refused.${TO_SETTINGS}`);
   }
   if (status === 403) {
-    // Often not the key as such: a model or a region the account can't use.
-    return new AiError('key', `${name} refused the key (403)${tail} Check it in AI settings.`);
+    // Not the key as such: an organisation to verify, a model or a region the account can't use.
+    return new AiError('refused', `${name} refused the request (403)${tail}`);
   }
   if (status === 429) {
     return new AiError(
@@ -213,7 +228,7 @@ export function failure(provider: Provider, status: number, body: unknown, key?:
   }
   return new AiError(
     'network',
-    `${name} couldn’t answer just now (${status})${said ? tail : '. Try again in a moment.'}`,
+    `${name} couldn’t answer just now (${status})${said ? `${tail} Try again in a moment.` : '. Try again in a moment.'}`,
   );
 }
 

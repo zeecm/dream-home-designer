@@ -6,6 +6,8 @@ import {
   checkPictureModel,
   curated,
   listModels,
+  modelName,
+  openAiName,
   parseAnthropic,
   parseGemini,
   parseOpenAi,
@@ -160,8 +162,24 @@ describe('model lists', () => {
       'nano-banana-pro-preview',
     ]);
     expect(lists.text[0]?.name).toBe('Gemini 3 Pro');
-    // Two share a name: the id tells them apart.
-    expect(lists.image.map((m) => m.name)).toContain('Nano Banana Pro (gemini-3-pro-image)');
+    // Two share a name: the preview says so.
+    expect(lists.image.map((m) => m.name)).toEqual([
+      'Gemini 3.1 Flash Image',
+      'Nano Banana Pro',
+      'Nano Banana Pro preview',
+      'Nano Banana',
+      'Nano Banana Pro Preview',
+    ]);
+    // Names that still clash: the ids.
+    expect(
+      parseGemini({
+        models: ['gemini-x-image-a', 'gemini-x-image-b'].map((id) => ({
+          name: `models/${id}`,
+          displayName: 'Same',
+          supportedGenerationMethods: ['generateContent'],
+        })),
+      }).image.map((m) => m.name),
+    ).toEqual(['gemini-x-image-a', 'gemini-x-image-b']);
     expect(recommended('gemini', 'text', ids(lists.text))).toBe('gemini-3-pro');
     // Every render costs: the cheaper picture model is the one suggested.
     expect(recommended('gemini', 'image', ids(lists.image))).toBe('gemini-2.5-flash-image');
@@ -205,6 +223,31 @@ describe('model lists', () => {
     expect(lists.text[0]?.name).toBe('Claude Opus 5.5');
     expect(lists.image).toEqual([]);
     expect(recommended('anthropic', 'text', ids(lists.text))).toBe('claude-opus-5-5');
+  });
+
+  it('names models by their names, not their ids', () => {
+    expect(parseOpenAi(openai).text.map((m) => m.name)).toEqual([
+      'GPT-5',
+      'GPT-5 (2025-08-07)',
+      'GPT-5 mini',
+      'GPT-4.1',
+      'GPT-4o',
+      'o3',
+    ]);
+    expect(openAiName('gpt-image-1-mini')).toBe('GPT Image 1 mini');
+    expect(openAiName('o4-mini')).toBe('o4 mini');
+    expect(curated('anthropic').text.map((m) => m.name)).toEqual([
+      'Claude Opus 5.5',
+      'Claude Sonnet 5.5',
+      'Claude Haiku 5.5',
+    ]);
+    expect(curated('gemini').image.map((m) => m.name)).toEqual([
+      'Gemini 3 Pro Image',
+      'Gemini 3.1 Flash Image',
+      'Gemini 2.5 Flash Image',
+    ]);
+    expect(curated('openai').image.map((m) => m.name)).toEqual(['GPT Image 1']);
+    expect(modelName('some-new-model')).toBe('some-new-model');
   });
 
   it('takes nothing from an answer of the wrong shape', () => {
@@ -376,7 +419,7 @@ describe('asking the provider', () => {
       'x',
     ).catch((x) => x);
     expect(e.message).toBe(
-      'Gemini turned the request down (404): models/x is not found (key [key])',
+      'Gemini turned the request down (404): models/x is not found (key [key]).',
     );
   });
 });

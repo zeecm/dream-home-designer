@@ -643,7 +643,16 @@ characters, shown as text, with keys and tokens redacted: sk-…, sk_live_…, A
 ya29.…, Bearer …, and long mixed-case or hex runs; lower-case model names stay): "Gemini
 turned the request down (400): …". Gemini's 400 "API key not valid" counts as a refused key.
 `input_fidelity: high` goes only to gpt-image-1 (`HIGH_FIDELITY`). A held Enter that closes
-the render dialog doesn't reopen it from the button focus returns to. The e2e AI specs abort
+the render dialog doesn't reopen it from the button focus returns to. Only a 401 or the
+provider's own "invalid key" is a key error; other 403s read "{Provider} refused the request
+(403): …" (OpenAI's organisation verification, say), and OpenAI's Test says the picture model
+only exists (verification may still be needed). Models show by name (the provider's, else
+`MODEL_NAMES` or one made from an OpenAI id; a shared name gets "preview" or the id). The
+render dialog keeps the model line and the Look select in its sticky foot, beside Render. In
+the walk, the camera says "Render" (named "Photo-real render") and answers a second finger
+while a thumb holds a stick (its own pointerup: browsers make no click of it); on phones on
+their side (320 to 500 px tall) the map and the camera sit along the top beside the time,
+clear of the sticks (`walk-render.spec.ts` checks 844 × 390, 750 × 342 and 568 × 320). The e2e AI specs abort
 any provider request a test doesn't mock (`ai-models.spec.ts`).
 
 **AI: suggested layouts (stage 2, 5 Nov):** "Suggest layouts with AI" in the plan's

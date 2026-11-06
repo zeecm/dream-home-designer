@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { failure, providerMessage, redact } from './providers';
+import { failure, inSettings, providerMessage, redact } from './providers';
 
 describe('provider error messages', () => {
   it('reads error.message from each provider’s error body', () => {
@@ -90,13 +90,39 @@ describe('provider error messages', () => {
     });
     expect(e.kind).toBe('unreadable');
     expect(e.message).toBe(
-      'Gemini turned the request down (400): Image input modality is not enabled for models/x',
+      'Gemini turned the request down (400): Image input modality is not enabled for models/x.',
     );
     expect(failure('openai', 404, {}).message).toBe('OpenAI turned the request down (404).');
     expect(failure('anthropic', 529, { error: { message: 'Overloaded' } }).message).toBe(
-      'Claude couldn’t answer just now (529): Overloaded',
+      'Claude couldn’t answer just now (529): Overloaded. Try again in a moment.',
     );
     expect(failure('openai', 429, { error: { message: 'Rate limit reached' } }).kind).toBe('quota');
+  });
+
+  it('takes a 403 for a refused request, not a bad key, unless the provider says so', () => {
+    const verify = failure('openai', 403, {
+      error: {
+        message:
+          'Your organization must be verified to use the model `gpt-image-1`. Please go to: https://platform.openai.com/settings/organization/general and click on Verify Organization',
+      },
+    });
+    expect(verify.kind).toBe('refused');
+    expect(verify.message).toMatch(/^OpenAI refused the request \(403\): Your organization must/);
+    // Our words follow theirs as a sentence of its own.
+    expect(verify.message).toMatch(/Verify Organization\.$/);
+    expect(verify.message).not.toContain('AI settings');
+    expect(failure('gemini', 403, { error: { message: 'API key not valid.' } }).kind).toBe('key');
+    expect(failure('openai', 403, { error: { message: 'x', code: 'invalid_api_key' } }).kind).toBe(
+      'key',
+    );
+  });
+
+  it('leaves out the pointer to AI settings inside AI settings', () => {
+    const e = failure('openai', 401, {});
+    expect(e.message).toBe('The key was refused. Check it in AI settings.');
+    expect(inSettings(e)).toBe('The key was refused.');
+    const other = failure('gemini', 404, { error: { message: 'Not found' } });
+    expect(inSettings(other)).toBe(other.message);
   });
 
   it('takes Gemini’s 400 for a bad key as a key error', () => {

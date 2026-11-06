@@ -2567,12 +2567,13 @@ h3.field-label {
     width: 140px;
     padding: 4px 10px;
   }
-  /* Top left, under the time: the right side has Leave walk and Footsteps, the bottom the
-     sticks. */
+  /* Along the top, beside the time: the right side has Leave walk, Footsteps and the camera,
+     the bottom the sticks. (Under the time it met the walk stick on a short screen, such as
+     Safari's 342 px.) */
   .minimap {
-    left: 8px;
+    left: 156px;
     right: auto;
-    top: 104px;
+    top: 8px;
     bottom: auto;
     transform: scale(0.56);
     transform-origin: top left;
@@ -2748,7 +2749,7 @@ h3.field-label {
   color: var(--muted);
   font-size: var(--fs-small);
 }
-/* A phone on its side: a smaller picture, so the key line or the look shows under it. */
+/* A phone on its side: a smaller picture, between the head and the foot. */
 @media (max-height: 500px) {
   .render-pictures img {
     max-height: 28vh;
@@ -2757,20 +2758,54 @@ h3.field-label {
     height: 28vh;
   }
 }
+/* The foot: the model line, then the look beside the buttons (wrapping on a narrow screen). */
+.render-actions {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.render-look {
+  display: flex;
+  flex: 1 1 240px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.render-look .input {
+  flex: 1;
+  min-width: 0;
+}
+/* A long provider message scrolls in its own few lines, never pushing the actions away. */
+.foot-status {
+  max-height: 72px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+.foot-status:empty {
+  display: none;
+}
+/* A phone on its side: two lines, so the form above keeps its room. */
+@media (max-height: 500px) {
+  .foot-status {
+    max-height: 40px;
+  }
+}
 
 /* While walking: under Footsteps. */
 .viewport-render-walk {
   top: 108px;
 }
-/* Touch screens: a camera icon at a fingertip's size, clear of the sticks; the mini-map
-   under Footsteps steps down below it. */
+/* Touch screens: a camera and "Render" (a paid picture, not a screenshot) at a fingertip's
+   size, clear of the sticks; the mini-map under Footsteps steps down below it. */
 .viewport-render-icon {
-  width: 44px;
-  min-width: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: 44px;
-  padding: 0;
+  min-width: 44px;
+  padding: 0 12px;
 }
 .viewport-render-icon svg {
+  flex: none;
   width: 20px;
   height: 20px;
 }
@@ -2779,11 +2814,21 @@ h3.field-label {
     top: 160px;
   }
 }
-/* A phone on its side keeps the map top left, under the time. */
+/* A phone on its side (320 to 500 px tall): the map and the render button along the top,
+   beside the time, so the right column (Leave walk, Footsteps) ends well above the sticks. */
 @media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
   .viewport-render-walk ~ .minimap {
-    top: 104px;
+    top: 8px;
   }
+  .viewport-render-walk {
+    top: 8px;
+    right: auto;
+    left: 258px;
+  }
+}
+/* Its own finger's tap, at once, even with a thumb on a stick. */
+.viewport-render-walk {
+  touch-action: manipulation;
 }
 
 .layouts-dialog {

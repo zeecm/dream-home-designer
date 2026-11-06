@@ -484,6 +484,16 @@ export function Viewport() {
   const compare = comparing && !walking && !!versions?.before && !!versions.after;
   const stick = useRef<Vec2>({ x: 0, y: 0 });
   const lookStick = useRef<Vec2>({ x: 0, y: 0 });
+  // The finger on the walk's render button, if one is down on it.
+  const renderTap = useRef<number | null>(null);
+  const openRender = () => {
+    // The mouse back from the walk, to use the dialog.
+    if (document.pointerLockElement) document.exitPointerLock();
+    // Let go of the sticks: the walk stands still while the dialog is open.
+    stick.current = { x: 0, y: 0 };
+    lookStick.current = { x: 0, y: 0 };
+    setRendering(true);
+  };
   const projectId = project.id;
   const pose = useRef<WalkPose | null>(null);
   // Leaving a walk forgets the pose here (WalkControls hands it to saveWalkPose as it goes).
@@ -615,25 +625,47 @@ export function Viewport() {
           </button>
           <SoundToggle />
           {!viewer && (
-            // On touch screens a camera icon, clear of the sticks and the mini-map (under
+            // On touch screens a camera and "Render", clear of the sticks and the mini-map (under
             // Footsteps; the map moves down for it). The view to render is the one walked to.
             <button
               type="button"
               className={`btn viewport-render viewport-render-walk${coarse ? ' viewport-render-icon' : ''}`}
-              // The icon's name, and a tooltip for it.
+              // Named in full (the label says only "Render"), with a tooltip.
               aria-label={coarse ? 'Photo-real render' : undefined}
               title={coarse ? 'Photo-real render' : undefined}
               onKeyDown={ignoreHeldKey}
-              onClick={() => {
-                // The mouse back from the walk, to use the dialog.
-                if (document.pointerLockElement) document.exitPointerLock();
-                // Let go of the sticks: the walk stands still while the dialog is open.
-                stick.current = { x: 0, y: 0 };
-                lookStick.current = { x: 0, y: 0 };
-                setRendering(true);
+              // A second finger, while a thumb holds a stick: the browser makes no click of a
+              // tap during another touch, so the button answers its own finger's lift.
+              onPointerDown={(e) => {
+                if (e.pointerType !== 'touch') return;
+                renderTap.current = e.pointerId;
+                e.stopPropagation();
               }}
+              onPointerUp={(e) => {
+                if (renderTap.current !== e.pointerId) return;
+                renderTap.current = null;
+                // A touch is held by the button it began on: lifted off it, it is no tap.
+                const r = e.currentTarget.getBoundingClientRect();
+                const on =
+                  e.clientX >= r.left &&
+                  e.clientX <= r.right &&
+                  e.clientY >= r.top &&
+                  e.clientY <= r.bottom;
+                if (on) openRender();
+              }}
+              onPointerCancel={() => {
+                renderTap.current = null;
+              }}
+              onClick={openRender}
             >
-              {coarse ? icons.camera : 'Photo-real render'}
+              {coarse ? (
+                <>
+                  {icons.camera}
+                  <span aria-hidden="true">Render</span>
+                </>
+              ) : (
+                'Photo-real render'
+              )}
             </button>
           )}
           {level && <MiniMap level={level} pose={pose} />}
