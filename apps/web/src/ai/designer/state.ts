@@ -22,6 +22,7 @@ import {
   changeFrom,
   changePlan,
   contextFor,
+  onPlanNow,
   resultFor,
 } from './plan';
 import { type DraftDesign, type RunPlan, type RunState, blankStep, runDesign } from './run';
@@ -76,8 +77,8 @@ interface DesignerState {
   leaving: ((go: boolean) => void) | null;
   /** Compare is open over the stage: the versions picked beside Before, in the order ticked. */
   comparing: string[] | null;
-  /** The side a preview starts on when it isn't on show yet (Compare's Before column). */
-  startSide: 'before' | 'version';
+  /** A side the preview is to show, once (Compare's columns): the preview obeys it, then clears it. */
+  wantSide: 'before' | 'version' | null;
 }
 
 export const useDesigner = create<DesignerState>(() => ({
@@ -96,7 +97,7 @@ export const useDesigner = create<DesignerState>(() => ({
   accepting: null,
   leaving: null,
   comparing: null,
-  startSide: 'version',
+  wantSide: null,
 }));
 
 const newDesignId = () =>
@@ -159,14 +160,13 @@ export function previewFrom(id: string | null) {
   const st = useDesigner.getState();
   const target = id ?? st.selected;
   if (!target) return;
-  useDesigner.setState({ comparing: null, mode: 'card' });
-  const side = id ? 'version' : 'before';
-  const shown = useEditor.getState().preview;
-  if (target === st.selected && st.previewing && shown) {
-    useEditor.getState().setPreview({ ...shown, side });
-    return;
-  }
-  useDesigner.setState({ selected: target, previewing: true, startSide: side });
+  useDesigner.setState({
+    comparing: null,
+    mode: 'card',
+    selected: target,
+    previewing: true,
+    wantSide: id ? 'version' : 'before',
+  });
 }
 
 /** Back to my plan: the preview ends; the version stays selected. */
@@ -524,10 +524,12 @@ export { acceptedNow };
 /** Puts the ticked parts of `d` into the renovation: one undo step. */
 export async function acceptVersion(d: Design, parts: Part[], removeHandPlaced: boolean) {
   const project = doc();
-  // Worked out on After as it is now (or the flat, with no renovation).
+  // Worked out on After as it is now (or the flat, with no renovation), keeping what was
+  // changed by hand since the last accept.
+  const v = onPlanNow(d, useDesigner.getState().designs, project);
   const r = resultFor(
     project,
-    { ...d, base: { ...d.base, variant: 'after' } },
+    { ...v, base: { ...v.base, variant: 'after' } },
     designOpts(project),
   );
   const before = project.levels[0];

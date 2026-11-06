@@ -1,5 +1,13 @@
-import { type Level, finish, itemFootprint, planGeometry, roomShapes } from '@dhd/core';
-import { useMemo } from 'react';
+import {
+  type Item,
+  type Level,
+  finish,
+  itemFootprint,
+  itemSize,
+  planGeometry,
+  roomShapes,
+} from '@dhd/core';
+import { memo, useMemo } from 'react';
 
 /**
  * A small drawing of a layout: rooms faintly, walls filled; walls that are new or changed
@@ -38,9 +46,34 @@ function onAWall(level: Level, p: P): boolean {
   });
 }
 
+/** A level's plan geometry, worked out once per level (levels are never changed in place). */
+const geometries = new WeakMap<Level, ReturnType<typeof planGeometry>>();
+function geometryOf(level: Level) {
+  let g = geometries.get(level);
+  if (!g) {
+    g = planGeometry(level);
+    geometries.set(level, g);
+  }
+  return g;
+}
+
+/**
+ * The order pieces are drawn in: low ones first (a rug under its table), then by kind and
+ * id, so the same pieces always draw the same way, whatever order they were placed in.
+ */
+export function drawOrder(level: Level): Item[] {
+  return Object.values(level.items)
+    .map((it): [Item, number] => [it, itemSize(it).h])
+    .sort(
+      ([a, ha], [b, hb]) =>
+        ha - hb || (a.assetId < b.assetId ? -1 : a.assetId > b.assetId ? 1 : a.id < b.id ? -1 : 1),
+    )
+    .map(([it]) => it);
+}
+
 /** The frame that holds every one of `levels`' walls, with a margin: one scale for them all. */
 export function sharedBox(levels: Level[], margin = 0.3): Box | null {
-  const all = levels.flatMap((l) => planGeometry(l).pieces.flatMap((p) => p.polygon));
+  const all = levels.flatMap((l) => geometryOf(l).pieces.flatMap((p) => p.polygon));
   if (!all.length) return null;
   const xs = all.map((p) => p.x);
   const ys = all.map((p) => p.y);
@@ -49,7 +82,7 @@ export function sharedBox(levels: Level[], margin = 0.3): Box | null {
   return { x, y, w: Math.max(...xs) - x + margin, h: Math.max(...ys) - y + margin };
 }
 
-export function MiniLayout({
+export const MiniLayout = memo(function MiniLayout({
   before,
   level,
   box,
@@ -62,26 +95,32 @@ export function MiniLayout({
   furnished?: boolean;
   className?: string;
 }) {
-  const geom = useMemo(() => planGeometry(level), [level]);
-  const was = useMemo(() => planGeometry(before), [before]);
+  const geom = geometryOf(level);
   const rooms = useMemo(() => [...roomShapes(level).entries()], [level]);
+  const pieces = useMemo(() => (furnished ? drawOrder(level) : []), [furnished, level]);
   const frame = useMemo(() => box ?? sharedBox([level]), [box, level]);
+  // Which walls are new or changed, and which are gone: once per pair of levels.
+  const { fresh, gone } = useMemo(() => {
+    const changed = (id: string) => {
+      const old = before.walls[id];
+      const now = level.walls[id];
+      if (!old) {
+        // A piece of an old wall split by a new one isn't new.
+        const m = middle(level, id);
+        return !m || !onAWall(before, m);
+      }
+      return !!now && (old.build !== now.build || old.height !== now.height);
+    };
+    return {
+      fresh: new Set(Object.keys(level.walls).filter(changed)),
+      gone: geometryOf(before).pieces.filter((p) => {
+        if (level.walls[p.wallId]) return false;
+        const m = middle(before, p.wallId);
+        return !m || !onAWall(level, m);
+      }),
+    };
+  }, [before, level]);
   if (!frame) return null;
-  const changed = (id: string) => {
-    const old = before.walls[id];
-    const now = level.walls[id];
-    if (!old) {
-      // A piece of an old wall split by a new one isn't new.
-      const m = middle(level, id);
-      return !m || !onAWall(before, m);
-    }
-    return !!now && (old.build !== now.build || old.height !== now.height);
-  };
-  const gone = was.pieces.filter((p) => {
-    if (level.walls[p.wallId]) return false;
-    const m = middle(before, p.wallId);
-    return !m || !onAWall(level, m);
-  });
   return (
     <svg
       className={className}
@@ -99,15 +138,14 @@ export function MiniLayout({
           />
         );
       })}
-      {furnished &&
-        Object.values(level.items).map((it) => (
-          <polygon key={it.id} className="mini-item" points={pts(itemFootprint(it))} />
-        ))}
+      {pieces.map((it) => (
+        <polygon key={it.id} className="mini-item" points={pts(itemFootprint(it))} />
+      ))}
       {geom.pieces.map((p, i) => (
         <polygon
           // biome-ignore lint/suspicious/noArrayIndexKey: a fixed drawing
           key={i}
-          className={changed(p.wallId) ? 'mini-new' : undefined}
+          className={fresh.has(p.wallId) ? 'mini-new' : undefined}
           points={pts(p.polygon)}
         />
       ))}
@@ -117,4 +155,4 @@ export function MiniLayout({
       ))}
     </svg>
   );
-}
+});

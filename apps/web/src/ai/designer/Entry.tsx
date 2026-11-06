@@ -8,7 +8,7 @@ import { LayoutsDialog } from '../LayoutsDialog';
 import { aiSettings } from '../credentials';
 import { BriefDialog } from './BriefDialog';
 import { usd } from './spend';
-import { endPreview, openPanel, useDesigner } from './state';
+import { acceptedNow, endPreview, openPanel, useDesigner } from './state';
 
 /**
  * Where the designer starts (Plan details ▸ Renovation): Design my flat (or the versions
@@ -149,6 +149,10 @@ export function DesignerBar() {
   const run = useDesigner((s) => s.run);
   const panel = useDesigner((s) => s.panel);
   const selected = useDesigner((s) => s.selected);
+  // A version in the renovation is shown as the plan has it (with any changes made by hand).
+  const shownDesign = useDesigner((s) => s.designs.find((x) => x.id === s.selected));
+  const after = useStore((s) => s.editor.doc.renovation?.levels[0]);
+  const inPlan = !!shownDesign && acceptedNow(shownDesign, after);
   // The bar coming or going changes the plan's height: fit the plan to what's left, with a
   // margin, so nothing of it is cut under the bar or the designer's sheet.
   const barShown = !!preview || (!!run && !panel);
@@ -198,7 +202,11 @@ export function DesignerBar() {
             { value: 'version', label: preview.label, title: `Design ${preview.label}` },
           ]}
         />
-        <span className="designer-bar-text">Previewing {preview.label}, not in your plan yet</span>
+        <span className="designer-bar-text">
+          {inPlan
+            ? `${preview.label} is in your renovation, shown as your plan has it`
+            : `Previewing ${preview.label}, not in your plan yet`}
+        </span>
         <span className="button-row">
           {!run && selected && (
             <button

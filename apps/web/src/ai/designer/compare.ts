@@ -1,4 +1,28 @@
-import type { Design } from '@dhd/core';
+import type { Design, DesignProblem } from '@dhd/core';
+
+/** How bad a problem is: structural first, then what blocks use, then advice and budget. */
+const SEVERITY: Record<DesignProblem['kind'], number> = {
+  structural: 0,
+  clearance: 1,
+  walkway: 2,
+  delivery: 3,
+  'door-width': 4,
+  window: 5,
+  budget: 7,
+};
+const severityOf = (p: DesignProblem) =>
+  p.kind === 'clearance' && p.issue?.kind === 'zone' ? 6 : SEVERITY[p.kind];
+
+/** Problems worst first, then by room, then by text: one stable order in every column. */
+export function problemsInOrder<P extends DesignProblem>(
+  problems: readonly P[],
+  roomOf: (p: P) => string,
+): P[] {
+  const by = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  return [...problems].sort(
+    (a, b) => severityOf(a) - severityOf(b) || by(roomOf(a), roomOf(b)) || by(a.text, b.text),
+  );
+}
 
 /**
  * Compare: the flat as it is, then up to two versions side by side. Which two, as the

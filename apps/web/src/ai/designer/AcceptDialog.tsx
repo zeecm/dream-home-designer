@@ -22,8 +22,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProject } from '../../store';
 import { changeText, placeText } from '../../ui/Renovation';
 import { icons } from '../../ui/icons';
-import { baseOf, planChanged, resultFor } from './plan';
-import { acceptVersion, designOpts } from './state';
+import { baseOf, changeFrom, onPlanNow, planChanged, resultFor } from './plan';
+import { acceptVersion, designOpts, useDesigner } from './state';
 
 /**
  * Put a version into the renovation: the walls (all or nothing), then per space its
@@ -49,10 +49,14 @@ export function AcceptDialog({ design: d, onClose }: { design: Design; onClose: 
   }, []);
   const close = () => ref.current?.close();
   const now = baseOf(project, 'after')?.base;
-  const r = useMemo(
-    () => resultFor(project, { ...d, base: { ...d.base, variant: 'after' } }, designOpts(project)),
-    [project, d],
-  );
+  const designs = useDesigner((st) => st.designs);
+  // On After as it is, keeping what was changed by hand since the last accept (never undone
+  // here without a word: those parts are kept, and said so below).
+  const from = useMemo(() => changeFrom(d, designs, project), [d, designs, project]);
+  const r = useMemo(() => {
+    const v = onPlanNow(d, designs, project);
+    return resultFor(project, { ...v, base: { ...v.base, variant: 'after' } }, designOpts(project));
+  }, [project, d, designs]);
   const rows = useMemo(() => {
     if (!r || !now) return null;
     const changes = renovationChanges(now, r.level).filter(
@@ -147,6 +151,12 @@ export function AcceptDialog({ design: d, onClose }: { design: Design; onClose: 
           <p className="notice-warning">
             Your plan has changed since V{d.n} was made. It has been checked again on the plan as it
             is now.
+          </p>
+        )}
+        {from.held.length > 0 && from.accepted && (
+          <p className="field-hint accept-held">
+            Kept as you changed them since you accepted V{from.accepted.n}:{' '}
+            {from.held.map((l) => l.label).join(', ')}. Change something can redo them.
           </p>
         )}
         {rows.changes.length > 0 && (

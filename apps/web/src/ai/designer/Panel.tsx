@@ -1,11 +1,15 @@
 import {
   type Aspect,
+  BATHROOMS,
   type Design,
   type DesignResult,
   type Lock,
   type RunEstimate,
   type StepPrompt,
+  aspectOf,
+  lockCovers,
   renovationChanges,
+  roomIdAt,
   usageTotals,
 } from '@dhd/core';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
@@ -25,9 +29,12 @@ import {
   baseOf,
   changeFrom,
   changePlan,
+  changedText,
   contextFor,
   estimateFor,
+  heldRows,
   needsCostCheck,
+  onPlanNow,
   planChanged,
   plannedPrompts,
   resultFor,
@@ -86,24 +93,14 @@ const isStopped = (d: Design) =>
 const tabName = (d: Design, accepted: boolean) =>
   `V${d.n}${accepted ? ', accepted' : ''}${isStopped(d) ? ', stopped' : ''}`;
 
-/** What a version changed from the one it was made from: "From V1. Changed: Kitchen furniture · “Cheaper.”" */
-function changedText(d: Design, parentN: number | null): string {
-  const sc = d.request.scope;
-  const aspects = (as: Aspect[]) => as.map((a) => ASPECT_NAMES[a].toLowerCase()).join(', ');
-  const what =
-    sc.kind === 'space'
-      ? `${d.spaces[sc.space]?.name ?? 'a room'} ${aspects(sc.aspects)}`
-      : sc.kind === 'aspects'
-        ? `the whole design: ${aspects(sc.aspects)}`
-        : 'the whole design';
-  const words = d.request.feedback.trim();
-  return `${parentN ? `From V${parentN}. ` : ''}Changed: ${what}${words ? ` · “${words}”` : ''}`;
-}
-
 /** A version on the plan as it is now, worked out once per version and plan. */
 export function useResult(d: Design | undefined): DesignResult | null {
   const project = useProject();
-  return useMemo(() => (d ? resultFor(project, d, designOpts(project)) : null), [project, d]);
+  const designs = useDesigner((st) => st.designs);
+  return useMemo(
+    () => (d ? resultFor(project, onPlanNow(d, designs, project), designOpts(project)) : null),
+    [project, d, designs],
+  );
 }
 
 function duration(ms: number) {
@@ -380,9 +377,6 @@ const QUICK = [
   'Kid-friendly',
 ] as const;
 
-/** A hand-edit lock, as the composer keeps track of the ones the person unlocked. */
-const heldKey = (l: Lock) => `${l.space}|${l.aspect}|${l.label}`;
-
 function ChangeSomething({ d, next }: { d: Design; next: number }) {
   const project = useProject();
   const ai = useAi();
@@ -391,10 +385,28 @@ function ChangeSomething({ d, next }: { d: Design; next: number }) {
   // changed by hand since (D9).
   const from = useMemo(() => changeFrom(d, designs, project), [d, designs, project]);
   const r = useMemo(() => resultFor(project, from.v, designOpts(project)), [project, from.v]);
+  // One row per space and part (a lock holds the whole part): unlocking a row unlocks it all.
+  const rows = useMemo(() => {
+    const after = project.renovation?.levels[0];
+    const head = (l: Lock): string => {
+      if (l.space === '*') return '';
+      if (l.space === BATHROOMS) return 'Bathrooms’ paint and floors';
+      const s = r?.spaces.find((x) => lockCovers(l, x.rooms));
+      const name = s?.name ?? 'A room';
+      const what = ASPECT_NAMES[l.aspect].toLowerCase();
+      if (l.aspect !== 'furniture' && l.aspect !== 'built-ins') return `${name} ${what}`;
+      const n = Object.values(after?.items ?? {}).filter((it) => {
+        const room = after && roomIdAt(after, { x: it.position.x, y: it.position.z });
+        return aspectOf(it) === l.aspect && !!room && !!s?.rooms.includes(room);
+      }).length;
+      return `${name} ${what}, ${n === 1 ? 'its 1 piece' : `all ${n} pieces`} as now`;
+    };
+    return heldRows(from.held, head);
+  }, [from.held, r, project]);
   const [unlocked, setUnlocked] = useState<string[]>([]);
   const held = useMemo(
-    () => from.held.filter((l) => !unlocked.includes(heldKey(l))),
-    [from.held, unlocked],
+    () => rows.filter((x) => !unlocked.includes(x.key)).flatMap((x) => x.locks),
+    [rows, unlocked],
   );
   // A paid button waits while a run starts (a double click starts one run).
   const busy = useDesigner((st) => st.starting || !!st.run);
@@ -421,10 +433,7 @@ function ChangeSomething({ d, next }: { d: Design; next: number }) {
         l.aspect === a &&
         (space === '*'
           ? l.space === '*'
-          : l.space !== '*' &&
-            l.space
-              .split('+')
-              .some((id) => spaces.find((s) => s.key === space)?.rooms.includes(id))),
+          : lockCovers(l, spaces.find((s) => s.key === space)?.rooms ?? [])),
     );
   // The requests, worked out again only when what is asked changes (not at each keystroke).
   const asked = req.aspects.join();
@@ -494,7 +503,10 @@ function ChangeSomething({ d, next }: { d: Design; next: number }) {
             key={a}
             type="button"
             className="chip"
-            aria-pressed={aspects.includes(a)}
+            // Walls changed by hand stay as they are: the chip says so, off.
+            aria-pressed={aspects.includes(a) && !(a === 'walls' && heldOn('*', 'walls'))}
+            disabled={a === 'walls' && heldOn('*', 'walls')}
+            title={a === 'walls' && heldOn('*', 'walls') ? 'Kept as you changed them' : undefined}
             onClick={() => toggleAspect(a)}
           >
             {ASPECT_NAMES[a]}
@@ -551,19 +563,19 @@ function ChangeSomething({ d, next }: { d: Design; next: number }) {
           </tbody>
         </table>
       </fieldset>
-      {from.held.length > 0 && (
+      {rows.length > 0 && (
         <section className="held-list" aria-labelledby="held-h">
           <h4 id="held-h" className="field-label">
             Kept as you changed them
           </h4>
           <ul>
-            {from.held.map((l) => {
-              const k = heldKey(l);
+            {rows.map((row) => {
+              const k = row.key;
               const off = unlocked.includes(k);
               return (
                 <li key={k} className={off ? 'held-off' : undefined}>
                   <span>
-                    {l.label}
+                    {row.text}
                     {off && <span className="held-note"> · redone this time</span>}
                   </span>
                   {off ? (
@@ -578,7 +590,7 @@ function ChangeSomething({ d, next }: { d: Design; next: number }) {
                     <button
                       type="button"
                       className="icon-btn held-unlock"
-                      aria-label={`Unlock ${l.label}`}
+                      aria-label={`Unlock ${row.text}`}
                       title="Unlock: let the designer change it"
                       onClick={() => setUnlocked([...unlocked, k])}
                     >
@@ -1026,6 +1038,7 @@ export function DesignerPanel() {
       note: s.note,
       memory: s.memory,
       accepting: s.accepting,
+      wantSide: s.wantSide,
     })),
   );
   const project = useProject();
@@ -1046,12 +1059,13 @@ export function DesignerPanel() {
       if (useEditor.getState().preview) useEditor.getState().setPreview(null);
       return;
     }
-    const side = useEditor.getState().preview?.side ?? useDesigner.getState().startSide;
-    if (useDesigner.getState().startSide !== 'version')
-      useDesigner.setState({ startSide: 'version' });
+    // A side asked for (Compare's columns) wins once; otherwise the side on show stays.
+    const want = st.wantSide;
+    const side = want ?? useEditor.getState().preview?.side ?? 'version';
+    if (want) useDesigner.setState({ wantSide: null });
     useEditor.getState().setPreview({ level: r.level, before, label: `V${d.n}`, side });
     if (reduced()) useEditor.getState().requestFit();
-  }, [st.previewing, d, r, project.levels]);
+  }, [st.previewing, st.wantSide, d, r, project.levels]);
   useEffect(() => () => useEditor.getState().setPreview(null), []);
 
   // Esc stops a run (on a computer).
@@ -1059,6 +1073,8 @@ export function DesignerPanel() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('dialog[open]'))
         return;
+      // Esc while comparing closes Compare (its own handler), never stops a paid run.
+      if (useDesigner.getState().comparing) return;
       if (useDesigner.getState().run) {
         e.preventDefault();
         stopRun();
