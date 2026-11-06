@@ -10,12 +10,12 @@ import { describe, expect, it } from 'vitest';
 import { minCacheable, requestFor } from './stream';
 
 /**
- * Claude caches the stable prefix only past a model's minimum (no error below it, just no
- * cache). The sample flat, the smallest plan we design, must clear the largest minimum we
- * might meet for Opus (4,096 tokens, by our 3.2-characters estimate, with room to spare), so
- * every room step after the first reads the cache.
+ * Claude caches the stable prefix only past each model's minimum (no error below it, just no
+ * cache): 512 tokens for the 5.x models, up to 4,096 for older ones (the claude-api
+ * reference). The sample flat, the smallest plan we design, must clear the minimum of every
+ * Claude model we offer, so the room steps after the first read the cache.
  */
-const OPUS_FLOOR = 4096;
+const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-opus-4-6'];
 
 describe('the stable prefix and Claude’s cache minimum', () => {
   const level = sampleFlatProject('prj_cache').levels[0] as Level;
@@ -27,10 +27,10 @@ describe('the stable prefix and Claude’s cache minimum', () => {
   });
   const stable = tokensOf(p.system.length + p.prefix.length);
 
-  it('is above Opus’s largest cache minimum for the sample flat', () => {
-    console.log(`stable prefix ~${stable} tokens`);
-    expect(stable).toBeGreaterThan(OPUS_FLOOR * 1.05);
-    expect(stable).toBeGreaterThan(minCacheable('claude-opus-5-5'));
+  it('is above each Claude model’s cache minimum for the sample flat', () => {
+    expect(minCacheable('claude-opus-5-5')).toBe(512);
+    expect(minCacheable('claude-opus-4-6')).toBe(4096);
+    for (const model of MODELS) expect(stable).toBeGreaterThan(minCacheable(model));
   });
 
   it('is marked for caching in the request', () => {

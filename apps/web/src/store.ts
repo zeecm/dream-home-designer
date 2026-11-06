@@ -28,6 +28,7 @@ import {
 import type { Patch } from 'immer';
 import { create } from 'zustand';
 import { forgetWithAccount, keepWithAccount } from './account';
+import { designStore } from './ai/designer/storage';
 import { getAsset, putAsset } from './assets';
 import {
   type Backend,
@@ -288,6 +289,8 @@ export const useStore = create<State>((set, get) => {
   };
 
   const createFrom = async (doc: Project, sample = false) => {
+    // A design running on the plan open now: the person decides first.
+    if (!(await leaveGuard())) return;
     await flush();
     set({ sync: { kind: 'loading' } });
     try {
@@ -402,6 +405,7 @@ export const useStore = create<State>((set, get) => {
         });
         return fallBack();
       }
+      if (get().editor.doc.id !== id && !(await leaveGuard())) return;
       if (get().editor.doc.id !== id) await flush();
       set({ sync: { kind: 'loading' } });
       try {
@@ -492,6 +496,10 @@ export const useStore = create<State>((set, get) => {
         }
         set({ recent: forgetRecent(r.id) });
         forgetWithAccount(r.id);
+        // Its designs go with it: they hold the brief and what each room is for.
+        await designStore()
+          .then((s) => s.removeProject(r.id))
+          .catch(() => {});
       }
       return failed;
     },
@@ -650,6 +658,15 @@ window.addEventListener('beforeunload', (e) => {
   const unsaved = ['dirty', 'saving', 'conflict', 'error'].includes(sync.kind);
   if (backend?.kind === 'remote' && unsaved) e.preventDefault();
 });
+
+/**
+ * Asked before another plan opens; false keeps this one open. The designer sets it while a
+ * design runs (stop it and open the other plan, or keep designing).
+ */
+let leaveGuard: () => Promise<boolean> = async () => true;
+export const setLeaveGuard = (fn: () => Promise<boolean>) => {
+  leaveGuard = fn;
+};
 
 export const useProject = () => useStore((s) => s.editor.doc);
 

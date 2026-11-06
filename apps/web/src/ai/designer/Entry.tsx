@@ -1,5 +1,5 @@
 import { usageTotals } from '@dhd/core';
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useEditor } from '../../editor';
 import { useStore } from '../../store';
 import { Segmented } from '../../ui/fields';
@@ -65,6 +65,60 @@ export function openBrief() {
 
 /** The brief and the key, mounted once for the app. */
 export function DesignerDialogs() {
+  const leaving = useDesigner((s) => s.leaving);
+  return (
+    <>
+      <BriefDialogs />
+      {leaving && <LeaveDialog answer={leaving} />}
+    </>
+  );
+}
+
+/** Another plan is opening while a design runs: stop it (keeping what's done), or stay. */
+function LeaveDialog({ answer }: { answer: (go: boolean) => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const stay = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const d = ref.current;
+    if (d && !d.open) d.showModal();
+    stay.current?.focus();
+  }, []);
+  return (
+    <dialog
+      ref={ref}
+      className="dialog dialog-confirm"
+      aria-labelledby="leave-h"
+      onCancel={(e) => {
+        e.preventDefault();
+        answer(false);
+      }}
+    >
+      <div className="dialog-head">
+        <h2 id="leave-h">Stop designing and open the other plan?</h2>
+      </div>
+      <div className="confirm-body">
+        <p>The steps already finished are kept in this plan’s designs.</p>
+      </div>
+      <footer className="dialog-foot">
+        <div className="button-row">
+          <button type="button" className="btn" onClick={() => answer(true)}>
+            Stop and open
+          </button>
+          <button
+            ref={stay}
+            type="button"
+            className="btn btn-primary"
+            onClick={() => answer(false)}
+          >
+            Keep designing
+          </button>
+        </div>
+      </footer>
+    </dialog>
+  );
+}
+
+function BriefDialogs() {
   const open = useDesigner((s) => s.briefOpen);
   const [needKey, setNeedKey] = useState(false);
   useEffect(() => {

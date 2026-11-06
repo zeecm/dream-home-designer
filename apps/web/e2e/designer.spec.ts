@@ -111,6 +111,29 @@ async function openSample(page: Page) {
   await page.keyboard.press('1');
 }
 
+const planId = (page: Page) => new URL(page.url()).searchParams.get('p') ?? '';
+
+/** How many designs and briefs this browser keeps for a plan (IndexedDB). */
+function storedFor(page: Page, projectId: string) {
+  return page.evaluate(
+    (pid) =>
+      new Promise<{ designs: number; briefs: number }>((resolve, reject) => {
+        const req = indexedDB.open('dhd-designs');
+        req.onsuccess = () => {
+          const tx = req.result.transaction(['designs', 'briefs'], 'readonly');
+          const d = tx.objectStore('designs').index('projectId').count(pid);
+          const b = tx.objectStore('briefs').count(pid);
+          tx.oncomplete = () => {
+            resolve({ designs: d.result, briefs: b.result });
+            req.result.close();
+          };
+        };
+        req.onerror = () => reject(req.error);
+      }),
+    projectId,
+  );
+}
+
 const panel = (page: Page) => page.getByRole('complementary', { name: 'Designer' });
 
 /** The brief, the cost check, and the run to its end. */
@@ -387,6 +410,10 @@ test.describe('desktop', () => {
     held = [];
     holding = false;
     const before = m.calls.length;
+    // A room not designed can be tried on its own, priced as one step.
+    await expect(
+      p.getByRole('button', { name: /^Try this room again · about US\$\d/ }),
+    ).toHaveCount(3);
     await p.getByRole('button', { name: /^Finish the design · about US\$/ }).click();
     const check = page.getByRole('dialog', { name: 'Finish the design' });
     if (await check.isVisible().catch(() => false)) {
@@ -418,6 +445,79 @@ test.describe('desktop', () => {
     expect(stored.length).toBeGreaterThan(1000);
     expect(stored).not.toContain(KEY);
     expect(stored).not.toMatch(/sk-ant|x-api-key/);
+  });
+
+  test('deleting a plan deletes its designs, one at a time and with Clear all', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    await mock(page);
+    for (const how of ['one', 'all'] as const) {
+      await openSample(page);
+      const doomed = planId(page);
+      await designFlat(page);
+      expect(await storedFor(page, doomed)).toEqual({ designs: 1, briefs: 1 });
+      // Another copy of the sample: it is the one kept, so the first can go.
+      await page.getByRole('button', { name: 'Projects' }).click();
+      await page.getByRole('button', { name: 'New copy of the sample flat' }).click();
+      await waitSaved(page);
+      await expect.poll(() => planId(page)).not.toBe(doomed);
+      await page.getByRole('button', { name: 'Projects' }).click();
+      await page.getByRole('button', { name: 'Manage your plans…' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Your plans' });
+      if (how === 'one') {
+        await dialog
+          .getByRole('listitem')
+          .nth(1)
+          .getByRole('button', { name: /^Delete/ })
+          .click();
+        await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+      } else {
+        await dialog.getByRole('button', { name: 'Clear all plans' }).click();
+        await dialog.getByRole('button', { name: 'Clear all', exact: true }).click();
+      }
+      await expect(dialog.getByRole('listitem')).toHaveCount(1);
+      await expect.poll(() => storedFor(page, doomed)).toEqual({ designs: 0, briefs: 0 });
+      await page.keyboard.press('Escape');
+    }
+  });
+
+  test('opening another plan mid-run asks first; Stop and open keeps the steps done', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    const held: (() => void)[] = [];
+    await mock(page, {
+      reply: (c) => (c.step === 'layout' ? null : new Promise<void>((r) => held.push(r))),
+    });
+    await openSample(page);
+    const first = planId(page);
+    await page.getByRole('button', { name: 'Design my flat with AI' }).click();
+    await page.getByRole('button', { name: 'Next: check the cost' }).click();
+    await page.getByRole('button', { name: /^Design my flat · about US\$/ }).click();
+    await expect(panel(page).locator('.step-row-done')).toHaveCount(1, { timeout: 30_000 });
+    await expect.poll(() => held.length).toBeGreaterThan(0);
+    const open = async () => {
+      await page.getByRole('button', { name: 'Projects' }).click();
+      await page.getByRole('button', { name: 'New copy of the sample flat' }).click();
+    };
+    await open();
+    const ask = page.getByRole('dialog', { name: 'Stop designing and open the other plan?' });
+    await expect(ask).toBeVisible();
+    await expect(ask.getByRole('button', { name: 'Keep designing' })).toBeFocused();
+    await ask.getByRole('button', { name: 'Keep designing' }).click();
+    await expect(ask).toHaveCount(0);
+    expect(planId(page)).toBe(first);
+    await expect(panel(page).getByRole('button', { name: 'Stop' })).toBeVisible();
+    await open();
+    await ask.getByRole('button', { name: 'Stop and open' }).click();
+    await waitSaved(page);
+    await expect.poll(() => planId(page)).not.toBe(first);
+    for (const r of held) r();
+    // The first plan keeps its version, with the layout done.
+    expect((await storedFor(page, first)).designs).toBe(1);
   });
 
   for (const provider of ['openai', 'gemini'] as const) {

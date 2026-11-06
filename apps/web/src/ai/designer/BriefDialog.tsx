@@ -653,6 +653,7 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
     setStage('cost');
   };
   const start = (a: AiSettings) => {
+    void putBrief(project.id, brief);
     startDesign(a, brief, est?.usd?.typical ?? null);
     close();
   };

@@ -571,6 +571,17 @@ function Card({ d, r, running }: { d: Design; r: DesignResult; running: boolean 
     () => (missing.length && !running ? estimateOf() : null),
     [missing.length, running, d],
   );
+  // What trying one room again costs: its one room step.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once per version and run, not per render
+  const roomEst = useMemo(
+    () =>
+      new Map(
+        running
+          ? []
+          : missing.map((s) => [s.key, estimateOf([s.key])?.usd?.typical ?? null] as const),
+      ),
+    [missing.length, running, d],
+  );
   return (
     <article className="designer-card" aria-labelledby={`v-${d.id}-h`}>
       <h3 id={`v-${d.id}-h`} className="designer-name">
@@ -642,6 +653,9 @@ function Card({ d, r, running }: { d: Design; r: DesignResult; running: boolean 
               {!ok && !running && (
                 <button type="button" className="link-btn" onClick={() => finish([s.key])}>
                   Try this room again
+                  {typeof roomEst.get(s.key) === 'number'
+                    ? ` · about ${usd(roomEst.get(s.key) as number)}`
+                    : ''}
                 </button>
               )}
             </li>

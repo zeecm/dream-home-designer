@@ -11,7 +11,7 @@ import {
 import { create } from 'zustand';
 import { useRates } from '../../cost/estimate';
 import { useEditor } from '../../editor';
-import { useStore } from '../../store';
+import { setLeaveGuard, useStore } from '../../store';
 import { type AiSettings, aiSettings } from '../credentials';
 import { type ChangeRequest, changePlan, contextFor, resultFor } from './plan';
 import { type DraftDesign, type RunPlan, type RunState, runDesign } from './run';
@@ -37,6 +37,8 @@ export interface Running {
   paused: ((go: boolean) => void) | null;
   /** About how much more finishing would take. */
   remaining: number | null;
+  /** Settles once the run has ended and its last step is saved. */
+  ended: Promise<void>;
 }
 
 interface DesignerState {
@@ -58,6 +60,8 @@ interface DesignerState {
   briefOpen: boolean;
   /** The version whose Accept dialog is open. */
   accepting: string | null;
+  /** Asking whether to stop the run and open another plan: answer it. */
+  leaving: ((go: boolean) => void) | null;
 }
 
 export const useDesigner = create<DesignerState>(() => ({
@@ -73,6 +77,7 @@ export const useDesigner = create<DesignerState>(() => ({
   note: null,
   briefOpen: false,
   accepting: null,
+  leaving: null,
 }));
 
 const newDesignId = () =>
@@ -130,6 +135,27 @@ export function endPreview() {
 }
 
 export const stopRun = () => useDesigner.getState().run?.ctrl.abort();
+
+/**
+ * Before another plan opens: with a design running, asks whether to stop it (its finished
+ * steps are kept) and open the other plan, or keep designing.
+ */
+export function askToLeave(): Promise<boolean> {
+  const run = useDesigner.getState().run;
+  if (!run) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    useDesigner.setState({
+      leaving: (go) => {
+        useDesigner.setState({ leaving: null });
+        if (!go) return resolve(false);
+        run.ctrl.abort();
+        // Once the run has ended and saved what it finished.
+        void run.ended.then(() => resolve(true));
+      },
+    });
+  });
+}
+setLeaveGuard(askToLeave);
 
 /** Answers the pause at the tab's limit. */
 export function answerPause(go: boolean) {
@@ -218,6 +244,10 @@ async function begin(b: Begin) {
   // A change's version exists from the start (its copied rooms are a design already).
   if (!record && b.parent) await persist(b.draft);
   countRun();
+  let endRun: () => void = () => {};
+  const ended = new Promise<void>((resolve) => {
+    endRun = resolve;
+  });
   const running: Running = {
     designId: record?.id ?? null,
     projectId,
@@ -234,6 +264,7 @@ async function begin(b: Begin) {
     estimate: b.estimate,
     paused: null,
     remaining: null,
+    ended,
   };
   useDesigner.setState({
     run: running,
@@ -281,6 +312,7 @@ async function begin(b: Begin) {
       last: { ...r, state, n: rec?.n ?? null, designId: rec?.id ?? null, paused: null },
     });
   }
+  endRun();
 }
 
 /** A whole new design from the brief. */
