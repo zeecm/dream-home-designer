@@ -79,6 +79,38 @@ const doorName = (level: Level, d: DoorOnTheWay, main?: string) =>
       ? 'the main door'
       : `the ${level.rooms[d.into]?.name ?? 'room'} door`;
 
+/** A main door in the From picker: its width and the room it opens into. */
+function doorLabel(level: Level, id: string): string {
+  const o = level.openings[id];
+  if (!o) return id;
+  const wall = level.walls[o.wallId];
+  const a = wall && level.vertices[wall.a];
+  const b = wall && level.vertices[wall.b];
+  // The room nearest the door's middle.
+  let near = '';
+  if (a && b) {
+    const c = { x: a.x + (b.x - a.x) * o.t, y: a.y + (b.y - a.y) * o.t };
+    let best = Number.POSITIVE_INFINITY;
+    for (const r of Object.values(level.rooms)) {
+      const pts = r.loop.map((v) => level.vertices[v]).filter((v) => !!v) as {
+        x: number;
+        y: number;
+      }[];
+      if (!pts.length) continue;
+      const m = {
+        x: pts.reduce((t, p) => t + p.x, 0) / pts.length,
+        y: pts.reduce((t, p) => t + p.y, 0) / pts.length,
+      };
+      const dist = Math.hypot(m.x - c.x, m.y - c.y);
+      if (dist < best) {
+        best = dist;
+        near = r.name;
+      }
+    }
+  }
+  return `${near ? `${near} door` : 'Door'}, ${formatLength(o.width)}`;
+}
+
 /** The verdict in a sentence. */
 export function deliveryText(level: Level, r: Delivery, name: string): string {
   switch (r.status) {
@@ -93,7 +125,9 @@ export function deliveryText(level: Level, r: Delivery, name: string): string {
       if (!w) return 'Fits through every door on the way in.';
       const where = doorName(level, w, r.from);
       if (r.status === 'fits' || r.status === 'tight') {
-        const narrowest = r.doors.reduce((p, q) => (q.clear < p.clear ? q : p));
+        // The door it's tightest through (the worst), else the narrowest.
+        const narrowest =
+          r.status === 'tight' ? w : r.doors.reduce((p, q) => (q.clear < p.clear ? q : p));
         const head =
           r.status === 'tight'
             ? 'Just fits through every door on the way in'
@@ -143,7 +177,7 @@ export function GettingItIn({ level, id }: { level: Level; id: string }) {
                   const o = level.openings[d];
                   return (
                     <option key={d} value={d}>
-                      {o ? `Door, ${formatLength(o.width)}` : d}
+                      {o ? doorLabel(level, d) : d}
                     </option>
                   );
                 })}
@@ -171,7 +205,7 @@ export function GettingItIn({ level, id }: { level: Level; id: string }) {
 const FIT_CLASS = {
   fits: 'way-fits',
   tight: 'way-tight',
-  hinges: 'way-tight',
+  hinges: 'way-hinges',
   'too-big': 'way-bad',
 };
 
@@ -281,6 +315,17 @@ function AddBySizeDialog({
       return;
     }
     const sdiag = shape === 'sofa' && diag.trim() ? size(diag) : null;
+    // A diagonal is at least the shorter of depth and height, and at most their diagonal.
+    if (
+      shape === 'sofa' &&
+      diag.trim() &&
+      (sdiag === null || sdiag < Math.min(sd, sh) - 0.005 || sdiag > Math.hypot(sd, sh) + 0.005)
+    ) {
+      setError(
+        `The diagonal depth is between ${formatLength(Math.min(sd, sh))} and ${formatLength(Math.hypot(sd, sh))} for this depth and height.`,
+      );
+      return;
+    }
     const id = newId('mdl');
     dispatch(
       addModel({

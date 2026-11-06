@@ -1,4 +1,4 @@
-import { furnitureKind, furnitureLayer, itemSize } from './furniture';
+import { furnitureKind, furnitureLayer, itemFootprint, itemSize } from './furniture';
 import { pointInPolygon } from './geometry';
 import { type PlanGeometry, doorStyle, framePoint, planGeometry } from './plan';
 import { roomShapes } from './rooms';
@@ -38,6 +38,8 @@ export type Delivery =
 const SPARE = 0.02;
 /** Far enough in front of a door: a room is never deeper than this for turning. */
 const FAR = 3;
+/** Outside the main door: an HDB common corridor, about this wide. */
+const CORRIDOR = 1.2;
 
 /** A door's clear width: what its leaves, open, leave of the opening. */
 export function clearWidth(o: Opening): number {
@@ -117,7 +119,7 @@ function doorsOf(level: Level, geom: PlanGeometry): Door[] {
       const f = g.frame;
       const u = (g.span[0] + g.span[1]) / 2;
       const centre = framePoint(f, u, 0);
-      const off = f.half + 0.12;
+      const off = f.half + 0.1;
       const at = (k: number) => ({ x: centre.x + f.n.x * off * k, y: centre.y + f.n.y * off * k });
       return { o: g.opening, centre, n: f.n, half: f.half, sides: [roomAt(at(1)), roomAt(at(-1))] };
     });
@@ -147,7 +149,15 @@ export function mainDoors(level: Level, geom = planGeometry(level)): string[] {
   const outside = outsideOpenings(level, geom);
   const doors = Object.values(level.openings).filter((o) => o.kind === 'door');
   const main = doors.filter((o) => outside.has(o.id));
-  return (main.length ? main : doors).sort((a, b) => b.width - a.width).map((o) => o.id);
+  // A hinged door first (a balcony's sliding or folding doors aren't the way in), then the
+  // widest clear opening.
+  const hinged = (o: Opening) => {
+    const st = doorStyle(o);
+    return st === 'swing' || st === 'double' ? 0 : 1;
+  };
+  return (main.length ? main : doors)
+    .sort((a, b) => hinged(a) - hinged(b) || clearWidth(b) - clearWidth(a))
+    .map((o) => o.id);
 }
 
 /**
@@ -176,8 +186,23 @@ export function deliveryCheck(
 
   const kind = furnitureKind(item.assetId);
   const { w, d, h } = itemSize(item, kind);
-  const ways = carries(w, d, h, kind?.diagonal);
-  const walls = geom.pieces.map((q) => q.polygon);
+  // A sofa's diagonal, scaled as its depth and height were.
+  const k0 = kind?.size;
+  const diagonal =
+    kind?.diagonal && k0 ? kind.diagonal * (Math.hypot(d, h) / Math.hypot(k0.d, k0.h)) : undefined;
+  const ways = carries(w, d, h, diagonal);
+  // In the way of a turn: walls, their junctions, and built-in carpentry.
+  const walls = [
+    ...geom.pieces.map((q) => q.polygon),
+    ...geom.footprints.hubs.map((hub) => hub.polygon),
+    ...Object.values(level.items)
+      .filter(
+        (it) =>
+          furnitureKind(it.assetId)?.carpentry &&
+          furnitureLayer(furnitureKind(it.assetId)) === 'floor',
+      )
+      .map((it) => itemFootprint(it)),
+  ];
 
   /** One door, entered from the side `k` (+1: from +n into -n). */
   const judge = (door: Door, k: number, into: string | null): DoorOnTheWay => {
@@ -193,11 +218,18 @@ export function deliveryCheck(
         { x: door.n.x * side, y: door.n.y * side },
         walls,
       );
-    const before = space(k);
-    const after = space(-k);
+    // Outside (no room that side): the common corridor.
+    const sideRoom = (side: number) => (side > 0 ? door.sides[0] : door.sides[1]);
+    const room = (side: number) => (sideRoom(side) ? space(side) : Math.min(CORRIDOR, space(side)));
+    const before = room(k);
+    const after = room(-k);
     const goes = (c: Carry, width: number) => {
       if (c.t > width || c.v > height) return false;
-      const turns = (sp: number) => c.l <= sp || c.l <= turnLimit(width, sp, c.t);
+      // Movers tip a long piece up to get it round: its length in plan, tilted under the
+      // ceiling as far as it goes.
+      const lift = Math.max(0, level.ceilingHeight - c.v);
+      const l = c.l > lift ? Math.sqrt(c.l * c.l - lift * lift) : c.v;
+      const turns = (sp: number) => l <= sp || l <= turnLimit(width, sp, c.t);
       return turns(before) && turns(after);
     };
     const passing = ways.filter((c) => goes(c, clear));
@@ -274,10 +306,11 @@ export function deliveryCheck(
     while (queue.length) {
       const room = queue.shift() as string;
       if (room === target) break;
+      // Across a room boundary costs no door: to the front of the queue.
       for (const nb of free.get(room) ?? []) {
         if (prev.has(nb)) continue;
         prev.set(nb, { room, door: null });
-        queue.push(nb);
+        queue.unshift(nb);
       }
       for (const door of doors) {
         if (door === start) continue;

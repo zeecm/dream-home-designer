@@ -2917,3 +2917,7 @@ h3.field-label {
 .way-bad text {
   fill: #d92d20;
 }
+.way-hinges circle,
+.way-hinges text {
+  fill: #7c3aed;
+}

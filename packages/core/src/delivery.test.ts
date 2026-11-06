@@ -110,4 +110,22 @@ describe('the way in', () => {
     const doc = { ...sampleFlatProject('prj_t'), schemaVersion: 7 };
     expect(() => parseProject(migrate(doc))).not.toThrow();
   });
+
+  it('a balcony’s sliding door to the outside isn’t the main door; a room with no door is unreachable', () => {
+    const { level, id } = withPiece({ w: 0.8, d: 0.6, h: 0.7 }, 'rm_bedroom');
+    const main = 'op_door_living-and-dining_outside-3';
+    const wallId = level.openings[main]?.wallId as string;
+    const balcony: Opening = {
+      ...door(1.8, { style: 'sliding', panels: 2 }),
+      id: 'op_balc',
+      wallId,
+      t: 0.8,
+    };
+    const withBalcony = { ...level, openings: { ...level.openings, op_balc: balcony } };
+    expect(mainDoors(withBalcony)[0]).toBe(main);
+    // The bedroom with its door taken out: no way in.
+    const shut = { ...level.openings };
+    delete shut['op_door_bedroom_living-and-dining-3'];
+    expect(deliveryCheck({ ...level, openings: shut }, id).status).toBe('unreachable');
+  });
 });
