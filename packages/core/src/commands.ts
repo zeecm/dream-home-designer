@@ -22,6 +22,7 @@ import {
 } from './schema';
 import { projectOnSegment, segmentIntersection } from './snap';
 import { endCapture, reclampOpenings, splitWallAt } from './topology';
+import { followRuns } from './trunking';
 
 const level = draftLevel;
 
@@ -99,6 +100,8 @@ export function moveVertex(levelId: string, vertexId: string, to: Vec2): Command
       v.x = to.x;
       v.y = to.y;
       reclampOpenings(lvl);
+      // Aircon trunking on the walls that moved stays square and on them.
+      followRuns(lvl);
     },
   };
 }

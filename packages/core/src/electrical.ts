@@ -19,7 +19,7 @@ import {
   isHalfWall,
   wallFaces,
 } from './schema';
-import { wallStatus } from './structural';
+import { SHELTER_ROOM, wallStatus } from './structural';
 
 /**
  * Electrical points: sockets, switches, lights, aircon units and the rest, placed on a wall
@@ -565,7 +565,13 @@ export const trunkingMetres = (level: Level, p: ElecPoint) =>
 /** Rooms that are bathrooms or WCs: no sockets, no switches. */
 export const WET_ROOM = /bath|toilet|\bwc\b|shower/i;
 
-export type PointWarning = 'wet' | 'shelter' | 'structural' | 'no-compressor' | 'off-ledge';
+export type PointWarning =
+  | 'wet'
+  | 'shelter'
+  | 'structural'
+  | 'no-compressor'
+  | 'off-ledge'
+  | 'trunk-shelter';
 
 /** Rooms that are an aircon ledge. */
 export const LEDGE_ROOM = /ledge|air-?con/i;
@@ -584,7 +590,32 @@ export const WARNING_TEXT: Record<PointWarning, string> = {
   structural: 'On a structural wall: surface trunking, or check with HDB.',
   'no-compressor': 'No compressor: run its trunking to one.',
   'off-ledge': 'Not on the aircon ledge: an HDB flat’s compressors go there.',
+  'trunk-shelter': 'Its trunking goes through the household shelter wall, which can’t be drilled.',
 };
+
+/** Whether segments ab and cd cross. */
+function segmentsCross(a: Vec2, b: Vec2, c: Vec2, d: Vec2): boolean {
+  const o = (p: Vec2, q: Vec2, r: Vec2) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+  return o(c, d, a) * o(c, d, b) < 0 && o(a, b, c) * o(a, b, d) < 0;
+}
+
+/** Whether an aircon unit's trunking goes through a household shelter wall (on `statusOf`). */
+function trunkThroughShelter(level: Level, p: ElecPoint, statusOf: Level): boolean {
+  const path = trunkingPath(level, p);
+  if (path.length < 2) return false;
+  if (!Object.values(statusOf.rooms).some((r) => SHELTER_ROOM.test(r.name))) return false;
+  for (const w of Object.values(level.walls)) {
+    if (isBoundary(w)) continue;
+    const st = statusOf.walls[w.id] ? wallStatus(statusOf, w.id) : wallStatus(level, w.id);
+    if (st !== 'shelter') continue;
+    const a = level.vertices[w.a];
+    const b = level.vertices[w.b];
+    if (!a || !b) continue;
+    for (let i = 1; i < path.length; i++)
+      if (segmentsCross(path[i - 1] as Vec2, path[i] as Vec2, a, b)) return true;
+  }
+  return false;
+}
 
 /**
  * What's wrong with a point: a socket in a bathroom or WC, a point on the shelter's wall or a
@@ -605,6 +636,7 @@ export function pointWarnings(level: Level, p: ElecPoint, statusOf: Level = leve
     !(p.compressorId && level.points[p.compressorId]?.kind === 'compressor')
   )
     out.push('no-compressor');
+  if (p.kind === 'aircon' && trunkThroughShelter(level, p, statusOf)) out.push('trunk-shelter');
   if (p.kind === 'compressor' && p.at && hasLedge(level) && !onLedge(level, p.at))
     out.push('off-ledge');
   return out;

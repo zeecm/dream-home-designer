@@ -188,6 +188,7 @@ export function Inspector() {
   // The plan's compass opens the details at which way the plan faces: unfold first, then
   // scroll once the unfolded panel has laid out (a folded panel hides its body).
   const directionToken = useEditor((s) => s.directionToken);
+  const running = useEditor((s) => !!s.trunking);
   const reveal = useRef(0);
   useEffect(() => {
     if (!directionToken) return;
@@ -196,9 +197,10 @@ export function Inspector() {
   }, [directionToken]);
   // Suggested points keep it open: the sheet is the list of them. The Comment tool keeps it
   // folded: on a phone the plan is what you comment on.
+  // Running trunking folds it too: on a phone the plan needs the height for the bends.
   const open =
     (suggesting && !viewer) ||
-    (userOpen ?? (!!selection || (tool !== 'select' && tool !== 'comment')));
+    (userOpen ?? (!running && (!!selection || (tool !== 'select' && tool !== 'comment'))));
   // A tap low on the plan selects as the finger lifts, and the panel opens under it; the
   // click the browser then sends for that tap lands on the toggle now there, and would fold
   // the panel at once. So the toggle takes a click only if its press began on it (or it had

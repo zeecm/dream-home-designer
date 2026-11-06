@@ -34,8 +34,15 @@ Removal 20–40. Sockets, lights [1]; the rest common practice.
 - Aircon: then "Run trunking": tap bends, end on a compressor (placed if none); bends drag.
   Every leg runs square to the walls and hugs a face within 0.3 m (50 mm off it); Alt frees
   the angle; a dashed preview shows the next leg and its length. "Route along the walls"
-  (bar and Inspector) routes it out through the outside wall or a window to the ledge in one
-  undo step; "Straighten" squares an existing run (6 Nov, owner's report).
+  (bar and Inspector) routes it to the ledge in one undo step; "Straighten" squares an
+  existing run and brings legs off the walls onto them (6 Nov, owner's report).
+- **Trunking stays inside the flat** (product decision, 7 Nov): HDB allows no exposed piping
+  on the façade outside the aircon ledge. A route runs along the walls of the unit's room at
+  the ceiling line and, if need be, through neighbouring rooms and corridors (never the
+  household shelter, whose walls can't be drilled, and never through a door opening),
+  crossing internal walls where it must, and leaves only through a wall that borders the
+  ledge. With no such route: "No inside route to the ledge: draw it by hand or ask your
+  installer." A hand run through a shelter wall is warned about.
 - Points follow their wall and splits; go with a deleted or hacked wall (one undo).
 - Phone: magnifier; height in mm, `inputmode="decimal"`.
 

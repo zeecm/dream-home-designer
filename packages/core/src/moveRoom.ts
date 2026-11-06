@@ -7,6 +7,7 @@ import { detectFaces, roomShapes, syncRooms } from './rooms';
 import type { ElecPoint, Item, Level, Opening, Room, Vec2, Vertex, Wall } from './schema';
 import { MIN_JOINED, band, segmentDistance } from './shiftWall';
 import { reclampOpenings } from './topology';
+import { followRuns } from './trunking';
 
 /**
  * Moving a whole room, as dragging a selected room's handle does: its corners, everything
@@ -347,6 +348,7 @@ export function moveRoom(from: Level, move: RoomMove, delta: Vec2): Command {
       applyMove(lvl, start, move, by);
       reclampOpenings(lvl);
       syncRooms(lvl);
+      followRuns(lvl);
     },
   };
 }

@@ -520,6 +520,8 @@ export function PlanCanvas() {
     const start = pointer(e);
     touch.current = { start, moved: false, claimed: false, stopped: stoppedCoast.current };
     ghostDown.current = ghostKeyOf(e.target);
+    // Running trunking, the next leg shows from the moment the finger is down.
+    if (ctx && tool === 'electrical' && useEditor.getState().trunking) active.move(start, false);
     // Held still on the spot it will place (or on a corner in Select): magnify it.
     window.clearTimeout(loupeHold.current);
     if (placesPoint(start, true)) {

@@ -14,6 +14,7 @@ import {
   deletePoint,
   maxHeight,
   minHeight,
+  planGeometry,
   pointName,
   pointPosition,
   pointRoom,
@@ -36,10 +37,6 @@ import { ElecGlyph, GLYPH_DEPTH } from './glyph';
 import { SuggestButton } from './suggest';
 
 const KEY = 'dhd-electrical';
-
-/** What "Route along the walls" says when there's no clean route. */
-export const NO_ROUTE =
-  'No clean route along the walls to a compressor or the ledge: tap the bends instead.';
 
 /** Whether the plan shows electrical points (on unless switched off; remembered here). */
 export const useElectricalOn = create<{ on: boolean; set: (on: boolean) => void }>((set) => {
@@ -322,6 +319,13 @@ export function PointInspector({ level, id }: { level: Level; id: string }) {
   const trunking = useEditor((s) => s.trunking);
   const h = useId();
   const p = level.points?.[id];
+  // The run squared to the walls, if that changes it: worked out once per change to the plan.
+  const runs = p?.kind === 'aircon' && !!(p.route?.length || p.compressorId);
+  const geom = useMemo(() => (runs ? planGeometry(level) : null), [runs, level]);
+  const straight = useMemo(
+    () => (p && geom ? straightenedRoute(level, p, geom) : null),
+    [p, geom, level],
+  );
   if (!p) return null;
   const warn = pointWarnings(level, p, beforeOf(project, level));
   const room = pointRoom(level, p);
@@ -350,18 +354,14 @@ export function PointInspector({ level, id }: { level: Level; id: string }) {
     useEditor.getState().select({ kind: 'point', id });
   };
   const alongWalls = () => {
-    const routed = routeAlongWalls(level, id);
-    if (!routed) {
-      useStore.setState({ notice: NO_ROUTE });
+    const routed = routeAlongWalls(level, id, geom ?? planGeometry(level));
+    if ('error' in routed) {
+      useStore.setState({ notice: routed.error });
       return;
     }
     dispatch(routed.command);
   };
   // The run squared to the walls, if that changes it.
-  const straight =
-    p.kind === 'aircon' && (p.route?.length || p.compressorId)
-      ? straightenedRoute(level, p, trunkingPath(level, p))
-      : null;
   return (
     <>
       <div className="inspector-head">

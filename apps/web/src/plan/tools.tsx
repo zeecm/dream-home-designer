@@ -201,12 +201,23 @@ type Drag =
       grab: Vec2;
       /** At its usual height as the drag began: it takes the usual height wherever it lands. */
       usual: boolean;
+      /** The level as the drag began: trunking ending on it follows from there each move. */
+      level: Level;
       start: Vec2;
       moved: boolean;
       key: string;
     }
   /** A bend of a selected aircon unit's trunking. */
-  | { kind: 'bend'; id: string; index: number; start: Vec2; moved: boolean; key: string }
+  | {
+      kind: 'bend';
+      id: string;
+      index: number;
+      /** The level as the drag began: every move works from it, so no bend is lost. */
+      level: Level;
+      start: Vec2;
+      moved: boolean;
+      key: string;
+    }
   /** The turn handle in front of a selected piece. */
   | { kind: 'rotate'; id: string; start: Vec2; moved: boolean; key: string }
   /** A selected room's move handle: the room and what it carries move together. */
@@ -440,6 +451,7 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         drag.current = {
           kind: 'bend',
           ...bend,
+          level: ctx.level,
           start: p.screen,
           moved: false,
           key: `bend:${bend.id}:${Date.now()}`,
@@ -552,6 +564,7 @@ export function useSelectTool(ctx: ToolContext): ToolController {
             id: h.id,
             grab: { x: p.world.x - at.x, y: p.world.y - at.y },
             usual: atDefaultHeight(ctx.level, pt),
+            level: ctx.level,
             start: p.screen,
             moved: false,
             key,
@@ -666,13 +679,15 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         return;
       }
       if (d.kind === 'bend') {
-        const ac = ctx.level.points[d.id];
+        // From the run as the drag began, so a bend that lines up for a moment isn't lost.
+        const ac = d.level.points[d.id];
         if (!ac?.route) return;
         const at = gridSnap(p.world, 0.05, p.alt);
-        // Its neighbours slide so the legs either side stay square (Alt: just this bend).
+        // Its neighbours slide so the legs either side stay square, and it hugs a wall face
+        // it's dragged near (Alt: just this bend, anywhere).
         const route = p.alt
           ? ac.route.map((q, i) => (i === d.index ? at : q))
-          : draggedRoute(ctx.level, ac, d.index, at);
+          : draggedRoute(d.level, ac, d.index, at, { geom: ctx.geom, snap: true });
         ctx.dispatch(updatePoint(levelId, d.id, { route }), { coalesceKey: d.key });
         return;
       }
@@ -682,7 +697,9 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         if (pt.at) {
           const at = gridSnap({ x: p.world.x - d.grab.x, y: p.world.y - d.grab.y }, 0.05, p.alt);
           // A compressor takes the trunking into it along, square.
-          ctx.dispatch(moveWithTrunking(ctx.level, d.id, { at }), { coalesceKey: d.key });
+          ctx.dispatch(moveWithTrunking(d.level, d.id, { at }, ctx.geom), {
+            coalesceKey: d.key,
+          });
           return;
         }
         // Along its wall, or onto another face near the pointer (a socket isn't picked up by
@@ -695,7 +712,9 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         });
         if (!spot) return;
         const { at: _, ...wall } = spot;
-        ctx.dispatch(moveWithTrunking(ctx.level, d.id, { wall }), { coalesceKey: d.key });
+        ctx.dispatch(moveWithTrunking(d.level, d.id, { wall }, ctx.geom), {
+          coalesceKey: d.key,
+        });
         return;
       }
       if (d.kind === 'vertex') {

@@ -1421,27 +1421,40 @@ B2 3–5 on a desktop and a 390 px phone, plus the mattress, the 18 mm panel and
 out-of-range diagonal; criterion 16 (production accepts a
 v10 save) is for the deploy. Not done: the lift has no place on the plan.
 
-**Square aircon trunking (6 Nov, the owner's "it trunks at strange angles"; no schema change):**
-`trunkingPath` now starts at `trunkingStart` (the unit's face point + `TRUNK_OFF` 50 mm along
-its normal; render no longer adds its own offset). Core `trunking.ts`: `trunkAxes` (the nearest
-wall's direction, squared to exact x/y when within 1e-6), `nextBend(level, from, cursor,
-{alt, target})` (along whichever axis is nearer the pointer; stops on a face's hug line, 50 mm
-off it, before or past the wall, within `TRUNK_SNAP` 0.3 m, or level with the compressor; else
-5 cm steps; `alt` free), `legInto` (the corner into a compressor: fewer walls crossed, then
-carrying straight on), `tidyRoute` (square legs kept, crooked ones re-run through `nextBend`, a
-corner into the compressor, `simplifyPath`), `movePathEnd`/`dragBend` (a moved end or bend
-slides its neighbour so legs stay square) with `moveWithTrunking` (compressor or unit dragged,
-one command) and `draggedRoute`, `wallsCrossed` (pieces, gaps and hubs of `planGeometry`), and
-`autoRoute(level, unit, compressor)`: Dijkstra on a grid of hug lines (every face's line square
-to the unit's wall, plus both ends' lines), never into a room but the unit's, the outside and
-the compressor's; costs: length, ×1.6 off a face, 0.2 per turn, 0.4 through a window, 0.8
-drilled, 3 by a door. `routeAlongWalls(level, unitId)` picks the unit's compressor, the nearest,
-or a new one at the nearest ledge's `labelPoint`, in one command. In the sample the main
-bedroom's run leaves by its side window, runs down the outside of the left wall and enters the
-ledge through it (the ledge doesn't touch the bedroom, so two crossings is the least). Web: the
-run's taps go through `nextBend`/`legInto`; a dashed preview (`trunk-preview`) with a corner
-dot and the leg's length; bar buttons Undo bend (an icon under 560 px), Compressor here, Route
-along the walls ("Along walls" under 560 px), Done; Inspector Route along the walls and
-Straighten (`straightenedRoute`, disabled when already straight). e2e `trunking.spec.ts`
-(desktop and a 390 px phone). Not done: a wall moved under a run (shiftWall, moveRoom) doesn't
-re-square its bends; Straighten fixes it.
+**Square aircon trunking, inside the flat (6–7 Nov, the owner's "it trunks at strange angles";
+no schema change):** `trunkingPath` starts at `trunkingStart` (the unit's face point +
+`TRUNK_OFF` 50 mm along its normal; render no longer adds its own offset). Product rule (PM,
+7 Nov): **no trunking on the façade**; routes stay inside, through rooms and corridors, never
+the shelter or a door opening, into the ledge only through a wall bordering it. Core
+`trunking.ts`: `trunkAxes`/`unitAxes`/`axesOf` (squared to exact x/y within 1e-6);
+`nextBend(level, from, cursor, {alt, target, axes})` picks the axis nearest the pointer's way
+among the unit's, the last leg's and the nearest wall's, snaps to a face's hug line within
+`TRUNK_SNAP` 0.3 m (before or past the wall) or level with the compressor, else 5 cm steps,
+and `stopShort` keeps it 50 mm short of the first face in its way (any angle) unless the
+pointer is past that wall; `legInto` (into a compressor: `alongWalls` routes it with
+`wallRoute`, else an L corner that never doubles back); `tidyRoute` (legs square to the
+last leg, the unit or the nearest wall kept; crooked ones projected exactly, so no jog;
+`hugLegs` slides middle legs up to 1.5 m onto a parallel face when that crosses no new wall;
+the way in routed); `fromLegs` (bends as the meeting points of legs that keep their
+directions) behind `movePathEnd`, `followRuns` (called in `moveVertex`, `shiftWall` and
+`moveRoom` recipes: legs that hugged a face follow it, the first leg follows the unit) and
+`dragBend`/`draggedRoute` (with `snapToFaces`); `moveWithTrunking(level0, id, patch, geom)`
+(compressor or unit dragged; the Select tool keeps the level from the drag's start in its
+drag state and recomputes from it every move); `wallsCrossed`; `wallRoute`/`autoRoute`:
+Dijkstra on a grid of hug lines square to the unit's wall, over rooms bucketed in 1 m cells
+(first within 3 m of the unit's room and the ledge, then the whole plan); rooms allowed: all
+but shelters and other ledges, never 'outside'; no door or shelter-wall crossings; costs
+length ×(1 + 1.5 off a face + 0.3 away from the unit's room and the ledge), 0.2 a turn, 0.4
+by a window or passage, 0.8 drilled; a 612-wall plan routes well under 400 ms (test).
+`routeAlongWalls(level, unitId, geom)` → `{command, compressorId}` or `{error}` (`NO_LEDGE`,
+`NO_INSIDE_ROUTE`); a new compressor goes towards the unit's end of the ledge, clear of the
+name. `pointWarnings` adds `trunk-shelter` for a hand run through a shelter wall. Web: taps
+go through `nextBend`/`legInto` and merge straight-on bends; the dashed preview (no fill)
+shows from finger-down, clears on the tap; the bar reads "2.9 m + 1.2 m next"; Undo bend is an
+icon and "Route along the walls" reads "Along walls" under 560 px (its name follows); the
+details sheet folds during a run; a pinch that leaves the last bend under the bar is undone
+once the plan settles; Inspector Route along the walls and Straighten (memoised); the
+estimate prints trunking to one place. e2e `trunking.spec.ts` (desktop and a 390 px phone).
+Checked: a renovation's After runs route the same way. Not done: a compressor on a small
+ledge can still touch the ledge's name; two units sharing a compressor share its last leg.
+

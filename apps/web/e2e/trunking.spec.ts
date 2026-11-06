@@ -37,6 +37,17 @@ function expectSquare(path: { x: number; y: number }[]) {
   }
 }
 
+/**
+ * Never on the façade: every bend within the sample flat's outside walls (their inside faces
+ * at x 0.30 and y 0.15 on the left and top, where the main bedroom and the ledge are).
+ */
+function expectInside(path: { x: number; y: number }[]) {
+  for (const p of path) {
+    expect(p.x, JSON.stringify(p)).toBeGreaterThan(0.3);
+    expect(p.y, JSON.stringify(p)).toBeGreaterThan(0.15);
+  }
+}
+
 async function clickAt(page: Page, x: number, y: number) {
   await page.mouse.move(x, y, { steps: 2 });
   await page.mouse.click(x, y);
@@ -57,34 +68,46 @@ test.describe('desktop', () => {
       .locator('.palette .elec-kind-list')
       .getByRole('button', { name: /^Aircon/ })
       .click();
-    const r = await roomBox(page, 'rm_main-bedroom');
-    await clickAt(page, r.x + r.width * 0.5, r.y + 8);
+    const r0 = await roomBox(page, 'rm_main-bedroom');
+    await clickAt(page, r0.x + r0.width * 0.5, r0.y + 8);
     const bar = page.getByTestId('trunking-bar');
     await expect(bar).toBeVisible();
+    // The plan may have moved to bring the ledge into sight.
+    await page.waitForTimeout(400);
+    const r = await roomBox(page, 'rm_main-bedroom');
     // Off the square on purpose: each tap still lands square to the walls.
     await page.mouse.move(r.x + r.width * 0.56, r.y + r.height * 0.55, { steps: 3 });
     const preview = page.getByTestId('trunk-preview');
     await expect(preview).toBeVisible();
     await expect(preview.locator('text')).toHaveText(/\d+\.\d{2} m/);
+    // The bar keeps what's run apart from the leg under the pointer.
+    await expect(page.getByTestId('trunking-sofar')).toHaveText(/^0\.0 m \+ \d+\.\d m next$/);
     await page.mouse.click(r.x + r.width * 0.56, r.y + r.height * 0.55);
+    // The tap takes the preview with it.
+    await expect(preview).toHaveCount(0);
     await clickAt(page, r.x + r.width * 0.2, r.y + r.height * 0.6);
     const ledge = await roomBox(page, 'rm_air-con-ledge');
     await page.mouse.move(ledge.x + ledge.width * 0.4, ledge.y + ledge.height * 0.6, { steps: 3 });
-    // Onto the ledge: the preview shows the corner into it.
+    // Onto the ledge: the preview shows the way in along the walls, a line, not a filled shape.
     await expect(preview.locator('polyline')).toBeVisible();
+    expect(await preview.locator('polyline').evaluate((e) => getComputedStyle(e).fill)).toBe(
+      'none',
+    );
     await page.mouse.click(ledge.x + ledge.width * 0.4, ledge.y + ledge.height * 0.6);
     await expect(bar).toHaveCount(0);
     await expect(page.locator('.elec-trunk')).toHaveCount(1);
     const tapped = await trunk(page);
     expectSquare(tapped);
+    expectInside(tapped);
 
-    // Along the walls, in the Inspector: square, out to the ledge's compressor.
+    // Along the walls, in the Inspector: square, inside the flat, to the ledge's compressor.
     await page.getByRole('button', { name: 'Route along the walls' }).click();
     await expect
       .poll(async () => JSON.stringify(await trunk(page)))
       .not.toBe(JSON.stringify(tapped));
     const routed = await trunk(page);
     expectSquare(routed);
+    expectInside(routed);
     expect(routed.at(-1)).toEqual(tapped.at(-1));
     await expect(page.getByRole('button', { name: 'Straighten' })).toBeDisabled();
     // One undo brings the tapped run back.
@@ -106,6 +129,7 @@ test.describe('desktop', () => {
       .poll(async () => JSON.stringify(await trunk(page)))
       .not.toBe(JSON.stringify(crooked));
     expectSquare(await trunk(page));
+    expectInside(await trunk(page));
     await expect(page.getByRole('button', { name: 'Straighten' })).toBeDisabled();
 
     // The estimate's trunking is the Inspector's, which is the path's.
@@ -186,14 +210,36 @@ test.describe('phone', () => {
       390,
     );
 
+    // The details sheet folds while the run goes on: the plan gets the height.
+    await expect(page.getByRole('button', { name: 'Show plan details' })).toBeVisible();
+    expect(plan.height).toBeGreaterThan(330);
+
     const b = await roomBox(page, 'rm_main-bedroom');
-    await tap(page, { x: b.x + b.width * 0.55, y: b.y + b.height * 0.55 });
+    // A finger down and moving shows the next leg before it lifts; lifted, it's gone.
+    const cdp = await page.context().newCDPSession(page);
+    const at = { x: b.x + b.width * 0.55, y: b.y + b.height * 0.55 };
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x: at.x, y: at.y - 20, id: 0 }],
+    });
+    for (let k = 1; k <= 4; k++) {
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x: at.x, y: at.y - 20 + k * 5, id: 0 }],
+      });
+      await page.waitForTimeout(16);
+    }
+    await expect(page.getByTestId('trunk-preview')).toBeVisible();
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect(page.getByTestId('trunk-preview')).toHaveCount(0);
+    await expect(page.getByTestId('trunking-sofar')).not.toContainText('next');
     await tap(page, { x: b.x + b.width * 0.15, y: b.y + b.height * 0.62 });
     const l = await roomBox(page, 'rm_air-con-ledge');
     await tap(page, { x: l.x + l.width * 0.5, y: l.y + l.height * 0.5 });
     await expect(bar).toHaveCount(0);
     const tapped = await trunk(page);
     expectSquare(tapped);
+    expectInside(tapped);
 
     await page.getByRole('button', { name: 'Route along the walls' }).tap();
     await expect
@@ -216,8 +262,10 @@ test.describe('phone', () => {
     const r = await roomBox(page, 'rm_main-bedroom');
     await tap(page, { x: r.x + r.width * 0.5, y: r.y + 3 });
     const bar = page.getByTestId('trunking-bar');
-    await bar.getByRole('button', { name: 'Route along the walls' }).tap();
+    // On a phone it reads "Along walls", and that's its name.
+    await bar.getByRole('button', { name: 'Along walls' }).tap();
     await expect(bar).toHaveCount(0);
+    expectInside(await trunk(page));
     await expect(
       page.locator('[data-testid="electrical-layer"] [data-kind="compressor"]'),
     ).toHaveCount(1);

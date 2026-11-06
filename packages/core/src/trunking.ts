@@ -1,3 +1,4 @@
+import { type Draft, current, original } from 'immer';
 import {
   LEDGE_ROOM,
   type PointPatch,
@@ -11,14 +12,16 @@ import {
 import { labelPoint, pointInPolygon } from './geometry';
 import type { Command } from './history';
 import { type PlanGeometry, type WallFrame, framePoint, planGeometry } from './plan';
-import { roomShapes } from './rooms';
+import { type RoomShape, roomShapes } from './rooms';
 import { type ElecPoint, type Level, type Vec2, isBoundary, isGlass } from './schema';
+import { SHELTER_ROOM, wallStatus } from './structural';
 
 /**
- * Aircon trunking as a fitter runs it: straight, along a wall face and close to it (or along
- * the ceiling line), turning at right angles, and out through the outside wall or a window
- * to the compressor on the ledge. A run's path is [beside the unit, ...bends, compressor];
- * the bends are what an aircon unit's `route` stores.
+ * Aircon trunking as a fitter runs it: straight, along a wall face and close to it (along
+ * the ceiling line), turning square, and inside the flat to the wall that borders the aircon
+ * ledge, through it to the compressor. HDB allows no exposed piping on the façade outside
+ * the ledge. A run's path is [beside the unit, ...bends, compressor]; the bends are what an
+ * aircon unit's `route` stores.
  */
 
 /** Within this of a wall face (metres) a run hugs it, TRUNK_OFF off the face. */
@@ -28,9 +31,20 @@ const STEP = 0.05;
 /** Under this a segment is no segment (1 mm). */
 const TINY = 1e-3;
 
+/** What "Route along the walls" says when there's no route inside the flat to the ledge. */
+export const NO_INSIDE_ROUTE =
+  'No inside route to the ledge: draw it by hand or ask your installer.';
+/** What it says with no compressor and no aircon ledge to run to. */
+export const NO_LEDGE = 'No compressor or aircon ledge to run to: add a compressor first.';
+
 const dot = (a: Vec2, b: Vec2) => a.x * b.x + a.y * b.y;
 const sub = (a: Vec2, b: Vec2): Vec2 => ({ x: a.x - b.x, y: a.y - b.y });
+const crossOf = (a: Vec2, b: Vec2) => a.x * b.y - a.y * b.x;
 const along = (p: Vec2, d: Vec2, t: number): Vec2 => ({ x: p.x + d.x * t, y: p.y + d.y * t });
+const unit = (v: Vec2): Vec2 | null => {
+  const l = Math.hypot(v.x, v.y);
+  return l < 1e-12 ? null : { x: v.x / l, y: v.y / l };
+};
 
 /** A direction made exactly axis-aligned where it nearly is (walls drawn square read square). */
 function squared(d: Vec2): Vec2 {
@@ -46,7 +60,8 @@ export interface TrunkAxes {
   n: Vec2;
 }
 
-const axesOf = (d: Vec2): TrunkAxes => {
+/** The axes along `d` and square to it. */
+export const axesOf = (d: Vec2): TrunkAxes => {
   const s = squared(d);
   return { d: s, n: { x: -s.y, y: s.x } };
 };
@@ -68,26 +83,25 @@ export function trunkAxes(
   return axesOf(best?.f.d ?? { x: 1, y: 0 });
 }
 
-/** A wall face as trunking sees it: the line it hugs, TRUNK_OFF out from the face. */
-interface Face {
-  f: WallFrame;
-  /** Out of the face. */
-  normal: Vec2;
-  /** On the hug line, level with the wall's start (u = 0). */
-  origin: Vec2;
-  /** The face's extent along the wall (u). */
-  lo: number;
-  hi: number;
+/** The axes of an aircon unit's wall (null off a wall). */
+export function unitAxes(level: Level, unitPoint: ElecPoint): TrunkAxes | null {
+  const dir = pointPosition(level, unitPoint)?.dir;
+  return dir ? axesOf(dir) : null;
 }
 
-/** What a run meets: wall faces, and the solid and open parts of each wall. */
-interface Obstacles {
-  faces: Face[];
-  /** Solid wall (and junction hubs), with the wall each belongs to. */
-  solid: { wallId?: string; poly: Vec2[]; box: Box }[];
-  /** Doors, windows and passages: gaps through a wall. */
-  gaps: { wallId: string; kind: 'door' | 'window' | 'passage'; poly: Vec2[]; box: Box }[];
+/** The axes of the leg from a to b (null for no leg). */
+const legAxes = (a: Vec2 | undefined, b: Vec2 | undefined): TrunkAxes | null => {
+  const u = a && b ? unit(sub(b, a)) : null;
+  return u ? axesOf(u) : null;
+};
+
+/** Whether ab runs along one of the axes (within 1 mm over its length). */
+export function squareTo(axes: TrunkAxes, a: Vec2, b: Vec2): boolean {
+  const v = sub(b, a);
+  return Math.abs(dot(v, axes.d)) < TINY || Math.abs(dot(v, axes.n)) < TINY;
 }
+
+// ------------------------------------------------------------------------- what a run meets
 
 interface Box {
   x0: number;
@@ -101,6 +115,66 @@ const boxOf = (poly: readonly Vec2[]): Box => ({
   x1: Math.max(...poly.map((p) => p.x)),
   y1: Math.max(...poly.map((p) => p.y)),
 });
+const inBox = (p: Vec2, b: Box) => p.x > b.x0 && p.x < b.x1 && p.y > b.y0 && p.y < b.y1;
+const boxesMeet = (a: Vec2, b: Vec2, box: Box) =>
+  Math.max(a.x, b.x) > box.x0 &&
+  Math.min(a.x, b.x) < box.x1 &&
+  Math.max(a.y, b.y) > box.y0 &&
+  Math.min(a.y, b.y) < box.y1;
+
+/** Things on the plan bucketed by 1 m cells, to find those near a spot or a leg quickly. */
+class Buckets<T extends { box: Box }> {
+  private cells = new Map<string, T[]>();
+  constructor(items: readonly T[]) {
+    for (const it of items) {
+      for (let ix = Math.floor(it.box.x0); ix <= Math.floor(it.box.x1); ix++)
+        for (let iy = Math.floor(it.box.y0); iy <= Math.floor(it.box.y1); iy++) {
+          const k = `${ix},${iy}`;
+          const list = this.cells.get(k);
+          if (list) list.push(it);
+          else this.cells.set(k, [it]);
+        }
+    }
+  }
+  at(p: Vec2): readonly T[] {
+    return this.cells.get(`${Math.floor(p.x)},${Math.floor(p.y)}`) ?? [];
+  }
+  near(a: Vec2, b: Vec2): Set<T> {
+    const out = new Set<T>();
+    for (let ix = Math.floor(Math.min(a.x, b.x)); ix <= Math.floor(Math.max(a.x, b.x)); ix++)
+      for (let iy = Math.floor(Math.min(a.y, b.y)); iy <= Math.floor(Math.max(a.y, b.y)); iy++)
+        for (const it of this.cells.get(`${ix},${iy}`) ?? []) out.add(it);
+    return out;
+  }
+}
+
+/** A wall face as trunking sees it: the line it hugs, TRUNK_OFF out from the face. */
+interface Face {
+  f: WallFrame;
+  /** Out of the face. */
+  normal: Vec2;
+  /** On the face itself, level with the wall's start (u = 0). */
+  base: Vec2;
+  /** On the hug line, level with the wall's start. */
+  origin: Vec2;
+  /** The face's extent along the wall (u). */
+  lo: number;
+  hi: number;
+}
+
+/** A solid piece of wall (or a junction hub), or a door, window or passage through one. */
+interface Part {
+  wallId?: string;
+  through: 'solid' | 'door' | 'window' | 'passage';
+  poly: Vec2[];
+  box: Box;
+}
+
+/** What a run meets: wall faces, and the solid and open parts of each wall. */
+interface Obstacles {
+  faces: Face[];
+  parts: Buckets<Part>;
+}
 
 const obstacleCache = new WeakMap<PlanGeometry, Obstacles>();
 
@@ -114,30 +188,33 @@ function obstacles(geom: PlanGeometry): Obstacles {
       const [lo, hi] = side > 0 ? f.left : f.right;
       if (hi - lo < 1e-6) continue;
       const normal = { x: f.n.x * side, y: f.n.y * side };
-      faces.push({ f, normal, origin: along(framePoint(f, 0, side), normal, TRUNK_OFF), lo, hi });
+      const base = framePoint(f, 0, side);
+      faces.push({ f, normal, base, origin: along(base, normal, TRUNK_OFF), lo, hi });
     }
   }
-  const solid: Obstacles['solid'] = [
-    ...geom.pieces.map((p) => ({ wallId: p.wallId, poly: p.polygon, box: boxOf(p.polygon) })),
-    ...geom.footprints.hubs.map((h) => ({ poly: h.polygon, box: boxOf(h.polygon) })),
+  const parts: Part[] = [
+    ...geom.pieces.map((p) => ({
+      wallId: p.wallId,
+      through: 'solid' as const,
+      poly: p.polygon,
+      box: boxOf(p.polygon),
+    })),
+    ...geom.footprints.hubs.map((h) => ({
+      through: 'solid' as const,
+      poly: h.polygon,
+      box: boxOf(h.polygon),
+    })),
+    ...geom.openings.map((o) => ({
+      wallId: o.wallId,
+      through: o.kind,
+      poly: o.polygon,
+      box: boxOf(o.polygon),
+    })),
   ];
-  const gaps = geom.openings.map((o) => ({
-    wallId: o.wallId,
-    kind: o.kind,
-    poly: o.polygon,
-    box: boxOf(o.polygon),
-  }));
-  const out = { faces, solid, gaps };
+  const out = { faces, parts: new Buckets(parts) };
   obstacleCache.set(geom, out);
   return out;
 }
-
-const inBox = (p: Vec2, b: Box) => p.x > b.x0 && p.x < b.x1 && p.y > b.y0 && p.y < b.y1;
-const boxesMeet = (a: Vec2, b: Vec2, box: Box) =>
-  Math.max(a.x, b.x) > box.x0 &&
-  Math.min(a.x, b.x) < box.x1 &&
-  Math.max(a.y, b.y) > box.y0 &&
-  Math.min(a.y, b.y) < box.y1;
 
 /** Whether segments ab and cd cross (properly). */
 function cross(a: Vec2, b: Vec2, c: Vec2, d: Vec2): boolean {
@@ -163,10 +240,7 @@ function meets(a: Vec2, b: Vec2, poly: readonly Vec2[], box: Box): boolean {
 
 /** Whether a spot is inside a wall's thickness (or a doorway or window in it). */
 function inWall(obs: Obstacles, p: Vec2): boolean {
-  return (
-    obs.solid.some((s) => inBox(p, s.box) && pointInPolygon(p, s.poly)) ||
-    obs.gaps.some((g) => inBox(p, g.box) && pointInPolygon(p, g.poly))
-  );
+  return obs.parts.at(p).some((s) => inBox(p, s.box) && pointInPolygon(p, s.poly));
 }
 
 /** A wall a segment goes through: solid, or by a window, door or passage in it. */
@@ -184,26 +258,50 @@ export function wallsCrossed(
   b: Vec2,
   geom: PlanGeometry = planGeometry(level),
 ): TrunkCrossing[] {
-  const obs = obstacles(geom);
   const len = Math.hypot(b.x - a.x, b.y - a.y);
   if (len < TINY) return [];
   const dir = { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
   const hit = new Map<string, TrunkCrossing>();
-  const note = (wallId: string, through: TrunkCrossing['through']) => {
-    const f = geom.frames[wallId];
+  for (const s of obstacles(geom).parts.near(a, b)) {
+    if (!meets(a, b, s.poly, s.box)) continue;
+    const wallId = s.wallId ?? `hub:${s.box.x0},${s.box.y0}`;
+    const f = s.wallId ? geom.frames[s.wallId] : undefined;
     const lengthwise = !!f && Math.abs(dot(f.d, dir)) > 0.7;
     const was = hit.get(wallId);
     // Solid wall anywhere in the crossing makes it a hole drilled.
-    if (!was || (through === 'solid' && was.through !== 'solid'))
-      hit.set(wallId, { wallId, through, lengthwise: lengthwise || !!was?.lengthwise });
-  };
-  for (const g of obs.gaps) if (meets(a, b, g.poly, g.box)) note(g.wallId, g.kind);
-  for (const s of obs.solid) {
-    if (!meets(a, b, s.poly, s.box)) continue;
-    if (s.wallId) note(s.wallId, 'solid');
-    else note(`hub:${s.box.x0},${s.box.y0}`, 'solid');
+    if (!was || (s.through === 'solid' && was.through !== 'solid'))
+      hit.set(wallId, { wallId, through: s.through, lengthwise: lengthwise || !!was?.lengthwise });
   }
   return [...hit.values()];
+}
+
+// ------------------------------------------------------------------------------------ rooms
+
+interface RoomEntry {
+  id: string;
+  shape: RoomShape;
+  box: Box;
+}
+const roomIndex = new WeakMap<Map<string, RoomShape>, Buckets<RoomEntry>>();
+
+function roomsOf(shapes: Map<string, RoomShape>): Buckets<RoomEntry> {
+  const cached = roomIndex.get(shapes);
+  if (cached) return cached;
+  const out = new Buckets(
+    [...shapes].map(([id, shape]) => ({ id, shape, box: boxOf(shape.outer) })),
+  );
+  roomIndex.set(shapes, out);
+  return out;
+}
+
+/** The room a spot is in, or 'outside'. */
+function regionAt(rooms: Buckets<RoomEntry>, p: Vec2): string {
+  for (const r of rooms.at(p)) {
+    if (!inBox(p, r.box)) continue;
+    const s = r.shape;
+    if (pointInPolygon(p, s.outer) && !s.holes.some((h) => pointInPolygon(p, h))) return r.id;
+  }
+  return 'outside';
 }
 
 // -------------------------------------------------------------------------- one bend at a time
@@ -222,14 +320,20 @@ export interface BendOptions {
   target?: Vec2 | null;
   /** How near a face or the target catches the bend (TRUNK_SNAP). */
   snap?: number;
+  /**
+   * Other axes the leg may run on besides the nearest wall's: the unit's, and the run's last
+   * leg's. The one nearest the pointer's way wins.
+   */
+  axes?: readonly (TrunkAxes | null | undefined)[];
 }
 
 /**
- * The bend to add to a run at `from` for the pointer at `cursor`: square to the nearest
- * wall (along it or straight out from it, whichever is nearer the pointer), stopping
+ * The bend to add to a run at `from` for the pointer at `cursor`: square to the unit's wall,
+ * the last leg or the nearest wall (whichever way is nearest the pointer's), stopping
  * TRUNK_OFF short of (or past) a wall face it reaches within TRUNK_SNAP, so the next leg
- * hugs that face, or level with the target; else in 5 cm steps. `alt` frees the angle.
- * Null where the bend would be on `from`.
+ * hugs that face, or level with the target; else in 5 cm steps. It never goes through a wall
+ * the pointer isn't past: it stops TRUNK_OFF short of the first face in the way, whatever
+ * its angle. `alt` frees the angle. Null where the bend would be on `from`.
  */
 export function nextBend(
   level: Level,
@@ -243,23 +347,32 @@ export function nextBend(
       : { at: { ...cursor }, snap: 'free' };
   }
   const geom = opts.geom ?? planGeometry(level);
-  const { d, n } = trunkAxes(level, from, geom);
-  const du = dot(sub(cursor, from), d);
-  const dn = dot(sub(cursor, from), n);
-  const axis = Math.abs(du) >= Math.abs(dn) ? d : n;
-  const s = axis === d ? du : dn;
-  if (Math.abs(s) < TINY) return null;
+  const v = sub(cursor, from);
+  let axis: Vec2 = { x: 1, y: 0 };
+  let s = 0;
+  for (const set of [...(opts.axes ?? []), trunkAxes(level, from, geom)]) {
+    if (!set) continue;
+    for (const a of [set.d, set.n]) {
+      const c = dot(v, a);
+      if (Math.abs(c) > Math.abs(s) + 1e-9) {
+        axis = c < 0 ? { x: -a.x, y: -a.y } : a;
+        s = Math.abs(c);
+      }
+    }
+  }
+  if (s < TINY) return null;
   const tol = opts.snap ?? TRUNK_SNAP;
+  const obs = obstacles(geom);
   let best: { t: number; err: number; snap: Bend['snap'] } | null = null;
   const consider = (t: number, snap: Bend['snap']) => {
-    if (Math.sign(t) !== Math.sign(s) || Math.abs(t) < 0.01) return;
+    if (t < 0.01) return;
     const err = Math.abs(t - s);
     if (err <= tol + 1e-9 && (!best || err < best.err - 1e-9)) best = { t, err, snap };
   };
-  for (const face of obstacles(geom).faces) {
-    // Only a face across the run: its hug line is where the run would turn along it.
+  for (const face of obs.faces) {
+    // A face across the run: its hug line is where the run would turn along it.
     const k = dot(face.normal, axis);
-    if (Math.abs(k) < 0.999) continue;
+    if (Math.abs(k) < 0.05) continue;
     const t = dot(sub(face.origin, from), face.normal) / k;
     const u = dot(sub(along(from, axis, t), face.f.a), face.f.d);
     // Past the face's ends by up to TRUNK_OFF: round an outside corner, into an inside one.
@@ -268,46 +381,88 @@ export function nextBend(
   }
   if (opts.target) consider(dot(sub(opts.target, from), axis), 'target');
   const picked = best as { t: number; snap: Bend['snap'] } | null;
-  const t = picked ? picked.t : Math.round(s / STEP) * STEP;
-  if (Math.abs(t) < TINY) return null;
-  return { at: along(from, axis, t), snap: picked?.snap ?? 'step' };
+  const want = picked ? picked.t : Math.round(s / STEP) * STEP;
+  // Stopped short of the first face in the way, unless the pointer is past its wall too.
+  const t = stopShort(level, geom, from, axis, want, cursor);
+  if (t < TINY) return null;
+  return { at: along(from, axis, t), snap: t < want - 1e-9 ? 'wall' : (picked?.snap ?? 'step') };
 }
 
-/** Whether ab runs along one of the axes (within 1 mm over its length). */
-export function squareTo(axes: TrunkAxes, a: Vec2, b: Vec2): boolean {
-  const v = sub(b, a);
-  return Math.abs(dot(v, axes.d)) < TINY || Math.abs(dot(v, axes.n)) < TINY;
+/**
+ * How far a leg from `from` along `axis` may go towards `t`: TRUNK_OFF short of the first
+ * wall face in its way (whatever that face's angle), unless the leg to `meant` goes through
+ * that wall too (a wall crossed on purpose).
+ */
+function stopShort(
+  level: Level,
+  geom: PlanGeometry,
+  from: Vec2,
+  axis: Vec2,
+  t: number,
+  meant: Vec2,
+): number {
+  const through = new Set(wallsCrossed(level, from, meant, geom).map((w) => w.wallId));
+  let out = t;
+  for (const face of obstacles(geom).faces) {
+    if (through.has(face.f.wall.id)) continue;
+    const k = dot(face.normal, axis);
+    // Only a face looking back at the run (the near face of a wall ahead).
+    if (k > -0.05) continue;
+    const tFace = dot(sub(face.base, from), face.normal) / k;
+    const tHug = dot(sub(face.origin, from), face.normal) / k;
+    if (tFace < -1e-9 || out <= tHug + 1e-9) continue;
+    const u = dot(sub(along(from, axis, tFace), face.f.a), face.f.d);
+    if (u < face.lo - 1e-6 || u > face.hi + 1e-6) continue;
+    out = tHug;
+  }
+  return out;
 }
 
 /**
  * The corner a run needs from `from` into a fixed end (a compressor) to arrive square: none
- * if it already does, else the corner whose two legs go through fewer walls, preferring
- * the one that carries on the way the run was going (from `prev`).
+ * if it already does (to the last leg, the unit's wall or the nearest wall), else the corner
+ * whose two legs go through fewer walls, preferring the one that carries on the way the run
+ * was going (from `prev`), then square to the last leg, the unit, the nearest wall.
  */
 export function legInto(
   level: Level,
   from: Vec2,
   to: Vec2,
-  opts: { geom?: PlanGeometry; prev?: Vec2 } = {},
+  opts: {
+    geom?: PlanGeometry;
+    prev?: Vec2;
+    axes?: TrunkAxes | null;
+    /** Route the way in along the walls, inside the flat (wallRoute), where it can. */
+    alongWalls?: boolean;
+  } = {},
 ): Vec2[] {
   const geom = opts.geom ?? planGeometry(level);
-  const axes = trunkAxes(level, from, geom);
-  if (squareTo(axes, from, to)) return [];
+  const lastLeg = legAxes(opts.prev, from);
+  const sets = [lastLeg, opts.axes, trunkAxes(level, from, geom)].filter(
+    (a): a is TrunkAxes => !!a,
+  );
+  const way = opts.prev ? unit(sub(from, opts.prev)) : null;
+  if (opts.alongWalls) {
+    const axes = lastLeg ?? opts.axes ?? trunkAxes(level, from, geom);
+    const routed = wallRoute(level, from, to, axes, { geom, way });
+    if (routed) return routed;
+  }
+  if (sets.some((a) => squareTo(a, from, to))) return [];
   const v = sub(to, from);
-  const corners = [along(from, axes.d, dot(v, axes.d)), along(from, axes.n, dot(v, axes.n))];
-  const score = (c: Vec2) => {
-    const walls =
-      wallsCrossed(level, from, c, geom).length + wallsCrossed(level, c, to, geom).length;
-    const prev = opts.prev;
-    const turns =
-      prev &&
-      Math.abs((from.x - prev.x) * (c.y - from.y) - (from.y - prev.y) * (c.x - from.x)) < 1e-6
-        ? 0
-        : 1;
-    return walls * 10 + turns;
-  };
-  const [c1, c2] = corners as [Vec2, Vec2];
-  return [score(c2) < score(c1) ? c2 : c1];
+  let best: { c: Vec2; score: number } | null = null;
+  sets.forEach((a, i) => {
+    for (const c of [along(from, a.d, dot(v, a.d)), along(from, a.n, dot(v, a.n))]) {
+      const walls =
+        wallsCrossed(level, from, c, geom).length + wallsCrossed(level, c, to, geom).length;
+      const out = unit(sub(c, from));
+      // Carrying straight on is best; doubling back over the last leg, worst.
+      const turn = !way || !out ? 1 : dot(way, out) > 0.999 ? 0 : dot(way, out) < -0.999 ? 5 : 1;
+      const score = walls * 10 + turn + i * 0.1;
+      if (!best || score < best.score - 1e-9) best = { c, score };
+    }
+  });
+  const picked = best as { c: Vec2 } | null;
+  return picked ? [picked.c] : [];
 }
 
 /** A path without repeated points or bends that don't turn (the ends kept). */
@@ -332,41 +487,68 @@ export function simplifyPath(path: readonly Vec2[]): Vec2[] {
   return out;
 }
 
+/** How far Straighten slides a leg across to bring it onto a wall face (metres). */
+const SLIDE = 1.5;
+
 /**
- * An existing run made straight: each leg square to the nearest wall and hugging the faces
- * it nears (as nextBend has it, each bend kept as far along as it was), a corner added into
- * a fixed end (`end`: its compressor), and bends that don't turn or go nowhere dropped. The
- * whole path comes back, its first point (and with `end`, its last) where they were.
+ * An existing run made straight. A leg square to the last leg, the unit's wall (`axes`) or
+ * the nearest wall stays as it is; a crooked one is squared to whichever of those is nearest
+ * its way, its bend kept as far along as it was (so no jog follows), never through a wall it
+ * didn't go through. Then each leg between two bends that runs off the walls slides across
+ * onto the nearest face it can (up to SLIDE), its neighbours lengthening, so the run goes via
+ * the walls; the way into a fixed end (`end`: its compressor) is routed along the walls
+ * (legInto); bends that don't turn or go nowhere are dropped. The whole path comes back, its
+ * first point (and with `end`, its last) where they were.
  */
 export function tidyRoute(
   level: Level,
   path: readonly Vec2[],
-  opts: { end?: boolean; geom?: PlanGeometry } = {},
+  opts: { end?: boolean; geom?: PlanGeometry; axes?: TrunkAxes | null } = {},
 ): Vec2[] {
   const first = path[0];
   if (!first) return [];
   const geom = opts.geom ?? planGeometry(level);
-  const out: Vec2[] = [{ ...first }];
+  let out: Vec2[] = [{ ...first }];
   const last = opts.end && path.length >= 2 ? path[path.length - 1] : undefined;
   const bends = path.slice(1, last ? -1 : undefined);
   for (const q of bends) {
     const from = out[out.length - 1] as Vec2;
-    // A leg already square stays as it is; a crooked one is squared (and hugs, as tapped).
-    const axes = trunkAxes(level, from, geom);
-    if (squareTo(axes, from, q)) {
+    const sets = [legAxes(out[out.length - 2], from), opts.axes, trunkAxes(level, from, geom)];
+    const v = sub(q, from);
+    const square = sets.find((a): a is TrunkAxes => !!a && squareTo(a, from, q));
+    if (square) {
       // Exactly square: off by under a millimetre, it's put on the line.
-      const v = sub(q, from);
-      const ax = Math.abs(dot(v, axes.n)) < TINY ? axes.d : axes.n;
-      const off = Math.abs(dot(v, ax === axes.d ? axes.n : axes.d));
+      const ax = Math.abs(dot(v, square.n)) < TINY ? square.d : square.n;
+      const off = Math.abs(crossOf(ax, v));
       out.push(off < 1e-9 ? { ...q } : along(from, ax, dot(v, ax)));
       continue;
     }
-    const b = nextBend(level, from, q, { geom, target: last });
-    if (b) out.push(b.at);
+    // Squared to the axis nearest its way, as far along it as the bend was.
+    let axis: Vec2 | null = null;
+    let s = 0;
+    for (const set of sets) {
+      if (!set) continue;
+      for (const a of [set.d, set.n]) {
+        const c = dot(v, a);
+        if (Math.abs(c) > Math.abs(s) + 1e-9) {
+          axis = c < 0 ? { x: -a.x, y: -a.y } : a;
+          s = Math.abs(c);
+        }
+      }
+    }
+    if (!axis) continue;
+    const t = stopShort(level, geom, from, axis, s, q);
+    if (t >= TINY) out.push(along(from, axis, t));
   }
+  out = hugLegs(level, simplifyPath(out), geom);
   if (last) {
     out.push(
-      ...legInto(level, out[out.length - 1] as Vec2, last, { geom, prev: out[out.length - 2] }),
+      ...legInto(level, out[out.length - 1] as Vec2, last, {
+        geom,
+        prev: out[out.length - 2],
+        axes: opts.axes,
+        alongWalls: true,
+      }),
       { ...last },
     );
   }
@@ -374,9 +556,103 @@ export function tidyRoute(
 }
 
 /**
- * A run with one end moved (the unit along its wall, or the compressor dragged): the bend
- * next to that end slides with it so the leg stays square, or with no bend to slide, a corner
- * goes in. The other end and the far bends stay.
+ * Each leg between two bends (both free to move, the first point fixed) that runs off every
+ * wall face slid across onto the nearest face parallel to it, up to SLIDE away, where its
+ * neighbours (square to it) only lengthen and none of the three legs goes through a wall it
+ * didn't already.
+ */
+function hugLegs(level: Level, pts: Vec2[], geom: PlanGeometry): Vec2[] {
+  const out = pts.map((p) => ({ ...p }));
+  const faces = obstacles(geom).faces;
+  const crossed = (a: Vec2 | undefined, b: Vec2 | undefined) =>
+    a && b ? new Set(wallsCrossed(level, a, b, geom).map((w) => w.wallId)) : new Set<string>();
+  const within = (now: Set<string>, was: Set<string>) => [...now].every((w) => was.has(w));
+  for (let i = 1; i + 1 < out.length; i++) {
+    const a = out[i] as Vec2;
+    const b = out[i + 1] as Vec2;
+    const e = unit(sub(b, a));
+    if (!e) continue;
+    const before = out[i - 1] as Vec2;
+    const after = out[i + 2];
+    const squareBy = (p: Vec2 | undefined, q: Vec2) => {
+      const u = p ? unit(sub(q, p)) : null;
+      return !p || !u || Math.abs(dot(u, e)) < 1e-6;
+    };
+    if (!squareBy(before, a) || !squareBy(after, b)) continue;
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const options: Vec2[] = [];
+    let hugging = false;
+    for (const face of faces) {
+      if (Math.abs(dot(face.normal, e)) > 1e-6) continue;
+      const ua = dot(sub(a, face.f.a), face.f.d);
+      const ub = dot(sub(b, face.f.a), face.f.d);
+      const lo = Math.max(Math.min(ua, ub), face.lo - TRUNK_OFF);
+      const hi = Math.min(Math.max(ua, ub), face.hi + TRUNK_OFF);
+      // Alongside it for at least half the leg.
+      if (hi - lo < Math.min(len, 0.3) * 0.5) continue;
+      const delta = dot(sub(face.origin, a), face.normal);
+      if (Math.abs(delta) < 1e-6) {
+        hugging = true;
+        break;
+      }
+      // The shift onto its hug line, along the face's normal.
+      if (Math.abs(delta) <= SLIDE) options.push(along({ x: 0, y: 0 }, face.normal, delta));
+    }
+    if (hugging) continue;
+    const was = [crossed(before, a), crossed(a, b), crossed(b, after)];
+    for (const step of options.sort((p, q) => Math.hypot(p.x, p.y) - Math.hypot(q.x, q.y))) {
+      const a2 = { x: a.x + step.x, y: a.y + step.y };
+      const b2 = { x: b.x + step.x, y: b.y + step.y };
+      const now = [crossed(before, a2), crossed(a2, b2), crossed(b2, after)];
+      if (now.every((n, k) => within(n, was[k] as Set<string>))) {
+        out[i] = a2;
+        out[i + 1] = b2;
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** Where the line through p along u meets the line through q along w (null if parallel). */
+function meet(p: Vec2, u: Vec2, q: Vec2, w: Vec2): Vec2 | null {
+  const den = crossOf(u, w);
+  if (Math.abs(den) < 1e-9) return null;
+  return along(p, u, crossOf(sub(q, p), w) / den);
+}
+
+/**
+ * A path re-made from its legs: each leg keeps its direction (from `path`) and runs through
+ * its anchor (its first point, or the one given in `anchors`), and each bend is where two
+ * legs meet. The ends are `start` and `end`. Legs that don't turn are kept as they were.
+ */
+function fromLegs(
+  path: readonly Vec2[],
+  start: Vec2,
+  end: Vec2,
+  anchors: ReadonlyMap<number, Vec2>,
+): Vec2[] {
+  const n = path.length;
+  const dirs = path.slice(1).map((p, k) => unit(sub(p, path[k] as Vec2)));
+  const anchor = (k: number) =>
+    k === 0 ? start : k === n - 2 ? end : (anchors.get(k) ?? (path[k] as Vec2));
+  const out: Vec2[] = [{ ...start }];
+  for (let i = 1; i < n - 1; i++) {
+    const u = dirs[i - 1];
+    const w = dirs[i];
+    const p = u && w ? meet(anchor(i - 1), u, anchor(i), w) : null;
+    out.push(p ?? { ...(path[i] as Vec2) });
+  }
+  out.push({ ...end });
+  return out;
+}
+
+/**
+ * A run with one end moved (the unit along its wall, or the compressor dragged): every leg
+ * keeps its direction, the leg at that end now through it, and the bends are where the legs
+ * meet (so the bend next to it slides along its other leg); with no bend to slide, a corner
+ * goes in. Give it the path as it was when the drag began, every move: a bend that lines up
+ * for a moment isn't lost.
  */
 export function movePathEnd(
   level: Level,
@@ -385,33 +661,57 @@ export function movePathEnd(
   to: Vec2,
   geom: PlanGeometry = planGeometry(level),
 ): Vec2[] {
-  const ordered = which === 'start' ? [...path].reverse() : [...path];
-  const end = ordered[ordered.length - 1];
-  const next = ordered[ordered.length - 2];
-  if (!end || !next) return [...path];
-  let out: Vec2[];
-  if (ordered.length >= 3) {
-    const axes = trunkAxes(level, next, geom);
-    const v = sub(end, next);
-    const before = ordered.slice(0, -2);
-    if (Math.abs(dot(v, axes.n)) < TINY || Math.abs(dot(v, axes.d)) < TINY) {
-      // The last leg ran along `ax`: the bend takes the end's new place across it.
-      const ax = Math.abs(dot(v, axes.n)) < TINY ? axes.d : axes.n;
-      const other = ax === axes.d ? axes.n : axes.d;
-      const slid = along(next, other, dot(sub(to, next), other));
-      out = [...before, slid, { ...to }];
-    } else out = [...before, next, { ...to }];
-  } else {
-    out = [next, ...legInto(level, next, to, { geom }), { ...to }];
+  const first = path[0];
+  const last = path[path.length - 1];
+  if (!first || !last || path.length < 2) return [...path];
+  if (path.length === 2) {
+    const [a, b] = which === 'start' ? [to, last] : [first, to];
+    return [a, ...legInto(level, a, b, { geom }), b];
   }
-  out = simplifyPath(out);
-  return which === 'start' ? out.reverse() : out;
+  const start = which === 'start' ? to : first;
+  const end = which === 'end' ? to : last;
+  return simplifyPath(fromLegs(path, start, end, new Map()));
 }
 
 /**
- * A bend dragged to `at`: its neighbours slide so the legs either side stay square, except a
- * fixed end (the start, and with `fixedEnd` the compressor), along whose leg the bend slides
- * instead.
+ * A spot moved onto the hug line of a wall face within `tol` (TRUNK_SNAP) of it, square to
+ * the axes given; then onto a second face square to the first, into a corner.
+ */
+export function snapToFaces(
+  level: Level,
+  p: Vec2,
+  axes: TrunkAxes,
+  opts: { geom?: PlanGeometry; tol?: number } = {},
+): Vec2 {
+  const geom = opts.geom ?? planGeometry(level);
+  const tol = opts.tol ?? TRUNK_SNAP;
+  let at = { ...p };
+  let used: Vec2 | null = null;
+  for (let pass = 0; pass < 2; pass++) {
+    let best: { face: Face; dist: number } | null = null;
+    for (const face of obstacles(geom).faces) {
+      const onAxis =
+        Math.abs(Math.abs(dot(face.normal, axes.d)) - 1) < 1e-3 ||
+        Math.abs(Math.abs(dot(face.normal, axes.n)) - 1) < 1e-3;
+      if (!onAxis || (used && Math.abs(dot(face.normal, used)) > 0.5)) continue;
+      const dist = dot(sub(at, face.origin), face.normal);
+      if (Math.abs(dist) > tol) continue;
+      const u = dot(sub(at, face.f.a), face.f.d);
+      if (u < face.lo - TRUNK_OFF - 1e-6 || u > face.hi + TRUNK_OFF + 1e-6) continue;
+      if (!best || Math.abs(dist) < Math.abs(best.dist)) best = { face, dist };
+    }
+    const b = best as { face: Face; dist: number } | null;
+    if (!b) break;
+    at = along(at, b.face.normal, -b.dist);
+    used = b.face.normal;
+  }
+  return at;
+}
+
+/**
+ * A bend dragged to `at`: its neighbours slide along their other legs so every leg keeps its
+ * direction, except a fixed end (the start, and with `fixedEnd` the compressor), along whose
+ * leg the bend slides instead. Give it the path from when the drag began.
  */
 export function dragBend(
   level: Level,
@@ -422,28 +722,31 @@ export function dragBend(
 ): Vec2[] {
   const p = path[index];
   if (!p || index === 0) return [...path];
-  const geom = opts.geom ?? planGeometry(level);
-  const axes = trunkAxes(level, p, geom);
   const out = path.map((q) => ({ ...q }));
   const fixed = (j: number) => j === 0 || (!!opts.fixedEnd && j === path.length - 1);
+  const legs = [index - 1, index + 1]
+    .map((j) => {
+      const q = path[j];
+      const u = q ? unit(sub(q, p)) : null;
+      return q && u ? { j, q, u } : null;
+    })
+    .filter((l): l is { j: number; q: Vec2; u: Vec2 } => !!l);
+  // Held by the fixed neighbours: on their legs' lines.
+  const held = legs.filter((l) => fixed(l.j));
   let to = { ...at };
-  const slides: { j: number; across: Vec2 }[] = [];
-  for (const j of [index - 1, index + 1]) {
-    const q = path[j];
-    if (!q) continue;
-    const v = sub(q, p);
-    const onD = Math.abs(dot(v, axes.n)) < TINY;
-    const onN = Math.abs(dot(v, axes.d)) < TINY;
-    if (!onD && !onN) continue;
-    // The axis the leg runs across: it must stay level with the bend on it.
-    const across = onD ? axes.n : axes.d;
-    if (fixed(j)) to = along(to, across, dot(sub(q, to), across));
-    else slides.push({ j, across });
-  }
+  const [h1, h2] = held;
+  if (h1 && h2) to = meet(h1.q, h1.u, h2.q, h2.u) ?? to;
+  else if (h1) to = along(h1.q, h1.u, dot(sub(at, h1.q), h1.u));
   out[index] = to;
-  for (const { j, across } of slides) {
-    const q = out[j] as Vec2;
-    out[j] = along(q, across, dot(sub(to, q), across));
+  for (const l of legs) {
+    if (fixed(l.j)) continue;
+    // The neighbour slides along its other leg to stay on this leg's line.
+    const k = l.j + (l.j < index ? -1 : 1);
+    const far = path[k];
+    const w = far ? unit(sub(l.q, far)) : null;
+    // A free last bend (no compressor yet) just moves across, onto this leg's line.
+    const slid = far && w ? meet(far, w, to, l.u) : along(to, l.u, dot(sub(l.q, to), l.u));
+    if (slid) out[l.j] = slid;
   }
   return out;
 }
@@ -451,33 +754,41 @@ export function dragBend(
 /**
  * A point changed (`patch`) with the trunking that ends on it kept square: a compressor
  * moved takes the last bend of each run into it along, an aircon unit moved along its wall
- * its first bend (movePathEnd). One command, so a drag is one undo step.
+ * its first bend (movePathEnd). One command, so a drag is one undo step. Give it the level
+ * from when the drag began, every move.
  */
-export function moveWithTrunking(level: Level, pointId: string, patch: PointPatch): Command {
+export function moveWithTrunking(
+  level: Level,
+  pointId: string,
+  patch: PointPatch,
+  geomIn?: PlanGeometry,
+): Command {
   const was = level.points[pointId];
   const set = updatePoint(level.id, pointId, patch);
+  if (!was || !(patch.at || patch.wall)) return set;
+  const now = { ...was, ...patch } as ElecPoint;
+  const units =
+    now.kind === 'compressor' && now.at
+      ? Object.values(level.points).filter((u) => u.kind === 'aircon' && u.compressorId === pointId)
+      : now.kind === 'aircon' && (was.route?.length || was.compressorId)
+        ? [was]
+        : [];
+  // Nothing ends on it: just the point.
+  if (units.length === 0) return set;
+  const geom = geomIn ?? planGeometry(level);
   const follow: { id: string; route: Vec2[] }[] = [];
-  if (was && (patch.at || patch.wall)) {
-    const now = { ...was, ...patch } as ElecPoint;
-    const geom = planGeometry(level);
+  for (const u of units) {
+    const path = trunkingPath(level, u);
+    if (path.length < 2) continue;
+    const end = !!u.compressorId && !!level.points[u.compressorId]?.at;
     if (now.kind === 'compressor' && now.at) {
-      for (const u of Object.values(level.points)) {
-        if (u.kind !== 'aircon' || u.compressorId !== pointId) continue;
-        const path = trunkingPath(level, u);
-        if (path.length < 2) continue;
-        follow.push({
-          id: u.id,
-          route: movePathEnd(level, path, 'end', now.at, geom).slice(1, -1),
-        });
-      }
-    } else if (now.kind === 'aircon' && (was.route?.length || was.compressorId)) {
-      const path = trunkingPath(level, was);
-      const start = trunkingStart({ ...level, points: { ...level.points, [pointId]: now } }, now);
-      const end = !!was.compressorId && !!level.points[was.compressorId]?.at;
-      if (start && path.length >= 2) {
-        const moved = movePathEnd(level, path, 'start', start, geom);
-        follow.push({ id: pointId, route: moved.slice(1, end ? -1 : undefined) });
-      }
+      follow.push({ id: u.id, route: movePathEnd(level, path, 'end', now.at, geom).slice(1, -1) });
+    } else {
+      const moved = { ...level, points: { ...level.points, [pointId]: now } };
+      const start = trunkingStart(moved, now);
+      if (!start) continue;
+      const out = movePathEnd(level, path, 'start', start, geom);
+      follow.push({ id: u.id, route: out.slice(1, end ? -1 : undefined) });
     }
   }
   const updates = follow.map((f) => updatePoint(level.id, f.id, { route: f.route }));
@@ -490,96 +801,289 @@ export function moveWithTrunking(level: Level, pointId: string, patch: PointPatc
   };
 }
 
-/** The route of a unit with its bend `index` dragged to `at` (dragBend, ends fixed). */
-export function draggedRoute(level: Level, unit: ElecPoint, index: number, at: Vec2): Vec2[] {
-  const path = trunkingPath(level, unit);
-  const end = !!unit.compressorId && !!level.points[unit.compressorId]?.at;
-  const out = dragBend(level, path, index + 1, at, { fixedEnd: end });
+/**
+ * The route of a unit with its bend `index` dragged to `at` (dragBend, ends fixed), from the
+ * level as the drag began. With `snap`, the bend hugs a face it's dragged near.
+ */
+export function draggedRoute(
+  level: Level,
+  unitPoint: ElecPoint,
+  index: number,
+  at: Vec2,
+  opts: { geom?: PlanGeometry; snap?: boolean } = {},
+): Vec2[] {
+  const geom = opts.geom ?? planGeometry(level);
+  const path = trunkingPath(level, unitPoint);
+  const end = !!unitPoint.compressorId && !!level.points[unitPoint.compressorId]?.at;
+  const bend = path[index + 1];
+  const spot =
+    opts.snap && bend
+      ? snapToFaces(level, at, legAxes(path[index], bend) ?? trunkAxes(level, bend, geom), {
+          geom,
+        })
+      : at;
+  const out = dragBend(level, path, index + 1, spot, { fixedEnd: end, geom });
   return out.slice(1, end ? -1 : undefined);
+}
+
+/**
+ * After walls moved in a recipe (a corner dragged, a wall shifted, a room moved): every
+ * aircon run kept square. Each leg that hugged a face before still hugs it (it moves across
+ * with the wall), the first leg runs from where the unit now is, and the bends are where the
+ * legs meet (fromLegs). Call it in the same recipe, after the walls have moved.
+ */
+export function followRuns(lvl: Draft<Level>): void {
+  const units = Object.values(lvl.points ?? {}).filter(
+    (p) => p.kind === 'aircon' && (p.route?.length ?? 0) > 0,
+  );
+  if (units.length === 0) return;
+  const before = original(lvl) as Level | undefined;
+  if (!before) return;
+  const after = current(lvl) as Level;
+  const g0 = planGeometry(before);
+  const g1 = planGeometry(after);
+  const faces0 = obstacles(g0).faces;
+  for (const u of units) {
+    const was = before.points[u.id];
+    if (!was?.route?.length) continue;
+    const path = trunkingPath(before, was);
+    const start = trunkingStart(after, after.points[u.id] as ElecPoint);
+    if (!start || path.length < 2) continue;
+    const comp = was.compressorId ? after.points[was.compressorId]?.at : undefined;
+    const end = comp ?? (path[path.length - 1] as Vec2);
+    // Legs on a face's hug line: through the same face's hug line now.
+    const anchors = new Map<number, Vec2>();
+    for (let k = 0; k + 1 < path.length; k++) {
+      const a = path[k] as Vec2;
+      const b = path[k + 1] as Vec2;
+      const e = unit(sub(b, a));
+      if (!e) continue;
+      const face = faces0.find(
+        (f) =>
+          Math.abs(dot(f.normal, e)) < 1e-6 &&
+          Math.abs(dot(sub(a, f.origin), f.normal)) < 1e-6 &&
+          Math.max(dot(sub(a, f.f.a), f.f.d), dot(sub(b, f.f.a), f.f.d)) > f.lo - TRUNK_OFF &&
+          Math.min(dot(sub(a, f.f.a), f.f.d), dot(sub(b, f.f.a), f.f.d)) < f.hi + TRUNK_OFF,
+      );
+      const f1 = face && g1.frames[face.f.wall.id];
+      if (!face || !f1) continue;
+      const side = dot(face.normal, face.f.n) > 0 ? 1 : -1;
+      const normal = { x: f1.n.x * side, y: f1.n.y * side };
+      if (dot(normal, face.normal) < 1 - 1e-9) continue;
+      const origin = along(framePoint(f1, 0, side), normal, TRUNK_OFF);
+      anchors.set(k, along(a, normal, dot(sub(origin, a), normal)));
+    }
+    // A free last bend (no compressor) moves with its leg's face, if it hugged one.
+    const lastLeg = path.length - 2;
+    const freeEnd =
+      comp || !anchors.has(lastLeg)
+        ? end
+        : (() => {
+            const anchor = anchors.get(lastLeg) as Vec2;
+            const a = path[lastLeg] as Vec2;
+            return { x: end.x + anchor.x - a.x, y: end.y + anchor.y - a.y };
+          })();
+    const next = fromLegs(path, start, freeEnd, anchors);
+    const route = next.slice(1, comp ? -1 : undefined);
+    const same =
+      route.length === was.route.length &&
+      route.every((q, i) => {
+        const w = was.route?.[i];
+        return !!w && Math.hypot(q.x - w.x, q.y - w.y) < 1e-9;
+      });
+    if (!same) u.route = route;
+  }
 }
 
 // ---------------------------------------------------------------------------- along the walls
 
-function regionAt(level: Level, p: Vec2): string {
-  for (const [id, s] of roomShapes(level)) {
-    if (pointInPolygon(p, s.outer) && !s.holes.some((h) => pointInPolygon(p, h))) return id;
-  }
-  return 'outside';
-}
-
 /** What going through each kind of wall costs a route, in metres of trunking. */
 const THROUGH_COST: Record<TrunkCrossing['through'], number> = {
   window: 0.4,
+  passage: 0.4,
   solid: 0.8,
-  passage: 3,
-  door: 3,
+  door: 0.8,
 };
 /** A leg off every face (across the ceiling) costs this much more a metre. */
-const OFF_WALL = 0.6;
+const OFF_WALL = 1.5;
+/** A leg in a room other than the unit's or the ledge costs this much more a metre. */
+const AWAY = 0.3;
 /** Each turn, in metres. */
 const TURN = 0.2;
+/** How far round the unit's room and the ledge a route looks first (metres). */
+const REACH = 3;
 
 /**
- * A route along the walls from an aircon unit to a compressor at `compressor`: square to the
- * unit's wall, hugging the faces of the unit's room (TRUNK_OFF off them) and the outside
- * of the flat, through the outside wall or a window, onto the ledge. The cheapest by length,
- * turns, legs off a wall and walls drilled; it never goes into another room (the
- * compressor's aside). Its bends (the unit's `route`), or null with no such route.
+ * A route along the walls from an aircon unit to a compressor at `compressor` (on the aircon
+ * ledge), inside the flat: square to the unit's wall, hugging faces (TRUNK_OFF off them) at
+ * the ceiling line, through the unit's room and, if need be, other rooms and corridors (never
+ * the household shelter or the outside), through internal walls where it must, and into the
+ * ledge only through a wall that borders it. The cheapest by length, turns, legs off a wall,
+ * legs away from the unit's room and walls drilled. Its bends (the unit's `route`), or null
+ * with no such route (the ledge borders no room it can reach).
  */
 export function autoRoute(
   level: Level,
-  unit: ElecPoint,
+  unitPoint: ElecPoint,
   compressor: Vec2,
   geom: PlanGeometry = planGeometry(level),
 ): Vec2[] | null {
-  const start = trunkingStart(level, unit);
-  const pos = pointPosition(level, unit);
+  const start = trunkingStart(level, unitPoint);
+  const pos = pointPosition(level, unitPoint);
   if (!start || !pos?.dir) return null;
-  const { d, n } = axesOf(pos.dir);
-  const home = regionAt(level, start);
-  if (home === 'outside') return null;
-  const allowed = new Set([home, 'outside', regionAt(level, compressor)]);
+  return wallRoute(level, start, compressor, axesOf(pos.dir), { geom });
+}
+
+/**
+ * A route along the walls, inside the flat, from `from` to `to` (as autoRoute has it), square
+ * to `axes`; `way` is the way the run was already going at `from` (it won't double back).
+ * Its bends, or null with none.
+ */
+export function wallRoute(
+  level: Level,
+  start: Vec2,
+  compressor: Vec2,
+  axes: TrunkAxes,
+  opts: { geom?: PlanGeometry; way?: Vec2 | null } = {},
+): Vec2[] | null {
+  const geom = opts.geom ?? planGeometry(level);
+  const shapes = roomShapes(level);
+  const rooms = roomsOf(shapes);
+  const home = regionAt(rooms, start);
+  const ledge = regionAt(rooms, compressor);
+  if (home === 'outside' || ledge === 'outside') return null;
+  const boxOfRoom = (id: string) => {
+    const s = shapes.get(id);
+    return s ? boxOf(s.outer) : null;
+  };
+  const hb = boxOfRoom(home);
+  const lb = boxOfRoom(ledge);
+  if (!hb || !lb) return null;
+  // Near the unit's room and the ledge first; the whole flat if that finds nothing.
+  const near: Box = {
+    x0: Math.min(hb.x0, lb.x0) - REACH,
+    y0: Math.min(hb.y0, lb.y0) - REACH,
+    x1: Math.max(hb.x1, lb.x1) + REACH,
+    y1: Math.max(hb.y1, lb.y1) + REACH,
+  };
+  const job: RouteJob = {
+    level,
+    geom,
+    shapes,
+    rooms,
+    axes,
+    way: opts.way ?? null,
+    start,
+    compressor,
+    home,
+    ledge,
+    shelter: shelterWalls(level),
+  };
+  const first = routeWithin(job, near);
+  if (first.route || first.whole) return first.route;
+  return routeWithin(job, null).route;
+}
+
+interface RouteJob {
+  level: Level;
+  geom: PlanGeometry;
+  shapes: Map<string, RoomShape>;
+  rooms: Buckets<RoomEntry>;
+  /** The route runs square to these (the unit's wall). */
+  axes: TrunkAxes;
+  /** The way the run was already going at the start. */
+  way: Vec2 | null;
+  start: Vec2;
+  compressor: Vec2;
+  home: string;
+  ledge: string;
+  /** The household shelter's walls: never drilled. */
+  shelter: ReadonlySet<string>;
+}
+
+/** The walls of the household shelter (wallStatus 'shelter'). */
+function shelterWalls(level: Level): Set<string> {
+  const out = new Set<string>();
+  if (!Object.values(level.rooms).some((r) => SHELTER_ROOM.test(r.name))) return out;
+  for (const id of Object.keys(level.walls)) if (wallStatus(level, id) === 'shelter') out.add(id);
+  return out;
+}
+
+function routeWithin(job: RouteJob, window: Box | null): { route: Vec2[] | null; whole: boolean } {
+  const { level, geom, shapes, rooms, start, compressor, home, ledge } = job;
+  const { d, n } = job.axes;
   const obs = obstacles(geom);
+  const overlaps = (b: Box) =>
+    !window || (b.x1 > window.x0 && b.x0 < window.x1 && b.y1 > window.y0 && b.y0 < window.y1);
+  // Rooms it may go through: any but the shelter and other ledges, within the window.
+  const allowed = new Set<string>();
+  let whole = true;
+  for (const [id, s] of shapes) {
+    const name = level.rooms[id]?.name ?? '';
+    const ok = id === home || id === ledge || (!SHELTER_ROOM.test(name) && !LEDGE_ROOM.test(name));
+    if (!ok) continue;
+    if (overlaps(boxOf(s.outer))) allowed.add(id);
+    else whole = false;
+  }
+  // The area the grid covers: the allowed rooms, and a little round them.
+  let area: Box | null = null;
+  for (const id of allowed) {
+    const s = shapes.get(id);
+    if (!s) continue;
+    const b = boxOf(s.outer);
+    area = area
+      ? {
+          x0: Math.min(area.x0, b.x0),
+          y0: Math.min(area.y0, b.y0),
+          x1: Math.max(area.x1, b.x1),
+          y1: Math.max(area.y1, b.y1),
+        }
+      : b;
+  }
+  if (!area) return { route: null, whole };
+  const pad = 0.5;
+  const box = { x0: area.x0 - pad, y0: area.y0 - pad, x1: area.x1 + pad, y1: area.y1 + pad };
 
   // The lines a route may run on: each face's hug line square to the axes (u = const or
-  // v = const, with the stretch it hugs), and through both ends.
-  // Keyed to 0.1 mm; each line at the first value given it (the ends', so they lie on theirs).
+  // v = const, with the stretch it hugs), and through both ends. Keyed to 0.1 mm; each line
+  // at the first value given it (the ends', so they lie on theirs).
   const us = new Map<number, [number, number][]>();
   const vs = new Map<number, [number, number][]>();
-  const exact = new Map<Map<number, [number, number][]>, Map<number, number>>([
-    [us, new Map()],
-    [vs, new Map()],
-  ]);
+  const exU = new Map<number, number>();
+  const exV = new Map<number, number>();
   const key = (x: number) => Math.round(x * 1e4) / 1e4;
-  const addLine = (m: Map<number, [number, number][]>, c: number, ext?: [number, number]) => {
+  const addLine = (
+    m: Map<number, [number, number][]>,
+    ex: Map<number, number>,
+    c: number,
+    ext?: [number, number],
+  ) => {
     const k = key(c);
     const list = m.get(k) ?? [];
     if (ext) list.push(ext);
     m.set(k, list);
-    const ex = exact.get(m) as Map<number, number>;
     if (!ex.has(k)) ex.set(k, c);
   };
   const toU = (p: Vec2) => dot(p, d);
   const toV = (p: Vec2) => dot(p, n);
   for (const p of [start, compressor]) {
-    addLine(us, toU(p));
-    addLine(vs, toV(p));
+    addLine(us, exU, toU(p));
+    addLine(vs, exV, toV(p));
   }
   for (const face of obs.faces) {
     const a = framePoint(face.f, face.lo - TRUNK_OFF, 0);
     const b = framePoint(face.f, face.hi + TRUNK_OFF, 0);
+    if (!boxesMeet(a, b, box) && !inBox(a, box)) continue;
     if (Math.abs(dot(face.normal, d)) > 0.999) {
       const e = [toV(a), toV(b)].sort((x, y) => x - y) as [number, number];
-      addLine(us, toU(face.origin), e);
+      addLine(us, exU, toU(face.origin), e);
     } else if (Math.abs(dot(face.normal, n)) > 0.999) {
       const e = [toU(a), toU(b)].sort((x, y) => x - y) as [number, number];
-      addLine(vs, toV(face.origin), e);
+      addLine(vs, exV, toV(face.origin), e);
     }
   }
   const U = [...us.keys()].sort((a, b) => a - b);
   const V = [...vs.keys()].sort((a, b) => a - b);
-  const exU = exact.get(us) as Map<number, number>;
-  const exV = exact.get(vs) as Map<number, number>;
   const at = (i: number, j: number): Vec2 => {
     const u = exU.get(U[i] as number) as number;
     const v = exV.get(V[j] as number) as number;
@@ -591,17 +1095,35 @@ export function autoRoute(
   const WALL = -1;
   const NO = -2;
   const state = new Int8Array(NU * NV);
+  const region = new Map<number, string>();
   for (let i = 0; i < NU; i++)
     for (let j = 0; j < NV; j++) {
       const p = at(i, j);
-      state[i * NV + j] = inWall(obs, p) ? WALL : allowed.has(regionAt(level, p)) ? 1 : NO;
+      const k = i * NV + j;
+      if (!inBox(p, box)) state[k] = NO;
+      else if (inWall(obs, p)) state[k] = WALL;
+      else {
+        const r = regionAt(rooms, p);
+        region.set(k, r);
+        state[k] = allowed.has(r) ? 1 : NO;
+      }
     }
   const startNode = U.indexOf(key(toU(start))) * NV + V.indexOf(key(toV(start)));
   const endNode = U.indexOf(key(toU(compressor))) * NV + V.indexOf(key(toV(compressor)));
-  if (state[startNode] !== 1 || state[endNode] !== 1) return null;
+  if (state[startNode] !== 1 || state[endNode] !== 1) return { route: null, whole };
 
   const hugs = (ext: [number, number][] | undefined, c: number) =>
     !!ext?.some(([lo, hi]) => c >= lo - 1e-6 && c <= hi + 1e-6);
+  /** Whether every stretch of ab clear of walls is in a room it may go through. */
+  const clearOfOthers = (a: Vec2, b: Vec2) => {
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const steps = Math.ceil(len / 0.05);
+    for (let k = 1; k < steps; k++) {
+      const p = { x: a.x + ((b.x - a.x) * k) / steps, y: a.y + ((b.y - a.y) * k) / steps };
+      if (!inWall(obs, p) && !allowed.has(regionAt(rooms, p))) return false;
+    }
+    return true;
+  };
   // The four ways out of a crossing: +u, -u, +v, -v.
   const edgeCache = new Map<number, { to: number; cost: number } | null>();
   const edge = (node: number, dir: number): { to: number; cost: number } | null => {
@@ -623,12 +1145,20 @@ export function autoRoute(
         const b = at(i, j);
         const len = Math.hypot(b.x - a.x, b.y - a.y);
         const walls = wallsCrossed(level, a, b, geom);
-        if (walls.some((w) => w.lengthwise)) break;
+        if (walls.some((w) => w.lengthwise || w.through === 'door' || job.shelter.has(w.wallId)))
+          break;
+        // Through a wall: what's on the far side of each must be somewhere it may go. Both
+        // ends are; a leg through one wall and no further needs no more looking.
+        if (walls.length > 1 || (walls.length === 1 && len > 0.6)) {
+          if (!clearOfOthers(a, b)) break;
+        }
         const hug =
           di !== 0
             ? hugs(vs.get(V[j0] as number), ((U[i0] as number) + (U[i] as number)) / 2)
             : hugs(us.get(U[i0] as number), ((V[j0] as number) + (V[j] as number)) / 2);
-        let cost = len * (hug ? 1 : 1 + OFF_WALL);
+        const r = region.get(node);
+        const away = r !== home && r !== ledge;
+        let cost = len * (1 + (hug ? 0 : OFF_WALL) + (away ? AWAY : 0));
         for (const w of walls) {
           const glass = !w.wallId.startsWith('hub:') && isGlass(level.walls[w.wallId] ?? {});
           cost += glass ? 5 : THROUGH_COST[w.through];
@@ -678,8 +1208,20 @@ export function autoRoute(
     }
     return top;
   };
-  // State s = node * 5 + way in (4: none, at the start).
-  const s0 = startNode * 5 + 4;
+  // State s = node * 5 + way in (4: none, at the start, or the way the run already goes).
+  const w = job.way;
+  const wayIn = !w
+    ? 4
+    : dot(w, d) > 0.999
+      ? 0
+      : dot(w, d) < -0.999
+        ? 1
+        : dot(w, n) > 0.999
+          ? 2
+          : dot(w, n) < -0.999
+            ? 3
+            : 4;
+  const s0 = startNode * 5 + wayIn;
   dist[s0] = 0;
   push(0, s0);
   let goal = -1;
@@ -706,51 +1248,69 @@ export function autoRoute(
       }
     }
   }
-  if (goal < 0) return null;
+  if (goal < 0) return { route: null, whole };
   const nodes: number[] = [];
   for (let s = goal; s >= 0; s = prev[s] as number) nodes.push(Math.floor(s / 5));
   nodes.reverse();
   const path = nodes.map((k) => at(Math.floor(k / NV), k % NV));
   path[0] = { ...start };
   path[path.length - 1] = { ...compressor };
-  return simplifyPath(path).slice(1, -1);
+  return { route: simplifyPath(path).slice(1, -1), whole };
 }
 
 /** Where a run along the walls ends: the unit's compressor, the nearest one, or a new one. */
-function compressorFor(level: Level, unit: ElecPoint): { at: Vec2; id?: string } | null {
-  const own = unit.compressorId ? level.points[unit.compressorId] : undefined;
+function compressorFor(level: Level, unitPoint: ElecPoint): { at: Vec2; id?: string } | null {
+  const own = unitPoint.compressorId ? level.points[unitPoint.compressorId] : undefined;
   if (own?.at) return { at: own.at, id: own.id };
-  const from = pointPosition(level, unit)?.at;
+  const from = pointPosition(level, unitPoint)?.at;
   if (!from) return null;
   const dist = (p: Vec2) => Math.hypot(p.x - from.x, p.y - from.y);
   const near = Object.values(level.points)
     .filter((q): q is ElecPoint & { at: Vec2 } => q.kind === 'compressor' && !!q.at)
     .sort((p, q) => dist(p.at) - dist(q.at))[0];
   if (near) return { at: near.at, id: near.id };
-  // A new one in the middle of the nearest ledge.
+  // A new one on the nearest ledge, towards the unit's end of it (clear of its name).
   const ledges: Vec2[] = [];
   for (const [id, shape] of roomShapes(level)) {
-    if (LEDGE_ROOM.test(level.rooms[id]?.name ?? '')) ledges.push(labelPoint(shape.outer));
+    if (LEDGE_ROOM.test(level.rooms[id]?.name ?? '')) ledges.push(ledgeSpot(shape, from));
   }
   const spot = ledges.sort((p, q) => dist(p) - dist(q))[0];
   return spot ? { at: spot } : null;
 }
 
 /**
- * Routes an aircon unit's trunking along the walls to its compressor (the nearest one, or
- * a new one on the ledge), in one undo step. Null where there's no compressor or ledge to
- * go to or no clean route there: the bends are then tapped by hand.
+ * Where a new compressor goes on a ledge: level with the middle, along the ledge's length
+ * towards `from`'s end, its box clear of the walls; the middle if that isn't on the ledge.
+ */
+function ledgeSpot(shape: RoomShape, from: Vec2): Vec2 {
+  const mid = labelPoint(shape.outer);
+  const b = boxOf(shape.outer);
+  const half = 0.8 / 2 + 0.2;
+  const alongX = b.x1 - b.x0 >= b.y1 - b.y0;
+  const [lo, hi] = alongX ? [b.x0 + half, b.x1 - half] : [b.y0 + half, b.y1 - half];
+  if (hi <= lo) return mid;
+  const toward = alongX ? from.x : from.y;
+  const at = toward > (lo + hi) / 2 ? hi : lo;
+  const spot = alongX ? { x: at, y: mid.y } : { x: mid.x, y: at };
+  return pointInPolygon(spot, shape.outer) ? spot : mid;
+}
+
+/**
+ * Routes an aircon unit's trunking along the walls, inside the flat, to its compressor (the
+ * nearest one, or a new one on the ledge), in one undo step. Else why not (NO_LEDGE,
+ * NO_INSIDE_ROUTE): the bends are then tapped by hand.
  */
 export function routeAlongWalls(
   level: Level,
   unitId: string,
-): { command: Command; compressorId: string } | null {
-  const unit = level.points[unitId];
-  if (unit?.kind !== 'aircon') return null;
-  const comp = compressorFor(level, unit);
-  if (!comp) return null;
-  const route = autoRoute(level, unit, comp.at);
-  if (!route) return null;
+  geom: PlanGeometry = planGeometry(level),
+): { command: Command; compressorId: string } | { error: string } {
+  const unitPoint = level.points[unitId];
+  if (unitPoint?.kind !== 'aircon') return { error: NO_INSIDE_ROUTE };
+  const comp = compressorFor(level, unitPoint);
+  if (!comp) return { error: NO_LEDGE };
+  const route = autoRoute(level, unitPoint, comp.at, geom);
+  if (!route) return { error: NO_INSIDE_ROUTE };
   const added = comp.id ? null : addPoint(level.id, { kind: 'compressor', at: comp.at });
   const compressorId = comp.id ?? (added?.pointId as string);
   const set = updatePoint(level.id, unitId, { route, compressorId });
@@ -769,14 +1329,15 @@ export function routeAlongWalls(
 /** The run of an aircon unit straightened (tidyRoute), as its new bends; null if no change. */
 export function straightenedRoute(
   level: Level,
-  unit: ElecPoint,
-  path: readonly Vec2[],
+  unitPoint: ElecPoint,
+  geom: PlanGeometry = planGeometry(level),
 ): Vec2[] | null {
+  const path = trunkingPath(level, unitPoint);
   if (path.length < 2) return null;
-  const end = !!unit.compressorId && !!level.points[unit.compressorId]?.at;
-  const tidy = tidyRoute(level, path, { end });
+  const end = !!unitPoint.compressorId && !!level.points[unitPoint.compressorId]?.at;
+  const tidy = tidyRoute(level, path, { end, geom, axes: unitAxes(level, unitPoint) });
   const route = tidy.slice(1, end ? -1 : undefined);
-  const was = unit.route ?? [];
+  const was = unitPoint.route ?? [];
   const same =
     route.length === was.length &&
     route.every((q, i) => {

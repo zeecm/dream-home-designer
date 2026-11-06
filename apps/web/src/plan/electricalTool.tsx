@@ -4,6 +4,7 @@ import {
   type Level,
   type Vec2,
   addPoint,
+  axesOf,
   deletePoint,
   legInto,
   nextBend,
@@ -13,13 +14,15 @@ import {
   pointRoom,
   roomShapes,
   routeAlongWalls,
+  simplifyPath,
   trunkingLength,
   trunkingPath,
+  unitAxes,
   updatePoint,
 } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../editor';
-import { NO_ROUTE, glyphRadius } from '../electrical/electrical';
+import { glyphRadius } from '../electrical/electrical';
 import { ElecGlyph } from '../electrical/glyph';
 import { currentLevel, useStore } from '../store';
 import { icons } from '../ui/icons';
@@ -108,6 +111,26 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
     const next = runView(level, c.view, c.size, at);
     if (next !== c.view) useEditor.getState().setView(next, true);
   }, [runId]);
+  // A pinch or a pan that left the run's last bend under the bar: brought back below it once
+  // the plan settles.
+  const view = ctx.view;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on each view change, once settled
+  useEffect(() => {
+    if (!runId) return;
+    const timer = window.setTimeout(() => {
+      const c = ctxRef.current;
+      const level = currentLevel() ?? c.level;
+      const ac = level.points[runId];
+      const last = ac && trunkingPath(level, ac).at(-1);
+      if (!last) return;
+      const s = worldToScreen(c.view, c.size, last);
+      const under = s.y >= 0 && s.y < BAR_H + 8 && s.x >= 0 && s.x <= c.size.width;
+      if (!under) return;
+      const by = BAR_H + 48 - s.y;
+      useEditor.getState().setView({ ...c.view, cy: c.view.cy - by / c.view.zoom }, true);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [runId, view]);
 
   /** Where a point of the kind picked would go for this spot. */
   const spot = (world: Vec2, alt: boolean): ElecPoint | null => {
@@ -171,9 +194,9 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
   const alongWalls = () => {
     const r = runningUnit();
     if (!r) return;
-    const routed = routeAlongWalls(live(), r.ac.id);
-    if (!routed) {
-      useStore.setState({ notice: NO_ROUTE });
+    const routed = routeAlongWalls(live(), r.ac.id, ctx.geom);
+    if ('error' in routed) {
+      useStore.setState({ notice: routed.error });
       return;
     }
     ctx.dispatch(routed.command);
@@ -183,26 +206,37 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
 
   /**
    * What a tap here does to the run: the legs it adds from the last bend (square, as
-   * nextBend and legInto have them), and where it ends the run, if it does: on a compressor
-   * tapped, or on a new one on the aircon ledge.
+   * nextBend has them, and into a compressor or the ledge along the walls, as legInto has
+   * them), and where it ends the run, if it does: on a compressor tapped, or on a new one on
+   * the aircon ledge.
    */
   const step = (level: Level, ac: ElecPoint, p: PlanPointer) => {
     const path = trunkingPath(level, ac);
     const last = path.at(-1);
     if (!last) return null;
     const prev = path.at(-2);
+    const axes = unitAxes(level, ac);
     const comp = compressorAt(p);
     const compAt = comp ? level.points[comp]?.at : undefined;
-    const ledge = !comp && onLedge(level, p.world) ? gridSnap(p.world, 0.05, p.alt) : undefined;
+    const spotOn = gridSnap(p.world, 0.05, p.alt);
+    const ledge = !comp && onLedge(level, spotOn) ? spotOn : undefined;
     const end = compAt ?? ledge;
     if (end) {
-      const corner = p.alt ? [] : legInto(level, last, end, { geom: ctx.geom, prev });
+      const corner = p.alt
+        ? []
+        : legInto(level, last, end, { geom: ctx.geom, prev, axes, alongWalls: true });
       return { legs: [last, ...corner, end], comp, ledge };
     }
     const bend = nextBend(level, last, p.world, {
       alt: p.alt,
       geom: ctx.geom,
       target: runTarget(level, last, true),
+      axes: [
+        axes,
+        prev && Math.hypot(last.x - prev.x, last.y - prev.y) > 1e-9
+          ? axesOf({ x: last.x - prev.x, y: last.y - prev.y })
+          : null,
+      ],
     });
     return bend ? { legs: [last, bend.at] } : null;
   };
@@ -214,11 +248,15 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
       const run = runningUnit();
       if (run) {
         const s = step(ctx.level, run.ac, p);
+        // The preview is of where the finger was: it goes with the tap (and the ghost of a
+        // new point with it, so none is left behind once the run ends).
+        setAim(null);
+        setGhost(null);
         if (!s) return true;
-        const route = [
-          ...(run.ac.route ?? []),
-          ...s.legs.slice(1, s.comp || s.ledge ? -1 : undefined),
-        ];
+        const ends = !!(s.comp || s.ledge);
+        // Bends that go straight on are merged as the run is made.
+        const path = simplifyPath([...trunkingPath(ctx.level, run.ac), ...s.legs.slice(1)]);
+        const route = path.slice(1, ends ? -1 : undefined);
         if (s.comp) {
           ctx.dispatch(updatePoint(ctx.level.id, run.ac.id, { route, compressorId: s.comp }), {
             coalesceKey: run.t.key,
@@ -273,6 +311,7 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
       setMissed((m) => (m && Math.hypot(p.screen.x - m.at.x, p.screen.y - m.at.y) < 40 ? m : null));
     },
     up: () => {},
+    touchCancel: () => setAim(null),
     key: (e) => {
       const run = runningUnit();
       if (run && e.key === 'Backspace') {
@@ -304,7 +343,7 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
         // The next leg (and the corner into a compressor or the ledge) where a tap would put it.
         const legs = (aim && step(level, run, aim)?.legs) ?? [];
         const next = trunkingLength(legs);
-        const sofar = trunkingLength(path) + next;
+        const sofar = trunkingLength(path);
         const end = legs.at(-1);
         const tag = end && s(end);
         const label = formatLength(next);
@@ -338,7 +377,10 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
               >
                 <span className="trunking-bar-text">
                   Tap each bend, then the compressor or the ledge.{' '}
-                  <span className="num">{formatLength(sofar, 1)}</span>
+                  <span className="num" data-testid="trunking-sofar">
+                    {formatLength(sofar, 1)}
+                    {next > 1e-3 ? ` + ${formatLength(next, 1)} next` : ''}
+                  </span>
                 </span>
                 <span className="draw-bar-row">
                   <button
@@ -365,7 +407,6 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
                     type="button"
                     className="btn"
                     onClick={alongWalls}
-                    aria-label="Route along the walls"
                     title="Route the trunking along the walls to the ledge"
                   >
                     <span className="trunking-wide">Route along the walls</span>
@@ -375,6 +416,18 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
                     type="button"
                     className="btn btn-primary"
                     onClick={() => {
+                      // Bends that go straight on are merged as the run is made.
+                      const path = trunkingPath(live(), run);
+                      const tidy = simplifyPath(path);
+                      if (tidy.length < path.length) {
+                        const end = !!run.compressorId;
+                        ctx.dispatch(
+                          updatePoint(ctx.level.id, run.id, {
+                            route: tidy.slice(1, end ? -1 : undefined),
+                          }),
+                          { coalesceKey: trunking.key },
+                        );
+                      }
                       setTrunking(null);
                       select({ kind: 'point', id: run.id });
                     }}
