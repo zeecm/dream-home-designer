@@ -74,5 +74,7 @@ test('a built-in wardrobe is priced by the foot run, and resizing it reprices it
   await page.keyboard.press('Escape');
   await page.locator('.cost-summary').getByRole('button', { name: 'See estimate' }).click();
   const dialog = page.getByRole('dialog', { name: 'Cost estimate' });
-  await expect(dialog.locator('.estimate-line', { hasText: 'Built-in wardrobe' })).toContainText('8 ft run');
+  await expect(dialog.locator('.estimate-line', { hasText: 'Built-in wardrobe' })).toContainText(
+    '8 ft run',
+  );
 });
