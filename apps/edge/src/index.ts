@@ -1,6 +1,6 @@
 import { Container, getContainer } from '@cloudflare/containers';
 import { type AuthEnv, d1Store, handleAuth } from './auth';
-import { allowCreate, d1Quota } from './quota';
+import { allowComment, allowCreate, d1Quota } from './quota';
 
 export interface Env extends AuthEnv {
   /** Accounts (D1): people, sessions and the plans they keep. */
@@ -8,6 +8,8 @@ export interface Env extends AuthEnv {
   API: DurableObjectNamespace<ApiContainer>;
   WRITE_LIMIT: RateLimit;
   CREATE_LIMIT: RateLimit;
+  /** Comment writes per address per minute. */
+  COMMENT_LIMIT: RateLimit;
   R2_ENDPOINT: string;
   R2_BUCKET: string;
   R2_ACCESS_KEY: string;
@@ -30,7 +32,11 @@ export const EVENT_NAMES = new Set([
   'share',
   'download',
   'restore-version',
+  'comment',
 ]);
+
+/** A comment write: any non-GET under /projects/{id}/comments (after /api is stripped). */
+export const COMMENT_PATH = /^\/projects\/[^/]+\/comments(\/|$)/;
 
 /**
  * Telemetry from the app, kept here rather than in the API: errors go to the Worker's logs
@@ -123,6 +129,27 @@ export default {
           return json({ error: 'too many new projects, try again in a minute' }, 429);
         if (env.DB && !(await allowCreate(d1Quota(env.DB), client, { secret: env.KEYS_SECRET }))) {
           return json({ error: 'you have started a lot of plans today; try again tomorrow' }, 429);
+        }
+      }
+      if (COMMENT_PATH.test(url.pathname)) {
+        const comment = await env.COMMENT_LIMIT.limit({ key: client });
+        if (!comment.success) {
+          return json(
+            {
+              error: "You're commenting very fast. Wait a minute and try again.",
+              code: 'comment_rate',
+            },
+            429,
+          );
+        }
+        if (env.DB && !(await allowComment(d1Quota(env.DB), client, { secret: env.KEYS_SECRET }))) {
+          return json(
+            {
+              error: "That's a lot of comments for one day. Try again tomorrow.",
+              code: 'comment_daily',
+            },
+            429,
+          );
         }
       }
     }

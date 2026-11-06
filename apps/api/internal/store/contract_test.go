@@ -204,6 +204,77 @@ func runContract(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 	})
 
+	t.Run("comments", func(t *testing.T) {
+		s := newStore(t)
+		cs, ok := s.(CommentStore)
+		if !ok {
+			t.Fatal("store does not keep comments")
+		}
+		if _, err := cs.GetComments(ctx, "prj_k"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("comments of a missing project: %v", err)
+		}
+		if err := s.Create(ctx, Record{ID: "prj_k", Name: "K", Doc: []byte(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+		none, err := cs.GetComments(ctx, "prj_k")
+		if err != nil || none.Version != 0 || len(none.Doc) != 0 {
+			t.Fatalf("before any comment: %+v %v", none, err)
+		}
+		if err := cs.PutComments(ctx, "prj_k", none, []byte(`{"n":1}`)); err != nil {
+			t.Fatal(err)
+		}
+		// A writer that read before the first write loses.
+		if err := cs.PutComments(ctx, "prj_k", none, []byte(`{"n":"stale"}`)); !errors.Is(err, ErrCommentsChanged) {
+			t.Fatalf("stale first write: %v", err)
+		}
+		v1, err := cs.GetComments(ctx, "prj_k")
+		if err != nil || v1.Version != 1 || string(v1.Doc) != `{"n":1}` {
+			t.Fatalf("after one write: %+v %v", v1, err)
+		}
+		if err := cs.PutComments(ctx, "prj_k", v1, []byte(`{"n":2}`)); err != nil {
+			t.Fatal(err)
+		}
+		if err := cs.PutComments(ctx, "prj_k", v1, []byte(`{"n":"stale"}`)); !errors.Is(err, ErrCommentsChanged) {
+			t.Fatalf("stale write: %v", err)
+		}
+		// A save leaves the comments alone, and the comments leave the project's version alone.
+		if _, err := s.Update(ctx, "prj_k", 1, "K", doc); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := cs.GetComments(ctx, "prj_k"); got.Version != 2 || string(got.Doc) != `{"n":2}` {
+			t.Fatalf("after a project save: %+v", got)
+		}
+		if rec, _ := s.Get(ctx, "prj_k"); rec.Version != 2 {
+			t.Fatalf("project version: %d", rec.Version)
+		}
+		if err := cs.DeleteComments(ctx, "prj_k"); err != nil {
+			t.Fatal(err)
+		}
+		if err := cs.DeleteComments(ctx, "prj_k"); err != nil {
+			t.Fatalf("delete twice: %v", err)
+		}
+		gone, err := cs.GetComments(ctx, "prj_k")
+		if err != nil || gone.Version != 0 {
+			t.Fatalf("after DeleteComments: %+v %v", gone, err)
+		}
+		if err := cs.PutComments(ctx, "prj_k", gone, []byte(`{"n":3}`)); err != nil {
+			t.Fatal(err)
+		}
+		// Deleting the project deletes them; a project recreated with its id starts empty.
+		if err := s.Delete(ctx, "prj_k"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := cs.GetComments(ctx, "prj_k"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("comments of a deleted project: %v", err)
+		}
+		if err := s.Create(ctx, Record{ID: "prj_k", Name: "K", Doc: []byte(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := cs.GetComments(ctx, "prj_k"); err != nil || got.Version != 0 || len(got.Doc) != 0 {
+			t.Fatalf("recreated project inherited comments: %+v %v", got, err)
+		}
+	})
+
 	t.Run("errors", func(t *testing.T) {
 		s := newStore(t)
 		if _, err := s.Get(ctx, "prj_missing"); !errors.Is(err, ErrNotFound) {

@@ -209,6 +209,10 @@ func (s *R2) Delete(ctx context.Context, id string) error {
 	}
 	// Its owner too, so a restored project isn't left open to anyone with the link.
 	_ = s.copy(ctx, accessKey(id), deletedAccessKey(id), "")
+	// Its comments are kept the same way, and must be gone before the project is.
+	if err := s.keepAndDeleteComments(ctx, id); err != nil {
+		return err
+	}
 	// The project goes first: if a later step fails, a leftover image or access record is
 	// harmless, whereas a project without its access record would be open to anyone.
 	res, err := s.do(ctx, http.MethodDelete, objectKey(id), nil, nil, nil)

@@ -27,6 +27,10 @@ type Memory struct {
 	onAccess  func(id string, a *Access) error
 	// history keeps, per project, the versions saves replaced (not persisted).
 	history map[string][]memoryVersion
+	// comments keeps each project's comments document; onComments persists a change (nil
+	// deletes) while the lock is held.
+	comments   map[string]memoryComments
+	onComments func(id string, c *memoryComments) error
 }
 
 type memoryVersion struct {
@@ -36,11 +40,12 @@ type memoryVersion struct {
 
 func NewMemory() *Memory {
 	return &Memory{
-		records: map[string]Record{},
-		images:  map[string]Image{},
-		models:  map[string]map[string][]byte{},
-		access:  map[string]Access{},
-		now:     time.Now,
+		records:  map[string]Record{},
+		images:   map[string]Image{},
+		models:   map[string]map[string][]byte{},
+		access:   map[string]Access{},
+		comments: map[string]memoryComments{},
+		now:      time.Now,
 	}
 }
 
@@ -143,7 +148,13 @@ func (m *Memory) Delete(_ context.Context, id string) error {
 	if !ok {
 		return ErrNotFound
 	}
-	// The project goes first, as in R2: a leftover image or access record is harmless.
+	// The comments go first, so a project recreated with this id can't inherit them; then
+	// the project, as in R2: a leftover image or access record is harmless.
+	if _, ok := m.comments[id]; ok {
+		if err := m.putComments(id, nil); err != nil {
+			return err
+		}
+	}
 	if m.onWrite != nil {
 		if err := m.onWrite(rec, true); err != nil {
 			return err

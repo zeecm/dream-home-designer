@@ -53,6 +53,9 @@ func NewFile(dir string) (*Memory, error) {
 	if m.onAccess, err = fileAccess(dir, m.access); err != nil {
 		return nil, err
 	}
+	if m.onComments, err = fileCommentsHook(dir, m.comments); err != nil {
+		return nil, err
+	}
 	m.onWrite = func(rec Record, deleted bool) error {
 		path := filepath.Join(dir, rec.ID+".json")
 		if deleted {

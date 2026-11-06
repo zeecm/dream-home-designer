@@ -41,6 +41,8 @@ type fakeS3 struct {
 	beforePut func()
 	// failDelete makes DELETEs of keys with this prefix fail, as a flaky bucket would.
 	failDelete string
+	// onRequest sees every request (not under the lock).
+	onRequest func(r *http.Request)
 }
 
 type fakeObject struct {
@@ -66,6 +68,9 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	key := ""
 	if len(parts) == 2 {
 		key = parts[1]
+	}
+	if f.onRequest != nil {
+		f.onRequest(r)
 	}
 	if r.Method == http.MethodPut && f.beforePut != nil {
 		hook := f.beforePut
@@ -292,4 +297,57 @@ func TestR2Live(t *testing.T) {
 		})
 		return s
 	})
+}
+
+func TestR2KeepsADeletedProjectsComments(t *testing.T) {
+	f, srv := newFakeS3(t)
+	s := NewR2(srv.URL, "bucket", "test", "secret")
+	ctx := context.Background()
+	if err := s.Create(ctx, Record{ID: "prj_a", Name: "Flat", Doc: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutComments(ctx, "prj_a", CommentsRec{}, []byte(`{"threads":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.objects[commentsKey("prj_a")].meta.Get(metaVersion); got != "1" {
+		t.Fatalf("version metadata: %q", got)
+	}
+	// The comments can't be deleted: the project's delete stops, so a project recreated
+	// with its id can't inherit them.
+	f.failDelete = "comments/"
+	if err := s.Delete(ctx, "prj_a"); err == nil {
+		t.Fatal("want the delete to fail")
+	}
+	if _, err := s.Get(ctx, "prj_a"); err != nil {
+		t.Fatalf("project gone after a failed comments delete: %v", err)
+	}
+	f.failDelete = ""
+	if err := s.Delete(ctx, "prj_a"); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(f.objects[deletedCommentsKey("prj_a")].body); got != `{"threads":[]}` {
+		t.Fatalf("deleted comments copy: %q", got)
+	}
+	if _, ok := f.objects[commentsKey("prj_a")]; ok {
+		t.Fatal("comments outlived their project")
+	}
+}
+
+// A poll of a project without comments costs a GET that 404s and a HEAD, never a GET of
+// the whole plan.
+func TestR2CommentsOfAProjectWithNoneUseAHead(t *testing.T) {
+	f, srv := newFakeS3(t)
+	s := NewR2(srv.URL, "bucket", "test", "secret")
+	ctx := context.Background()
+	if err := s.Create(ctx, Record{ID: "prj_a", Name: "Flat", Doc: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	var seen []string
+	f.onRequest = func(r *http.Request) { seen = append(seen, r.Method+" "+r.URL.Path) }
+	if rec, err := s.GetComments(ctx, "prj_a"); err != nil || rec.Version != 0 {
+		t.Fatalf("%+v %v", rec, err)
+	}
+	if got := strings.Join(seen, ", "); got != "GET /bucket/comments/prj_a.json, HEAD /bucket/projects/prj_a.json" {
+		t.Fatalf("requests: %s", got)
+	}
 }

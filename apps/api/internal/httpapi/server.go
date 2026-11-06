@@ -19,6 +19,9 @@ type Server struct {
 	store store.Store
 	log   *slog.Logger
 	mux   *http.ServeMux
+	now   func() time.Time
+	// commentLocks serialises comment writes per project.
+	commentLocks projectLocks
 }
 
 // Option configures a Server.
@@ -38,7 +41,7 @@ func New(s store.Store, log *slog.Logger, opts ...Option) *Server {
 	for _, opt := range opts {
 		opt(&o)
 	}
-	srv := &Server{store: s, log: log, mux: http.NewServeMux()}
+	srv := &Server{store: s, log: log, mux: http.NewServeMux(), now: time.Now}
 	srv.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -64,6 +67,7 @@ func New(s store.Store, log *slog.Logger, opts ...Option) *Server {
 	srv.mux.HandleFunc("POST /telemetry", srv.telemetry)
 	srv.mux.HandleFunc("GET /projects/{id}/versions", srv.versions)
 	srv.mux.HandleFunc("GET /projects/{id}/versions/{version}", srv.version)
+	srv.routeComments()
 	return srv
 }
 
@@ -204,6 +208,7 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	s.clearComments(r.Context(), env.ID)
 	if owner != "" {
 		w.Header().Set("X-Owner-Token", owner)
 		w.Header().Set("X-Role", string(RoleOwner))
