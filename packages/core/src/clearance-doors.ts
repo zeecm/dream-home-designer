@@ -1,5 +1,5 @@
 import type { ClearanceIssue } from './clearance';
-import { overlapDepth, sideOf, zoneOf } from './convex';
+import { clipHalf, overlapDepth, sideOf, zoneOf } from './convex';
 import { itemSize } from './furniture';
 import type { Item, Vec2 } from './schema';
 
@@ -61,27 +61,59 @@ export function doorClashes(
   return out;
 }
 
+/** Where two convex polygons overlap (empty if they don't). */
+function overlap(p: Vec2[], q: Vec2[]): Vec2[] {
+  let area = 0;
+  for (let i = 0; i < q.length; i++) {
+    const a = q[i] as Vec2;
+    const b = q[(i + 1) % q.length] as Vec2;
+    area += a.x * b.y - b.x * a.y;
+  }
+  const k = area >= 0 ? 1 : -1;
+  let out = p;
+  for (let i = 0; i < q.length && out.length >= 3; i++) {
+    const a = q[i] as Vec2;
+    const b = q[(i + 1) % q.length] as Vec2;
+    out = clipHalf(out, (v) => k * ((b.x - a.x) * (v.y - a.y) - (b.y - a.y) * (v.x - a.x)));
+  }
+  return out.length >= 3 ? out : [];
+}
+
 /**
- * Pieces whose hinged front a door's leaves hit when both are open. A piece already standing
- * in that door's swing (slice 1's 'door' issue, in `inSwing` as "item|opening") isn't
- * reported twice.
+ * Pieces whose hinged front a door's leaves hit when both are open, in the same room (a
+ * door swinging into the room behind a wall doesn't). A piece already standing in that
+ * door's swing (slice 1's 'door' issue, in `inSwing` as "item|opening") isn't reported twice.
+ * `roomAt` names the room at a point.
  */
 export function doorFrontIssues(
   items: readonly Item[],
   fps: ReadonlyMap<string, Vec2[]>,
   sweeps: readonly [string, Vec2[][]][],
   inSwing: ReadonlySet<string>,
+  roomAt: (p: Vec2) => string | null = () => null,
 ): Extract<ClearanceIssue, { kind: 'door-front' }>[] {
   const out: Extract<ClearanceIssue, { kind: 'door-front' }>[] = [];
   for (const it of items) {
     const fp = fps.get(it.id);
     const reach = fp && frontReach(it, fp);
     if (!reach) continue;
+    let home: string | null | undefined;
     for (const [openingId, sweep] of sweeps) {
       if (inSwing.has(`${it.id}|${openingId}`)) continue;
-      if (sweep.some((s) => overlapDepth(reach, s) > CLASH)) {
-        out.push({ kind: 'door-front', itemId: it.id, openingId, zone: reach, sweep });
-      }
+      const hit = sweep.filter((s) => overlapDepth(reach, s) > CLASH);
+      if (!hit.length) continue;
+      // Where they meet must be in the piece's own room.
+      home ??= roomAt({ x: it.position.x, y: it.position.z });
+      const same = hit.some((s) => {
+        const o = overlap(reach, s);
+        if (!o.length || !home) return !home;
+        const c = {
+          x: o.reduce((t, v) => t + v.x, 0) / o.length,
+          y: o.reduce((t, v) => t + v.y, 0) / o.length,
+        };
+        return roomAt(c) === home;
+      });
+      if (same) out.push({ kind: 'door-front', itemId: it.id, openingId, zone: reach, sweep });
     }
   }
   return out;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bedSides } from './clearance';
+import { bedSides, clearanceIssues, doorSweep } from './clearance';
 import { addOpening, drawWall, updateWall } from './commands';
 import { blankProject } from './factory';
 import { sampleFlatProject } from './fixtures/sampleFlat';
@@ -146,6 +146,9 @@ describe('walkways', () => {
     expect(ys[0]).toBeCloseTo(4.05, 2);
     expect(ys[1]).toBeCloseTo(face - 0.35, 2);
     expect(i.to).toEqual([{ roomId: roomNamed(lvl, 6, 2) }]);
+    // The bar is as long as the width it's labelled with.
+    const [p0, p1] = i.pinch;
+    expect(Math.hypot(p1.x - p0.x, p1.y - p0.y)).toBeCloseTo(i.have, 3);
     expect(i.path.length).toBeGreaterThan(1);
     expect(i.path.length).toBeLessThanOrEqual(60);
   });
@@ -176,6 +179,10 @@ describe('walkways', () => {
     expect(w.length).toBeGreaterThan(0);
     expect(w.every((i) => i.itemId === lastId())).toBe(true);
     expect(w[0]?.have).toBe(0);
+    // Drawn shut across the corridor, wall face to wall face, where the sofa stands.
+    const ys = (w[0]?.pinch ?? []).map((q) => q.y).sort((a, b) => a - b);
+    expect(ys[0]).toBeCloseTo(4.05, 1);
+    expect(ys[1]).toBeCloseTo(f.y - 0.05, 1);
     // With a cabinet narrowing the corridor on the way too: the way past the sofa is closed by
     // the sofa alone.
     const both = withItems(lvl, [['shoe-cabinet', { x: 1.0, y: f.y - 0.05 - 0.175 }, Math.PI]]);
@@ -394,6 +401,40 @@ describe('walkways', () => {
     expect(i?.need).toBeCloseTo(0.78, 5);
     expect(i?.capped).toBe(true);
     expect(i?.itemId).toBe(lastId());
+  });
+
+  it('a doorway filled by a piece: the way closed, drawn across the doorway', () => {
+    const f = flat();
+    // A wardrobe across Room A's door (x 1.6..2.4 in the wall at y 4), on the corridor side.
+    const lvl = withItems(level(f), [['wardrobe', { x: 2, y: 4.05 + 0.3 }]]);
+    const a = roomNamed(lvl, 2, 2);
+    const w = ways(walkwayReport(lvl)).filter((i) => i.to.some((t) => t.roomId === a));
+    expect(w).toHaveLength(1);
+    expect(w[0]?.have).toBe(0);
+    const pinch = w[0]?.pinch ?? [];
+    const xs = pinch.map((q) => q.x).sort((p, q) => p - q);
+    expect(xs[0]).toBeCloseTo(1.6, 2);
+    expect(xs[1]).toBeCloseTo(2.4, 2);
+    for (const q of pinch) expect(q.y).toBeCloseTo(4, 2);
+  });
+
+  it('a door that swings into the room behind a wall doesn’t hit a front on this side', () => {
+    const f = flat();
+    const lvl0 = level(f);
+    const doorA = Object.values(lvl0.openings).find(
+      (o) => o.wallId === f.wall({ x: 0, y: 4 }, { x: 4, y: 4 }),
+    );
+    if (!doorA) throw new Error('no door');
+    const sweep = doorSweep(lvl0, doorA.id).flat();
+    const into = sweep.reduce((t, q) => t + q.y, 0) / sweep.length;
+    // A wardrobe on the other side of the wall from the swing, its front 0.10 m off the wall,
+    // facing it: its reach (0.45) goes through the wall into the swing.
+    const other = into < 4 ? 1 : -1;
+    const face = 4 + other * 0.05;
+    const front = face + other * 0.1;
+    const at = { x: 2, y: front + other * 0.3 };
+    const facing = withItems(lvl0, [['wardrobe', at, other > 0 ? Math.PI : 0]]);
+    expect(clearanceIssues(facing).some((i) => i.kind === 'door-front')).toBe(false);
   });
 
   it('doorways: a plant 1 cm into one is no issue; a sofa just inside a room is measured', () => {
