@@ -56,7 +56,7 @@ function sidewaysTest() {
     await expect(furniture).toHaveAttribute('aria-pressed', 'true');
 
     // Walking: the 3D view takes the whole screen below the top bar.
-    await page.getByRole('button', { name: /^3D$/ }).tap();
+    await page.getByRole('button', { name: 'Switch to 3D' }).tap();
     await page.getByRole('button', { name: 'Walk through' }).tap();
     await expect(page.getByRole('button', { name: 'Leave walk' })).toBeVisible();
     await expect(page.locator('.palette')).toBeHidden();

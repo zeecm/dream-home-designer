@@ -7,7 +7,7 @@ import {
   sampleFlatProject,
 } from '@dhd/core';
 import { describe, expect, it } from 'vitest';
-import { asRigid, deliveryText, liftLine, liftNumbers, liftStatus } from './words';
+import { deliveryText, liftLine, liftNumbers, liftStatus } from './words';
 
 const level = sampleFlatProject('prj_t').levels[0] as Level;
 const { typical } = LIFT_PRESETS;
@@ -94,11 +94,14 @@ describe('the lift in words', () => {
     ).toBe('Ask the shop whether it comes apart.');
   });
 
-  it('a bed’s verdict is softened: checked as a rigid box', () => {
-    expect(
-      asRigid('Doesn’t fit in the lift (1.10 × 1.40 m, 2.30 m high), even on end or tilted.'),
-    ).toBe(
-      'Checked as a rigid box, doesn’t fit in the lift (1.10 × 1.40 m, 2.30 m high), even on end or tilted.',
+  it('a bed goes in the lift part by part; when a part doesn’t, its note says so', () => {
+    expect(liftStatus(typical, { fit: 'fits', how: 'end', spare: 0.1 }, true)).toBe(
+      'Lift: each part fits.',
     );
+    expect(liftStatus(typical, { fit: 'tight', how: 'end', spare: 0.01 }, true)).toBe(
+      'Lift: each part just fits.',
+    );
+    expect(liftStatus(typical, { fit: 'too-big', fails: 'car', spare: 0 }, true)).toBeNull();
+    expect(liftStatus(undefined, undefined, true)).toBe('Lift: not checked.');
   });
 });

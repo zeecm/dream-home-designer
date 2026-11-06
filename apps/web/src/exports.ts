@@ -4,6 +4,7 @@ import { type ViewMode, useEditor } from './editor';
 import { printFrame } from './print/frame';
 import { useStore } from './store';
 import { track } from './telemetry';
+import { shownViewNow } from './ui/oneView';
 
 /**
  * Downloads: the plan as a picture or a printout, the 3D view as a picture, the 3D model,
@@ -43,7 +44,8 @@ const settle = async (frames = 3) => {
 async function withView<T>(need: 'plan' | '3d', fn: () => Promise<T>): Promise<T> {
   const ed = useEditor.getState();
   const before: ViewMode = ed.viewMode;
-  const shown = before === 'split' || before === need;
+  const now = shownViewNow();
+  const shown = now === 'split' || now === need;
   if (!shown) {
     ed.setViewMode(need);
     await settle(6);

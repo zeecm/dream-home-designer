@@ -1,5 +1,5 @@
-import { type AiSettings, CURATED, PROVIDERS, type Provider } from './credentials';
-import { AiError, errorBody, failure, timeoutSignal } from './providers';
+import { type AiSettings, CURATED, MODEL_NAMES, PROVIDERS, type Provider } from './credentials';
+import { AiError, anySignal, errorBody, failure, timeoutSignal } from './providers';
 
 /** A model to choose: its id exactly as the provider lists it, and a name to show. */
 export interface ModelOption {
@@ -57,17 +57,46 @@ export function byBest(a: string, b: string): number {
   return ra.tier - rb.tier || ra.unstable - rb.unstable || a.localeCompare(b);
 }
 
-/** The options sorted best first, a name shown once (an id added where two share it). */
+/** How many of `options` carry each name. */
+const nameCounts = (options: ModelOption[]) => {
+  const count = new Map<string, number>();
+  for (const o of options) count.set(o.name, (count.get(o.name) ?? 0) + 1);
+  return count;
+};
+
+/**
+ * The options sorted best first, each name shown once: where two share one (Gemini names a
+ * model and its preview alike), the preview says so; failing that, the id is shown.
+ */
 function tidy(options: ModelOption[]): ModelOption[] {
   const unique = [...new Map(options.map((o) => [o.id, o])).values()].sort((a, b) =>
     byBest(a.id, b.id),
   );
-  const count = new Map<string, number>();
-  for (const o of unique) count.set(o.name, (count.get(o.name) ?? 0) + 1);
-  return unique.map((o) =>
-    o.name !== o.id && (count.get(o.name) ?? 0) > 1 ? { ...o, name: `${o.name} (${o.id})` } : o,
+  const shared = nameCounts(unique);
+  const told = unique.map((o) =>
+    (shared.get(o.name) ?? 0) > 1 && /preview/.test(o.id) && !/preview/i.test(o.name)
+      ? { ...o, name: `${o.name} preview` }
+      : o,
   );
+  const still = nameCounts(told);
+  return told.map((o) => ((still.get(o.name) ?? 0) > 1 ? { ...o, name: o.id } : o));
 }
+
+/** A name for an OpenAI model id, as OpenAI writes them: gpt-5-mini is "GPT-5 mini". */
+export function openAiName(id: string): string {
+  const date = id.match(/-(\d{4}-\d{2}-\d{2})$/)?.[1];
+  const base = date ? id.slice(0, -date.length - 1) : id;
+  const name = base.startsWith('gpt-image-')
+    ? `GPT Image ${base.slice('gpt-image-'.length).replace(/-/g, ' ')}`
+    : base.startsWith('gpt-')
+      ? `GPT-${base.slice(4).replace(/-/, ' ').replace(/-/g, ' ')}`
+      : base.replace(/-/g, ' ');
+  return date ? `${name} (${date})` : name;
+}
+
+/** A model's name to show: as listed, else as we know it, else its id. */
+export const modelName = (id: string) =>
+  MODEL_NAMES[id] ?? (/^(gpt-|o\d)/.test(id) ? openAiName(id) : id);
 
 /** Gemini models that can't do these jobs: not for text, nor for pictures. */
 const GEMINI_NOT_TEXT = /image|tts|embedding|aqa|imagen|veo|audio|live|gemma|robotics|computer-use/;
@@ -90,29 +119,26 @@ export function parseGemini(body: unknown): ModelLists {
       id,
       name: typeof m.displayName === 'string' && m.displayName ? m.displayName : id,
     };
-    if (/image/.test(id)) image.push(option);
-    else if (!GEMINI_NOT_TEXT.test(id)) text.push(option);
+    if (/image|nano-banana/.test(id)) image.push(option);
+    else if (/^gemini-/.test(id) && !GEMINI_NOT_TEXT.test(id)) text.push(option);
   }
   return { text: tidy(text), image: tidy(image) };
 }
 
-/** OpenAI's `GET /models` answer as model lists (it gives no names: the ids are shown). */
+/** OpenAI's `GET /models` answer as model lists (it gives no names: made from the ids). */
 export function parseOpenAi(body: unknown): ModelLists {
   const data = ((body as { data?: unknown })?.data ?? []) as { id?: unknown }[];
   const ids = (Array.isArray(data) ? data : [])
     .map((m) => m?.id)
     .filter((id): id is string => typeof id === 'string');
-  const text = ids.filter(
-    (id) =>
-      /^(gpt-|o\d)/.test(id) &&
-      // Chat models that take images and answer to a strict schema.
-      !/^gpt-(3|4)(\.5)?(-|$)/.test(id) &&
-      !/audio|realtime|tts|transcribe|image|search|instruct|embedding|moderation|codex|computer|oss|deep-research/.test(
-        id,
-      ),
+  // Only chat-completions models that take an image and answer to a strict schema (and
+  // their dated snapshots): not o1-mini or o3-mini (no images), nor the -pro models (not
+  // on chat completions), audio, search or the like.
+  const text = ids.filter((id) =>
+    /^(gpt-(4o|4\.1|5(\.\d+)?)(-mini|-nano)?|o1|o3|o4-mini)(-\d{4}-\d{2}-\d{2})?$/.test(id),
   );
   const image = ids.filter((id) => /^gpt-image-/.test(id));
-  const opt = (id: string) => ({ id, name: id });
+  const opt = (id: string) => ({ id, name: openAiName(id) });
   return { text: tidy(text.map(opt)), image: tidy(image.map(opt)) };
 }
 
@@ -137,14 +163,14 @@ export function parseAnthropic(body: unknown): ModelLists {
 
 /** The built-in lists, for when the provider's can't be had. */
 export function curated(p: Provider): ModelLists {
-  const opt = (id: string) => ({ id, name: id });
+  const opt = (id: string) => ({ id, name: modelName(id) });
   return { text: CURATED[p].text.map(opt), image: CURATED[p].image.map(opt) };
 }
 
 /**
- * The model to suggest from those listed: the provider's default when listed; for Gemini,
- * the best Pro for plans and gemini-3-pro-image (else gemini-2.5-flash-image) for pictures;
- * otherwise the best listed.
+ * The model to suggest from those listed: the provider's default when listed (for pictures,
+ * the cheaper gemini-2.5-flash-image and gpt-image-1: every render costs); for Gemini's
+ * plans, the best Pro; otherwise the best listed.
  */
 export function recommended(
   p: Provider,
@@ -153,11 +179,6 @@ export function recommended(
 ): string | undefined {
   if (p === 'gemini' && kind === 'text') {
     return ids.find((id) => rank(id).tier === 0 && !SNAPSHOT.test(id)) ?? ids[0];
-  }
-  if (p === 'gemini' && kind === 'image') {
-    return (
-      ['gemini-3-pro-image', 'gemini-2.5-flash-image'].find((id) => ids.includes(id)) ?? ids[0]
-    );
   }
   const fallback = kind === 'text' ? PROVIDERS[p].model : PROVIDERS[p].imageModel;
   return fallback && ids.includes(fallback) ? fallback : ids[0];
@@ -178,7 +199,10 @@ async function getJson(
     throw new AiError('network', 'Couldn’t reach the provider (network or browser block).');
   }
   if (!res.ok) throw failure(p, res.status, await errorBody(res), key);
-  return (await res.json()) as unknown;
+  const body = (await res.json()) as unknown;
+  // An answer that comes after the key changed (or the dialog closed) is never used.
+  signal.throwIfAborted();
+  return body;
 }
 
 /**
@@ -235,8 +259,13 @@ export async function listModels(
  * Checks the key can use its picture model without making a picture: Gemini counts the
  * tokens of a word (free), OpenAI looks the model up.
  */
-export async function checkPictureModel(ai: AiSettings, model: string): Promise<void> {
-  const signal = timeoutSignal(30_000);
+export async function checkPictureModel(
+  ai: AiSettings,
+  model: string,
+  cancel?: AbortSignal,
+): Promise<void> {
+  const timeout = timeoutSignal(30_000);
+  const signal = cancel ? anySignal([cancel, timeout]) : timeout;
   const k = ai.key.trim();
   let res: Response;
   try {
@@ -253,6 +282,7 @@ export async function checkPictureModel(ai: AiSettings, model: string): Promise<
             signal,
           });
   } catch {
+    if (cancel?.aborted) throw new AiError('cancelled', 'Cancelled.');
     throw new AiError('network', 'Couldn’t reach the provider. Check your connection.');
   }
   if (!res.ok) throw failure(ai.provider, res.status, await errorBody(res), k);

@@ -129,18 +129,31 @@ export class HttpError extends Error {
 /** The longest provider message shown. */
 const MESSAGE_MAX = 200;
 
+/** A token's dotted parts after its first (sk-proj-abc.def123, AQ.abc.def): all of it goes. */
+const DOTTED = String.raw`(?:\.[\w*-]+)*`;
+
+/** Whether a long run of token characters looks like a secret rather than words or a name. */
+const secretLike = (s: string) =>
+  (/[A-Z]/.test(s) && /[a-z]/.test(s) && /\d/.test(s)) || /^[a-f0-9]{32,}$/i.test(s);
+
 /**
- * `text` on one line, without anything that looks like an API key: `key` itself, and the
- * shapes of Anthropic's, OpenAI's and Google's keys.
+ * `text` on one line, without anything that looks like an API key or token: `key` itself;
+ * the shapes of Anthropic's and OpenAI's keys (sk-…), Google's (AIza…, AQ.…, ya29.…) and
+ * others' (sk_live_…); and any long random-looking run (base64 or hex). Lower-case names
+ * such as models/gemini-2.5-flash-image-preview stay readable.
  */
 export function redact(text: string, key?: string): string {
   let out = text;
   const k = key?.trim();
   if (k && k.length >= 6) out = out.split(k).join('[key]');
   return out
-    .replace(/\bsk-[A-Za-z0-9_*-]{6,}/g, '[key]')
-    .replace(/\bAIza[0-9A-Za-z_-]{10,}/g, '[key]')
-    .replace(/\b(Bearer|key=)\s*[A-Za-z0-9._~+/=-]{12,}/gi, '$1 [key]')
+    .replace(new RegExp(String.raw`\bsk-[\w*-]{6,}${DOTTED}`, 'g'), '[key]')
+    .replace(/\bsk_[a-z]+_[\w*]{8,}/g, '[key]')
+    .replace(/\bAIza[\w-]{10,}/g, '[key]')
+    .replace(new RegExp(String.raw`\bAQ\.[\w-]{20,}${DOTTED}`, 'g'), '[key]')
+    .replace(new RegExp(String.raw`\bya29\.[\w-]{10,}${DOTTED}`, 'g'), '[key]')
+    .replace(/\b(Bearer|key=)\s*[\w.~+/=-]{12,}/gi, '$1 [key]')
+    .replace(/[\w\-.+/=]{32,}/g, (run) => (secretLike(run) ? '[key]' : run))
     .replace(/[\p{Cc}\s]+/gu, ' ')
     .trim();
 }
@@ -163,29 +176,44 @@ export function providerMessage(body: unknown, key?: string): string | null {
   return clean.length > MESSAGE_MAX ? `${clean.slice(0, MESSAGE_MAX - 1).trimEnd()}…` : clean;
 }
 
-/** Whether Google said the key itself is wrong (it answers 400 for a bad key). */
-function badGoogleKey(body: unknown): boolean {
+/**
+ * Whether the provider said, in so many words, that the key itself is wrong: Google answers
+ * 400 for a bad key, with reason API_KEY_INVALID.
+ */
+function saysBadKey(body: unknown): boolean {
   const first = (Array.isArray(body) ? body[0] : body) as {
-    error?: { message?: unknown; details?: { reason?: unknown }[] };
+    error?: { message?: unknown; code?: unknown; details?: { reason?: unknown }[] };
   } | null;
   const message = first?.error?.message;
   return (
-    (typeof message === 'string' && /API key not valid/i.test(message)) ||
+    (typeof message === 'string' &&
+      /API key not valid|invalid api key|incorrect api key|invalid x-api-key/i.test(message)) ||
+    first?.error?.code === 'invalid_api_key' ||
     !!first?.error?.details?.some((d) => d?.reason === 'API_KEY_INVALID')
   );
 }
+
+/** What the AI-settings errors point to; left off inside AI settings (`inSettings`). */
+const TO_SETTINGS = ' Check it in AI settings.';
+
+/** An error's words as shown inside AI settings, where pointing to them is no help. */
+export const inSettings = (e: AiError) => e.message.replace(TO_SETTINGS, '');
+
+/** `text` ending as a sentence, so words of ours can follow it. */
+const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
 
 /** A failed response from `provider`, in words a person can act on, with what it said. */
 export function failure(provider: Provider, status: number, body: unknown, key?: string): AiError {
   const said = providerMessage(body, key);
   const name = PROVIDERS[provider].short;
-  const tail = said ? `: ${said}` : '.';
-  if (status === 401 || (status === 400 && provider === 'gemini' && badGoogleKey(body))) {
-    return new AiError('key', 'The key was refused. Check it in AI settings.');
+  const tail = said ? `: ${sentence(said)}` : '.';
+  // A key error only when it is one: a 401, or the provider saying the key is wrong.
+  if (status === 401 || ((status === 400 || status === 403) && saysBadKey(body))) {
+    return new AiError('key', `The key was refused.${TO_SETTINGS}`);
   }
   if (status === 403) {
-    // Often not the key as such: a model or a region the account can't use.
-    return new AiError('key', `${name} refused the key (403)${tail} Check it in AI settings.`);
+    // Not the key as such: an organisation to verify, a model or a region the account can't use.
+    return new AiError('refused', `${name} refused the request (403)${tail}`);
   }
   if (status === 429) {
     return new AiError(
@@ -200,7 +228,7 @@ export function failure(provider: Provider, status: number, body: unknown, key?:
   }
   return new AiError(
     'network',
-    `${name} couldn’t answer just now (${status})${said ? tail : '. Try again in a moment.'}`,
+    `${name} couldn’t answer just now (${status})${said ? `${tail} Try again in a moment.` : '. Try again in a moment.'}`,
   );
 }
 

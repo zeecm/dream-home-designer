@@ -1,4 +1,10 @@
-import { furnitureKind, furnitureLayer, itemFootprint, itemSize } from './furniture';
+import {
+  type FurnitureKind,
+  furnitureKind,
+  furnitureLayer,
+  itemFootprint,
+  itemSize,
+} from './furniture';
 import { pointInPolygon } from './geometry';
 import { type PlanGeometry, doorStyle, framePoint, planGeometry } from './plan';
 import { roomShapes } from './rooms';
@@ -10,7 +16,8 @@ import { outsideOpenings } from './walk';
  * Will it get in? The way from the flat's main door to a piece, room to room through doors
  * and passages, and whether the piece can be carried through each: square through the clear
  * width and height, tipped any way, or a sofa tilted on its diagonal; and turned in the space
- * in front of the door. Advice only. Spec: docs/specs/my-furniture.md.
+ * in front of the door. A bed comes flat and is checked part by part (`deliveryParts`).
+ * Advice only. Spec: docs/specs/my-furniture.md.
  */
 export type Fit = 'fits' | 'tight' | 'hinges' | 'too-big';
 
@@ -28,6 +35,28 @@ export interface DoorOnTheWay {
   /** It gets through only tilted on its diagonal (a sofa whose diagonal depth is known). */
   tilted?: boolean;
   centre: Vec2;
+  /** A piece that comes in parts (a bed): how each part goes through. */
+  parts?: PartFit[];
+}
+
+/** A part of a piece delivered in parts: a bed's mattress, headboard and side rails. */
+export type DeliveryPartName = 'mattress' | 'headboard' | 'rails';
+
+export interface DeliveryPart {
+  part: DeliveryPartName;
+  size: { w: number; d: number; h: number };
+  /** It may be folded in half along its length (a mattress, unless it's a king). */
+  folds: boolean;
+}
+
+/** How a part goes through a door, or the whole way in. */
+export interface PartFit {
+  part: DeliveryPartName;
+  fit: Fit;
+  /** It goes only folded in half (a mattress). */
+  folded?: true;
+  /** The whole way in: a mattress too wide to fold. */
+  stiff?: true;
 }
 
 export type Delivery =
@@ -40,8 +69,10 @@ export type Delivery =
       /** The way in, in order: the lift door first (openingId 'lift') when a lift is given. */
       doors: DoorOnTheWay[];
       worst: DoorOnTheWay | null;
-      /** How it goes in the lift, when a lift is given. */
+      /** How it goes in the lift, when a lift is given (a bed: its worst part). */
       lift?: LiftFit;
+      /** A piece that comes in parts (a bed): how each part goes the whole way in. */
+      parts?: PartFit[];
     };
 
 /** Room for the hand: under this to spare is tight. */
@@ -50,6 +81,40 @@ const SPARE = 0.02;
 const FAR = 3;
 /** Outside the main door: an HDB common corridor, about this wide. */
 const CORRIDOR = 1.2;
+
+/** A mattress is at most this thick (pocket springs and a topper). */
+const MATTRESS = 0.3;
+/** A mattress up to this wide folds in half; a king's (1.83 m) is too stiff to. */
+const FOLDS_UP_TO = 1.7;
+/** A bed frame's panels: this thick, and its side rails this high. */
+const PANEL = 0.1;
+const RAIL = 0.3;
+
+/**
+ * The parts a piece is delivered in, if not in one piece (null): a bed w × d × h comes as its
+ * mattress (w × d, at most 0.3 m thick, folding in half along its length unless it's wider
+ * than 1.7 m) and its frame in flat panels: the headboard w × 0.1 × h and the side rails
+ * d × 0.1 × 0.3 (the foot rail is the headboard's width and lower, so it fits if that does).
+ * Catalogue beds and beds added by size; other pieces, and uploaded models, are rigid.
+ */
+export function deliveryParts(
+  kind: FurnitureKind | undefined,
+  size: { w: number; d: number; h: number },
+): DeliveryPart[] | null {
+  if (!kind || (kind.comesFlat !== 'bed' && kind.shape !== 'bed')) return null;
+  const { w, d, h } = size;
+  return [
+    { part: 'mattress', size: { w, d, h: Math.min(h, MATTRESS) }, folds: w <= FOLDS_UP_TO + EPS },
+    { part: 'headboard', size: { w, d: PANEL, h }, folds: false },
+    { part: 'rails', size: { w: d, d: PANEL, h: Math.min(h, RAIL) }, folds: false },
+  ];
+}
+
+/** A part folded in half along its length: half as long, twice as thick. */
+const folded = (s: { w: number; d: number; h: number }) => ({ w: s.w, d: s.d / 2, h: s.h * 2 });
+
+const FIT_ORDER: Fit[] = ['fits', 'tight', 'hinges', 'too-big'];
+const worse = (a: Fit, b: Fit) => FIT_ORDER.indexOf(a) > FIT_ORDER.indexOf(b);
 
 /** A door's clear width: what its leaves, open, leave of the opening. */
 export function clearWidth(o: Opening): number {
@@ -332,6 +397,32 @@ export function liftFit(
   };
 }
 
+/**
+ * Whether a piece in parts goes in a lift: each part, a mattress folded if it must be. The
+ * worst part's fit (the first, on a tie), and each part's.
+ */
+export function liftFitParts(
+  parts: DeliveryPart[],
+  lift: Lift,
+): { fit: LiftFit; parts: PartFit[] } {
+  let worst: LiftFit | null = null;
+  const out: PartFit[] = [];
+  for (const p of parts) {
+    let f = liftFit(p.size, undefined, lift);
+    let bent = false;
+    if (p.folds && f.fit !== 'fits') {
+      const g = liftFit(folded(p.size), undefined, lift);
+      if (worse(f.fit, g.fit)) {
+        f = g;
+        bent = true;
+      }
+    }
+    out.push({ part: p.part, fit: f.fit, ...(bent ? { folded: true as const } : {}) });
+    if (!worst || worse(f.fit, worst.fit)) worst = f;
+  }
+  return { fit: worst ?? { fit: 'fits', spare: 0 }, parts: out };
+}
+
 /** A door or passage in the door graph: where it is, and the rooms either side. */
 export interface RouteDoor {
   o: Opening;
@@ -541,7 +632,18 @@ export function deliveryCheck(
   const k0 = kind?.size;
   const diagonal =
     kind?.diagonal && k0 ? kind.diagonal * (Math.hypot(d, h) / Math.hypot(k0.d, k0.h)) : undefined;
-  const ways = carries(w, d, h, diagonal);
+  // What's carried in: the piece whole, or each of its parts (a mattress also folded).
+  const parts = deliveryParts(kind, { w, d, h });
+  const pieces: { size: { w: number; d: number; h: number }; flat: Carry[]; bent?: Carry[] }[] =
+    parts
+      ? parts.map((p) => {
+          const flat = carries(p.size.w, p.size.d, p.size.h);
+          const f = folded(p.size);
+          return p.folds
+            ? { size: p.size, flat, bent: [...flat, ...carries(f.w, f.d, f.h)] }
+            : { size: p.size, flat };
+        })
+      : [{ size: { w, d, h }, flat: carries(w, d, h, diagonal) }];
   // In the way of a turn: walls, their junctions, and built-in carpentry.
   const walls = [
     ...geom.pieces.map((q) => q.polygon),
@@ -555,8 +657,14 @@ export function deliveryCheck(
       .map((it) => itemFootprint(it)),
   ];
 
-  /** One door, entered from the side `k` (+1: from +n into -n). */
-  const judge = (door: RouteDoor, k: number, into: string | null): DoorOnTheWay => {
+  /** One door, entered from the side `k` (+1: from +n into -n), by a piece carried `ways`. */
+  const judgeWays = (
+    door: RouteDoor,
+    k: number,
+    into: string | null,
+    ways: Carry[],
+    { w, d, h }: { w: number; d: number; h: number },
+  ): DoorOnTheWay => {
     const clear = clearWidth(door.o);
     const height = door.o.height;
     // The space to turn in, on each side.
@@ -577,9 +685,9 @@ export function deliveryCheck(
     const goes = (c: Carry, width: number) => {
       if (c.t > width || c.v > height) return false;
       // Movers tip a long piece up to get it round: its length in plan, tilted under the
-      // ceiling as far as it goes.
+      // ceiling as far as it goes (stood right up, its height in plan, if that's shorter).
       const lift = Math.max(0, level.ceilingHeight - c.v);
-      const l = c.l > lift ? Math.sqrt(c.l * c.l - lift * lift) : c.v;
+      const l = c.l > lift ? Math.sqrt(c.l * c.l - lift * lift) : Math.min(c.l, c.v);
       const turns = (sp: number) => l <= sp || l <= turnLimit(width, sp, c.t);
       return turns(before) && turns(after);
     };
@@ -617,6 +725,27 @@ export function deliveryCheck(
     return { openingId: door.o.id, into, clear, height, centre, fit: 'too-big', need };
   };
 
+  /** One door: the piece, or each of its parts (the worst part's result, on a tie the first). */
+  const judge = (door: RouteDoor, k: number, into: string | null): DoorOnTheWay => {
+    const results = pieces.map((p) => {
+      const flat = judgeWays(door, k, into, p.flat, p.size);
+      if (!p.bent || flat.fit === 'fits') return { j: flat, folded: false };
+      const bent = judgeWays(door, k, into, p.bent, p.size);
+      return worse(flat.fit, bent.fit) ? { j: bent, folded: true } : { j: flat, folded: false };
+    });
+    let worst = results[0] as (typeof results)[number];
+    for (const r of results) if (worse(r.j.fit, worst.j.fit)) worst = r;
+    if (!parts) return worst.j;
+    return {
+      ...worst.j,
+      parts: results.map((r, i) => ({
+        part: parts[i]?.part as DeliveryPartName,
+        fit: r.j.fit,
+        ...(r.folded ? { folded: true as const } : {}),
+      })),
+    };
+  };
+
   // The first door is the main door, from outside (or from whichever side is outside).
   const startInto = start.sides[0] ?? start.sides[1];
   if (!startInto) return { status: 'unreachable', from };
@@ -644,7 +773,13 @@ export function deliveryCheck(
   if (!route) return { status: 'unreachable', from };
 
   // The lift first, if given: its door, and its car.
-  const lift = opts.lift ? liftFit({ w, d, h }, diagonal, opts.lift) : undefined;
+  const inLift =
+    opts.lift && parts
+      ? liftFitParts(parts, opts.lift)
+      : opts.lift
+        ? { fit: liftFit({ w, d, h }, diagonal, opts.lift), parts: null }
+        : undefined;
+  const lift = inLift?.fit;
   if (opts.lift && lift) {
     route.unshift({
       openingId: 'lift',
@@ -655,15 +790,43 @@ export function deliveryCheck(
       fit: lift.fit,
       ...(lift.need !== undefined ? { need: lift.need } : {}),
       ...(lift.tilted ? { tilted: true } : {}),
+      ...(inLift?.parts ? { parts: inLift.parts } : {}),
     });
   }
   const worst = worstDoor(route);
-  return { status: worst?.fit ?? 'fits', from, doors: route, worst, ...(lift ? { lift } : {}) };
+  return {
+    status: worst?.fit ?? 'fits',
+    from,
+    doors: route,
+    worst,
+    ...(lift ? { lift } : {}),
+    ...(parts ? { parts: partsOnTheWay(parts, route) } : {}),
+  };
+}
+
+/** Each part's worst fit along the way in, and whether it had to be folded anywhere. */
+function partsOnTheWay(parts: DeliveryPart[], route: DoorOnTheWay[]): PartFit[] {
+  return parts.map((p) => {
+    let fit: Fit = 'fits';
+    let bent = false;
+    for (const door of route) {
+      const f = door.parts?.find((q) => q.part === p.part);
+      if (!f) continue;
+      if (worse(f.fit, fit)) fit = f.fit;
+      if (f.folded) bent = true;
+    }
+    return {
+      part: p.part,
+      fit,
+      ...(bent ? { folded: true as const } : {}),
+      ...(p.part === 'mattress' && !p.folds ? { stiff: true as const } : {}),
+    };
+  });
 }
 
 /** The worst door on a way in: the worst fit, then the narrowest (null for none). */
 export function worstDoor(doors: DoorOnTheWay[]): DoorOnTheWay | null {
-  const order: Fit[] = ['fits', 'tight', 'hinges', 'too-big'];
+  const order = FIT_ORDER;
   return doors.reduce<DoorOnTheWay | null>(
     (p, q) =>
       !p || order.indexOf(q.fit) > order.indexOf(p.fit) || (q.fit === p.fit && q.clear < p.clear)
@@ -680,11 +843,32 @@ export function deliverable(assetId: string): boolean {
   return furnitureLayer(kind) === 'floor';
 }
 
+const PART_NAME: Record<DeliveryPartName, string> = {
+  mattress: 'the mattress',
+  headboard: 'the headboard',
+  rails: 'the side rails',
+};
+
 /**
- * The check treats every piece as rigid. A bed isn't quite: said beside a "too big" for one.
+ * Why a piece in parts (a bed) gets in or doesn't, said above the verdict: "Comes flat: the
+ * mattress and frame panels each fit." Null for a piece checked whole.
  */
-export function rigidNote(assetId: string): string | null {
-  return assetId.startsWith('bed-') || furnitureKind(assetId)?.shape === 'bed'
-    ? 'A mattress bends and a frame usually comes flat; ask the shop.'
-    : null;
+export function partsNote(r: Delivery): string | null {
+  if (!('parts' in r) || !r.parts) return null;
+  const bad = r.parts.filter((p) => p.fit === 'too-big');
+  if (!bad.length) {
+    const bent = r.parts.some((p) => p.part === 'mattress' && p.folded);
+    return bent
+      ? 'Comes flat: the mattress (folded in half) and frame panels each fit.'
+      : 'Comes flat: the mattress and frame panels each fit.';
+  }
+  // A mattress that doesn't fit even folded, or is too wide to fold (a king).
+  const names = bad.map((p) =>
+    p.part !== 'mattress'
+      ? PART_NAME[p.part]
+      : `the mattress (${p.stiff ? 'too wide to fold' : 'even folded in half'})`,
+  );
+  const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0];
+  const verb = names.length > 1 || bad[0]?.part === 'rails' ? 'don’t' : 'doesn’t';
+  return `Comes flat, but ${list} ${verb} fit; ask the shop.`;
 }

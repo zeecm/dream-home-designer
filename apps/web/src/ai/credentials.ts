@@ -67,6 +67,32 @@ export const CURATED: Record<Provider, { text: string[]; image: string[] }> = {
   },
 };
 
+/**
+ * Names to show for the built-in models, as their providers write them, for when the
+ * provider's own list (with its names) can't be had. The id stays the option's value.
+ */
+export const MODEL_NAMES: Record<string, string> = {
+  'claude-opus-5-5': 'Claude Opus 5.5',
+  'claude-sonnet-5-5': 'Claude Sonnet 5.5',
+  'claude-haiku-5-5': 'Claude Haiku 5.5',
+  'gemini-3-pro': 'Gemini 3 Pro',
+  'gemini-2.5-pro': 'Gemini 2.5 Pro',
+  'gemini-2.5-flash': 'Gemini 2.5 Flash',
+  'gemini-3-pro-image': 'Gemini 3 Pro Image',
+  'gemini-3.1-flash-image': 'Gemini 3.1 Flash Image',
+  'gemini-2.5-flash-image': 'Gemini 2.5 Flash Image',
+};
+
+/**
+ * What a picture costs, next to the provider's others, where we know it: shown in the picture
+ * select, so a dearer model is a choice made knowingly. Rough: keep up with the providers' prices.
+ */
+export function priceNote(id: string): string | undefined {
+  if (/^gemini-2\.5-flash-image/.test(id) || /^gpt-image-1-mini/.test(id)) return 'cheaper';
+  if (/^gemini-3-pro-image/.test(id)) return 'about 3× the price';
+  return undefined;
+}
+
 /** Whether a provider makes pictures. */
 export const makesPictures = (p: Provider) => !!PROVIDERS[p].imageModel;
 
