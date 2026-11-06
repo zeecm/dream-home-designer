@@ -79,10 +79,12 @@ for any plan.
   (walls HDB allows, room uses, furniture, carpentry, paint, a cost), checked like your own
   edits; versions to preview, accept in parts with Undo, and change room by room with feedback;
   a cost check before every run and a spending limit. [spec](docs/specs/ai-interior-designer.md)
+- AI interior designer, slice 1c: compare Before and two versions side by side (one at a time
+  on a phone), and what you change by hand after accepting is kept by the next version and
+  by accepting again. [spec](docs/specs/ai-interior-designer.md#6-compare)
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
-- AI interior designer, slice 1c: compare versions side by side, and locks for your own edits.
 - Exact render: a photo-real picture drawn on your device from the 3D model itself (true
   light through the windows, lamps, soft shadows), so nothing is added or moved; free, no
   key. [spec](docs/specs/exact-render.md)
