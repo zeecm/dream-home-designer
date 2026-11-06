@@ -438,29 +438,28 @@ export function RenovationSection() {
         hacking it and building it anew. Once the work is done, make the renovation the plan; either
         step can be undone.
       </p>
-      <span className="button-row">
-        <button
-          type="button"
-          className="btn btn-small"
-          onClick={() => {
-            dispatch(endRenovation('after'));
-            setVariant('before');
-          }}
-        >
-          Make it the plan
-        </button>
-        <button
-          type="button"
-          className="btn btn-small btn-danger"
-          onClick={() => {
-            dispatch(endRenovation('before'));
-            setVariant('before');
-          }}
-        >
-          Discard the renovation
-        </button>
-      </span>
+      <button
+        type="button"
+        className="btn btn-block"
+        onClick={() => {
+          dispatch(endRenovation('after'));
+          setVariant('before');
+        }}
+      >
+        Make it the plan
+      </button>
       <SuggestLayouts />
+      {/* The destructive action goes last (Undo still brings the renovation back). */}
+      <button
+        type="button"
+        className="btn btn-block btn-danger"
+        onClick={() => {
+          dispatch(endRenovation('before'));
+          setVariant('before');
+        }}
+      >
+        Discard the renovation
+      </button>
     </section>
   );
 }

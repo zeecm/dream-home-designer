@@ -7,11 +7,14 @@ import '@fontsource/ibm-plex-sans/latin-500.css';
 import '@fontsource/ibm-plex-sans/latin-600.css';
 import './styles.css';
 import { watchErrors } from './telemetry';
+import { watchVisualViewport } from './ui/sheetViewport';
 
 // iOS Safari zooms the page on a pinch whatever touch-action says; the plan and the 3D
 // view handle pinches themselves.
 document.addEventListener('gesturestart', (e) => e.preventDefault());
 watchErrors();
+// A phone's full-screen dialogs keep their buttons above the keyboard.
+watchVisualViewport();
 
 const root = document.getElementById('root');
 if (!root) throw new Error('#root missing');
