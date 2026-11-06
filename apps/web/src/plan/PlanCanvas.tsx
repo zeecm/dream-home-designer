@@ -296,8 +296,12 @@ export function PlanCanvas() {
   const lastFit = useRef({ at: 0, ink: null as PixelBox | null, image: '' });
   // Fit on request, and while the pane settles or the plan image arrives, until the user
   // pans or zooms. Once settled, a resize (a phone's details panel opening) keeps the view.
+  // A layout effect: the fit (and the measuring it waits on) lands in the commit that asked
+  // for it, before the page paints or handles input. As a passive effect, the plan showed
+  // the old view for as long as a busy page took to get round to it (seconds after a view
+  // switch), and a click there landed where the plan was about to move away from.
   // biome-ignore lint/correctness/useExhaustiveDependencies: refit on size, request or image, not on every edit
-  useEffect(() => {
+  useLayoutEffect(() => {
     if ((!fitRequested && viewAdjusted) || !level || size.width === 0) return;
     const prev = lastFit.current;
     const resizedOnly = prev.ink === ink && prev.image === image.status;
@@ -332,8 +336,9 @@ export function PlanCanvas() {
   // When the pane resizes (a phone's details panel folding or opening), the plan stays put
   // on screen: its top left keeps its place rather than everything shifting by half.
   const lastSize = useRef(size);
+  // In layout too, after the fit, so the plan never shows a frame offset by the resize.
   // biome-ignore lint/correctness/useExhaustiveDependencies: on a resize only
-  useEffect(() => {
+  useLayoutEffect(() => {
     const prev = lastSize.current;
     lastSize.current = size;
     const cur = useEditor.getState().view;
