@@ -79,12 +79,12 @@ function useShortcuts() {
       }
     });
     // Losing the right to comment (the owner closed comments, an edit link was reset)
-    // drops the Comment tool, and any comment half written.
+    // drops the Comment tool. A comment half written stays open, locked, so its words can
+    // still be copied.
     const dropComment = () => {
       const ed = useEditor.getState();
       if (ed.tool !== 'comment' || mayComment()) return;
       ed.setTool('select');
-      useComments.getState().cancelDraft();
     };
     const offComments = useComments.subscribe(dropComment);
     const offRole = useStore.subscribe((s, prev) => s.role !== prev.role && dropComment());
@@ -163,10 +163,14 @@ function ViewOnlyBanner() {
   if (role !== 'viewer') return null;
   return (
     <div className="sample-banner">
-      <span>
+      <span className="banner-long">
         {commenting
           ? 'View only. You can look around and leave comments, but not change the plan.'
           : 'View only. You can look around and walk through this plan, but not change it.'}
+      </span>
+      {/* A phone's one line. */}
+      <span className="banner-short" aria-hidden="true">
+        {commenting ? 'View only · you can comment' : 'View only'}
       </span>
       <button
         type="button"
@@ -218,6 +222,8 @@ function Toast() {
   const toast = useStore((s) => s.toast);
   const undo = useStore((s) => s.undo);
   const [shown, setShown] = useState<number | null>(null);
+  // Out of the way of a comment open on the plan (its Resolve and Post are at its foot).
+  const commentOpen = useComments((s) => !!s.openThread || !!s.draft);
   useEffect(() => {
     if (!toast) return;
     setShown(toast.at);
@@ -226,7 +232,7 @@ function Toast() {
   }, [toast]);
   if (!toast || shown !== toast.at) return null;
   return (
-    <output className="toast">
+    <output className={commentOpen ? 'toast toast-top' : 'toast'}>
       <span>{toast.text}</span>
       {toast.action && (
         <button

@@ -3275,7 +3275,9 @@ span.comment-pin {
   left: 0;
   right: 0;
   z-index: 60;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
   background: var(--surface);
   border-top: 1px solid var(--border);
@@ -3311,12 +3313,8 @@ span.comment-pin {
   overflow-wrap: anywhere;
 }
 .comment-card-title:focus {
+  /* Focused by the app as a thread opens, for screen readers: no ring for it. */
   outline: none;
-}
-.comment-card-title:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 2px;
 }
 .comment-gone {
   margin: 0;
@@ -3415,13 +3413,11 @@ span.comment-pin {
   right: 0;
   min-width: 180px;
 }
-/* "Who can comment": three choices that wrap rather than cut their words. */
+/* "Who can comment": three choices on one line, each as wide as its words. */
 .share-menu .segmented-fill button {
-  height: auto;
-  min-height: 36px;
-  padding: 4px 6px;
-  white-space: normal;
-  line-height: 16px;
+  flex: 1 1 auto;
+  padding: 0 6px;
+  font-size: var(--fs-small);
 }
 .comment-confirm {
   display: flex;
@@ -3459,10 +3455,9 @@ span.comment-pin {
   position: sticky;
   bottom: calc(-1 * var(--pad));
   margin: 0 calc(-1 * var(--pad)) calc(-1 * var(--pad));
-  padding: 10px var(--pad) var(--pad);
+  padding: 6px var(--pad) calc(6px + env(safe-area-inset-bottom));
   display: grid;
   gap: 8px;
-  justify-items: start;
   background: var(--surface);
   border-top: 1px solid var(--border);
 }
@@ -3616,5 +3611,119 @@ span.comment-pin {
   }
   .project-name {
     max-width: 18vw;
+  }
+}
+
+/* ---------------------------------------------------------------- comments, QA round */
+
+/* A sheet's fields scroll; its buttons stay at its foot, above the keyboard. */
+.comment-sheet > .comment-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.comment-sheet .comment-actions,
+.comment-sheet .comment-reply .button-row {
+  position: sticky;
+  bottom: 0;
+  padding-top: 8px;
+  background: var(--surface);
+}
+.comment-sheet-tight {
+  padding-top: 10px;
+}
+.comment-sheet-tight .comment-text {
+  min-height: 52px;
+  max-height: 96px;
+}
+.comment-sheet-tight .comment-card .field-hint:not(.error-text) {
+  display: none;
+}
+.comment-copy {
+  justify-self: start;
+  font-size: var(--fs-small);
+}
+
+/* With Select, a pin answers only to its bubble, so the piece under its tip stays tappable. */
+.comment-pins-select button.comment-pin {
+  pointer-events: none;
+}
+.comment-pins-select button.comment-pin::before {
+  content: "";
+  position: absolute;
+  inset: -4px -4px 11px;
+  pointer-events: auto;
+}
+
+/* Comments on the other version of the flat. */
+.comment-elsewhere {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 4px 12px;
+  max-width: calc(100% - 24px);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: auto;
+}
+
+/* The panel's foot: one row. */
+.comments-foot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.comments-foot-row .comment-as {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.comment-copied {
+  color: var(--text);
+}
+
+/* Toasts move up out of the way of a comment open on the plan. */
+.toast-top {
+  top: 16px;
+  bottom: auto;
+}
+
+.banner-short {
+  display: none;
+}
+@media (max-width: 720px) {
+  .banner-long {
+    display: none;
+  }
+  .banner-short {
+    display: inline;
+  }
+  .comments-btn {
+    flex: none;
+    min-width: 40px;
+  }
+}
+
+/* A phone on its side: the comments down the right-hand side, not half its short height. */
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  .comments-sheet {
+    left: auto;
+    top: 48px;
+    width: 340px;
+    height: auto !important;
+    border-radius: 16px 0 0 0 !important;
+  }
+  .comments-sheet .sheet-handle {
+    display: none;
   }
 }

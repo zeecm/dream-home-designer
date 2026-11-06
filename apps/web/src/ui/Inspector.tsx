@@ -190,7 +190,8 @@ export function Inspector() {
     reveal.current = directionToken;
     setUserOpen(true);
   }, [directionToken]);
-  const open = userOpen ?? (!!selection || tool !== 'select');
+  // The Comment tool keeps it folded: on a phone the plan is what you comment on.
+  const open = userOpen ?? (!!selection || (tool !== 'select' && tool !== 'comment'));
   // biome-ignore lint/correctness/useExhaustiveDependencies: after a reveal, once open
   useEffect(() => {
     if (!open || !reveal.current) return;
@@ -236,6 +237,8 @@ export function Inspector() {
       <fieldset className="inspector-body" disabled={viewer}>
         {body}
       </fieldset>
+      {/* A way of looking, not a change: a view link can use it too. */}
+      {!selection && <CommentPinsSwitch />}
       {selection && <ToolPanel />}
     </aside>
   );
@@ -328,7 +331,6 @@ function PlanSummary({ level }: { level: Level }) {
       <StructuralSuggestion />
       <ClearanceSummary />
       <ElectricalSummary level={level} />
-      <CommentPinsSwitch />
       <RenovationSection />
       <CostSummary />
       <LengthField

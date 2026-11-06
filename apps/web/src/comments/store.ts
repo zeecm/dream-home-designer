@@ -138,7 +138,8 @@ export const useComments = create<CommentsState>((set, get) => {
     // epoch (no comments yet) never replaces one that has had comments.
     if (s.doc?.epoch && !f.doc.epoch) return;
     if (s.doc && f.doc.epoch === s.doc.epoch && f.doc.version < s.doc.version) return;
-    const before = s.doc?.epoch === f.doc.epoch ? s.doc : null;
+    // New messages are told apart by their ids: the first comment comes with a new epoch.
+    const before = s.doc;
     set({
       doc: f.doc,
       etag: f.etag,

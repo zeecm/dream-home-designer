@@ -15,7 +15,7 @@ import { shareLink } from '../keys';
 import { useProject, useStore } from '../store';
 import { Segmented } from '../ui/fields';
 import { icons } from '../ui/icons';
-import { CommentError, errorText } from './api';
+import { type CommentAction, CommentError, errorText } from './api';
 import {
   canComment,
   commentId,
@@ -140,7 +140,7 @@ function TextField({
   onChange,
   onSubmit,
   placeholder,
-  disabled,
+  readOnly,
 }: {
   id: string;
   label: string;
@@ -148,7 +148,7 @@ function TextField({
   onChange: (v: string) => void;
   onSubmit: () => void;
   placeholder: string;
-  disabled?: boolean;
+  readOnly?: boolean;
 }) {
   const n = Array.from(value.trim()).length;
   return (
@@ -162,7 +162,7 @@ function TextField({
         rows={3}
         value={value}
         placeholder={placeholder}
-        disabled={disabled}
+        readOnly={readOnly}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
@@ -194,16 +194,17 @@ function Confirm({
   onYes: () => void;
   onNo: () => void;
 }) {
-  const yes = useRef<HTMLButtonElement>(null);
-  useEffect(() => yes.current?.focus(), []);
+  // Focus on Keep: a stray Enter keeps what was there.
+  const keep = useRef<HTMLButtonElement>(null);
+  useEffect(() => keep.current?.focus(), []);
   return (
     <div className="comment-confirm">
       <span>{question}</span>
       <span className="button-row">
-        <button ref={yes} type="button" className="btn btn-small btn-danger" onClick={onYes}>
+        <button type="button" className="btn btn-small btn-danger" onClick={onYes}>
           {action}
         </button>
-        <button type="button" className="btn btn-small" onClick={onNo}>
+        <button ref={keep} type="button" className="btn btn-small" onClick={onNo}>
           Keep
         </button>
       </span>
@@ -223,11 +224,18 @@ export function Composer({ onClose }: { onClose: () => void }) {
   const [locked, setLocked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [discarding, setDiscarding] = useState(false);
+  const [copied, setCopied] = useState(false);
   const id = useId();
+  // The right to comment can go while typing (the owner closed comments): the text stays,
+  // to copy, and the composer says why it can't post.
+  const may = useCanComment();
+  const role = useCommentRole();
+  const setting = useComments((s) => s.doc?.setting ?? 'all');
   if (!draft) return null;
+  const refused = locked || !may;
   const askName = !savedName;
   const ready =
-    !busy && !locked && text.trim() !== '' && !tooLong(text) && (!askName || name.trim() !== '');
+    !busy && !refused && text.trim() !== '' && !tooLong(text) && (!askName || name.trim() !== '');
 
   const post = async () => {
     if (!ready) return;
@@ -286,12 +294,27 @@ export function Composer({ onClose }: { onClose: () => void }) {
         }}
         onSubmit={() => void post()}
         placeholder="What do you think?"
-        disabled={locked}
+        readOnly={refused}
       />
-      {error && (
+      {(error || !may) && (
         <p className="field-hint error-text" role="alert">
-          {error}
+          {error ?? noCommentReason(role, setting)}
         </p>
+      )}
+      {refused && text.trim() && (
+        <button
+          type="button"
+          className="link-btn comment-copy"
+          onClick={() =>
+            void copy(text.trim()).then((ok) => {
+              if (!ok) return;
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            })
+          }
+        >
+          {copied ? 'Copied' : 'Copy text'}
+        </button>
       )}
       {discarding ? (
         <Confirm
@@ -409,13 +432,13 @@ export function ThreadCard({
   const askName = !savedName;
   const allMine = thread.messages.every((m) => m.mine);
   const canDeleteThread = owner || allMine;
-  const act = async (fn: () => Promise<void>) => {
+  const act = async (fn: () => Promise<void>, action: CommentAction = 'post') => {
     setError(null);
     setBusy(true);
     try {
       await fn();
     } catch (e) {
-      setError(errorText(e));
+      setError(errorText(e, action));
     } finally {
       setBusy(false);
     }
@@ -452,7 +475,7 @@ export function ThreadCard({
           },
         });
       }
-    });
+    }, 'save');
 
   return (
     <section className="comment-card" aria-labelledby={`${id}-h`}>
@@ -478,7 +501,9 @@ export function ThreadCard({
             first={i === 0}
             now={now}
             canDelete={owner || m.mine}
-            onDelete={() => void act(() => useComments.getState().deleteReply(thread.id, m.id))}
+            onDelete={() =>
+              void act(() => useComments.getState().deleteReply(thread.id, m.id), 'delete')
+            }
           />
         ))}
       </ul>
@@ -531,7 +556,9 @@ export function ThreadCard({
             void act(async () => {
               await useComments.getState().deleteThread(thread.id);
               onClose();
-            });
+              // The thread is gone: focus goes to the Comments button, not the page.
+              document.querySelector<HTMLElement>('.comments-btn')?.focus();
+            }, 'delete');
           }}
           onNo={() => setConfirming(false)}
         />
@@ -663,6 +690,9 @@ export function CommentsPanel() {
   const now = useNow();
   const panel = useRef<HTMLElement>(null);
   const drag = useRef<number | null>(null);
+  const moved = useRef(false);
+  const [dragDy, setDragDy] = useState(0);
+  const [menu, setMenu] = useState(false);
   const close = () => {
     const c = useComments.getState();
     c.setPanel(false);
@@ -759,6 +789,11 @@ export function CommentsPanel() {
     <aside
       ref={panel}
       className={`panel comments-panel${sheet ? ' comments-sheet' : ''}${full ? ' comments-sheet-full' : ''}`}
+      style={
+        sheet && dragDy
+          ? { height: `calc(${full ? '100dvh - 48px' : '50dvh'} - ${dragDy}px)` }
+          : undefined
+      }
       aria-label="Comments"
       onKeyDown={(e) => {
         if (e.key === 'Escape' && !e.defaultPrevented) {
@@ -772,13 +807,26 @@ export function CommentsPanel() {
           type="button"
           className="sheet-handle"
           aria-label={full ? 'Make the comments smaller' : 'Make the comments full height'}
-          onClick={() => setFull((f) => !f)}
+          onClick={() => {
+            if (!moved.current) setFull((f) => !f);
+            moved.current = false;
+          }}
           onPointerDown={(e) => {
             drag.current = e.clientY;
+            moved.current = false;
+            e.currentTarget.setPointerCapture(e.pointerId);
+          }}
+          // The sheet follows the finger, and settles at half, full or closed on release.
+          onPointerMove={(e) => {
+            if (drag.current === null) return;
+            const dy = e.clientY - drag.current;
+            if (Math.abs(dy) > 4) moved.current = true;
+            setDragDy(dy);
           }}
           onPointerUp={(e) => {
             const from = drag.current;
             drag.current = null;
+            setDragDy(0);
             if (from === null) return;
             const dy = e.clientY - from;
             if (dy < -30) setFull(true);
@@ -786,6 +834,10 @@ export function CommentsPanel() {
               if (full) setFull(false);
               else close();
             }
+          }}
+          onPointerCancel={() => {
+            drag.current = null;
+            setDragDy(0);
           }}
         />
       )}
@@ -799,87 +851,107 @@ export function CommentsPanel() {
       </div>
       <div className="comments-panel-body">{body}</div>
       {doc && !inPanel && (
+        // One row, so the list keeps the room: who is commenting, and the rest in a menu.
         <footer className="comments-panel-foot">
-          {may &&
-            (renaming ? (
-              <form
-                className="copy-row"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (!draftName.trim()) return;
-                  useComments.getState().setName(draftName);
-                  setRenaming(false);
-                }}
-              >
-                <input
-                  className="input"
-                  aria-label="Your name"
-                  value={draftName}
-                  maxLength={COMMENT_MAX_NAME}
-                  // biome-ignore lint/a11y/noAutofocus: opened by Change, to type in
-                  autoFocus
-                  onChange={(e) => setDraftName(e.target.value)}
-                />
-                <button type="submit" className="btn btn-small">
-                  Save
-                </button>
-              </form>
-            ) : (
-              name && (
-                <p className="comment-as">
-                  Commenting as {name} ·{' '}
-                  <button
-                    type="button"
-                    className="link-btn"
-                    onClick={() => {
-                      setDraftName(name);
-                      setRenaming(true);
-                    }}
-                  >
-                    Change
-                  </button>
-                </p>
-              )
-            ))}
-          {(view?.open.length ?? 0) > 0 && (
-            <button
-              type="button"
-              className="btn btn-small"
-              onClick={() =>
-                void copy(commentsText(doc, renovation)).then((ok) => {
-                  if (!ok) return;
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
-                })
-              }
+          {renaming ? (
+            <form
+              className="copy-row"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!draftName.trim()) return;
+                useComments.getState().setName(draftName);
+                setRenaming(false);
+              }}
             >
-              {copied ? 'Copied' : 'Copy open comments'}
-            </button>
-          )}
-          {role === 'owner' &&
-            resolvedCount > 0 &&
-            (confirming ? (
-              <Confirm
-                question={`Delete ${resolvedCount} resolved ${resolvedCount === 1 ? 'comment' : 'comments'}? This can’t be undone.`}
-                onYes={() => {
-                  setConfirming(false);
-                  setError(null);
-                  useComments
-                    .getState()
-                    .deleteResolved()
-                    .catch((e) => setError(errorText(e)));
-                }}
-                onNo={() => setConfirming(false)}
+              <input
+                className="input"
+                aria-label="Your name"
+                value={draftName}
+                maxLength={COMMENT_MAX_NAME}
+                // biome-ignore lint/a11y/noAutofocus: opened by Change, to type in
+                autoFocus
+                onChange={(e) => setDraftName(e.target.value)}
               />
-            ) : (
-              <button
-                type="button"
-                className="link-btn error-text"
-                onClick={() => setConfirming(true)}
-              >
-                Delete resolved comments
+              <button type="submit" className="btn btn-small">
+                Save
               </button>
-            ))}
+            </form>
+          ) : confirming ? (
+            <Confirm
+              question={`Delete ${resolvedCount} resolved ${resolvedCount === 1 ? 'comment' : 'comments'}? This can’t be undone.`}
+              onYes={() => {
+                setConfirming(false);
+                setError(null);
+                useComments
+                  .getState()
+                  .deleteResolved()
+                  .catch((e) => setError(errorText(e, 'delete')));
+              }}
+              onNo={() => setConfirming(false)}
+            />
+          ) : (
+            <div className="comments-foot-row">
+              <p className="comment-as">
+                {may && name && (
+                  <>
+                    Commenting as {name} ·{' '}
+                    <button
+                      type="button"
+                      className="link-btn"
+                      onClick={() => {
+                        setDraftName(name);
+                        setRenaming(true);
+                      }}
+                    >
+                      Change
+                    </button>
+                  </>
+                )}
+                {copied && <span className="comment-copied">Copied</span>}
+              </p>
+              <div className="menu-anchor">
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label="More comment actions"
+                  aria-expanded={menu}
+                  onClick={() => setMenu((o) => !o)}
+                >
+                  {icons.more}
+                </button>
+                {menu && (
+                  <div className="menu menu-up">
+                    <button
+                      type="button"
+                      disabled={(view?.open.length ?? 0) === 0}
+                      onClick={() => {
+                        setMenu(false);
+                        void copy(commentsText(doc, renovation)).then((ok) => {
+                          if (!ok) return;
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 1500);
+                        });
+                      }}
+                    >
+                      Copy open comments
+                    </button>
+                    {role === 'owner' && resolvedCount > 0 && (
+                      <button
+                        type="button"
+                        className="error-text"
+                        onClick={() => {
+                          setMenu(false);
+                          setConfirming(true);
+                        }}
+                      >
+                        Delete resolved comments…
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           {error && (
             <p className="field-hint error-text" role="alert">
               {error}
@@ -942,7 +1014,7 @@ export function WhoCanComment() {
           useComments
             .getState()
             .setSetting(v)
-            .catch((e) => setError(errorText(e)));
+            .catch((e) => setError(errorText(e, 'save')));
         }}
         options={[
           { value: 'all', label: 'Anyone with a link' },
