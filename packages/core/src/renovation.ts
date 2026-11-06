@@ -64,7 +64,7 @@ export function endRenovation(keep: Variant): Command {
 }
 
 /** The records an edit to the flat as it is carries over (rooms follow from the walls). */
-const CARRIED = ['vertices', 'walls', 'openings', 'items'] as const;
+const CARRIED = ['vertices', 'walls', 'openings', 'items', 'points'] as const;
 type Carried = (typeof CARRIED)[number];
 /** What a room keeps of its own when carried: the rest (its outline) is found again. */
 const ROOM_FIELDS = ['name', 'floorMaterial', 'ceilingMaterial', 'ceilingHeight'] as const;
@@ -131,9 +131,12 @@ function planCarry(old: Level, now: Level, there: Level): Change[] | 'none' | 'c
   const has = there as unknown as Records;
   const changes: Change[] = [];
   for (const key of CARRIED) {
-    for (const id of new Set([...Object.keys(was[key]), ...Object.keys(edited[key])])) {
-      if (same(was[key][id], edited[key][id])) continue;
-      const to = merge(was[key][id], edited[key][id], has[key][id]);
+    const w = was[key] ?? {};
+    const e = edited[key] ?? {};
+    const h = has[key] ?? {};
+    for (const id of new Set([...Object.keys(w), ...Object.keys(e)])) {
+      if (same(w[id], e[id])) continue;
+      const to = merge(w[id], e[id], h[id]);
       if (to === 'conflict') return 'conflict';
       if (to !== 'same') changes.push({ key, id, to });
     }
@@ -188,6 +191,7 @@ function planCarry(old: Level, now: Level, there: Level): Change[] | 'none' | 'c
     vertices: { ...there.vertices },
     walls: { ...there.walls },
     openings: { ...there.openings },
+    points: { ...there.points },
   } as Record<string, Record<string, unknown>>;
   for (const c of changes) {
     if (c.key === 'items') continue;
@@ -200,6 +204,11 @@ function planCarry(old: Level, now: Level, there: Level): Change[] | 'none' | 'c
   if (Object.values(ws).some((w) => !vs[w.a] || !vs[w.b])) return 'conflict';
   const ops = Object.values(trial.openings as Level['openings']);
   if (ops.some((o) => !ws[o.wallId] || isBoundary(ws[o.wallId] as Wall))) return 'conflict';
+  // Every socket or switch on a wall that is there (not a boundary).
+  for (const p of Object.values(trial.points as Level['points'])) {
+    const w = p.wall && ws[p.wall.wallId];
+    if (p.wall && (!w || isBoundary(w))) return 'conflict';
+  }
   // No door or window added or moved by the edit overlapping another on its wall.
   for (const c of changes) {
     if (c.key !== 'openings' || !c.to) continue;
@@ -269,7 +278,7 @@ export function carriedToRenovation(
           outcome.conflict = true;
           if (!back) return;
           for (const key of [...CARRIED, 'rooms'] as const) {
-            (after as Record<string, unknown>)[key] = structuredClone(back[key]);
+            (after as Record<string, unknown>)[key] = structuredClone(back[key] ?? {});
           }
           after.ceilingHeight = back.ceilingHeight;
         };
@@ -280,6 +289,7 @@ export function carriedToRenovation(
         const keep = structuredClone(current(after));
         if (plan !== 'none') {
           for (const c of plan) {
+            after[c.key] ??= {};
             const into: Record<string, unknown> = after[c.key];
             if (c.to === undefined) delete into[c.id];
             else into[c.id] = structuredClone(c.to);

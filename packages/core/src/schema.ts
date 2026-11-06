@@ -140,6 +140,52 @@ export const Light = z.object({
 });
 export type Light = z.infer<typeof Light>;
 
+/** What an electrical point is: a socket, switch, light, aircon unit and so on. */
+export const ElecKind = z.enum([
+  'socket-double',
+  'socket-single',
+  'switch',
+  'light',
+  'fan',
+  'data',
+  'tv',
+  'aircon',
+  'compressor',
+  'water-heater',
+  'cooker',
+  'doorbell',
+]);
+export type ElecKind = z.infer<typeof ElecKind>;
+
+/**
+ * An electrical point. On a wall (`wall`): `t` along it from vertex a (as an opening's), on
+ * its `side` face, `height` above the floor (an aircon unit's top). Or on the plan (`at`): a
+ * ceiling light or fan, a compressor on the ledge. An aircon unit's trunking runs through its
+ * `route` bends to its compressor.
+ */
+export const ElecPoint = z
+  .object({
+    id: z.string(),
+    kind: ElecKind,
+    wall: z
+      .object({
+        wallId: z.string(),
+        t: z.number().min(0).max(1),
+        side: z.enum(['left', 'right']),
+        height: z.number().min(0),
+      })
+      .optional(),
+    at: Vec2.optional(),
+    /** Switches: how many gangs on the plate. */
+    gang: z.number().int().min(1).max(3).optional(),
+    /** Aircon: the compressor its trunking runs to. */
+    compressorId: z.string().optional(),
+    /** Aircon: the trunking's bends, from the unit to the compressor. */
+    route: z.array(Vec2).optional(),
+  })
+  .refine((p) => !!p.wall !== !!p.at, { message: 'a point is on a wall or at a place, not both' });
+export type ElecPoint = z.infer<typeof ElecPoint>;
+
 export const Level = z.object({
   id: z.string(),
   name: z.string(),
@@ -151,6 +197,8 @@ export const Level = z.object({
   rooms: z.record(Room),
   items: z.record(Item),
   lights: z.record(Light),
+  /** Electrical points: sockets, switches, lights, aircon (schema 9). */
+  points: z.record(ElecPoint).default({}),
 });
 export type Level = z.infer<typeof Level>;
 
@@ -222,7 +270,7 @@ export const CustomModel = CustomModelBase.refine((m) => !!m.hash !== !!m.shape,
 });
 export type CustomModel = z.infer<typeof CustomModel>;
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 export const Project = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),

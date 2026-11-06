@@ -166,6 +166,10 @@ export function deleteWall(levelId: string, wallId: string, snapshot?: Level): C
       for (const op of Object.values(lvl.openings)) {
         if (op.wallId === wallId) delete lvl.openings[op.id];
       }
+      // Its sockets and switches go with it.
+      for (const p of Object.values(lvl.points ?? {})) {
+        if (p.wall?.wallId === wallId) delete lvl.points[p.id];
+      }
 
       const stillUsed = new Set<string>();
       for (const w of Object.values(lvl.walls)) {
@@ -295,6 +299,8 @@ export function updateWall(levelId: string, wallId: string, patch: WallPatch): C
         const lvl = level(d, levelId);
         for (const o of Object.values(lvl.openings))
           if (o.wallId === wallId) delete lvl.openings[o.id];
+        for (const p of Object.values(lvl.points ?? {}))
+          if (p.wall?.wallId === wallId) delete lvl.points[p.id];
       }
     },
   };

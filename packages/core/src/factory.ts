@@ -13,6 +13,7 @@ export function emptyLevel(id = 'lvl_ground'): Level {
     rooms: {},
     items: {},
     lights: {},
+    points: {},
   };
 }
 

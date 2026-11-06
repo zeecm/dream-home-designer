@@ -28,3 +28,4 @@ export * from './clearance';
 export * from './cost';
 export * from './delivery';
 export * from './dimensions';
+export * from './electrical';

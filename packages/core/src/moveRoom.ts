@@ -3,7 +3,7 @@ import type { Command } from './history';
 import { newId } from './ids';
 import { draftLevel } from './levels';
 import { detectFaces, roomShapes, syncRooms } from './rooms';
-import type { Item, Level, Opening, Room, Vec2, Vertex, Wall } from './schema';
+import type { ElecPoint, Item, Level, Opening, Room, Vec2, Vertex, Wall } from './schema';
 import { MIN_JOINED, band, segmentDistance } from './shiftWall';
 import { reclampOpenings } from './topology';
 
@@ -29,6 +29,8 @@ export interface RoomMove {
   /** Corners that move with the room. */
   vertices: string[];
   items: string[];
+  /** Ceiling lights and the like (points on the plan, not on a wall) in the room. */
+  points?: string[];
   /**
    * Corners that stay, where a joined wall runs across the move: the room's walls leave each
    * for a new corner (`vertex`), joined back to it by a new wall (`wall`).
@@ -50,10 +52,13 @@ function along(p: Vec2, q: Vec2, d: Vec2): boolean {
 }
 
 /** The corners on the room's outline or inside it, and the furniture standing in it. */
-function carried(level: Level, roomId: string): { vertices: Set<string>; items: string[] } {
+function carried(
+  level: Level,
+  roomId: string,
+): { vertices: Set<string>; items: string[]; points: string[] } {
   const room = level.rooms[roomId];
   const outer = room && roomShapes(level).get(roomId)?.outer;
-  if (!room || !outer || outer.length < 3) return { vertices: new Set(), items: [] };
+  if (!room || !outer || outer.length < 3) return { vertices: new Set(), items: [], points: [] };
   const loop = new Set(room.loop);
   const vertices = new Set(
     Object.values(level.vertices)
@@ -63,7 +68,10 @@ function carried(level: Level, roomId: string): { vertices: Set<string>; items: 
   const items = Object.values(level.items)
     .filter((it) => pointInPolygon({ x: it.position.x, y: it.position.z }, outer))
     .map((it) => it.id);
-  return { vertices, items };
+  const points = Object.values(level.points ?? {})
+    .filter((p) => p.at && pointInPolygon(p.at, outer))
+    .map((p) => p.id);
+  return { vertices, items, points };
 }
 
 const wallsAt = (level: Level, id: string) =>
@@ -81,8 +89,8 @@ export function roomJoined(level: Level, roomId: string): boolean {
  * standing alone). New ids for the steps are made here, outside any recipe.
  */
 export function planRoomMove(level: Level, roomId: string, axis: Axis | null): RoomMove {
-  const { vertices: inRoom, items } = carried(level, roomId);
-  if (!axis) return { axis, vertices: [...inRoom], items, steps: [], stays: [] };
+  const { vertices: inRoom, items, points } = carried(level, roomId);
+  if (!axis) return { axis, vertices: [...inRoom], items, points, steps: [], stays: [] };
   const d = dirOf(axis);
   const room = level.rooms[roomId];
   const loop = new Set(room?.loop ?? []);
@@ -115,7 +123,7 @@ export function planRoomMove(level: Level, roomId: string, axis: Axis | null): R
     }
     steps.push({ corner: id, vertex: newId('v'), wall: newId('w') });
   }
-  return { axis, vertices, items, steps, stays };
+  return { axis, vertices, items, points, steps, stays };
 }
 
 /** The parts of a level a move changes. */
@@ -125,6 +133,7 @@ interface Movable {
   openings: Record<string, Opening>;
   items: Record<string, Item>;
   rooms: Record<string, Room>;
+  points?: Record<string, ElecPoint>;
 }
 
 /** The move's delta, held to its axis. */
@@ -195,6 +204,11 @@ function applyMove(lvl: Movable, start: Level, move: RoomMove, delta: Vec2): voi
     const cur = lvl.openings[id];
     if (cur && cur.t !== o.t) cur.t = o.t;
   }
+  for (const [id, p] of Object.entries(start.points ?? {})) {
+    const cur = lvl.points?.[id];
+    if (cur?.wall && p.wall && cur.wall.t !== p.wall.t) cur.wall.t = p.wall.t;
+    if (cur?.at && p.at && (cur.at.x !== p.at.x || cur.at.y !== p.at.y)) cur.at = { ...p.at };
+  }
   if (Math.hypot(delta.x, delta.y) < 1e-9) return;
 
   for (const id of move.vertices) {
@@ -208,6 +222,10 @@ function applyMove(lvl: Movable, start: Level, move: RoomMove, delta: Vec2): voi
     if (!it) continue;
     it.position.x += delta.x;
     it.position.z += delta.y;
+  }
+  for (const id of move.points ?? []) {
+    const p = lvl.points?.[id];
+    if (p?.at) p.at = { x: p.at.x + delta.x, y: p.at.y + delta.y };
   }
   const corners = cornersOf(move);
   const d = move.axis ? dirOf(move.axis) : null;
@@ -289,6 +307,25 @@ function applyMove(lvl: Movable, start: Level, move: RoomMove, delta: Vec2): voi
     const after = Math.hypot(nb.x - na.x, nb.y - na.y);
     if (after < 1e-9) continue;
     o.t = keptT(anchorEnd(w0, corners, movedA), o0.t, before, after);
+  }
+  // Sockets and switches likewise.
+  for (const [id, p0] of Object.entries(start.points ?? {})) {
+    const w0 = p0.wall && start.walls[p0.wall.wallId];
+    const w = p0.wall && lvl.walls[p0.wall.wallId];
+    const p = lvl.points?.[id];
+    const pa = w0 && start.vertices[w0.a];
+    const pb = w0 && start.vertices[w0.b];
+    const na = w && lvl.vertices[w.a];
+    const nb = w && lvl.vertices[w.b];
+    if (!w0 || !p0.wall || !p?.wall || !pa || !pb || !na || !nb) continue;
+    const movedA = Math.hypot(na.x - pa.x, na.y - pa.y) > 1e-9;
+    const movedB = Math.hypot(nb.x - pb.x, nb.y - pb.y) > 1e-9;
+    if (movedA === movedB) continue;
+    const before = Math.hypot(pb.x - pa.x, pb.y - pa.y);
+    const after = Math.hypot(nb.x - na.x, nb.y - na.y);
+    if (after < 1e-9) continue;
+    const t = keptT(anchorEnd(w0, corners, movedA), p0.wall.t, before, after);
+    p.wall.t = Math.min(1, Math.max(0, t));
   }
 }
 

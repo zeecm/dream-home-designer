@@ -32,6 +32,8 @@ const MIGRATIONS: Record<number, (doc: Record<string, unknown>) => Record<string
   // 8 lets a custom model be a piece by size: an optional hash, and shape, material and
   // diagonal. Every version-7 model has a hash.
   7: (doc) => doc,
+  // 9 adds Level.points (electrical points), empty by default.
+  8: (doc) => doc,
 };
 
 export function migrate(input: unknown): unknown {
