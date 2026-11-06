@@ -34,6 +34,8 @@ const MIGRATIONS: Record<number, (doc: Record<string, unknown>) => Record<string
   7: (doc) => doc,
   // 9 adds Level.points (electrical points), empty by default.
   8: (doc) => doc,
+  // 10 adds the optional Site.lift; a version-9 site has no lift checked.
+  9: (doc) => doc,
 };
 
 export function migrate(input: unknown): unknown {

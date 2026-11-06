@@ -103,14 +103,14 @@ function along(l: Level, id: string, by: number): NonNullable<ElecPoint['wall']>
 }
 
 describe('electrical points (schema 9)', () => {
-  it('a version-8 plan parses as 9 with no points on every level', () => {
+  it('a version-8 plan parses (as the current version) with no points on every level', () => {
     const doc = JSON.parse(JSON.stringify(hdb4RoomProject())) as Record<string, unknown>;
     doc.schemaVersion = 8;
     for (const l of doc.levels as Record<string, unknown>[]) delete l.points;
     doc.renovation = { levels: [{ ...(doc.levels as object[])[0], id: A }] };
     const { project } = loadProject(doc);
     expect(project.schemaVersion).toBe(SCHEMA_VERSION);
-    expect(SCHEMA_VERSION).toBe(9);
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(9);
     expect(project.levels[0]?.points).toEqual({});
     expect(project.renovation?.levels[0]?.points).toEqual({});
   });
