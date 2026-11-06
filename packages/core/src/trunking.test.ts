@@ -23,6 +23,7 @@ import {
   axesOf,
   dragBend,
   draggedRoute,
+  hasJog,
   legInto,
   movePathEnd,
   moveWithTrunking,
@@ -721,6 +722,90 @@ describe('QA round 2', () => {
       }
     }
     expect(shared).toBeGreaterThan(1);
+  });
+});
+
+describe('QA round 3', () => {
+  /** The sample with an aircon unit on the main bedroom's right wall, a quarter way down. */
+  const withUnit = (route: Vec2[] | null) => {
+    const project = sampleFlatProject();
+    const lid = project.levels[0]?.id as string;
+    let s: EditorDoc = { doc: project, history: emptyHistory() };
+    const a = addPoint(lid, {
+      kind: 'aircon',
+      wall: { wallId: 'w_bedroom_main-bedroom', t: 0.25, side: 'left', height: 2.4 },
+    });
+    s = dispatch(s, a.command);
+    const cu = addPoint(lid, { kind: 'compressor', at: { x: 1.891, y: 6.82 } });
+    s = dispatch(s, cu.command);
+    if (route) s = dispatch(s, updatePoint(lid, a.pointId, { route, compressorId: cu.pointId }));
+    return { s, id: a.pointId, lid };
+  };
+  /** Bath/WC 1's right wall (x 2.397, 90 mm) hugged from inside: 2.397 - 0.045 - 0.05. */
+  const BATH_HUG = 2.397 - 0.095;
+  // Down its wall, over the door head, through Bath/WC 1 into the ledge (as routed before).
+  const overDoor = [
+    { x: 3.166, y: 2.998 },
+    { x: 2.85, y: 2.998 },
+    { x: 2.85, y: 4.222 },
+    { x: BATH_HUG, y: 4.222 },
+    { x: BATH_HUG, y: 6.274 },
+    { x: 1.891, y: 6.274 },
+  ];
+
+  it('its wall moved 0.2 m left: no jog left behind, and Straighten finds nothing to do', () => {
+    const { s: s0, id } = withUnit(overDoor);
+    const l0 = s0.doc.levels[0] as Level;
+    const wall = 'w_bedroom_main-bedroom';
+    const s = dispatch(s0, shiftWall(l0, wall, 0.2, shiftIds(l0, wall)));
+    const lvl = s.doc.levels[0] as Level;
+    const u = lvl.points[id] as ElecPoint;
+    const path = trunkingPath(lvl, u);
+    // The unit moved with its wall (its face now 0.116 m from the door wall's).
+    expect((path[0] as Vec2).x).toBeCloseTo(2.966, 3);
+    expect(square(path)).toBe(true);
+    expect(hasJog(path)).toBe(false);
+    expect(straightenedRoute(lvl, u)).toBeNull();
+  });
+
+  it('a jog under 15 cm is not straight: Straighten takes it out', () => {
+    const { s: s0, id } = withUnit(overDoor);
+    const l0 = s0.doc.levels[0] as Level;
+    const wall = 'w_bedroom_main-bedroom';
+    const moved = dispatch(s0, shiftWall(l0, wall, 0.2, shiftIds(l0, wall)));
+    // The run as it was left before: a 0.116 m jog where the faces step.
+    const lvl0 = moved.doc.levels[0] as Level;
+    const jogged = [{ x: 2.966, y: 2.998 }, ...overDoor.slice(1)];
+    const unitPoint = { ...(lvl0.points[id] as ElecPoint), route: jogged };
+    const lvl = { ...lvl0, points: { ...lvl0.points, [id]: unitPoint } };
+    expect(hasJog(trunkingPath(lvl, unitPoint))).toBe(true);
+    const fixed = straightenedRoute(lvl, unitPoint);
+    expect(fixed).not.toBeNull();
+    const after = { ...unitPoint, route: fixed ?? [] };
+    const path = trunkingPath({ ...lvl, points: { ...lvl.points, [id]: after } }, after);
+    expect(square(path)).toBe(true);
+    expect(hasJog(path)).toBe(false);
+  });
+
+  it('with a trunk down the left wall, the unit joins it rather than going over the door', () => {
+    const project = sampleFlatProject();
+    const lid = project.levels[0]?.id as string;
+    let s: EditorDoc = { doc: project, history: emptyHistory() };
+    const level = () => s.doc.levels[0] as Level;
+    const route = (wallId: string, t: number) => {
+      const a = addPoint(lid, { kind: 'aircon', wall: { wallId, t, side: 'left', height: 2.4 } });
+      s = dispatch(s, a.command);
+      const r = routeAlongWalls(level(), a.pointId);
+      if ('error' in r) throw new Error(r.error);
+      s = dispatch(s, r.command);
+      return trunkingPath(level(), level().points[a.pointId] as ElecPoint);
+    };
+    route('w_main-bedroom_outside', 0.2);
+    const second = route('w_bedroom_main-bedroom', 0.25);
+    expect(square(second)).toBe(true);
+    // Down the left wall's hug line (x 0.35), not the door wall's (x 2.85).
+    expect(second.some((p) => Math.abs(p.x - 0.35) < 1e-6)).toBe(true);
+    expect(second.some((p) => Math.abs(p.x - 2.85) < 1e-6)).toBe(false);
   });
 });
 

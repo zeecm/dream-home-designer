@@ -213,6 +213,16 @@ test.describe('phone', () => {
     // The details sheet folds while the run goes on: the plan gets the height.
     await expect(page.getByRole('button', { name: 'Show plan details' })).toBeVisible();
     expect(plan.height).toBeGreaterThan(330);
+    // The unit's room and the ledge fill the strip below the bar.
+    await page.waitForTimeout(600);
+    const plan2 = await page.locator('svg.plan-svg').boundingBox();
+    const bed = await roomBox(page, 'rm_main-bedroom');
+    const led = await roomBox(page, 'rm_air-con-ledge');
+    if (!plan2) throw new Error('no plan');
+    const strip = plan2.y + plan2.height - (bb.y + bb.height);
+    expect(led.y + led.height - bed.y).toBeGreaterThan(strip * 0.8);
+    expect(bed.y).toBeGreaterThan(bb.y + bb.height - 2);
+    expect(led.y + led.height).toBeLessThan(plan2.y + plan2.height + 2);
 
     const b = await roomBox(page, 'rm_main-bedroom');
     // A finger down and moving shows the next leg before it lifts; lifted, it's gone.
