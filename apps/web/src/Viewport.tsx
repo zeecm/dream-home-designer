@@ -13,6 +13,7 @@ import { LevelMeshes, MaterialCache, ModelLibrary } from '@dhd/render';
 import { OrbitControls } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import {
+  type KeyboardEvent,
   type MutableRefObject,
   useEffect,
   useLayoutEffect,
@@ -442,6 +443,14 @@ function Capture() {
 
 const coarsePointer = () => window.matchMedia('(pointer: coarse)').matches;
 
+/**
+ * Closing the render dialog with Enter hands focus back to the button that opened it, and
+ * the key, still held, would open it again at once: a held key's repeats don't press it.
+ */
+const ignoreHeldKey = (e: KeyboardEvent) => {
+  if (e.repeat && (e.key === 'Enter' || e.key === ' ')) e.preventDefault();
+};
+
 export function Viewport() {
   const project = useProject();
   const level = useLevel();
@@ -453,6 +462,8 @@ export function Viewport() {
   // Comparing a renovation's before and after, side by side across a divider.
   const [comparing, setComparing] = useState(false);
   const [rendering, setRendering] = useState(false);
+  // Read once a render: the walk's sticks, the render button and the hints all follow it.
+  const coarse = coarsePointer();
   const viewer = useStore((st) => st.role === 'viewer');
   const [split, setSplit] = useState(0.5);
   const splitRef = useRef(0.5);
@@ -608,10 +619,11 @@ export function Viewport() {
             // Footsteps; the map moves down for it). The view to render is the one walked to.
             <button
               type="button"
-              className={`btn viewport-render viewport-render-walk${coarsePointer() ? ' viewport-render-icon' : ''}`}
+              className={`btn viewport-render viewport-render-walk${coarse ? ' viewport-render-icon' : ''}`}
               // The icon's name, and a tooltip for it.
-              aria-label={coarsePointer() ? 'Photo-real render' : undefined}
-              title={coarsePointer() ? 'Photo-real render' : undefined}
+              aria-label={coarse ? 'Photo-real render' : undefined}
+              title={coarse ? 'Photo-real render' : undefined}
+              onKeyDown={ignoreHeldKey}
               onClick={() => {
                 // The mouse back from the walk, to use the dialog.
                 if (document.pointerLockElement) document.exitPointerLock();
@@ -621,18 +633,18 @@ export function Viewport() {
                 setRendering(true);
               }}
             >
-              {coarsePointer() ? icons.camera : 'Photo-real render'}
+              {coarse ? icons.camera : 'Photo-real render'}
             </button>
           )}
           {level && <MiniMap level={level} pose={pose} />}
-          {coarsePointer() && (
+          {coarse && (
             <>
               <Joystick stick={stick} disabled={rendering} />
               <Joystick stick={lookStick} look disabled={rendering} />
             </>
           )}
           <p className="viewport-hint">
-            {coarsePointer()
+            {coarse
               ? 'Left stick to walk · right stick or drag to look'
               : 'W A S D or arrows to walk · Shift to run · click to look with the mouse · Esc frees the mouse, Esc again leaves'}
           </p>
@@ -667,6 +679,7 @@ export function Viewport() {
             <button
               type="button"
               className={`btn viewport-render${versions ? ' viewport-render-low' : ''}`}
+              onKeyDown={ignoreHeldKey}
               onClick={() => setRendering(true)}
             >
               Photo-real render
@@ -674,7 +687,7 @@ export function Viewport() {
           )}
 
           <p className="viewport-hint">
-            {coarsePointer()
+            {coarse
               ? 'Drag to orbit · pinch to zoom · two fingers to pan'
               : 'Drag to orbit · right-drag to pan · scroll to zoom'}
           </p>

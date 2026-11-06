@@ -67,6 +67,16 @@ export const CURATED: Record<Provider, { text: string[]; image: string[] }> = {
   },
 };
 
+/**
+ * What a picture costs, next to the provider's others, where we know it: shown in the picture
+ * select, so a dearer model is a choice made knowingly. Rough: keep up with the providers' prices.
+ */
+export function priceNote(id: string): string | undefined {
+  if (/^gemini-2\.5-flash-image/.test(id) || /^gpt-image-1-mini/.test(id)) return 'cheaper';
+  if (/^gemini-3-pro-image/.test(id)) return 'about 3× the price';
+  return undefined;
+}
+
 /** Whether a provider makes pictures. */
 export const makesPictures = (p: Provider) => !!PROVIDERS[p].imageModel;
 

@@ -58,6 +58,29 @@ describe('provider error messages', () => {
     ).toBe('Key [key] failed');
   });
 
+  it('redacts Google’s newer keys and tokens, others’ keys and long random runs', () => {
+    // Gemini keys of the newer shape (the owner's), and Google OAuth tokens
+    expect(redact('key AQ.Ab8RN6Kx_q-0123456789abcdefgh was refused')).toBe(
+      'key [key] was refused',
+    );
+    expect(redact('token ya29.a0AfH6SMBx-12345abcdef.more here')).toBe('token [key] here');
+    // Stripe-style secret keys
+    expect(redact('got sk_live_51HabcDEF123456 instead')).toBe('got [key] instead');
+    // The dotted tail of an OpenAI key goes too
+    expect(redact('Incorrect API key provided: sk-proj-abc.def123.')).toBe(
+      'Incorrect API key provided: [key].',
+    );
+    // Long base64 and hex runs
+    expect(redact('sig dGhpcyBpcyBhIHNlY3JldCB0b2tlbiBvZiBzb21lIGtpbmQ9PQ== end')).toBe(
+      'sig [key] end',
+    );
+    expect(redact(`id ${'0123456789abcdef'.repeat(3)} end`)).toBe('id [key] end');
+    // Names and addresses in a message stay readable.
+    const plain =
+      'models/gemini-2.5-flash-image-preview-09-2025 is not found for API version v1beta';
+    expect(redact(plain)).toBe(plain);
+  });
+
   it('says which provider turned a request down, and what it said', () => {
     const e = failure('gemini', 400, {
       error: {
