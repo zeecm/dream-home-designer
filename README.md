@@ -40,7 +40,8 @@ for any plan.
 - Any wall colour (a colour picker) and eight wallpapers.
 - AI with your own key (Claude, OpenAI or Gemini): trace walls from a plan image, looked over
   before it goes in. [spec](docs/specs/ai-layouts.md)
-- Photo-real renders of any 3D or walk-through view (phones too), with your own OpenAI or Gemini key.
+- Photo-real renders of any 3D or walk-through view (phones too), with your own OpenAI or Gemini key,
+  told the true room sizes and the furniture in view; from above they start at eye height.
 - AI suggested layouts from a short brief: up to three, checked against what HDB lets you
   change, one click to make one the renovation.
 - Structural and household-shelter walls marked (hatched), with hacking warnings: shelter

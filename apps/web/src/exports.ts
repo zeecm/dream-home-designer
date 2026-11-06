@@ -1,3 +1,4 @@
+import type { SceneCamera } from '@dhd/core';
 import type * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { type ViewMode, useEditor } from './editor';
@@ -200,6 +201,13 @@ interface Scene3d {
   render: () => void;
   canvas: HTMLCanvasElement;
   level: () => THREE.Object3D | undefined;
+  /** Where the camera is and what it looks at, as drawn now. */
+  camera: () => SceneCamera;
+  /**
+   * The view from another camera, drawn and read at once, then the view on screen drawn
+   * again before the browser shows a frame, so the screen doesn't change.
+   */
+  renderFrom: (camera: SceneCamera) => Promise<Blob>;
 }
 
 let scene3d: Scene3d | null = null;
@@ -209,17 +217,36 @@ export function registerScene3d(s: Scene3d | null) {
   scene3d = s;
 }
 
+/** The canvas as a PNG (its picture is copied at once, then encoded). */
+export const canvasBlob = (canvas: HTMLCanvasElement) =>
+  new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('No picture'))), 'image/png'),
+  );
+
 /** The 3D view as it is now (the orbit view, or the walk), as a PNG. */
 export async function capture3d(): Promise<Blob> {
+  return (await capture3dView()).blob;
+}
+
+/** The 3D view as it is now, and the camera it is seen from. */
+export async function capture3dView(): Promise<{ blob: Blob; camera: SceneCamera }> {
   return withView('3d', async () => {
     await settle(10); // models and shadows settle
     const s = scene3d;
     if (!s) throw new Error('The 3D view isn’t on screen.');
     // Drawn now and read at once, so the canvas needn't keep its buffer between frames.
     s.render();
-    return await new Promise<Blob>((resolve, reject) =>
-      s.canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('No picture'))), 'image/png'),
-    );
+    const blob = canvasBlob(s.canvas);
+    return { blob: await blob, camera: s.camera() };
+  });
+}
+
+/** The 3D view from `camera` (at eye height, say), leaving the view on screen as it is. */
+export async function capture3dFrom(camera: SceneCamera): Promise<Blob> {
+  return withView('3d', async () => {
+    const s = scene3d;
+    if (!s) throw new Error('The 3D view isn’t on screen.');
+    return await s.renderFrom(camera);
   });
 }
 
