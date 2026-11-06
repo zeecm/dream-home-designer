@@ -55,11 +55,12 @@ for any plan.
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
+- "My furniture" by measured size and a check that it gets in from the main door.
+  [spec](docs/specs/my-furniture.md)
 
 ### Planned
-1. "My furniture" and a delivery-path fit check.
-2. Clearance checks, slice 2: walkways from the main door, dining chairs, labels on the plan.
-3. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
+1. Clearance checks, slice 2: walkways from the main door, dining chairs, labels on the plan.
+2. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
 
 ## What it does
 
