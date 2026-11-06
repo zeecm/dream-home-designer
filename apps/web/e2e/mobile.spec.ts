@@ -378,6 +378,108 @@ test('on a phone: a small piece moves under the finger, however close its handle
   await expect(items).toHaveCount(1);
 });
 
+/**
+ * A tap, and then the click the browser sends for it after the lift (by when anything the
+ * lift opened is on screen, and the click has landed on whatever is now there).
+ */
+async function tapThrough(page: Page, x: number, y: number) {
+  type W = { tapClick?: Promise<void> };
+  await page.evaluate(() => {
+    (window as W).tapClick = new Promise((done) =>
+      // Once the page has handled it.
+      window.addEventListener('click', () => setTimeout(done), { once: true, capture: true }),
+    );
+  });
+  await page.touchscreen.tap(x, y);
+  await page.evaluate(() => (window as W).tapClick);
+}
+
+test('on a phone: a piece tapped low on the plan opens its details, though they open under the finger', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.evaluate(() => document.fonts.ready);
+  const toggle = page.locator('.inspector-toggle');
+  const details = page.getByRole('complementary', { name: 'Details' });
+  // A small pan first, as a hand settles the plan: from then on the panel opening or folding
+  // leaves the plan where it is on screen (just after it was fitted, it would refit).
+  const r = await planBox(page);
+  await touches(page, settled(line({ x: r.x + 30, y: r.y + 40 }, { x: r.x + 50, y: r.y + 40 }, 4)));
+  // Where the toggle sits once the details are open. A tap there on the plan opens them under
+  // the finger, and the browser's click for that tap comes after, onto the toggle.
+  await toggle.tap();
+  await expect(toggle).toHaveText('Hide details');
+  const open = await toggle.boundingBox();
+  if (!open) throw new Error('no toggle');
+  const y = open.y + open.height / 2;
+  await toggle.tap();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await planBox(page); // grown back over the panel's room
+  // Across the screen at that height, the middle of the kitchen (low on the plan).
+  const x = await page.evaluate((y) => {
+    const xs: number[] = [];
+    for (let x = 0; x < innerWidth; x += 2) {
+      const hit = document.elementFromPoint(x, y)?.closest('[data-hit]');
+      if (hit?.getAttribute('data-hit') === 'room:rm_kitchen') xs.push(x);
+    }
+    return xs.length ? ((xs[0] ?? 0) + (xs[xs.length - 1] ?? 0)) / 2 : null;
+  }, y);
+  if (x === null) throw new Error('no kitchen under the toggle');
+
+  // A fridge, placed there with the details folded by hand.
+  await page.getByRole('button', { name: /^Furniture/ }).tap();
+  await toggle.tap();
+  await details.getByLabel('Find furniture').fill('fridge');
+  await details
+    .getByRole('button', { name: /^Fridge/ })
+    .first()
+    .tap();
+  await toggle.tap();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await tapThrough(page, x, y);
+  const items = page.locator('[data-hit^="item:"]');
+  await expect(items).toHaveCount(1);
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+  // In Select with nothing chosen, the details fold. The fridge, tapped: they open, and stay.
+  await page.getByRole('button', { name: /^Select/ }).tap();
+  await details.getByRole('button', { name: 'Clear selection' }).tap();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  const piece = await items.first().boundingBox();
+  if (!piece) throw new Error('no fridge');
+  const at = { x: piece.x + piece.width / 2, y: piece.y + piece.height / 2 };
+  expect(Math.abs(at.y - y)).toBeLessThan(open.height / 2); // under where the toggle comes
+  await tapThrough(page, at.x, at.y);
+  await expect(details.getByRole('heading', { name: 'Fridge' })).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+  // So does a room tapped there.
+  await details.getByRole('button', { name: 'Clear selection' }).tap();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  const room = await page.evaluate(
+    ([y, skip]) => {
+      for (let x = 0; x < innerWidth; x += 2) {
+        if (Math.abs(x - skip.x) < skip.r) continue;
+        const hit = document.elementFromPoint(x, y)?.closest('[data-hit]');
+        if (hit?.getAttribute('data-hit') === 'room:rm_kitchen') return x + 4;
+      }
+      return null;
+    },
+    [y, { x: at.x, r: piece.width }] as const,
+  );
+  if (room === null) throw new Error('no kitchen beside the fridge');
+  await tapThrough(page, room, y);
+  await expect(details.getByRole('heading', { name: 'Room', exact: true })).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+  // The toggle itself still folds and opens them by finger.
+  await toggle.tap();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await toggle.tap();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+});
+
 test('on a phone: a tapped wall drags sideways by finger; an untapped one pans', async ({
   page,
 }) => {
