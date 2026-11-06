@@ -23,9 +23,12 @@ import {
 } from './models';
 import { AiError, askForJson, inSettings } from './providers';
 
-/** A 1 × 1 white PNG: enough for a model to answer a test. */
+/**
+ * A 64 × 64 light grey PNG for the test: an image so the test also checks the model takes one.
+ * Not 1 × 1: Gemini refuses images that small ("Unable to process input image").
+ */
 const DOT =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=';
+  'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAATElEQVR42u3PMQ0AAAwDoPpXWwmVsHsJOCB9LgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIClwHQUQKk2+ThhwAAAABJRU5ErkJggg==';
 
 /** How long typing pauses before the key's models are looked up. */
 const LIST_AFTER = 600;

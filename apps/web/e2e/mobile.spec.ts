@@ -709,7 +709,18 @@ test('on a phone: the plan stays under a fast finger, coasts after a swipe, and 
   const x1 = await x();
   await swipe(from, (i) => ({ x: from.x - i * 12, y: from.y }), 6);
   await expect.poll(x).toBeLessThan(x1 - 72 - 20);
-  await page.waitForTimeout(1500);
+  // It stops: wait until it has (a coast runs about 1.6 s of frames, and a slow machine's
+  // frames are capped at 32 ms each, so longer on the clock), then it stays put.
+  await expect
+    .poll(
+      async () => {
+        const a = await x();
+        await page.waitForTimeout(200);
+        return Math.abs((await x()) - a);
+      },
+      { timeout: 6000 },
+    )
+    .toBeLessThan(0.5);
   const settled = await x();
   await page.waitForTimeout(300);
   expect(await x()).toBeCloseTo(settled, 0);
