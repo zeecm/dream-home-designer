@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { deleteWall, drawWall, updateRoom, updateWall } from './commands';
+import {
+  addOpening,
+  deleteWall,
+  drawWall,
+  updateOpening,
+  updateRoom,
+  updateWall,
+} from './commands';
 import { TYPICAL_RATES, costEstimate, footRun } from './cost';
 import { blankProject } from './factory';
 import { sampleFlatProject } from './fixtures/sampleFlat';
@@ -158,5 +165,49 @@ describe('cost estimate', () => {
     const labels = costEstimate(flat(s), reno(s), R).lines.map((l) => l.label);
     expect(labels.filter((l) => l.startsWith('Hack wall (structural)')).length).toBeGreaterThan(0);
     expect(labels.filter((l) => l === 'Hack wall').length).toBe(0);
+  });
+
+  it('kitchen modules add up into one run before rounding to feet', () => {
+    const s0 = room(4, 4);
+    const sink = furnitureKind('kitchen-sink');
+    const hob = furnitureKind('kitchen-hob');
+    if (!sink || !hob) throw new Error('no cabinets');
+    const lvl = {
+      ...flat(s0),
+      items: { a: newItem('a', sink, { x: 1, y: 0.3 }), b: newItem('b', hob, { x: 1.8, y: 0.3 }) },
+    };
+    const base = costEstimate(lvl, undefined, R).lines.filter(
+      (l) => l.label === 'Kitchen base cabinets',
+    );
+    expect(base).toHaveLength(1);
+    expect(base[0]?.qty).toBe(5);
+  });
+
+  it('a door moved: cut, closed up and the door; made a window: a window', () => {
+    let s = room(4, 4, [[2, 0, 2, 4]]);
+    const wallId = partition(flat(s));
+    const d = addOpening(flat(s).id, {
+      wallId,
+      kind: 'door',
+      t: 0.3,
+      width: 0.8,
+      height: 2.1,
+      sill: 0,
+      swing: 'leftIn',
+    });
+    s = dispatch(dispatch(s, d.command), startRenovation());
+    expect(reno(s).openings[d.openingId]).toBeTruthy();
+    const moved = dispatch(s, updateOpening(A(s), d.openingId, { t: 0.7 }));
+    const labels = costEstimate(flat(moved), reno(moved), R).lines.map((l) => l.label);
+    expect(labels).toContain('Cut an opening');
+    expect(labels).toContain('Close up a door');
+    expect(labels).toContain('Swing door');
+    const window = dispatch(
+      s,
+      updateOpening(A(s), d.openingId, { kind: 'window', sill: 0.9, height: 1.2 }),
+    );
+    expect(costEstimate(flat(window), reno(window), R).lines.map((l) => l.label)).toContain(
+      'Window',
+    );
   });
 });

@@ -609,7 +609,12 @@ export type RenovationChange = ChangePlace & {
         sill?: number;
         moved?: boolean;
       }
-    | { kind: 'floor'; from: string; to: string }
+    | {
+        kind: 'floor';
+        from: string;
+        to: string /** The room, in the renovation. */;
+        roomId: string;
+      }
     | { kind: 'area'; before: number; after: number }
     | { kind: 'rename'; from: string }
     | { kind: 'room'; change: 'added' | 'removed'; area: number }
@@ -694,7 +699,7 @@ const guardOf = (s: WallStatus | undefined): Guard | undefined =>
   s === 'shelter' ? 'shelter' : s ? 'structural' : undefined;
 
 /** The wall of the flat as it is that an opening of the renovation is cut into, if any. */
-function wallBefore(before: Level, after: Level, openingId: string): string | undefined {
+export function wallBefore(before: Level, after: Level, openingId: string): string | undefined {
   const at = openingAt(after, openingId);
   return at ? wallThrough(before, at.c, at.d)?.id : undefined;
 }
@@ -945,6 +950,7 @@ export function renovationChanges(
       out.push({
         ...place,
         kind: 'floor',
+        roomId: r.id,
         from: name(was.floorMaterial),
         to: name(r.floorMaterial),
       });

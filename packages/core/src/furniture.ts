@@ -619,12 +619,14 @@ export function newItem(
   ceilingHeight = 2.7,
 ): Item {
   const y = kind.ceiling ? Math.max(0, ceilingHeight - kind.size.h) : (kind.elevation ?? 0);
+  // Full-height built-ins are made to the ceiling.
+  const tall = kind.carpentry === 'wardrobe' || kind.carpentry === 'tall';
   return {
     id,
     assetId: kind.id,
     position: { x: at.x, y, z: at.y },
     rotationY: rotation,
-    scale: { x: 1, y: 1, z: 1 },
+    scale: { x: 1, y: tall ? ceilingHeight / kind.size.h : 1, z: 1 },
     flags: { snapWall: !!kind.againstWall, collidable: !kind.walkThrough },
   };
 }

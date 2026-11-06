@@ -1,7 +1,8 @@
 import { finish } from './finishes';
 import { furnitureKind, itemSize } from './furniture';
+import { pointInPolygon } from './geometry';
 import type { DoorStyle } from './plan';
-import { type RenovationChange, renovationChanges } from './renovation';
+import { type RenovationChange, renovationChanges, wallBefore } from './renovation';
 import { roomArea, roomShape } from './rooms';
 import type { Item, Level } from './schema';
 
@@ -184,21 +185,11 @@ const CARPENTRY_NAMES: Record<Carpentry, string> = {
 /** The room an item stands in, by name. */
 function roomOfItem(level: Level, item: Item): string {
   const p = { x: item.position.x, y: item.position.z };
-  for (const room of Object.values(level.rooms)) {
-    const s = roomShape(level, room);
-    let inside = false;
-    const poly = s.outer;
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const a = poly[i];
-      const b = poly[j];
-      if (!a || !b) continue;
-      if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) {
-        inside = !inside;
-      }
-    }
-    if (inside) return room.name;
-  }
-  return 'Flat';
+  const room = Object.values(level.rooms).find((r) => {
+    const sh = roomShape(level, r);
+    return pointInPolygon(p, sh.outer) && !sh.holes.some((h) => pointInPolygon(p, h));
+  });
+  return room?.name ?? 'Flat';
 }
 
 /**
@@ -226,7 +217,8 @@ export function costEstimate(before: Level, after: Level | undefined, rates: Rat
         const b = outer[(i + 1) % outer.length];
         if (a && b) perimeter += Math.hypot(b.x - a.x, b.y - a.y);
       }
-      const area = Math.round((perimeter * shown.ceilingHeight + roomArea(shown, room)) * 10) / 10;
+      const height = room.ceilingHeight ?? shown.ceilingHeight;
+      const area = Math.round((perimeter * height + roomArea(shown, room)) * 10) / 10;
       if (area > 0)
         lines.push(
           line('Painting', 'Repaint walls and ceiling', room.name, area, 'm²', rates.paint),
@@ -234,7 +226,9 @@ export function costEstimate(before: Level, after: Level | undefined, rates: Rat
     }
   }
 
-  // Built-ins: new or resized in the renovation; with none, all of them.
+  // Built-ins: new or resized in the renovation; with none, all of them. A carpenter
+  // measures a run, not its modules: widths add up per room and kind, then round to feet.
+  const runs = new Map<string, { kind: Carpentry; where: string; width: number }>();
   for (const it of Object.values(shown.items)) {
     const c = carpentryOf(it);
     if (!c) continue;
@@ -243,10 +237,18 @@ export function costEstimate(before: Level, after: Level | undefined, rates: Rat
       if (was && was.assetId === it.assetId && Math.abs(itemSize(was).w - itemSize(it).w) < 0.005)
         continue;
     }
-    const feet = footRun(itemSize(it).w);
     const where = roomOfItem(shown, it);
-    lines.push(line('Carpentry', CARPENTRY_NAMES[c], where, feet, 'ft run', rates.carpentry[c]));
-    if (c === 'base')
+    const k = `${where}|${c}`;
+    const run = runs.get(k) ?? { kind: c, where, width: 0 };
+    run.width += itemSize(it).w;
+    runs.set(k, run);
+  }
+  for (const { kind, where, width } of runs.values()) {
+    const feet = footRun(width);
+    lines.push(
+      line('Carpentry', CARPENTRY_NAMES[kind], where, feet, 'ft run', rates.carpentry[kind]),
+    );
+    if (kind === 'base')
       lines.push(line('Carpentry', 'Countertop', where, feet, 'ft run', rates.countertop));
   }
 
@@ -288,44 +290,55 @@ function changeLines(c: RenovationChange, before: Level, after: Level, rates: Ra
       return [line('Building', 'New wall', place, len, 'm', rates.newWall)];
     case 'opening': {
       if (c.change === 'with-wall') return [];
-      if (c.change === 'removed') {
-        return [
-          line(
-            'Doors and windows',
-            `Close up ${c.opening === 'window' ? 'a window' : `a ${c.opening}`}${tag}`,
-            place,
-            1,
-            'each',
-            rates.closeOpening,
-          ),
-        ];
-      }
+      const D = 'Doors and windows';
+      const closeUp = () =>
+        line(
+          D,
+          `Close up ${c.opening === 'window' ? 'a window' : `a ${c.opening}`}${tag}`,
+          place,
+          1,
+          'each',
+          rates.closeOpening,
+        );
+      if (c.change === 'removed') return [closeUp()];
       const o = after.openings[c.id];
       if (!o) return [];
       const out: CostLine[] = [];
-      // A new opening in a wall that was there: cutting it.
-      if (c.change === 'added' && Object.values(before.walls).length && before.walls[o.wallId]) {
-        out.push(
-          line('Doors and windows', `Cut an opening${tag}`, place, 1, 'each', rates.cutOpening),
-        );
+      const b = c.change === 'changed' ? (c.before ?? {}) : {};
+      const moved = c.change === 'changed' && !!c.moved;
+      const bigger =
+        (b.width !== undefined && c.width > b.width + 0.004) ||
+        (b.height !== undefined && (c.height ?? 0) > b.height + 0.004);
+      // A hole in a wall that was there: cut new, moved (and the old one closed) or made bigger.
+      const inOldWall = !!wallBefore(before, after, c.id);
+      if (c.change === 'added' && inOldWall)
+        out.push(line(D, `Cut an opening${tag}`, place, 1, 'each', rates.cutOpening));
+      if (moved) {
+        out.push(line(D, `Cut an opening${tag}`, place, 1, 'each', rates.cutOpening), closeUp());
+      } else if (bigger) {
+        out.push(line(D, `Widen the opening${tag}`, place, 1, 'each', rates.cutOpening));
       }
-      const restyled = c.change === 'changed' && (c.before?.style || c.before?.glazed);
-      const resized =
-        c.change === 'changed' &&
-        (c.before?.width !== undefined || c.before?.height !== undefined || c.moved);
-      if (o.kind === 'door' && (c.change === 'added' || restyled || resized)) {
+      // A new door or window: new, a new kind, restyled, moved or resized.
+      const changed =
+        c.change === 'added' ||
+        b.opening !== undefined ||
+        b.style !== undefined ||
+        b.glazed !== undefined ||
+        b.width !== undefined ||
+        b.height !== undefined ||
+        b.sill !== undefined ||
+        moved;
+      if (o.kind === 'door' && changed) {
         const style = (o.style ?? 'swing') as DoorStyle;
-        out.push(line('Doors and windows', DOOR_NAMES[style], place, 1, 'each', rates.door[style]));
-        if (o.glazed) {
-          out.push(line('Doors and windows', 'Glass leaves', place, 1, 'each', rates.glassLeaves));
-        }
-      } else if (o.kind === 'window' && (c.change === 'added' || resized)) {
-        out.push(line('Doors and windows', 'Window', place, 1, 'each', rates.window));
+        out.push(line(D, DOOR_NAMES[style], place, 1, 'each', rates.door[style]));
+        if (o.glazed) out.push(line(D, 'Glass leaves', place, 1, 'each', rates.glassLeaves));
+      } else if (o.kind === 'window' && changed) {
+        out.push(line(D, 'Window', place, 1, 'each', rates.window));
       }
       return out;
     }
     case 'floor': {
-      const room = Object.values(after.rooms).find((r) => r.name === c.rooms[0]);
+      const room = after.rooms[c.roomId];
       const kind = room ? floorKind(room.floorMaterial) : null;
       if (!room || !kind) return [];
       const area = Math.round(roomArea(after, room) * 10) / 10;

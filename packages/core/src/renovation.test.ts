@@ -261,6 +261,7 @@ describe('renovationChanges', () => {
       rooms: ['Kitchen'],
       outside: false,
       kind: 'floor',
+      roomId: 'rm_kitchen',
       from: finish('tile-grey')?.name,
       to: finish('wood-oak')?.name,
     });

@@ -1,13 +1,16 @@
 import {
+  AFTER_SUFFIX,
   type CostEstimate,
   type CostGroup,
   type CostLine,
   type Item,
+  type Level,
   type Rate,
   type Rates,
   TYPICAL_RATES,
   carpentryCost,
   costEstimate,
+  itemSize,
 } from '@dhd/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
@@ -20,27 +23,63 @@ const KEY = 'dhd-rates';
 export const DISCLAIMER =
   'A rough guide from typical Singapore prices (2025–2026), not a quote. Prices vary with materials, contractor and site. Get itemised quotes from HDB-registered contractors.';
 
+type Loose = Record<string, unknown>;
+const isRate = (v: unknown): v is Rate => {
+  const r = v as Rate | null;
+  return (
+    !!r &&
+    typeof r === 'object' &&
+    Number.isFinite(r.low) &&
+    Number.isFinite(r.high) &&
+    r.low >= 0 &&
+    r.high >= r.low
+  );
+};
+const isRateLike = (v: unknown) => !!v && typeof v === 'object' && 'low' in (v as object);
+
+/**
+ * `over` laid on `base`, keeping only what is valid there: a rate with two numbers (low not
+ * above high), a switch that is true or false, a group of rates (doors, floors, carpentry)
+ * rate by rate. Anything else keeps the typical value.
+ */
+function merge(base: Rates, over: unknown): Rates {
+  if (!over || typeof over !== 'object') return base;
+  const out: Loose = { ...base };
+  for (const [k, b] of Object.entries(base as unknown as Loose)) {
+    const v = (over as Loose)[k];
+    if (v === undefined) continue;
+    if (typeof b === 'boolean') {
+      if (typeof v === 'boolean') out[k] = v;
+    } else if (isRateLike(b)) {
+      if (isRate(v)) out[k] = v;
+    } else if (b && typeof b === 'object' && v && typeof v === 'object') {
+      const group: Loose = { ...(b as Loose) };
+      for (const g of Object.keys(group)) if (isRate((v as Loose)[g])) group[g] = (v as Loose)[g];
+      out[k] = group;
+    }
+  }
+  return out as unknown as Rates;
+}
+
+/** What differs from the typical rates (so new typical rates still reach someone who edited one). */
+function diff(rates: Rates): Loose {
+  const out: Loose = {};
+  for (const [k, b] of Object.entries(TYPICAL_RATES as unknown as Loose)) {
+    const v = (rates as unknown as Loose)[k];
+    if (JSON.stringify(v) !== JSON.stringify(b)) out[k] = v;
+  }
+  return out;
+}
+
 /** Rates as the person set them in this browser, over the typical ones. */
 function loadRates(): Rates {
   try {
     const raw = window.localStorage.getItem(KEY);
-    if (raw) return merge(TYPICAL_RATES, JSON.parse(raw) as Partial<Rates>);
+    if (raw) return merge(TYPICAL_RATES, JSON.parse(raw));
   } catch {
     // Unreadable or blocked: the typical rates.
   }
   return TYPICAL_RATES;
-}
-
-/** `over` laid over `base`, a level deep (doors, floors, carpentry are records of rates). */
-function merge(base: Rates, over: Partial<Rates>): Rates {
-  const out = { ...base } as Record<string, unknown>;
-  for (const [k, v] of Object.entries(over)) {
-    const b = (base as unknown as Record<string, unknown>)[k];
-    if (b && typeof b === 'object' && !('low' in b) && v && typeof v === 'object') {
-      out[k] = { ...b, ...(v as object) };
-    } else if (b !== undefined) out[k] = v;
-  }
-  return out as unknown as Rates;
 }
 
 export const useRates = create<{
@@ -51,7 +90,7 @@ export const useRates = create<{
   rates: loadRates(),
   set: (rates) => {
     try {
-      window.localStorage.setItem(KEY, JSON.stringify(rates));
+      window.localStorage.setItem(KEY, JSON.stringify(diff(rates)));
     } catch {
       // Not remembered; used for this visit.
     }
@@ -67,16 +106,26 @@ export const useRates = create<{
   },
 }));
 
+// One estimate for the summary and the dialog alike: the last one, while nothing changed.
+let last: { before: Level; after?: Level; rates: Rates; est: CostEstimate } | null = null;
+
 /** The estimate for the first level: its renovation if there is one. */
 export function useEstimate(): CostEstimate | null {
-  const doc = useStore((s) => s.editor.doc);
+  const before = useStore((s) => s.editor.doc.levels[0]);
+  const after = useStore((s) =>
+    before
+      ? s.editor.doc.renovation?.levels.find((l) => l.id === `${before.id}${AFTER_SUFFIX}`)
+      : undefined,
+  );
   const rates = useRates((s) => s.rates);
   return useMemo(() => {
-    const before = doc.levels[0];
     if (!before) return null;
-    const after = doc.renovation?.levels.find((l) => l.id.startsWith(before.id));
-    return costEstimate(before, after, rates);
-  }, [doc, rates]);
+    if (last && last.before === before && last.after === after && last.rates === rates)
+      return last.est;
+    const est = costEstimate(before, after, rates);
+    last = { before, after, rates, est };
+    return est;
+  }, [before, after, rates]);
 }
 
 export const money = (v: number) => `$${Math.round(v).toLocaleString('en-SG')}`;
@@ -118,10 +167,9 @@ export function CarpentryLine({ item }: { item: Item }) {
   const rates = useRates((s) => s.rates);
   const c = carpentryCost(item, rates);
   if (!c) return null;
-  const w = c.feet * 0.3048;
   return (
     <p className="field-hint carpentry-line">
-      Built-in: {formatLength(w)} · {c.feet} ft run · about {range(c.low, c.high)}
+      Built-in: {formatLength(itemSize(item).w)} · {c.feet} ft run · about {range(c.low, c.high)}
     </p>
   );
 }
@@ -130,21 +178,27 @@ export function CarpentryLine({ item }: { item: Item }) {
 export function CostSummary() {
   const est = useEstimate();
   const [open, setOpen] = useState(false);
-  if (!est || !est.lines.length) return null;
+  if (!est) return null;
   return (
-    <div className="field cost-summary">
-      <span className="field-label">Cost estimate</span>
-      <p className="cost-total">
-        about <strong>{range(est.low, est.high)}</strong>
-      </p>
-      {!est.renovation && (
-        <p className="field-hint">Start a renovation to price hacking, walls and floors.</p>
-      )}
-      <button type="button" className="btn btn-small" onClick={() => setOpen(true)}>
-        See estimate
-      </button>
+    <>
+      <div className="field cost-summary">
+        <span className="field-label">Cost estimate</span>
+        {est.lines.length ? (
+          <p className="cost-total">
+            about <strong>{range(est.low, est.high)}</strong>
+          </p>
+        ) : (
+          <p className="field-hint">Nothing to price yet.</p>
+        )}
+        {!est.renovation && (
+          <p className="field-hint">Start a renovation to price hacking, walls and floors.</p>
+        )}
+        <button type="button" className="btn btn-small" onClick={() => setOpen(true)}>
+          See estimate
+        </button>
+      </div>
       {open && <EstimateDialog onClose={() => setOpen(false)} />}
-    </div>
+    </>
   );
 }
 
@@ -225,8 +279,14 @@ const RATE_ROWS: {
 function RateRow({ row }: { row: (typeof RATE_ROWS)[number] }) {
   const { rates, set } = useRates();
   const v = row.get(rates);
+  // Bumped when an entry is refused, so the fields show the rate again.
+  const [tries, setTries] = useState(0);
+  const num = (t: string) => (t.trim() === '' ? Number.NaN : Number(t.replace(/[,\s$]/g, '')));
   const commit = (low: number, high: number) => {
-    if (!Number.isFinite(low) || !Number.isFinite(high) || low < 0 || high < 0) return;
+    if (!Number.isFinite(low) || !Number.isFinite(high) || low < 0 || high < 0) {
+      setTries((n) => n + 1);
+      return;
+    }
     set(row.put(rates, low <= high ? { low, high } : { low: high, high: low }));
   };
   return (
@@ -239,16 +299,16 @@ function RateRow({ row }: { row: (typeof RATE_ROWS)[number] }) {
         inputMode="decimal"
         aria-label={`${row.label}, low`}
         defaultValue={v.low}
-        key={`l${v.low}`}
-        onBlur={(e) => commit(Number(e.target.value), v.high)}
+        key={`l${v.low}-${tries}`}
+        onBlur={(e) => commit(num(e.target.value), v.high)}
       />
       <input
         className="input"
         inputMode="decimal"
         aria-label={`${row.label}, high`}
         defaultValue={v.high}
-        key={`h${v.high}`}
-        onBlur={(e) => commit(v.low, Number(e.target.value))}
+        key={`h${v.high}-${tries}`}
+        onBlur={(e) => commit(v.low, num(e.target.value))}
       />
     </div>
   );
@@ -278,12 +338,13 @@ export function EstimateDialog({ onClose }: { onClose: () => void }) {
   };
   const print = () => {
     // A page of its own: only the estimate, dated.
-    const w = window.open('', '_blank', 'noopener=no');
+    const w = window.open('', '_blank');
     if (!w) return;
     const esc = (t: string) =>
       t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c] as string);
     w.document.title = `Cost estimate: ${name}`;
     w.document.body.innerHTML = `<pre style="font: 13px/1.5 system-ui, sans-serif; white-space: pre-wrap">${esc(estimateText(est, name))}</pre>`;
+    w.addEventListener('afterprint', () => w.close());
     w.print();
   };
   const toggle = (k: 'painting' | 'debrisOn' | 'contingency', label: string) => (
