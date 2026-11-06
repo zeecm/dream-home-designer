@@ -10,6 +10,7 @@ import { OPENING_PRESETS, type Preset, THICKNESS_PRESETS } from '../presets';
 import { useStore } from '../store';
 import { PlanImagePanel } from './PlanImage';
 import { icons } from './icons';
+import { useShownView } from './oneView';
 
 export interface ToolDef {
   id: Tool;
@@ -268,7 +269,7 @@ function CubeIcon() {
  */
 export function ToolPanel() {
   const tool = useEditor((s) => s.tool);
-  const only3d = useEditor((s) => s.viewMode === '3d');
+  const only3d = useShownView() === '3d';
   const viewer = useStore((s) => s.role === 'viewer');
   if (tool === 'select' || only3d || (viewer && tool !== 'comment')) return null;
   const def = TOOLS.find((t) => t.id === tool);
@@ -286,7 +287,7 @@ export function ToolPanel() {
 export function Palette() {
   const tool = useEditor((s) => s.tool);
   const setTool = useEditor((s) => s.setTool);
-  const only3d = useEditor((s) => s.viewMode === '3d');
+  const only3d = useShownView() === '3d';
   const viewer = useStore((s) => s.role === 'viewer');
   const commenting = useCanComment();
   // A view link gets Select and Comment, not a row of greyed-out drawing tools; Comment only

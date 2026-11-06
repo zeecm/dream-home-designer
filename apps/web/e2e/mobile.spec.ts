@@ -156,7 +156,7 @@ test('on a phone: Set scale ends can be dragged to adjust them before typing the
 test('on a phone: a swipe looks around while standing still', async ({ page }) => {
   await page.goto('/');
   await waitSaved(page);
-  await page.getByRole('button', { name: /^3D$/ }).tap();
+  await page.getByRole('button', { name: 'Show 3D view' }).tap();
   await page.getByRole('button', { name: 'Walk through' }).tap();
   const marker = page.locator('.minimap-view').locator('..');
   await expect(marker).toHaveAttribute('transform', /rotate/);

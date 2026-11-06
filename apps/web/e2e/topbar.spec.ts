@@ -65,7 +65,7 @@ async function expectBarFits(page: Page, minTarget: number) {
   return names;
 }
 
-for (const width of [360, 390]) {
+for (const width of [320, 360, 390]) {
   test.describe(`a ${width} px phone`, () => {
     test.use({ ...iPhone, viewport: { width, height: 664 } });
 
@@ -75,15 +75,22 @@ for (const width of [360, 390]) {
       await page.goto('/');
       await waitSaved(page);
       const names = await expectBarFits(page, 40);
-      expect(names).toEqual(expect.arrayContaining(['Share', 'Undo', 'Redo', '3D']));
-      // The project name keeps room enough to read a word or two.
-      const name = await page.getByLabel('Project name').boundingBox();
-      expect(name?.width ?? 0).toBeGreaterThanOrEqual(width < 390 ? 56 : 80);
+      expect(names).toEqual(expect.arrayContaining(['Share', 'Undo', 'Redo', 'Show 3D view']));
+      // The project name keeps room enough to read a word or two; on the first SE it gives way.
+      const name = page.getByLabel('Project name');
+      if (width < 352) await expect(name).toBeHidden();
+      else expect((await name.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(48);
 
-      // One button goes to the other view, and back.
-      await page.getByRole('button', { name: /^3D$/ }).tap();
+      // One button goes to the other view, and back. A tap leaves it as it was (no hover
+      // fill stuck on), and touch gets no tooltip.
+      const toggle = page.locator('.view-toggle');
+      const rest = await toggle.evaluate((b) => getComputedStyle(b).backgroundColor);
+      await expect(toggle).not.toHaveAttribute('title');
+      await page.getByRole('button', { name: 'Show 3D view' }).tap();
       await expect(page.getByTestId('viewport-wrap')).toBeVisible();
-      await page.getByRole('button', { name: /^Plan$/ }).tap();
+      await expect(page.getByRole('button', { name: 'Show plan', exact: true })).toBeVisible();
+      expect(await toggle.evaluate((b) => getComputedStyle(b).backgroundColor)).toBe(rest);
+      await page.getByRole('button', { name: 'Show plan', exact: true }).tap();
       await expect(page.locator('svg.plan-svg')).toBeVisible();
       await expect(page.getByTestId('viewport-wrap')).toHaveCount(0);
     });
@@ -92,7 +99,7 @@ for (const width of [360, 390]) {
       await page.goto(await viewLink(browser));
       await expect(page.getByRole('button', { name: 'Make my own copy' })).toBeVisible();
       const names = await expectBarFits(page, 40);
-      expect(names).toContain('3D');
+      expect(names).toContain('Show 3D view');
       expect(names).not.toContain('Undo');
     });
 
@@ -128,6 +135,43 @@ test.describe('an iPad mini, upright', () => {
     if (!box) throw new Error('no dialog');
     expect(Math.abs(box.x + box.width / 2 - 768 / 2)).toBeLessThanOrEqual(1);
   });
+});
+
+// Every phone on its side gets the same one button as upright.
+for (const name of ['iPhone 13 landscape', 'iPhone SE landscape'] as const) {
+  test.describe(name, () => {
+    const { defaultBrowserType: _b, ...device } = devices[name];
+    test.use(device);
+    test('one view button, as upright, and no sideways scroll', async ({ page }) => {
+      await page.goto('/');
+      await waitSaved(page);
+      await expect(page.locator('.topbar-right > .segmented')).toBeHidden();
+      await expect(page.getByRole('button', { name: 'Show 3D view' })).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+    });
+  });
+}
+
+test('Split under 720 px shows one view, the button goes to the other, and wider is Split again', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('2');
+  await expect(page.locator('main.stage')).toHaveClass(/stage-split/);
+  await page.setViewportSize({ width: 700, height: 800 });
+  // The last single view chosen (the plan, here), never the two stacked.
+  await expect(page.locator('main.stage')).toHaveClass(/stage-plan/);
+  await expect(page.getByTestId('viewport-wrap')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Show 3D view' }).click();
+  await expect(page.locator('main.stage')).toHaveClass(/stage-3d/);
+  // Split chosen by key on a narrow screen keeps the view on screen.
+  await page.keyboard.press('2');
+  await expect(page.locator('main.stage')).toHaveClass(/stage-3d/);
+  await expect(page.getByRole('button', { name: 'Show plan', exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(page.locator('main.stage')).toHaveClass(/stage-split/);
 });
 
 for (const width of [768, 1024, 1280]) {

@@ -15,6 +15,7 @@ import { Palette, TOOLS } from './ui/Palette';
 import { RenovationBar } from './ui/Renovation';
 import { TopBar } from './ui/TopBar';
 import { icons } from './ui/icons';
+import { useShownView } from './ui/oneView';
 
 const isTyping = (t: EventTarget | null) =>
   // While a dialog is open, keys are the dialog's, not the plan's shortcuts.
@@ -264,7 +265,7 @@ function Toast() {
 
 export function App() {
   const { id: projectId, name } = useProject();
-  const viewMode = useEditor((s) => s.viewMode);
+  const viewMode = useShownView();
   const walking = useEditor((s) => !!s.walking);
   const variant = useEditor((s) => s.variant);
   useShortcuts();

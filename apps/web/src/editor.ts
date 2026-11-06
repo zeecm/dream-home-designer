@@ -30,6 +30,14 @@ export type Selection =
   | { kind: 'point'; id: string };
 
 export type ViewMode = 'plan' | 'split' | '3d';
+export type SingleView = Exclude<ViewMode, 'split'>;
+
+/**
+ * The view the stage shows. A phone has room for one view: with Split on, it shows the last
+ * single view chosen, and Split comes back when the screen widens again.
+ */
+export const shownView = (mode: ViewMode, last: SingleView, oneView: boolean): ViewMode =>
+  oneView && mode === 'split' ? last : mode;
 
 export interface EditorState {
   tool: Tool;
@@ -37,6 +45,8 @@ export interface EditorState {
   hover: Selection | null;
   view: View | null;
   viewMode: ViewMode;
+  /** The last single view chosen (Plan or 3D): what a phone shows when Split is on. */
+  lastSingle: SingleView;
   /** Set to fit the plan to the canvas on its next render. */
   fitRequested: boolean;
   /** True once the user pans or zooms; until then the plan refits when its pane resizes. */
@@ -121,6 +131,7 @@ export const useEditor = create<EditorState>((set) => ({
   hover: null,
   view: null,
   viewMode: initialViewMode(),
+  lastSingle: initialViewMode() === '3d' ? '3d' : 'plan',
   fitRequested: true,
   viewAdjusted: false,
   wallThickness: 0.1,
@@ -145,7 +156,13 @@ export const useEditor = create<EditorState>((set) => ({
   setView: (view, byUser) => set(byUser ? { view, viewAdjusted: true } : { view }),
   setViewMode: (viewMode) => {
     rememberViewMode(viewMode);
-    set({ viewMode, fitRequested: true, viewAdjusted: false, walking: null });
+    set({
+      viewMode,
+      ...(viewMode !== 'split' && { lastSingle: viewMode }),
+      fitRequested: true,
+      viewAdjusted: false,
+      walking: null,
+    });
   },
   walking: null,
   sunHour: 15,
