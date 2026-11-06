@@ -622,15 +622,20 @@ export function deliveryCheck(
       ...(lift.tilted ? { tilted: true } : {}),
     });
   }
+  const worst = worstDoor(route);
+  return { status: worst?.fit ?? 'fits', from, doors: route, worst, ...(lift ? { lift } : {}) };
+}
+
+/** The worst door on a way in: the worst fit, then the narrowest (null for none). */
+export function worstDoor(doors: DoorOnTheWay[]): DoorOnTheWay | null {
   const order: Fit[] = ['fits', 'tight', 'hinges', 'too-big'];
-  const worst = route.reduce<DoorOnTheWay | null>(
+  return doors.reduce<DoorOnTheWay | null>(
     (p, q) =>
       !p || order.indexOf(q.fit) > order.indexOf(p.fit) || (q.fit === p.fit && q.clear < p.clear)
         ? q
         : p,
     null,
   );
-  return { status: worst?.fit ?? 'fits', from, doors: route, worst, ...(lift ? { lift } : {}) };
 }
 
 /** Pieces whose way in is worth checking: on the floor, not built in, not people or rugs. */

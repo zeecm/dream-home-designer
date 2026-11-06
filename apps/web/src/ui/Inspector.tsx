@@ -18,6 +18,8 @@ import {
   deleteRoom,
   deleteVertex,
   deleteWall,
+  diagonalFits,
+  diagonalRange,
   doorPanels,
   doorStyle,
   duplicateOf,
@@ -65,7 +67,7 @@ import {
 } from '../clearance/clearance';
 import { CommentPinsSwitch } from '../comments/ui';
 import { CarpentryLine, CostSummary } from '../cost/estimate';
-import { GettingItIn } from '../delivery/delivery';
+import { DIAGONAL_FIELD, GettingItIn } from '../delivery/delivery';
 import { useEditor } from '../editor';
 import { ElectricalSummary, PointInspector } from '../electrical/electrical';
 import { SuggestPanel, useSuggest } from '../electrical/suggest';
@@ -1069,18 +1071,31 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
           clear();
         }}
       />
-      <OwnModel id={it.assetId} />
+      <OwnModel id={it.assetId} size={size} />
     </>
   );
 }
 
-/** For a piece made from a model uploaded to this plan: the model's name, and taking it out. */
-function OwnModel({ id }: { id: string }) {
+/**
+ * For a piece of the person's own (uploaded, or added by size): the model's name, a sofa's
+ * diagonal depth, and taking it out. `size` is this piece's size, as it may be scaled.
+ */
+function OwnModel({ id, size }: { id: string; size: { w: number; d: number; h: number } }) {
   const dispatch = useStore((s) => s.dispatch);
   const project = useProject();
   const model = project.models?.[id];
   if (!model) return null;
   const uses = modelUses(project, id);
+  const m = model.size;
+  const range = diagonalRange(m.d, m.h);
+  const span = (r: { min: number; max: number }) =>
+    `${r.min.toFixed(2)}\u2013${r.max.toFixed(2)}\u00a0m`;
+  // Measured on the sofa as added; this piece has been made bigger or smaller since.
+  const scaled =
+    !!model.diagonal &&
+    (Math.abs(size.w - m.w) > 0.005 ||
+      Math.abs(size.d - m.d) > 0.005 ||
+      Math.abs(size.h - m.h) > 0.005);
   return (
     <section className="stack" aria-labelledby="own-model-h">
       <h3 id="own-model-h" className="section-title">
@@ -1091,6 +1106,23 @@ function OwnModel({ id }: { id: string }) {
         value={model.name}
         onCommit={(name) => dispatch(updateModel(id, { name }))}
       />
+      {model.shape === 'sofa' && (
+        <LengthField
+          id={DIAGONAL_FIELD}
+          label="Diagonal depth"
+          value={model.diagonal}
+          placeholder="Not measured"
+          allowEmpty
+          enterKeyHint="done"
+          hint={`Lay a straight stick from the top of the back to the front of the seat. Measure from the bottom back corner straight to the stick. For this sofa: ${span(range)}. Leave empty if not measured.${scaled ? ` Measured on the sofa at ${m.w.toFixed(2)} × ${m.d.toFixed(2)} × ${formatLength(m.h)}; scaled with this piece.` : ''}`}
+          validate={(v) =>
+            diagonalFits(v, m.d, m.h)
+              ? null
+              : `Between ${range.min.toFixed(2)} and ${range.max.toFixed(2)}\u00a0m for this sofa.`
+          }
+          onCommit={(v) => dispatch(updateModel(id, { diagonal: v ?? null }))}
+        />
+      )}
       <DeleteButton
         label={uses > 1 ? `Remove model and its ${uses} pieces` : 'Remove model'}
         onClick={() => {

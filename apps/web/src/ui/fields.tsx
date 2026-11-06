@@ -4,12 +4,15 @@ import { formatLength, parseLength } from '../units';
 interface FieldProps {
   label: string;
   hint?: string;
+  /** The control's id (default: a generated one). */
+  id?: string;
   children: (id: string, describedBy: string | undefined) => ReactNode;
 }
 
 /** Label above the control, an optional limit or hint tied to it underneath. */
-export function Field({ label, hint, children }: FieldProps) {
-  const id = useId();
+export function Field({ label, hint, id: given, children }: FieldProps) {
+  const auto = useId();
+  const id = given ?? auto;
   const hintId = hint ? `${id}-hint` : undefined;
   return (
     <div className="field">
@@ -37,6 +40,12 @@ interface LengthFieldProps {
   unit?: 'mm';
   /** An out-of-range or unreadable value goes back to the last good one on blur. */
   revertInvalid?: boolean;
+  /** A reason to refuse a readable value (checked before min and max), or null. */
+  validate?: (value: number) => string | null;
+  /** The input's id, to reach it from elsewhere. */
+  id?: string;
+  /** The phone keyboard's Enter key. */
+  enterKeyHint?: 'done' | 'next';
   onCommit: (value: number | undefined) => void;
 }
 
@@ -95,11 +104,14 @@ export function LengthField({
   allowEmpty,
   unit,
   revertInvalid,
+  validate,
+  id,
+  enterKeyHint,
   onCommit,
 }: LengthFieldProps) {
   const fmt = (v: number) => (unit === 'mm' ? `${Math.round(v * 1000)} mm` : formatLength(v));
   const shown = value === undefined ? '' : fmt(value);
-  const edit = useEdit(shown, { value, min, max, allowEmpty, onCommit });
+  const edit = useEdit(shown, { value, min, max, allowEmpty, validate, onCommit });
   const [error, setError] = useState<string | null>(null);
   // Escape blurs the field; the blur that follows must not commit what was typed.
   const cancelled = useRef(false);
@@ -127,12 +139,13 @@ export function LengthField({
       return;
     }
     const v = parseLength(s.draft);
-    if (v === null || v < t.min - 1e-9 || v > t.max + 1e-9) {
+    const refused = v === null ? null : (t.validate?.(v) ?? null);
+    if (v === null || refused || v < t.min - 1e-9 || v > t.max + 1e-9) {
       if (leaving) return;
       setError(
         v === null
           ? 'Enter a length such as 2.5 m, 250 cm, 2500 mm or just 2500.'
-          : `Between ${fmt(t.min)} and ${fmt(t.max)}.`,
+          : (refused ?? `Between ${fmt(t.min)} and ${fmt(t.max)}.`),
       );
       // Back to the last good value, the complaint saying why; or kept to correct.
       if (revertInvalid) edit.reset();
@@ -159,12 +172,13 @@ export function LengthField({
   );
 
   return (
-    <Field label={label} hint={error ?? hint}>
-      {(id, describedBy) => (
+    <Field label={label} hint={error ?? hint} id={id}>
+      {(inputId, describedBy) => (
         <input
-          id={id}
+          id={inputId}
           className={`input num${error ? ' invalid' : ''}`}
           inputMode="decimal"
+          enterKeyHint={enterKeyHint}
           value={edit.draft}
           placeholder={placeholder}
           aria-invalid={!!error}
