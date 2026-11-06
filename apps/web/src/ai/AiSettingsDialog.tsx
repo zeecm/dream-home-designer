@@ -268,7 +268,8 @@ export function AiSettingsDialog({
             With an AI model of your choice, on your own key: trace walls from a plan image, suggest
             layouts, and make photo-real renders (OpenAI or Gemini). Your key is kept in this
             browser only and goes, with what you send, only to the provider you pick. Each run costs
-            a few cents on your account with them.
+            a few cents on your account with them; designing a whole flat costs more, about
+            US$0.30–1.50, and is shown before it runs.
           </p>
           <div className="ai-form">
             <label className="field">

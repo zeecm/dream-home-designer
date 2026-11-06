@@ -46,7 +46,8 @@ export function DesignerEntry() {
         Suggest layouts with AI
       </button>
       <p className="field-hint">
-        Layouts: walls only, a few cents. Design: walls, furniture, paint and cost, about US$1–2.
+        Layouts: walls only, a few cents. Design: walls, furniture, paint and cost, about
+        US$0.30–1.50 (the cost is shown before it runs).
       </p>
       {layouts && (
         <LayoutsDialog
@@ -144,6 +145,7 @@ function BriefDialogs() {
  */
 export function DesignerBar() {
   const preview = useEditor((s) => s.preview);
+  const walking = useEditor((s) => !!s.walking);
   const run = useDesigner((s) => s.run);
   const panel = useDesigner((s) => s.panel);
   const selected = useDesigner((s) => s.selected);
@@ -160,6 +162,16 @@ export function DesignerBar() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [preview]);
+  // Walking hides the bar: a small reminder in its place.
+  if (preview && walking) {
+    return (
+      <output className="designer-walk-pill">
+        {preview.side === 'before'
+          ? 'Showing the flat as it is'
+          : `Previewing ${preview.label}, not your plan`}
+      </output>
+    );
+  }
   if (preview) {
     return (
       <div className="reno-bar designer-bar">

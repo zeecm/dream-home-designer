@@ -1,9 +1,10 @@
 import { type DesignBrief, PRICES_AS_OF, type RunEstimate, priceOf } from '@dhd/core';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Segmented } from '../../ui/fields';
 import { type AiSettings, PROVIDERS } from '../credentials';
 import { LARGE_INPUT, MAX_STEP_INPUT } from './plan';
 import { tokens, usd, useSpend } from './spend';
+import { useDesigner } from './state';
 import { designerCannotUse } from './stream';
 
 /**
@@ -72,6 +73,9 @@ export function CostCheck(p: CostCheckProps) {
   const over = cap !== null && high !== null && spend.usd + high > cap;
   const tooBig = p.est.steps.some((s) => s.input > MAX_STEP_INPUT);
   const unsupported = designerCannotUse(p.ai);
+  // Pressed once: it waits while the run starts (a double click starts one run).
+  const [pressed, setPressed] = useState(false);
+  const busy = useDesigner((s) => s.starting || !!s.run) || pressed;
   const provider = PROVIDERS[p.ai.provider];
   const label =
     typical === null ? p.action : `${over ? p.anyway : p.action} · about ${usd(typical)}`;
@@ -163,8 +167,12 @@ export function CostCheck(p: CostCheckProps) {
           <button
             type="button"
             className="btn btn-primary"
-            disabled={tooBig || !!unsupported}
-            onClick={p.onStart}
+            disabled={tooBig || !!unsupported || busy}
+            onClick={() => {
+              if (busy) return;
+              setPressed(true);
+              p.onStart();
+            }}
             data-spends=""
           >
             {label}

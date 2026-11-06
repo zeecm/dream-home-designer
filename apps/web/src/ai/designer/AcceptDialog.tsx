@@ -1,14 +1,26 @@
 import {
   BATHROOMS,
   type Design,
+  type Item,
   type Part,
   allowedParts,
   aspectOf,
   dependsOnWalls,
   renovationChanges,
+  roomIdAt,
+  roomsBeside,
 } from '@dhd/core';
+
+/** Whether a piece is already in the renovation where the version puts it. */
+const sameItem = (a: Item, b: Item | undefined) =>
+  !!b &&
+  a.assetId === b.assetId &&
+  Math.abs(a.position.x - b.position.x) < 0.01 &&
+  Math.abs(a.position.z - b.position.z) < 0.01 &&
+  Math.abs(a.rotationY - b.rotationY) < 1e-3;
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProject } from '../../store';
+import { changeText, placeText } from '../../ui/Renovation';
 import { icons } from '../../ui/icons';
 import { baseOf, planChanged, resultFor } from './plan';
 import { acceptVersion, designOpts } from './state';
@@ -49,12 +61,34 @@ export function AcceptDialog({ design: d, onClose }: { design: Design; onClose: 
     const spaces = r.spaces
       .filter((s) => s.items.length || s.status === 'done' || s.status === 'copied')
       .map((s) => {
-        const items = s.items.map((id) => r.level.items[id]).filter((it) => !!it);
+        // Only what isn't in the renovation already (a version accepted before counts nothing).
+        const items = s.items
+          .map((id) => r.level.items[id])
+          .filter((it): it is Item => !!it && !sameItem(it, now.items[it.id]));
+        const rooms = new Set(s.rooms);
+        const finishes =
+          s.rooms.some((id) => r.level.rooms[id]?.floorMaterial !== now.rooms[id]?.floorMaterial) ||
+          Object.values(r.level.walls).some((w) => {
+            const was = now.walls[w.id];
+            const [left, right] = roomsBeside(r.level, w.id);
+            return (
+              (!!left && rooms.has(left) && w.materialLeft !== was?.materialLeft) ||
+              (!!right && rooms.has(right) && w.materialRight !== was?.materialRight)
+            );
+          });
         const counts: Record<Aspect, number> = {
           furniture: items.filter((it) => aspectOf(it) === 'furniture').length,
           'built-ins': items.filter((it) => aspectOf(it) === 'built-ins').length,
-          finishes: 1,
-          electrical: r.points.filter((p) => s.rooms.includes(p.roomId)).length,
+          finishes: finishes ? 1 : 0,
+          electrical: Object.values(r.level.points ?? {}).filter((p) => {
+            if (now.points?.[p.id]) return false;
+            const room = p.at
+              ? roomIdAt(r.level, p.at)
+              : p.wall
+                ? roomsBeside(r.level, p.wall.wallId)[p.wall.side === 'left' ? 0 : 1]
+                : null;
+            return !!room && rooms.has(room);
+          }).length,
         };
         return { s, counts, needsWalls: dependsOnWalls(now, r.level, s) };
       });
@@ -128,6 +162,16 @@ export function AcceptDialog({ design: d, onClose }: { design: Design; onClose: 
             </span>
           </label>
         )}
+        {rows.changes.length > 0 && (
+          <ul className="accept-changes">
+            {rows.changes.map((c, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: changes have no ids
+              <li key={i}>
+                {placeText(c)}: {changeText(c)}
+              </li>
+            ))}
+          </ul>
+        )}
         {rows.spaces.map((x) => (
           <fieldset key={x.s.key} className="accept-space">
             <legend>{x.s.name}</legend>
@@ -178,7 +222,8 @@ export function AcceptDialog({ design: d, onClose }: { design: Design; onClose: 
           </label>
         )}
         <p className="field-hint">
-          One undo step. Pieces you placed yourself stay unless you tick above.
+          One undo step.
+          {rows.byHand > 0 ? ' Pieces you placed yourself stay unless you tick above.' : ''}
         </p>
       </div>
       <footer className="dialog-foot">

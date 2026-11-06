@@ -54,6 +54,8 @@ export interface StepState {
   wait: { seconds: number; attempt: number } | null;
   /** Requests made again (an unreadable answer, a step too long, a busy server). */
   retries: number;
+  /** Cut off by Stop: the most it may still be billed (its prompt, and output to its limit). */
+  cutOffHigh: number | null;
 }
 
 export interface Halt {
@@ -208,6 +210,29 @@ export function mergeAnswer(
   };
 }
 
+/** Which step a run is on, the same everywhere it is shown: "Step 2 of 5". */
+export function progressOf(state: Pick<RunState, 'steps'>): { step: number; of: number } {
+  const of = Math.max(1, state.steps.length);
+  const done = state.steps.filter((s) => s.status !== 'waiting' && s.status !== 'running').length;
+  return { step: Math.min(done + 1, of), of };
+}
+
+/** A step not started yet. */
+export const blankStep = (key: string, label: string, kind: StepState['kind']): StepState => ({
+  key,
+  label,
+  kind,
+  status: 'waiting',
+  tokens: 0,
+  usd: 0,
+  estimated: false,
+  thinking: '',
+  error: null,
+  wait: null,
+  retries: 0,
+  cutOffHigh: null,
+});
+
 const usdText = (v: number) => (v < 10 ? `US$${v.toFixed(2)}` : `US$${Math.round(v)}`);
 
 export async function runDesign(o: RunOptions): Promise<{ state: RunState; design: DraftDesign }> {
@@ -224,19 +249,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     endedAt: null,
     said: '',
   };
-  const blank = (key: string, label: string, kind: StepState['kind']): StepState => ({
-    key,
-    label,
-    kind,
-    status: 'waiting',
-    tokens: 0,
-    usd: 0,
-    estimated: false,
-    thinking: '',
-    error: null,
-    wait: null,
-    retries: 0,
-  });
+  const blank = blankStep;
   if (plan.layout) state.steps.push(blank('layout', 'Layout and style', 'layout'));
   const roomRows =
     plan.rooms === 'all' ? (o.expected ?? []) : plan.rooms.map((key) => ({ key, label: key }));
@@ -391,6 +404,20 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       if (error) {
         if (o.signal.aborted) {
           st.status = 'cancelled';
+          const price = priceOf(ai.model, o.prices);
+          st.cutOffHigh = price
+            ? usdOf(
+                {
+                  input: tokensOf(
+                    p.system.length + p.prefix.length + p.shared.length + p.tail.length,
+                  ),
+                  cachedInput: 0,
+                  cacheWrite: 0,
+                  output: p.maxTokens,
+                },
+                price,
+              )
+            : null;
           st.thinking = '';
           update();
           throw new Stopped(ABORT_TEXT);

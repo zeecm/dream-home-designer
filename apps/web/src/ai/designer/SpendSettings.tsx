@@ -23,8 +23,12 @@ export function SpendSettings({ model, focus }: { model: string; focus?: boolean
   const ref = useRef<HTMLFieldSetElement>(null);
   useEffect(() => {
     if (!focus) return;
-    ref.current?.scrollIntoView({ block: 'start' });
-    ref.current?.querySelector<HTMLInputElement>('input')?.focus();
+    // After the dialog has opened (its own effect runs after this one).
+    const f = requestAnimationFrame(() => {
+      ref.current?.scrollIntoView({ block: 'start' });
+      ref.current?.querySelector<HTMLInputElement>('input')?.focus();
+    });
+    return () => cancelAnimationFrame(f);
   }, [focus]);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [hint, setHint] = useState('');

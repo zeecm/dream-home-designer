@@ -7,6 +7,7 @@ import {
   type Project,
   acceptDesign,
   levelFingerprint,
+  spacesOf,
 } from '@dhd/core';
 import { create } from 'zustand';
 import { useRates } from '../../cost/estimate';
@@ -15,7 +16,7 @@ import { setLeaveGuard, useStore } from '../../store';
 import { type AiSettings, aiSettings } from '../credentials';
 import { sharedQuestion } from './once';
 import { type ChangeRequest, changePlan, contextFor, resultFor } from './plan';
-import { type DraftDesign, type RunPlan, type RunState, runDesign } from './run';
+import { type DraftDesign, type RunPlan, type RunState, blankStep, runDesign } from './run';
 import { addUsage, countRun, overLimit, priceTable } from './spend';
 import { type DesignStore, designStore } from './storage';
 
@@ -59,6 +60,8 @@ interface DesignerState {
   /** A note to show under the versions (older ones removed, say). */
   note: string | null;
   briefOpen: boolean;
+  /** A run is being started (a paid button was pressed): every paid button waits. */
+  starting: boolean;
   /** The version whose Accept dialog is open. */
   accepting: string | null;
   /** Asking whether to stop the run and open another plan: answer it. */
@@ -77,6 +80,7 @@ export const useDesigner = create<DesignerState>(() => ({
   last: null,
   note: null,
   briefOpen: false,
+  starting: false,
   accepting: null,
   leaving: null,
 }));
@@ -194,7 +198,29 @@ interface Begin {
 }
 
 /** Starts a run; resolves when it ends. */
+/**
+ * Starts a run; resolves when it ends. A second press while one is starting (a double
+ * click on a paid button) does nothing.
+ */
+let starting = false;
 async function begin(b: Begin) {
+  if (starting || useDesigner.getState().run) return;
+  starting = true;
+  useDesigner.setState({ starting: true });
+  try {
+    await beginRun(b, () => {
+      starting = false;
+      useDesigner.setState({ starting: false });
+    });
+  } finally {
+    if (starting) {
+      starting = false;
+      useDesigner.setState({ starting: false });
+    }
+  }
+}
+
+async function beginRun(b: Begin, started: () => void) {
   const project = doc();
   const ctx = contextFor(project, b.brief, b.draft.aliases);
   if (!ctx || useDesigner.getState().run) return;
@@ -259,7 +285,14 @@ async function begin(b: Begin) {
     designId: record?.id ?? null,
     projectId,
     state: {
-      steps: [],
+      // The rows as planned, so the count is right from the start ("Step 1 of 5").
+      steps: [
+        ...(b.plan.layout ? [blankStep('layout', 'Layout and style', 'layout')] : []),
+        ...(b.plan.rooms === 'all'
+          ? (b.expected ?? [])
+          : b.plan.rooms.map((key) => ({ key, label: b.draft.spaces[key]?.name ?? 'Room' }))
+        ).map((r) => blankStep(r.key, r.label, 'room')),
+      ],
       phase: 'running',
       halt: null,
       usage: [],
@@ -281,6 +314,7 @@ async function begin(b: Begin) {
     previewing: true,
     ...(record ? { selected: record.id } : {}),
   });
+  started();
   const set = (patch: Partial<Running>) => {
     const r = useDesigner.getState().run;
     if (r && r.ctrl === ctrl) useDesigner.setState({ run: { ...r, ...patch } });
@@ -336,6 +370,7 @@ export function startDesign(ai: AiSettings, brief: DesignBrief, estimate: number
     existing: null,
     request: { scope: { kind: 'all' }, feedback: '', locks: [] },
     estimate,
+    expected: spacesOf(ctx.base).map((s) => ({ key: s.key, label: s.name })),
   });
 }
 
@@ -407,6 +442,9 @@ export function changeDesign(v: Design, req: ChangeRequest, estimate: number | n
       locks: made.locks,
     },
     estimate,
+    expected: r.spaces
+      .filter((s) => !(made.plan.skip ?? []).includes(s.key))
+      .map((s) => ({ key: s.key, label: s.name })),
   });
 }
 

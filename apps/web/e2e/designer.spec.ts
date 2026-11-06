@@ -343,11 +343,18 @@ test.describe('desktop', () => {
     await p.getByLabel('What would you like different?').fill('more storage');
     await expect(p.getByText(/^1 request: Kitchen furniture/)).toBeVisible();
     const before = m.calls.length;
-    await p.getByRole('button', { name: /^Make V2 · about US\$/ }).click();
+    // A double click starts one paid run, not two.
+    await p.getByRole('button', { name: /^Make V2 · about US\$/ }).dblclick();
     await expect(p.getByRole('tab', { name: 'V2' })).toBeVisible({ timeout: 30_000 });
     await expect(p.getByText(/^Done in /)).toBeVisible({ timeout: 30_000 });
+    await expect(p.getByRole('tab')).toHaveCount(2);
     const sent = m.calls.slice(before);
     expect(sent).toHaveLength(1);
+    // What V2 changed, in words; no internal ids anywhere on its card.
+    await expect(p.locator('.designer-changed')).toHaveText(
+      'From V1. Changed: Kitchen furniture · “more storage”',
+    );
+    expect(await p.locator('.designer-card').innerText()).not.toMatch(/\b[WDRP]\d+\b/);
     expect(sent[0]?.body).toContain('more storage');
     expect(sent[0]?.body).toContain('furnish \\"Kitchen\\"');
     expect(sent[0]?.body).not.toContain('furnish \\"Living');
@@ -615,6 +622,35 @@ test.describe('desktop', () => {
   });
 });
 
+test.describe('tablet, 1024 × 768', () => {
+  test.use({ viewport: { width: 1024, height: 768 }, hasTouch: true });
+
+  test('the panel is a column beside the plan, and the plan is refitted to show the design', async ({
+    page,
+  }) => {
+    await setup(page);
+    await mock(page);
+    await page.goto('/');
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    await designFlat(page);
+    const box = await panel(page).boundingBox();
+    expect(box?.width ?? 0).toBe(360);
+    expect(box?.x ?? 0).toBeGreaterThan(600);
+    // The plan fills what is left, and the designed pieces are in sight on it.
+    const plan = await page.locator('.plan-svg').boundingBox();
+    expect(plan?.width ?? 0).toBeGreaterThan(450);
+    const seen = await page.locator('[data-hit^="item:"]').evaluateAll((els, area) => {
+      const a = area as { x: number; y: number; width: number; height: number };
+      return els.filter((e) => {
+        const r = e.getBoundingClientRect();
+        return r.right > a.x && r.left < a.x + a.width && r.bottom > a.y && r.top < a.y + a.height;
+      }).length;
+    }, plan);
+    expect(seen).toBeGreaterThan(20);
+  });
+});
+
 test.describe('phone, 390 px, fingers only (43)', () => {
   const { defaultBrowserType: _webkit, ...iPhone } = devices['iPhone 13'];
   test.use({ ...iPhone, viewport: { width: 390, height: 844 } });
@@ -662,6 +698,30 @@ test.describe('phone, 390 px, fingers only (43)', () => {
     const sheet = await p.boundingBox();
     expect(sheet?.width ?? 0).toBeLessThanOrEqual(390);
     await expect(page.locator('.designer-bar')).toContainText('Previewing V1');
+    // The sheet: tap its handle for full height, drag it down to fold it, up to open it.
+    const handle = p.locator('.sheet-handle');
+    await handle.tap();
+    await expect(p).toHaveClass(/designer-full/);
+    const drag = async (dy: number) => {
+      const h = await handle.boundingBox();
+      if (!h) throw new Error('no handle');
+      const x = h.x + h.width / 2;
+      const y = h.y + h.height / 2;
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x, y + dy, { steps: 5 });
+      await page.mouse.up();
+    };
+    await drag(120);
+    await expect(p).toHaveClass(/designer-half/);
+    await drag(120);
+    await expect(p).toHaveClass(/designer-folded/);
+    await expect(p.getByRole('heading', { name: /Designer/ })).toBeVisible();
+    // Folded, the plan has the screen, refitted above the header.
+    const plan = await page.locator('.plan-svg').boundingBox();
+    expect(plan?.height ?? 0).toBeGreaterThan(400);
+    await drag(-120);
+    await expect(p).toHaveClass(/designer-half/);
     const acceptBtn = p.getByRole('button', { name: 'Accept…' });
     expect((await acceptBtn.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
 

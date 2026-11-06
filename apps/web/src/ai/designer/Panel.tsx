@@ -30,7 +30,7 @@ import {
   plannedPrompts,
   resultFor,
 } from './plan';
-import type { RunState, StepState } from './run';
+import { type RunState, type StepState, progressOf } from './run';
 import { capUsd, priceTable, spent, tokens, usd, useSpend } from './spend';
 import {
   type Running,
@@ -47,6 +47,7 @@ import {
   useDesigner,
 } from './state';
 import { designerCannotUse } from './stream';
+import { byRoom, fixedNotes, humanize, problemRoom } from './words';
 
 /**
  * The Designer panel: the run as it goes (steps, the meter, Stop), then the versions (tabs
@@ -54,12 +55,47 @@ import { designerCannotUse } from './stream';
  * on the plan. In the details column (360 px), a bottom sheet below 1100 px.
  */
 
+/** A tablet held upright or a phone (not one on its side): the panel is a sheet. */
+const SHEET_Q = '(max-width: 900px)';
+const SIDE_Q = '(pointer: coarse) and (max-height: 500px)';
+const sheetNow = () =>
+  !!window.matchMedia?.(SHEET_Q).matches && !window.matchMedia?.(SIDE_Q).matches;
+function useDesignerSheet(): boolean {
+  const [on, setOn] = useState(sheetNow);
+  useEffect(() => {
+    const a = window.matchMedia?.(SHEET_Q);
+    const b = window.matchMedia?.(SIDE_Q);
+    const change = () => setOn(sheetNow());
+    a?.addEventListener('change', change);
+    b?.addEventListener('change', change);
+    return () => {
+      a?.removeEventListener('change', change);
+      b?.removeEventListener('change', change);
+    };
+  }, []);
+  return on;
+}
+
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const reduced = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 const isStopped = (d: Design) =>
   Object.values(d.spaces).some((s) => s.status === 'cancelled' || s.status === 'skipped');
 const tabName = (d: Design, accepted: boolean) =>
   `V${d.n}${accepted ? ', accepted' : ''}${isStopped(d) ? ', stopped' : ''}`;
+
+/** What a version changed from the one it was made from: "From V1. Changed: Kitchen furniture · “Cheaper.”" */
+function changedText(d: Design, parentN: number | null): string {
+  const sc = d.request.scope;
+  const aspects = (as: Aspect[]) => as.map((a) => ASPECT_NAMES[a].toLowerCase()).join(', ');
+  const what =
+    sc.kind === 'space'
+      ? `${d.spaces[sc.space]?.name ?? 'a room'} ${aspects(sc.aspects)}`
+      : sc.kind === 'aspects'
+        ? `the whole design: ${aspects(sc.aspects)}`
+        : 'the whole design';
+  const words = d.request.feedback.trim();
+  return `${parentN ? `From V${parentN}. ` : ''}Changed: ${what}${words ? ` · “${words}”` : ''}`;
+}
 
 /** A version on the plan as it is now, worked out once per version and plan. */
 export function useResult(d: Design | undefined): DesignResult | null {
@@ -109,9 +145,12 @@ function RunView({ run, live }: { run: Running; live: boolean }) {
   const estimated = s.steps.some((x) => x.status === 'running') || totals.estimated;
   const spentRun = totals.usd ?? 0;
   const done = s.steps.filter((x) => x.status === 'done').length;
+  const cut = s.steps.filter((x) => x.status === 'cancelled');
+  const cutOffN = cut.length;
+  const cutOff = cut.reduce((t, x) => t + (x.cutOffHigh ?? 0), 0);
   const phaseLine =
     live && running
-      ? `Step ${current + 1} of ${requests}: ${running.label}…`
+      ? `Step ${progressOf(s).step} of ${progressOf(s).of}: ${running.label}…`
       : s.phase === 'paused'
         ? 'Paused at your limit for this tab.'
         : null;
@@ -191,8 +230,9 @@ function RunView({ run, live }: { run: Running; live: boolean }) {
       {!live && s.phase === 'stopped' && (
         <p className="designer-outcome">
           Stopped. Kept {done} of {requests} steps.
-          {s.steps.some((x) => x.status === 'cancelled') &&
-            ' The step that was cut off may still be billed.'}
+          {cutOff > 0 &&
+            ` The ${cutOffN === 1 ? 'step' : 'steps'} cut off may still be billed (up to about ${usd(cutOff)}).`}
+          {cutOff === 0 && cutOffN > 0 && ' The step cut off may still be billed.'}
         </p>
       )}
       {!live && s.phase === 'failed' && (
@@ -340,6 +380,8 @@ const QUICK = [
 function ChangeSomething({ d, r, next }: { d: Design; r: DesignResult; next: number }) {
   const project = useProject();
   const ai = useAi();
+  // A paid button waits while a run starts (a double click starts one run).
+  const busy = useDesigner((st) => st.starting || !!st.run);
   const { prices } = useSpend();
   const [scope, setScope] = useState('all');
   const [aspects, setAspects] = useState<Aspect[]>(['walls', ...ROOM_ASPECTS]);
@@ -461,12 +503,15 @@ function ChangeSomething({ d, r, next }: { d: Design; r: DesignResult; next: num
                 <th scope="row">{s.name}</th>
                 {ROOM_ASPECTS.map((a) => (
                   <td key={a}>
-                    <input
-                      type="checkbox"
-                      aria-label={`Keep ${s.name}: ${ASPECT_NAMES[a].toLowerCase()}`}
-                      checked={!!keep[s.key]?.includes(a)}
-                      onChange={() => toggleKeep(s.key, a)}
-                    />
+                    {/* The whole cell is the tap target. */}
+                    <label className="keep-cell">
+                      <input
+                        type="checkbox"
+                        aria-label={`Keep ${s.name}: ${ASPECT_NAMES[a].toLowerCase()}`}
+                        checked={!!keep[s.key]?.includes(a)}
+                        onChange={() => toggleKeep(s.key, a)}
+                      />
+                    </label>
                   </td>
                 ))}
               </tr>
@@ -486,7 +531,7 @@ function ChangeSomething({ d, r, next }: { d: Design; r: DesignResult; next: num
           onChange={(e) => setFeedback(e.target.value)}
         />
       </label>
-      <fieldset className="chip-row chip-scroll" aria-label="Add a sentence">
+      <fieldset className="chip-row" aria-label="Add a sentence">
         {[
           ...QUICK,
           ...(d.brief.household.elders.length ? ['Safer for an elderly parent'] : []),
@@ -499,7 +544,7 @@ function ChangeSomething({ d, r, next }: { d: Design; r: DesignResult; next: num
       <button
         type="button"
         className="btn btn-primary btn-block"
-        disabled={nothing || !ai || !est || !!designerCannotUse(ai)}
+        disabled={nothing || !ai || !est || !!designerCannotUse(ai) || busy}
         onClick={go}
         data-spends=""
       >
@@ -544,6 +589,8 @@ const Card = memo(function Card({
   const project = useProject();
   const after = project.renovation?.levels[0];
   const ai = useAi();
+  // A paid button waits while a run starts (a double click starts one run).
+  const busy = useDesigner((st) => st.starting || !!st.run);
   const [finishing, setFinishing] = useState<{ est: RunEstimate; only?: string[] } | null>(null);
   const base = baseOf(project, d.base.variant)?.base;
   const changes = useMemo(
@@ -593,12 +640,43 @@ const Card = memo(function Card({
       ),
     [missing.length, running, d],
   );
+  // Notes in words, grouped by room and each said once; nothing fixed that was then dropped.
+  const notes = useMemo(
+    () => [
+      {
+        title: 'Fixed for you',
+        cls: 'designer-fixed',
+        groups: byRoom(fixedNotes(r), r, d.aliases, d.baseLevel),
+      },
+      {
+        title: 'Left out',
+        cls: 'designer-left-out',
+        groups: byRoom([...r.refused, ...r.dropped], r, d.aliases, d.baseLevel),
+      },
+      {
+        title: 'The designer’s notes',
+        cls: 'designer-notes',
+        groups: byRoom(r.notes, r, d.aliases, d.baseLevel),
+      },
+    ],
+    [r, d.aliases, d.baseLevel],
+  );
+  const parentN = useDesigner((st) => st.designs.find((x) => x.id === d.parent)?.n ?? null);
+  const changedLine = d.parent ? changedText(d, parentN) : null;
+  /** Why a room isn't designed, in words (its step's reason, without the room's name). */
+  const failedWhy = (s: DesignResult['spaces'][number]) => {
+    const e = s.storedKey ? d.spaces[s.storedKey]?.error : undefined;
+    if (!e) return null;
+    const why = e.startsWith(`${s.name}: `) ? e.slice(s.name.length + 2) : e;
+    return why.replace(/\.$/, '');
+  };
   return (
     <article className="designer-card" aria-labelledby={`v-${d.id}-h`}>
       <h3 id={`v-${d.id}-h`} className="designer-name">
         {d.concept?.name ?? d.name}
       </h3>
       {d.concept && <p className="designer-summary">{d.concept.summary}</p>}
+      {changedLine && <p className="designer-changed">{changedLine}</p>}
       {planChanged(project, d) && (
         <p className="field-hint">Made on the plan as it was; checked again on it as it is now.</p>
       )}
@@ -659,13 +737,16 @@ const Card = memo(function Card({
                       ? 'Waiting'
                       : 'Not designed'}
                 </span>
+                {!ok && !running && failedWhy(s) && (
+                  <span className="designer-room-why">Not designed: {failedWhy(s)}</span>
+                )}
                 {s.intent && <span className="designer-intent">{s.intent}</span>}
               </button>
               {!ok && !running && (
                 <button
                   type="button"
                   className="link-btn"
-                  disabled={!ai || !!designerCannotUse(ai)}
+                  disabled={!ai || !!designerCannotUse(ai) || busy}
                   onClick={() => finish([s.key])}
                 >
                   Try this room again
@@ -682,7 +763,7 @@ const Card = memo(function Card({
         <button
           type="button"
           className="btn btn-block"
-          disabled={!ai || !!designerCannotUse(ai)}
+          disabled={!ai || !!designerCannotUse(ai) || busy}
           onClick={() => finish()}
           data-spends=""
         >
@@ -700,7 +781,10 @@ const Card = memo(function Card({
               return (
                 // biome-ignore lint/suspicious/noArrayIndexKey: problems have no ids
                 <li key={i}>
-                  <span>{p.text}</span>
+                  <span>
+                    {problemRoom(p, r.level) ? <strong>{problemRoom(p, r.level)}: </strong> : null}
+                    {humanize(p.text, d.aliases, r.level, d.baseLevel)}
+                  </span>
                   {(it || p.roomId) && (
                     <button
                       type="button"
@@ -720,38 +804,27 @@ const Card = memo(function Card({
           </ul>
         </section>
       )}
-      {r.repaired.length > 0 && (
-        <details>
-          <summary>Fixed for you ({r.repaired.length})</summary>
-          <ul>
-            {r.repaired.map((n, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: notes have no ids
-              <li key={i}>{n.text}</li>
-            ))}
-          </ul>
-        </details>
-      )}
-      {r.refused.length + r.dropped.length > 0 && (
-        <details>
-          <summary>Left out ({r.refused.length + r.dropped.length})</summary>
-          <ul className="designer-left-out">
-            {[...r.refused, ...r.dropped].map((n, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: notes have no ids
-              <li key={i}>{n.text}</li>
-            ))}
-          </ul>
-        </details>
-      )}
-      {r.notes.length > 0 && (
-        <details>
-          <summary>The designer’s notes ({r.notes.length})</summary>
-          <ul>
-            {r.notes.map((n, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: notes have no ids
-              <li key={i}>{n.text}</li>
-            ))}
-          </ul>
-        </details>
+      {notes.map(
+        (g) =>
+          g.groups.length > 0 && (
+            <details key={g.title}>
+              <summary>
+                {g.title} ({g.groups.reduce((t, x) => t + x.lines.length, 0)})
+              </summary>
+              <div className={g.cls}>
+                {g.groups.map((x) => (
+                  <section key={x.room} className="designer-note-room">
+                    <h5>{x.room}</h5>
+                    <ul>
+                      {x.lines.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  </section>
+                ))}
+              </div>
+            </details>
+          ),
       )}
       <details>
         <summary>Usage</summary>
@@ -778,7 +851,7 @@ const Card = memo(function Card({
             <button
               type="button"
               className="btn"
-              disabled={!ai || !!designerCannotUse(ai)}
+              disabled={!ai || !!designerCannotUse(ai) || busy}
               onClick={() => useDesigner.setState({ mode: 'change' })}
             >
               Change something
@@ -917,16 +990,79 @@ export function DesignerPanel() {
   const said = st.run?.state.said ?? st.last?.state.said ?? '';
   const halt = (st.run ?? st.last)?.state.halt;
   const folded = st.run
-    ? `${st.run.state.steps.filter((x) => x.status === 'done').length} of ${st.run.state.steps.length} · ${usd(usageTotals(st.run.state.usage).usd ?? 0)}`
+    ? `Step ${progressOf(st.run.state).step} of ${progressOf(st.run.state).of} · ${usd(usageTotals(st.run.state.usage).usd ?? 0)}`
     : null;
+  // A phone or a tablet held upright: a sheet at the foot, half height, full, or folded to
+  // its header; the plan refits above it each time it changes.
+  const sheet = useDesignerSheet();
+  const [size, setSize] = useState<'folded' | 'half' | 'full'>('half');
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on a change of the sheet's size
+  useEffect(() => {
+    const f = requestAnimationFrame(() => useEditor.getState().requestFit());
+    return () => cancelAnimationFrame(f);
+  }, [size, sheet]);
+  useEffect(
+    () => () => {
+      requestAnimationFrame(() => useEditor.getState().requestFit());
+    },
+    [],
+  );
+  const drag = useRef<number | null>(null);
+  const moved = useRef(false);
 
   return (
-    <aside className="panel designer" aria-labelledby="designer-h">
+    <aside
+      className={`panel designer${sheet ? ` designer-sheet designer-${size}` : ''}`}
+      aria-labelledby="designer-h"
+    >
+      {sheet && (
+        <button
+          type="button"
+          className="sheet-handle"
+          aria-label={
+            size === 'full'
+              ? 'Make the designer smaller'
+              : size === 'folded'
+                ? 'Open the designer'
+                : 'Make the designer full height'
+          }
+          onClick={() => {
+            if (!moved.current) setSize(size === 'half' ? 'full' : 'half');
+            moved.current = false;
+          }}
+          onPointerDown={(e) => {
+            drag.current = e.clientY;
+            moved.current = false;
+            e.currentTarget.setPointerCapture(e.pointerId);
+          }}
+          onPointerMove={(e) => {
+            if (drag.current !== null && Math.abs(e.clientY - drag.current) > 4)
+              moved.current = true;
+          }}
+          // Up a size, or down a size, with the finger.
+          onPointerUp={(e) => {
+            const from = drag.current;
+            drag.current = null;
+            if (from === null) return;
+            const dy = e.clientY - from;
+            if (dy < -30) setSize(size === 'folded' ? 'half' : 'full');
+            else if (dy > 30) setSize(size === 'full' ? 'half' : 'folded');
+          }}
+          onPointerCancel={() => {
+            drag.current = null;
+          }}
+        />
+      )}
       <div className="inspector-head designer-head">
         <h2 id="designer-h" className="panel-title" ref={heading} tabIndex={-1}>
           Designer
           {folded && <span className="designer-folded num"> {folded}</span>}
         </h2>
+        {sheet && size === 'folded' && running && (
+          <button type="button" className="btn btn-small" onClick={stopRun}>
+            Stop
+          </button>
+        )}
         <button
           type="button"
           className="icon-btn"

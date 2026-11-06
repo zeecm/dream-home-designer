@@ -891,9 +891,13 @@ select {
 .reno-key-new {
   background: var(--accent);
 }
-.reno-hatch-line {
+/* In metres, scaling with the plan, as the structural hatch is (the plan's other strokes keep
+   their screen width, which would make these 0.04 px wide). */
+.plan-svg .reno-hatch-line,
+[id^="plan-scene"] .reno-hatch-line {
+  vector-effect: none;
   stroke: var(--negative);
-  stroke-width: 0.04;
+  stroke-width: 0.035;
 }
 .reno-hack-ground {
   fill: color-mix(in srgb, var(--negative) 18%, var(--surface));
@@ -1406,6 +1410,14 @@ input[type="range"] {
 .room-area {
   font-size: 13px;
   fill: var(--muted);
+}
+/* A halo, so a name drawn over furniture or a symbol stays readable. */
+.room-name,
+.room-area {
+  paint-order: stroke;
+  stroke: var(--plan-well);
+  stroke-width: 3px;
+  stroke-linejoin: round;
 }
 .dimension line {
   stroke: var(--accent);
@@ -5113,8 +5125,9 @@ textarea {
   }
 }
 
-/* Below 1100 px: the panel is a sheet across the foot of the screen. */
-@media (max-width: 1100px) {
+/* A tablet held upright (900 px or less): the panel is a sheet across the foot of the
+   screen, half height, full, or folded to its header; the plan refits above it. */
+@media (max-width: 900px) {
   .workspace-designer {
     grid-template-columns: var(--palette-width) minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto;
@@ -5122,8 +5135,30 @@ textarea {
   .workspace-designer > .designer {
     grid-column: 1 / -1;
     grid-row: 2;
-    height: 50vh;
   }
+}
+.workspace-designer > .designer-half {
+  height: 50vh;
+  max-height: 50vh;
+}
+.workspace-designer > .designer-full {
+  height: calc(100dvh - 180px);
+  max-height: none;
+}
+.workspace-designer > .designer-folded {
+  height: auto;
+  max-height: none;
+}
+.designer-folded > :not(.sheet-handle, .designer-head, .visually-hidden) {
+  display: none;
+}
+.designer-sheet .sheet-handle {
+  flex: none;
+  margin: 2px auto -6px;
+}
+.designer-sheet .designer-head .btn-small {
+  margin-left: auto;
+  margin-right: 8px;
 }
 @media (max-width: 720px) {
   .workspace-designer {
@@ -5133,8 +5168,6 @@ textarea {
   .workspace-designer > .designer {
     grid-column: 1;
     grid-row: 2;
-    height: 50vh;
-    max-height: 50vh;
   }
   .designer-head {
     padding-top: 4px;
@@ -5163,5 +5196,67 @@ textarea {
     grid-row: 1;
     height: auto;
     max-height: none;
+  }
+}
+
+/* AI designer: review fixes. */
+.designer-changed {
+  margin: -4px 0 0;
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+.designer-room-why {
+  grid-column: 1 / -1;
+  font-size: var(--fs-small);
+  color: var(--negative);
+}
+.designer-note-room h5 {
+  margin: 6px 0 2px;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--text);
+}
+.designer-card details .designer-note-room ul {
+  margin-top: 0;
+}
+.accept-changes {
+  margin: -6px 0 0;
+  padding-left: 30px;
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+.keep-cell {
+  display: inline-grid;
+  place-items: center;
+  min-width: 32px;
+  min-height: 32px;
+  cursor: pointer;
+}
+.designer-walk-pill {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  z-index: 6;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--text);
+  color: var(--surface);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+  pointer-events: none;
+}
+@media (pointer: coarse) {
+  .designer-change .btn,
+  .designer-card .btn {
+    min-height: 44px;
+  }
+  .keep-cell {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .keep-grid td,
+  .keep-grid th {
+    height: auto;
   }
 }
