@@ -14,3 +14,8 @@
 | 10 | Walls hard to judge in plan | Elevation view of one wall | L |
 | 11 | Storage shortfall | Storage meter against the household | S |
 | 12 | Ageing parents | Accessibility check: turning circles, step-free paths, grab bars | S |
+| 13 | Brochure plans are 50–100 mm out; carpentry gets built to the wrong size | On-site measure: at key collection, tap a wall on the phone, type the laser reading; the plan corrects, differences over 30 mm flagged for the carpenter | M |
+| 14 | Owners shop by link (IKEA, Castlery, Taobao) and guess if it fits | Paste a product link: AI reads the size and price into My furniture, so it gets the fit, delivery and clearance checks; a shopping list with totals | M |
+| 15 | Owners don't know the order of works or how long it takes | Renovation timeline from the change list: permit, hacking, wet works, electrical, carpentry (measured after tiling), painting, cleaning; weeks from key collection, permit items flagged | S–M |
+
+Rows 1–6 are built; 7, 8, 10, 11 and 12 are planned (README Roadmap); 13–15 added 6 Nov 2026.

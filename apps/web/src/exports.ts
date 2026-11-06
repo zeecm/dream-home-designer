@@ -1,6 +1,7 @@
 import type * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { type ViewMode, useEditor } from './editor';
+import { printFrame } from './print/frame';
 import { useStore } from './store';
 import { track } from './telemetry';
 
@@ -188,9 +189,7 @@ export async function printPlan() {
   doc.head.append(style);
   doc.body.append(title, img);
   await img.decode();
-  win.focus();
-  win.print();
-  setTimeout(() => frameEl.remove(), 60_000);
+  printFrame(frameEl);
 }
 
 // ------------------------------------------------------------------------ 3D

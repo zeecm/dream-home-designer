@@ -1140,3 +1140,45 @@ picker when there are several main doors, remembered per browser), and the route
 plan with each door's clear width (`data-export="skip"`). Not yet: the lift in the UI,
 corridor widths, furniture in the way.
 
+
+**Plan for contractors (6 Nov, spec `docs/specs/dimensioned-export.md`, slice 1):** core
+`dimensions.ts`: `planDimensions(level, geom?, opts?)` → chains per side (outside faces found
+by sampling each face: flat behind, free space in front, and seen from outside, so a face in
+a notch is left off; within 1° of an axis; tier 0 openings, tier 1 corners, tier 2 overall;
+stops within 5 mm merge, a tier equal to the next is dropped; each stop's `from` is the face
+its extension line starts at, the outline edge for a stop out of sight), `aligned` chains for
+slanting faces (their ends are corners on both sides), room spans (rays ±x, ±y from the label
+point to the nearest wall face, opening or boundary; under 0.6 m left out), door/window tags
+(away from a door's swing, into the room for a window; flipped to the other side if a label
+or built-in is on them), label points (placeLabel, then a grid search clear of tag and
+built-in boxes, `opts.labelHalf`/`tagHalf`/`avoidBoxes` sized by the sheet), `roundChain`
+(cumulative rounding, so pieces add up) and `sheetScale`/`SHEET_MM`/`PAPER_MM`. Web
+`print/contractorSheet.tsx` draws its own SVG pages in mm (walls, hatch, glass, half walls,
+boundaries, door symbols by style, windows, built-ins with name and length, furniture
+optional, After's hacked red / new teal, labels with white halos, chains, title column with
+scale bar (2.5 m at 1:50), north from `site.north`, key, page n of N; page 2+ the change list
+from `changesAsText` with the place bold, then Notes lines), rendered by a lazily loaded
+`react-dom/server` and printed from a hidden iframe (`data-print="contractor"`, `@page` size
+landscape, margin 0). `print/ContractorDialog.tsx` from Projects ▸ Download (disabled without
+walls). The phone rules that hid the view switch's Split button were `.topbar .segmented`,
+which also hit segmented controls in dialogs opened from the top bar; now
+`.topbar-right > .segmented`. Spec criterion 7's "25 m wide: 1:200, fits false" can't both hold
+(25 m fits A4 at 1:200: 147 mm of drawing width); the test checks 25 m → 1:200 and 40 m → not
+to scale. Not yet: slice 2, a label that can't fit a crowded room (furniture shown) may sit on
+a built-in.
+
+**Plan for contractors, review fixes (6 Nov):** After draws hacked walls under the After walls
+and new ones over them as what they are (teal wall, light-teal half wall, teal-outlined glass,
+with their length), new doors and windows teal (`diff.openingsAdded`) with the cut hatched red
+where the wall stays; `outlineBounds` takes boundary lines and `include` points, `planExtent`
+adds door swings, so chains clear a door opening out and (After) hacked walls; a face beside a
+boundary-closed room is inside it for half the wall's thickness (no 50 mm pieces at a
+terrace); pieces under 20 mm join a neighbour; labels keep off walls, door leaves, tags and
+`blockBoxes` (hacked walls), a long name goes on two lines; spans go beside the label when the
+line through it would cross a tag, leaf or hacked wall (`spanFigure` sizes the room needed),
+none for a room under 95% of its bounding box; tags carry the clamped width. Printing
+(`print/frame.ts`, also `printPlan`) drops the frame on `afterprint` (10 min fallback) and
+focuses Projects; pages are wrapped in clipping `.sheet-paper` boxes. Dialog: the scale counts
+hacked walls (`print/extent.ts`), A3 by default when only A3 is to scale, `role="alert"`,
+focus back to Projects; the sheet always has a Version line. Not yet: a notch's depth (faces
+hidden in a notch get no chain).

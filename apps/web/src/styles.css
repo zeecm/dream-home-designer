@@ -2026,10 +2026,10 @@ h3.field-label {
     gap: 4px;
   }
   /* Two views side by side make no sense at phone width. */
-  .topbar .segmented button:nth-child(2) {
+  .topbar-right > .segmented button:nth-child(2) {
     display: none;
   }
-  .topbar .segmented button {
+  .topbar-right > .segmented button {
     padding: 0 6px;
   }
   .topbar {
@@ -2337,15 +2337,15 @@ h3.field-label {
   }
   .topbar .btn,
   .topbar .icon-btn,
-  .topbar .segmented button {
+  .topbar-right > .segmented button {
     min-height: 34px;
     height: 34px;
   }
-  .topbar .segmented button {
+  .topbar-right > .segmented button {
     padding: 0 10px;
   }
   /* Two views side by side are too cramped this short. */
-  .topbar .segmented button:nth-child(2) {
+  .topbar-right > .segmented button:nth-child(2) {
     display: none;
   }
   .project-name {
@@ -2940,4 +2940,14 @@ h3.field-label {
 .catalogue-name,
 .inspector .note {
   overflow-wrap: anywhere;
+}
+
+/* Plan for contractors: on a phone, a sheet up from the bottom. */
+@media (max-width: 560px) {
+  .contractor-dialog {
+    width: 100vw;
+    max-width: 100vw;
+    margin: auto 0 0;
+    border-radius: var(--radius-card) var(--radius-card) 0 0;
+  }
 }

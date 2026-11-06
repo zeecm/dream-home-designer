@@ -27,3 +27,4 @@ export * from './structural';
 export * from './clearance';
 export * from './cost';
 export * from './delivery';
+export * from './dimensions';

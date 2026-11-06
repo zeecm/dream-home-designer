@@ -1,4 +1,4 @@
-import { renameProject } from '@dhd/core';
+import { renameProject, variantLevels } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { signInUrl, useAccount } from '../account';
 import { AiSettingsDialog } from '../ai/AiSettingsDialog';
@@ -10,6 +10,7 @@ import {
   downloadProjectFile,
   printPlan,
 } from '../exports';
+import { ContractorDialog } from '../print/ContractorDialog';
 import { type SyncStatus, useProject, useStore } from '../store';
 import { HistoryDialog } from './HistoryDialog';
 import { PlansDialog } from './PlansDialog';
@@ -74,12 +75,21 @@ function ProjectMenu() {
   const [managing, setManaging] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [history, setHistory] = useState(false);
+  const [contractor, setContractor] = useState(false);
+  // A plan for contractors needs walls to measure: a narrow selector, so an edit that
+  // doesn't change the answer doesn't redraw the menu.
+  const variant = useEditor((s) => s.variant);
+  const hasWalls = useStore((s) =>
+    Object.values(variantLevels(s.editor.doc, variant)[0]?.walls ?? {}).some(
+      (w) => w.kind !== 'boundary',
+    ),
+  );
   // Past versions live on the server, and a view-only link doesn't see them.
   const canHistory = useStore((s) => !!s.backend?.versions && s.role !== 'viewer');
   const fileInput = useRef<HTMLInputElement>(null);
   const ref = useRef<HTMLDivElement>(null);
   const recent = useStore((s) => s.recent);
-  const currentId = useProject().id;
+  const currentId = useStore((s) => s.editor.doc.id);
   const { load, createProject, openSample, importProject } = useStore.getState();
   // A download that fails says why, instead of doing nothing.
   const save = (fn: () => Promise<void>) =>
@@ -151,6 +161,14 @@ function ProjectMenu() {
           <button type="button" onClick={run(() => save(printPlan))}>
             Print the plan, or save it as PDF
           </button>
+          <button
+            type="button"
+            disabled={!hasWalls}
+            title={hasWalls ? undefined : 'Draw some walls first'}
+            onClick={run(() => setContractor(true))}
+          >
+            Plan for contractors (PDF)
+          </button>
           <button type="button" onClick={run(() => save(download3dImage))}>
             3D view as a picture (PNG)
           </button>
@@ -191,6 +209,7 @@ function ProjectMenu() {
       {managing && <PlansDialog onClose={() => setManaging(false)} />}
       {aiOpen && <AiSettingsDialog onClose={() => setAiOpen(false)} />}
       {history && <HistoryDialog onClose={() => setHistory(false)} />}
+      {contractor && <ContractorDialog onClose={() => setContractor(false)} />}
     </div>
   );
 }
