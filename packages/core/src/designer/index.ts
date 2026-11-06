@@ -13,6 +13,15 @@ export { categoriesFor, catalogueText, priorityOf, resolveAsset } from './catalo
 export { briefData, compass, designContext, planForDesign, type ContextInput } from './describe';
 export { type WallLock, designLocks, wallLocks } from './locks';
 export {
+  type Hit,
+  type PlaceOutcome,
+  type SpaceIndex,
+  type Want,
+  hitsOf,
+  placePiece,
+  spaceIndex,
+} from './place';
+export {
   CHARS_PER_TOKEN,
   OUTPUT,
   PRICES,
@@ -37,6 +46,16 @@ export {
   roomStep,
   runPrompts,
 } from './prompts';
+export {
+  type DesignOptions,
+  type DesignProblem,
+  type DesignResult,
+  type ResultSpace,
+  designResult,
+  isFloorFinish,
+  isWallFinish,
+  wallFinishOf,
+} from './result';
 export {
   Aspect,
   BATHROOMS,
@@ -78,3 +97,4 @@ export {
 } from './spaces';
 export { type UsageOpts, usageOf, usageTotals } from './usage';
 export { levelFingerprint } from './util';
+export { KEEP_TEXT, LOCK_TEXT, type Note, applyDesignWalls, canonicalIds } from './walls';
