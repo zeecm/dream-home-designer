@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { clearanceIssues } from '../clearance';
+import { LIFT_PRESETS } from '../delivery';
 import { furnishedSample } from '../fixtures/furnishedSample';
 import { furnitureKind, itemFootprint } from '../furniture';
 import { levelBounds } from '../geometry';
 import { planGeometry } from '../plan';
-import type { Level } from '../schema';
+import { DEFAULT_SITE, type Level } from '../schema';
 import { aliasesFor } from './aliases';
 import { priorityOf } from './catalogue';
 import unsafeRoom from './fixtures/room-unsafe.json';
@@ -188,16 +189,37 @@ describe('placing pieces (criteria 7–15)', () => {
   });
 
   it('13: a new king bed that can’t get through the door is listed with the delivery verdict', () => {
-    const r = result(
-      SAMPLE_KEYS.bedroom,
-      answer([{ ref: 'bed1', assetId: 'bed-king', wall: 'W5' }]),
+    const king = answer([{ ref: 'bed1', assetId: 'bed-king', wall: 'W5' }]);
+    // A bed comes flat (mattress and frame panels): through the sample's doors it's fine.
+    const fine = result(SAMPLE_KEYS.bedroom, king);
+    expect(fine.problems.filter((x) => x.kind === 'delivery')).toEqual([]);
+    // Up in a typical HDB lift, a king mattress (too wide to fold) doesn't fit.
+    const r = designResult(
+      level,
+      level,
+      sampleDesign({ answers: { [SAMPLE_KEYS.bedroom]: king } }),
+      {
+        site: { ...DEFAULT_SITE, lift: LIFT_PRESETS.typical },
+      },
     );
     const bed = Object.values(r.level.items).find((i) => i.assetId === 'bed-king')!;
     const p = r.problems.find((x) => x.kind === 'delivery' && x.itemId === bed.id);
     expect(p?.delivery?.status).toBe('too-big');
-    expect(p?.text).toMatch(/^The king bed won’t get into Mdm Lim's room: it is too big/);
-    // A piece the household brings along is in the flat already: no delivery.
-    expect(r.problems.filter((x) => x.kind === 'delivery')).toHaveLength(1);
+    expect(p?.text).toBe(
+      "The king bed won’t get into Mdm Lim's room: it is too big for a door on the way. Comes flat, but the mattress (too wide to fold) doesn’t fit; ask the shop.",
+    );
+    // A super single comes up in the same lift, folded.
+    const single = designResult(
+      level,
+      level,
+      sampleDesign({
+        answers: {
+          [SAMPLE_KEYS.bedroom]: answer([{ ref: 'b', assetId: 'bed-super-single', wall: 'W5' }]),
+        },
+      }),
+      { site: { ...DEFAULT_SITE, lift: LIFT_PRESETS.typical } },
+    );
+    expect(single.problems.filter((x) => x.kind === 'delivery')).toEqual([]);
   });
 
   it('14: a new wall leaving a bedroom with no window: "has no window"', () => {

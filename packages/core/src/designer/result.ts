@@ -1,7 +1,7 @@
 import { freeze } from 'immer';
 import { type ClearanceIssue, clearanceIssues } from '../clearance';
 import { type CostEstimate, type Rates, TYPICAL_RATES, costEstimate } from '../cost';
-import { type Delivery, deliverable, deliveryCheck, entranceDoor, rigidNote } from '../delivery';
+import { type Delivery, deliverable, deliveryCheck, entranceDoor, partsNote } from '../delivery';
 import { FLOOR_FINISHES, PAINTS, WALLPAPERS, customPaint } from '../finishes';
 import { type FurnitureKind, furnitureKind, itemFootprint, itemSize } from '../furniture';
 import { placeLabel, pointInPolygon } from '../geometry';
@@ -605,7 +605,7 @@ function work(
         const kind = furnitureKind(it.assetId);
         const where = room ? (level.rooms[room]?.name ?? 'its room') : 'its room';
         const what = `The ${kind ? nameOf(kind) : 'piece'}`;
-        const rigid = rigidNote(it.assetId);
+        const rigid = partsNote(d);
         problems.push({
           kind: 'delivery',
           delivery: d,
