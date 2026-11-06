@@ -47,11 +47,20 @@ interface SuggestState {
   fitAll: number;
   /** Bumped to show the suggestions as they are now, without the 150 ms wait. */
   refresh: number;
+  /**
+   * Rooms added while the panel is open, with the points added: their rows (and any point
+   * left out of them) are done, until an undo takes the points back.
+   */
+  done: ReadonlyMap<string, readonly string[]>;
   openPanel: () => void;
   close: () => void;
   toggle: (s: Suggestion, roomName: string) => void;
   setRoom: (id: string | null) => void;
 }
+
+/** A mouse or trackpad (clicks), not a finger (taps). */
+const fine = () =>
+  typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: fine)').matches;
 
 const narrow = () =>
   typeof window !== 'undefined' && window.matchMedia?.('(max-width: 720px)').matches;
@@ -66,6 +75,7 @@ export const useSuggest = create<SuggestState>((set, get) => ({
   next: undefined,
   fitAll: 0,
   refresh: 0,
+  done: new Map(),
   openPanel: () => {
     useElectricalOn.getState().set(true);
     const ed = useEditor.getState();
@@ -78,6 +88,7 @@ export const useSuggest = create<SuggestState>((set, get) => ({
       room: null,
       status: '',
       next: undefined,
+      done: new Map(),
       fitAll: narrow() ? Date.now() : 0,
     });
   },
@@ -89,7 +100,7 @@ export const useSuggest = create<SuggestState>((set, get) => ({
     else out.delete(s.key);
     const what = `${RULE_NAMES[s.rule][0]}, ${roomName}`;
     const status = leaving
-      ? `Left out: ${what}. Tap again to keep it. ${s.why}`
+      ? `Left out: ${what}. ${fine() ? 'Click' : 'Tap'} again to keep it. ${s.why}`
       : `Kept: ${what}. ${s.why}`;
     set({ out, status });
   },
@@ -224,6 +235,16 @@ function addThese(level: Level, points: readonly Suggestion[], label: string): s
   }
 }
 
+/** Whether a room was added while the panel is open (and not since taken back). */
+function isDone(
+  done: ReadonlyMap<string, readonly string[]>,
+  level: Level | undefined,
+  roomId: string,
+): boolean {
+  const ids = done.get(roomId);
+  return !!ids && !!level && ids.some((id) => !!level.points?.[id]);
+}
+
 /** Opens the suggestions: in the Electrical tool's options and the plan details. */
 export function SuggestButton({ small = false }: { small?: boolean }) {
   const viewer = useStore((s) => s.role === 'viewer');
@@ -287,24 +308,32 @@ export function SuggestPanel() {
     return () => window.removeEventListener('keydown', onKey, true);
   }, []);
 
+  const done = useSuggest((s) => s.done);
+  const live = useLevel();
   const rows = useMemo(() => {
     if (!data) return [];
     const { level, result } = data;
-    return result.rooms.map((id) => {
-      const all = result.points.filter((p) => p.roomId === id);
-      const kept = all.filter((p) => !out.has(p.key));
-      return {
-        id,
-        name: level.rooms[id]?.name ?? 'Room',
-        all,
-        kept,
-        cost: suggestionCost(kept, rates),
-        notes: result.notes.filter((n) => n.roomId === id).map((n) => n.text),
-      };
-    });
-  }, [data, out, rates]);
+    return result.rooms
+      .filter((id) => !isDone(done, live, id))
+      .map((id) => {
+        const all = result.points.filter((p) => p.roomId === id);
+        const kept = all.filter((p) => !out.has(p.key));
+        return {
+          id,
+          name: level.rooms[id]?.name ?? 'Room',
+          all,
+          kept,
+          cost: suggestionCost(kept, rates),
+          notes: result.notes.filter((n) => n.roomId === id).map((n) => n.text),
+        };
+      });
+  }, [data, out, rates, done, live]);
   const withPoints = rows.filter((r) => r.all.length > 0);
-  const notesOnly = rows.filter((r) => r.all.length === 0);
+  // With nothing to add, no notes either: the empty line says it all.
+  const notesOnly = withPoints.length ? rows.filter((r) => r.all.length === 0) : [];
+  // Opened (by keyboard too): focus starts at the panel's heading.
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => heading.current?.focus({ preventScroll: true }), []);
   const kept = withPoints.flatMap((r) => r.kept);
   const keptRooms = withPoints.filter((r) => r.kept.length > 0).length;
   const total = suggestionCost(kept, rates);
@@ -343,7 +372,12 @@ export function SuggestPanel() {
     const label = `Add ${plural(pts.length, 'point')} to ${name}`;
     const i = withPoints.findIndex((r) => r.id === id);
     const after = withPoints.slice(i + 1).find((r) => r.kept.length > 0);
-    if (addThese(fresh.level, pts, label)) useSuggest.setState({ next: after?.id ?? null });
+    const ids = addThese(fresh.level, pts, label);
+    if (ids) {
+      // The row goes, with any point left out of it.
+      const done = new Map(useSuggest.getState().done).set(id, ids);
+      useSuggest.setState({ next: after?.id ?? null, done });
+    }
   };
   const addAll = () => {
     const fresh = freshSuggestions();
@@ -362,7 +396,7 @@ export function SuggestPanel() {
   return (
     <section className="suggest" aria-labelledby="suggest-h">
       <div className="inspector-head suggest-head">
-        <h2 id="suggest-h" className="panel-title">
+        <h2 id="suggest-h" className="panel-title" ref={heading} tabIndex={-1}>
           Suggested points
         </h2>
         <button
@@ -376,8 +410,11 @@ export function SuggestPanel() {
         </button>
       </div>
       <p className="suggest-intro">
-        Typical points for each room of an HDB flat, placed by your furniture. Tap any you don’t
-        want, then add them. Check them with your electrician.
+        <span className="suggest-intro-more">
+          Typical points for each room of an HDB flat, placed by your furniture.{' '}
+        </span>
+        {fine() ? 'Click' : 'Tap'} any you don’t want, then add them.
+        <span className="suggest-intro-more"> Check them with your electrician.</span>
       </p>
       {!here ? (
         <p className="suggest-before">
@@ -444,7 +481,9 @@ export function SuggestPanel() {
                 <p className="suggest-meta num" data-testid="suggest-meta">
                   {r.kept.length === 0
                     ? `All ${r.all.length} left out`
-                    : `${plural(r.kept.length, 'point')} · about ${range(r.cost.low, r.cost.high)}`}
+                    : `${plural(r.kept.length, 'point')} · ${
+                        r.cost.high > 0 ? `about ${range(r.cost.low, r.cost.high)}` : 'no charge'
+                      }`}
                 </p>
                 {r.kept.length > 0 && <p className="suggest-what">{summary(r.kept)}</p>}
                 <details className="suggest-points">
@@ -488,14 +527,15 @@ export function SuggestPanel() {
               </div>
             ))}
           </div>
-          {status && (
-            <p className="suggest-status" aria-live="polite" data-testid="suggest-status">
-              {status}
-            </p>
-          )}
         </>
       )}
       <div className="suggest-foot">
+        {/* Above the buttons, always in view: what the last tap did, and why. */}
+        {here && status && (
+          <p className="suggest-status" aria-live="polite" data-testid="suggest-status">
+            {status}
+          </p>
+        )}
         {here && kept.length > 0 && (
           <p className="suggest-total num" data-testid="suggest-total">
             <span>
@@ -602,15 +642,19 @@ export const SuggestLayer = memo(function SuggestLayer({
     return () => clearTimeout(t);
   }, [added]);
 
-  const r = glyphRadius(zoom);
+  // Zoomed out over the whole flat, ghosts shrink to dots rather than pile up (at most 0.2 m),
+  // still easy to hit; a room's row zooms in on it.
+  const r = Math.min(glyphRadius(zoom), Math.max(0.07, 0.2));
   const hit = (coarse() ? 22 : 14) / zoom;
+  const done = useSuggest((s) => s.done);
   const ghosts = useMemo(() => {
     if (!data) return [];
     return data.result.points.flatMap((s) => {
+      if (isDone(done, level, s.roomId)) return [];
       const pos = pointPosition(data.level, { ...s.point, id: s.key } as ElecPoint);
       return pos ? [{ s, pos }] : [];
     });
-  }, [data]);
+  }, [data, done, level]);
   const outline = useMemo(() => {
     if (!data || !room) return null;
     const shape = roomShapes(data.level).get(room);
