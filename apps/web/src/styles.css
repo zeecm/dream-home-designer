@@ -2921,3 +2921,23 @@ h3.field-label {
 .way-hinges text {
   fill: #7c3aed;
 }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .way-tight circle,
+  :root:not([data-theme="light"]) .way-tight text {
+    fill: #f59e0b;
+  }
+  :root:not([data-theme="light"]) .way-bad circle,
+  :root:not([data-theme="light"]) .way-bad text {
+    fill: #ff6b5e;
+  }
+  :root:not([data-theme="light"]) .way-hinges circle,
+  :root:not([data-theme="light"]) .way-hinges text {
+    fill: #a78bfa;
+  }
+}
+/* A long name with no spaces wraps rather than spilling out. */
+.inspector h2,
+.catalogue-name,
+.inspector .note {
+  overflow-wrap: anywhere;
+}

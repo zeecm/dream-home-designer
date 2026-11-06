@@ -11,6 +11,7 @@ import {
   newId,
 } from '@dhd/core';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { create } from 'zustand';
 import { useEditor } from '../editor';
 import { useProject, useStore } from '../store';
@@ -111,8 +112,11 @@ function doorLabel(level: Level, id: string): string {
   return `${near ? `${near} door` : 'Door'}, ${formatLength(o.width)}`;
 }
 
+/** A length that doesn't break between its number and its unit. */
+const nb = (t: string) => t.replace(' ', '\u00a0');
+
 /** The verdict in a sentence. */
-export function deliveryText(level: Level, r: Delivery, name: string): string {
+export function deliveryText(level: Level, r: Delivery): string {
   switch (r.status) {
     case 'no-room':
       return 'Put it in a room to check the way in.';
@@ -132,16 +136,15 @@ export function deliveryText(level: Level, r: Delivery, name: string): string {
           r.status === 'tight'
             ? 'Just fits through every door on the way in'
             : 'Fits through every door on the way in';
-        return `${head}. Narrowest: ${doorName(level, narrowest, r.from)}, ${formatLength(narrowest.clear)}.`;
+        return `${head}. Narrowest: ${doorName(level, narrowest, r.from)}, ${nb(formatLength(narrowest.clear))}.`;
       }
       if (r.status === 'hinges') {
-        return `Fits through ${where} with the door off its hinges (${formatLength(w.clear)} clear with it on).`;
+        return `Fits through ${where} with the door off its hinges (${nb(formatLength(w.clear))} clear with it on).`;
       }
       if (w.turn) {
-        return `Can’t turn through ${where} from the ${formatLength(w.turn.space)} space in front.`;
+        return `Can’t turn through ${where} from the ${nb(formatLength(w.turn.space))} space in front.`;
       }
-      const lower = name.toLowerCase();
-      return `Too big for ${where}: ${formatLength(w.clear)} wide; the ${lower} needs ${formatLength(w.need ?? 0)} on its side.`;
+      return `Too big for ${where}: ${nb(formatLength(w.clear))} wide; it needs ${nb(formatLength(w.need ?? 0))} on its side.`;
     }
   }
 }
@@ -157,14 +160,13 @@ export function GettingItIn({ level, id }: { level: Level; id: string }) {
   const setFrom = useFrom((s) => s.set);
   const doors = useMemo(() => mainDoors(level), [level]);
   if (!item || !r) return null;
-  const name = furnitureKind(item.assetId)?.name ?? 'piece';
   const bad = r.status === 'too-big' || r.status === 'unreachable';
   return (
     <section className="stack" aria-label="Getting it in">
       <h3 className="section-title">Getting it in</h3>
       {own || shown ? (
         <>
-          <p className={`note${bad ? ' warning-text' : ''}`}>{deliveryText(level, r, name)}</p>
+          <p className={`note${bad ? ' warning-text' : ''}`}>{deliveryText(level, r)}</p>
           {doors.length > 1 && 'from' in r && (
             <label className="field">
               <span className="field-label">From</span>
@@ -269,17 +271,20 @@ export function AddBySize({ onAdded }: { onAdded: (id: string) => void }) {
           +
         </span>
         <span className="catalogue-name">Add by size</span>
-        <span className="choice-note">Your sofa, bed or cabinet</span>
+        <span className="choice-note">Yours, measured</span>
       </button>
-      {open && (
-        <AddBySizeDialog
-          onClose={() => setOpen(false)}
-          onAdded={(id) => {
-            setOpen(false);
-            onAdded(id);
-          }}
-        />
-      )}
+      {/* Outside the catalogue's list, whose button styles would take it over. */}
+      {open &&
+        createPortal(
+          <AddBySizeDialog
+            onClose={() => setOpen(false)}
+            onAdded={(id) => {
+              setOpen(false);
+              onAdded(id);
+            }}
+          />,
+          document.body,
+        )}
     </>
   );
 }
