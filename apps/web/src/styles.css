@@ -2761,6 +2761,22 @@ h3.field-label {
 .render-pictures .segmented {
   margin-bottom: 8px;
 }
+/* Where to render from: two choices across, each its name over a short note. */
+.render-from button {
+  height: auto;
+  min-height: 28px;
+  padding: 4px 8px;
+  white-space: normal;
+  line-height: 1.25;
+}
+.render-from-note {
+  display: block;
+  font-size: var(--fs-small);
+  font-weight: 400;
+}
+.render-warning {
+  margin: 0 0 8px;
+}
 .render-pictures img {
   display: block;
   width: 100%;

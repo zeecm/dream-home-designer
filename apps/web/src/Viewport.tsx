@@ -3,6 +3,7 @@ import {
   type Vec2,
   dayOfYear,
   daylight,
+  finish,
   itemLights,
   levelBounds,
   siteOf,
@@ -24,7 +25,7 @@ import {
 import * as THREE from 'three';
 import { RenderDialog } from './ai/RenderDialog';
 import { useEditor } from './editor';
-import { registerScene3d } from './exports';
+import { canvasBlob, registerScene3d } from './exports';
 import { configureLoader, fetchUploaded } from './models';
 import { useLevel, useProject, useStore } from './store';
 import { icons } from './ui/icons';
@@ -427,14 +428,129 @@ function CompareDivider({
   );
 }
 
-/** Lets the downloads draw this view on demand and reach the level's meshes. */
-function Capture() {
-  const { gl, scene, camera } = useThree();
+/** The walk's sky light, and its even light under the ceilings, for `light` daylight (0 to 1). */
+const WALK_SKY = (light: number) => 0.05 + 2.15 * light;
+const WALK_EVEN = (light: number) => 0.02 + 0.33 * light;
+
+/** The level's meshes as drawn (a renovation's two versions, while comparing). */
+const LEVEL_GROUPS = new Set(['level', 'level-compared']);
+
+/**
+ * Lets the downloads draw this view on demand and reach the level's meshes, and the render
+ * draw it from another camera (at eye height) without the view on screen changing.
+ */
+function Capture({
+  level,
+  ceilings,
+  daylight,
+}: {
+  level: Level | undefined;
+  ceilings: boolean;
+  /** How much daylight there is (0 to 1), to light an eye-height view as the walk is lit. */
+  daylight: number;
+}) {
+  const { gl, scene, camera, controls } = useThree();
+  const day = useRef(daylight);
+  day.current = daylight;
+  const shown = useRef(level);
+  shown.current = level;
+  const hasCeilings = useRef(ceilings);
+  hasCeilings.current = ceilings;
+  const orbit = useRef(controls);
+  orbit.current = controls;
   useEffect(() => {
     registerScene3d({
       render: () => gl.render(scene, camera),
       canvas: gl.domElement,
       level: () => scene.getObjectByName('level'),
+      camera: () => {
+        const cam = camera as THREE.PerspectiveCamera;
+        // The orbit's target, else a point straight ahead.
+        const target =
+          (orbit.current as { target?: THREE.Vector3 } | null)?.target?.clone() ??
+          cam.getWorldDirection(new THREE.Vector3()).add(cam.position);
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+        const v = (p: THREE.Vector3) => ({ x: p.x, y: p.y, z: p.z });
+        return {
+          position: v(cam.position),
+          target: v(target),
+          up: v(up),
+          fov: THREE.MathUtils.degToRad(cam.fov),
+          aspect: gl.domElement.width / Math.max(1, gl.domElement.height),
+        };
+      },
+      renderFrom: (c) => {
+        const cam = new THREE.PerspectiveCamera(
+          THREE.MathUtils.radToDeg(c.fov),
+          c.aspect,
+          0.02,
+          500,
+        );
+        cam.position.set(c.position.x, c.position.y, c.position.z);
+        cam.lookAt(c.target.x, c.target.y, c.target.z);
+        cam.updateMatrixWorld();
+        // The orbit view leaves the ceilings off to see in; inside a room they belong on.
+        const lvl = shown.current;
+        const hidden: THREE.Object3D[] = [];
+        const flat: THREE.Material[] = [];
+        const undo: (() => void)[] = [];
+        let indoors: LevelMeshes | null = null;
+        if (lvl && !hasCeilings.current) {
+          indoors = new LevelMeshes(materials, { ceilings: true, models });
+          indoors.update(lvl);
+          indoors.group.name = 'level-eye';
+          // No light reaches a ceiling from below, so it would draw dark grey and steer the
+          // image model to a dark, moody room: its paint, light and matte, unlit instead.
+          indoors.group.traverse((o) => {
+            const id = o.name.startsWith('ceiling:') ? o.name.slice(8) : null;
+            if (!id || !(o instanceof THREE.Mesh)) return;
+            const paint = finish(lvl.rooms[id]?.ceilingMaterial ?? '')?.color ?? '#f2f0ec';
+            o.material = new THREE.MeshBasicMaterial({ color: paint });
+            flat.push(o.material);
+          });
+          for (const o of scene.children) {
+            if (LEVEL_GROUPS.has(o.name) && o.visible) {
+              o.visible = false;
+              hidden.push(o);
+            }
+          }
+          scene.add(indoors.group);
+          // Lit as the walk is: no sun shadows (the ceilings would shade every floor), the
+          // walk's sky light, and its even light under the ceilings.
+          const light = day.current;
+          scene.traverse((o) => {
+            if (o instanceof THREE.DirectionalLight && o.castShadow) {
+              o.castShadow = false;
+              undo.push(() => {
+                o.castShadow = true;
+              });
+            } else if (o instanceof THREE.HemisphereLight) {
+              const was = o.intensity;
+              o.intensity = WALK_SKY(light);
+              undo.push(() => {
+                o.intensity = was;
+              });
+            }
+          });
+          const even = new THREE.AmbientLight(0xffffff, WALK_EVEN(light));
+          scene.add(even);
+          undo.push(() => scene.remove(even));
+        }
+        try {
+          gl.render(scene, cam);
+          // The canvas's picture is copied here, before the view below is drawn over it.
+          return canvasBlob(gl.domElement);
+        } finally {
+          if (indoors) {
+            scene.remove(indoors.group);
+            indoors.dispose();
+          }
+          for (const m of flat) m.dispose();
+          for (const o of hidden) o.visible = true;
+          for (const u of undo) u();
+          gl.render(scene, camera);
+        }
+      },
     });
     return () => registerScene3d(null);
   }, [gl, scene, camera]);
@@ -540,11 +656,11 @@ export function Viewport() {
             sky,
             dark ? '#3a3d40' : '#dfe3e6',
             // Indoors at night only the lamps should really light a room.
-            walking ? 0.05 + 2.15 * light : 0.3 + 1.2 * light,
+            walking ? WALK_SKY(light) : 0.3 + 1.2 * light,
           ]}
         />
         {/* Under the ceilings the sun can't reach; even light keeps rooms readable. */}
-        {walking && <ambientLight intensity={0.02 + 0.33 * light} />}
+        {walking && <ambientLight intensity={WALK_EVEN(light)} />}
         <primitive object={sunTarget} position={[frame.x, 0, frame.z]} />
         <directionalLight
           castShadow={!walking && sun.altitude > 0}
@@ -572,7 +688,7 @@ export function Viewport() {
         ) : (
           level && <Lamps level={level} />
         )}
-        <Capture />
+        <Capture level={level} ceilings={walking} daylight={light} />
         <mesh rotation-x={-Math.PI / 2} position={[frame.x, -0.01, frame.z]} receiveShadow>
           <planeGeometry args={[200, 200]} />
           <meshStandardMaterial color={dark ? '#1a1c1e' : '#eef1f3'} />
