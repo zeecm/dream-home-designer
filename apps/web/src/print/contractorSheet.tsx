@@ -22,22 +22,23 @@ import {
   isHalfWall,
   itemFootprint,
   itemSize,
-  outlineBounds,
   planDimensions,
+  planExtent,
   planGeometry,
+  pointInPolygon,
   renovationChanges,
-  renovationDiff,
   roomArea,
   roomShape,
   roomShapes,
   roundChain,
   sheetDrawingArea,
   sheetScale,
-  variantLevels,
   wallStatus,
 } from '@dhd/core';
 import type { ReactElement, ReactNode } from 'react';
 import { changesAsText } from '../ui/Renovation';
+import { hackedPoints, sheetLevels } from './extent';
+import { printFrame } from './frame';
 
 /**
  * The plan for contractors: a measured drawing on A4 or A3, landscape, one SVG per page in
@@ -62,6 +63,8 @@ const MUTED = '#5c636b';
 const FAINT = '#a9afb6';
 const HACK = '#c0392b';
 const NEW = '#0f8288';
+/** A new half wall: a light teal, with a teal edge. */
+const NEW_HALF = '#9fd3d5';
 const FONT = 'Helvetica, Arial, sans-serif';
 
 /** Text sizes, mm. */
@@ -197,10 +200,24 @@ function Walls({
   );
 }
 
-/** Doors (by how they open), windows and openings, over the gaps in the walls. */
-function Openings({ geom, sheet }: { geom: PlanGeometry; sheet: Sheet }) {
+/**
+ * Doors (by how they open), windows and openings, over the gaps in the walls. One new in a
+ * renovation (`added`) is drawn teal, and where it is cut into a wall that stays (`cut`), the
+ * gap is hatched as hacking.
+ */
+function Openings({
+  geom,
+  sheet,
+  added,
+  cut,
+}: {
+  geom: PlanGeometry;
+  sheet: Sheet;
+  added: ReadonlySet<string>;
+  cut: ReadonlySet<string>;
+}) {
   const { P } = sheet;
-  const line = (a: Vec2, b: Vec2, key: string, dash?: string) => {
+  const line = (a: Vec2, b: Vec2, key: string, ink: string, dash?: string) => {
     const p = P(a);
     const q = P(b);
     return (
@@ -210,13 +227,13 @@ function Openings({ geom, sheet }: { geom: PlanGeometry; sheet: Sheet }) {
         y1={n2(p.y)}
         x2={n2(q.x)}
         y2={n2(q.y)}
-        stroke={INK}
+        stroke={ink}
         strokeWidth={0.22}
         strokeDasharray={dash}
       />
     );
   };
-  const arc = (c: Vec2, from: Vec2, to: Vec2, key: string) => {
+  const arc = (c: Vec2, from: Vec2, to: Vec2, key: string, arcInk: string) => {
     const r = Math.hypot(from.x - c.x, from.y - c.y) * sheet.k;
     const cross = (from.x - c.x) * (to.y - c.y) - (from.y - c.y) * (to.x - c.x);
     const p = P(from);
@@ -226,7 +243,7 @@ function Openings({ geom, sheet }: { geom: PlanGeometry; sheet: Sheet }) {
         key={key}
         d={`M ${n2(p.x)} ${n2(p.y)} A ${n2(r)} ${n2(r)} 0 0 ${cross > 0 ? 1 : 0} ${n2(q.x)} ${n2(q.y)}`}
         fill="none"
-        stroke={MUTED}
+        stroke={arcInk}
         strokeWidth={0.13}
       />
     );
@@ -237,39 +254,60 @@ function Openings({ geom, sheet }: { geom: PlanGeometry; sheet: Sheet }) {
         const f = o.frame;
         const [u0, u1] = o.span;
         const parts: ReactNode[] = [];
+        const isNew = added.has(o.opening.id);
+        const ln = (a: Vec2, b: Vec2, key: string, dash?: string) =>
+          line(a, b, key, isNew ? NEW : INK, dash);
+        const ar = (c: Vec2, from: Vec2, to: Vec2, key: string) =>
+          arc(c, from, to, key, isNew ? NEW : MUTED);
         if (o.kind === 'window') {
-          parts.push(line(framePoint(f, u0, 1), framePoint(f, u1, 1), 'f1'));
-          parts.push(line(framePoint(f, u0, -1), framePoint(f, u1, -1), 'f2'));
-          parts.push(line(framePoint(f, u0, 0), framePoint(f, u1, 0), 'g'));
+          parts.push(ln(framePoint(f, u0, 1), framePoint(f, u1, 1), 'f1'));
+          parts.push(ln(framePoint(f, u0, -1), framePoint(f, u1, -1), 'f2'));
+          parts.push(ln(framePoint(f, u0, 0), framePoint(f, u1, 0), 'g'));
         }
         if (o.kind === 'door') {
           const style = doorStyle(o.opening);
           if (style === 'swing') {
             const s = doorSwing(f, o.opening);
-            parts.push(line(s.hinge, s.leafEnd, 'leaf'));
-            parts.push(arc(s.hinge, s.leafEnd, s.arcEnd, 'arc'));
+            parts.push(ln(s.hinge, s.leafEnd, 'leaf'));
+            parts.push(ar(s.hinge, s.leafEnd, s.arcEnd, 'arc'));
           } else if (style === 'double') {
             const open = doorLeaves(f, o.opening, 1);
             const shut = doorLeaves(f, o.opening, 0);
             open.forEach((l, i) => {
-              parts.push(line(l.a, l.b, `l${i}`));
-              parts.push(arc(l.a, l.b, shut[i]?.b ?? l.b, `a${i}`));
+              parts.push(ln(l.a, l.b, `l${i}`));
+              parts.push(ar(l.a, l.b, shut[i]?.b ?? l.b, `a${i}`));
             });
           } else if (style === 'sliding' || style === 'pocket') {
             const shut = doorLeaves(f, o.opening, 0);
-            shut.forEach((l, i) => parts.push(line(l.a, l.b, `s${i}`)));
+            shut.forEach((l, i) => parts.push(ln(l.a, l.b, `s${i}`)));
             if (shut.length === 1) {
               for (const [i, l] of doorLeaves(f, o.opening, 1).entries()) {
-                parts.push(line(l.a, l.b, `d${i}`, '0.8 0.5'));
+                parts.push(ln(l.a, l.b, `d${i}`, '0.8 0.5'));
               }
             }
           } else {
-            doorLeaves(f, o.opening, 0.5).forEach((l, i) => parts.push(line(l.a, l.b, `f${i}`)));
+            doorLeaves(f, o.opening, 0.5).forEach((l, i) => parts.push(ln(l.a, l.b, `f${i}`)));
           }
         }
         return (
-          <g key={o.opening.id} data-opening={o.opening.id}>
-            <polygon points={pts(o.polygon.map(P))} fill="#ffffff" />
+          <g
+            key={o.opening.id}
+            data-opening={o.opening.id}
+            data-new={isNew || undefined}
+            data-cut={cut.has(o.opening.id) || undefined}
+          >
+            {cut.has(o.opening.id) ? (
+              <polygon
+                className="opening-cut"
+                points={pts(o.polygon.map(P))}
+                fill="url(#hack-hatch)"
+                stroke={HACK}
+                strokeWidth={0.25}
+                strokeDasharray="1 0.6"
+              />
+            ) : (
+              <polygon points={pts(o.polygon.map(P))} fill="#ffffff" />
+            )}
             {parts}
           </g>
         );
@@ -332,35 +370,137 @@ function Furniture({
   );
 }
 
-/** What the renovation hacks (red, dashed) and builds (teal), over the After walls. */
-function RenovationMarks({ diff, sheet }: { diff: RenovationDiff; sheet: Sheet }) {
+/**
+ * What the renovation hacks: red hatch, dashed, drawn under the After walls, so where a wall
+ * is put back in its place (glass, a half wall) only what actually goes shows.
+ */
+function Hacked({ diff, sheet }: { diff: RenovationDiff; sheet: Sheet }) {
   const { P } = sheet;
   return (
-    <>
-      <g className="reno-built">
-        {diff.built.map((s, i) => (
+    <g className="reno-hacked">
+      {diff.demolished.map((s, i) => (
+        <polygon
           // biome-ignore lint/suspicious/noArrayIndexKey: stretches in order
-          <polygon key={i} points={pts(s.polygon.map(P))} fill={NEW} />
-        ))}
-      </g>
-      <g className="reno-hacked">
-        {diff.demolished.map((s, i) => (
-          <polygon
-            // biome-ignore lint/suspicious/noArrayIndexKey: stretches in order
-            key={i}
-            points={pts(s.polygon.map(P))}
-            fill="url(#hack-hatch)"
-            stroke={HACK}
-            strokeWidth={0.25}
-            strokeDasharray="1 0.6"
-          />
-        ))}
-      </g>
-    </>
+          key={i}
+          points={pts(s.polygon.map(P))}
+          fill="url(#hack-hatch)"
+          stroke={HACK}
+          strokeWidth={0.25}
+          strokeDasharray="1 0.6"
+        />
+      ))}
+    </g>
   );
 }
 
-function Tags({ tags, sheet }: { tags: OpeningTag[]; sheet: Sheet }) {
+/**
+ * What the renovation builds, in teal, each as what it is: a wall solid, a half wall light
+ * with a teal edge, glass a teal outline with its centre line. Each new stretch long enough
+ * gets its length beside it.
+ */
+function Built({ diff, level, sheet }: { diff: RenovationDiff; level: Level; sheet: Sheet }) {
+  const { P } = sheet;
+  return (
+    <g className="reno-built">
+      {diff.built.map((s, i) => {
+        const w = level.walls[s.wallId];
+        const glass = !!w && isGlass(w);
+        const half = !!w && !glass && isHalfWall(w, level.ceilingHeight);
+        const a = P(s.from);
+        const b = P(s.to);
+        const kind = glass ? 'glass' : half ? 'half' : 'wall';
+        return (
+          // biome-ignore lint/suspicious/noArrayIndexKey: stretches in order
+          <g key={i} data-built={kind} data-wall={s.wallId}>
+            <polygon
+              points={pts(s.polygon.map(P))}
+              fill={glass ? '#ffffff' : half ? NEW_HALF : NEW}
+              stroke={NEW}
+              strokeWidth={glass || half ? 0.2 : 0.06}
+            />
+            {glass && (
+              <line
+                x1={n2(a.x)}
+                y1={n2(a.y)}
+                x2={n2(b.x)}
+                y2={n2(b.y)}
+                stroke={NEW}
+                strokeWidth={0.14}
+              />
+            )}
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+/**
+ * The length of each new stretch of wall, in teal beside it (on the side away from the
+ * nearer room label), when there is room for the figure.
+ */
+function BuiltLengths({
+  diff,
+  sheet,
+  dims,
+}: { diff: RenovationDiff; sheet: Sheet; dims: PlanDimensions }) {
+  const { P } = sheet;
+  const labels = dims.labels.map((l) => P(l.at));
+  return (
+    <g className="reno-built-lengths">
+      {diff.built.map((s, i) => {
+        if (s.length < 0.4) return null;
+        const a = P(s.from);
+        const b = P(s.to);
+        const len = Math.hypot(b.x - a.x, b.y - a.y);
+        const text = String(Math.round(s.length * 100) * 10);
+        if (textWidth(text, TAG_TEXT) + 1 > len) return null;
+        const d = { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
+        const n = { x: -d.y, y: d.x };
+        const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        // Half the wall's thickness out, and a gap: the side further from a room's label.
+        const halfT =
+          Math.max(
+            ...s.polygon.map((p) => Math.abs((P(p).x - m.x) * n.x + (P(p).y - m.y) * n.y)),
+          ) || 0;
+        const off = halfT + 0.6 + TAG_TEXT * 0.45;
+        const at = (k: number) => ({ x: m.x + n.x * off * k, y: m.y + n.y * off * k });
+        const near = (p: Vec2) => Math.min(...labels.map((l) => Math.hypot(l.x - p.x, l.y - p.y)));
+        const p = labels.length && near(at(-1)) > near(at(1)) ? at(-1) : at(1);
+        let deg = (Math.atan2(d.y, d.x) * 180) / Math.PI;
+        if (deg > 90) deg -= 180;
+        if (deg <= -90) deg += 180;
+        return (
+          <text
+            // biome-ignore lint/suspicious/noArrayIndexKey: stretches in order
+            key={i}
+            className="built-length"
+            x={n2(p.x)}
+            y={n2(p.y)}
+            transform={`rotate(${n2(deg)} ${n2(p.x)} ${n2(p.y)})`}
+            fontSize={TAG_TEXT}
+            textAnchor="middle"
+            dominantBaseline="central"
+            fill={NEW}
+            {...HALO}
+          >
+            {text}
+          </text>
+        );
+      })}
+    </g>
+  );
+}
+
+function Tags({
+  tags,
+  sheet,
+  added,
+}: {
+  tags: OpeningTag[];
+  sheet: Sheet;
+  added: ReadonlySet<string>;
+}) {
   return (
     <g className="tags">
       {tags.map((t) => {
@@ -381,7 +521,7 @@ function Tags({ tags, sheet }: { tags: OpeningTag[]; sheet: Sheet }) {
             fontSize={TAG_TEXT}
             textAnchor="middle"
             dominantBaseline="central"
-            fill={MUTED}
+            fill={added.has(t.openingId) ? NEW : MUTED}
             {...HALO}
           >
             {`${t.kind === 'door' ? 'D' : 'W'} ${mm(t.width)}`}
@@ -394,22 +534,49 @@ function Tags({ tags, sheet }: { tags: OpeningTag[]; sheet: Sheet }) {
 
 const areaText = (m2: number) => `${m2.toFixed(1)} m² · ${sqft(m2)} sq ft`;
 
+/** A room name's height on paper per line (mm, before scaling). */
+const NAME_LINE = NAME_TEXT * 1.1;
+
 /**
- * A room label's size on paper (mm): its name, area and size, shrunk (to 70% at most) to fit
- * a small room, and half its box.
+ * A room label's size on paper (mm): its name (on two lines, if that is narrower and the room
+ * is too narrow for one), area and size, shrunk (to 70% at most) to fit a small room; half
+ * its box, and the name's lines.
  */
-function labelFit(level: Level, room: Room, k: number): { scale: number; half: Vec2 } {
-  const w = Math.max(
-    textWidth(room.name, NAME_TEXT, true),
-    textWidth(areaText(roomArea(level, room)), AREA_TEXT),
-  );
+function labelFit(
+  level: Level,
+  room: Room,
+  k: number,
+): { scale: number; half: Vec2; name: string[] } {
+  const area = textWidth(areaText(roomArea(level, room)), AREA_TEXT);
   const outer = roomShape(level, room).outer;
   const xs = outer.map((p) => p.x);
   const ys = outer.map((p) => p.y);
-  const roomW = (Math.max(...xs) - Math.min(...xs)) * k - 2.5;
-  const roomH = (Math.max(...ys) - Math.min(...ys)) * k - 2.5;
-  const scale = Math.min(1, Math.max(0.7, Math.min(roomW / (w + 1.6), roomH / 8.4)));
-  return { scale, half: { x: (w * scale) / 2 + 0.8, y: 4.2 * scale } };
+  // Less the walls (half of each, about) and a gap.
+  const roomW = (Math.max(...xs) - Math.min(...xs)) * k - 4;
+  const roomH = (Math.max(...ys) - Math.min(...ys)) * k - 4;
+  const fit = (name: string[]) => {
+    const w = Math.max(area, ...name.map((n) => textWidth(n, NAME_TEXT, true)));
+    const h = 8.4 + (name.length - 1) * NAME_LINE;
+    const scale = Math.min(1, Math.max(0.7, Math.min(roomW / (w + 1.6), roomH / h)));
+    return { scale, w, h, name, fits: (w + 1.6) * scale <= roomW };
+  };
+  let best = fit([room.name]);
+  const words = room.name.split(' ');
+  if (!best.fits && words.length > 1) {
+    // Split at the space nearest the middle.
+    let cut = 1;
+    for (let i = 1; i < words.length; i++) {
+      const left = words.slice(0, i).join(' ').length;
+      const bestLeft = words.slice(0, cut).join(' ').length;
+      if (Math.abs(left - room.name.length / 2) < Math.abs(bestLeft - room.name.length / 2)) {
+        cut = i;
+      }
+    }
+    const two = fit([words.slice(0, cut).join(' '), words.slice(cut).join(' ')]);
+    if (two.w * two.scale < best.w * best.scale) best = two;
+  }
+  const { scale, w, h, name } = best;
+  return { scale, half: { x: (w * scale) / 2 + 0.8, y: (h / 2) * scale }, name };
 }
 
 /**
@@ -433,7 +600,9 @@ function Rooms({
         const room = level.rooms[roomId];
         if (!room) return null;
         const c = P(at);
-        const { scale: f, half } = labelFit(level, room, sheet.k);
+        const { scale: f, half, name } = labelFit(level, room, sheet.k);
+        // A name on two lines moves the first up and the rest down by half a line.
+        const dy = ((name.length - 1) * NAME_LINE) / 2;
         const spans = dims.spans
           .filter((s) => s.roomId === roomId)
           .map((s) => {
@@ -442,95 +611,120 @@ function Rooms({
             const b = P(s.b);
             const len = Math.round(Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y) * 100) * 10;
             const text = String(len);
+            // Where the line runs, across it: through the label, or beside it (clear of a tag).
+            const line = x ? a.y : a.x;
+            const through = Math.abs(line - (x ? c.y : c.x)) < 0.05;
             const gap = (x ? half.x : half.y) + 0.6;
             const start = x ? a.x : a.y;
             const end = x ? b.x : b.y;
             const mid0 = x ? c.x : c.y;
-            const lo = mid0 - gap;
-            const hi = mid0 + gap;
+            const lo = through ? mid0 - gap : end;
+            const hi = through ? mid0 + gap : end;
             const before = lo - start;
             const after = end - hi;
-            const room1 = Math.max(before, after);
-            const fits = room1 >= textWidth(text, DIM_TEXT) + 2;
-            const mid = before >= after ? (start + lo) / 2 : (hi + end) / 2;
-            return { s, x, len, text, start, end, lo, hi, fits, mid };
+            const fits = Math.max(before, after) >= textWidth(text, DIM_TEXT) + 2;
+            // Beside the label, the figure keeps off where the other span crosses this one.
+            const tw = textWidth(text, DIM_TEXT) / 2 + 0.8;
+            const cross = (other: boolean) =>
+              other && end - (mid0 + tw) >= tw && mid0 - tw - start >= tw
+                ? end - mid0 >= mid0 - start
+                  ? (mid0 + end) / 2
+                  : (start + mid0) / 2
+                : (start + end) / 2;
+            const mid = !through
+              ? cross(dims.spans.some((o) => o.roomId === roomId && o.axis !== s.axis))
+              : before >= after
+                ? (start + lo) / 2
+                : (hi + end) / 2;
+            // The figure's side of the line: away from the label (a through line: before it).
+            const away = through ? -1 : line > (x ? c.y : c.x) ? 1 : -1;
+            return { s, x, len, text, start, end, lo, hi, fits, mid, line, away };
           });
         const onLines = spans.every((p) => p.fits);
         const extra = !onLines && spans.length ? spans.map((p) => p.text).join(' × ') : null;
-        const tick = (x: boolean, v: number, key: string) => (
+        const tick = (x: boolean, line: number, v: number, key: string) => (
           <line
             key={key}
-            x1={n2(x ? v - 0.6 : c.x - 0.6)}
-            y1={n2(x ? c.y + 0.6 : v + 0.6)}
-            x2={n2(x ? v + 0.6 : c.x + 0.6)}
-            y2={n2(x ? c.y - 0.6 : v - 0.6)}
+            x1={n2(x ? v - 0.6 : line - 0.6)}
+            y1={n2(x ? line + 0.6 : v + 0.6)}
+            x2={n2(x ? v + 0.6 : line + 0.6)}
+            y2={n2(x ? line - 0.6 : v - 0.6)}
             stroke={INK}
             strokeWidth={0.18}
           />
         );
-        const seg = (x: boolean, p: number, q: number, key: string) =>
+        const seg = (x: boolean, line: number, p: number, q: number, key: string) =>
           q - p > 0.3 ? (
             <line
               key={key}
-              x1={n2(x ? p : c.x)}
-              y1={n2(x ? c.y : p)}
-              x2={n2(x ? q : c.x)}
-              y2={n2(x ? c.y : q)}
+              x1={n2(x ? p : line)}
+              y1={n2(x ? line : p)}
+              x2={n2(x ? q : line)}
+              y2={n2(x ? line : q)}
               stroke={FAINT}
               strokeWidth={0.13}
             />
           ) : null;
         return (
           <g key={roomId} className="room" data-room={roomId}>
-            {spans.map(({ s, x, len, text, start, end, lo, hi, mid }) => (
-              <g key={s.axis} className="room-span" data-axis={s.axis} data-mm={len}>
-                {seg(x, start, Math.min(lo, end), 'a')}
-                {seg(x, Math.max(hi, start), end, 'b')}
-                {tick(x, start, 'ta')}
-                {tick(x, end, 'tb')}
-                {onLines &&
-                  (x ? (
-                    <text
-                      x={n2(mid)}
-                      y={n2(c.y - 0.7)}
-                      fontSize={DIM_TEXT}
-                      textAnchor="middle"
-                      fill={INK}
-                      {...HALO}
-                    >
-                      {text}
-                    </text>
-                  ) : (
-                    <text
-                      x={n2(c.x - 0.7)}
-                      y={n2(mid)}
-                      transform={`rotate(-90 ${n2(c.x - 0.7)} ${n2(mid)})`}
-                      fontSize={DIM_TEXT}
-                      textAnchor="middle"
-                      fill={INK}
-                      {...HALO}
-                    >
-                      {text}
-                    </text>
-                  ))}
-              </g>
-            ))}
+            {spans.map(({ s, x, len, text, start, end, lo, hi, mid, line, away }) => {
+              // Text sits out from the line by a gap; below or right of it, past its height.
+              const off = away > 0 ? 0.7 + DIM_TEXT * 0.72 : -0.7;
+              return (
+                <g key={s.axis} className="room-span" data-axis={s.axis} data-mm={len}>
+                  {seg(x, line, start, Math.min(lo, end), 'a')}
+                  {seg(x, line, Math.max(hi, start), end, 'b')}
+                  {tick(x, line, start, 'ta')}
+                  {tick(x, line, end, 'tb')}
+                  {onLines &&
+                    (x ? (
+                      <text
+                        x={n2(mid)}
+                        y={n2(line + off)}
+                        fontSize={DIM_TEXT}
+                        textAnchor="middle"
+                        fill={INK}
+                        {...HALO}
+                      >
+                        {text}
+                      </text>
+                    ) : (
+                      <text
+                        x={n2(line + off)}
+                        y={n2(mid)}
+                        transform={`rotate(-90 ${n2(line + off)} ${n2(mid)})`}
+                        fontSize={DIM_TEXT}
+                        textAnchor="middle"
+                        fill={INK}
+                        {...HALO}
+                      >
+                        {text}
+                      </text>
+                    ))}
+                </g>
+              );
+            })}
             <text
               className="room-name"
               x={n2(c.x)}
-              y={n2(c.y - (extra ? 2.2 : 0.6) * f)}
+              y={n2(c.y - ((extra ? 2.2 : 0.6) + dy) * f)}
               fontSize={n2(NAME_TEXT * f)}
               fontWeight={700}
               textAnchor="middle"
               fill={INK}
               {...HALO}
             >
-              {room.name}
+              {name.map((line, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: the name's lines in order
+                <tspan key={i} x={n2(c.x)} dy={i === 0 ? 0 : n2(NAME_LINE * f)}>
+                  {i < name.length - 1 ? `${line} ` : line}
+                </tspan>
+              ))}
             </text>
             <text
               className="room-area"
               x={n2(c.x)}
-              y={n2(c.y + (extra ? 0.8 : 2.4) * f)}
+              y={n2(c.y + ((extra ? 0.8 : 2.4) + dy) * f)}
               fontSize={n2(AREA_TEXT * f)}
               textAnchor="middle"
               fill={MUTED}
@@ -542,7 +736,7 @@ function Rooms({
               <text
                 className="room-size"
                 x={n2(c.x)}
-                y={n2(c.y + 3.6 * f)}
+                y={n2(c.y + (3.6 + dy) * f)}
                 fontSize={n2(AREA_TEXT * f)}
                 textAnchor="middle"
                 fill={INK}
@@ -563,11 +757,14 @@ function Chain({
   chain,
   sheet,
   offset,
+  blockers = [],
 }: {
   chain: DimensionChain;
   sheet: Sheet;
   /** How far outside the plan's outline the line runs, mm. */
   offset: number;
+  /** Where the extension lines of the chains further out cross this one (plan, along the side). */
+  blockers?: number[];
 }) {
   const { P } = sheet;
   const pieces = roundChain(chain.stops, 0.01);
@@ -671,8 +868,13 @@ function Chain({
   const a0 = alongP(chain.stops[0] ?? 0);
   const a1 = alongP(chain.stops[chain.stops.length - 1] ?? 0);
   // Figures sit outside the line; a figure too long for its piece, or running into the one
-  // before, goes out a row, and failing that, beside it.
+  // before, goes out a row, beside its piece if need be: clear of the figure before it and
+  // of the extension lines of the chains further out, which cross that row.
   const rows: number[] = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
+  const ext = blockers.map(alongP);
+  const free = (mid: number, w: number) =>
+    mid - w / 2 >= (rows[1] as number) + 0.8 &&
+    !ext.some((e) => e > mid - w / 2 - 0.8 && e < mid + w / 2 + 0.8);
   const figures = pieces.map((p, i) => {
     const s0 = alongP(chain.stops[i] ?? 0);
     const s1 = alongP(chain.stops[i + 1] ?? 0);
@@ -683,7 +885,20 @@ function Chain({
     const fits = w + 0.8 <= s1 - s0;
     if (!fits || mid - w / 2 < (rows[0] as number) + 0.8) {
       row = 1;
-      if (mid - w / 2 < (rows[1] as number) + 0.8) mid = (rows[1] as number) + 0.8 + w / 2;
+      const home = mid;
+      // The nearest spot that is clear, trying either way out from the piece's middle.
+      let found = false;
+      for (let k = 0; k <= 60 && !found; k++) {
+        for (const sgn of k === 0 ? [1] : [-1, 1]) {
+          const m = home + sgn * k * 0.25;
+          if (free(m, w)) {
+            mid = m;
+            found = true;
+            break;
+          }
+        }
+      }
+      if (!found) mid = Math.max(home, (rows[1] as number) + 0.8 + w / 2);
     }
     rows[row] = mid + w / 2;
     // Text baseline, out from the line by a gap (and a row): letters stand outside it.
@@ -746,7 +961,16 @@ function Chains({ dims, sheet }: { dims: PlanDimensions; sheet: Sheet }) {
   for (const side of ['top', 'right', 'bottom', 'left'] as const) {
     const list = dims.chains.filter((c) => c.side === side).sort((a, b) => a.tier - b.tier);
     list.forEach((c, i) => {
-      out.push(<Chain key={`${side}${c.tier}`} chain={c} sheet={sheet} offset={7 + i * 7.5} />);
+      const outer = list.slice(i + 1).flatMap((o) => o.stops);
+      out.push(
+        <Chain
+          key={`${side}${c.tier}`}
+          chain={c}
+          sheet={sheet}
+          offset={7 + i * 7.5}
+          blockers={outer}
+        />,
+      );
     });
   }
   dims.chains
@@ -764,7 +988,12 @@ interface LegendKey {
   swatch: ReactNode;
 }
 
-function legendKeys(level: Level, guarded: ReadonlySet<string>, diff: RenovationDiff | null) {
+function legendKeys(
+  level: Level,
+  guarded: ReadonlySet<string>,
+  diff: RenovationDiff | null,
+  cut: ReadonlySet<string>,
+) {
   const walls = Object.values(level.walls);
   const keys: LegendKey[] = [];
   const box = (fill: string, stroke = 'none', dash?: string) => (
@@ -817,20 +1046,62 @@ function legendKeys(level: Level, guarded: ReadonlySet<string>, diff: Renovation
       ),
     });
   }
-  if (diff?.demolished.length) {
+  if (diff?.demolished.length || cut.size) {
     keys.push({
       key: 'hacked',
       label: 'Wall to hack',
       swatch: box('url(#hack-hatch)', HACK, '1 0.6'),
     });
   }
-  if (diff?.built.length) keys.push({ key: 'new', label: 'New wall', swatch: box(NEW) });
+  const built = (diff?.built ?? []).map((s) => level.walls[s.wallId]);
+  const glass = (w: (typeof built)[number]) => !!w && isGlass(w);
+  const half = (w: (typeof built)[number]) =>
+    !!w && !isGlass(w) && isHalfWall(w, level.ceilingHeight);
+  if (built.some((w) => !glass(w) && !half(w))) {
+    keys.push({ key: 'new', label: 'New wall', swatch: box(NEW) });
+  }
+  if (built.some(glass)) {
+    keys.push({
+      key: 'new-glass',
+      label: 'New glass partition',
+      swatch: (
+        <>
+          {box('#ffffff', NEW)}
+          <line x1={0} y1={1.2} x2={6} y2={1.2} stroke={NEW} strokeWidth={0.14} />
+        </>
+      ),
+    });
+  }
+  if (built.some(half)) {
+    keys.push({ key: 'new-half', label: 'New half wall', swatch: box(NEW_HALF, NEW) });
+  }
+  if (diff?.openingsAdded.length) {
+    keys.push({
+      key: 'new-opening',
+      label: 'New door or window',
+      swatch: (
+        <>
+          <line x1={0} y1={2.4} x2={0} y2={0} stroke={NEW} strokeWidth={0.22} />
+          <path d="M 0 0 A 2.4 2.4 0 0 1 2.4 2.4" fill="none" stroke={NEW} strokeWidth={0.13} />
+        </>
+      ),
+    });
+  }
   return keys;
 }
 
-/** Splits text into lines of at most `width` mm at this size. */
+/**
+ * Splits text into lines of at most `width` mm at this size; a word too long for a line of
+ * its own (a long name without spaces) is broken where it reaches the edge.
+ */
 function wrap(text: string, size: number, width: number, bold = false): string[] {
-  const words = text.split(' ');
+  const words = text.split(' ').flatMap((w) => {
+    if (textWidth(w, size, bold) <= width) return [w];
+    const per = Math.max(1, Math.floor(width / (size * (bold ? 0.6 : 0.55))));
+    const parts: string[] = [];
+    for (let i = 0; i < w.length; i += per) parts.push(w.slice(i, i + per));
+    return parts;
+  });
   const lines: string[] = [];
   let cur = '';
   for (const w of words) {
@@ -859,7 +1130,7 @@ function TitleColumn({
   sheet: Sheet;
   project: Project;
   levelName: string;
-  version: string | null;
+  version: string;
   paper: Paper;
   north: number;
   /** The plan's key; null on a page without the plan (no key, scale bar or north). */
@@ -877,9 +1148,12 @@ function TitleColumn({
   const out: ReactNode[] = [];
   const text = (
     s: string,
-    size: number,
-    opts: { bold?: boolean; color?: string; cls?: string; gap?: number } = {},
+    size0: number,
+    opts: { bold?: boolean; color?: string; cls?: string; gap?: number; shrink?: boolean } = {},
   ) => {
+    // A long word shrinks the text (to 70% at most) to fit the column; past that it breaks.
+    const longest = Math.max(...s.split(' ').map((w) => textWidth(w, size0, opts.bold)));
+    const size = opts.shrink ? n2(size0 * Math.max(0.7, Math.min(1, width / longest))) : size0;
     // One text, a row per line (spaces kept, so it reads as the sentence it is).
     const lines = wrap(s, size, width, opts.bold);
     out.push(
@@ -903,22 +1177,28 @@ function TitleColumn({
     y += lines.length * size * 1.35;
     y += opts.gap ?? 0;
   };
-  text(project.name, 4.2, { bold: true, cls: 'sheet-name', gap: 1 });
+  text(project.name, 4.2, { bold: true, cls: 'sheet-name', gap: 1, shrink: true });
   text('Plan for contractors', 2.6, { color: MUTED, gap: 4 });
   const row = (k: string, v: string, cls?: string) => {
+    const lines = wrap(v, 2.3, width - 18);
     out.push(
       <text key={out.length} x={x} y={n2(y)} fontSize={2.3} fill={MUTED}>
         {k}
       </text>,
       <text key={out.length + 1} className={cls} x={x + 18} y={n2(y)} fontSize={2.3} fill={INK}>
-        {v}
+        {lines.map((line, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: wrapped lines in order
+          <tspan key={i} x={x + 18} dy={i === 0 ? 0 : 3.1}>
+            {i < lines.length - 1 ? `${line} ` : line}
+          </tspan>
+        ))}
       </text>,
     );
-    y += 3.6;
+    y += 3.6 + (lines.length - 1) * 3.1;
   };
   row('Date', date, 'sheet-date');
   row('Level', levelName);
-  if (version) row('Version', version, 'sheet-version');
+  row('Version', version, 'sheet-version');
   row('Scale', sheet.fits ? `1:${sheet.scale} at ${paper}` : 'Not to scale', 'sheet-scale');
   y += 3;
   // The scale bar: 5 m, or 2.5 m where 5 m is wider than the column (1:50).
@@ -1202,12 +1482,19 @@ export function contractorPages(
   opts: SheetOptions,
   date = sheetDate(),
 ): ContractorSheets {
-  const variant = project.renovation ? opts.variant : 'before';
-  const level = variantLevels(project, variant)[0];
-  const before = project.levels[0];
-  if (!level || !before) throw new Error('This plan has no level to print.');
+  const levels = sheetLevels(project, opts.variant);
+  if (!levels) throw new Error('This plan has no level to print.');
+  const { level, before, diff } = levels;
   const geom = planGeometry(level);
-  const sheet = layout(opts.paper, outlineBounds(geom));
+  // Hacked walls are drawn too: the sheet and the chains go round them.
+  const hacked = hackedPoints(diff);
+  const sheet = layout(opts.paper, planExtent(geom, hacked));
+  const boxOf = (ps: readonly Vec2[]) => {
+    const xs = ps.map((p) => p.x);
+    const ys = ps.map((p) => p.y);
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    return { c: { x: (x0 + x1) / 2, y: (y0 + y1) / 2 }, hx: (x1 - x0) / 2, hy: (y1 - y0) / 2 };
+  };
   // Labels and tags placed for their size on paper.
   const dims = planDimensions(level, geom, {
     labelHalf: (room) => {
@@ -1215,16 +1502,15 @@ export function contractorPages(
       return { x: h.x / sheet.k, y: h.y / sheet.k };
     },
     tagHalf: { along: 3.6 / sheet.k, across: 1.4 / sheet.k },
+    spanFigure: { w: (textWidth('0000', DIM_TEXT) + 2.6) / sheet.k, h: (DIM_TEXT + 1) / sheet.k },
     // Built-ins (always drawn), and the furniture when it is.
     avoidBoxes: Object.values(level.items).flatMap((item) => {
       const kind = furnitureKind(item.assetId);
       if (!kind?.carpentry && (!opts.furniture || kind?.ceiling)) return [];
-      const f = itemFootprint(item, kind);
-      const xs = f.map((p) => p.x);
-      const ys = f.map((p) => p.y);
-      const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
-      return [{ c: { x: (x0 + x1) / 2, y: (y0 + y1) / 2 }, hx: (x1 - x0) / 2, hy: (y1 - y0) / 2 }];
+      return [boxOf(itemFootprint(item, kind))];
     }),
+    blockBoxes: (diff?.demolished ?? []).map((s) => boxOf(s.polygon)),
+    include: hacked,
   });
   // Concrete walls, judged on the flat as it is; not once they're glass or cut down.
   const guarded = new Set<string>();
@@ -1233,14 +1519,21 @@ export function contractorPages(
     const s = before.walls[id] ? wallStatus(before, id) : wallStatus(level, id);
     if (s === 'structural' || s === 'shelter') guarded.add(id);
   }
-  const after = variant === 'after' ? level : null;
-  const diff = after ? renovationDiff(before, after) : null;
+  const after = diff ? level : null;
   const changes = after && diff ? renovationChanges(before, after, diff) : [];
-  const version = project.renovation
-    ? variant === 'after'
-      ? 'After the renovation'
-      : 'As it is now'
-    : null;
+  const version = project.renovation && diff ? 'After the renovation' : 'As it is now';
+  // New doors and windows, and those cut into a wall that was there before.
+  const added = new Set(diff?.openingsAdded ?? []);
+  const beforeWalls = diff ? planGeometry(before).pieces.map((p) => p.polygon) : [];
+  const cut = new Set(
+    geom.openings
+      .filter((o) => added.has(o.opening.id))
+      .filter((o) => {
+        const c = framePoint(o.frame, (o.span[0] + o.span[1]) / 2, 0);
+        return beforeWalls.some((poly) => pointInPolygon(c, poly));
+      })
+      .map((o) => o.opening.id),
+  );
 
   // Page 2 onwards: the change list, wrapped and split over pages.
   const listWidth = sheet.w - 2 * SHEET_MM.margin - SHEET_MM.title - 16;
@@ -1277,7 +1570,7 @@ export function contractorPages(
       date={date}
     />
   );
-  const legend = legendKeys(level, guarded, diff);
+  const legend = legendKeys(level, guarded, diff, cut);
   const shapes = roomShapes(level);
   const plan = (
     <Frame key="p1" sheet={sheet} label={`Plan of ${project.name}, page 1 of ${total}`}>
@@ -1297,10 +1590,12 @@ export function contractorPages(
           ))}
         </g>
         <Furniture level={level} sheet={sheet} loose={opts.furniture} />
+        {diff && <Hacked diff={diff} sheet={sheet} />}
         <Walls level={level} geom={geom} sheet={sheet} guarded={guarded} />
-        {diff && <RenovationMarks diff={diff} sheet={sheet} />}
-        <Openings geom={geom} sheet={sheet} />
-        <Tags tags={dims.tags} sheet={sheet} />
+        {diff && <Built diff={diff} level={level} sheet={sheet} />}
+        <Openings geom={geom} sheet={sheet} added={added} cut={cut} />
+        <Tags tags={dims.tags} sheet={sheet} added={added} />
+        {diff && <BuiltLengths diff={diff} sheet={sheet} dims={dims} />}
         <Rooms level={level} dims={dims} sheet={sheet} />
         <Chains dims={dims} sheet={sheet} />
       </g>
@@ -1349,10 +1644,9 @@ export async function printContractorSheet(project: Project, opts: SheetOptions)
   const { w, h } = PAPER_MM[opts.paper];
   doc.title = `${project.name}: plan for contractors`;
   const style = doc.createElement('style');
-  style.textContent = `@page{size:${opts.paper} landscape;margin:0}html,body{margin:0;padding:0;background:#fff}svg.contractor-page{display:block;width:${w}mm;height:${h}mm;break-after:page;page-break-after:always}svg.contractor-page:last-child{break-after:auto;page-break-after:auto}`;
+  // Each page in a box of the paper's size that clips, so nothing spills onto a blank page.
+  style.textContent = `@page{size:${opts.paper} landscape;margin:0}html,body{margin:0;padding:0;background:#fff}.sheet-paper{width:${w}mm;height:${h}mm;overflow:hidden;break-after:page;page-break-after:always}.sheet-paper:last-child{break-after:auto;page-break-after:auto}svg.contractor-page{display:block;width:${w}mm;height:${h}mm}`;
   doc.head.append(style);
-  doc.body.innerHTML = pages.join('');
-  win.focus();
-  win.print();
-  setTimeout(() => frameEl.remove(), 60_000);
+  doc.body.innerHTML = pages.map((p) => `<div class="sheet-paper">${p}</div>`).join('');
+  printFrame(frameEl);
 }

@@ -1,9 +1,11 @@
-import { type Paper, type Variant, outlineBounds, planGeometry, sheetScale } from '@dhd/core';
+import { type Paper, type Variant, sheetScale } from '@dhd/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useEditor } from '../editor';
-import { useLevel, useProject, useStore } from '../store';
+import { useProject, useStore } from '../store';
 import { Segmented } from '../ui/fields';
 import { icons } from '../ui/icons';
+import { sheetExtent } from './extent';
+import { focusApp } from './frame';
 
 const scaleText = (s: { scale: number; fits: boolean }) =>
   s.fits ? `1:${s.scale}` : 'not to scale';
@@ -16,8 +18,8 @@ export function ContractorDialog({ onClose }: { onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   const project = useProject();
   const shown = useEditor((s) => s.variant);
-  const level = useLevel();
-  const [paper, setPaper] = useState<Paper>('A4');
+  // Until one is picked: A4, unless only A3 has the plan to scale.
+  const [picked, setPicked] = useState<Paper | null>(null);
   const [variant, setVariant] = useState<Variant>(project.renovation ? shown : 'before');
   const [furniture, setFurniture] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -29,13 +31,13 @@ export function ContractorDialog({ onClose }: { onClose: () => void }) {
   }, []);
   const close = () => ref.current?.close();
 
-  // The scale on each paper, for the version picked (a renovation can change the outline).
-  const printed = project.renovation && variant === 'after' ? project.renovation.levels[0] : null;
-  const target = printed ?? project.levels[0] ?? level;
+  // The scale on each paper, for the version picked (a renovation can change the outline,
+  // and its hacked walls are drawn too).
   const scales = useMemo(() => {
-    const b = target && outlineBounds(planGeometry(target));
+    const b = sheetExtent(project, variant);
     return b ? { A4: sheetScale(b, 'A4'), A3: sheetScale(b, 'A3') } : null;
-  }, [target]);
+  }, [project, variant]);
+  const paper: Paper = picked ?? (scales && !scales.A4.fits && scales.A3.fits ? 'A3' : 'A4');
 
   const print = async () => {
     setBusy(true);
@@ -57,7 +59,12 @@ export function ContractorDialog({ onClose }: { onClose: () => void }) {
       className="dialog contractor-dialog"
       aria-labelledby="contractor-h"
       tabIndex={-1}
-      onClose={(e) => e.target === e.currentTarget && onClose()}
+      onClose={(e) => {
+        if (e.target !== e.currentTarget) return;
+        onClose();
+        // Back to where it was opened from (the menu item is gone with the menu).
+        focusApp();
+      }}
     >
       <header className="dialog-head">
         <h2 id="contractor-h">Plan for contractors</h2>
@@ -77,7 +84,7 @@ export function ContractorDialog({ onClose }: { onClose: () => void }) {
               label="Paper"
               fill
               value={paper}
-              onChange={setPaper}
+              onChange={setPicked}
               options={(['A4', 'A3'] as const).map((p) => ({
                 value: p,
                 label: scales ? `${p}, ${scaleText(scales[p])}` : p,
@@ -113,7 +120,11 @@ export function ContractorDialog({ onClose }: { onClose: () => void }) {
         </div>
       </div>
       <footer className="dialog-foot">
-        {error && <p className="field-hint warning-text">{error}</p>}
+        {error && (
+          <p className="field-hint warning-text" role="alert">
+            {error}
+          </p>
+        )}
         <div className="button-row">
           <button
             type="button"

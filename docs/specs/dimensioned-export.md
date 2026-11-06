@@ -30,11 +30,17 @@ paper-up, dark on white in any theme.
 - core `dimensions.ts` `planDimensions(level)` → `{ chains, spans, tags }` in metres:
   - chains `{ side, tier, at, stops[] }`: outside walls (room on one side) within 1° of an
     axis join the side they face; tier 1 stops: outer-face ends; tier 0 adds opening edges;
-    tier 2: min–max. Stops within 5 mm merge; a tier equal to the next is dropped. Other
-    outside walls: an `aligned` chain on the face.
-  - spans `{ roomId, a, b }`: rays ±x, ±y from the label point to the nearest face or
-    boundary; under 0.6 m skipped.
-  - tags `{ openingId, at, width }`; `roundChain(stops, step)` makes rounded pieces add up.
+    tier 2: min–max. Stops within 5 mm merge; a piece under 20 mm joins its neighbour; a
+    tier equal to the next is dropped. Other outside walls: an `aligned` chain on the face.
+    A face beside a room closed by a boundary (a terrace) is inside it for half the wall's
+    thickness. Chains run outside the extent: walls, boundary lines, door swings and (After)
+    hacked walls.
+  - spans `{ roomId, a, b }`: rays ±x, ±y to the nearest face or boundary, through the label
+    point, or on the nearest line beside it clear of tags, door leaves and hacked walls with
+    room for the figure; none when no line is clear, under 0.6 m, or for a room under 95% of
+    its bounding box (an L).
+  - tags `{ openingId, at, width }` (the width as the opening fits its wall);
+    `roundChain(stops, step)` makes rounded pieces add up.
 - core `sheetScale(bounds, paper)` → `{ scale, fits }`.
 - web `print/contractorSheet.tsx`: its own SVG over `planGeometry`, `doorSwing`,
   `wallStatuses`, `renovationDiff`, via `renderToStaticMarkup`; not the screen layers.

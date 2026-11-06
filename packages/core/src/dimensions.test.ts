@@ -3,6 +3,7 @@ import { addOpening, drawWall } from './commands';
 import {
   type ChainSide,
   type DimensionChain,
+  outlineBounds,
   planDimensions,
   roundChain,
   sheetScale,
@@ -11,14 +12,19 @@ import { blankProject } from './factory';
 import { sampleFlatProject } from './fixtures/sampleFlat';
 import { pointInPolygon } from './geometry';
 import { type EditorDoc, dispatch, emptyHistory } from './history';
-import { placeOpening, planGeometry } from './plan';
+import { doorSwing, placeOpening, planGeometry } from './plan';
 import { roomShapes } from './rooms';
 import type { Level, Vec2 } from './schema';
 
 /** A level drawn with the editor's own commands: polylines of walls, then openings. */
 function build(
   lines: { pts: [number, number][]; thickness?: number; boundary?: boolean }[],
-  openings: { kind: 'door' | 'window'; width: number; at: Vec2 }[] = [],
+  openings: {
+    kind: 'door' | 'window';
+    width: number;
+    at: Vec2;
+    swing?: 'leftIn' | 'leftOut' | 'rightIn' | 'rightOut';
+  }[] = [],
 ): Level {
   let s: EditorDoc = { doc: blankProject('t', 'prj_t'), history: emptyHistory() };
   const level = () => s.doc.levels[0] as Level;
@@ -45,6 +51,7 @@ function build(
       width: o.width,
       height: o.kind === 'window' ? 1.2 : 2.1,
       sill: o.kind === 'window' ? 0.9 : 0,
+      ...(o.swing ? { swing: o.swing } : {}),
     });
     s = dispatch(s, r.command);
   }
@@ -154,7 +161,8 @@ describe('planDimensions', () => {
       expect(o?.stops[1]).toBeCloseTo(maxY, 3);
     }
     // Every window in an outside wall (a room on one side only, as the walk finds the front
-    // door): its two edges in tier 0 of exactly one side.
+    // door): its two edges in tier 0 of exactly one side (or, within 20 mm of a corner, joined
+    // to it: no piece under 20 mm is a figure of its own).
     const shapes = [...roomShapes(level).values()];
     const inRoom = (p: Vec2) => shapes.some((s) => pointInPolygon(p, s.outer));
     const windows = geom.openings.filter((o) => {
@@ -175,10 +183,15 @@ describe('planDimensions', () => {
         if (!t0) return false;
         const axis = side === 'top' || side === 'bottom' ? 'x' : 'y';
         const e = w.span.map((u) => f.a[axis] + f.d[axis] * u);
-        return e.every((v) => t0.stops.some((s) => Math.abs(s - v) < 0.002));
+        return (
+          e.some((v) => t0.stops.some((s) => Math.abs(s - v) < 0.002)) &&
+          e.every((v) => t0.stops.some((s) => Math.abs(s - v) < 0.02))
+        );
       });
       expect(hits, w.opening.id).toHaveLength(1);
     }
+    // No piece under 20 mm.
+    for (const c of d.chains) expect(Math.min(...pieces(c))).toBeGreaterThanOrEqual(0.02 - 1e-9);
     // Rounded to 10 mm, every tier adds up to its overall.
     for (const c of d.chains) {
       if (c.side === 'aligned') continue;
@@ -258,6 +271,140 @@ describe('planDimensions', () => {
     // The door is to the outside: a tier-0 pair on the bottom.
     const t0 = pieces(chain(d.chains, 'bottom', 0));
     expect(t0[1]).toBeCloseTo(0.9, 6);
+  });
+});
+
+describe('planDimensions: what the sheet needs clear', () => {
+  it('a terrace closed by a boundary past the walls is in the bounds, with no bogus pieces', () => {
+    // A 4 × 3 m room, and a terrace beside it closed by a boundary out to x = 6.
+    const level = build([
+      { pts: box(4, 3) },
+      {
+        pts: [
+          [4, 0],
+          [6, 0],
+          [6, 3],
+          [4, 3],
+        ],
+        boundary: true,
+      },
+    ]);
+    expect(Object.keys(level.rooms)).toHaveLength(2);
+    const geom = planGeometry(level);
+    expect(outlineBounds(geom)?.max.x).toBeCloseTo(6, 6);
+    const d = planDimensions(level, geom);
+    expect(d.bounds?.max.x).toBeCloseTo(6, 6);
+    // The wall's ends past the terrace's line (half its thickness) are no 50 mm pieces.
+    for (const c of d.chains) expect(Math.min(...pieces(c))).toBeGreaterThan(0.1);
+    // The right wall's face looks into the terrace: no chain on the right at all.
+    expect(d.chains.filter((c) => c.side === 'right')).toEqual([]);
+    expect(pieces(chain(d.chains, 'top', 2))[0]).toBeCloseTo(4.1, 6);
+  });
+
+  it('a door opening out of the flat pushes the chains on its side out past its swing', () => {
+    const reach: number[] = [];
+    for (const swing of ['leftIn', 'leftOut'] as const) {
+      const level = build(
+        [{ pts: box(4, 3) }],
+        [{ kind: 'door', width: 0.9, at: { x: 2, y: 3 }, swing }],
+      );
+      const geom = planGeometry(level);
+      const o = geom.openings[0];
+      if (!o) throw new Error('no door');
+      const s = doorSwing(o.frame, o.opening);
+      const far = Math.max(3.05, s.leafEnd.y, s.arcEnd.y);
+      const d = planDimensions(level, geom);
+      const bottom = d.chains.filter((c) => c.side === 'bottom');
+      expect(bottom.length).toBeGreaterThan(0);
+      for (const c of bottom) expect(c.at).toBeCloseTo(far, 6);
+      reach.push(far);
+    }
+    // One of the two swings opens out: its 0.9 m leaf, hinged on the outside face.
+    expect(Math.max(...reach)).toBeCloseTo(3.95, 6);
+    expect(Math.min(...reach)).toBeCloseTo(3.05, 6);
+  });
+
+  it('hacked walls (include) are in the bounds the chains go round', () => {
+    const d = planDimensions(build([{ pts: box(4, 3) }]), undefined, {
+      include: [{ x: 5, y: 1 }],
+    });
+    expect(d.bounds?.max.x).toBeCloseTo(5, 6);
+    expect(chain(d.chains, 'right', 2)?.at).toBeCloseTo(5, 6);
+  });
+
+  it('a piece under 20 mm joins its neighbour, and the chain still adds up', () => {
+    // 30 mm walls, and a window from the corner: its edge 15 mm from the outside face.
+    const level = build(
+      [{ pts: box(4, 3), thickness: 0.03 }],
+      [{ kind: 'window', width: 1, at: { x: 0.5, y: 0 } }],
+    );
+    const d = planDimensions(level);
+    const t0 = chain(d.chains, 'top', 0);
+    expect(t0).toBeDefined();
+    const p = pieces(t0);
+    expect(Math.min(...p)).toBeGreaterThanOrEqual(0.02);
+    const total = p.reduce((a, b) => a + b, 0);
+    expect(total).toBeCloseTo(pieces(chain(d.chains, 'top', 2))[0] as number, 9);
+  });
+
+  it('a tag is as wide as the opening as it fits its wall, as the chains measure it', () => {
+    const base = build([{ pts: box(4, 3) }], [{ kind: 'window', width: 1.2, at: { x: 2, y: 0 } }]);
+    const level = structuredClone(base);
+    const o = Object.values(level.openings)[0];
+    if (!o) throw new Error('no window');
+    // Off the wall's start: 0.4 m of it is past the corner.
+    o.t = 0.05;
+    const geom = planGeometry(level);
+    const g = geom.openings[0];
+    if (!g) throw new Error('no window');
+    const d = planDimensions(level, geom);
+    expect(d.tags[0]?.width).toBeCloseTo(g.span[1] - g.span[0], 9);
+    expect(d.tags[0]?.width).toBeLessThan(1.2 - 0.1);
+  });
+
+  it('a room span keeps off a tag: beside the label, not through the tag', () => {
+    // A window in the right wall level with the room's middle: its tag is on the width line.
+    const level = build([{ pts: box(5, 4) }], [{ kind: 'window', width: 1.2, at: { x: 5, y: 2 } }]);
+    const d = planDimensions(level);
+    const label = d.labels[0]?.at as Vec2;
+    const tag = d.tags[0];
+    if (!tag) throw new Error('no tag');
+    const w = d.spans.find((s) => s.axis === 'x');
+    expect(w).toBeDefined();
+    // Not through the label, clear of the tag along the wall (0.6 m half its length, and 0.32 m
+    // half the tag's).
+    expect(Math.abs((w?.a.y ?? 0) - label.y)).toBeGreaterThan(0.3);
+    expect(Math.abs((w?.a.y ?? 0) - tag.at.y)).toBeGreaterThan(0.32);
+    expect((w?.b.x ?? 0) - (w?.a.x ?? 0)).toBeCloseTo(4.9, 6);
+    // The depth runs through the label still.
+    const h = d.spans.find((s) => s.axis === 'y');
+    expect(h?.a.x).toBeCloseTo(label.x, 6);
+  });
+
+  it('an L-shaped room has no one width and depth: no spans', () => {
+    const l: [number, number][] = [
+      [0, 0],
+      [6, 0],
+      [6, 3],
+      [3, 3],
+      [3, 6],
+      [0, 6],
+      [0, 0],
+    ];
+    const d = planDimensions(build([{ pts: l }]));
+    expect(d.labels).toHaveLength(1);
+    expect(d.spans).toEqual([]);
+  });
+
+  it('a label keeps off a hacked wall (blockBoxes) and the spans do not cross it', () => {
+    const level = build([{ pts: box(6, 3) }]);
+    const hacked = { c: { x: 3, y: 1.5 }, hx: 0.05, hy: 1.5 };
+    const d = planDimensions(level, undefined, { blockBoxes: [hacked] });
+    const at = d.labels[0]?.at as Vec2;
+    expect(Math.abs(at.x - 3)).toBeGreaterThan(0.6 + 0.05);
+    // No width across the hacked wall; the depth beside it.
+    expect(d.spans.filter((s) => s.axis === 'x')).toEqual([]);
+    expect(d.spans.filter((s) => s.axis === 'y')).toHaveLength(1);
   });
 });
 

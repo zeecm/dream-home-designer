@@ -1,8 +1,10 @@
 import type { Bounds } from './geometry';
-import { labelClearance, placeLabel, pointInPolygon } from './geometry';
+import { labelClearance, placeLabel, pointInPolygon, signedArea } from './geometry';
 import {
   type PlanGeometry,
   type WallFrame,
+  doorLeaves,
+  doorStyle,
   doorSwing,
   framePoint,
   planGeometry,
@@ -75,6 +77,19 @@ export interface DimensionOptions {
   tagHalf?: { along: number; across: number };
   /** More boxes labels keep clear of (centre and half sizes, metres): built-ins, say. */
   avoidBoxes?: { c: Vec2; hx: number; hy: number }[];
+  /**
+   * Boxes neither labels nor room spans may cross (centre and half sizes, metres): a
+   * renovation's hacked walls, say.
+   */
+  blockBoxes?: { c: Vec2; hx: number; hy: number }[];
+  /**
+   * The room a span's figure needs (metres): its width with a gap, and its height with a gap.
+   * A span through a label needs the width beside the label; one beside it, the height on its
+   * far side.
+   */
+  spanFigure?: { w: number; h: number };
+  /** More points the drawing covers (a renovation's hacked walls): the chains go outside them. */
+  include?: Vec2[];
 }
 
 export interface PlanDimensions {
@@ -83,7 +98,10 @@ export interface PlanDimensions {
   tags: OpeningTag[];
   /** Where each room's label goes (the point its spans run through). */
   labels: { roomId: string; at: Vec2 }[];
-  /** The walls' outline bounds (faces, not centre lines), or null with no walls. */
+  /**
+   * What the drawing covers: the walls' outline (faces, not centre lines), the boundary lines,
+   * door swings and `include`, or null with no walls. The side chains run outside it.
+   */
   bounds: Bounds | null;
 }
 
@@ -93,6 +111,10 @@ const MERGE = 0.005;
 const AXIS_TOLERANCE = (1 * Math.PI) / 180;
 /** Room spans shorter than this aren't worth a dimension. */
 const MIN_SPAN = 0.6;
+/** A piece of a chain shorter than this is no figure of its own: it joins its neighbour. */
+const MIN_PIECE = 0.02;
+/** A room this much of its bounding box or less has no one width and depth (an L, say). */
+const RECTISH = 0.95;
 /** How far past a face a point is tested for a room or free space. */
 const PROBE = 0.05;
 /** The half-size of a room label the spans are placed for, in metres (about 1:100 text). */
@@ -131,6 +153,27 @@ function mergeStops(primary: Stop[], extra: Stop[] = [], out = 1): Stop[] {
   for (const s of [...primary].sort((a, b) => a.v - b.v)) add(s);
   for (const s of [...extra].sort((a, b) => a.v - b.v)) add(s);
   return kept.sort((a, b) => a.v - b.v);
+}
+
+/**
+ * The stops with each piece under MIN_PIECE joined to its neighbour, so the chain still adds
+ * up: of the two stops either side of a small piece, an inner one that isn't `fixed` (a stop
+ * of the tier outside it) goes. The ends always stay.
+ */
+function dropSmall(stops: Stop[], fixed: (s: Stop) => boolean = () => false): Stop[] {
+  const out = [...stops];
+  let i = 1;
+  while (out.length > 2 && i < out.length) {
+    const piece = (out[i] as Stop).v - (out[i - 1] as Stop).v;
+    if (piece >= MIN_PIECE - 1e-9) {
+      i++;
+      continue;
+    }
+    if (i < out.length - 1 && !fixed(out[i] as Stop)) out.splice(i, 1);
+    else if (i - 1 > 0 && !fixed(out[i - 1] as Stop)) out.splice(i - 1, 1);
+    else i++;
+  }
+  return out;
 }
 
 const sameStops = (a: Stop[], b: Stop[]) =>
@@ -175,6 +218,10 @@ function lookOf(out: Vec2): { side: ChainSide | null; dir: Vec2 } {
  */
 function outsideStretches(geom: PlanGeometry, polys: Polys, segs: Seg[]): Stretch[] {
   const out: Stretch[] = [];
+  const lines = boundarySegs(geom);
+  /** Within `d` of a boundary line: a room closed by it is just there, past a wall's end. */
+  const byBoundary = (p: Vec2, d: number) =>
+    lines.some(([a, b]) => segDistance(p, a, b) <= d + 1e-6);
   for (const [wallId, f] of Object.entries(geom.frames)) {
     if (geom.boundaries.includes(wallId)) continue;
     for (const side of [1, -1] as const) {
@@ -191,6 +238,9 @@ function outsideStretches(geom: PlanGeometry, polys: Polys, segs: Seg[]): Stretc
         const behind = { x: q.x - f.n.x * side * PROBE, y: q.y - f.n.y * side * PROBE };
         return (
           free(front, polys) &&
+          // A face beside a room closed by a boundary (a terrace past the walls) is inside
+          // that room, as far as the wall's half thickness goes past the room's line.
+          !byBoundary(front, f.half) &&
           !free(behind, polys) &&
           rayHit(front, dir, segs) === Number.POSITIVE_INFINITY
         );
@@ -228,13 +278,25 @@ function outsideStretches(geom: PlanGeometry, polys: Polys, segs: Seg[]): Stretc
   return out;
 }
 
-/** Bounds of every wall piece, junction and opening: the flat's outline, face to face. */
-export function outlineBounds(geom: PlanGeometry): Bounds | null {
-  const all = [
-    ...geom.pieces.map((p) => p.polygon),
-    ...geom.footprints.hubs.map((h) => h.polygon),
-    ...geom.openings.map((o) => o.polygon),
-  ].flat();
+type Seg = [Vec2, Vec2];
+
+/** The boundary lines (rooms divided or closed without a wall), end to end. */
+function boundarySegs(geom: PlanGeometry): Seg[] {
+  return geom.boundaries.flatMap((id) => {
+    const f = geom.frames[id];
+    return f ? [[framePoint(f, 0, 0), framePoint(f, f.length, 0)] as Seg] : [];
+  });
+}
+
+function segDistance(p: Vec2, a: Vec2, b: Vec2): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2)) : 0;
+  return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+}
+
+function boundsOf(all: readonly Vec2[]): Bounds | null {
   if (all.length === 0) return null;
   const xs = all.map((p) => p.x);
   const ys = all.map((p) => p.y);
@@ -244,7 +306,49 @@ export function outlineBounds(geom: PlanGeometry): Bounds | null {
   };
 }
 
-type Seg = [Vec2, Vec2];
+/**
+ * Bounds of every wall piece, junction and opening and the boundary lines' ends (a terrace
+ * closed by a boundary past the walls), and of `include`: the flat's outline, face to face.
+ */
+export function outlineBounds(geom: PlanGeometry, include: readonly Vec2[] = []): Bounds | null {
+  const walls = [
+    ...geom.pieces.map((p) => p.polygon),
+    ...geom.footprints.hubs.map((h) => h.polygon),
+    ...geom.openings.map((o) => o.polygon),
+  ].flat();
+  if (walls.length === 0) return null;
+  return boundsOf([...walls, ...boundarySegs(geom).flat(), ...include]);
+}
+
+/** Where each door's leaves reach, open: a door opening out of the flat reaches past it. */
+function doorReach(geom: PlanGeometry): Vec2[] {
+  return geom.openings.flatMap((o) => {
+    if (o.kind !== 'door') return [];
+    const style = doorStyle(o.opening);
+    if (style === 'swing') {
+      const s = doorSwing(o.frame, o.opening);
+      // The arc's middle, too: it bulges past its ends on a slanting wall.
+      const m = {
+        x: s.leafEnd.x + s.arcEnd.x - 2 * s.hinge.x,
+        y: s.leafEnd.y + s.arcEnd.y - 2 * s.hinge.y,
+      };
+      const k = s.radius / (Math.hypot(m.x, m.y) || 1);
+      return [s.hinge, s.leafEnd, s.arcEnd, { x: s.hinge.x + m.x * k, y: s.hinge.y + m.y * k }];
+    }
+    if (style === 'sliding' || style === 'pocket') return [];
+    return doorLeaves(o.frame, o.opening, style === 'double' ? 1 : 0.5).flatMap((l) => [l.a, l.b]);
+  });
+}
+
+/**
+ * What a measured drawing of the plan covers: its outline (`outlineBounds`, with `include`)
+ * and the door swings, so the dimensions outside clear a door that opens out.
+ */
+export function planExtent(geom: PlanGeometry, include: readonly Vec2[] = []): Bounds | null {
+  const b = outlineBounds(geom, include);
+  if (!b) return null;
+  return boundsOf([b.min, b.max, ...doorReach(geom)]);
+}
 
 /** Where a ray from p first meets a segment, as a distance along it, or Infinity. */
 function rayHit(p: Vec2, d: Vec2, segs: readonly Seg[]): number {
@@ -263,6 +367,72 @@ function rayHit(p: Vec2, d: Vec2, segs: readonly Seg[]): number {
 
 const edgesOf = (poly: readonly Vec2[]): Seg[] =>
   poly.map((p, i) => [p, poly[(i + 1) % poly.length] as Vec2]);
+
+/** A box: centre and half sizes (metres). */
+interface Box {
+  c: Vec2;
+  hx: number;
+  hy: number;
+}
+
+const boxesOverlap = (p: Vec2, half: Vec2, b: Box) =>
+  Math.abs(p.x - b.c.x) < half.x + b.hx && Math.abs(p.y - b.c.y) < half.y + b.hy;
+
+/** Whether the segment a–b crosses the box (Liang–Barsky clipping). */
+function segmentHitsBox(a: Vec2, b: Vec2, box: Box): boolean {
+  let t0 = 0;
+  let t1 = 1;
+  const d = { x: b.x - a.x, y: b.y - a.y };
+  const clip = (p: number, q: number) => {
+    if (Math.abs(p) < 1e-12) return q >= 0;
+    const r = q / p;
+    if (p < 0) {
+      if (r > t1) return false;
+      if (r > t0) t0 = r;
+    } else {
+      if (r < t0) return false;
+      if (r < t1) t1 = r;
+    }
+    return true;
+  };
+  return (
+    clip(-d.x, a.x - (box.c.x - box.hx)) &&
+    clip(d.x, box.c.x + box.hx - a.x) &&
+    clip(-d.y, a.y - (box.c.y - box.hy)) &&
+    clip(d.y, box.c.y + box.hy - a.y) &&
+    t1 - t0 > 1e-9
+  );
+}
+
+/** Whether segments a–b and c–d cross, or come within `gap` of each other. */
+function segmentsNear(a: Vec2, b: Vec2, c: Vec2, d: Vec2, gap: number): boolean {
+  const cr = (o: Vec2, p: Vec2, q: Vec2) => (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x);
+  if (cr(c, d, a) * cr(c, d, b) < 0 && cr(a, b, c) * cr(a, b, d) < 0) return true;
+  return (
+    Math.min(
+      segDistance(a, c, d),
+      segDistance(b, c, d),
+      segDistance(c, a, b),
+      segDistance(d, a, b),
+    ) < gap
+  );
+}
+
+/** How far a circle reaches into a box (centre, half sizes): 0 if clear. */
+function intrusion(p: Vec2, half: Vec2, c: { c: Vec2; r: number }): number {
+  const ox = Math.abs(c.c.x - p.x) - half.x;
+  const oy = Math.abs(c.c.y - p.y) - half.y;
+  if (ox > 0 || oy > 0) return Math.max(0, c.r - Math.hypot(Math.max(ox, 0), Math.max(oy, 0)));
+  return c.r - Math.max(ox, oy);
+}
+
+/** Whether a box (centre, half sizes) and a polygon overlap. */
+function boxHitsPolygon(c: Vec2, half: Vec2, poly: readonly Vec2[]): boolean {
+  const box = { c, hx: half.x, hy: half.y };
+  if (poly.some((p) => Math.abs(p.x - c.x) < half.x && Math.abs(p.y - c.y) < half.y)) return true;
+  if (pointInPolygon(c, poly)) return true;
+  return edgesOf(poly).some(([a, b]) => segmentHitsBox(a, b, box));
+}
 
 /**
  * The plan's dimensions. Outside walls (a room on one side only, measured along each face,
@@ -289,7 +459,7 @@ export function planDimensions(
       ...geom.openings.map((o) => o.polygon),
     ],
   };
-  const bounds = outlineBounds(geom);
+  const bounds = planExtent(geom, opts.include);
   const chains: DimensionChain[] = [];
   const solidSegs = polys.solid.flatMap(edgesOf);
   /** Whether a face point can be seen from outside, looking back along `dir` (or just beside it). */
@@ -368,18 +538,21 @@ export function planDimensions(
       else merged.push({ ...r });
     }
     const out = side === 'top' || side === 'left' ? -1 : 1;
-    const tier1 = mergeStops(
-      [
-        ...merged.flatMap((r) => [
-          { v: r.from, from: r.at },
-          { v: r.to, from: r.at },
-        ]),
-        ...corners[side],
-      ],
-      [],
-      out,
+    const tier1 = dropSmall(
+      mergeStops(
+        [
+          ...merged.flatMap((r) => [
+            { v: r.from, from: r.at },
+            { v: r.to, from: r.at },
+          ]),
+          ...corners[side],
+        ],
+        [],
+        out,
+      ),
     );
-    const tier0 = mergeStops(tier1, edges[side], out);
+    const isCorner = (x: Stop) => tier1.some((c) => Math.abs(c.v - x.v) < MERGE);
+    const tier0 = dropSmall(mergeStops(tier1, edges[side], out), isCorner);
     const tier2 = [tier1[0] as Stop, tier1[tier1.length - 1] as Stop];
     const at =
       side === 'top'
@@ -417,25 +590,33 @@ export function planDimensions(
         x: c.x + f.n.x * s * (f.half + PROBE),
         y: c.y + f.n.y * s * (f.half + PROBE),
       });
-      k = inRoom(probe(1), polys) ? 1 : -1;
+      // Into the room, for a window in an outside wall; between two rooms, into the larger,
+      // which has more room to keep its label clear of the tag.
+      const areaAt = (q: Vec2) => {
+        const r = polys.rooms.find((x) => pointInPolygon(q, x.outer));
+        return r ? Math.abs(signedArea(r.outer)) : -1;
+      };
+      k = areaAt(probe(1)) >= areaAt(probe(-1)) ? 1 : -1;
     }
     tags.push({
       openingId: o.opening.id,
       kind: o.kind,
-      width: o.opening.width,
+      // As the chains have it: the opening as it fits its wall.
+      width: o.span[1] - o.span[0],
       at: c,
       out: { x: f.n.x * k, y: f.n.y * k },
       half: f.half,
     });
   }
 
-  // Room labels, clear of door swings and of the tags (as boxes: a tag is long and thin, and
-  // placeLabel's circles are tested only at a label's corners and edge middles).
+  // Room labels, clear of door swings, walls, hacked walls and the tags (as boxes: a tag is
+  // long and thin, and placeLabel's circles are tested only at a label's corners and edge
+  // middles).
   const swings = geom.openings
     .filter((o) => o.kind === 'door')
     .map((o) => swingZone(doorSwing(o.frame, o.opening)));
   const tagHalf = opts.tagHalf ?? { along: 0.32, across: 0.12 };
-  const boxOf = (t: OpeningTag) => {
+  const boxOf = (t: OpeningTag): Box => {
     const off = t.half + tagHalf.across;
     const c = { x: t.at.x + t.out.x * off, y: t.at.y + t.out.y * off };
     // Along the wall is square to `out`.
@@ -443,11 +624,25 @@ export function planDimensions(
     const ay = Math.abs(t.out.x) * tagHalf.along + Math.abs(t.out.y) * tagHalf.across;
     return { c, hx: ax, hy: ay };
   };
-  const tagBoxes = [...tags.map(boxOf), ...(opts.avoidBoxes ?? [])];
-  const onTag = (p: Vec2, half: Vec2) =>
-    tagBoxes.some(
-      (b) => Math.abs(p.x - b.c.x) < half.x + b.hx && Math.abs(p.y - b.c.y) < half.y + b.hy,
-    );
+  // Door leaves, open: a label keeps off them, and a span may cross a swing's arc, not its leaf.
+  const leaves: Seg[] = geom.openings.flatMap((o): Seg[] => {
+    if (o.kind !== 'door') return [];
+    const style = doorStyle(o.opening);
+    if (style === 'swing') {
+      const sw = doorSwing(o.frame, o.opening);
+      return [[sw.hinge, sw.leafEnd]];
+    }
+    if (style === 'sliding' || style === 'pocket') return [];
+    return doorLeaves(o.frame, o.opening, style === 'double' ? 1 : 0.5).map((l): Seg => [l.a, l.b]);
+  });
+  const blocks = opts.blockBoxes ?? [];
+  const tagBoxes = [...tags.map(boxOf), ...(opts.avoidBoxes ?? []), ...blocks];
+  const onLeaf = (p: Vec2, half: Vec2) =>
+    leaves.some(([a, b]) => segmentHitsBox(a, b, { c: p, hx: half.x, hy: half.y }));
+  const onWall = (p: Vec2, half: Vec2) =>
+    polys.solid.some((poly) => boxHitsPolygon(p, half, poly)) || onLeaf(p, half);
+  const blocked = (p: Vec2, half: Vec2) =>
+    tagBoxes.some((b) => boxesOverlap(p, half, b)) || onWall(p, half);
   /** How much of a label box tags and other boxes cover (m²). */
   const covered = (p: Vec2, half: Vec2) =>
     tagBoxes.reduce((sum, b) => {
@@ -456,76 +651,149 @@ export function planDimensions(
       return ox > 0 && oy > 0 ? sum + ox * oy : sum;
     }, 0);
   /**
-   * placeLabel's spot, or if a tag or a box is in the way, the nearest spot on a grid that is
-   * clear of them (and fits as placeLabel's must), or, with none clear, the least covered.
+   * placeLabel's spot, or if a tag, a box or a wall (a wall's face is half its thickness inside
+   * the room's centre-line outline) is in the way, the nearest spot on a grid that is clear of
+   * them (and fits as placeLabel's must), or, with none clear, the least covered.
    */
   const place = (outer: Vec2[], half: Vec2, holes: Vec2[][]) => {
     const home = placeLabel(outer, half, swings, holes);
-    if (!onTag(home, half)) return home;
+    if (!blocked(home, half)) return home;
     const xs = outer.map((p) => p.x);
     const ys = outer.map((p) => p.y);
     const x0 = Math.min(...xs);
     const y0 = Math.min(...ys);
     const w = Math.max(...xs) - x0;
     const h = Math.max(...ys) - y0;
+    // A hacked wall weighs most, then tags and boxes, then a wall or door leaf or poking out
+    // of the room, then a door's swing, then the way from placeLabel's spot.
+    const score = (p: Vec2) =>
+      (blocks.some((b) => boxesOverlap(p, half, b)) ? 50 : 0) +
+      (tagBoxes.some((b) => boxesOverlap(p, half, b)) ? 30 : 0) +
+      covered(p, half) * 100 +
+      (polys.solid.some((poly) => boxHitsPolygon(p, half, poly)) ? 20 : 0) +
+      (onLeaf(p, half) ? 20 : 0) +
+      Math.max(0, -labelClearance(p, half, outer, [], holes)) * 100 +
+      swings.reduce((sum, c) => sum + intrusion(p, half, c), 0) * 30 +
+      Math.hypot(p.x - home.x, p.y - home.y) * 0.1;
     let best = home;
-    let bestScore = covered(home, half) * 100;
+    let bestScore = score(home);
     for (let i = 0; i <= 24; i++) {
       for (let j = 0; j <= 24; j++) {
         const p = { x: x0 + (w * i) / 24, y: y0 + (h * j) / 24 };
         if (!pointInPolygon(p, outer)) continue;
-        if (labelClearance(p, half, outer, swings, holes) < 0) continue;
-        const score = covered(p, half) * 100 + Math.hypot(p.x - home.x, p.y - home.y);
-        if (score < bestScore) {
-          bestScore = score;
+        const sc = score(p);
+        if (sc < bestScore) {
+          bestScore = sc;
           best = p;
         }
       }
     }
     return best;
   };
-  const segs: Seg[] = [
-    ...solidSegs,
-    ...geom.boundaries.flatMap((id) => {
-      const f = geom.frames[id];
-      return f ? [[framePoint(f, 0, 0), framePoint(f, f.length, 0)] as Seg] : [];
-    }),
-  ];
-  const spans: RoomSpan[] = [];
   const labels: { roomId: string; at: Vec2 }[] = [];
-  const placed: { c: Vec2; half: Vec2 }[] = [];
+  const placed: { c: Vec2; half: Vec2; roomId: string }[] = [];
   const shapeOf = roomShapes(level);
   for (const r of Object.values(level.rooms)) {
     const shape = shapeOf.get(r.id);
     if (!shape || shape.outer.length < 3) continue;
-    const p = place(shape.outer, opts.labelHalf?.(r) ?? LABEL_HALF, shape.holes);
+    const half = opts.labelHalf?.(r) ?? LABEL_HALF;
+    const p = place(shape.outer, half, shape.holes);
     labels.push({ roomId: r.id, at: p });
-    placed.push({ c: p, half: opts.labelHalf?.(r) ?? LABEL_HALF });
-    for (const axis of ['x', 'y'] as const) {
-      const d = axis === 'x' ? { x: 1, y: 0 } : { x: 0, y: 1 };
-      const fwd = rayHit(p, d, segs);
-      const back = rayHit(p, { x: -d.x, y: -d.y }, segs);
-      if (!Number.isFinite(fwd) || !Number.isFinite(back) || fwd + back < MIN_SPAN) continue;
-      spans.push({
-        roomId: r.id,
-        axis,
-        a: { x: p.x - d.x * back, y: p.y - d.y * back },
-        b: { x: p.x + d.x * fwd, y: p.y + d.y * fwd },
-      });
-    }
+    placed.push({ c: p, half, roomId: r.id });
   }
 
   // A tag on a label (one that had no room to keep clear of it) or on a built-in goes to the
   // other side of its wall, if that side is clear.
   const others = (opts.avoidBoxes ?? []).map((b) => ({ c: b.c, half: { x: b.hx, y: b.hy } }));
-  const onLabel = (b: { c: Vec2; hx: number; hy: number }) =>
-    [...placed, ...others].some(
-      (l) => Math.abs(l.c.x - b.c.x) < l.half.x + b.hx && Math.abs(l.c.y - b.c.y) < l.half.y + b.hy,
-    );
+  const onLabel = (b: Box) => [...placed, ...others].some((l) => boxesOverlap(l.c, l.half, b));
   for (const t of tags) {
     if (!onLabel(boxOf(t))) continue;
     const flipped = { ...t, out: { x: -t.out.x, y: -t.out.y } };
     if (!onLabel(boxOf(flipped))) t.out = flipped.out;
+  }
+
+  // Each room's clear width and depth, face to face: through its label, or if a tag, a door's
+  // leaf or a hacked wall is in the way (or the label leaves its figure no room), on the
+  // nearest line beside the label that is clear, with room for its figure on its far side;
+  // with none, no span. A room much less than its bounding box (an L, say) has no one width
+  // and depth: none.
+  const segs: Seg[] = [...solidSegs, ...boundarySegs(geom)];
+  const spanBoxes = [...tags.map(boxOf), ...blocks];
+  const fig = opts.spanFigure ?? { w: 0, h: 0 };
+  const spans: RoomSpan[] = [];
+  for (const { c: p, half, roomId } of placed) {
+    const shape = shapeOf.get(roomId);
+    if (!shape) continue;
+    const box = boundsOf(shape.outer);
+    if (!box) continue;
+    const area =
+      Math.abs(signedArea(shape.outer)) -
+      shape.holes.reduce((s, h) => s + Math.abs(signedArea(h)), 0);
+    const boxArea = (box.max.x - box.min.x) * (box.max.y - box.min.y);
+    if (area < RECTISH * boxArea) continue;
+    for (const axis of ['x', 'y'] as const) {
+      const d = axis === 'x' ? { x: 1, y: 0 } : { x: 0, y: 1 };
+      // Square to the span: y for a width, x for a depth.
+      const across = axis === 'x' ? { x: 0, y: 1 } : { x: 1, y: 0 };
+      const halfAlong = axis === 'x' ? half.x : half.y;
+      const clearOfLabel = (axis === 'x' ? half.y : half.x) + 0.12;
+      const lo = axis === 'x' ? box.min.y : box.min.x;
+      const hi = axis === 'x' ? box.max.y : box.max.x;
+      const at0 = axis === 'x' ? p.y : p.x;
+      const offsets = [0];
+      for (let k = 0; clearOfLabel + k * 0.1 < hi - lo; k++) {
+        offsets.push(clearOfLabel + k * 0.1, -(clearOfLabel + k * 0.1));
+      }
+      // In this room (not the next one through a wall), and on no wall or door leaf.
+      const inside = (q: Vec2) =>
+        pointInPolygon(q, shape.outer) &&
+        !shape.holes.some((h) => pointInPolygon(q, h)) &&
+        !onWall(q, { x: 0.001, y: 0.001 });
+      // A line beside the label keeps clear of the walls either side, by more than its figure.
+      const roomy = (q: Vec2) => {
+        const k = fig.h * 1.5;
+        return [k, -k].every((m) => inside({ x: q.x + across.x * m, y: q.y + across.y * m }));
+      };
+      const span = (q: Vec2) => {
+        const fwd = rayHit(q, d, segs);
+        const back = rayHit(q, { x: -d.x, y: -d.y }, segs);
+        if (!Number.isFinite(fwd) || !Number.isFinite(back)) return null;
+        return {
+          fwd,
+          back,
+          a: { x: q.x - d.x * back, y: q.y - d.y * back },
+          b: { x: q.x + d.x * fwd, y: q.y + d.y * fwd },
+        };
+      };
+      const find = () => {
+        for (const off of offsets) {
+          if (at0 + off <= lo || at0 + off >= hi) continue;
+          const q = { x: p.x + across.x * off, y: p.y + across.y * off };
+          if (!inside(q) || (off !== 0 && !roomy(q))) continue;
+          const sp = span(q);
+          if (!sp || sp.fwd + sp.back < MIN_SPAN) continue;
+          const { a, b } = sp;
+          const hits = (u: Vec2, v: Vec2) =>
+            spanBoxes.some((bx) => segmentHitsBox(u, v, bx)) ||
+            leaves.some(([l0, l1]) => segmentsNear(u, v, l0, l1, 0.03));
+          if (hits(a, b)) continue;
+          if (off === 0) {
+            // Through the label: its figure goes beside the label, on the longer side.
+            if (Math.max(sp.fwd, sp.back) - halfAlong < fig.w) continue;
+          } else {
+            // Beside it: the figure on the far side, inside the room and clear.
+            if (sp.fwd + sp.back < fig.w) continue;
+            const k = Math.sign(off) * fig.h;
+            const shift = (v: Vec2) => ({ x: v.x + across.x * k, y: v.y + across.y * k });
+            if (fig.h > 0 && (!inside(shift(q)) || hits(shift(a), shift(b)))) continue;
+          }
+          return { a, b };
+        }
+        return null;
+      };
+      const found = find();
+      if (found) spans.push({ roomId, axis, ...found });
+    }
   }
 
   return { chains, spans, tags, labels, bounds };

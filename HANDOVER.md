@@ -1166,3 +1166,19 @@ which also hit segmented controls in dialogs opened from the top bar; now
 (25 m fits A4 at 1:200: 147 mm of drawing width); the test checks 25 m → 1:200 and 40 m → not
 to scale. Not yet: slice 2, a label that can't fit a crowded room (furniture shown) may sit on
 a built-in.
+
+**Plan for contractors, review fixes (6 Nov):** After draws hacked walls under the After walls
+and new ones over them as what they are (teal wall, light-teal half wall, teal-outlined glass,
+with their length), new doors and windows teal (`diff.openingsAdded`) with the cut hatched red
+where the wall stays; `outlineBounds` takes boundary lines and `include` points, `planExtent`
+adds door swings, so chains clear a door opening out and (After) hacked walls; a face beside a
+boundary-closed room is inside it for half the wall's thickness (no 50 mm pieces at a
+terrace); pieces under 20 mm join a neighbour; labels keep off walls, door leaves, tags and
+`blockBoxes` (hacked walls), a long name goes on two lines; spans go beside the label when the
+line through it would cross a tag, leaf or hacked wall (`spanFigure` sizes the room needed),
+none for a room under 95% of its bounding box; tags carry the clamped width. Printing
+(`print/frame.ts`, also `printPlan`) drops the frame on `afterprint` (10 min fallback) and
+focuses Projects; pages are wrapped in clipping `.sheet-paper` boxes. Dialog: the scale counts
+hacked walls (`print/extent.ts`), A3 by default when only A3 is to scale, `role="alert"`,
+focus back to Projects; the sheet always has a Version line. Not yet: a notch's depth (faces
+hidden in a notch get no chain).
