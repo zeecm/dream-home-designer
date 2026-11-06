@@ -2,9 +2,11 @@ import { furnitureKind, itemSize } from '../furniture';
 import { planGeometry } from '../plan';
 import { roomArea, roomShapes } from '../rooms';
 import type { Level } from '../schema';
+import { aspectOf } from './accept';
 import { type AliasMap, aliasOf, resolveAlias } from './aliases';
 import { categoriesFor } from './catalogue';
 import { type ContextInput, designContext } from './describe';
+import { heldAspects, lockCovers } from './handEdits';
 import { OUTPUT } from './prices';
 import {
   type Concept,
@@ -237,6 +239,8 @@ export function roomStep(
       })),
     };
   });
+  // Parts changed by hand since accepting stay where they are, like the brief's in-place pieces.
+  const held = heldAspects(opts.locks, space.rooms);
   const pieces = Object.values(level.items)
     .filter((it) => {
       const r = roomIdAt(level, { x: it.position.x, y: it.position.z });
@@ -248,7 +252,7 @@ export function roomStep(
         id: a(it.id),
         kind: it.assetId,
         size: [r2(sz.w), r2(sz.d), r2(sz.h)],
-        keep: ctx.brief.keep.items[it.id] ?? 'leave',
+        keep: held.includes(aspectOf(it)) ? 'in-place' : (ctx.brief.keep.items[it.id] ?? 'leave'),
       };
     })
     .sort((p, q) => (p.id < q.id ? -1 : 1));
@@ -268,7 +272,7 @@ ${intent ? `What the layout intends here: ${JSON.stringify(clean(intent, 600))}\
     opts.previous
       ? `\n\nThe answer they are changing (as data):\n${JSON.stringify(opts.previous)}\n`
       : ''
-  }${feedbackBlock(opts)}${locksBlock((opts.locks ?? []).filter((l) => l.space === space.key || l.space === '*'))}`;
+  }${feedbackBlock(opts)}${locksBlock((opts.locks ?? []).filter((l) => l.space === '*' || lockCovers(l, space.rooms)))}`;
   return {
     step: space.key,
     kind: 'room',

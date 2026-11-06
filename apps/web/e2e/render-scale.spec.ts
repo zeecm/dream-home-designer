@@ -13,13 +13,17 @@ const PNG =
 /** Answers Gemini's picture requests with a tiny PNG, keeping each prompt sent. */
 async function mockGemini(page: Page) {
   const prompts: string[] = [];
+  // How many pictures each request sent (the view, and the plan with it).
+  const images: number[] = [];
   // Never a real provider: anything not mocked is turned away.
   for (const host of ['https://api.openai.com/**', 'https://api.anthropic.com/**']) {
     await page.route(host, (route) => route.abort());
   }
   await page.route('https://generativelanguage.googleapis.com/**', async (route) => {
     const body = route.request().postDataJSON();
-    prompts.push(body.contents[0].parts[1].text);
+    const parts = body.contents[0].parts as { text?: string; inline_data?: unknown }[];
+    images.push(parts.filter((p) => p.inline_data).length);
+    prompts.push(parts.find((p) => p.text)?.text ?? '');
     // A moment's work, as a model takes, so the dialog can be seen busy.
     await new Promise((r) => setTimeout(r, 600));
     await route.fulfill({
@@ -40,7 +44,7 @@ async function mockGemini(page: Page) {
       }),
     );
   });
-  return prompts;
+  return Object.assign(prompts, { images });
 }
 
 /** Puts a piece from the catalogue down in a room of the sample (desktop, Plan view). */
@@ -94,7 +98,7 @@ test('from the orbit view, a render starts from eye height and tells the model t
   expect(prompts).toHaveLength(1);
   const atEye = prompts[0] ?? '';
   // The style and fidelity asks are kept.
-  expect(atEye).toContain('Edit this image. It is an exact 3D model of a real home');
+  expect(atEye).toContain('It is an exact 3D model of a real home');
   expect(atEye).toContain('This is "Living and dining", ');
   expect(atEye).toContain('(21.0 m²), ceiling 2.6 m.');
   expect(atEye).toContain('1.6 m above the floor, at eye height');
@@ -105,6 +109,10 @@ test('from the orbit view, a render starts from eye height and tells the model t
     'Do not add, remove, enlarge or move furniture, doors, windows or openings',
   );
   expect(atEye).toContain('Doors, windows and openings in view');
+  // The floor plan goes with the view, with what it is.
+  expect(prompts.images[0]).toBe(2);
+  expect(atEye.startsWith('Edit the first image.')).toBe(true);
+  expect(atEye).toContain('The second image is the floor plan of the whole home');
 
   // From the view itself: honest about it, and the list follows the picture.
   await here.click();

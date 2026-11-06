@@ -1,5 +1,7 @@
 import {
   type Aspect,
+  BATHROOMS,
+  type Command,
   type ContextInput,
   type Design,
   type DesignBrief,
@@ -7,15 +9,21 @@ import {
   type DesignResult,
   type Level,
   type Lock,
+  type Part,
   type Price,
   type Project,
   type RunEstimate,
   type StepPrompt,
+  acceptDesign,
   aliasesFor,
+  aspectOf,
   designResult,
   estimateRun,
+  handEdits,
   layoutStep,
   levelFingerprint,
+  lockCovers,
+  roomIdAt,
   roomStep,
   runPrompts,
   spacesOf,
@@ -167,6 +175,217 @@ export interface ChangeRequest {
   /** Kept as they are, by space key ('*' for the walls). */
   keep: Record<string, Aspect[]>;
   feedback: string;
+  /** Parts changed by hand since accepting, still kept (`hand-edit` locks; × unlocks one). */
+  held?: Lock[];
+}
+
+/**
+ * The plan as it was just before a version was accepted: what the accept itself changed is
+ * the difference to `accepted.level`. Records kept before this was stored fall back to the
+ * level the version was designed on.
+ */
+const priorOf = (d: Design): Level => d.accepted?.prior ?? d.baseLevel;
+
+/**
+ * Whether the wall changes a version's accept made are still in After: the walls and
+ * openings it added are there, those it took away aren't, and the walls it glazed or cut
+ * down still are. Null when it accepted no walls part, or that part changed nothing.
+ */
+export function wallsStillIn(d: Design, after: Level | undefined): boolean | null {
+  if (!after || !d.accepted?.parts.some((p) => p.aspect === 'walls')) return null;
+  const was = priorOf(d);
+  const acc = d.accepted.level;
+  const checks: boolean[] = [];
+  for (const [id, w] of Object.entries(acc.walls)) {
+    const old = was.walls[id];
+    const now = after.walls[id];
+    if (!old) checks.push(!!now);
+    else if (old.build !== w.build || old.height !== w.height) {
+      checks.push(!!now && now.build === w.build && now.height === w.height);
+    }
+  }
+  for (const id of Object.keys(was.walls)) if (!acc.walls[id]) checks.push(!after.walls[id]);
+  for (const id of Object.keys(acc.openings)) {
+    if (!was.openings[id]) checks.push(!!after.openings[id]);
+  }
+  for (const id of Object.keys(was.openings)) {
+    if (!acc.openings[id]) checks.push(!after.openings[id]);
+  }
+  return checks.length ? checks.every(Boolean) : null;
+}
+
+/**
+ * Whether a version is in the renovation now: accepted, and its pieces or its wall changes
+ * still there (a version accepted for its walls alone stays accepted through later edits).
+ */
+export function acceptedNow(d: Design, after: Level | undefined): boolean {
+  if (!d.accepted || !after) return false;
+  const lvl = d.accepted.level;
+  // The pieces the accept itself put in (not those it kept, as held parts are).
+  const was = priorOf(d);
+  const items = Object.keys(lvl.items).filter((id) => !was.items[id]);
+  if (items.some((id) => !!after.items[id])) return true;
+  const walls = wallsStillIn(d, after);
+  if (walls !== null) return walls;
+  if (items.length) return false;
+  return levelFingerprint(after) === levelFingerprint(lvl);
+}
+
+/** A version's wall changes, as text to compare by. */
+const wallsText = (d: Design) => JSON.stringify(d.concept?.walls ?? []);
+
+/**
+ * Whether After has `v`'s wall changes already: a version with the same wall changes (it,
+ * or one made from it that copied them) was accepted with its walls, and they are still
+ * there. Applied again on After, they would be made twice.
+ */
+export function wallsInAfter(v: Design, designs: Design[], after: Level | undefined): boolean {
+  if (!v.concept?.walls.length) return false;
+  const mine = wallsText(v);
+  return [v, ...designs].some((d) => wallsText(d) === mine && wallsStillIn(d, after) === true);
+}
+
+/**
+ * A "Kept as you changed them" row: one per space and part, its locks unlocked together. A
+ * lock holds the whole part (all the room's furniture, say), so the row says what is held
+ * (`head`, e.g. "Living and dining furniture, all 15 pieces as they are now") and then why.
+ */
+export interface HeldRow {
+  key: string;
+  locks: Lock[];
+  text: string;
+}
+export function heldRows(locks: Lock[], head: (l: Lock) => string = () => ''): HeldRow[] {
+  const rows = new Map<string, HeldRow>();
+  for (const l of locks) {
+    const key = `${l.space}|${l.aspect}`;
+    const row = rows.get(key) ?? { key, locks: [], text: '' };
+    row.locks.push(l);
+    const why = row.locks.map((x) => x.label).join(', ');
+    const what = head(l);
+    row.text = what ? `${what}: ${why}` : why;
+    rows.set(key, row);
+  }
+  return [...rows.values()];
+}
+
+/**
+ * What a held row keeps, in words: "Living and dining furniture, all 13 pieces, as now"
+ * (counted in After, `after`), "Kitchen furniture, none, as now", "Bedroom paint and floors".
+ */
+export function heldHead(
+  l: Lock,
+  spaces: { name: string; rooms: string[] }[],
+  after: Level | undefined,
+): string {
+  if (l.space === '*') return '';
+  if (l.space === BATHROOMS) return 'Bathrooms’ paint and floors';
+  const s = spaces.find((x) => lockCovers(l, x.rooms));
+  const name = s?.name ?? 'A room';
+  const what = ASPECT_NAMES[l.aspect].toLowerCase();
+  if (l.aspect !== 'furniture' && l.aspect !== 'built-ins') return `${name} ${what}`;
+  const n = Object.values(after?.items ?? {}).filter((it) => {
+    const room = after && roomIdAt(after, { x: it.position.x, y: it.position.z });
+    return aspectOf(it) === l.aspect && !!room && !!s?.rooms.includes(room);
+  }).length;
+  const pieces = n === 0 ? 'none' : n === 1 ? 'its 1 piece' : `all ${n} pieces`;
+  return `${name} ${what}, ${pieces}, as now`;
+}
+
+/** The version accepted last that is still in the renovation, if any. */
+export function lastAccepted(designs: Design[], after: Level | undefined): Design | null {
+  return (
+    designs
+      .filter((d) => acceptedNow(d, after))
+      .sort((a, b) => ((a.accepted?.at ?? '') < (b.accepted?.at ?? '') ? -1 : 1))
+      .pop() ?? null
+  );
+}
+
+/**
+ * Where a change to `v` starts. Once a version is accepted, After is the truth (D9): the
+ * change is made on After as it is now, and what the person changed by hand since accepting
+ * is listed as `hand-edit` locks. A version whose walls are in After already brings no wall
+ * changes of its own (they'd be made twice).
+ */
+export function changeFrom(
+  v: Design,
+  designs: Design[],
+  doc: Project,
+): { v: Design; held: Lock[]; accepted: Design | null } {
+  const after = doc.renovation?.levels[0];
+  const accepted = lastAccepted(designs, after);
+  if (!accepted?.accepted || !after) return { v, held: [], accepted: null };
+  const wallsIn = wallsInAfter(v, designs, after);
+  return {
+    v: {
+      ...v,
+      brief: { ...v.brief, start: 'after' },
+      base: { ...v.base, variant: 'after' },
+      concept: wallsIn && v.concept ? { ...v.concept, walls: [] } : v.concept,
+    },
+    held: heldFor(v, accepted, after),
+    accepted,
+  };
+}
+
+/**
+ * What a version keeps as changed by hand. A version made on After since the last accept
+ * already decided on the hand edits made before it (kept, or unlocked and redone): its own
+ * hand-edit locks stand, and only edits made since it was made are added. Any other version
+ * keeps every hand edit since the last accept.
+ */
+function heldFor(v: Design, accepted: Design, after: Level): Lock[] {
+  const at = accepted.accepted?.at ?? '';
+  const decided = v.base.variant === 'after' && v.createdAt > at && v.id !== accepted.id;
+  if (!decided) return accepted.accepted ? handEdits(accepted.accepted.level, after) : [];
+  const own = v.request.locks.filter((l) => l.by === 'hand-edit');
+  const since = handEdits(v.baseLevel, after);
+  const key = (l: Lock) => `${l.space}|${l.aspect}|${l.label}`;
+  const seen = new Set(own.map(key));
+  return [...own, ...since.filter((l) => !seen.has(key(l)))];
+}
+
+/**
+ * Accepting `d`'s ticked parts as the app does: worked out on After as it is now (or the
+ * flat, with no renovation), keeping what was changed by hand since the last accept; with
+ * the plan as it was before (`prior`), to record what the accept itself changed.
+ */
+export function acceptCommand(
+  d: Design,
+  designs: Design[],
+  doc: Project,
+  parts: Part[],
+  result: DesignOptions,
+  opts: { removeHandPlaced?: boolean; label?: string } = {},
+): { command: Command; prior: Level } | null {
+  const before = doc.levels[0];
+  const v = onPlanNow(d, designs, doc);
+  const r = resultFor(doc, { ...v, base: { ...v.base, variant: 'after' } }, result);
+  if (!r || !before) return null;
+  return {
+    command: acceptDesign(before.id, r.level, parts, {
+      base: d.baseLevel,
+      ...(opts.removeHandPlaced ? { removeHandPlaced: true } : {}),
+      ...(opts.label ? { label: opts.label } : {}),
+    }),
+    prior: structuredClone(doc.renovation?.levels[0] ?? before),
+  };
+}
+
+/**
+ * A version as the plan would have it now, for showing it, comparing it and accepting it.
+ * Once a version is accepted, After is the truth: it is placed on After as it is, without
+ * wall changes After already has, keeping what was changed by hand since the accept (the
+ * hand-edit locks it was made with are replaced by those, so an undone accept holds nothing).
+ * For a version wholly in the renovation, that is After itself.
+ */
+export function onPlanNow(d: Design, designs: Design[], doc: Project): Design {
+  const from = changeFrom(d, designs, doc);
+  const own = from.v.request.locks.filter((l) => l.by !== 'hand-edit');
+  const locks = [...own, ...from.held];
+  if (locks.length === d.request.locks.length && from.v === d && !from.held.length) return d;
+  return { ...from.v, request: { ...from.v.request, locks } };
 }
 
 /**
@@ -181,6 +400,7 @@ export function changePlan(
 ): { plan: RunPlan; design: DraftDesign; locks: Lock[]; labels: string[] } | null {
   const spaces = result.spaces;
   const name = (key: string) => spaces.find((s) => s.key === key)?.name ?? 'Room';
+  const held = req.held ?? [];
   const locks: Lock[] = [];
   for (const [key, aspects] of Object.entries(req.keep)) {
     for (const aspect of aspects) {
@@ -193,7 +413,13 @@ export function changePlan(
       });
     }
   }
-  const locked = (key: string, a: Aspect) => !!req.keep[key]?.includes(a);
+  locks.push(...held);
+  const roomsOf = (key: string) => spaces.find((s) => s.key === key)?.rooms ?? key.split('+');
+  const locked = (key: string, a: Aspect) =>
+    !!req.keep[key]?.includes(a) ||
+    held.some(
+      (l) => l.aspect === a && (key === '*' ? l.space === '*' : lockCovers(l, roomsOf(key))),
+    );
   const asked = (a: Aspect) => req.aspects.includes(a);
   const walls = req.scope === 'all' && asked('walls') && !locked('*', 'walls');
   const roomAspects = ROOM_ASPECTS.filter(asked);
@@ -221,6 +447,7 @@ export function changePlan(
     concept: v.concept,
     spaces: copied,
     usage: [],
+    request: { locks },
   };
   const keys = targets.map((s) => s.key);
   const plan: RunPlan = {
@@ -247,4 +474,18 @@ export function changePlan(
     ),
   ];
   return { plan, design, locks, labels };
+}
+
+/** What a version changed from the one it was made from: "From V1. Changed: Kitchen furniture · “Cheaper.”" */
+export function changedText(d: Design, parentN: number | null): string {
+  const sc = d.request.scope;
+  const aspects = (as: Aspect[]) => as.map((a) => ASPECT_NAMES[a].toLowerCase()).join(', ');
+  const what =
+    sc.kind === 'space'
+      ? `${d.spaces[sc.space]?.name ?? 'a room'} ${aspects(sc.aspects)}`
+      : sc.kind === 'aspects'
+        ? `the whole design: ${aspects(sc.aspects)}`
+        : 'the whole design';
+  const words = d.request.feedback.trim();
+  return `${parentN ? `From V${parentN}. ` : ''}Changed: ${what}${words ? ` · “${words}”` : ''}`;
 }

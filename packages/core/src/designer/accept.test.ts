@@ -18,10 +18,11 @@ import {
   tanBrief,
   wallOp,
 } from './fixtures/sample';
-import { handEdits } from './handEdits';
+import { bathroomsHeld, handEdits, heldAspects, wallsHeld } from './handEdits';
+import { roomStep } from './prompts';
 import { designResult } from './result';
 import { BATHROOMS, type Concept, type Part } from './schema';
-import { roomIdAt, spaceOfRoom, spacesOf } from './spaces';
+import { roomIdAt, roomsBeside, spaceOfRoom, spacesOf } from './spaces';
 
 const fresh = (level?: Level): EditorDoc => {
   const doc = sampleFlatProject();
@@ -222,6 +223,134 @@ describe('handEdits (criterion 20)', () => {
       'finishes: Kitchen floor (marble)',
       'walls: Walls and doors (changed)',
     ]);
+  });
+});
+
+describe('hand-edit locks in the next version (D9, criterion 36)', () => {
+  /** V1 accepted whole, then the sofa moved 0.4 m and Mdm Lim's room's wall repainted by hand. */
+  function handEdited() {
+    const s0 = fresh();
+    const lvl = flat(s0);
+    const r = designResult(lvl, lvl, sampleDesign({ level: lvl, id: 'dsn_v1' }));
+    const s1 = dispatch(s0, acceptDesign(lvl.id, r.level, allParts(r.level), { base: lvl }));
+    const accepted = reno(s1);
+    const sofa = Object.values(accepted.items).find((i) => i.assetId === 'sofa-3')!;
+    const w10 = aliasesFor(lvl).W10 as string;
+    const s2 = dispatch(
+      dispatch(s1, updateItem(accepted.id, sofa.id, { position: { x: sofa.position.x - 0.4 } })),
+      updateWall(accepted.id, w10, { materialRight: 'paint-sky' }),
+    );
+    const now = reno(s2);
+    return { lvl, accepted, now, sofa: now.items[sofa.id]!, w10, locks: handEdits(accepted, now) };
+  }
+  // The next version, made on After as it is: the same answers, the walls already in After.
+  const next = (lvl: Level, locks: ReturnType<typeof handEdits>) => ({
+    ...sampleDesign({ level: lvl, id: 'dsn_v3', concept: { ...sampleConcept(lvl), walls: [] } }),
+    request: { locks },
+  });
+
+  it('keeps the moved sofa where it was moved and the repainted face, and redoes the rest', () => {
+    const { lvl, now, sofa, w10, locks } = handEdited();
+    const r = designResult(now, lvl, next(lvl, locks));
+    expect(r.level.items[sofa.id]).toEqual(sofa);
+    expect(Object.values(r.level.items).filter((i) => i.assetId === 'sofa-3')).toHaveLength(1);
+    // The living room's furniture is After's, all of it; its built-ins are the version's.
+    const living = spacesOf(now).find((s) => s.key === SAMPLE_KEYS.living)!;
+    const inLiving = (l: Level) =>
+      Object.values(l.items).filter(
+        (i) =>
+          spaceOfRoom(spacesOf(l), roomIdAt(l, { x: i.position.x, y: i.position.z }))?.key ===
+          living.key,
+      );
+    const furniture = (l: Level) =>
+      inLiving(l)
+        .filter((i) => aspectOf(i) === 'furniture')
+        .map((i) => i.id)
+        .sort();
+    expect(furniture(r.level)).toEqual(furniture(now));
+    expect(
+      inLiving(r.level).some((i) => aspectOf(i) === 'built-ins' && i.id.startsWith('it_d')),
+    ).toBe(true);
+    expect(
+      inLiving(r.level)
+        .filter((i) => aspectOf(i) === 'built-ins')
+        .every((i) => !now.items[i.id]),
+    ).toBe(true);
+    // The repainted face stays as painted by hand.
+    expect(r.level.walls[w10]?.materialRight).toBe('paint-sky');
+    // Without the locks, the version's own sofa replaces it.
+    const plain = designResult(now, lvl, next(lvl, []));
+    expect(plain.level.items[sofa.id]).toBeUndefined();
+    expect(plain.level.walls[w10]?.materialRight).not.toBe('paint-sky');
+  });
+
+  it('accepting that next version keeps the sofa where it was moved', () => {
+    const { lvl, now, sofa, locks } = handEdited();
+    const r = designResult(now, lvl, next(lvl, locks));
+    const doc = sampleFlatProject();
+    const s = dispatch(
+      { doc: { ...doc, renovation: { levels: [now] } }, history: emptyHistory() },
+      acceptDesign(lvl.id, r.level, allParts(r.level), { base: now }),
+    );
+    expect(reno(s).items[sofa.id]).toEqual(sofa);
+  });
+
+  it('the room step marks the held pieces fixed: in place, and the lock listed', () => {
+    const { lvl, now, sofa, locks } = handEdited();
+    expect(
+      heldAspects(locks, spacesOf(now).find((s) => s.key === SAMPLE_KEYS.living)!.rooms),
+    ).toEqual(['furniture']);
+    const design = next(lvl, locks);
+    const r = designResult(now, lvl, { ...design, spaces: {} });
+    const living = r.spaces.find((s) => s.key === SAMPLE_KEYS.living)!;
+    const aliases = aliasesFor(r.level, design.aliases);
+    const p = roomStep(
+      { base: now, before: lvl, brief: design.brief, aliases },
+      living,
+      r.level,
+      aliases,
+      { locks },
+    );
+    expect(p.tail).toContain('3-seat sofa (moved)');
+    expect(p.tail).not.toContain('(repainted)');
+    const alias = Object.entries(aliases).find(([, id]) => id === sofa.id)?.[0];
+    expect(p.tail).toContain(`{"id":"${alias}","kind":"sofa-3"`);
+    expect(p.tail).toMatch(
+      new RegExp(`"id":"${alias}","kind":"sofa-3","size":\\[[^\\]]*\\],"keep":"in-place"`),
+    );
+  });
+
+  it('a bathroom repainted and refloored by hand: locked as the bathrooms’, and kept', () => {
+    const { lvl, now } = handEdited();
+    const bath = Object.values(now.rooms).find((r) => /bath/i.test(r.name))!;
+    const wallId = Object.keys(now.walls).find((id) => roomsBeside(now, id).includes(bath.id))!;
+    const side = roomsBeside(now, wallId)[0] === bath.id ? 'materialLeft' : 'materialRight';
+    const edited = structuredClone(now);
+    edited.walls[wallId]![side] = 'paint-blush';
+    edited.rooms[bath.id]!.floorMaterial = 'marble';
+    const locks = handEdits(now, edited);
+    expect(locks.map((l) => [l.space, l.aspect, l.label])).toEqual([
+      [BATHROOMS, 'finishes', `${bath.name} wall (repainted)`],
+      [BATHROOMS, 'finishes', `${bath.name} floor (marble)`],
+    ]);
+    expect(bathroomsHeld(locks)).toBe(true);
+    const kept = designResult(edited, lvl, next(lvl, locks));
+    expect(kept.level.walls[wallId]?.[side]).toBe('paint-blush');
+    expect(kept.level.rooms[bath.id]?.floorMaterial).toBe('marble');
+    // Without the locks, the concept's bathroom finishes apply again.
+    const plain = designResult(edited, lvl, next(lvl, []));
+    expect(plain.level.walls[wallId]?.[side]).not.toBe('paint-blush');
+    expect(plain.level.rooms[bath.id]?.floorMaterial).not.toBe('marble');
+  });
+
+  it('walls changed by hand: the version applies none of its wall changes', () => {
+    const { lvl, now } = handEdited();
+    const locks = [{ space: '*', aspect: 'walls', by: 'hand-edit', label: 'Walls' }] as const;
+    expect(wallsHeld([...locks])).toBe(true);
+    const d = { ...sampleDesign({ level: lvl, id: 'dsn_v4' }), request: { locks: [...locks] } };
+    const r = designResult(now, lvl, d);
+    expect(r.applied).toEqual([]);
+    expect(Object.keys(r.level.walls).sort()).toEqual(Object.keys(now.walls).sort());
   });
 });
 

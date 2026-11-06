@@ -13,7 +13,7 @@ import { icons } from '../ui/icons';
 import { AiSettingsDialog } from './AiSettingsDialog';
 import { PROVIDERS, imageSettings, useAi } from './credentials';
 import { AiError } from './providers';
-import { RENDER_STYLES, type RenderStyle, renderPhoto } from './render';
+import { RENDER_STYLES, type RenderStyle, planImage, renderPhoto } from './render';
 
 const STYLE_NAMES: Record<RenderStyle, string> = {
   as: 'As designed',
@@ -28,6 +28,8 @@ interface Shot {
   blob: Blob;
   url: string;
   facts?: SceneFacts;
+  /** Where it was taken from, to mark on the plan sent with it. */
+  camera?: SceneCamera;
 }
 
 /**
@@ -65,10 +67,10 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
     if (d && !d.open) d.showModal();
     const urls: string[] = [];
     let live = true;
-    const shot = (blob: Blob, facts?: SceneFacts): Shot => {
+    const shot = (blob: Blob, camera: SceneCamera): Shot => {
       const url = URL.createObjectURL(blob);
       urls.push(url);
-      return { blob, url, facts };
+      return { blob, url, camera, facts: level ? sceneFacts(level, camera) : undefined };
     };
     void (async () => {
       let here: Shot;
@@ -77,7 +79,7 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
         const view = await capture3dView();
         if (!live) return; // closed before the picture was ready
         camera = view.camera;
-        here = shot(view.blob, level ? sceneFacts(level, camera) : undefined);
+        here = shot(view.blob, camera);
         setShots({ here });
       } catch {
         if (live) setStatus('Couldn’t take a picture of the 3D view.');
@@ -91,7 +93,7 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
         const room = level.rooms[eye.roomId]?.name ?? 'the room';
         const eyeBlob = await capture3dFrom(eye.camera);
         if (!live) return;
-        setShots({ here, eye: { ...shot(eyeBlob, sceneFacts(level, eye.camera)), room } });
+        setShots({ here, eye: { ...shot(eyeBlob, eye.camera), room } });
         setFrom('eye');
       } catch {
         // This view is still there to render from.
@@ -114,7 +116,14 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
     setBusy(ctrl);
     setStatus('Rendering… this can take a minute or two.');
     try {
-      const blob = await renderPhoto(ai, view.blob, style, ctrl.signal, view.facts);
+      // The plan goes with the view, so the model knows what lies at and past its edges.
+      let plan: Blob | undefined;
+      try {
+        if (level && view.camera) plan = await planImage(level, view.camera);
+      } catch {
+        plan = undefined; // the view and its facts still go
+      }
+      const blob = await renderPhoto(ai, view.blob, style, ctrl.signal, view.facts, plan);
       setPhoto({
         blob,
         url: URL.createObjectURL(blob),

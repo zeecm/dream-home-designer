@@ -440,9 +440,20 @@ export const Design = z.object({
     }),
   ),
   usage: z.array(Usage),
-  accepted: z.object({ at: z.string(), parts: z.array(Part), level: Level }).nullable(),
+  /**
+   * After as accepted (`level`), and as it was just before (`prior`: what the accept itself
+   * changed is the difference; records from before it was kept have none).
+   */
+  accepted: z
+    .object({ at: z.string(), parts: z.array(Part), level: Level, prior: Level.optional() })
+    .nullable(),
 });
 export type Design = z.infer<typeof Design>;
 
-/** What `designResult` needs of a version. */
-export type DesignInput = Pick<Design, 'id' | 'brief' | 'aliases' | 'concept' | 'spaces'>;
+/**
+ * What `designResult` needs of a version. Its request's `hand-edit` locks keep those parts as
+ * the plan has them (see `heldAspects`).
+ */
+export type DesignInput = Pick<Design, 'id' | 'brief' | 'aliases' | 'concept' | 'spaces'> & {
+  request?: Pick<Design['request'], 'locks'>;
+};

@@ -4,6 +4,7 @@ import {
   type DesignResult,
   type RunEstimate,
   type StepPrompt,
+  lockCovers,
   renovationChanges,
   usageTotals,
 } from '@dhd/core';
@@ -22,10 +23,15 @@ import {
   type ChangeRequest,
   ROOM_ASPECTS,
   baseOf,
+  changeFrom,
   changePlan,
+  changedText,
   contextFor,
   estimateFor,
+  heldHead,
+  heldRows,
   needsCostCheck,
+  onPlanNow,
   planChanged,
   plannedPrompts,
   resultFor,
@@ -42,6 +48,7 @@ import {
   designOpts,
   finishDesign,
   finishPlan,
+  openCompare,
   selectDesign,
   stopRun,
   useDesigner,
@@ -83,24 +90,14 @@ const isStopped = (d: Design) =>
 const tabName = (d: Design, accepted: boolean) =>
   `V${d.n}${accepted ? ', accepted' : ''}${isStopped(d) ? ', stopped' : ''}`;
 
-/** What a version changed from the one it was made from: "From V1. Changed: Kitchen furniture · “Cheaper.”" */
-function changedText(d: Design, parentN: number | null): string {
-  const sc = d.request.scope;
-  const aspects = (as: Aspect[]) => as.map((a) => ASPECT_NAMES[a].toLowerCase()).join(', ');
-  const what =
-    sc.kind === 'space'
-      ? `${d.spaces[sc.space]?.name ?? 'a room'} ${aspects(sc.aspects)}`
-      : sc.kind === 'aspects'
-        ? `the whole design: ${aspects(sc.aspects)}`
-        : 'the whole design';
-  const words = d.request.feedback.trim();
-  return `${parentN ? `From V${parentN}. ` : ''}Changed: ${what}${words ? ` · “${words}”` : ''}`;
-}
-
 /** A version on the plan as it is now, worked out once per version and plan. */
 export function useResult(d: Design | undefined): DesignResult | null {
   const project = useProject();
-  return useMemo(() => (d ? resultFor(project, d, designOpts(project)) : null), [project, d]);
+  const designs = useDesigner((st) => st.designs);
+  return useMemo(
+    () => (d ? resultFor(project, onPlanNow(d, designs, project), designOpts(project)) : null),
+    [project, d, designs],
+  );
 }
 
 function duration(ms: number) {
@@ -377,9 +374,24 @@ const QUICK = [
   'Kid-friendly',
 ] as const;
 
-function ChangeSomething({ d, r, next }: { d: Design; r: DesignResult; next: number }) {
+function ChangeSomething({ d, next }: { d: Design; next: number }) {
   const project = useProject();
   const ai = useAi();
+  const designs = useDesigner((st) => st.designs);
+  // Once a version is accepted, the change starts from After as it is, keeping what was
+  // changed by hand since (D9).
+  const from = useMemo(() => changeFrom(d, designs, project), [d, designs, project]);
+  const r = useMemo(() => resultFor(project, from.v, designOpts(project)), [project, from.v]);
+  // One row per space and part (a lock holds the whole part): unlocking a row unlocks it all.
+  const rows = useMemo(() => {
+    const after = project.renovation?.levels[0];
+    return heldRows(from.held, (l) => heldHead(l, r?.spaces ?? [], after));
+  }, [from.held, r, project]);
+  const [unlocked, setUnlocked] = useState<string[]>([]);
+  const held = useMemo(
+    () => rows.filter((x) => !unlocked.includes(x.key)).flatMap((x) => x.locks),
+    [rows, unlocked],
+  );
   // A paid button waits while a run starts (a double click starts one run).
   const busy = useDesigner((st) => st.starting || !!st.run);
   const { prices } = useSpend();
@@ -389,26 +401,36 @@ function ChangeSomething({ d, r, next }: { d: Design; r: DesignResult; next: num
   const [feedback, setFeedback] = useState('');
   const [check, setCheck] = useState<RunEstimate | null>(null);
   const area = useRef<HTMLTextAreaElement>(null);
-  const spaces = r.spaces;
+  const spaces = r?.spaces ?? [];
   const offered: Aspect[] = scope === 'all' ? ['walls', ...ROOM_ASPECTS] : ROOM_ASPECTS;
   const req: ChangeRequest = {
     scope,
     aspects: aspects.filter((a) => offered.includes(a)),
     keep,
     feedback,
+    held,
   };
+  /** Kept because it was changed by hand (the person can unlock it below). */
+  const heldOn = (space: string, a: Aspect) =>
+    held.some(
+      (l) =>
+        l.aspect === a &&
+        (space === '*'
+          ? l.space === '*'
+          : lockCovers(l, spaces.find((s) => s.key === space)?.rooms ?? [])),
+    );
   // The requests, worked out again only when what is asked changes (not at each keystroke).
   const asked = req.aspects.join();
   // biome-ignore lint/correctness/useExhaustiveDependencies: what is asked, not the words
   const planned = useMemo(() => {
-    const ctx = contextFor(project, d.brief, d.aliases);
-    const made = changePlan(d, r, { ...req, feedback: '' }, 'dsn_estimate');
+    const ctx = contextFor(project, from.v.brief, from.v.aliases);
+    const made = r && changePlan(from.v, r, { ...req, feedback: '' }, 'dsn_estimate');
     if (!ctx || !made) return null;
     return {
       prompts: plannedPrompts(ctx, made.design, made.plan, designOpts(project)),
       labels: made.labels,
     };
-  }, [project, d, r, scope, asked, keep]);
+  }, [project, from.v, r, scope, asked, keep, held]);
   const est = useMemo(() => {
     if (!ai || !planned) return null;
     const words = feedback.trim();
@@ -465,7 +487,10 @@ function ChangeSomething({ d, r, next }: { d: Design; r: DesignResult; next: num
             key={a}
             type="button"
             className="chip"
-            aria-pressed={aspects.includes(a)}
+            // Walls changed by hand stay as they are: the chip says so, off.
+            aria-pressed={aspects.includes(a) && !(a === 'walls' && heldOn('*', 'walls'))}
+            disabled={a === 'walls' && heldOn('*', 'walls')}
+            title={a === 'walls' && heldOn('*', 'walls') ? 'Kept as you changed them' : undefined}
             onClick={() => toggleAspect(a)}
           >
             {ASPECT_NAMES[a]}
@@ -478,7 +503,8 @@ function ChangeSomething({ d, r, next }: { d: Design; r: DesignResult; next: num
           <label className="check-row">
             <input
               type="checkbox"
-              checked={!!keep['*']?.includes('walls')}
+              checked={!!keep['*']?.includes('walls') || heldOn('*', 'walls')}
+              disabled={heldOn('*', 'walls')}
               onChange={() => toggleKeep('*', 'walls')}
             />
             <span>Walls and doors</span>
@@ -508,7 +534,9 @@ function ChangeSomething({ d, r, next }: { d: Design; r: DesignResult; next: num
                       <input
                         type="checkbox"
                         aria-label={`Keep ${s.name}: ${ASPECT_NAMES[a].toLowerCase()}`}
-                        checked={!!keep[s.key]?.includes(a)}
+                        checked={!!keep[s.key]?.includes(a) || heldOn(s.key, a)}
+                        disabled={heldOn(s.key, a)}
+                        title={heldOn(s.key, a) ? 'Kept as you changed it' : undefined}
                         onChange={() => toggleKeep(s.key, a)}
                       />
                     </label>
@@ -519,6 +547,46 @@ function ChangeSomething({ d, r, next }: { d: Design; r: DesignResult; next: num
           </tbody>
         </table>
       </fieldset>
+      {rows.length > 0 && (
+        <section className="held-list" aria-labelledby="held-h">
+          <h4 id="held-h" className="field-label">
+            Kept as you changed them
+          </h4>
+          <ul>
+            {rows.map((row) => {
+              const k = row.key;
+              const off = unlocked.includes(k);
+              return (
+                <li key={k} className={off ? 'held-off' : undefined}>
+                  <span>
+                    {row.text}
+                    {off && <span className="held-note"> · redone this time</span>}
+                  </span>
+                  {off ? (
+                    <button
+                      type="button"
+                      className="link-btn"
+                      onClick={() => setUnlocked(unlocked.filter((x) => x !== k))}
+                    >
+                      Keep
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="icon-btn held-unlock"
+                      aria-label={`Unlock ${row.text}`}
+                      title="Unlock: let the designer change it"
+                      onClick={() => setUnlocked([...unlocked, k])}
+                    >
+                      {icons.close}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
       <label className="field">
         <span className="field-label">What would you like different?</span>
         <textarea
@@ -847,6 +915,14 @@ const Card = memo(function Card({
       </details>
       {!running && (
         <div className="designer-actions">
+          <button
+            type="button"
+            className="btn btn-block"
+            onClick={openCompare}
+            data-compare-open=""
+          >
+            Compare
+          </button>
           <div className="button-row">
             <button
               type="button"
@@ -946,6 +1022,7 @@ export function DesignerPanel() {
       note: s.note,
       memory: s.memory,
       accepting: s.accepting,
+      wantSide: s.wantSide,
     })),
   );
   const project = useProject();
@@ -966,10 +1043,13 @@ export function DesignerPanel() {
       if (useEditor.getState().preview) useEditor.getState().setPreview(null);
       return;
     }
-    const side = useEditor.getState().preview?.side ?? 'version';
+    // A side asked for (Compare's columns) wins once; otherwise the side on show stays.
+    const want = st.wantSide;
+    const side = want ?? useEditor.getState().preview?.side ?? 'version';
+    if (want) useDesigner.setState({ wantSide: null });
     useEditor.getState().setPreview({ level: r.level, before, label: `V${d.n}`, side });
     if (reduced()) useEditor.getState().requestFit();
-  }, [st.previewing, d, r, project.levels]);
+  }, [st.previewing, st.wantSide, d, r, project.levels]);
   useEffect(() => () => useEditor.getState().setPreview(null), []);
 
   // Esc stops a run (on a computer).
@@ -977,6 +1057,8 @@ export function DesignerPanel() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('dialog[open]'))
         return;
+      // Esc while comparing closes Compare (its own handler), never stops a paid run.
+      if (useDesigner.getState().comparing) return;
       if (useDesigner.getState().run) {
         e.preventDefault();
         stopRun();
@@ -1102,7 +1184,7 @@ export function DesignerPanel() {
         {st.designs.length > 0 && <Tabs designs={st.designs} selected={st.selected} />}
         {st.note && <p className="field-hint">{st.note}</p>}
         {d && r && st.mode === 'change' && !running ? (
-          <ChangeSomething key={d.id} d={d} r={r} next={nextN} />
+          <ChangeSomething key={d.id} d={d} next={nextN} />
         ) : d && r ? (
           <Card d={d} r={r} running={running && st.run?.designId === d.id} />
         ) : null}

@@ -1,4 +1,11 @@
-import { type SceneFacts, sceneSheet } from '@dhd/core';
+import {
+  type Level,
+  SKETCH_KEY,
+  type SceneCamera,
+  type SceneFacts,
+  planSketch,
+  sceneSheet,
+} from '@dhd/core';
 import type { AiSettings } from './credentials';
 import { AiError, anySignal, errorBody, failure, timeoutSignal } from './providers';
 
@@ -14,6 +21,9 @@ export const RENDER_STYLES = {
 } as const;
 export type RenderStyle = keyof typeof RENDER_STYLES;
 
+/** What the second image is, when the plan goes with the view. */
+const PLAN_NOTE = `The second image is the floor plan of the whole home seen from above, for reference only: never draw it or copy its look. On it ${SKETCH_KEY} Use it to know what is at the picture's edges and just beyond them: a doorway or opening the plan shows stays open, and a wall the plan shows as solid stays solid.`;
+
 /** Said again at the end, where a model weighs it most: the same picture, only real. */
 const LAST_WORD =
   'The result must match the image line for line: only the materials and the light change. Nothing added, removed or moved.';
@@ -23,21 +33,25 @@ const LAST_WORD =
  * view) a short sheet of what is really there, so a view from high up isn't read as a big
  * room and filled with furniture that wouldn't fit.
  */
-export function renderPrompt(style: RenderStyle, facts?: SceneFacts): string {
+export function renderPrompt(style: RenderStyle, facts?: SceneFacts, plan = false): string {
   // Daylight "through the windows" with none in sight has a model add one to explain it.
   const glazed = facts?.openings.some((o) => o.kind === 'window' || o.kind === 'glass') ?? true;
   const light = glazed
     ? 'natural daylight through the windows'
     : 'soft, even indoor light, as there is no window in view';
-  const base = `Edit this image. It is an exact 3D model of a real home, drawn to scale: not a sketch to interpret or improve. Make it look like a real photograph of this exact room by changing only how the surfaces look (realistic materials and textures) and the light (${light}, soft shadows, light bouncing off the walls). ${RENDER_STYLES[style]} Every edge must stay where it is: the same camera, framing and perspective; the same walls, corners, ceiling and floor; the same doors, windows and openings, the same sizes and in the same places; the same furniture, in the same places, sizes and orientations. Add nothing: no furniture, rugs, lamps, curtains, pictures, plants, décor, people or text. Remove nothing. Never add a door, doorway, arch, opening, niche or window: a solid wall stays solid, and empty floor stays empty.`;
-  if (!facts) return `${base}\n\n${LAST_WORD}`;
+  const base = `${plan ? 'Edit the first image. ' : 'Edit this image. '}It is an exact 3D model of a real home, drawn to scale: not a sketch to interpret or improve. Make it look like a real photograph of this exact room by changing only how the surfaces look (realistic materials and textures) and the light (${light}, soft shadows, light bouncing off the walls). ${RENDER_STYLES[style]} Every edge must stay where it is: the same camera, framing and perspective; the same walls, corners, ceiling and floor; the same doors, windows and openings, the same sizes and in the same places; the same furniture, in the same places, sizes and orientations. Add nothing: no furniture, rugs, lamps, curtains, pictures, plants, décor, people or text. Remove nothing. Never add a door, doorway, arch, opening, niche or window: a solid wall stays solid, and empty floor stays empty.`;
+  const key = plan ? `\n\n${PLAN_NOTE}` : '';
+  if (!facts) return `${base}${key}\n\n${LAST_WORD}`;
   // The sheet fits its own length (pieces and openings dropped and counted), its
   // instruction first.
   const sheet = sceneSheet(facts, { finishes: style === 'as' });
-  return `${base}\n\nThe true scene, measured: ${sheet}\n\n${LAST_WORD}`;
+  return `${base}${key}\n\nThe true scene, measured: ${sheet}\n\n${LAST_WORD}`;
 }
 
 const TIMEOUT = 240_000;
+
+/** OpenAI image models that take several pictures (the view and the plan). */
+export const MANY_IMAGES = /^gpt-image-/;
 
 /** OpenAI image models known to take `input_fidelity` (gpt-image-1 and its snapshots). */
 export const HIGH_FIDELITY = /^gpt-image-1(-\d{4}-\d{2}-\d{2})?$/;
@@ -70,6 +84,25 @@ async function fitWithin(png: Blob, max: number): Promise<Blob> {
 }
 
 /**
+ * The floor plan with the camera marked (`planSketch`), as a PNG for the image model: so it
+ * knows the home around the view, not only what the picture shows.
+ */
+export async function planImage(level: Level, camera: SceneCamera, px = 1024): Promise<Blob> {
+  // The view's shape: a model may make its picture the shape of the last one it is given.
+  const { svg, width, height } = planSketch(level, camera, px, camera.aspect);
+  const img = new Image();
+  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  await img.decode();
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext('2d')?.drawImage(img, 0, 0, width, height);
+  return await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('No plan picture'))), 'image/png'),
+  );
+}
+
+/**
  * A photo-real picture of `view` (a PNG of the 3D view) by the person's image model, told
  * the facts of the view when given them.
  */
@@ -79,8 +112,12 @@ export async function renderPhoto(
   style: RenderStyle,
   signal?: AbortSignal,
   facts?: SceneFacts,
+  plan?: Blob,
 ): Promise<Blob> {
-  const prompt = renderPrompt(style, facts);
+  // An older OpenAI image model (dall-e-2) takes one picture: the view alone.
+  const withPlan =
+    plan && (ai.provider !== 'openai' || MANY_IMAGES.test(ai.model)) ? plan : undefined;
+  const prompt = renderPrompt(style, facts, !!withPlan);
   const timeout = timeoutSignal(TIMEOUT);
   const both = signal ? anySignal([signal, timeout]) : timeout;
   let res: Response;
@@ -95,7 +132,13 @@ export async function renderPhoto(
     if (ai.provider === 'openai') {
       const form = new FormData();
       form.append('model', ai.model);
-      form.append('image', view, 'view.png');
+      // With the plan, both go as `image[]`, the view first (kept most closely).
+      if (withPlan) {
+        form.append('image[]', view, 'view.png');
+        form.append('image[]', withPlan, 'plan.png');
+      } else {
+        form.append('image', view, 'view.png');
+      }
       form.append('prompt', prompt);
       form.append('size', 'auto');
       // Keep the room as it is drawn (walls, furniture), not a loose impression of it: only
@@ -119,6 +162,16 @@ export async function renderPhoto(
                 role: 'user',
                 parts: [
                   { inline_data: { mime_type: 'image/png', data: await blobToBase64(view) } },
+                  ...(withPlan
+                    ? [
+                        {
+                          inline_data: {
+                            mime_type: 'image/png',
+                            data: await blobToBase64(withPlan),
+                          },
+                        },
+                      ]
+                    : []),
                   { text: prompt },
                 ],
               },
