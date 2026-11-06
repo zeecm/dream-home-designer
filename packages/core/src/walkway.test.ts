@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { bedSides } from './clearance';
 import { addOpening, drawWall, updateWall } from './commands';
 import { blankProject } from './factory';
 import { sampleFlatProject } from './fixtures/sampleFlat';
@@ -287,6 +288,27 @@ describe('walkways', () => {
       expect(i.need).toBeCloseTo(0.6, 5);
       expect(Math.abs(i.have - 0.5)).toBeLessThanOrEqual(0.02);
     }
+    // A side slice 1 already finds short (0.40 m to the wall) isn't walked to again.
+    const tight = withItems(level(f), [['bed-queen', { x: 7.95 - 0.4 - queen.size.w / 2, y: by }]]);
+    const bedId = lastId();
+    const bed2 = tight.items[bedId];
+    if (!bed2) throw new Error('no bed');
+    expect(bedSides(tight, bed2).map((x) => x.side)).toEqual(['left']);
+    expect(
+      walkwayReport(tight)
+        .routes.filter((x) => x.route === 'bed')
+        .map((x) => x.to.side),
+    ).toEqual(['left']);
+    // A single bed against a wall: only its open side.
+    const single = furnitureKind('bed-single');
+    if (!single) throw new Error('no single');
+    const alone = withItems(level(f), [['bed-single', { x: 7.95 - single.size.w / 2, y: by }]]);
+    const sb = alone.items[lastId()];
+    if (!sb) throw new Error('no bed');
+    const routes = walkwayReport(alone).routes.filter((x) => x.route === 'bed');
+    expect(routes).toHaveLength(1);
+    expect(routes[0]?.to.side).toBe('left');
+    expect(routes[0]?.ok).toBe(true);
   });
 
   it('10. no door to the outside: no walkways, no-main-door', () => {
@@ -330,16 +352,16 @@ describe('walkways', () => {
     ]);
     const lvl = withItems(base, pieces);
     walkwayReport(withItems(base, pieces.slice(0, 1)));
-    const runs = 5;
-    let total = 0;
-    for (let i = 0; i < runs; i++) {
+    const times: number[] = [];
+    for (let i = 0; i < 7; i++) {
       // A new level object each time (as a drag makes), so nothing is cached.
       const fresh = Object.freeze({ ...lvl, items: { ...lvl.items } });
       const t0 = performance.now();
       walkwayReport(fresh);
-      total += performance.now() - t0;
+      times.push(performance.now() - t0);
     }
-    const ms = total / runs;
+    // The median, so a busy machine's one slow run doesn't decide it.
+    const ms = times.sort((a, b) => a - b)[3] as number;
     console.log(`walkways: ${ms.toFixed(2)} ms`);
     expect(ms).toBeLessThan(40);
   });
