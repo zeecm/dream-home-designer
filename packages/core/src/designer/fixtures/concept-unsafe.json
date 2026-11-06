@@ -1,0 +1,188 @@
+{
+  "name": "An open plan that ignores every rule the flat has, with a name far too long to keep",
+  "summary": "Opens everything up.",
+  "style": {
+    "name": "Open loft",
+    "mood": "Raw and open.",
+    "palette": [
+      { "name": "Concrete", "hex": "#a7a6a2", "use": "walls" },
+      { "name": "Green", "hex": "green", "use": "feature" },
+      { "name": "Steel", "hex": "#4b4e52", "use": "ACCENT" }
+    ]
+  },
+  "walls": [
+    {
+      "op": "remove_wall",
+      "wall": "W32",
+      "opening": null,
+      "a": null,
+      "b": null,
+      "height": null,
+      "t": null,
+      "width": null,
+      "style": null
+    },
+    {
+      "op": "Remove_Wall",
+      "wall": "W6",
+      "opening": null,
+      "a": null,
+      "b": null,
+      "height": null,
+      "t": null,
+      "width": null,
+      "style": null
+    },
+    {
+      "op": "remove_opening",
+      "wall": null,
+      "opening": "D2",
+      "a": null,
+      "b": null,
+      "height": null,
+      "t": null,
+      "width": null,
+      "style": null
+    },
+    {
+      "op": "remove_wall",
+      "wall": "W13",
+      "opening": null,
+      "a": null,
+      "b": null,
+      "height": null,
+      "t": null,
+      "width": null,
+      "style": null
+    },
+    {
+      "op": "glass_wall",
+      "wall": "W12",
+      "opening": null,
+      "a": null,
+      "b": null,
+      "height": null,
+      "t": null,
+      "width": null,
+      "style": null
+    },
+    {
+      "op": "remove_opening",
+      "wall": null,
+      "opening": "D9",
+      "a": null,
+      "b": null,
+      "height": null,
+      "t": null,
+      "width": null,
+      "style": null
+    },
+    {
+      "op": "remove_opening",
+      "wall": null,
+      "opening": "D13",
+      "a": null,
+      "b": null,
+      "height": null,
+      "t": null,
+      "width": null,
+      "style": null
+    },
+    {
+      "op": "remove_wall",
+      "wall": "W99",
+      "opening": null,
+      "a": null,
+      "b": null,
+      "height": null,
+      "t": null,
+      "width": null,
+      "style": null
+    },
+    {
+      "op": "add_wall",
+      "wall": null,
+      "opening": null,
+      "a": { "x": 6.4, "y": 6.2 },
+      "b": { "x": 8.0, "y": 7.8 },
+      "height": null,
+      "t": null,
+      "width": null,
+      "style": null
+    },
+    {
+      "op": "add_wall",
+      "wall": null,
+      "opening": null,
+      "a": { "x": 1e9, "y": 2 },
+      "b": { "x": 3, "y": 2 },
+      "height": null,
+      "t": null,
+      "width": null,
+      "style": null
+    },
+    {
+      "op": "add_door",
+      "wall": "W10",
+      "opening": null,
+      "a": null,
+      "b": null,
+      "height": null,
+      "t": 0.7,
+      "width": 0.4,
+      "style": "SWING"
+    },
+    {
+      "op": "demolish_everything",
+      "wall": "W5",
+      "opening": null,
+      "a": null,
+      "b": null,
+      "height": null,
+      "t": null,
+      "width": null,
+      "style": null
+    }
+  ],
+  "rooms": [
+    {
+      "room": "R8",
+      "at": null,
+      "name": "Store room",
+      "use": "store",
+      "intent": "More storage.",
+      "floor": "concrete",
+      "paint": "paint-grey"
+    },
+    {
+      "room": "R42",
+      "at": null,
+      "name": "Nowhere",
+      "use": "study",
+      "intent": "",
+      "floor": "concrete",
+      "paint": "paint-grey"
+    },
+    {
+      "room": null,
+      "at": { "x": 20, "y": 20 },
+      "name": "Outside",
+      "use": "living",
+      "intent": "",
+      "floor": "concrete",
+      "paint": "paint-grey"
+    },
+    {
+      "room": "R3",
+      "at": null,
+      "name": "Loft <script>alert(1)</script>",
+      "use": "Living",
+      "intent": "Everything in one room.",
+      "floor": "lava",
+      "paint": "concrete-grey"
+    }
+  ],
+  "bathrooms": [],
+  "reasons": ["One", "Two", "Three", "Four", "Five", "Six", "Seven"],
+  "notes": []
+}
