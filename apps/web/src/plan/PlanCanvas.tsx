@@ -15,6 +15,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { TraceDraftLayer } from '../ai/DraftLayer';
 import { type PixelBox, inkBounds } from '../assets';
 import { ClearanceLayer } from '../clearance/clearance';
+import { DeliveryLayer } from '../delivery/delivery';
 import { type Tool, useEditor } from '../editor';
 import { currentLevel, useLevel, useProject, useStore } from '../store';
 import { Compass, describeNorth } from '../ui/Compass';
@@ -846,6 +847,7 @@ export function PlanCanvas() {
             />
             <RenovationMarks />
             <ClearanceLayer level={level} />
+            <DeliveryLayer level={level} zoom={v.zoom} />
             <TraceDraftLayer />
             <PlanHighlights
               level={level}

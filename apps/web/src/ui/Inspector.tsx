@@ -56,6 +56,7 @@ import {
   useClearanceOn,
 } from '../clearance/clearance';
 import { CarpentryLine, CostSummary } from '../cost/estimate';
+import { GettingItIn } from '../delivery/delivery';
 import { useEditor } from '../editor';
 import { roomsBeside } from '../plan/keyboard';
 import { OPENING_PRESETS, ROOM_NAMES } from '../presets';
@@ -850,6 +851,7 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
       {/* First, so a phone's sheet shows it without scrolling. */}
       <ItemClearances level={level} id={id} />
       <CarpentryLine item={it} />
+      <GettingItIn level={level} id={id} />
       <LengthField
         label="Width"
         value={size.w}

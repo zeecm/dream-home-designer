@@ -29,6 +29,9 @@ const MIGRATIONS: Record<number, (doc: Record<string, unknown>) => Record<string
   // 7 adds the optional Wall.build and Wall.glassAbove, and Opening.style, panels, glazed and
   // stack: every version-6 wall is solid, every door a swing door.
   6: (doc) => doc,
+  // 8 lets a custom model be a piece by size: an optional hash, and shape, material and
+  // diagonal. Every version-7 model has a hash.
+  7: (doc) => doc,
 };
 
 export function migrate(input: unknown): unknown {

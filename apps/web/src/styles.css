@@ -2887,3 +2887,57 @@ h3.field-label {
     display: none;
   }
 }
+
+/* The way in: dashed from the main door, door by door, to the piece. */
+.way-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2px;
+  stroke-dasharray: 6 4;
+}
+.way circle {
+  stroke: var(--surface);
+  stroke-width: 1.5px;
+}
+.way text {
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+  font-weight: 600;
+}
+.way-fits circle,
+.way-fits text {
+  fill: var(--accent);
+}
+.way-tight circle,
+.way-tight text {
+  fill: #b45309;
+}
+.way-bad circle,
+.way-bad text {
+  fill: #d92d20;
+}
+.way-hinges circle,
+.way-hinges text {
+  fill: #7c3aed;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .way-tight circle,
+  :root:not([data-theme="light"]) .way-tight text {
+    fill: #f59e0b;
+  }
+  :root:not([data-theme="light"]) .way-bad circle,
+  :root:not([data-theme="light"]) .way-bad text {
+    fill: #ff6b5e;
+  }
+  :root:not([data-theme="light"]) .way-hinges circle,
+  :root:not([data-theme="light"]) .way-hinges text {
+    fill: #a78bfa;
+  }
+}
+/* A long name with no spaces wraps rather than spilling out. */
+.inspector h2,
+.catalogue-name,
+.inspector .note {
+  overflow-wrap: anywhere;
+}

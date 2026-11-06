@@ -98,8 +98,11 @@ async function syncOnce(projectId: string) {
   if (role === 'viewer' || !['saved', 'dirty', 'saving'].includes(sync.kind)) return;
   const held = synced.get(projectId) ?? new Set<string>();
   synced.set(projectId, held);
-  const todo = Object.values(editor.doc.models ?? {}).filter(
-    (m) => !held.has(m.hash) && !refused.has(`${projectId}|${m.hash}`),
+  // Pieces added by size have no file to store.
+  const todo = Object.values(editor.doc.models ?? {}).flatMap((m) =>
+    m.hash && !held.has(m.hash) && !refused.has(`${projectId}|${m.hash}`)
+      ? [{ ...m, hash: m.hash }]
+      : [],
   );
   if (todo.length === 0) return;
   // Ask once what the server has, so a model is never sent twice.

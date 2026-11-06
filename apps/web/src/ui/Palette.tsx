@@ -1,5 +1,6 @@
 import { FURNITURE, type FurnitureKind, type OpeningKind, customKind } from '@dhd/core';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { AddBySize } from '../delivery/delivery';
 import { type Tool, useEditor } from '../editor';
 import { addModelFile } from '../models';
 import { TOOL_HINTS } from '../plan/tools';
@@ -122,7 +123,7 @@ function Catalogue({ idPrefix }: { idPrefix: string }) {
   const viewer = useStore((s) => s.role === 'viewer');
   const own = Object.values(models ?? {})
     .map(customKind)
-    .filter((k) => matches(k) || (q && 'your models'.includes(q)));
+    .filter((k) => matches(k) || (q && 'your furniture'.includes(q)));
   const groups = [...new Set(shown.map((k) => k.category))];
   const cm = (m: number) => Math.round(m * 100);
   const piece = (k: FurnitureKind, thumb: ReactNode) => (
@@ -151,7 +152,7 @@ function Catalogue({ idPrefix }: { idPrefix: string }) {
       />
       <div className="catalogue-list">
         <div className="catalogue-group">
-          <p className="catalogue-heading">Your models</p>
+          <p className="catalogue-heading">Your furniture</p>
           <ul className="choice-list">
             {own.map((k) =>
               piece(
@@ -160,6 +161,11 @@ function Catalogue({ idPrefix }: { idPrefix: string }) {
                   <CubeIcon />
                 </span>,
               ),
+            )}
+            {!viewer && (
+              <li>
+                <AddBySize onAdded={(id) => pick(id)} />
+              </li>
             )}
             {!viewer && (
               <li>
