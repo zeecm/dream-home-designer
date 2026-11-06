@@ -234,9 +234,18 @@ function highestOn(level: Level, w: Wall, kind: ElecKind): number {
   return Math.floor((kind === 'aircon' ? top : top - h / 2) * 1000 + 1e-6) / 1000;
 }
 
+/** The lowest a point's plate bottom goes: clear of the skirting. */
+export const PLATE_FLOOR = 0.05;
+
+/** The lowest height a point of `kind` can have (its plate's bottom PLATE_FLOOR up). */
+export function minHeight(kind: ElecKind): number {
+  const h = ELEC_KINDS[kind].plate.h;
+  return Math.ceil((PLATE_FLOOR + (kind === 'aircon' ? h : h / 2)) * 1000 - 1e-6) / 1000;
+}
+
 /**
- * The highest a point can go: under its room's ceiling (the level's, where the room sets
- * none), and on a half wall under its top.
+ * The highest a point can go: its plate under its room's ceiling (the level's, where the
+ * room sets none), and on a half wall JAMB_CLEAR under its top.
  */
 export function maxHeight(level: Level, p: ElecPoint): number {
   const pos = pointPosition(level, p);
@@ -246,8 +255,10 @@ export function maxHeight(level: Level, p: ElecPoint): number {
     x: pos.at.x + pos.normal.x * 0.05,
     y: pos.at.y + pos.normal.y * 0.05,
   });
+  const h = ELEC_KINDS[p.kind].plate.h;
+  const under = Math.floor((p.kind === 'aircon' ? ceiling : ceiling - h / 2) * 1000 + 1e-6) / 1000;
   const w = level.walls[p.wall.wallId];
-  return Math.min(ceiling, w ? highestOn(level, w, p.kind) : ceiling);
+  return Math.min(under, w ? highestOn(level, w, p.kind) : under);
 }
 
 function usualHeight(level: Level, kind: ElecKind, place?: WallPlace): number {
@@ -308,8 +319,10 @@ function verticalSpan(kind: ElecKind, height: number): [number, number] {
 /**
  * Where along a wall face a point can go, as near `along` as it can: kept on the face
  * between the inside corners, never in a door or passage (moved to the nearer jamb, its
- * plate JAMB_CLEAR from it), and in a window's width only under its sill (or over its head).
- * Null if the face has no room for it, on a glass wall, or above a half wall's top.
+ * plate JAMB_CLEAR from it; a switch to a swing door's latch side), in a window's width only
+ * under its sill (or over its head), and never on another point of the face at its height
+ * (`self`, the point being moved, aside). Null if the face has no room for it, on a glass
+ * wall, or above a half wall's top.
  */
 export function clearAlong(
   level: Level,
@@ -317,6 +330,7 @@ export function clearAlong(
   kind: ElecKind,
   place: WallPlace,
   height: number,
+  self?: string,
 ): number | null {
   const f = geom.frames[place.wallId];
   // Nothing goes on glass, nor higher on a half wall than its top.
@@ -328,28 +342,45 @@ export function clearAlong(
   const hi = Math.min(f.length, span[1]) - half;
   if (hi < lo) return null;
   const [bottom, top] = verticalSpan(kind, height);
-  // Openings on this wall the point can't overlap at its height.
-  const blocks = Object.values(level.openings)
-    .filter((o) => o.wallId === place.wallId)
-    .filter((o) => {
-      const sill = o.kind === 'window' ? o.sill : 0;
-      return top > sill + 1e-9 && bottom < sill + o.height - 1e-9;
-    })
-    .map((o) => {
-      const c = o.t * f.length;
-      return [c - o.width / 2, c + o.width / 2] as [number, number];
-    });
+  const across = (b: number, t: number) => top > b + 1e-9 && bottom < t - 1e-9;
+  // Openings on this wall the point can't overlap at its height (a swing door's latch jamb
+  // noted), and the other points on this face.
+  const blocks: { s0: number; s1: number; latch?: 0 | 1 }[] = [];
+  for (const o of Object.values(level.openings)) {
+    if (o.wallId !== place.wallId) continue;
+    const sill = o.kind === 'window' ? o.sill : 0;
+    if (!across(sill, sill + o.height)) continue;
+    const c = o.t * f.length;
+    const swing = o.kind === 'door' && (o.style ?? 'swing') === 'swing';
+    const latch = swing ? ((o.swing ?? 'leftIn').startsWith('left') ? 1 : 0) : undefined;
+    blocks.push({ s0: c - o.width / 2, s1: c + o.width / 2, latch });
+  }
+  for (const q of Object.values(level.points ?? {})) {
+    if (q.id === self || !q.wall || q.wall.wallId !== place.wallId) continue;
+    if (q.wall.side !== place.side || !across(...verticalSpan(q.kind, q.wall.height))) continue;
+    const c = q.wall.t * f.length;
+    const w = ELEC_KINDS[q.kind].plate.w / 2;
+    blocks.push({ s0: c - w, s1: c + w });
+  }
   const ok = (u: number) =>
     u >= lo - 1e-9 &&
     u <= hi + 1e-9 &&
     blocks.every(
-      ([s0, s1]) => u + half <= s0 - JAMB_CLEAR + 1e-9 || u - half >= s1 + JAMB_CLEAR - 1e-9,
+      ({ s0, s1 }) => u + half <= s0 - JAMB_CLEAR + 1e-9 || u - half >= s1 + JAMB_CLEAR - 1e-9,
     );
   const want = Math.min(hi, Math.max(lo, place.along));
   if (ok(want)) return want;
-  // Beside each jamb in the way, nearest first.
+  const beside = (b: (typeof blocks)[number], end: 0 | 1) =>
+    end === 0 ? b.s0 - JAMB_CLEAR - half : b.s1 + JAMB_CLEAR + half;
+  // A switch tapped in a swing door: beside its latch, not behind the door on its hinge.
+  if (kind === 'switch') {
+    const door = blocks.find((b) => b.latch !== undefined && want > b.s0 && want < b.s1);
+    const at = door && beside(door, door.latch as 0 | 1);
+    if (at !== undefined && ok(at)) return at;
+  }
+  // Beside each jamb or point in the way, nearest first.
   const candidates = blocks
-    .flatMap(([s0, s1]) => [s0 - JAMB_CLEAR - half, s1 + JAMB_CLEAR + half])
+    .flatMap((b) => [beside(b, 0), beside(b, 1)])
     .filter(ok)
     .sort((p, q) => Math.abs(p - want) - Math.abs(q - want));
   return candidates[0] ?? null;
@@ -357,18 +388,20 @@ export function clearAlong(
 
 /**
  * Where a point of `kind` goes for a tap at `p`: on the nearest wall face within
- * `tolerance` (0.3 m), at its default height (or `height`), clear of openings. Null with no
- * wall face near, or no room on it.
+ * `tolerance` (0.3 m), at its default height (or `height`), clear of openings and other
+ * points (`self`, the one being moved, aside). Of a wall's two faces, the one the tap is
+ * beyond, or for a tap within the wall, the one looking into a room: a face with no room
+ * only for a tap clearly outside it. Null with no wall face near, or no room on it.
  */
 export function placePoint(
   level: Level,
   kind: ElecKind,
   p: Vec2,
-  opts: { geom?: PlanGeometry; tolerance?: number; height?: number } = {},
+  opts: { geom?: PlanGeometry; tolerance?: number; height?: number; self?: string } = {},
 ): (NonNullable<ElecPoint['wall']> & { at: Vec2 }) | null {
   const geom = opts.geom ?? planGeometry(level);
   const tol = opts.tolerance ?? 0.3;
-  let best: { place: WallPlace; dist: number; len: number } | null = null;
+  let best: { place: WallPlace; dist: number; len: number; off: number } | null = null;
   for (const w of Object.values(level.walls)) {
     if (isBoundary(w)) continue;
     const a = level.vertices[w.a];
@@ -387,17 +420,25 @@ export function placePoint(
     const outside = Math.max(0, -u, u - len);
     const dist = Math.hypot(off, outside);
     if (dist > tol || (best && dist >= best.dist)) continue;
-    best = { place: { wallId: w.id, along: u, side }, dist, len };
+    best = { place: { wallId: w.id, along: u, side }, dist, len, off };
   }
   if (!best) return null;
+  // A face with no room behind it (the outside of the flat) only for a tap clearly beyond it.
+  if (best.off < CLEARLY_OUTSIDE) {
+    const other = { ...best.place, side: best.place.side === 'left' ? 'right' : 'left' } as const;
+    if (!roomOfPlace(level, best.place) && roomOfPlace(level, other)) best.place = other;
+  }
   const height = opts.height ?? defaultHeight(level, kind, best.place);
-  const along = clearAlong(level, geom, kind, best.place, height);
+  const along = clearAlong(level, geom, kind, best.place, height, opts.self);
   if (along === null) return null;
   const t = Math.min(1, Math.max(0, along / best.len));
   const wall = { wallId: best.place.wallId, t, side: best.place.side, height };
   const pos = pointPosition(level, { id: 'probe', kind, wall });
   return { ...wall, at: pos?.at ?? p };
 }
+
+/** A tap further than this beyond a wall's face with no room behind it is meant for it. */
+const CLEARLY_OUTSIDE = 0.1;
 
 /**
  * Where along its wall a wall point goes moved to `along` metres from vertex a: clear of
@@ -412,7 +453,8 @@ export function pointTAt(
   const pw = p.wall;
   const f = pw && geom.frames[pw.wallId];
   if (!pw || !f || f.length < 1e-9) return null;
-  const u = clearAlong(level, geom, p.kind, { wallId: pw.wallId, along, side: pw.side }, pw.height);
+  const place = { wallId: pw.wallId, along, side: pw.side };
+  const u = clearAlong(level, geom, p.kind, place, pw.height, p.id);
   return u === null ? null : Math.min(1, Math.max(0, u / f.length));
 }
 
@@ -484,19 +526,30 @@ export const trunkingMetres = (level: Level, p: ElecPoint) =>
 
 const WET = /bath|toilet|\bwc\b|shower/i;
 
-export type PointWarning = 'wet' | 'shelter' | 'structural' | 'no-compressor';
+export type PointWarning = 'wet' | 'shelter' | 'structural' | 'no-compressor' | 'off-ledge';
+
+const LEDGE = /ledge|air-?con/i;
+
+/** Whether a spot is on an aircon ledge (in a room named for one). */
+export function onLedge(level: Level, at: Vec2): boolean {
+  return LEDGE.test(roomAt(level, at)?.name ?? '');
+}
+
+/** Whether a level has an aircon ledge (a room named for one). */
+const hasLedge = (level: Level) => Object.values(level.rooms).some((r) => LEDGE.test(r.name));
 
 export const WARNING_TEXT: Record<PointWarning, string> = {
   wet: 'A socket in a bathroom or WC: not allowed near water.',
   shelter: 'On the household shelter wall: it can’t be chased or drilled.',
   structural: 'On a structural wall: surface trunking, or check with HDB.',
   'no-compressor': 'No compressor: run its trunking to one.',
+  'off-ledge': 'Not on the aircon ledge: an HDB flat’s compressors go there.',
 };
 
 /**
  * What's wrong with a point: a socket in a bathroom or WC, a point on the shelter's wall or a
- * structural one (judged on `statusOf`, the flat as it is, where the wall is there), or an
- * aircon unit with no compressor.
+ * structural one (judged on `statusOf`, the flat as it is, where the wall is there), an
+ * aircon unit with no compressor, or a compressor off the aircon ledge (where there is one).
  */
 export function pointWarnings(level: Level, p: ElecPoint, statusOf: Level = level): PointWarning[] {
   const out: PointWarning[] = [];
@@ -512,6 +565,8 @@ export function pointWarnings(level: Level, p: ElecPoint, statusOf: Level = leve
     !(p.compressorId && level.points[p.compressorId]?.kind === 'compressor')
   )
     out.push('no-compressor');
+  if (p.kind === 'compressor' && p.at && hasLedge(level) && !onLedge(level, p.at))
+    out.push('off-ledge');
   return out;
 }
 
@@ -650,6 +705,65 @@ export function updatePoint(levelId: string, pointId: string, patch: PointPatch)
       if (!ok.success) throw new Error(ok.error.issues[0]?.message ?? 'not a valid point');
     },
   };
+}
+
+/** Whether a point's height is its kind's usual one (then the plan shows no "h…"). */
+export function atDefaultHeight(level: Level, p: ElecPoint): boolean {
+  if (!p.wall) return true;
+  const pos = pointPosition(level, p);
+  if (!pos) return true;
+  const want = defaultHeight(level, p.kind, {
+    wallId: p.wall.wallId,
+    along: pos.along,
+    side: p.wall.side,
+  });
+  return Math.abs(want - p.wall.height) < 0.005;
+}
+
+/**
+ * Makes a point another kind, worked out from `level` as it is: a wall point takes the new
+ * kind's usual height (unless it was moved off its own) and is placed again clear of doors
+ * and other points (its plate may be wider); an aircon unit made something else takes its
+ * trunking with it, and its compressor where no other unit runs to it. One undo step.
+ */
+export function setPointKind(level: Level, pointId: string, kind: ElecKind): Command {
+  const p = level.points?.[pointId];
+  if (!p) throw new Error(`point ${pointId} not found`);
+  const patch: PointPatch = { kind };
+  if (kind === 'switch') patch.gang = p.gang ?? 1;
+  const pos = pointPosition(level, p);
+  if (p.wall && pos) {
+    if (ELEC_KINDS[kind].place !== 'wall') throw new Error('a wall point stays on a wall');
+    const place = { wallId: p.wall.wallId, along: pos.along, side: p.wall.side };
+    const height = atDefaultHeight(level, p) ? defaultHeight(level, kind, place) : p.wall.height;
+    const along = clearAlong(level, planGeometry(level), kind, place, height, p.id);
+    if (along === null) throw new Error(`no room here for ${pointName({ kind, gang: 1 })}`);
+    patch.wall = { ...p.wall, height, t: tOf(level, p.wall.wallId, along) ?? p.wall.t };
+  }
+  const comp = p.kind === 'aircon' && kind !== 'aircon' ? p.compressorId : undefined;
+  const shared =
+    !!comp &&
+    Object.values(level.points).some(
+      (q) => q.id !== pointId && q.kind === 'aircon' && q.compressorId === comp,
+    );
+  const update = updatePoint(level.id, pointId, patch);
+  return {
+    label: `Make it a ${KIND_LABEL(kind)}`,
+    recipe: (d) => {
+      update.recipe(d);
+      const lvl = draftLevel(d, level.id);
+      if (comp && !shared && lvl.points?.[comp]?.kind === 'compressor') delete lvl.points[comp];
+    },
+  };
+}
+
+/** `along` metres on a wall as its `t`. */
+function tOf(level: Level, wallId: string, along: number): number | null {
+  const w = level.walls[wallId];
+  const a = w && level.vertices[w.a];
+  const b = w && level.vertices[w.b];
+  const len = a && b ? Math.hypot(b.x - a.x, b.y - a.y) : 0;
+  return len > 1e-9 ? Math.min(1, Math.max(0, along / len)) : null;
 }
 
 /** Deletes a point; an aircon unit running to a compressor deleted loses its link. */

@@ -18,11 +18,15 @@ import {
   electricalChanges,
   inOpening,
   maxHeight,
+  minHeight,
+  onLedge,
   placePoint,
   pointCounts,
   pointPosition,
+  pointRoom,
   pointTAt,
   pointWarnings,
+  setPointKind,
   trunkingLength,
   trunkingMetres,
   updatePoint,
@@ -33,7 +37,7 @@ import { furnitureKind, newItem } from './furniture';
 import { type EditorDoc, dispatch, emptyHistory, redo, undo } from './history';
 import { AFTER_SUFFIX } from './levels';
 import { loadProject } from './migrate';
-import { type Carry, carriedToRenovation, startRenovation } from './renovation';
+import { type Carry, carriedToRenovation, renovationChanges, startRenovation } from './renovation';
 import { ElecPoint, type Level, type Project, SCHEMA_VERSION } from './schema';
 
 /** A w × d room, 100 mm walls, centred on lines from (0, 0); `extra` walls drawn after. */
@@ -503,10 +507,13 @@ describe('electrical points (schema 9)', () => {
     expect(maxHeight(flat(s), pt(flat(s), r.pointId))).toBeCloseTo(0.907, 6);
     const east = tap(s, 'socket-single', 3.8, 1.5);
     s = east.s;
-    expect(maxHeight(flat(s), pt(flat(s), east.id))).toBeCloseTo(2.6, 6);
+    // The plate's top at the ceiling: 2.6 m less half its 86 mm; never below 50 mm up.
+    expect(maxHeight(flat(s), pt(flat(s), east.id))).toBeCloseTo(2.557, 6);
+    expect(minHeight('socket-single')).toBeCloseTo(0.093, 6);
+    expect(minHeight('aircon')).toBeCloseTo(0.34, 6);
     const roomId = Object.keys(flat(s).rooms)[0] as string;
     s = dispatch(s, updateRoom(LID, roomId, { ceilingHeight: 2.4 }));
-    expect(maxHeight(flat(s), pt(flat(s), east.id))).toBeCloseTo(2.4, 6);
+    expect(maxHeight(flat(s), pt(flat(s), east.id))).toBeCloseTo(2.357, 6);
   });
 
   it('pointTAt slides a point along its wall, never into a doorway or past the corner', () => {
@@ -566,6 +573,129 @@ describe('electrical points (schema 9)', () => {
       carriedToRenovation(updatePoint(LID, sock.id, { wall: { ...wall, height: 0.45 } }), again),
     );
     expect(again.conflict).toBe(true);
+  });
+
+  it('a tap within a wall goes on the face looking into the room; well outside, the outer face', () => {
+    const s = room(4, 3);
+    // In the outer half of the bottom wall (its line at y = 0, faces at ±0.05).
+    const inWall = placePoint(flat(s), 'socket-single', { x: 2, y: -0.03 });
+    expect(inWall?.at.y).toBeCloseTo(0.05, 6);
+    // Just beyond the outer face: still the room's.
+    expect(placePoint(flat(s), 'socket-single', { x: 2, y: -0.1 })?.at.y).toBeCloseTo(0.05, 6);
+    // Clearly outside: the outer face, and named Outside in the estimate.
+    const out = placePoint(flat(s), 'socket-single', { x: 2, y: -0.25 });
+    expect(out?.at.y).toBeCloseTo(-0.05, 6);
+    if (!out) throw new Error('nowhere');
+    const { at: _, ...wall } = out;
+    const r = addPoint(LID, { kind: 'socket-single', wall });
+    const l = flat(dispatch(s, r.command));
+    expect(pointRoom(l, pt(l, r.pointId))).toBeNull();
+    const lines = costEstimate(l, undefined, TYPICAL_RATES).lines;
+    expect(lines.find((x) => x.group === 'Electrical')?.place).toBe('Outside');
+  });
+
+  it('a point never lands on another on the same face at its height; a switch in a doorway goes to the latch side', () => {
+    let s = room(4, 3);
+    const a = tap(s, 'socket-double', 2, 0.2);
+    s = a.s;
+    const b = tap(s, 'socket-double', 2.05, 0.2);
+    s = b.s;
+    const x = (id: string) => pointPosition(flat(s), pt(flat(s), id))?.at.x ?? Number.NaN;
+    expect(Math.abs(x(b.id) - x(a.id))).toBeCloseTo(0.146 + 0.05, 6);
+    // A switch above them is no trouble.
+    const sw = tap(s, 'switch', 2, 0.2);
+    s = sw.s;
+    expect(x(sw.id)).toBeCloseTo(2, 6);
+    // Dragged onto the first socket (itself aside), the second goes beside it.
+    const onTop = placePoint(flat(s), 'socket-double', { x: x(a.id), y: 0.2 }, { self: b.id });
+    expect(Math.abs((onTop?.at.x ?? 0) - x(a.id))).toBeCloseTo(0.196, 6);
+    expect(
+      placePoint(flat(s), 'socket-double', { x: x(b.id), y: 0.2 }, { self: b.id })?.at.x,
+    ).toBeCloseTo(x(b.id), 6);
+
+    // A door 0.9 m wide centred at x = 1, hinged at its left jamb (x = 0.55).
+    const wid = pt(flat(s), a.id).wall?.wallId as string;
+    const fromA = flat(s).vertices[flat(s).walls[wid]?.a ?? '']?.x === 0;
+    s = dispatch(
+      s,
+      addOpening(LID, {
+        wallId: wid,
+        kind: 'door',
+        t: fromA ? 0.25 : 0.75,
+        width: 0.9,
+        height: 2.1,
+        sill: 0,
+        swing: fromA ? 'leftIn' : 'rightIn',
+      }).command,
+    );
+    // Tapped near the hinge: the switch still goes by the latch, a socket to the nearer jamb.
+    const sw2 = placePoint(flat(s), 'switch', { x: 0.7, y: 0.2 });
+    expect(sw2?.at.x).toBeCloseTo(1.45 + 0.05 + 0.043, 6);
+    const so = placePoint(flat(s), 'socket-single', { x: 0.7, y: 0.2 });
+    expect(so?.at.x).toBeCloseTo(0.55 - 0.05 - 0.043, 6);
+  });
+
+  it('setPointKind: placed again for the new kind; an aircon made a switch takes its compressor, one undo', () => {
+    let s = room(4, 3);
+    const ac = tap(s, 'aircon', 2, 2.9);
+    s = ac.s;
+    const c = addPoint(LID, { kind: 'compressor', at: { x: 5, y: 1 } });
+    s = dispatch(s, c.command);
+    s = dispatch(
+      s,
+      updatePoint(LID, ac.id, { compressorId: c.pointId, route: [{ x: 4.5, y: 2.9 }] }),
+    );
+    s = dispatch(s, setPointKind(flat(s), ac.id, 'switch'));
+    const p = pt(flat(s), ac.id);
+    expect(p).toMatchObject({ kind: 'switch', gang: 1 });
+    expect(p.wall?.height).toBeCloseTo(1.05, 6);
+    expect(p.route).toBeUndefined();
+    expect(p.compressorId).toBeUndefined();
+    expect(flat(s).points[c.pointId]).toBeUndefined();
+    s = undo(s);
+    expect(pt(flat(s), ac.id).kind).toBe('aircon');
+    expect(flat(s).points[c.pointId]).toBeDefined();
+    // A wider plate, placed again clear of the point beside it.
+    const single = tap(s, 'socket-single', 1, 0.2);
+    const near = tap(single.s, 'socket-single', 1.2, 0.2);
+    s = dispatch(near.s, setPointKind(flat(near.s), near.id, 'socket-double'));
+    const gap =
+      (pointPosition(flat(s), pt(flat(s), near.id))?.at.x ?? 0) -
+      (pointPosition(flat(s), pt(flat(s), single.id))?.at.x ?? 0);
+    expect(Math.abs(gap)).toBeGreaterThanOrEqual(0.043 + 0.073 + 0.05 - 1e-6);
+  });
+
+  it('a compressor off the aircon ledge is warned of; on it, not', () => {
+    let s = room(4, 3, [[2, 0, 2, 3]]);
+    const right = Object.values(flat(s).rooms).find((r) =>
+      r.loop.some((v) => flat(s).vertices[v]?.x === 4),
+    );
+    if (!right) throw new Error('no room');
+    s = dispatch(s, renameRoom(LID, right.id, 'Air-con ledge'));
+    expect(onLedge(flat(s), { x: 3, y: 1.5 })).toBe(true);
+    expect(onLedge(flat(s), { x: 1, y: 1.5 })).toBe(false);
+    const off = addPoint(LID, { kind: 'compressor', at: { x: 1, y: 1.5 } });
+    const on = addPoint(LID, { kind: 'compressor', at: { x: 3, y: 1.5 } });
+    s = dispatch(dispatch(s, off.command), on.command);
+    expect(pointWarnings(flat(s), pt(flat(s), off.pointId))).toEqual(['off-ledge']);
+    expect(pointWarnings(flat(s), pt(flat(s), on.pointId))).toEqual([]);
+  });
+
+  it('renovationChanges lists the points a renovation adds, moves and takes out, by room', () => {
+    let s = dispatch(room(4, 3), startRenovation());
+    const r = tap(s, 'socket-double', 2, 0.2, A);
+    s = r.s;
+    const changes = renovationChanges(flat(s), reno(s));
+    expect(changes).toContainEqual(
+      expect.objectContaining({
+        kind: 'electrical',
+        change: 'new',
+        point: 'socket-double',
+        name: '13A double socket',
+        qty: 1,
+        rooms: [expect.any(String)],
+      }),
+    );
   });
 
   it('points carry to the renovation like the rest of the flat, and follow a moved corner', () => {

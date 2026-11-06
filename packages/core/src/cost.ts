@@ -441,7 +441,7 @@ export function electricalLines(before: Level, after: Level | undefined, rates: 
           ? rates.elecMove[p.kind]
           : rates.elecRemove;
     const label = `${pointName(p)}, ${change}`;
-    const place = pointRoom(level, p) ?? 'Flat';
+    const place = pointRoom(level, p) ?? 'Outside';
     const key = `${label}|${place}`;
     const was = groups.get(key);
     const qty = (was?.qty ?? 0) + 1;
@@ -451,7 +451,7 @@ export function electricalLines(before: Level, after: Level | undefined, rates: 
   const addTrunking = (p: ElecPoint, level: Level) => {
     const m = trunkingMetres(level, p);
     if (m <= 0) return;
-    const place = pointRoom(level, p) ?? 'Flat';
+    const place = pointRoom(level, p) ?? 'Outside';
     trunking.push(line('Electrical', 'Aircon trunking', place, m, 'm', rates.trunking));
   };
   const points = Object.values(shown.points ?? {});

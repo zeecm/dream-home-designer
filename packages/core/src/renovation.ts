@@ -1,10 +1,13 @@
 import { current, isDraft } from 'immer';
+import { electricalChanges, pointName, pointRoom } from './electrical';
 import { finish } from './finishes';
 import { placeLabel, pointInPolygon } from './geometry';
 import type { Command } from './history';
 import { AFTER_SUFFIX, type Variant } from './levels';
 import { roomArea, roomShapes, syncRooms } from './rooms';
 import {
+  type ElecKind,
+  type ElecPoint,
   type Level,
   type Project,
   type Vec2,
@@ -642,6 +645,14 @@ export type RenovationChange = ChangePlace & {
     | { kind: 'area'; before: number; after: number }
     | { kind: 'rename'; from: string }
     | { kind: 'room'; change: 'added' | 'removed'; area: number }
+    | {
+        kind: 'electrical';
+        change: 'new' | 'moved' | 'removed';
+        /** The point's kind, and its name as a contractor reads it ("2-gang switch"). */
+        point: ElecKind;
+        name: string;
+        qty: number;
+      }
   );
 
 /** How far past a wall's face to look for the room on that side. */
@@ -827,15 +838,16 @@ function matchRooms(before: Level, after: Level): Map<string, string> {
 }
 
 /** Changes in one place come out in this order. */
-const KIND_ORDER = ['hack', 'build', 'opening', 'rename', 'floor', 'area', 'room'];
+const KIND_ORDER = ['hack', 'build', 'opening', 'rename', 'floor', 'area', 'room', 'electrical'];
 
 /**
  * What a renovation changes, item by item, each placed by the rooms it touches (found in
  * the version it is in, and named as the room is in the renovation): wall hacked and built
  * (lengths summed per place), doors, windows and openings added, removed (or gone with the
  * wall) or changed, rooms renamed, refinished, grown or shrunk, and rooms new or gone. Rooms
- * are matched between versions by where they are. Ordered by place. For a list to discuss
- * with a contractor.
+ * are matched between versions by where they are; and electrical points new, moved or taken
+ * out (electricalChanges), counted per room and kind. Ordered by place. For a list to
+ * discuss with a contractor.
  */
 export function renovationChanges(
   before: Level,
@@ -993,6 +1005,31 @@ export function renovationChanges(
       area: roomArea(before, r),
     });
   }
+  const points = new Map<string, RenovationChange & { kind: 'electrical' }>();
+  const addPoint = (level: Level, p: ElecPoint, change: 'new' | 'moved' | 'removed') => {
+    const room = pointRoom(level, p);
+    const name = pointName(p);
+    const key = `${room}|${change}|${name}`;
+    const cur = points.get(key);
+    if (cur) cur.qty++;
+    else
+      points.set(key, {
+        rooms: room ? [room] : [],
+        outside: false,
+        kind: 'electrical',
+        change,
+        point: p.kind,
+        name,
+        qty: 1,
+      });
+  };
+  const elec = electricalChanges(before, after);
+  for (const p of elec.removed) addPoint(before, p, 'removed');
+  for (const [id, change] of elec.status) {
+    const p = after.points[id];
+    if (p) addPoint(after, p, change);
+  }
+  out.push(...points.values());
   // By place (a room before the walls it shares, outside walls after), then kind.
   const byPlace = (p: RenovationChange, q: RenovationChange) => {
     for (let i = 0; i < Math.min(p.rooms.length, q.rooms.length); i++) {
