@@ -10,6 +10,7 @@ import { track } from './telemetry';
  */
 export type Tool =
   | 'select'
+  | 'comment'
   | 'wall'
   | 'room'
   | 'door'

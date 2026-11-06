@@ -341,11 +341,14 @@ export function PlanHighlights({
   level,
   geom,
   hover,
+  hoverClass = 'hover',
   selection,
 }: {
   level: Level;
   geom: PlanGeometry;
   hover: Selection | null;
+  /** The hover outline's class: the Comment tool outlines in its own colour. */
+  hoverClass?: string;
   selection: Selection | null;
 }) {
   const shape = (s: Selection | null, cls: string) => {
@@ -388,7 +391,7 @@ export function PlanHighlights({
     <g pointerEvents="none">
       {hover &&
         (hover.kind !== selection?.kind || hover.id !== selection?.id) &&
-        shape(hover, 'hover')}
+        shape(hover, hoverClass)}
       {shape(selection, 'selected')}
     </g>
   );

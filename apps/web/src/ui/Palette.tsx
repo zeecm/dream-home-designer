@@ -1,5 +1,6 @@
 import { FURNITURE, type FurnitureKind, type OpeningKind, customKind } from '@dhd/core';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { useCanComment } from '../comments/store';
 import { AddBySize } from '../delivery/delivery';
 import { type Tool, useEditor } from '../editor';
 import { KindPalette } from '../electrical/electrical';
@@ -20,6 +21,8 @@ export interface ToolDef {
 /** Tools in the order people use them: look, draw, cut openings, check. */
 export const TOOLS: ToolDef[] = [
   { id: 'select', label: 'Select', key: 'V', icon: icons.select },
+  // Second, so it stays in view in the phone's scrolling row of tools.
+  { id: 'comment', label: 'Comment', key: 'K', icon: icons.comment },
   { id: 'wall', label: 'Wall', key: 'W', icon: icons.wall },
   { id: 'room', label: 'Room', key: 'R', icon: icons.room },
   { id: 'door', label: 'Door', key: 'D', icon: icons.door },
@@ -267,7 +270,7 @@ export function ToolPanel() {
   const tool = useEditor((s) => s.tool);
   const only3d = useEditor((s) => s.viewMode === '3d');
   const viewer = useStore((s) => s.role === 'viewer');
-  if (tool === 'select' || only3d || viewer) return null;
+  if (tool === 'select' || only3d || (viewer && tool !== 'comment')) return null;
   const def = TOOLS.find((t) => t.id === tool);
   return (
     <section className="tool-panel" aria-label={`${def?.label ?? 'Tool'} tool`}>
@@ -285,7 +288,12 @@ export function Palette() {
   const setTool = useEditor((s) => s.setTool);
   const only3d = useEditor((s) => s.viewMode === '3d');
   const viewer = useStore((s) => s.role === 'viewer');
-  const locked = only3d || viewer;
+  const commenting = useCanComment();
+  // A view link gets Select and Comment, not a row of greyed-out drawing tools; Comment only
+  // where this browser may comment.
+  const tools = TOOLS.filter((t) =>
+    t.id === 'comment' ? commenting : t.id === 'select' || !viewer,
+  );
   // A tool's options (the electrical kinds) can make the panel scroll: another tool starts it
   // at the top again, its tools in sight.
   const nav = useRef<HTMLElement>(null);
@@ -297,13 +305,13 @@ export function Palette() {
     <nav ref={nav} className="panel palette" aria-label="Tools">
       <h2 className="panel-heading">Tools</h2>
       <ul className="tool-list">
-        {TOOLS.map((t) => (
+        {tools.map((t) => (
           <li key={t.id}>
             <button
               type="button"
               className="tool"
               aria-pressed={tool === t.id}
-              disabled={locked}
+              disabled={only3d}
               onClick={() => setTool(t.id)}
               title={`${t.label} (${t.key})`}
             >
@@ -317,8 +325,10 @@ export function Palette() {
       <ToolOptions tool={tool} />
       <PlanImagePanel />
       <p className="tool-hint">
-        {viewer
-          ? 'This is a view-only link. Make your own copy to change the plan.'
+        {viewer && tool !== 'comment'
+          ? commenting
+            ? 'This is a view-only link: choose Comment to leave a comment, or make your own copy to change the plan.'
+            : 'This is a view-only link. Make your own copy to change the plan.'
           : only3d
             ? 'Switch to Plan or Split to draw and edit.'
             : TOOL_HINTS[tool]}

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Viewport } from './Viewport';
 import { keepWithAccount, pullFromAccount, useAccount } from './account';
 import { TraceBar } from './ai/TracePanel';
+import { canComment, commentRole, useCanComment, useComments } from './comments/store';
+import { CommentsLive, CommentsPanel, useCommentsLink } from './comments/ui';
 import { type Tool, type ViewMode, useEditor } from './editor';
 import { absorbLinkKey } from './keys';
 import { useModelSync } from './models';
@@ -48,7 +50,12 @@ function useShortcuts() {
       if (ed.walking) return; // walking has its own keys
       const tool = TOOLS.find((t) => t.key.toLowerCase() === k);
       if (tool) {
-        if (useStore.getState().role === 'viewer') return; // view-only: Select it stays
+        const c = useComments.getState();
+        const commenting = !!c.doc && canComment(commentRole(), c.doc.setting);
+        if (tool.id === 'comment' && !commenting) return;
+        // View-only: Select and Comment are the tools there are.
+        if (useStore.getState().role === 'viewer' && tool.id !== 'select' && tool.id !== 'comment')
+          return;
         ed.setTool(tool.id as Tool);
       } else if (VIEW_KEYS[k]) {
         ed.setViewMode(VIEW_KEYS[k] as ViewMode);
@@ -68,7 +75,10 @@ function useShortcuts() {
     window.addEventListener('keydown', onKey);
     // Becoming view-only (a link's edit access was reset) drops any drawing tool.
     const unsubscribe = useStore.subscribe((s, prev) => {
-      if (s.role === 'viewer' && prev.role !== 'viewer') useEditor.getState().setTool('select');
+      const ed = useEditor.getState();
+      if (s.role === 'viewer' && prev.role !== 'viewer' && ed.tool !== 'comment') {
+        ed.setTool('select');
+      }
     });
     return () => {
       window.removeEventListener('keydown', onKey);
@@ -138,11 +148,16 @@ function Notice() {
 /** Shown on a view-only link: what this is, and how to get a copy to change. */
 function ViewOnlyBanner() {
   const role = useStore((s) => s.role);
+  const commenting = useCanComment();
   const { copyProject } = useStore.getState();
   if (role !== 'viewer') return null;
   return (
     <div className="sample-banner">
-      <span>View only. You can look around and walk through this plan, but not change it.</span>
+      <span>
+        {commenting
+          ? 'View only. You can look around and leave comments, but not change the plan.'
+          : 'View only. You can look around and walk through this plan, but not change it.'}
+      </span>
       <button
         type="button"
         className="btn btn-small btn-primary"
@@ -203,7 +218,19 @@ function Toast() {
   return (
     <output className="toast">
       <span>{toast.text}</span>
-      {toast.undo !== false && (
+      {toast.action && (
+        <button
+          type="button"
+          className="link-btn"
+          onClick={() => {
+            toast.action?.run();
+            setShown(null);
+          }}
+        >
+          {toast.action.label}
+        </button>
+      )}
+      {toast.undo !== false && !toast.action && (
         <button
           type="button"
           className="link-btn"
@@ -226,6 +253,8 @@ export function App() {
   const variant = useEditor((s) => s.variant);
   useShortcuts();
   useModelSync();
+  useCommentsLink();
+  const commentsOpen = useComments((s) => s.panelOpen);
 
   useEffect(() => {
     // StrictMode runs effects twice in dev; only start once.
@@ -305,8 +334,9 @@ export function App() {
             <LoadingVeil />
           </div>
         </main>
-        <Inspector />
+        {commentsOpen ? <CommentsPanel /> : <Inspector />}
       </div>
+      <CommentsLive />
       <h1 className="visually-hidden">{name} · Dream Home Designer</h1>
     </div>
   );

@@ -146,6 +146,17 @@ export const icons = {
       <path d="M8 10V2.5M5 5.5l3-3 3 3M3.5 8.5v5h9v-5" />
     </Icon>
   ),
+  /** A speech bubble: the Comment tool and the Comments panel. */
+  comment: (
+    <Icon>
+      <path d="M2.5 4a1.5 1.5 0 0 1 1.5-1.5h8A1.5 1.5 0 0 1 13.5 4v5.5A1.5 1.5 0 0 1 12 11H7l-3 2.5V11a1.5 1.5 0 0 1-1.5-1.5z" />
+    </Icon>
+  ),
+  more: (
+    <Icon>
+      <path d="M3.5 8h.01M8 8h.01M12.5 8h.01" strokeWidth={2.5} />
+    </Icon>
+  ),
   split: (
     <Icon>
       <path d="M2 8h12" />

@@ -67,16 +67,17 @@ for any plan.
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
+- Comments on the plan, slice 1: pins anyone with the share link can leave, reply to and
+  resolve, for family decisions; the owner chooses who can comment.
+  [spec](docs/specs/plan-comments.md)
 
 ### Planned
-1. Comments on the plan: pins anyone with the share link can leave and resolve, for family
-   decisions.
-2. Slice 2s: the lift and a diagonal you can edit for your own furniture, notch depths on the
+1. Slice 2s: the lift and a diagonal you can edit for your own furniture, notch depths on the
    contractor sheet, carpentry priced on every level, suggested electrical points per room.
-3. Ageing parents check: wheelchair turning space, step-free routes, 850 mm doors, grab bars
+2. Ageing parents check: wheelchair turning space, step-free routes, 850 mm doors, grab bars
    in the bathroom (HDB EASE items).
-4. Storage meter: wardrobe and cabinet space against the household, room by room.
-5. A wall seen straight on (elevation): carpentry, windows, sockets and switches at height.
+3. Storage meter: wardrobe and cabinet space against the household, room by room.
+4. A wall seen straight on (elevation): carpentry, windows, sockets and switches at height.
 
 More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
 

@@ -15,6 +15,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { TraceDraftLayer } from '../ai/DraftLayer';
 import { type PixelBox, inkBounds } from '../assets';
 import { ClearanceAnnouncement, ClearanceLayer } from '../clearance/clearance';
+import { CommentsOnPlan } from '../comments/PlanPins';
 import { DeliveryLayer } from '../delivery/delivery';
 import { type Tool, useEditor } from '../editor';
 import { ElectricalLayer } from '../electrical/electrical';
@@ -23,6 +24,7 @@ import { Compass, describeNorth } from '../ui/Compass';
 import { uploadPlanImage, usePlanImage, useUploadPicker } from '../ui/PlanImage';
 import { RenovationMarks } from '../ui/Renovation';
 import { icons } from '../ui/icons';
+import { useCommentTool } from './commentTool';
 import { useCalibrateTool, useOpeningTool, useRoomTool, useWallTool } from './drawTools';
 import { useElectricalTool } from './electricalTool';
 import { useFurnitureTool } from './furnitureTool';
@@ -161,6 +163,7 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
   };
   const tools: Record<Tool, ToolController> = {
     select,
+    comment: useCommentTool(ctx),
     measure: useMeasureTool(ctx),
     wall: useWallTool(ctx),
     room: useRoomTool(ctx),
@@ -468,6 +471,7 @@ export function PlanCanvas() {
     tool === 'measure' ||
     tool === 'calibrate' ||
     tool === 'electrical' ||
+    tool === 'comment' ||
     (tool === 'select' && claimed && (start.hit?.kind === 'vertex' || start.hit?.kind === 'point'));
   /** A finger held still on a point shows the magnifier too, after a moment. */
   const loupeHold = useRef<number | undefined>(undefined);
@@ -806,6 +810,11 @@ export function PlanCanvas() {
         onPointerUp={onPointerUp}
         onPointerCancel={(e) => (e.pointerType === 'touch' ? onTouchCancel(e) : onPointerUp(e))}
         onContextMenu={(e) => e.preventDefault()}
+        // A tap's mouse events, after it opened the comment composer, would take its focus
+        // (and close a phone's keyboard).
+        onMouseDown={(e) => {
+          if (tool === 'comment') e.preventDefault();
+        }}
       >
         <defs>
           <pattern
@@ -847,7 +856,7 @@ export function PlanCanvas() {
               geom={geom}
               guarded={guarded}
               interactive={
-                tool === 'select'
+                tool === 'select' || tool === 'comment'
                   ? true
                   : tool === 'furniture'
                     ? 'items'
@@ -864,14 +873,15 @@ export function PlanCanvas() {
               before={before ?? level}
               zoom={v.zoom}
               selection={selection}
-              interactive={tool === 'select' || tool === 'electrical'}
+              interactive={tool === 'select' || tool === 'electrical' || tool === 'comment'}
             />
             <TraceDraftLayer />
             <PlanHighlights
               level={level}
               geom={geom}
-              hover={tool === 'select' ? hover : null}
-              selection={selection}
+              hover={tool === 'select' || tool === 'comment' ? hover : null}
+              hoverClass={tool === 'comment' ? 'hover comment-hover' : 'hover'}
+              selection={tool === 'comment' ? null : selection}
             />
           </g>
           <RoomLabels level={level} geom={geom} view={v} size={size} />
@@ -903,6 +913,7 @@ export function PlanCanvas() {
         </g>
         {loupe && <Loupe at={loupe} size={size} scene={sceneId} />}
       </svg>
+      <CommentsOnPlan view={v} size={size} tool={tool} />
 
       <p id="plan-keys" className="visually-hidden">
         In Select, Tab moves through rooms, walls, openings and corners; Escape then Shift+Tab

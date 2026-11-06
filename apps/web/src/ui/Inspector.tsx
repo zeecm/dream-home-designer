@@ -63,6 +63,7 @@ import {
   useWalkwayReport,
   walkwayLine,
 } from '../clearance/clearance';
+import { CommentPinsSwitch } from '../comments/ui';
 import { CarpentryLine, CostSummary } from '../cost/estimate';
 import { GettingItIn } from '../delivery/delivery';
 import { useEditor } from '../editor';
@@ -327,6 +328,7 @@ function PlanSummary({ level }: { level: Level }) {
       <StructuralSuggestion />
       <ClearanceSummary />
       <ElectricalSummary level={level} />
+      <CommentPinsSwitch />
       <RenovationSection />
       <CostSummary />
       <LengthField

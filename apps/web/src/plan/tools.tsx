@@ -96,6 +96,8 @@ export interface ToolController {
 }
 
 export const TOOL_HINTS: Record<Tool, string> = {
+  comment:
+    'Tap or click a piece, a wall, a room or any spot to leave a comment there. Everyone with the link sees it.',
   select:
     'Tap or click to select; drag a corner or a door to move it, or a selected room by its handle. Tab and the arrow keys work too; double-click a wall to add a corner.',
   wall: 'Tap or click each corner, or drag from corner to corner. Type a length for an exact wall. Drag an end of the wall you just drew to adjust it. Joining an existing wall, or Done, finishes.',

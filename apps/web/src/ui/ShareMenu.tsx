@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { WhoCanComment } from '../comments/ui';
 import { shareLink } from '../keys';
 import { useProject, useStore } from '../store';
 import { track } from '../telemetry';
@@ -114,6 +115,7 @@ function ShareBody() {
       <p className="note">Anyone with this link can look around and walk through the plan.</p>
       <CopyField label="Walk-through link" value={shareLink(id, null, true)} />
       <p className="note">The same, but it opens straight into a walk, on a phone too.</p>
+      {owner && <WhoCanComment />}
       {owner && (
         <>
           <label className="check-row">
