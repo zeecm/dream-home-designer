@@ -29,7 +29,7 @@ const PLAN_NOTE = `The second image is the floor plan of the whole home seen fro
 const LAST_WORD =
   'The result must match the image line for line: only the materials and the light change. Nothing added, removed or moved.';
 const LAST_WORD_WITH_IDEAS =
-  'The result must match the image line for line: only the materials, the light and what their ideas ask for change. Nothing else added, removed or moved.';
+  'The result must match the image line for line: only the materials, the light and the small things their ideas add (plants, textiles, art, décor) change. Walls, doors, windows and openings stay exactly as drawn, and the furniture stays where and as large as it is.';
 
 /** Longest idea text sent, in characters. */
 export const MAX_IDEAS = 600;
@@ -59,18 +59,29 @@ export function renderPrompt(
   const light = glazed
     ? 'natural daylight through the windows'
     : 'soft, even indoor light, as there is no window in view';
-  const base = `${plan ? 'Edit the first image. ' : 'Edit this image. '}It is an exact 3D model of a real home, drawn to scale: not a sketch to interpret or improve. Make it look like a real photograph of this exact room by changing only how the surfaces look (realistic materials and textures) and the light (${light}, soft shadows, light bouncing off the walls). ${RENDER_STYLES[style]} Every edge must stay where it is: the same camera, framing and perspective; the same walls, corners, ceiling and floor; the same doors, windows and openings, the same sizes and in the same places; the same furniture, in the same places, sizes and orientations. Add nothing: no furniture, rugs, lamps, curtains, pictures, plants, décor, people or text. Remove nothing. Never add a door, doorway, arch, opening, niche or window: a solid wall stays solid, and empty floor stays empty.`;
-  const key = plan ? `\n\n${PLAN_NOTE}` : '';
   const own = ownIdeas(ideas);
+  // With their own ideas, they win over the look and are the one thing that may be added;
+  // without, nothing is.
+  const look = own
+    ? style === 'as'
+      ? 'Keep every material and colour as it is, except where their ideas below say otherwise.'
+      : `${RENDER_STYLES[style]} Where their ideas below say otherwise, their ideas win.`
+    : RENDER_STYLES[style];
+  const adding = own
+    ? 'Add nothing beyond what their ideas below ask for: no other furniture, rugs, lamps, curtains, pictures, plants, décor, people or text.'
+    : 'Add nothing: no furniture, rugs, lamps, curtains, pictures, plants, décor, people or text.';
+  const base = `${plan ? 'Edit the first image. ' : 'Edit this image. '}It is an exact 3D model of a real home, drawn to scale: not a sketch to interpret or improve. Make it look like a real photograph of this exact room by changing only how the surfaces look (realistic materials and textures) and the light (${light}, soft shadows, light bouncing off the walls). ${look} Every edge must stay where it is: the same camera, framing and perspective; the same walls, corners, ceiling and floor; the same doors, windows and openings, the same sizes and in the same places; the same furniture, in the same places, sizes and orientations. ${adding} Remove nothing. Never add a door, doorway, arch, opening, niche or window: a solid wall stays solid${own ? '' : ', and empty floor stays empty'}.`;
+  const key = plan ? `\n\n${PLAN_NOTE}` : '';
+  // Their ideas come after the facts, nearest the end, where a model weighs them most.
   const theirs = own
-    ? `\n\nThe person's own ideas for this picture, in their words: "${own}". Follow them for materials, colours, light and styling. Where they ask for something to be added (plants, a rug, curtains, art), add just that, in a size that fits. Walls, doors, windows, openings and the room's size never change, whatever they say.`
+    ? `\n\nThe person's own ideas for this picture, in their words: "${own}". Follow them for materials, colours, light and styling, ahead of the look and the finishes above. Where they ask for something small to be added (plants, a rug, curtains, art), add just that, in a size that fits. Walls, doors, windows, openings, the furniture's places and sizes, and the room's size never change, whatever they say.`
     : '';
   const last = own ? LAST_WORD_WITH_IDEAS : LAST_WORD;
   if (!facts) return `${base}${key}${theirs}\n\n${last}`;
   // The sheet fits its own length (pieces and openings dropped and counted), its
-  // instruction first.
-  const sheet = sceneSheet(facts, { finishes: style === 'as' });
-  return `${base}${key}${theirs}\n\nThe true scene, measured: ${sheet}\n\n${last}`;
+  // instruction first. Finishes "as designed" only when their ideas don't restyle them.
+  const sheet = sceneSheet(facts, { finishes: style === 'as' && !own, ideas: !!own });
+  return `${base}${key}\n\nThe true scene, measured: ${sheet}${theirs}\n\n${last}`;
 }
 
 const TIMEOUT = 240_000;

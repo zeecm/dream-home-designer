@@ -465,9 +465,13 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
                 onChange={(e) => setBrief({ ...brief, colours: e.target.value })}
               />
             </label>
-            <label className="field">
-              <span className="field-label">Your own ideas</span>
+            <div className="field">
+              <label className="field-label" htmlFor="brief-ideas">
+                Your own ideas
+              </label>
               <textarea
+                id="brief-ideas"
+                aria-describedby="brief-ideas-hint"
                 className="input textarea"
                 rows={4}
                 maxLength={2000}
@@ -475,10 +479,10 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
                 value={brief.ideas}
                 onChange={(e) => setBrief({ ...brief, ideas: e.target.value })}
               />
-              <span className="field-hint">
+              <span className="field-hint" id="brief-ideas-hint">
                 The designer follows them where HDB rules allow, and says why when it can’t.
               </span>
-            </label>
+            </div>
           </div>
         );
       case 'budget': {

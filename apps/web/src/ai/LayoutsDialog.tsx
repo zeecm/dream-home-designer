@@ -171,9 +171,13 @@ export function LayoutsDialog({
               </label>
             ))}
           </fieldset>
-          <label className="field">
-            <span className="field-label">Your own ideas</span>
+          <div className="field">
+            <label className="field-label" htmlFor="layout-ideas">
+              Your own ideas
+            </label>
             <textarea
+              id="layout-ideas"
+              aria-describedby="layout-ideas-hint"
               className="input textarea"
               rows={3}
               maxLength={1000}
@@ -181,10 +185,10 @@ export function LayoutsDialog({
               value={brief.notes}
               onChange={(e) => setBrief({ ...brief, notes: e.target.value })}
             />
-            <span className="field-hint">
+            <span className="field-hint" id="layout-ideas-hint">
               Layouts follow them where HDB rules allow, and say why when they can’t.
             </span>
-          </label>
+          </div>
           {!ai && (
             <p className="field-hint">
               Needs your own AI key.{' '}

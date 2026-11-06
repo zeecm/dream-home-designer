@@ -107,8 +107,9 @@ test('from the orbit view, a render starts from eye height and tells the model t
   expect(atEye).toContain('"3-seat sofa" 2.1 × 0.9 × 0.8 m');
   // The fridge is behind the kitchen's walls: not in the picture, so not in the list.
   expect(atEye).not.toContain('Fridge');
+  // With their own ideas: nothing added beyond them, and the structure never changes.
   expect(atEye).toContain(
-    'Do not add, remove, enlarge or move furniture, doors, windows or openings',
+    'Do not remove, enlarge or move furniture, and do not add, remove or move doors, windows or openings; add nothing beyond what their ideas ask for',
   );
   expect(atEye).toContain('Doors, windows and openings in view');
   // The floor plan goes with the view, with what it is.

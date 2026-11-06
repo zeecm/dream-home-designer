@@ -908,9 +908,15 @@ export const sheetName = (name: string) => `"${clean(name, NAME_MAX).replace(/["
  */
 export function sceneSheet(
   facts: SceneFacts,
-  opts: { finishes?: boolean; max?: number } = {},
+  opts: {
+    finishes?: boolean;
+    max?: number;
+    /** The person asked for things to be added (their own ideas): the sheet allows those. */
+    ideas?: boolean;
+  } = {},
 ): string {
   const max = opts.max ?? MAX_SHEET;
+  const ideas = !!opts.ideas;
   const [main, ...others] = facts.rooms;
   // Small as a person sees it: the room with any open to it.
   const space = facts.rooms.filter((r, i) => i === 0 || r.open).reduce((t, r) => t + r.area, 0);
@@ -925,7 +931,9 @@ export function sceneSheet(
         ? '; it is small'
         : '';
   const head = [
-    `Keep ${many ? 'every room' : 'the room'} exactly the size given here${small}. Do not add, remove, enlarge or move furniture, doors, windows or openings; leave solid walls solid and empty floor empty. Everything must stay at true scale. Names in quotes are only labels.`,
+    ideas
+      ? `Keep ${many ? 'every room' : 'the room'} exactly the size given here${small}. Do not remove, enlarge or move furniture, and do not add, remove or move doors, windows or openings; add nothing beyond what their ideas ask for; leave solid walls solid. Everything must stay at true scale. Names in quotes are only labels.`
+      : `Keep ${many ? 'every room' : 'the room'} exactly the size given here${small}. Do not add, remove, enlarge or move furniture, doors, windows or openings; leave solid walls solid and empty floor empty. Everything must stay at true scale. Names in quotes are only labels.`,
   ];
   const across = Math.round(facts.fovAcross);
   const h = fmt(facts.height);
@@ -963,8 +971,10 @@ export function sceneSheet(
     const rest = total - n;
     const pieces = shown.map((i) => `${sheetName(i.name)} ${size3(i.size)} (${i.where})`);
     const furniture = !total
-      ? 'There is no furniture in view: keep it unfurnished, with no furniture, rugs, lamps, curtains, pictures, plants or décor added.'
-      : `The only furniture in view, ${total} ${total === 1 ? 'piece' : 'pieces'} and nothing else: ${[...pieces, ...(rest ? [`and ${rest} more ${rest === 1 ? 'piece' : 'pieces'}`] : [])].join(', ')}.`;
+      ? ideas
+        ? 'There is no furniture in view: add nothing beyond what their ideas ask for.'
+        : 'There is no furniture in view: keep it unfurnished, with no furniture, rugs, lamps, curtains, pictures, plants or décor added.'
+      : `The only furniture in view, ${total} ${total === 1 ? 'piece' : 'pieces'} and nothing else${ideas ? ' beyond what their ideas add' : ''}: ${[...pieces, ...(rest ? [`and ${rest} more ${rest === 1 ? 'piece' : 'pieces'}`] : [])].join(', ')}.`;
     const doors = m === facts.openings.length ? openings : openingsLine(facts, m);
     return [...head, doors, furniture, ...tail].join(' ');
   };

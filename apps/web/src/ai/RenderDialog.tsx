@@ -23,17 +23,18 @@ const STYLE_NAMES: Record<RenderStyle, string> = {
   industrial: 'Industrial',
 };
 
-const IDEAS_KEY = 'dhd-render-ideas';
-const readIdeas = () => {
+/** The person's ideas for renders, kept per plan for this tab. */
+const ideasKey = (projectId: string) => `dhd-render-ideas:${projectId}`;
+const readIdeas = (projectId: string) => {
   try {
-    return sessionStorage.getItem(IDEAS_KEY) ?? '';
+    return sessionStorage.getItem(ideasKey(projectId)) ?? '';
   } catch {
     return '';
   }
 };
-const keepIdeas = (text: string) => {
+const keepIdeas = (projectId: string, text: string) => {
   try {
-    sessionStorage.setItem(IDEAS_KEY, text);
+    sessionStorage.setItem(ideasKey(projectId), text);
   } catch {
     // Not kept: no matter.
   }
@@ -58,7 +59,7 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   useAi(); // re-render when keys change
   const ai = imageSettings();
-  const name = useProject().name;
+  const { name, id: projectId } = useProject();
   const level = useLevel();
   const walking = useEditor((s) => !!s.walking);
   // The view as it is, and (from high up) from eye height in its room.
@@ -70,7 +71,7 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
   );
   const [style, setStyle] = useState<RenderStyle>('as');
   // The person's own ideas, kept for the next render in this tab.
-  const [ideas, setIdeas] = useState(readIdeas);
+  const [ideas, setIdeas] = useState(() => readIdeas(projectId));
   const [busy, setBusy] = useState<AbortController | null>(null);
   const [status, setStatus] = useState('');
   const [settings, setSettings] = useState(false);
@@ -177,8 +178,8 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
       <div className="dialog-body">
         <p className="dialog-note">
           Your image model turns this view into a photograph-like picture, keeping the room and
-          furniture as they are. It’s an impression: details can differ. Best from inside a room:
-          walk through, look where you like, then render.
+          furniture as they are (plus anything your own ideas add). It’s an impression: details can
+          differ. Best from inside a room: walk through, look where you like, then render.
         </p>
         <div className="render-pictures">
           {shots?.eye && (
@@ -254,25 +255,29 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
           )}
         </div>
         {ai && (
-          <label className="field render-ideas">
-            <span className="field-label">Your own ideas (optional)</span>
+          <div className="field render-ideas">
+            <label className="field-label" htmlFor="render-ideas">
+              Your own ideas (optional)
+            </label>
             <textarea
+              id="render-ideas"
+              aria-describedby="render-ideas-hint"
               className="input textarea"
               rows={2}
               maxLength={MAX_IDEAS}
               disabled={!!busy}
-              placeholder="e.g. terrazzo floor, warm evening light, linen curtains, a big plant by the window"
+              placeholder="e.g. terrazzo floor, warm evening light, linen curtains, a big plant in the corner"
               value={ideas}
               onChange={(e) => {
                 setIdeas(e.target.value);
-                keepIdeas(e.target.value);
+                keepIdeas(projectId, e.target.value);
               }}
             />
-            <span className="field-hint">
+            <span className="field-hint" id="render-ideas-hint">
               Materials, colours, light and things to add. Walls, doors and windows stay as
               designed.
             </span>
-          </label>
+          </div>
         )}
       </div>
       {/* The look and the model in the foot, always in sight: however short the screen, and
