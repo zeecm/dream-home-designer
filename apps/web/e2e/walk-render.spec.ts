@@ -160,7 +160,7 @@ for (const [width, height] of [
     test('the walk’s map, sticks, time and buttons keep clear of each other', async ({ page }) => {
       await page.goto('/');
       await waitSaved(page);
-      await page.getByRole('button', { name: /^3D$/ }).tap();
+      await page.getByRole('button', { name: 'Switch to 3D' }).tap();
       await page.getByRole('button', { name: 'Walk through' }).tap();
       await expect(page.getByRole('button', { name: 'Leave walk' })).toBeVisible();
       const parts = [
@@ -200,7 +200,7 @@ for (const [width, height] of [
       });
       await page.goto('/');
       await waitSaved(page);
-      await page.getByRole('button', { name: /^3D$/ }).tap();
+      await page.getByRole('button', { name: 'Switch to 3D' }).tap();
       await page.getByRole('button', { name: 'Photo-real render' }).tap();
       const dialog = page.getByRole('dialog', { name: 'Photo-real render' });
       await expect(dialog.getByText('With Gemini (Google) (gemini-3-pro-image)')).toBeInViewport({
