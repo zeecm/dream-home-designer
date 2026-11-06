@@ -1460,6 +1460,14 @@ icon and "Route along the walls" reads "Along walls" under 560 px (its name foll
 details sheet folds during a run; a pinch that leaves the last bend under the bar is undone
 once the plan settles; Inspector Route along the walls and Straighten (memoised); the
 estimate prints trunking to one place. e2e `trunking.spec.ts` (desktop and a 390 px phone).
-Checked: a renovation's After runs route the same way. Not done: a compressor on a small
-ledge can still touch the ledge's name; two units sharing a compressor share its last leg.
+Checked: a renovation's After runs route the same way. QA round 2 (7 Nov): `legInto` squares
+the way in to the unit's or the nearest wall, never to an Alt leg, so an Alt bend never moves;
+Straighten falls back to `wallRoute` between the run's ends when the squared run isn't neat
+(`neatRun`: every leg over 0.35 m on a hug line, no doorway) and takes out jogs under `JOG`
+15 cm where that crosses no new wall (a jog the walls force, a face 0.2 m off the next, stays);
+a route joins other units' trunking (`sharedLegs`, 0.25 a metre, holes free) and avoids
+running over a door head (+0.6); "No inside route…" clears on success or another selection;
+on phones a run starts zoomed to the unit's room and the ledge; a new compressor sits at the
+ledge's far side towards the unit, and room labels keep clear of it (two circles along it; the
+name alone if the name and area don't fit).
 

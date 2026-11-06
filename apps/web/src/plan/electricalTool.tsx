@@ -10,6 +10,7 @@ import {
   nextBend,
   onLedge,
   placePoint,
+  pointInPolygon,
   pointPosition,
   pointRoom,
   roomShapes,
@@ -22,7 +23,7 @@ import {
 } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../editor';
-import { glyphRadius } from '../electrical/electrical';
+import { clearRouteNotice, glyphRadius } from '../electrical/electrical';
 import { ElecGlyph } from '../electrical/glyph';
 import { currentLevel, useStore } from '../store';
 import { icons } from '../ui/icons';
@@ -66,13 +67,28 @@ export function runView(level: Level, view: View, size: Size, from: Vec2): View 
   const min = { x: Math.min(from.x, to.x) - pad, y: Math.min(from.y, to.y) - pad };
   const max = { x: Math.max(from.x, to.x) + pad, y: Math.max(from.y, to.y) + pad };
   const area = { width: size.width, height: Math.max(1, size.height - BAR_H) };
+  // On a phone, the unit's room and the ledge fill the plan below the bar, zoomed in if need
+  // be, so a fingertip covers centimetres, not metres.
+  const phone = size.width < 600;
+  if (phone) {
+    for (const [, shape] of roomShapes(level)) {
+      if (!shape.outer.length) continue;
+      if (!pointInPolygon(from, shape.outer) && !pointInPolygon(to, shape.outer)) continue;
+      for (const p of shape.outer) {
+        min.x = Math.min(min.x, p.x - 0.3);
+        min.y = Math.min(min.y, p.y - 0.3);
+        max.x = Math.max(max.x, p.x + 0.3);
+        max.y = Math.max(max.y, p.y + 0.3);
+      }
+    }
+  }
   const seen = (p: Vec2) => {
     const s = worldToScreen(view, size, p);
     return s.x >= 16 && s.x <= size.width - 16 && s.y >= BAR_H + 8 && s.y <= size.height - 16;
   };
-  if (seen(min) && seen(max)) return view;
-  const fit = fitBounds({ min, max }, area, 24);
-  const zoom = Math.min(fit.zoom, view.zoom);
+  const fit = fitBounds({ min, max }, area, phone ? 12 : 24);
+  if (!phone && seen(min) && seen(max)) return view;
+  const zoom = phone ? fit.zoom : Math.min(fit.zoom, view.zoom);
   // Centred in the plan below the bar.
   return { zoom, cx: fit.cx, cy: fit.cy - BAR_H / 2 / zoom };
 }
@@ -200,6 +216,7 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
       return;
     }
     ctx.dispatch(routed.command);
+    clearRouteNotice();
     setTrunking(null);
     select({ kind: 'point', id: r.ac.id });
   };
@@ -224,7 +241,13 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
     if (end) {
       const corner = p.alt
         ? []
-        : legInto(level, last, end, { geom: ctx.geom, prev, axes, alongWalls: true });
+        : legInto(level, last, end, {
+            geom: ctx.geom,
+            prev,
+            axes,
+            alongWalls: true,
+            except: ac.id,
+          });
       return { legs: [last, ...corner, end], comp, ledge };
     }
     const bend = nextBend(level, last, p.world, {
@@ -407,11 +430,15 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
                     type="button"
                     className="btn"
                     onClick={alongWalls}
-                    title="Route the trunking along the walls to the ledge"
+                    title="Route along the walls, inside the flat, to the ledge"
+                    aria-describedby="trunking-route-what"
                   >
                     <span className="trunking-wide">Route along the walls</span>
                     <span className="trunking-narrow">Along walls</span>
                   </button>
+                  <span id="trunking-route-what" className="visually-hidden">
+                    Route along the walls
+                  </span>
                   <button
                     type="button"
                     className="btn btn-primary"

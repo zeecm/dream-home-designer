@@ -5,6 +5,8 @@ import {
   type ElecKind,
   type ElecPoint,
   type Level,
+  NO_INSIDE_ROUTE,
+  NO_LEDGE,
   type PointPosition,
   type PointWarning,
   type Vec2,
@@ -26,7 +28,7 @@ import {
   trunkingPath,
   updatePoint,
 } from '@dhd/core';
-import { memo, useId, useMemo } from 'react';
+import { memo, useEffect, useId, useMemo } from 'react';
 import { create } from 'zustand';
 import { type Selection, useEditor } from '../editor';
 import { useProject, useStore } from '../store';
@@ -37,6 +39,12 @@ import { ElecGlyph, GLYPH_DEPTH } from './glyph';
 import { SuggestButton } from './suggest';
 
 const KEY = 'dhd-electrical';
+
+/** Takes down "No inside route…" (or "No compressor…") once it no longer applies. */
+export function clearRouteNotice() {
+  const n = useStore.getState().notice;
+  if (n === NO_INSIDE_ROUTE || n === NO_LEDGE) useStore.setState({ notice: null });
+}
 
 /** Whether the plan shows electrical points (on unless switched off; remembered here). */
 export const useElectricalOn = create<{ on: boolean; set: (on: boolean) => void }>((set) => {
@@ -318,6 +326,9 @@ export function PointInspector({ level, id }: { level: Level; id: string }) {
   const project = useProject();
   const trunking = useEditor((s) => s.trunking);
   const h = useId();
+  // Another selection (or none) takes down a "No inside route…" note about this one.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on another point
+  useEffect(() => clearRouteNotice, [id]);
   const p = level.points?.[id];
   // The run squared to the walls, if that changes it: worked out once per change to the plan.
   const runs = p?.kind === 'aircon' && !!(p.route?.length || p.compressorId);
@@ -360,6 +371,7 @@ export function PointInspector({ level, id }: { level: Level; id: string }) {
       return;
     }
     dispatch(routed.command);
+    clearRouteNotice();
   };
   // The run squared to the walls, if that changes it.
   return (

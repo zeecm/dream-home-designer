@@ -434,6 +434,12 @@ function roomLabels(level: Level, geom: PlanGeometry, zoom: number): RoomLabel[]
     // Ceiling lights and fans, and compressors, drawn over the room (wide enough that the
     // label's sampled outline can't straddle one).
     ...Object.values(level.points ?? {}).flatMap((p) => {
+      // A compressor is a box 0.8 m wide: two circles along it, so its ends are kept clear.
+      if (p.at && p.kind === 'compressor')
+        return [-0.25, 0.25].map((dx) => ({
+          c: { x: (p.at as Vec2).x + dx, y: (p.at as Vec2).y },
+          r: Math.max(0.3, Math.max(0.07, 9 / zoom) * 2.2),
+        }));
       if (p.at) return [{ c: p.at, r: Math.max(0.35, Math.max(0.07, 9 / zoom) * 2.2) }];
       // A wall point's symbol stands out from its face into the room: clear of it too.
       const pos = pointPosition(level, p);
@@ -472,6 +478,16 @@ function roomLabels(level: Level, geom: PlanGeometry, zoom: number): RoomLabel[]
     // Keep 10 cm clear of the walls' centre lines, so a label never sits on a thick wall.
     const half = { x: halfPx.x / zoom + 0.1, y: halfPx.y / zoom + 0.1 };
     const at = placeLabel(poly, half, swings, shape.holes);
+    // Nowhere clear with its area (a small ledge with its compressor): the name alone, if
+    // that finds a clear spot.
+    if (areaFits && labelClearance(at, half, poly, swings, shape.holes) < 0) {
+      const slim = { x: (name.length * 7.6) / 2 / zoom + 4 / zoom + 0.1, y: 10 / zoom + 0.1 };
+      const at2 = placeLabel(poly, slim, swings, shape.holes);
+      if (labelClearance(at2, slim, poly, swings, shape.holes) >= 0) {
+        out.push({ id: r.id, name, area: null, at: at2, half: slim });
+        continue;
+      }
+    }
     out.push({ id: r.id, name, area: areaFits ? area : null, at, half });
   }
   return out;

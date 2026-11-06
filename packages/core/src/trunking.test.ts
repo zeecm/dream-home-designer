@@ -621,6 +621,109 @@ describe('the way in, and rooms not to go through', () => {
   });
 });
 
+describe('QA round 2', () => {
+  const l = sampleFlatProject().levels[0] as Level;
+  const geom = planGeometry(l);
+  const comp = { x: 1.3205, y: 6.6705 };
+  const bedUnit: ElecPoint = {
+    id: 'ac',
+    kind: 'aircon',
+    wall: { wallId: 'w_bedroom_main-bedroom', t: 0.504, side: 'left', height: 2.4 },
+  };
+  const xy = axesOf({ x: 1, y: 0 });
+
+  it('an Alt bend stays where it is when the run ends on the ledge; the way in is square', () => {
+    const start = trunkingStart(l, bedUnit) as Vec2;
+    const alt = { x: 1.1, y: 3.05 };
+    const way = legInto(l, alt, comp, { geom, prev: start, axes: xy, alongWalls: true });
+    const path = simplifyPath([start, alt, ...way, comp]);
+    expect(path[1]).toEqual(alt);
+    expect(square(path.slice(1))).toBe(true);
+  });
+
+  it('Straighten after an Alt run: square, along the walls, through no doorway', () => {
+    const run: ElecPoint = { ...bedUnit, compressorId: 'cu', route: [{ x: 1.1, y: 3.05 }] };
+    const lvl: Level = {
+      ...l,
+      points: { ac: run, cu: { id: 'cu', kind: 'compressor', at: comp } },
+    };
+    const route = straightenedRoute(lvl, run, geom);
+    expect(route).not.toBeNull();
+    const path = [trunkingStart(lvl, run) as Vec2, ...(route ?? []), comp];
+    expect(square(path)).toBe(true);
+    for (let i = 1; i < path.length; i++)
+      for (const w of wallsCrossed(lvl, path[i - 1] as Vec2, path[i] as Vec2, geom))
+        expect(w.through).not.toBe('door');
+    // Nothing more to do once straight.
+    const done = { ...run, route: route ?? [] };
+    expect(
+      straightenedRoute({ ...lvl, points: { ...lvl.points, ac: done } }, done, geom),
+    ).toBeNull();
+  });
+
+  it('a jog under 15 cm is taken out', () => {
+    const r = room();
+    const jog = [
+      { x: 1, y: 0.1 },
+      { x: 2, y: 0.1 },
+      { x: 2, y: 1 },
+      { x: 2.1, y: 1 },
+      { x: 2.1, y: 2.9 },
+      { x: 3, y: 2.9 },
+    ];
+    const tidy = tidyRoute(r, jog, { axes: xy });
+    expect(square(tidy)).toBe(true);
+    for (let i = 1; i < tidy.length; i++) {
+      const a = tidy[i - 1] as Vec2;
+      const b = tidy[i] as Vec2;
+      expect(Math.hypot(b.x - a.x, b.y - a.y)).toBeGreaterThan(0.15);
+    }
+  });
+
+  it('a second unit joins the first one’s trunk on its way to the ledge', () => {
+    const first = autoRoute(l, bedUnit, comp, geom) ?? [];
+    const a: ElecPoint = { ...bedUnit, compressorId: 'cu', route: first };
+    const lvl: Level = { ...l, points: { ac: a, cu: { id: 'cu', kind: 'compressor', at: comp } } };
+    const other: ElecPoint = {
+      id: 'ac2',
+      kind: 'aircon',
+      wall: { wallId: 'w_main-bedroom_outside', t: 0.25, side: 'left', height: 2.4 },
+    };
+    const g = planGeometry(lvl);
+    const second = autoRoute(lvl, other, comp, g);
+    expect(second).not.toBeNull();
+    const p1 = trunkingPath(lvl, a);
+    const p2 = [trunkingStart(lvl, other) as Vec2, ...(second ?? []), comp];
+    // Some stretch of the second run lies on the first's.
+    let shared = 0;
+    for (let i = 1; i < p2.length; i++) {
+      const s = p2[i - 1] as Vec2;
+      const t = p2[i] as Vec2;
+      for (let k = 1; k < p1.length; k++) {
+        const u = p1[k - 1] as Vec2;
+        const v = p1[k] as Vec2;
+        const sameX =
+          Math.abs(s.x - t.x) < 1e-6 && Math.abs(u.x - v.x) < 1e-6 && Math.abs(s.x - u.x) < 1e-6;
+        const sameY =
+          Math.abs(s.y - t.y) < 1e-6 && Math.abs(u.y - v.y) < 1e-6 && Math.abs(s.y - u.y) < 1e-6;
+        if (sameX)
+          shared += Math.max(
+            0,
+            Math.min(Math.max(s.y, t.y), Math.max(u.y, v.y)) -
+              Math.max(Math.min(s.y, t.y), Math.min(u.y, v.y)),
+          );
+        if (sameY)
+          shared += Math.max(
+            0,
+            Math.min(Math.max(s.x, t.x), Math.max(u.x, v.x)) -
+              Math.max(Math.min(s.x, t.x), Math.min(u.x, v.x)),
+          );
+      }
+    }
+    expect(shared).toBeGreaterThan(1);
+  });
+});
+
 describe('straightenedRoute', () => {
   it('the new bends for a crooked run; null once straight or with nothing to straighten', () => {
     const l = room();
