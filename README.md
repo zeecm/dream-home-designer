@@ -60,11 +60,13 @@ for any plan.
 - An electrical and lighting plan: sockets, switches, lights, data points and aircon with its
   trunking, at their heights, kept clear of doors and windows; counted into the estimate and
   drawn on the contractor sheet with a schedule. [spec](docs/specs/electrical.md)
+- Clearance checks, slice 2: walkways from the main door to every room and bed side, their
+  narrowest point drawn and measured; room to pull out dining chairs; door clashes (doors that
+  hit each other or a wardrobe's or fridge's doors); shortfall labels on the plan, and the
+  first problem read out on a drop. [spec](docs/specs/clearance-checks.md#slice-2)
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
-- Clearance checks, slice 2: walkways from the main door, dining chairs, door clashes, labels
-  on the plan. [spec](docs/specs/clearance-checks.md)
 
 ### Planned
 1. Comments on the plan: pins anyone with the share link can leave and resolve, for family
