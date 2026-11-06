@@ -13,6 +13,15 @@ export { categoriesFor, catalogueText, priorityOf, resolveAsset } from './catalo
 export { briefData, compass, designContext, planForDesign, type ContextInput } from './describe';
 export { type WallLock, designLocks, wallLocks } from './locks';
 export {
+  type AcceptOptions,
+  acceptDesign,
+  allowedParts,
+  aspectOf,
+  dependsOnWalls,
+  mergeDesign,
+} from './accept';
+export { handEdits } from './handEdits';
+export {
   type Hit,
   type PlaceOutcome,
   type SpaceIndex,
