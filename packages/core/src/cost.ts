@@ -1,10 +1,11 @@
+import { ELEC_KINDS, electricalChanges, pointName, pointRoom, trunkingMetres } from './electrical';
 import { finish } from './finishes';
 import { furnitureKind, itemSize } from './furniture';
 import { pointInPolygon } from './geometry';
 import type { DoorStyle } from './plan';
 import { type RenovationChange, renovationChanges, wallBefore } from './renovation';
 import { roomArea, roomShape } from './rooms';
-import type { Item, Level } from './schema';
+import type { ElecKind, ElecPoint, Item, Level } from './schema';
 import { SHELTER_ROOM } from './structural';
 
 /**
@@ -37,6 +38,11 @@ export interface Rates {
   paint: Rate;
   carpentry: Record<Carpentry, Rate>;
   countertop: Rate;
+  /** Electrical points: a new one, one moved, one taken out; aircon trunking per metre. */
+  elecNew: Record<ElecKind, Rate>;
+  elecMove: Record<ElecKind, Rate>;
+  elecRemove: Rate;
+  trunking: Rate;
   painting: boolean;
   debrisOn: boolean;
   contingency: boolean;
@@ -81,6 +87,36 @@ export const TYPICAL_RATES: Rates = {
     wall: r(90, 150),
   },
   countertop: r(75, 180),
+  elecNew: {
+    'socket-double': r(80, 150),
+    'socket-single': r(65, 120),
+    switch: r(40, 80),
+    light: r(50, 100),
+    fan: r(70, 120),
+    data: r(80, 150),
+    tv: r(80, 150),
+    aircon: r(150, 250),
+    compressor: r(0, 0),
+    'water-heater': r(120, 200),
+    cooker: r(150, 250),
+    doorbell: r(60, 120),
+  },
+  elecMove: {
+    'socket-double': r(60, 120),
+    'socket-single': r(60, 120),
+    switch: r(40, 70),
+    light: r(40, 80),
+    fan: r(40, 80),
+    data: r(60, 110),
+    tv: r(60, 110),
+    aircon: r(150, 250),
+    compressor: r(0, 0),
+    'water-heater': r(80, 150),
+    cooker: r(100, 180),
+    doorbell: r(40, 80),
+  },
+  elecRemove: r(20, 40),
+  trunking: r(30, 50),
   painting: true,
   debrisOn: true,
   contingency: true,
@@ -92,6 +128,7 @@ export type CostGroup =
   | 'Floors'
   | 'Painting'
   | 'Carpentry'
+  | 'Electrical'
   | 'Contingency';
 
 export interface CostLine {
@@ -103,6 +140,8 @@ export interface CostLine {
   unit: 'm' | 'm²' | 'ft run' | 'each' | 'lot';
   low: number;
   high: number;
+  /** An electrical point line: the kind it counts. */
+  point?: ElecKind;
 }
 
 export interface CostEstimate {
@@ -277,6 +316,8 @@ export function costEstimate(before: Level, after: Level | undefined, rates: Rat
       lines.push(line('Carpentry', 'Countertop', where, feet, 'ft run', rates.countertop));
   }
 
+  lines.push(...electricalLines(before, after, rates));
+
   const sum = (k: 'low' | 'high') => lines.reduce((t, l) => t + l[k], 0);
   if (rates.contingency && lines.length) {
     lines.push({
@@ -382,3 +423,70 @@ function changeLines(c: RenovationChange, before: Level, after: Level, rates: Ra
       return [];
   }
 }
+
+/**
+ * Electrical points priced: with a renovation, what it changes (new, relocated, taken out;
+ * a changed kind is new), else every point as new. An aircon point adds its trunking by the
+ * metre; a compressor comes in the aircon package. Lines group by what, where and change.
+ */
+export function electricalLines(before: Level, after: Level | undefined, rates: Rates): CostLine[] {
+  const shown = after ?? before;
+  const groups = new Map<string, CostLine>();
+  const add = (p: ElecPoint, level: Level, change: 'new' | 'relocate' | 'removal') => {
+    if (p.kind === 'compressor') return;
+    const rate =
+      change === 'new'
+        ? rates.elecNew[p.kind]
+        : change === 'relocate'
+          ? rates.elecMove[p.kind]
+          : rates.elecRemove;
+    const label = `${pointName(p)}, ${change}`;
+    const place = pointRoom(level, p) ?? 'Outside';
+    const key = `${label}|${place}`;
+    const was = groups.get(key);
+    const qty = (was?.qty ?? 0) + 1;
+    groups.set(key, { ...line('Electrical', label, place, qty, 'each', rate), point: p.kind });
+  };
+  const trunking: CostLine[] = [];
+  const addTrunking = (p: ElecPoint, level: Level) => {
+    const m = trunkingMetres(level, p);
+    if (m <= 0) return;
+    const place = pointRoom(level, p) ?? 'Outside';
+    trunking.push(line('Electrical', 'Aircon trunking', place, m, 'm', rates.trunking));
+  };
+  const points = Object.values(shown.points ?? {});
+  if (!after) {
+    for (const p of points) {
+      add(p, shown, 'new');
+      if (p.kind === 'aircon') addTrunking(p, shown);
+    }
+  } else {
+    const ch = electricalChanges(before, after);
+    for (const p of ch.removed) add(p, before, 'removal');
+    for (const p of points) {
+      const s = ch.status.get(p.id);
+      if (s) add(p, after, s === 'new' ? 'new' : 'relocate');
+      const was = before.points?.[p.id];
+      const rerouted =
+        !!was && JSON.stringify(trunkingOf(before, was)) !== JSON.stringify(trunkingOf(after, p));
+      if (p.kind === 'aircon' && (s || rerouted)) addTrunking(p, after);
+    }
+  }
+  const order = (l: CostLine) =>
+    ['new', 'relocate', 'removal'].findIndex((c) => l.label.endsWith(c));
+  return [
+    ...[...groups.values()].sort(
+      (a, b) =>
+        order(a) - order(b) ||
+        ELEC_ORDER.indexOf(a.point as ElecKind) - ELEC_ORDER.indexOf(b.point as ElecKind) ||
+        a.place.localeCompare(b.place),
+    ),
+    ...trunking,
+  ];
+}
+
+const ELEC_ORDER = Object.keys(ELEC_KINDS) as ElecKind[];
+
+/** An aircon unit's trunking, rounded, to compare two versions. */
+const trunkingOf = (level: Level, p: ElecPoint) =>
+  p.kind === 'aircon' ? trunkingMetres(level, p) : 0;

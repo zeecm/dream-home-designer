@@ -8,17 +8,22 @@ import {
   moveVertex,
   placeLabel,
   pointInPolygon,
+  pointName,
+  pointPosition,
+  pointRoom,
+  pointTAt,
   roomArea,
   roomShape,
   roomShapes,
   updateItem,
   updateOpening,
+  updatePoint,
   wallLine,
 } from '@dhd/core';
 import type { Selection } from '../editor';
 import { formatArea, formatLength } from '../units';
 
-const KIND_ORDER: Selection['kind'][] = ['room', 'item', 'wall', 'opening', 'vertex'];
+const KIND_ORDER: Selection['kind'][] = ['room', 'item', 'point', 'wall', 'opening', 'vertex'];
 
 /** Where an object sits on the plan, for ordering and for scrolling it into view. */
 export function objectPoint(level: Level, sel: Selection): Vec2 | null {
@@ -44,6 +49,10 @@ export function objectPoint(level: Level, sel: Selection): Vec2 | null {
       const it = level.items[sel.id];
       return it ? { x: it.position.x, y: it.position.z } : null;
     }
+    case 'point': {
+      const p = level.points?.[sel.id];
+      return (p && pointPosition(level, p)?.at) ?? null;
+    }
     case 'room': {
       const r = level.rooms[sel.id];
       const shape = r && roomShape(level, r);
@@ -62,6 +71,7 @@ export function planObjects(level: Level): Selection[] {
   const all: Selection[] = [
     ...Object.keys(level.rooms).map((id) => ({ kind: 'room' as const, id })),
     ...Object.keys(level.items).map((id) => ({ kind: 'item' as const, id })),
+    ...Object.keys(level.points ?? {}).map((id) => ({ kind: 'point' as const, id })),
     ...Object.keys(level.walls).map((id) => ({ kind: 'wall' as const, id })),
     ...Object.keys(level.openings).map((id) => ({ kind: 'opening' as const, id })),
     ...Object.keys(level.vertices).map((id) => ({ kind: 'vertex' as const, id })),
@@ -149,6 +159,14 @@ export function describe(level: Level, sel: Selection | null): string {
       const where = room ? ` in ${room.name}` : '';
       return `${furnitureKind(it.assetId)?.name ?? 'Furniture'}${where}, ${formatLength(w)} by ${formatLength(d)}`;
     }
+    case 'point': {
+      const p = level.points?.[sel.id];
+      if (!p) return '';
+      const room = pointRoom(level, p);
+      const where = room ? ` in ${room}` : '';
+      const up = p.wall ? `, ${Math.round(p.wall.height * 1000)} mm up` : '';
+      return `${pointName(p)}${where}${up}`;
+    }
     case 'opening': {
       const o = level.openings[sel.id];
       if (!o) return '';
@@ -194,6 +212,24 @@ export function nudge(level: Level, sel: Selection, delta: Vec2): Command[] {
       if (!it) return [];
       const position = { x: it.position.x + delta.x, z: it.position.z + delta.y };
       return [updateItem(level.id, sel.id, { position })];
+    }
+    case 'point': {
+      const p = level.points?.[sel.id];
+      if (!p) return [];
+      if (p.at) {
+        const at = { x: p.at.x + delta.x, y: p.at.y + delta.y };
+        return [updatePoint(level.id, sel.id, { at })];
+      }
+      const w = p.wall && level.walls[p.wall.wallId];
+      if (!p.wall || !w) return [];
+      const l = wallLine(level, w);
+      if (l.length < 1e-9) return [];
+      const along = (delta.x * (l.b.x - l.a.x) + delta.y * (l.b.y - l.a.y)) / l.length;
+      if (Math.abs(along) < 1e-9) return [];
+      // Kept on the face and out of doorways, as placing it is.
+      const t = pointTAt(level, p, p.wall.t * l.length + along);
+      if (t === null || Math.abs(t - p.wall.t) < 1e-9) return [];
+      return [updatePoint(level.id, sel.id, { wall: { ...p.wall, t } })];
     }
     case 'room':
       return [];

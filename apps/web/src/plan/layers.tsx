@@ -427,6 +427,11 @@ function roomLabels(level: Level, geom: PlanGeometry, zoom: number): RoomLabel[]
         const { w, d } = itemSize(it);
         return { c: { x: it.position.x, y: it.position.z }, r: Math.hypot(w, d) / 2 };
       }),
+    // Ceiling lights and fans, and compressors, drawn over the room (wide enough that the
+    // label's sampled outline can't straddle one).
+    ...Object.values(level.points ?? {}).flatMap((p) =>
+      p.at ? [{ c: p.at, r: Math.max(0.35, Math.max(0.07, 9 / zoom) * 2.2) }] : [],
+    ),
   ];
   const out: RoomLabel[] = [];
   const shapes = roomShapes(level);

@@ -22,6 +22,11 @@ export function ContractorDialog({ onClose }: { onClose: () => void }) {
   const [picked, setPicked] = useState<Paper | null>(null);
   const [variant, setVariant] = useState<Variant>(project.renovation ? shown : 'before');
   const [furniture, setFurniture] = useState(false);
+  // On when the plan has electrical points (in either version).
+  const hasPoints = [...project.levels, ...(project.renovation?.levels ?? [])].some(
+    (l) => Object.keys(l.points ?? {}).length > 0,
+  );
+  const [electrical, setElectrical] = useState(hasPoints);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -44,7 +49,12 @@ export function ContractorDialog({ onClose }: { onClose: () => void }) {
     setError('');
     try {
       const { printContractorSheet } = await import('./contractorSheet');
-      await printContractorSheet(useStore.getState().editor.doc, { paper, variant, furniture });
+      await printContractorSheet(useStore.getState().editor.doc, {
+        paper,
+        variant,
+        furniture,
+        electrical,
+      });
       close();
     } catch (e) {
       setError(`Couldn’t make the sheet: ${(e as Error).message}`);
@@ -113,6 +123,14 @@ export function ContractorDialog({ onClose }: { onClose: () => void }) {
               onChange={(e) => setFurniture(e.target.checked)}
             />
             <span>Include furniture</span>
+          </label>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={electrical}
+              onChange={(e) => setElectrical(e.target.checked)}
+            />
+            <span>Electrical plan</span>
           </label>
           <p className="field-hint">
             Built-ins are always shown. In the print dialog, choose Save as PDF, at scale 100%.

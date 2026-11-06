@@ -1,10 +1,13 @@
 import { current, isDraft } from 'immer';
+import { electricalChanges, pointName, pointRoom } from './electrical';
 import { finish } from './finishes';
 import { placeLabel, pointInPolygon } from './geometry';
 import type { Command } from './history';
 import { AFTER_SUFFIX, type Variant } from './levels';
 import { roomArea, roomShapes, syncRooms } from './rooms';
 import {
+  type ElecKind,
+  type ElecPoint,
   type Level,
   type Project,
   type Vec2,
@@ -64,7 +67,7 @@ export function endRenovation(keep: Variant): Command {
 }
 
 /** The records an edit to the flat as it is carries over (rooms follow from the walls). */
-const CARRIED = ['vertices', 'walls', 'openings', 'items'] as const;
+const CARRIED = ['vertices', 'walls', 'openings', 'items', 'points'] as const;
 type Carried = (typeof CARRIED)[number];
 /** What a room keeps of its own when carried: the rest (its outline) is found again. */
 const ROOM_FIELDS = ['name', 'floorMaterial', 'ceilingMaterial', 'ceilingHeight'] as const;
@@ -99,9 +102,15 @@ function overlapping(p: [Vec2, Vec2], q: [Vec2, Vec2]): boolean {
  * edit changed goes over where the renovation's is as it was (or already as the edit made it),
  * and the renovation keeps the fields it changed itself (a wall's paint, a door's width).
  * 'conflict' where both changed the same field differently, or one removed what the other
- * changed; 'same' where the renovation already has it.
+ * changed; 'same' where the renovation already has it. Fields in `deep` (records themselves)
+ * merge field by field.
  */
-function merge(was: unknown, edited: unknown, there: unknown): unknown | 'conflict' | 'same' {
+function merge(
+  was: unknown,
+  edited: unknown,
+  there: unknown,
+  deep: readonly string[] = [],
+): unknown | 'conflict' | 'same' {
   if (same(there, edited)) return 'same';
   if (was === undefined) return there === undefined ? edited : 'conflict';
   if (edited === undefined) return same(there, was) ? undefined : 'conflict';
@@ -109,8 +118,16 @@ function merge(was: unknown, edited: unknown, there: unknown): unknown | 'confli
   const a = was as Record<string, unknown>;
   const b = edited as Record<string, unknown>;
   const out = { ...(there as Record<string, unknown>) };
+  const isRecord = (v: unknown) => typeof v === 'object' && v !== null && !Array.isArray(v);
   for (const f of new Set([...Object.keys(a), ...Object.keys(b)])) {
     if (same(a[f], b[f])) continue;
+    // A nested record (a point's place on its wall) merges field by field itself.
+    if (deep.includes(f) && isRecord(a[f]) && isRecord(b[f]) && isRecord(out[f])) {
+      const sub = merge(a[f], b[f], out[f]);
+      if (sub === 'conflict') return 'conflict';
+      if (sub !== 'same') out[f] = sub;
+      continue;
+    }
     if (!same(out[f], a[f]) && !same(out[f], b[f])) return 'conflict';
     if (b[f] === undefined) delete out[f];
     else out[f] = b[f];
@@ -131,9 +148,12 @@ function planCarry(old: Level, now: Level, there: Level): Change[] | 'none' | 'c
   const has = there as unknown as Records;
   const changes: Change[] = [];
   for (const key of CARRIED) {
-    for (const id of new Set([...Object.keys(was[key]), ...Object.keys(edited[key])])) {
-      if (same(was[key][id], edited[key][id])) continue;
-      const to = merge(was[key][id], edited[key][id], has[key][id]);
+    const w = was[key] ?? {};
+    const e = edited[key] ?? {};
+    const h = has[key] ?? {};
+    for (const id of new Set([...Object.keys(w), ...Object.keys(e)])) {
+      if (same(w[id], e[id])) continue;
+      const to = merge(w[id], e[id], h[id], key === 'points' ? ['wall'] : []);
       if (to === 'conflict') return 'conflict';
       if (to !== 'same') changes.push({ key, id, to });
     }
@@ -188,6 +208,7 @@ function planCarry(old: Level, now: Level, there: Level): Change[] | 'none' | 'c
     vertices: { ...there.vertices },
     walls: { ...there.walls },
     openings: { ...there.openings },
+    points: { ...there.points },
   } as Record<string, Record<string, unknown>>;
   for (const c of changes) {
     if (c.key === 'items') continue;
@@ -200,6 +221,11 @@ function planCarry(old: Level, now: Level, there: Level): Change[] | 'none' | 'c
   if (Object.values(ws).some((w) => !vs[w.a] || !vs[w.b])) return 'conflict';
   const ops = Object.values(trial.openings as Level['openings']);
   if (ops.some((o) => !ws[o.wallId] || isBoundary(ws[o.wallId] as Wall))) return 'conflict';
+  // Every socket or switch on a wall that is there (not a boundary).
+  for (const p of Object.values(trial.points as Level['points'])) {
+    const w = p.wall && ws[p.wall.wallId];
+    if (p.wall && (!w || isBoundary(w))) return 'conflict';
+  }
   // No door or window added or moved by the edit overlapping another on its wall.
   for (const c of changes) {
     if (c.key !== 'openings' || !c.to) continue;
@@ -269,7 +295,7 @@ export function carriedToRenovation(
           outcome.conflict = true;
           if (!back) return;
           for (const key of [...CARRIED, 'rooms'] as const) {
-            (after as Record<string, unknown>)[key] = structuredClone(back[key]);
+            (after as Record<string, unknown>)[key] = structuredClone(back[key] ?? {});
           }
           after.ceilingHeight = back.ceilingHeight;
         };
@@ -280,6 +306,7 @@ export function carriedToRenovation(
         const keep = structuredClone(current(after));
         if (plan !== 'none') {
           for (const c of plan) {
+            after[c.key] ??= {};
             const into: Record<string, unknown> = after[c.key];
             if (c.to === undefined) delete into[c.id];
             else into[c.id] = structuredClone(c.to);
@@ -618,6 +645,14 @@ export type RenovationChange = ChangePlace & {
     | { kind: 'area'; before: number; after: number }
     | { kind: 'rename'; from: string }
     | { kind: 'room'; change: 'added' | 'removed'; area: number }
+    | {
+        kind: 'electrical';
+        change: 'new' | 'moved' | 'removed';
+        /** The point's kind, and its name as a contractor reads it ("2-gang switch"). */
+        point: ElecKind;
+        name: string;
+        qty: number;
+      }
   );
 
 /** How far past a wall's face to look for the room on that side. */
@@ -803,15 +838,16 @@ function matchRooms(before: Level, after: Level): Map<string, string> {
 }
 
 /** Changes in one place come out in this order. */
-const KIND_ORDER = ['hack', 'build', 'opening', 'rename', 'floor', 'area', 'room'];
+const KIND_ORDER = ['hack', 'build', 'opening', 'rename', 'floor', 'area', 'room', 'electrical'];
 
 /**
  * What a renovation changes, item by item, each placed by the rooms it touches (found in
  * the version it is in, and named as the room is in the renovation): wall hacked and built
  * (lengths summed per place), doors, windows and openings added, removed (or gone with the
  * wall) or changed, rooms renamed, refinished, grown or shrunk, and rooms new or gone. Rooms
- * are matched between versions by where they are. Ordered by place. For a list to discuss
- * with a contractor.
+ * are matched between versions by where they are; and electrical points new, moved or taken
+ * out (electricalChanges), counted per room and kind. Ordered by place. For a list to
+ * discuss with a contractor.
  */
 export function renovationChanges(
   before: Level,
@@ -969,6 +1005,31 @@ export function renovationChanges(
       area: roomArea(before, r),
     });
   }
+  const points = new Map<string, RenovationChange & { kind: 'electrical' }>();
+  const addPoint = (level: Level, p: ElecPoint, change: 'new' | 'moved' | 'removed') => {
+    const room = pointRoom(level, p);
+    const name = pointName(p);
+    const key = `${room}|${change}|${name}`;
+    const cur = points.get(key);
+    if (cur) cur.qty++;
+    else
+      points.set(key, {
+        rooms: room ? [room] : [],
+        outside: false,
+        kind: 'electrical',
+        change,
+        point: p.kind,
+        name,
+        qty: 1,
+      });
+  };
+  const elec = electricalChanges(before, after);
+  for (const p of elec.removed) addPoint(before, p, 'removed');
+  for (const [id, change] of elec.status) {
+    const p = after.points[id];
+    if (p) addPoint(after, p, change);
+  }
+  out.push(...points.values());
   // By place (a room before the walls it shares, outside walls after), then kind.
   const byPlace = (p: RenovationChange, q: RenovationChange) => {
     for (let i = 0; i < Math.min(p.rooms.length, q.rooms.length); i++) {

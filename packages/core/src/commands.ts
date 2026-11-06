@@ -1,5 +1,6 @@
 import type { Draft } from 'immer';
 import type { z } from 'zod';
+import { clearPointsOn } from './electrical';
 import { furnitureKind } from './furniture';
 import { clampOpeningT } from './geometry';
 import type { Command } from './history';
@@ -166,6 +167,10 @@ export function deleteWall(levelId: string, wallId: string, snapshot?: Level): C
       for (const op of Object.values(lvl.openings)) {
         if (op.wallId === wallId) delete lvl.openings[op.id];
       }
+      // Its sockets and switches go with it.
+      for (const p of Object.values(lvl.points ?? {})) {
+        if (p.wall?.wallId === wallId) delete lvl.points[p.id];
+      }
 
       const stillUsed = new Set<string>();
       for (const w of Object.values(lvl.walls)) {
@@ -243,6 +248,8 @@ export function addOpening(
         if (!wall) throw new Error(`wall ${opening.wallId} not found`);
         if (isBoundary(wall)) throw new Error('a room boundary has no wall to put an opening in');
         lvl.openings[openingId] = { ...opening, id: openingId };
+        // Sockets and switches it lands on move to its jambs, in the same undo step.
+        clearPointsOn(lvl, opening.wallId);
       },
     },
   };
@@ -295,6 +302,8 @@ export function updateWall(levelId: string, wallId: string, patch: WallPatch): C
         const lvl = level(d, levelId);
         for (const o of Object.values(lvl.openings))
           if (o.wallId === wallId) delete lvl.openings[o.id];
+        for (const p of Object.values(lvl.points ?? {}))
+          if (p.wall?.wallId === wallId) delete lvl.points[p.id];
       }
     },
   };
@@ -418,6 +427,7 @@ export function updateOpening(levelId: string, openingId: string, patch: Opening
       }
       if (o.kind !== 'window') o.sill = 0;
       o.t = clampOpeningT(length, o.width, o.t);
+      clearPointsOn(lvl, o.wallId);
     },
   };
 }

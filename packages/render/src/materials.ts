@@ -14,6 +14,9 @@ const palette: Record<string, { color: string; roughness: number; emissive?: str
     ]),
   ),
   door: { color: '#c9b08a', roughness: 0.6 },
+  // Sockets' and switches' plates, an aircon unit, its trunking and compressor.
+  faceplate: { color: '#ffffff', roughness: 0.3, emissive: '#3a3a3a' },
+  'faceplate-detail': { color: '#55595e', roughness: 0.5 },
   // Glass partitions' and fixed glass's frames: powder-coated aluminium.
   aluminium: { color: '#3d4247', roughness: 0.45 },
   'furniture-wood': { color: '#b98c5f', roughness: 0.6 },

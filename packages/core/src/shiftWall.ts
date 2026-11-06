@@ -166,6 +166,26 @@ export function keepFromFarEnds(
     if (!o || after < 1e-9) continue;
     o.t = toA ? 1 - ((1 - o0.t) * before) / after : (o0.t * before) / after;
   }
+  // Sockets and switches on those walls likewise.
+  for (const p0 of Object.values(start.points ?? {})) {
+    const ow = p0.wall && start.walls[p0.wall.wallId];
+    const p = lvl.points?.[p0.id];
+    if (!ow || !p0.wall || !p?.wall || ow.id === skip) continue;
+    const toA = moved.get(ow.a);
+    const toB = moved.get(ow.b);
+    if (!toA === !toB) continue;
+    const pa = start.vertices[ow.a];
+    const pb = start.vertices[ow.b];
+    if (!pa || !pb) continue;
+    const na = toA ?? pa;
+    const nb = toB ?? pb;
+    const before = Math.hypot(pb.x - pa.x, pb.y - pa.y);
+    const after = Math.hypot(nb.x - na.x, nb.y - na.y);
+    if (after < 1e-9) continue;
+    const t0 = p0.wall.t;
+    const t = toA ? 1 - ((1 - t0) * before) / after : (t0 * before) / after;
+    p.wall.t = Math.min(1, Math.max(0, t));
+  }
 }
 
 /** The shortest distance between two segments. */

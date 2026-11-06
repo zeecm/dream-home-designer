@@ -117,6 +117,7 @@ export function hdb4RoomLevel(): Level {
     },
     items: {},
     lights: {},
+    points: {},
   };
 }
 

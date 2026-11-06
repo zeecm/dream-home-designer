@@ -283,7 +283,11 @@ export function tracedLevel(
   newId: (prefix: 'op') => string,
   replace = false,
 ): { level: Level; skipped: number } {
-  let lvl: Level = replace ? { ...level, vertices: {}, walls: {}, openings: {}, rooms: {} } : level;
+  // Replacing the walls takes the points on them too (lights and the like stay).
+  const free = Object.fromEntries(Object.entries(level.points ?? {}).filter(([, p]) => !p.wall));
+  let lvl: Level = replace
+    ? { ...level, vertices: {}, walls: {}, openings: {}, rooms: {}, points: free }
+    : level;
   let skipped = 0;
   const apply = (cmd: Command) => {
     const doc = { levels: [lvl] } as unknown as Project;

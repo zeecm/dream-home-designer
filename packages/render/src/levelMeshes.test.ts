@@ -373,3 +373,41 @@ describe('extrudePolygon', () => {
     }
   });
 });
+
+describe('electrical points', () => {
+  it('a socket is a white plate 8 mm proud of its face; a ceiling light draws nothing', () => {
+    const l = structuredClone(hdb4RoomLevel());
+    // On the 200 mm front wall (y = 0), inside face at y = 0.1, 300 mm up.
+    l.points.p1 = {
+      id: 'p1',
+      kind: 'socket-double',
+      wall: { wallId: 'w_front_l', t: 0.6, side: 'left', height: 0.3 },
+    };
+    l.points.p2 = { id: 'p2', kind: 'light', at: { x: 2, y: 2 } };
+    l.points.ac = {
+      id: 'ac',
+      kind: 'aircon',
+      wall: { wallId: 'w_front_l', t: 0.3, side: 'left', height: 2.4 },
+      compressorId: 'cu',
+      route: [{ x: 1.5, y: 0.3 }],
+    };
+    l.points.cu = { id: 'cu', kind: 'compressor', at: { x: 1.5, y: 0.6 } };
+    const lm = new LevelMeshes(new MaterialCache());
+    lm.update(l);
+    const named = (n: string) => lm.group.children.filter((o) => o.name === n);
+    expect(named('point:p2')).toHaveLength(0);
+    const [socket] = named('point:p1');
+    if (!socket) throw new Error('no socket');
+    const plate = socket.children[0] as Mesh;
+    const box = new Box3().setFromObject(plate);
+    expect(box.max.y - box.min.y).toBeCloseTo(0.086, 3);
+    expect(box.max.x - box.min.x).toBeCloseTo(0.146, 3);
+    // The wall's inside face is at y = 0.1 (plan y is world z): the plate stands 8 mm off it.
+    expect(box.min.z).toBeCloseTo(0.1, 6);
+    expect(box.max.z).toBeCloseTo(0.108, 6);
+    expect((box.max.y + box.min.y) / 2).toBeCloseTo(0.3, 6);
+    // The aircon unit, its trunking and the compressor are there too.
+    expect(named('point:ac')[0]?.children.length).toBeGreaterThan(2);
+    expect(named('point:cu')).toHaveLength(1);
+  });
+});

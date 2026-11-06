@@ -57,23 +57,24 @@ for any plan.
 - A dimensioned plan for contractors: to scale on A4 or A3, chain dimensions, door and window
   widths, room sizes, the hacking plan and change list; print or save as PDF.
   [spec](docs/specs/dimensioned-export.md)
+- An electrical and lighting plan: sockets, switches, lights, data points and aircon with its
+  trunking, at their heights, kept clear of doors and windows; counted into the estimate and
+  drawn on the contractor sheet with a schedule. [spec](docs/specs/electrical.md)
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
-- Electrical and lighting plan, slice 1: sockets, switches, lights, data points and aircon with
-  its trunking, at their heights; counted into the estimate, drawn on the contractor sheet.
-  [spec](docs/specs/electrical.md)
+- Clearance checks, slice 2: walkways from the main door, dining chairs, door clashes, labels
+  on the plan. [spec](docs/specs/clearance-checks.md)
 
 ### Planned
-1. Clearance checks, slice 2: walkways from the main door, dining chairs, labels on the plan.
-2. Comments on the plan: pins anyone with the share link can leave and resolve, for family
+1. Comments on the plan: pins anyone with the share link can leave and resolve, for family
    decisions.
-3. Slice 2s: the lift and a diagonal you can edit for your own furniture, notch depths on the
+2. Slice 2s: the lift and a diagonal you can edit for your own furniture, notch depths on the
    contractor sheet, carpentry priced on every level, suggested electrical points per room.
-4. Ageing parents check: wheelchair turning space, step-free routes, 850 mm doors, grab bars
+3. Ageing parents check: wheelchair turning space, step-free routes, 850 mm doors, grab bars
    in the bathroom (HDB EASE items).
-5. Storage meter: wardrobe and cabinet space against the household, room by room.
-7. A wall seen straight on (elevation): carpentry, windows, sockets and switches at height.
+4. Storage meter: wardrobe and cabinet space against the household, room by room.
+5. A wall seen straight on (elevation): carpentry, windows, sockets and switches at height.
 
 More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
 

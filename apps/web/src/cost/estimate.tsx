@@ -3,6 +3,8 @@ import {
   type CostEstimate,
   type CostGroup,
   type CostLine,
+  ELEC_KINDS,
+  ELEC_KIND_ORDER,
   type Item,
   type Level,
   type Rate,
@@ -138,6 +140,7 @@ const GROUPS: CostGroup[] = [
   'Floors',
   'Painting',
   'Carpentry',
+  'Electrical',
   'Contingency',
 ];
 
@@ -224,6 +227,8 @@ const RATE_ROWS: {
       ['glassLeaves', 'Glass leaves', 'each'],
       ['paint', 'Painting', 'm²'],
       ['countertop', 'Countertop', 'ft run'],
+      ['elecRemove', 'Take out an electrical point', 'each'],
+      ['trunking', 'Aircon trunking', 'm'],
     ] as const
   ).map(([k, label, unit]) => ({
     label,
@@ -275,6 +280,21 @@ const RATE_ROWS: {
     get: (r: Rates) => r.carpentry[k],
     put: (r: Rates, v: Rate) => ({ ...r, carpentry: { ...r.carpentry, [k]: v } }),
   })),
+  // Electrical points, new and moved (a compressor comes with the aircon).
+  ...ELEC_KIND_ORDER.filter((k) => k !== 'compressor').flatMap((k) => [
+    {
+      label: `${ELEC_KINDS[k].name}, new`,
+      unit: 'each',
+      get: (r: Rates) => r.elecNew[k],
+      put: (r: Rates, v: Rate) => ({ ...r, elecNew: { ...r.elecNew, [k]: v } }),
+    },
+    {
+      label: `${ELEC_KINDS[k].name}, relocate`,
+      unit: 'each',
+      get: (r: Rates) => r.elecMove[k],
+      put: (r: Rates, v: Rate) => ({ ...r, elecMove: { ...r.elecMove, [k]: v } }),
+    },
+  ]),
 ];
 
 /** One rate: low and high, swapped if the low is the higher. */
@@ -382,7 +402,11 @@ export function EstimateDialog({ onClose }: { onClose: () => void }) {
       <div className="dialog-body">
         <p className="dialog-note">{DISCLAIMER}</p>
         {!est.renovation && (
-          <p className="dialog-note">Start a renovation to price hacking, walls and floors.</p>
+          <p className="dialog-note">
+            {est.lines.some((l) => l.group === 'Electrical')
+              ? 'Start a renovation to price hacking, walls and floors, and only the electrical points that change: until then, every point is priced as new.'
+              : 'Start a renovation to price hacking, walls and floors.'}
+          </p>
         )}
         <div className="estimate">
           {GROUPS.map((g) => {

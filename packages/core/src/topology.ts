@@ -47,6 +47,16 @@ export function splitWallAt(l: Mut, wallId: string, vertexId: string, newWallId:
       o.t = clampOpeningT(length - us, o.width, (u - us) / (length - us));
     }
   }
+  // Electrical points stay where they are, on whichever part now holds them.
+  for (const p of Object.values(l.points ?? {})) {
+    if (p.wall?.wallId !== wallId) continue;
+    const u = p.wall.t * length;
+    if (u <= us) p.wall.t = us > 1e-9 ? Math.min(1, u / us) : 0;
+    else {
+      p.wall.wallId = newWallId;
+      p.wall.t = Math.min(1, Math.max(0, (u - us) / (length - us)));
+    }
+  }
   for (const room of Object.values(l.rooms)) {
     const n = room.loop.length;
     for (let i = 0; i < n; i++) {
@@ -110,6 +120,18 @@ export function mergeVertex(l: Mut, from: string, into: string): void {
           delete l.openings[o.id];
         }
       }
+      for (const p of Object.values(l.points ?? {})) {
+        if (p.wall?.wallId !== w.id) continue;
+        if (twin && !isBoundary(l.walls[twin.id] ?? {})) {
+          p.wall.wallId = twin.id;
+          if (twin.a !== w.a) {
+            p.wall.t = 1 - p.wall.t;
+            p.wall.side = p.wall.side === 'left' ? 'right' : 'left';
+          }
+        } else {
+          delete l.points[p.id];
+        }
+      }
     } else {
       kept.push(w);
     }
@@ -131,9 +153,10 @@ export function flipSwing<S extends 'leftIn' | 'leftOut' | 'rightIn' | 'rightOut
 
 /** Makes a level draft equal to `next`, record by record (small undo patches). */
 export function applyLevel(d: Draft<Level>, next: Level): void {
-  for (const key of ['vertices', 'walls', 'openings', 'rooms'] as const) {
+  for (const key of ['vertices', 'walls', 'openings', 'rooms', 'points'] as const) {
+    d[key] ??= {};
     const cur = d[key] as Record<string, unknown>;
-    const want = next[key] as Record<string, unknown>;
+    const want = (next[key] ?? {}) as Record<string, unknown>;
     for (const id of Object.keys(cur)) if (!(id in want)) delete cur[id];
     for (const [id, value] of Object.entries(want)) {
       if (JSON.stringify(cur[id]) !== JSON.stringify(value)) cur[id] = structuredClone(value);
@@ -233,6 +256,13 @@ export function repairLevel(level: Level): { level: Level; fixes: string[] } {
     if (!l.walls[o.wallId]) {
       delete l.openings[o.id];
       fixes.push(`removed opening ${o.id} on a missing wall`);
+    }
+  }
+  for (const p of Object.values(l.points ?? {})) {
+    const w = p.wall && l.walls[p.wall.wallId];
+    if (p.wall && (!w || isBoundary(w))) {
+      delete l.points[p.id];
+      fixes.push(`removed point ${p.id} on a missing wall`);
     }
   }
   for (const r of Object.values(l.rooms)) {

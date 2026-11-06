@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { addOpening, drawWall } from './commands';
+import { addPoint, pointPosition } from './electrical';
 import { blankProject } from './factory';
 import { addItem, furnitureKind, newItem } from './furniture';
 import { pointInPolygon } from './geometry';
@@ -346,6 +347,56 @@ describe('moveRoom', () => {
     const l = f.lvl();
     expect(Object.keys(l.walls).length).toBe(walls);
     expect(roomArea(l, l.rooms[room.id] ?? room)).toBeCloseTo(12, 6);
+  });
+
+  it('keeps a step holding a switch: moving back stops short of closing it up', () => {
+    const f = plan(
+      [
+        { x: -2, y: 0 },
+        { x: 6, y: 0 },
+      ],
+      [
+        { x: 0, y: 0 },
+        { x: 0, y: 3 },
+        { x: 4, y: 3 },
+        { x: 4, y: 0 },
+      ],
+    );
+    const room = f.roomWith({ x: 2, y: 1 });
+    const press = (delta: Vec2) => {
+      const l = f.lvl();
+      const move = planRoomMove(l, room.id, 'y');
+      const to = moveTowards(l, move, { x: 0, y: 0 }, delta);
+      f.apply(moveRoom(l, move, to));
+      return to;
+    };
+    const before = new Set(Object.keys(f.lvl().walls));
+    press({ x: 0, y: 0.8 });
+    const step = Object.keys(f.lvl().walls).find((id) => !before.has(id));
+    if (!step) throw new Error('no step');
+    const sw = addPoint(f.lvl().id, {
+      kind: 'switch',
+      wall: { wallId: step, t: 0.5, side: 'left', height: 1.05 },
+    });
+    f.apply(sw.command);
+    const back = press({ x: 0, y: -0.8 });
+    expect(back.y).toBeGreaterThan(-0.8);
+    const l = f.lvl();
+    expect(l.walls[step]).toBeDefined();
+    const p = l.points[sw.pointId];
+    if (!p) throw new Error('switch gone');
+    expect(pointPosition(l, p)).not.toBeNull();
+    // Nothing on a wall that's gone, and the switch still on its wall's face.
+    for (const q of Object.values(l.points))
+      if (q.wall) expect(l.walls[q.wall.wallId]).toBeDefined();
+    const w = l.walls[step];
+    const a = w && l.vertices[w.a];
+    const b = w && l.vertices[w.b];
+    if (!a || !b) throw new Error('no step');
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const t = p.wall?.t ?? Number.NaN;
+    expect(t * len).toBeGreaterThan(0.043);
+    expect((1 - t) * len).toBeGreaterThan(0.043);
   });
 
   it('gives a step the side and faces of the wall it continues', () => {
