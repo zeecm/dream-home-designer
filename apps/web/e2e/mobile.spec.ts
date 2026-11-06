@@ -394,6 +394,44 @@ async function tapThrough(page: Page, x: number, y: number) {
   await page.evaluate(() => (window as W).tapClick);
 }
 
+/**
+ * Where to tap something on the plan inside a band of the screen (where the details' toggle
+ * comes once open): of the points whose `data-hit` starts with `prefix`, the one furthest
+ * from anything else, looking around it beyond the band too. Null if there is none.
+ */
+async function spotIn(page: Page, band: { top: number; bottom: number }, prefix: string) {
+  return page.evaluate(
+    ({ top, bottom, prefix }) => {
+      const step = 2;
+      const reach = 30; // looked at beyond the band, for room around a point near its edge
+      const xs = Array.from({ length: Math.floor(innerWidth / step) }, (_, i) => i * step);
+      const ys: number[] = [];
+      for (let y = top - reach; y <= bottom + reach; y += step) ys.push(y);
+      const on = ys.map((y) =>
+        xs.map((x) =>
+          (
+            document.elementFromPoint(x, y)?.closest('[data-hit]')?.getAttribute('data-hit') ?? ''
+          ).startsWith(prefix),
+        ),
+      );
+      let best: { x: number; y: number; room: number } | null = null;
+      ys.forEach((y, j) => {
+        if (y < top + 4 || y > bottom - 4) return;
+        xs.forEach((x, i) => {
+          if (!on[j]?.[i]) return;
+          // Steps to the nearest point that isn't it, along the row and the column.
+          let room = 0;
+          const inside = (dj: number, di: number) => on[j + dj * room]?.[i + di * room];
+          while (inside(0, 1) && inside(0, -1) && inside(1, 0) && inside(-1, 0)) room++;
+          if (!best || room > best.room) best = { x, y, room: room * step };
+        });
+      });
+      return best as { x: number; y: number; room: number } | null;
+    },
+    { ...band, prefix },
+  );
+}
+
 test('on a phone: a piece tapped low on the plan opens its details, though they open under the finger', async ({
   page,
 }) => {
@@ -403,41 +441,53 @@ test('on a phone: a piece tapped low on the plan opens its details, though they 
   const toggle = page.locator('.inspector-toggle');
   const details = page.getByRole('complementary', { name: 'Details' });
   // A small pan first, as a hand settles the plan: from then on the panel opening or folding
-  // leaves the plan where it is on screen (just after it was fitted, it would refit).
-  const r = await planBox(page);
-  await touches(page, settled(line({ x: r.x + 30, y: r.y + 40 }, { x: r.x + 50, y: r.y + 40 }, 4)));
+  // leaves the plan where it is on screen (just after it was fitted, it would refit). It
+  // starts on a room, which a drag pans, and it has panned once the rooms have moved.
+  const rooms = () => page.locator('g.rooms').boundingBox();
+  await planBox(page);
+  const before = await rooms();
+  const from = await spotIn(page, { top: 0, bottom: 900 }, 'room:');
+  if (!before || !from) throw new Error('no room to pan by');
+  await touches(page, settled(line(from, { x: from.x + 20, y: from.y }, 4)));
+  await expect.poll(async () => (await rooms())?.x ?? before.x).toBeGreaterThan(before.x + 10);
   // Where the toggle sits once the details are open. A tap there on the plan opens them under
   // the finger, and the browser's click for that tap comes after, onto the toggle.
   await toggle.tap();
   await expect(toggle).toHaveText('Hide details');
   const open = await toggle.boundingBox();
   if (!open) throw new Error('no toggle');
-  const y = open.y + open.height / 2;
-  await toggle.tap();
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await planBox(page); // grown back over the panel's room
-  // Across the screen at that height, the middle of the kitchen (low on the plan).
-  const x = await page.evaluate((y) => {
-    const xs: number[] = [];
-    for (let x = 0; x < innerWidth; x += 2) {
-      const hit = document.elementFromPoint(x, y)?.closest('[data-hit]');
-      if (hit?.getAttribute('data-hit') === 'room:rm_kitchen') xs.push(x);
-    }
-    return xs.length ? ((xs[0] ?? 0) + (xs[xs.length - 1] ?? 0)) / 2 : null;
-  }, y);
-  if (x === null) throw new Error('no kitchen under the toggle');
+  const band = { top: open.y, bottom: open.y + open.height };
+  const fold = async () => {
+    await toggle.tap();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await planBox(page); // grown back over the panel's room
+  };
+  await fold();
+  // A room there (low on the plan), where it has most room around: the fridge goes there.
+  const spot = await spotIn(page, band, 'room:');
+  if (!spot || spot.room < 10) throw new Error(`no room under the toggle: ${JSON.stringify(spot)}`);
+  const measured = await rooms();
 
   // A fridge, placed there with the details folded by hand.
   await page.getByRole('button', { name: /^Furniture/ }).tap();
   await toggle.tap();
   await details.getByLabel('Find furniture').fill('fridge');
-  await details
-    .getByRole('button', { name: /^Fridge/ })
-    .first()
-    .tap();
-  await toggle.tap();
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await tapThrough(page, x, y);
+  const fridge = details.getByRole('button', { name: /^Fridge/ }).first();
+  await fridge.tap();
+  await expect(fridge).toHaveAttribute('aria-pressed', 'true');
+  await fold();
+  // The plan back where the spot was measured (the panel opened and folded meanwhile).
+  await expect
+    .poll(async () => {
+      const now = await rooms();
+      return !!now && !!measured && Math.hypot(now.x - measured.x, now.y - measured.y) < 1;
+    })
+    .toBe(true);
+  // And nothing over it there (a notice, the panel): the finger meets the plan.
+  const onPlan = () =>
+    page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('svg.plan-svg'), spot);
+  await expect.poll(onPlan).toBe(true);
+  await tapThrough(page, spot.x, spot.y);
   const items = page.locator('[data-hit^="item:"]');
   await expect(items).toHaveCount(1);
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
@@ -446,30 +496,21 @@ test('on a phone: a piece tapped low on the plan opens its details, though they 
   await page.getByRole('button', { name: /^Select/ }).tap();
   await details.getByRole('button', { name: 'Clear selection' }).tap();
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  const piece = await items.first().boundingBox();
-  if (!piece) throw new Error('no fridge');
-  const at = { x: piece.x + piece.width / 2, y: piece.y + piece.height / 2 };
-  expect(Math.abs(at.y - y)).toBeLessThan(open.height / 2); // under where the toggle comes
-  await tapThrough(page, at.x, at.y);
+  await planBox(page);
+  const piece = await spotIn(page, band, 'item:');
+  if (!piece) throw new Error('no fridge under the toggle');
+  await tapThrough(page, piece.x, piece.y);
   await expect(details.getByRole('heading', { name: 'Fridge' })).toBeVisible();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
 
-  // So does a room tapped there.
+  // So does a room tapped there, beside the fridge.
   await details.getByRole('button', { name: 'Clear selection' }).tap();
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  const room = await page.evaluate(
-    ([y, skip]) => {
-      for (let x = 0; x < innerWidth; x += 2) {
-        if (Math.abs(x - skip.x) < skip.r) continue;
-        const hit = document.elementFromPoint(x, y)?.closest('[data-hit]');
-        if (hit?.getAttribute('data-hit') === 'room:rm_kitchen') return x + 4;
-      }
-      return null;
-    },
-    [y, { x: at.x, r: piece.width }] as const,
-  );
-  if (room === null) throw new Error('no kitchen beside the fridge');
-  await tapThrough(page, room, y);
+  await planBox(page);
+  const floor = await spotIn(page, band, 'room:');
+  if (!floor || floor.room < 4)
+    throw new Error(`no room beside the fridge: ${JSON.stringify(floor)}`);
+  await tapThrough(page, floor.x, floor.y);
   await expect(details.getByRole('heading', { name: 'Room', exact: true })).toBeVisible();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
 
