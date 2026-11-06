@@ -294,6 +294,8 @@ doors are 0.8–0.9 m wide."
 - When the lift is the worst step, the main sentence names it:
   - "Too big for the lift door: 0.90 m wide; it needs 0.95 m on its side."
   - "Doesn't fit in the lift (1.10 × 1.40 m, 2.30 m high), even on end or tilted."
+  - It fits the car only stood up, and can't be stood up through the door (owner's copy):
+    "Too long to stand up through the lift door (needs 2.10 m, the door allows 1.92 m)."
 - Otherwise the main sentence is as now, followed by a Lift line:
   - "Lift: fits as it stands." / "on its back." / "stood on end." / "tilted."
   - Tight: "Lift: just fits, stood on end."
@@ -337,8 +339,8 @@ E2e (desktop, and a 390 px phone by finger):
 
 9. "My sofa" 2.1 × 1.0 × 0.95 in the living room, Typical HDB lift: "Too big for the lift door: 0.90 m wide; it needs 0.95 m on its side."
 10. Set its diagonal to 0.80 (B2): it now clears the door but can't be stood up in the car:
-    "Doesn't fit in the lift (1.10 × 1.40 m, 2.30 m high), even on end or tilted." (the stand-up
-    rule under **Car**). A 1.8 × 1.0 × 0.95 "Short sofa" with diagonal 0.80: "Lift: fits stood on end."
+    "Too long to stand up through the lift door (needs 2.10 m, the door allows 1.92 m)." (the
+    stand-up rule under **Car**). A 1.8 × 1.0 × 0.95 "Short sofa" with diagonal 0.80: "Lift: fits stood on end."
 11. Reload: Typical is still chosen. A view link shows the same Lift line, with the select disabled.
 12. My measurements with car height 2.00: "Doesn't fit in the lift (1.10 × 1.40 m, 2.00 m high), even on end or tilted."
 13. Undo goes back to Typical.
