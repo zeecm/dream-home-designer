@@ -607,13 +607,17 @@ opens on OpenAI. Renders switch between the render and the 3D view. Layout thumb
 rooms, new or changed walls in the accent colour and walls taken down dashed; an option with
 nothing applicable has no Use button. Touch: 44 px buttons in dialogs and the trace bar.
 
-**Photo-real renders (5 Nov):** "Photo-real render" on the 3D view (and, with a mouse, while
-walking) takes a picture of the view as it is (`capture3d`) and sends it, with a look (as
+**Photo-real renders (5 Nov):** "Photo-real render" on the 3D view (and while walking: under
+Footsteps, a 44 px camera icon on touch screens, with the mini-map moved down below it) takes a picture of the view as it is (`capture3d`) and sends it, with a look (as
 designed, warm modern, Scandinavian, modern luxe, industrial), to the person's image model
 (`ai/render.ts`: OpenAI `images/edits` with `gpt-image-1`, or Gemini
 `gemini-2.5-flash-image` generateContent with image output; Claude makes no pictures). The
 picture shows in the dialog to download. The prompt keeps the camera, room and furniture
-and asks only for materials and light. 
+and asks only for materials and light. While the dialog is open over a walk, the walk
+stands still (`paused` on `WalkControls`; the sticks let go and ignore a finger still down,
+`disabled` on `Joystick`), so the picture is the view the person saw; closing it carries on
+from the same spot (6 Nov, owner: "mobile doesn't have the render option in walk through";
+`e2e/walk-render.spec.ts`).
 
 **AI: suggested layouts (stage 2, 5 Nov):** "Suggest layouts with AI" in the plan's
 Renovation section opens a brief (who lives here, eight common wishes, anything else) and
