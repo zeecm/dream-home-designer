@@ -74,20 +74,22 @@ for any plan.
   tilted; a sofa's diagonal depth can be added or changed later.
   [spec](docs/specs/slice-2s.md#b1-the-lift-pr-2-schema-10)
 
+- AI interior designer, slice 1: with your own key, a whole renovation proposed for the flat
+  (walls HDB allows, room uses, furniture, carpentry, paint, a cost), checked like your own
+  edits; versions to preview, accept in parts with Undo, and change room by room with feedback;
+  a cost check before every run and a spending limit. [spec](docs/specs/ai-interior-designer.md)
+
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
+- AI interior designer, slice 1c: compare versions side by side, and locks for your own edits.
 
 ### Planned
-1. AI interior designer: a whole renovation proposed for the flat (walls HDB allows, room
-   uses, furniture, carpentry, paint), checked like your own edits, then changed room by room
-   or by aspect with feedback and locks; a cost estimate before every run.
-   [spec](docs/specs/ai-interior-designer.md)
-2. Slice 2s, the rest: notch depths on the contractor sheet and the estimate on every level.
+1. Slice 2s, the rest: notch depths on the contractor sheet and the estimate on every level.
    (The lift check and a diagonal you can edit are done.)
-3. Ageing parents check: wheelchair turning space, step-free routes, 850 mm doors, grab bars
+2. Ageing parents check: wheelchair turning space, step-free routes, 850 mm doors, grab bars
    in the bathroom (HDB EASE items).
-4. Storage meter: wardrobe and cabinet space against the household, room by room.
-5. A wall seen straight on (elevation): carpentry, windows, sockets and switches at height.
+3. Storage meter: wardrobe and cabinet space against the household, room by room.
+4. A wall seen straight on (elevation): carpentry, windows, sockets and switches at height.
 
 More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
 
