@@ -20,7 +20,7 @@ import { hdb4RoomProject } from './fixtures/hdb4room';
 import { clampOpeningT, wallLine } from './geometry';
 import { type EditorDoc, dispatch, emptyHistory, undo } from './history';
 import { roomArea } from './rooms';
-import { Project } from './schema';
+import { DEFAULT_SITE, Project } from './schema';
 
 const L = 'lvl_ground';
 const fresh = (): EditorDoc => ({ doc: hdb4RoomProject(), history: emptyHistory() });
@@ -197,6 +197,21 @@ describe('restoreVersion', () => {
     expect(s.doc.name).toBe(old.name);
     expect(s.doc.version).toBe(7);
     expect(undo(s).doc.name).toBe('Changed');
+  });
+
+  it('copies the site deeply: the lift restored is not the old version’s object', () => {
+    const lift = {
+      preset: 'typical' as const,
+      door: { width: 0.9, height: 2.0 },
+      car: { width: 1.1, depth: 1.4, height: 2.3 },
+    };
+    const old = { ...hdb4RoomProject(), site: { ...DEFAULT_SITE, lift } };
+    let s: EditorDoc = { doc: hdb4RoomProject(), history: emptyHistory() };
+    s = dispatch(s, restoreVersion(old));
+    expect(s.doc.site?.lift).toEqual(lift);
+    expect(s.doc.site?.lift).not.toBe(lift);
+    expect(Object.isFrozen(lift)).toBe(false);
+    expect(undo(s).doc.site).toBeUndefined();
   });
 
   it('brings back the uploaded models its pieces were made from', () => {

@@ -2,7 +2,11 @@ import {
   type CustomModel,
   type Delivery,
   type DoorOnTheWay,
+  LIFT_PRESETS,
   type Level,
+  type Lift,
+  type LiftFit,
+  type LiftPose,
   addModel,
   deliverable,
   deliveryCheck,
@@ -11,14 +15,19 @@ import {
   furnitureKind,
   mainDoors,
   newId,
+  rigidNote,
+  setLift,
+  worstDoor,
 } from '@dhd/core';
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { create } from 'zustand';
 import { useEditor } from '../editor';
 import { useProject, useStore } from '../store';
+import { LengthField } from '../ui/fields';
 import { icons } from '../ui/icons';
 import { formatLength, parseLength } from '../units';
+import { deliveryText, liftLine, liftNumbers, nb } from './words';
 
 /** Pieces whose way in is shown (the person's own always; others when asked). */
 export const useWayShown = create<{ ids: Set<string>; toggle: (id: string) => void }>((set) => ({
@@ -62,26 +71,26 @@ export const wayIsOwn = (level: Level, itemId: string) => {
   return !furnitureKind(a)?.model && a.startsWith('mdl_');
 };
 
-/** The way in for a piece, from the chosen main door (or the widest), on the level shown. */
+/**
+ * The way in for a piece, from the chosen main door (or the widest), on the level shown, and
+ * through the plan's lift when one is set.
+ */
 export function useDelivery(level: Level | undefined, itemId: string | undefined): Delivery | null {
-  const projectId = useProject().id;
+  const project = useProject();
+  const projectId = project.id;
+  const lift = project.site?.lift;
+  // A model's diagonal changes the way in, though the level doesn't change.
+  const models = project.models;
   const chosen = useFrom((s) => s.from[projectId]) ?? loadFrom(projectId);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: models feed deliveryCheck's kinds
   return useMemo(() => {
     if (!level || !itemId || !level.items[itemId]) return null;
     if (!deliverable(level.items[itemId]?.assetId ?? '')) return null;
     const doors = mainDoors(level);
     const from = chosen && doors.includes(chosen) ? chosen : undefined;
-    return deliveryCheck(level, itemId, from ? { from } : {});
-  }, [level, itemId, chosen]);
+    return deliveryCheck(level, itemId, { ...(from ? { from } : {}), ...(lift ? { lift } : {}) });
+  }, [level, itemId, chosen, lift, models]);
 }
-
-/** A door's name: the main door (the first on the way), or by the room it leads into. */
-const doorName = (level: Level, d: DoorOnTheWay, main?: string) =>
-  d.openingId === 'lift'
-    ? 'the lift door'
-    : d.openingId === main || !d.into
-      ? 'the main door'
-      : `the ${level.rooms[d.into]?.name ?? 'room'} door`;
 
 /** A main door in the From picker: its width and the room it opens into. */
 function doorLabel(level: Level, id: string): string {
@@ -115,61 +124,77 @@ function doorLabel(level: Level, id: string): string {
   return `${near ? `${near} door` : 'Door'}, ${formatLength(o.width)}`;
 }
 
-/** A length that doesn't break between its number and its unit. */
-const nb = (t: string) => t.replace(' ', '\u00a0');
+/** The id of a sofa's diagonal depth field in its details ("Your model"). */
+export const DIAGONAL_FIELD = 'model-diagonal';
 
-/** The verdict in a sentence. */
-export function deliveryText(level: Level, r: Delivery): string {
-  switch (r.status) {
-    case 'no-room':
-      return 'Put it in a room to check the way in.';
-    case 'no-door':
-      return 'Add the main door first.';
-    case 'unreachable':
-      return 'There’s no way in to this room through the doors drawn.';
-    default: {
-      const w = r.worst;
-      if (!w) return 'Fits through every door on the way in.';
-      const where = doorName(level, w, r.from);
-      if (r.status === 'fits' || r.status === 'tight') {
-        // The door it's tightest through (the worst), else the narrowest.
-        const narrowest =
-          r.status === 'tight' ? w : r.doors.reduce((p, q) => (q.clear < p.clear ? q : p));
-        const head =
-          r.status === 'tight'
-            ? 'Just fits through every door on the way in'
-            : 'Fits through every door on the way in';
-        return `${head}. Narrowest: ${doorName(level, narrowest, r.from)}, ${nb(formatLength(narrowest.clear))}.`;
-      }
-      if (r.status === 'hinges') {
-        return `Fits through ${where} with the door off its hinges (${nb(formatLength(w.clear))} clear with it on).`;
-      }
-      if (w.turn) {
-        return `Can’t turn through ${where} from the ${nb(formatLength(w.turn.space))} space in front.`;
-      }
-      return `Too big for ${where}: ${nb(formatLength(w.clear))} wide; it needs ${nb(formatLength(w.need ?? 0))} on its side.`;
-    }
-  }
+/** Takes the person to the diagonal depth field: scrolled into view and focused. */
+function focusDiagonal() {
+  const el = document.getElementById(DIAGONAL_FIELD);
+  if (!el) return;
+  const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  el.focus({ preventScroll: true });
+  el.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' });
 }
 
 /** In a piece's details: whether it gets in, from which main door, and a way to show it. */
 export function GettingItIn({ level, id }: { level: Level; id: string }) {
-  const projectId = useProject().id;
+  const project = useProject();
+  const projectId = project.id;
+  const lift = project.site?.lift;
   const item = level.items[id];
   const own = wayIsOwn(level, id);
   const shown = useWayShown((s) => s.ids.has(id));
   const toggle = useWayShown((s) => s.toggle);
   const r = useDelivery(level, id);
   const setFrom = useFrom((s) => s.set);
+  const viewer = useStore((s) => s.role === 'viewer');
   const doors = useMemo(() => mainDoors(level), [level]);
   if (!item || !r) return null;
   const bad = r.status === 'too-big' || r.status === 'unreachable';
+  const fit = 'lift' in r ? r.lift : undefined;
+  const line = fit ? liftLine(fit) : null;
+  const rigid = r.status === 'too-big' ? rigidNote(item.assetId) : null;
+  // An own sofa too wide for a door, its diagonal not measured: tilted, it may go.
+  const model = project.models?.[item.assetId];
+  const askDiagonal =
+    !viewer &&
+    own &&
+    model?.shape === 'sofa' &&
+    !model.diagonal &&
+    'doors' in r &&
+    r.doors.some((d) => d.fit === 'too-big' && d.need !== undefined);
   return (
     <section className="stack" aria-label="Getting it in">
       <h3 className="section-title">Getting it in</h3>
       {own || shown ? (
         <>
-          <p className={`note${bad ? ' warning-text' : ''}`}>{deliveryText(level, r)}</p>
+          {/* A status: a change of lift (or of the piece) is read out. */}
+          <output className="way-verdict">
+            <p className={`note${bad ? ' warning-text' : ''}`} data-testid="way-verdict">
+              {deliveryText(level, r, lift)}
+            </p>
+            {line && (
+              <p className="note" data-testid="lift-line">
+                {line}
+              </p>
+            )}
+          </output>
+          {fit?.fit === 'too-big' && (
+            <p className="field-hint">
+              {lift?.preset === 'measured'
+                ? 'Ask the shop whether it comes apart.'
+                : 'Ask the shop whether it comes apart, or measure your lift: these sizes are typical.'}
+            </p>
+          )}
+          {rigid && <p className="field-hint">{rigid}</p>}
+          {askDiagonal && (
+            <div className="way-ask">
+              <p className="note">Measured its diagonal depth? Tilted, it may get through.</p>
+              <button type="button" className="btn btn-small" onClick={focusDiagonal}>
+                Add diagonal depth
+              </button>
+            </div>
+          )}
           {doors.length > 1 && 'from' in r && (
             <label className="field">
               <span className="field-label">From</span>
@@ -189,9 +214,7 @@ export function GettingItIn({ level, id }: { level: Level; id: string }) {
               </select>
             </label>
           )}
-          <p className="field-hint">
-            Measure the lift and the gate too: many HDB lift doors are about 0.9 m wide.
-          </p>
+          <LiftChoice lift={lift} />
           {!own && (
             <button type="button" className="btn btn-small" onClick={() => toggle(id)}>
               Hide the way
@@ -204,6 +227,148 @@ export function GettingItIn({ level, id }: { level: Level; id: string }) {
         </button>
       )}
     </section>
+  );
+}
+
+type LiftChoiceValue = 'unset' | 'none' | Lift['preset'];
+
+const LIFT_CHOICES: { value: LiftChoiceValue; label: string }[] = [
+  { value: 'unset', label: 'Not checked' },
+  { value: 'typical', label: 'Typical HDB lift' },
+  { value: 'older', label: 'Older, smaller lift' },
+  { value: 'large', label: 'Large (stretcher) lift' },
+  { value: 'measured', label: 'My measurements…' },
+  { value: 'none', label: 'No lift' },
+];
+
+/** Which lift the block has: one for the whole plan, kept with it. */
+function LiftChoice({ lift }: { lift: Lift | null | undefined }) {
+  const dispatch = useStore((s) => s.dispatch);
+  const viewer = useStore((s) => s.role === 'viewer');
+  const selectId = useId();
+  const value: LiftChoiceValue =
+    lift === undefined ? 'unset' : lift === null ? 'none' : lift.preset;
+  const hint = viewer
+    ? `${lift ? `${liftNumbers(lift)}. ` : ''}Set by whoever can edit the plan.`
+    : value === 'unset'
+      ? `Which lift does your block have? Most HDB lift doors are ${nb('0.8–0.9 m')} wide.`
+      : value === 'none'
+        ? 'Ground floor or a house: the way in starts at the main door.'
+        : value === 'measured'
+          ? 'Car width is across the door; depth is from the door to the back wall.'
+          : `${lift ? liftNumbers(lift) : ''}. Same lift for every piece in this plan.`;
+  const choose = (v: LiftChoiceValue) => {
+    if (v === 'unset') dispatch(setLift(undefined));
+    else if (v === 'none') dispatch(setLift(null));
+    else if (v === 'measured') {
+      // From the lift chosen before (a typical one if none), to change what differs.
+      dispatch(setLift({ ...structuredClone(lift ?? LIFT_PRESETS.typical), preset: 'measured' }));
+    } else dispatch(setLift(LIFT_PRESETS[v]));
+  };
+  return (
+    <>
+      <div className="field">
+        <label className="field-label" htmlFor={selectId}>
+          Lift
+        </label>
+        <select
+          id={selectId}
+          className="input lift-select"
+          value={value}
+          aria-describedby={`${selectId}-hint`}
+          onChange={(e) => choose(e.target.value as LiftChoiceValue)}
+        >
+          {LIFT_CHOICES.map((c) => (
+            <option key={c.value} value={c.value}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+        <p className="field-hint" id={`${selectId}-hint`} data-testid="lift-hint">
+          {hint}
+        </p>
+      </div>
+      {lift?.preset === 'measured' && !viewer && <LiftMeasurements lift={lift} />}
+    </>
+  );
+}
+
+/** "Between 0.5 and 2.0 m." for a value outside a lift measurement's range. */
+const within = (min: number, max: number) => (v: number) =>
+  v < min - 1e-9 || v > max + 1e-9
+    ? `Between ${min.toFixed(1)} and ${nb(`${max.toFixed(1)} m`)}.`
+    : null;
+const WIDER = 'The door can’t be wider than the car.';
+const TALLER = 'The door can’t be taller than the car.';
+
+/** The five measurements of a lift someone measured; each change saves the whole lift. */
+function LiftMeasurements({ lift }: { lift: Lift }) {
+  const dispatch = useStore((s) => s.dispatch);
+  const put = (change: (l: Lift) => void) => {
+    const next = structuredClone(lift);
+    change(next);
+    dispatch(setLift(next));
+  };
+  const field = (
+    label: string,
+    value: number,
+    check: (v: number) => string | null,
+    set: (l: Lift, v: number) => void,
+  ) => (
+    <LengthField
+      label={label}
+      value={value}
+      validate={check}
+      enterKeyHint="done"
+      onCommit={(v) => v !== undefined && put((l) => set(l, v))}
+    />
+  );
+  const { door, car } = lift;
+  return (
+    <fieldset className="lift-measures">
+      <legend className="field-label">Lift measurements</legend>
+      <div className="field-row">
+        {field(
+          'Door width',
+          door.width,
+          (v) => within(0.5, 2)(v) ?? (v > car.width + 1e-9 ? WIDER : null),
+          (l, v) => {
+            l.door.width = v;
+          },
+        )}
+        {field(
+          'Door height',
+          door.height,
+          (v) => within(1.8, 2.6)(v) ?? (v > car.height + 1e-9 ? TALLER : null),
+          (l, v) => {
+            l.door.height = v;
+          },
+        )}
+      </div>
+      <div className="field-row">
+        {field(
+          'Car width',
+          car.width,
+          (v) => within(0.8, 3)(v) ?? (v < door.width - 1e-9 ? WIDER : null),
+          (l, v) => {
+            l.car.width = v;
+          },
+        )}
+        {field('Car depth', car.depth, within(0.8, 3), (l, v) => {
+          l.car.depth = v;
+        })}
+      </div>
+      <div className="field-row">
+        {field(
+          'Car height',
+          car.height,
+          (v) => within(1.9, 3)(v) ?? (v < door.height - 1e-9 ? TALLER : null),
+          (l, v) => {
+            l.car.height = v;
+          },
+        )}
+      </div>
+    </fieldset>
   );
 }
 
@@ -241,6 +406,7 @@ export const DeliveryLayer = memo(function DeliveryLayer({
             <circle cx={d.centre.x} cy={d.centre.y} r={6 / zoom} />
             <text x={d.centre.x + 8 / zoom} y={d.centre.y - 6 / zoom} fontSize={font}>
               {formatLength(d.clear)}
+              {d.tilted ? ', tilted' : ''}
             </text>
           </g>
         ))}

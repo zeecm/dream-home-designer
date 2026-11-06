@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/zeecm/dream-home-designer/apps/api/internal/project"
 	"github.com/zeecm/dream-home-designer/apps/api/internal/store"
 )
 
@@ -357,7 +358,7 @@ func TestModels(t *testing.T) {
 			models[fmt.Sprintf("mdl_%d", i)] = map[string]any{"hash": h}
 		}
 		b, _ := json.Marshal(map[string]any{
-			"schemaVersion": 9, "id": "prj_m", "version": version, "name": "Flat", "units": "m",
+			"schemaVersion": project.SchemaVersion, "id": "prj_m", "version": version, "name": "Flat", "units": "m",
 			"underlay": nil, "levels": []any{map[string]any{}}, "models": models,
 		})
 		if res, _ := do(t, "PUT", ts.URL+"/projects/prj_m", b, map[string]string{"If-Match": fmt.Sprintf(`"%d"`, version)}); res.StatusCode != http.StatusOK {
