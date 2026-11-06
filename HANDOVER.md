@@ -628,14 +628,22 @@ reading and Test as a JSON request) has it moved to pictures on load (`migrateKe
 key is typed (600 ms pause), the selects fill from the provider's own list with that key,
 straight from the browser (`ai/models.ts`: Gemini `GET /v1beta/models`, OpenAI `GET
 /v1/models`, Anthropic `GET /v1/models`), friendly names where given, best first, the default
-marked "(recommended)" (Gemini: best listed Pro; gemini-3-pro-image, else
-gemini-2.5-flash-image). If listing fails, `CURATED` in `credentials.ts` with a hint; a saved
-model not listed stays as "(saved)". Test checks the plans model with JSON and the picture
-model without making a picture (Gemini `countTokens`, OpenAI `GET /v1/models/{id}`), a line
-each. Every failed provider call (trace, layouts, render, Test, listing) now shows what the
+marked "(recommended)" (Gemini: best listed Pro; pictures: the cheaper gemini-2.5-flash-image
+and gpt-image-1, since every render costs; `priceNote` labels "cheaper" / "about 3× the
+price"). A saved picture model, or the default a key saved before the choice renders with,
+is never changed by saving again. OpenAI text models are an allow-list (chat-completions
+models that take images); Gemini text models start `gemini-`. The selects keep the last list
+while a changed key's is looked up, falling back per job. If listing fails, `CURATED` in
+`credentials.ts` with a hint; a saved model not listed stays as "(saved)". Test checks the
+plans model with JSON and the picture model without making a picture (Gemini `countTokens`,
+OpenAI `GET /v1/models/{id}`), a line each; changing the provider, key or a model stops it.
+Every failed provider call (trace, layouts, render, Test, listing) now shows what the
 provider said (`failure`/`providerMessage` in `providers.ts`: `error.message`, cut to 200
-characters, anything key-like redacted, shown as text): "Gemini turned the request down
-(400): …". Gemini's 400 "API key not valid" counts as a refused key. The e2e AI specs abort
+characters, shown as text, with keys and tokens redacted: sk-…, sk_live_…, AIza…, AQ.…,
+ya29.…, Bearer …, and long mixed-case or hex runs; lower-case model names stay): "Gemini
+turned the request down (400): …". Gemini's 400 "API key not valid" counts as a refused key.
+`input_fidelity: high` goes only to gpt-image-1 (`HIGH_FIDELITY`). A held Enter that closes
+the render dialog doesn't reopen it from the button focus returns to. The e2e AI specs abort
 any provider request a test doesn't mock (`ai-models.spec.ts`).
 
 **AI: suggested layouts (stage 2, 5 Nov):** "Suggest layouts with AI" in the plan's
