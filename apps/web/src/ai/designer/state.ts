@@ -14,8 +14,16 @@ import { useRates } from '../../cost/estimate';
 import { useEditor } from '../../editor';
 import { setLeaveGuard, useStore } from '../../store';
 import { type AiSettings, aiSettings } from '../credentials';
+import { defaultPicks } from './compare';
 import { sharedQuestion } from './once';
-import { type ChangeRequest, changePlan, contextFor, resultFor } from './plan';
+import {
+  type ChangeRequest,
+  acceptedNow,
+  changeFrom,
+  changePlan,
+  contextFor,
+  resultFor,
+} from './plan';
 import { type DraftDesign, type RunPlan, type RunState, blankStep, runDesign } from './run';
 import { addUsage, countRun, overLimit, priceTable } from './spend';
 import { type DesignStore, designStore } from './storage';
@@ -66,6 +74,10 @@ interface DesignerState {
   accepting: string | null;
   /** Asking whether to stop the run and open another plan: answer it. */
   leaving: ((go: boolean) => void) | null;
+  /** Compare is open over the stage: the versions picked beside Before, in the order ticked. */
+  comparing: string[] | null;
+  /** The side a preview starts on when it isn't on show yet (Compare's Before column). */
+  startSide: 'before' | 'version';
 }
 
 export const useDesigner = create<DesignerState>(() => ({
@@ -83,6 +95,8 @@ export const useDesigner = create<DesignerState>(() => ({
   starting: false,
   accepting: null,
   leaving: null,
+  comparing: null,
+  startSide: 'version',
 }));
 
 const newDesignId = () =>
@@ -127,12 +141,34 @@ export function openPanel() {
   useDesigner.setState({ panel: true, mode: 'card', previewing: true });
 }
 export function closePanel() {
-  useDesigner.setState({ panel: false, mode: 'card' });
+  useDesigner.setState({ panel: false, mode: 'card', comparing: null });
   useEditor.getState().setPreview(null);
 }
 export function selectDesign(id: string) {
   useDesigner.setState({ selected: id, previewing: true, mode: 'card' });
 }
+/** Compare: Before and two versions (the selected and the one before it) over the stage. */
+export function openCompare() {
+  const st = useDesigner.getState();
+  useDesigner.setState({ comparing: defaultPicks(st.designs, st.selected) });
+}
+export const closeCompare = () => useDesigner.setState({ comparing: null });
+
+/** From Compare: the plan shows this version (or, with null, the flat as it is). */
+export function previewFrom(id: string | null) {
+  const st = useDesigner.getState();
+  const target = id ?? st.selected;
+  if (!target) return;
+  useDesigner.setState({ comparing: null, mode: 'card' });
+  const side = id ? 'version' : 'before';
+  const shown = useEditor.getState().preview;
+  if (target === st.selected && st.previewing && shown) {
+    useEditor.getState().setPreview({ ...shown, side });
+    return;
+  }
+  useDesigner.setState({ selected: target, previewing: true, startSide: side });
+}
+
 /** Back to my plan: the preview ends; the version stays selected. */
 export function endPreview() {
   useDesigner.setState({ previewing: false });
@@ -311,6 +347,7 @@ async function beginRun(b: Begin, started: () => void) {
     last: null,
     panel: true,
     mode: 'card',
+    comparing: null,
     previewing: true,
     ...(record ? { selected: record.id } : {}),
   });
@@ -408,6 +445,7 @@ export function finishDesign(d: Design, estimate: number | null, only?: string[]
       concept: d.concept,
       spaces: d.spaces,
       usage: d.usage,
+      request: d.request,
     },
     parent: null,
     existing: d,
@@ -416,10 +454,14 @@ export function finishDesign(d: Design, estimate: number | null, only?: string[]
   });
 }
 
-/** Change something: a new version from `v`. */
-export function changeDesign(v: Design, req: ChangeRequest, estimate: number | null) {
+/**
+ * Change something: a new version from `parent`, made on After as it is once a version is
+ * accepted (`changeFrom`), keeping what was changed by hand (`req.held`).
+ */
+export function changeDesign(parent: Design, req: ChangeRequest, estimate: number | null) {
   const ai = aiSettings();
   const project = doc();
+  const { v } = changeFrom(parent, useDesigner.getState().designs, project);
   const r = resultFor(project, v, designOpts(project));
   if (!ai || !r) return;
   const made = changePlan(v, r, req, newDesignId());
@@ -429,7 +471,7 @@ export function changeDesign(v: Design, req: ChangeRequest, estimate: number | n
     brief: v.brief,
     plan: made.plan,
     draft: made.design,
-    parent: v,
+    parent,
     existing: null,
     request: {
       scope:
@@ -477,16 +519,7 @@ export async function deleteDesign(d: Design) {
   });
 }
 
-/** Whether a version is in the renovation now: accepted, and its pieces or walls still there. */
-export function acceptedNow(d: Design, after: Level | undefined): boolean {
-  if (!d.accepted || !after) return false;
-  const lvl = d.accepted.level;
-  const items = Object.keys(lvl.items).filter((id) => !d.baseLevel.items[id]);
-  if (items.length) return items.some((id) => !!after.items[id]);
-  const walls = Object.keys(lvl.walls).filter((id) => !d.baseLevel.walls[id]);
-  if (walls.length) return walls.some((id) => !!after.walls[id]);
-  return levelFingerprint(after) === levelFingerprint(lvl);
-}
+export { acceptedNow };
 
 /** Puts the ticked parts of `d` into the renovation: one undo step. */
 export async function acceptVersion(d: Design, parts: Part[], removeHandPlaced: boolean) {
@@ -535,6 +568,7 @@ useStore.subscribe((s, prev) => {
     selected: null,
     panel: false,
     mode: 'card',
+    comparing: null,
     last: null,
     note: null,
     projectId: null,

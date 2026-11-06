@@ -136,6 +136,10 @@ function storedFor(page: Page, projectId: string) {
 }
 
 const panel = (page: Page) => page.getByRole('complementary', { name: 'Designer' });
+const compare = (page: Page) => page.getByRole('region', { name: 'Compare' });
+const shot = async (page: Page, name: string) => {
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/${name}.png` });
+};
 
 /** The brief, the cost check, and the run to its end. */
 async function designFlat(page: Page) {
@@ -340,7 +344,7 @@ test.describe('desktop', () => {
     await expect.poll(() => page.locator('[data-hit^="item:"]').count()).toBe(n);
   });
 
-  test('Change something ▸ Kitchen, Furniture: one request with the feedback; V2 (35)', async ({
+  test('Change something ▸ Kitchen, Furniture: one request with the feedback; V2; Compare (35)', async ({
     page,
   }) => {
     await setup(page);
@@ -376,6 +380,164 @@ test.describe('desktop', () => {
     expect(sent[0]?.body).not.toContain('furnish \\"Living');
     await expect(p.getByRole('tab', { name: 'V1' })).toBeVisible();
     await expect(p.getByRole('tab', { name: 'V2' })).toHaveAttribute('aria-selected', 'true');
+
+    // Compare: Before first, then V1 and V2, each drawn at one scale with its cost and checks.
+    await p.getByRole('button', { name: 'Compare' }).click();
+    const c = compare(page);
+    await expect(c.getByRole('heading', { name: 'Compare' })).toBeFocused();
+    await expect(c.getByRole('heading', { level: 3 })).toHaveText([
+      /^Before The flat as it is$/,
+      /^V1 /,
+      /^V2 /,
+    ]);
+    const plans = c.locator('.compare-mini');
+    await expect(plans).toHaveCount(3);
+    const boxes = await plans.evaluateAll((els) => els.map((e) => e.getAttribute('viewBox')));
+    expect(new Set(boxes).size).toBe(1);
+    // Rooms tinted, pieces drawn: Before has none, the versions have them.
+    await expect(plans.nth(0).locator('.mini-item')).toHaveCount(0);
+    expect(await plans.nth(1).locator('.mini-item').count()).toBeGreaterThan(20);
+    const v2 = c.getByRole('region', { name: /^V2 / });
+    await expect(v2.locator('.compare-facts')).toContainText(/S\$\d+k–\d+k/);
+    await expect(v2.locator('.compare-facts')).toContainText('Wall changes');
+    await expect(v2.locator('.compare-facts')).toContainText('Problems');
+    expect(await c.innerText()).not.toMatch(/\b[WDRP]\d+\b/);
+    // On a computer the columns sit side by side; the phone's switch is hidden.
+    const [a, b] = await Promise.all([plans.nth(0).boundingBox(), plans.nth(2).boundingBox()]);
+    expect(Math.abs((a?.y ?? 0) - (b?.y ?? 1))).toBeLessThan(2);
+    expect(Math.abs((a?.width ?? 0) - (b?.width ?? 1))).toBeLessThan(2);
+    await expect(c.locator('.compare-switch')).toBeHidden();
+    await shot(page, 'compare-desktop');
+    // Tapping a column's plan previews that version.
+    await c.getByRole('button', { name: 'Preview V1 on the plan' }).click();
+    await expect(c).toHaveCount(0);
+    await expect(page.locator('.designer-bar')).toContainText('Previewing V1');
+    await expect(p.getByRole('tab', { name: 'V1' })).toHaveAttribute('aria-selected', 'true');
+    // And Before shows the flat as it is; Esc closes Compare, back to the button.
+    await p.getByRole('button', { name: 'Compare' }).click();
+    await c.getByRole('button', { name: 'Show the flat as it is on the plan' }).click();
+    await expect(
+      page.locator('.designer-bar').getByRole('button', { name: 'Before' }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    await p.getByRole('button', { name: 'Compare' }).click();
+    await page.keyboard.press('Escape');
+    await expect(c).toHaveCount(0);
+    await expect(p.getByRole('button', { name: 'Compare' })).toBeFocused();
+    expect(m.calls.length - before).toBe(1);
+  });
+
+  test('after accepting, a piece moved by hand is kept by the next version (36)', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const m = await mock(page);
+    await openSample(page);
+    await designFlat(page);
+    const p = panel(page);
+    await p.getByRole('button', { name: 'Accept…' }).click();
+    await page
+      .getByRole('dialog', { name: 'Put V1 into your renovation' })
+      .getByRole('button', { name: /^Accept \d+ changes$/ })
+      .click();
+    await waitSaved(page);
+    // Move the sofa by hand, 0.4 m to the left.
+    const pid = planId(page);
+    const saved = async () =>
+      page.evaluate(async (id) => (await fetch(`/api/projects/${id}`)).json(), pid);
+    const after0 = (await saved()).renovation.levels[0];
+    const sofaId = Object.values(
+      after0.items as Record<string, { id: string; assetId: string }>,
+    ).find((i) => i.assetId === 'sofa-3')?.id as string;
+    expect(sofaId).toBeTruthy();
+    await p.getByRole('button', { name: 'Close the designer' }).click();
+    const sofa = page.locator(`[data-hit="item:${sofaId}"]`);
+    const outline = () => sofa.locator('polygon').getAttribute('points');
+    const was = await outline();
+    // Where nothing else (the rug, a point on the wall) lies over it.
+    const at = await page.evaluate((hit) => {
+      const r = document.querySelector(`[data-hit="${hit}"]`)?.getBoundingClientRect();
+      if (!r) return null;
+      for (let fy = 0.1; fy < 1; fy += 0.1) {
+        for (let fx = 0.1; fx < 1; fx += 0.1) {
+          const x = r.left + r.width * fx;
+          const y = r.top + r.height * fy;
+          const el = document.elementFromPoint(x, y)?.closest('[data-hit]');
+          if (el?.getAttribute('data-hit') === hit) return { x, y };
+        }
+      }
+      return null;
+    }, `item:${sofaId}`);
+    if (!at) throw new Error('the sofa is covered');
+    await page.mouse.click(at.x, at.y);
+    await expect(page.getByRole('heading', { name: '3-seat sofa' })).toBeVisible();
+    for (let i = 0; i < 4; i++) await page.keyboard.press('Shift+ArrowLeft');
+    await expect.poll(outline).not.toBe(was);
+    await page.keyboard.press('Escape');
+    await waitSaved(page);
+    const moved = await outline();
+    const xNow = (await saved()).renovation.levels[0].items[sofaId].position.x;
+    expect(xNow).toBeCloseTo(after0.items[sofaId].position.x - 0.4, 2);
+
+    // Iterate on the whole design: the composer lists the sofa, kept as moved.
+    await page.getByRole('button', { name: 'Designs (1)' }).click();
+    await p.getByRole('button', { name: 'Change something' }).click();
+    const held = p.getByRole('region', { name: 'Kept as you changed them' });
+    await expect(held).toContainText(/sofa \(moved\)/i);
+    // × unlocks it; Keep locks it again.
+    await held.getByRole('button', { name: /^Unlock .*sofa \(moved\)/i }).click();
+    await expect(held).toContainText('redone this time');
+    await held.getByRole('button', { name: 'Keep' }).click();
+    await held.scrollIntoViewIfNeeded();
+    await shot(page, 'kept-as-changed-desktop');
+    await expect(
+      p.getByRole('checkbox', { name: 'Keep Living and dining: furniture' }),
+    ).toBeChecked();
+    const before = m.calls.length;
+    await p.getByRole('button', { name: /^Make V2 · about US\$/ }).click();
+    const check = page.getByRole('dialog', { name: 'Make V2' });
+    if (await check.isVisible().catch(() => false)) {
+      await check.getByRole('button', { name: /^Make V2 · about/ }).click();
+    }
+    await expect(p.getByRole('tab', { name: 'V2' })).toHaveAttribute('aria-selected', 'true', {
+      timeout: 30_000,
+    });
+    await expect(p.getByText(/^Done in /)).toBeVisible({ timeout: 30_000 });
+    // The requests mark the sofa fixed: listed as kept, and in place in the living room's step.
+    const sent = m.calls.slice(before);
+    expect(sent.map((c) => c.step)).toContain('layout');
+    const living = sent.find((c) => c.step.startsWith('furnish "Living'));
+    expect(living?.body).toMatch(/sofa \(moved\)/i);
+    expect(living?.body).toMatch(
+      /\\"kind\\":\\"sofa-3\\",\\"size\\":\[[^\]]*\],\\"keep\\":\\"in-place\\"/,
+    );
+    // V2's sofa is where it was moved to, on the plan the version previews.
+    await expect(page.locator('.designer-bar')).toContainText('Previewing V2');
+    await expect(sofa).toHaveCount(1);
+    expect(await outline()).toBe(moved);
+    // The stored version keeps the hand-edit lock in its request.
+    const locks = await page.evaluate(
+      (id) =>
+        new Promise<unknown[]>((resolve, reject) => {
+          const req = indexedDB.open('dhd-designs');
+          req.onsuccess = () => {
+            const tx = req.result.transaction('designs', 'readonly');
+            const all = tx.objectStore('designs').getAll();
+            tx.oncomplete = () => {
+              const list = all.result as {
+                projectId: string;
+                n: number;
+                request: { locks: unknown[] };
+              }[];
+              resolve(list.find((d) => d.projectId === id && d.n === 2)?.request.locks ?? []);
+              req.result.close();
+            };
+          };
+          req.onerror = () => reject(req.error);
+        }),
+      pid,
+    );
+    expect(locks).toContainEqual(expect.objectContaining({ by: 'hand-edit', aspect: 'furniture' }));
   });
 
   test('a limit of US$0.03: the cost check says so, and the run pauses; Stop here keeps it (37)', async ({
@@ -689,6 +851,31 @@ test.describe('phone, 390 px, fingers only (43)', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       390,
     );
+  /**
+   * A finger dragged sideways across an element by `dx` pixels, as the pointer events a touch
+   * sends (a raw CDP touch drag leaves Chromium's emulated touch eating the next tap).
+   */
+  const swipe = async (page: Page, el: ReturnType<Page['locator']>, dx: number) => {
+    await el.evaluate((node, d) => {
+      const r = node.getBoundingClientRect();
+      const x = r.left + r.width / 2;
+      const y = r.top + r.height / 2;
+      const send = (type: string, px: number) =>
+        node.dispatchEvent(
+          new PointerEvent(type, {
+            bubbles: true,
+            pointerId: 7,
+            pointerType: 'touch',
+            isPrimary: true,
+            clientX: px,
+            clientY: y,
+          }),
+        );
+      send('pointerdown', x);
+      for (let i = 1; i <= 6; i++) send('pointermove', x + (d * i) / 6);
+      send('pointerup', x + d);
+    }, dx);
+  };
   const tall = async (page: Page, name: RegExp | string) => {
     const box = await page.getByRole('button', { name }).first().boundingBox();
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
@@ -768,6 +955,43 @@ test.describe('phone, 390 px, fingers only (43)', () => {
     });
     await expect(p.getByText(/^Done in /)).toBeVisible({ timeout: 30_000 });
     expect(m.calls).toHaveLength(6);
+
+    // Compare: one column at a time, Before / V1 / V2 above it, and a swipe across it.
+    await p.getByRole('button', { name: 'Compare' }).tap();
+    const c = compare(page);
+    const switcher = c.getByRole('group', { name: 'Column' });
+    await expect(switcher.getByRole('button')).toHaveText(['Before', 'V1', 'V2']);
+    await expect(switcher.getByRole('button', { name: 'V2' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    const shown = c.locator('.compare-col:visible');
+    await expect(shown).toHaveCount(1);
+    await expect(shown.getByRole('heading')).toHaveText(/^V2 /);
+    await noSideways(page);
+    for (const b of await switcher.getByRole('button').all()) {
+      expect((await b.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+    expect(
+      (await c.getByRole('button', { name: 'Done' }).boundingBox())?.height ?? 0,
+    ).toBeGreaterThanOrEqual(44);
+    await shot(page, 'compare-phone');
+    await switcher.getByRole('button', { name: 'Before' }).tap();
+    await expect(shown.getByRole('heading')).toHaveText(/^Before /);
+    // Tapping the column's plan shows it on the plan, and Compare closes.
+    await shown.locator('.compare-plan').tap();
+    await expect(c).toHaveCount(0);
+    await expect(
+      page.locator('.designer-bar').getByRole('button', { name: 'Before' }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    // A swipe to the left: the next column.
+    await p.getByRole('button', { name: 'Compare' }).tap();
+    await switcher.getByRole('button', { name: 'Before' }).tap();
+    await swipe(page, c.locator('.compare-col:visible .compare-facts'), -160);
+    await expect(c.locator('.compare-col:visible').getByRole('heading')).toHaveText(/^V1 /);
+    await shot(page, 'compare-phone-v1');
+    await c.getByRole('button', { name: 'Done' }).tap();
+    await expect(c).toHaveCount(0);
     // Back to V1 by its tab.
     await p.getByRole('tab', { name: 'V1' }).tap();
     await expect(page.locator('.designer-bar')).toContainText('Previewing V1');

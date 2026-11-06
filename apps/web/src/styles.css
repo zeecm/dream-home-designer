@@ -5047,6 +5047,202 @@ textarea {
   min-width: 0;
   color: var(--text);
 }
+/* Kept as you changed them: the hand-edit locks in Change something, each with × to unlock. */
+.held-list {
+  display: grid;
+  gap: 4px;
+}
+.held-list h4 {
+  margin: 0;
+  font-size: var(--fs-body);
+}
+.held-list ul {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.held-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  border-bottom: 1px solid var(--rule);
+}
+.held-off > span:first-child {
+  color: var(--muted);
+}
+.held-note {
+  font-size: var(--fs-small);
+}
+
+/* Compare: Before and two versions over the stage, each at one shared scale. */
+.designer-compare {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+}
+.compare-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 12px var(--pad);
+  border-bottom: 1px solid var(--border);
+}
+.compare-head h2 {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: 600;
+}
+.compare-head h2:focus {
+  outline: none;
+}
+.compare-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.compare-done {
+  margin-left: auto;
+}
+.compare-switch {
+  display: none;
+}
+.compare-cols {
+  display: grid;
+  grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr));
+  gap: 24px;
+  padding: 16px var(--pad) 24px;
+  touch-action: pan-y;
+}
+.compare-col {
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  container-type: inline-size;
+}
+.compare-col-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: 600;
+}
+.compare-col-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-body);
+  font-weight: 400;
+  color: var(--muted);
+}
+.compare-plan {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--plan-well);
+  cursor: pointer;
+}
+.compare-plan:hover {
+  border-color: var(--control);
+}
+.compare-plan:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.compare-mini.mini-layout {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 46vh;
+}
+.mini-layout .mini-item {
+  fill: var(--surface);
+  stroke: var(--muted);
+  stroke-width: 0.025;
+}
+.compare-plan-hint {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--surface);
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+.compare-facts {
+  display: grid;
+  margin: 0;
+}
+.compare-facts div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.compare-facts dt {
+  color: var(--muted);
+}
+/* A narrow column (three across a small stage): each label over its value. */
+@container (max-width: 240px) {
+  .compare-facts div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+}
+.compare-facts dd {
+  margin: 0;
+  min-width: 0;
+  font-weight: 500;
+}
+.compare-sub {
+  display: block;
+  font-size: var(--fs-small);
+  font-weight: 400;
+  color: var(--muted);
+}
+.negative .compare-sub {
+  color: var(--negative);
+}
+.compare-swatches {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 2px;
+}
+.compare-swatches .swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+}
+.compare-problems {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-hint);
+}
+
 .design-focus {
   fill: none;
   stroke: var(--accent);
@@ -5119,6 +5315,16 @@ textarea {
     width: 22px;
     height: 22px;
   }
+  .held-list li,
+  .compare-picks .check-row {
+    min-height: 44px;
+  }
+  .held-list .icon-btn,
+  .compare-done {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
   .keep-grid td,
   .keep-grid th {
     height: 44px;
@@ -5183,6 +5389,29 @@ textarea {
   .brief-keep-list li,
   .accept-grid {
     grid-template-columns: 1fr;
+  }
+}
+/* Compare on a phone: the whole screen, one column at a time (Before / V1 / V2, or a swipe). */
+@media (max-width: 720px) {
+  .designer-compare {
+    position: fixed;
+    z-index: 50;
+  }
+  .compare-switch {
+    display: block;
+    padding: 8px var(--pad) 0;
+  }
+  .compare-switch .segmented button {
+    height: 44px;
+  }
+  .compare-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .compare-col:not(.compare-col-on) {
+    display: none;
+  }
+  .compare-mini.mini-layout {
+    max-height: 52vh;
   }
 }
 /* A phone on its side: the panel is a 320 px column at the right. */

@@ -14,8 +14,10 @@ import {
   aliasesFor,
   designResult,
   estimateRun,
+  handEdits,
   layoutStep,
   levelFingerprint,
+  lockCovers,
   roomStep,
   runPrompts,
   spacesOf,
@@ -167,6 +169,57 @@ export interface ChangeRequest {
   /** Kept as they are, by space key ('*' for the walls). */
   keep: Record<string, Aspect[]>;
   feedback: string;
+  /** Parts changed by hand since accepting, still kept (`hand-edit` locks; × unlocks one). */
+  held?: Lock[];
+}
+
+/** Whether a version is in the renovation now: accepted, and its pieces or walls still there. */
+export function acceptedNow(d: Design, after: Level | undefined): boolean {
+  if (!d.accepted || !after) return false;
+  const lvl = d.accepted.level;
+  const items = Object.keys(lvl.items).filter((id) => !d.baseLevel.items[id]);
+  if (items.length) return items.some((id) => !!after.items[id]);
+  const walls = Object.keys(lvl.walls).filter((id) => !d.baseLevel.walls[id]);
+  if (walls.length) return walls.some((id) => !!after.walls[id]);
+  return levelFingerprint(after) === levelFingerprint(lvl);
+}
+
+/** The version accepted last that is still in the renovation, if any. */
+export function lastAccepted(designs: Design[], after: Level | undefined): Design | null {
+  return (
+    designs
+      .filter((d) => acceptedNow(d, after))
+      .sort((a, b) => ((a.accepted?.at ?? '') < (b.accepted?.at ?? '') ? -1 : 1))
+      .pop() ?? null
+  );
+}
+
+/**
+ * Where a change to `v` starts. Once a version is accepted, After is the truth (D9): the
+ * change is made on After as it is now, and what the person changed by hand since accepting
+ * is listed as `hand-edit` locks. A version whose walls are in After already brings no wall
+ * changes of its own (they'd be made twice).
+ */
+export function changeFrom(
+  v: Design,
+  designs: Design[],
+  doc: Project,
+): { v: Design; held: Lock[]; accepted: Design | null } {
+  const after = doc.renovation?.levels[0];
+  const accepted = lastAccepted(designs, after);
+  if (!accepted?.accepted || !after) return { v, held: [], accepted: null };
+  const wallsIn =
+    acceptedNow(v, after) && !!v.accepted?.parts.some((p) => p.aspect === 'walls') && !!v.concept;
+  return {
+    v: {
+      ...v,
+      brief: { ...v.brief, start: 'after' },
+      base: { ...v.base, variant: 'after' },
+      concept: wallsIn && v.concept ? { ...v.concept, walls: [] } : v.concept,
+    },
+    held: handEdits(accepted.accepted.level, after),
+    accepted,
+  };
 }
 
 /**
@@ -181,6 +234,7 @@ export function changePlan(
 ): { plan: RunPlan; design: DraftDesign; locks: Lock[]; labels: string[] } | null {
   const spaces = result.spaces;
   const name = (key: string) => spaces.find((s) => s.key === key)?.name ?? 'Room';
+  const held = req.held ?? [];
   const locks: Lock[] = [];
   for (const [key, aspects] of Object.entries(req.keep)) {
     for (const aspect of aspects) {
@@ -193,7 +247,13 @@ export function changePlan(
       });
     }
   }
-  const locked = (key: string, a: Aspect) => !!req.keep[key]?.includes(a);
+  locks.push(...held);
+  const roomsOf = (key: string) => spaces.find((s) => s.key === key)?.rooms ?? key.split('+');
+  const locked = (key: string, a: Aspect) =>
+    !!req.keep[key]?.includes(a) ||
+    held.some(
+      (l) => l.aspect === a && (key === '*' ? l.space === '*' : lockCovers(l, roomsOf(key))),
+    );
   const asked = (a: Aspect) => req.aspects.includes(a);
   const walls = req.scope === 'all' && asked('walls') && !locked('*', 'walls');
   const roomAspects = ROOM_ASPECTS.filter(asked);
@@ -221,6 +281,7 @@ export function changePlan(
     concept: v.concept,
     spaces: copied,
     usage: [],
+    request: { locks },
   };
   const keys = targets.map((s) => s.key);
   const plan: RunPlan = {
