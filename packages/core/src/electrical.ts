@@ -11,6 +11,7 @@ import {
   type ElecKind,
   ElecPoint,
   type Level,
+  type Opening,
   type Vec2,
   type Wall,
   isBoundary,
@@ -208,6 +209,20 @@ export function overCounter(level: Level, place: WallPlace): boolean {
 }
 
 /**
+ * Which end of a door its handle (latch) is at: 0 towards vertex a, 1 towards b. A swing
+ * door's is the end away from its hinge; a sliding, bi-fold or folding door's the end its
+ * leaves don't stack at. None for a double or pocket door, or a passage.
+ */
+export function latchEnd(o: Opening): 0 | 1 | undefined {
+  if (o.kind !== 'door') return undefined;
+  const style = o.style ?? 'swing';
+  if (style === 'swing') return (o.swing ?? 'leftIn').startsWith('left') ? 1 : 0;
+  if (style === 'sliding' || style === 'bifold' || style === 'folding')
+    return (o.stack ?? 'a') === 'a' ? 1 : 0;
+  return undefined;
+}
+
+/**
  * A kind's usual height (metres above the floor): sockets 300 mm (1150 over a kitchen
  * counter), switches 1050, data and TV 300, an aircon unit's top 200 below the ceiling, a
  * water heater 2000, a cooker 600, a doorbell 1200; ceiling points at the ceiling.
@@ -322,7 +337,8 @@ function verticalSpan(kind: ElecKind, height: number): [number, number] {
  * plate JAMB_CLEAR from it; a switch to a swing door's latch side), in a window's width only
  * under its sill (or over its head), and never on another point of the face at its height
  * (`self`, the point being moved, aside). Null if the face has no room for it, on a glass
- * wall, or above a half wall's top.
+ * wall, or above a half wall's top. `more` adds points not on the level yet (`extra`, a batch
+ * being placed) and stretches of the face to keep off (`blocked`, metres along the wall).
  */
 export function clearAlong(
   level: Level,
@@ -331,6 +347,7 @@ export function clearAlong(
   place: WallPlace,
   height: number,
   self?: string,
+  more: { extra?: readonly ElecPoint[]; blocked?: readonly (readonly [number, number])[] } = {},
 ): number | null {
   const f = geom.frames[place.wallId];
   // Nothing goes on glass, nor higher on a half wall than its top.
@@ -352,10 +369,14 @@ export function clearAlong(
     if (!across(sill, sill + o.height)) continue;
     const c = o.t * f.length;
     const swing = o.kind === 'door' && (o.style ?? 'swing') === 'swing';
-    const latch = swing ? ((o.swing ?? 'leftIn').startsWith('left') ? 1 : 0) : undefined;
-    blocks.push({ s0: c - o.width / 2, s1: c + o.width / 2, latch });
+    blocks.push({
+      s0: c - o.width / 2,
+      s1: c + o.width / 2,
+      latch: swing ? latchEnd(o) : undefined,
+    });
   }
-  for (const q of Object.values(level.points ?? {})) {
+  for (const [s0, s1] of more.blocked ?? []) blocks.push({ s0, s1 });
+  for (const q of [...Object.values(level.points ?? {}), ...(more.extra ?? [])]) {
     if (q.id === self || !q.wall || q.wall.wallId !== place.wallId) continue;
     if (q.wall.side !== place.side || !across(...verticalSpan(q.kind, q.wall.height))) continue;
     const c = q.wall.t * f.length;
@@ -524,19 +545,21 @@ export function trunkingPath(level: Level, p: ElecPoint): Vec2[] {
 export const trunkingMetres = (level: Level, p: ElecPoint) =>
   Math.round(trunkingLength(trunkingPath(level, p)) * 10) / 10;
 
-const WET = /bath|toilet|\bwc\b|shower/i;
+/** Rooms that are bathrooms or WCs: no sockets, no switches. */
+export const WET_ROOM = /bath|toilet|\bwc\b|shower/i;
 
 export type PointWarning = 'wet' | 'shelter' | 'structural' | 'no-compressor' | 'off-ledge';
 
-const LEDGE = /ledge|air-?con/i;
+/** Rooms that are an aircon ledge. */
+export const LEDGE_ROOM = /ledge|air-?con/i;
 
 /** Whether a spot is on an aircon ledge (in a room named for one). */
 export function onLedge(level: Level, at: Vec2): boolean {
-  return LEDGE.test(roomAt(level, at)?.name ?? '');
+  return LEDGE_ROOM.test(roomAt(level, at)?.name ?? '');
 }
 
 /** Whether a level has an aircon ledge (a room named for one). */
-const hasLedge = (level: Level) => Object.values(level.rooms).some((r) => LEDGE.test(r.name));
+const hasLedge = (level: Level) => Object.values(level.rooms).some((r) => LEDGE_ROOM.test(r.name));
 
 export const WARNING_TEXT: Record<PointWarning, string> = {
   wet: 'A socket in a bathroom or WC: not allowed near water.',
@@ -553,7 +576,7 @@ export const WARNING_TEXT: Record<PointWarning, string> = {
  */
 export function pointWarnings(level: Level, p: ElecPoint, statusOf: Level = level): PointWarning[] {
   const out: PointWarning[] = [];
-  if (isSocket(p.kind) && WET.test(pointRoom(level, p) ?? '')) out.push('wet');
+  if (isSocket(p.kind) && WET_ROOM.test(pointRoom(level, p) ?? '')) out.push('wet');
   if (p.wall) {
     const id = p.wall.wallId;
     const s = statusOf.walls[id] ? wallStatus(statusOf, id) : wallStatus(level, id);

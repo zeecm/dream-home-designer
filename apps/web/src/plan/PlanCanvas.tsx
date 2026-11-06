@@ -19,6 +19,7 @@ import { CommentsOnPlan } from '../comments/PlanPins';
 import { DeliveryLayer } from '../delivery/delivery';
 import { type Tool, useEditor } from '../editor';
 import { ElectricalLayer } from '../electrical/electrical';
+import { SuggestLayer, ghostKeyOf, toggleGhost } from '../electrical/suggest';
 import { currentLevel, useLevel, useProject, useStore } from '../store';
 import { Compass, describeNorth } from '../ui/Compass';
 import { uploadPlanImage, usePlanImage, useUploadPicker } from '../ui/PlanImage';
@@ -461,6 +462,8 @@ export function PlanCanvas() {
   } | null>(null);
   /** Whether the press now going down stopped a coast. */
   const stoppedCoast = useRef(false);
+  /** The suggested point a finger went down on, if any. */
+  const ghostDown = useRef<string | null>(null);
   const gesture = useRef<{ dist: number; mid: Vec2 } | null>(null);
   /** Where a finger placing a point is: the magnifier shows the plan under it. */
   const [loupe, setLoupe] = useState<Vec2 | null>(null);
@@ -516,6 +519,7 @@ export function PlanCanvas() {
     if (gesture.current) return; // still lifting fingers from a pinch
     const start = pointer(e);
     touch.current = { start, moved: false, claimed: false, stopped: stoppedCoast.current };
+    ghostDown.current = ghostKeyOf(e.target);
     // Held still on the spot it will place (or on a corner in Select): magnify it.
     window.clearTimeout(loupeHold.current);
     if (placesPoint(start, true)) {
@@ -624,6 +628,13 @@ export function PlanCanvas() {
     }
     // A tap that stopped the plan coasting does only that, as on a phone's lists and maps.
     if (t.stopped && !t.moved && !t.claimed) return;
+    // A tap on a suggested point leaves it out or brings it back, and does nothing else.
+    const ghost = ghostDown.current;
+    ghostDown.current = null;
+    if (ghost && !t.moved && !t.claimed) {
+      toggleGhost(ghost);
+      return;
+    }
     const end = pointer(e);
     if (t.claimed) {
       active.up(end);
@@ -668,6 +679,12 @@ export function PlanCanvas() {
       Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < 6;
     lastDown.current = double ? { t: 0, x: 0, y: 0 } : { t: now, x: e.clientX, y: e.clientY };
     const p = pointer(e, double ? 2 : 1);
+    // A click on a suggested point leaves it out or brings it back, and does nothing else.
+    const ghost = e.button === 0 && !space.current ? ghostKeyOf(e.target) : null;
+    if (ghost) {
+      toggleGhost(ghost);
+      return;
+    }
     if (e.button === 1 || e.button === 2 || space.current || !ctx || !active.down(p)) {
       pan.current = p.screen;
       setPanning(true);
@@ -875,6 +892,7 @@ export function PlanCanvas() {
               selection={selection}
               interactive={tool === 'select' || tool === 'electrical' || tool === 'comment'}
             />
+            <SuggestLayer zoom={v.zoom} size={size} />
             <TraceDraftLayer />
             <PlanHighlights
               level={level}

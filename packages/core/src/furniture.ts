@@ -4,7 +4,7 @@ import type { Command } from './history';
 import { draftLevel } from './levels';
 import { MODEL_KINDS } from './modelKinds.generated';
 import type { PlanGeometry } from './plan';
-import type { CustomModel, Item, Level, Project, Vec2, Vec3 } from './schema';
+import type { CustomModel, FurnitureShape, Item, Level, Project, Vec2, Vec3 } from './schema';
 
 /**
  * The furniture catalogue: pieces built from boxes, sized as they commonly come in a
@@ -97,6 +97,8 @@ export interface FurnitureKind {
   carpentry?: 'wardrobe' | 'tall' | 'low' | 'base' | 'wall';
   /** Where the model comes from (its licence page). */
   source?: string;
+  /** A piece of the person's own added by its size: the shape it is (a bed, a sofa). */
+  shape?: FurnitureShape;
   parts: FurniturePart[];
 }
 
@@ -541,6 +543,7 @@ export function customKind(m: CustomModel): FurnitureKind {
     category,
     size: m.size,
     againstWall: m.shape === 'sofa' || m.shape === 'bed' || m.shape === 'cabinet',
+    ...(m.shape ? { shape: m.shape } : {}),
     ...(m.diagonal ? { diagonal: m.diagonal } : {}),
     parts: shapeParts(m.shape ?? 'box', w, d, h, m.material ?? 'fabric'),
   };

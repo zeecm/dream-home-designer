@@ -74,6 +74,13 @@ test('upload your own model: place it, it reaches the server, another browser se
   await page.waitForTimeout(1000);
   expect(errors).toEqual([]);
 
+  // Back to the plan, and its 3D view gone, before another browser draws in 3D. Both pages
+  // share one software GPU here, and a 3D view redraws every frame (about 250 ms a frame on
+  // it): left open, it stalls the other page's WebGL calls for seconds at a time, so its
+  // clicks and its model fetch crawl and a busy run overruns the test's time.
+  await page.keyboard.press('1');
+  await expect(page.getByTestId('viewport-wrap')).toHaveCount(0);
+
   // A browser that never had it fetches it from the server.
   const other = await browser.newPage();
   const fetched = other.waitForResponse((r) => r.url().endsWith(`/models/${hash}`));
@@ -83,7 +90,6 @@ test('upload your own model: place it, it reaches the server, another browser se
   await other.close();
 
   // Renamed, then taken out with its piece, in one undo step.
-  await page.keyboard.press('1');
   await items.first().click({ force: true });
   const name = page.getByLabel('Model name');
   await name.fill('Gran’s chair');

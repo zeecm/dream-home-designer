@@ -64,16 +64,17 @@ for any plan.
   narrowest point drawn and measured; room to pull out dining chairs; door clashes (doors that
   hit each other or a wardrobe's or fridge's doors); shortfall labels on the plan, and the
   first problem read out on a drop. [spec](docs/specs/clearance-checks.md#slice-2)
+- Comments on the plan: pins anyone with the share link can leave, reply to and resolve, for
+  family decisions; the owner chooses who can comment. [spec](docs/specs/plan-comments.md)
+- Suggested electrical points: one button gives the usual points for each room, placed by your
+  furniture and priced before you add them. [spec](docs/specs/slice-2s.md)
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
-- Comments on the plan, slice 1: pins anyone with the share link can leave, reply to and
-  resolve, for family decisions; the owner chooses who can comment.
-  [spec](docs/specs/plan-comments.md)
 
 ### Planned
-1. Slice 2s: the lift and a diagonal you can edit for your own furniture, notch depths on the
-   contractor sheet, carpentry priced on every level, suggested electrical points per room.
+1. Slice 2s, the rest: the lift and a diagonal you can edit for your own furniture, notch
+   depths on the contractor sheet, carpentry priced on every level.
 2. Ageing parents check: wheelchair turning space, step-free routes, 850 mm doors, grab bars
    in the bathroom (HDB EASE items).
 3. Storage meter: wardrobe and cabinet space against the household, room by room.

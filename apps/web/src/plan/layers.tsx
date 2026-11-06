@@ -17,6 +17,7 @@ import {
   itemSize,
   labelClearance,
   placeLabel,
+  pointPosition,
   roomArea,
   roomShape,
   roomShapes,
@@ -432,9 +433,16 @@ function roomLabels(level: Level, geom: PlanGeometry, zoom: number): RoomLabel[]
       }),
     // Ceiling lights and fans, and compressors, drawn over the room (wide enough that the
     // label's sampled outline can't straddle one).
-    ...Object.values(level.points ?? {}).flatMap((p) =>
-      p.at ? [{ c: p.at, r: Math.max(0.35, Math.max(0.07, 9 / zoom) * 2.2) }] : [],
-    ),
+    ...Object.values(level.points ?? {}).flatMap((p) => {
+      if (p.at) return [{ c: p.at, r: Math.max(0.35, Math.max(0.07, 9 / zoom) * 2.2) }];
+      // A wall point's symbol stands out from its face into the room: clear of it too.
+      const pos = pointPosition(level, p);
+      if (!pos?.normal) return [];
+      const r = Math.max(0.07, 9 / zoom) * (p.kind === 'aircon' ? 2.4 : 1.7);
+      return [
+        { c: { x: pos.at.x + pos.normal.x * r * 0.5, y: pos.at.y + pos.normal.y * r * 0.5 }, r },
+      ];
+    }),
   ];
   const out: RoomLabel[] = [];
   const shapes = roomShapes(level);
