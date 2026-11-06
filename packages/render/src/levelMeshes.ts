@@ -32,7 +32,7 @@ import {
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { extrudePolygon } from './extrude';
-import type { MaterialCache } from './materials';
+import type { MaterialSource } from './materials';
 import type { ModelSource } from './models';
 
 export interface LevelMeshOptions {
@@ -127,7 +127,7 @@ export class LevelMeshes {
   private parts = new Map<string, Part>();
 
   constructor(
-    private readonly materials: MaterialCache,
+    private readonly materials: MaterialSource,
     private readonly opts: LevelMeshOptions = {},
   ) {
     this.group.name = 'level';

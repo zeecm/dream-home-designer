@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Exact render spike (dev only)</title>
+    <style>
+      body { margin: 16px; font: 13px system-ui, sans-serif; background: #f4f6f8; }
+      canvas { display: block; max-width: 100%; border: 1px solid #ccc; background: #000; }
+      pre { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <p>
+      Slice 0 spike for the exact render (not built or shipped). Query:
+      <code>?w=1600&amp;h=900&amp;samples=64&amp;hour=16&amp;room=living&amp;tiles=3</code> (the rest
+      are listed in <code>src/exact/spike.ts</code>)
+    </p>
+    <div id="out"></div>
+    <pre id="log"></pre>
+    <script type="module" src="/src/exact/spike.ts"></script>
+  </body>
+</html>
