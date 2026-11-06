@@ -444,5 +444,10 @@ export const Design = z.object({
 });
 export type Design = z.infer<typeof Design>;
 
-/** What `designResult` needs of a version. */
-export type DesignInput = Pick<Design, 'id' | 'brief' | 'aliases' | 'concept' | 'spaces'>;
+/**
+ * What `designResult` needs of a version. Its request's `hand-edit` locks keep those parts as
+ * the plan has them (see `heldAspects`).
+ */
+export type DesignInput = Pick<Design, 'id' | 'brief' | 'aliases' | 'concept' | 'spaces'> & {
+  request?: Pick<Design['request'], 'locks'>;
+};

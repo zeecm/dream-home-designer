@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Viewport } from './Viewport';
 import { keepWithAccount, pullFromAccount, useAccount } from './account';
 import { TraceBar } from './ai/TracePanel';
+import { DesignerCompare } from './ai/designer/Compare';
 import { DesignerBar, DesignerDialogs } from './ai/designer/Entry';
 import { DesignerPanel } from './ai/designer/Panel';
 import { useDesigner } from './ai/designer/state';
@@ -358,6 +359,7 @@ export function App() {
             {viewMode !== 'plan' && <Viewport key={projectId} />}
             <LoadingVeil />
           </div>
+          {designerOpen && <DesignerCompare />}
         </main>
         {commentsOpen ? <CommentsPanel /> : designerOpen ? <DesignerPanel /> : <Inspector />}
       </div>

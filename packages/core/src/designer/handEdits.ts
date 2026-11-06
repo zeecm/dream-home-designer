@@ -3,7 +3,8 @@ import { furnitureKind } from '../furniture';
 import { renovationDiff } from '../renovation';
 import type { Item, Level } from '../schema';
 import { aspectOf } from './accept';
-import type { Lock } from './schema';
+import { WET } from './locks';
+import { type Aspect, BATHROOMS, type Lock } from './schema';
 import { type Space, roomIdAt, roomsBeside, spaceOfRoom, spacesOf } from './spaces';
 
 /**
@@ -17,6 +18,12 @@ export function handEdits(accepted: Level, now: Level): Lock[] {
   const out: Lock[] = [];
   const add = (space: Space | undefined, aspect: Lock['aspect'], label: string) => {
     if (space) out.push({ space: space.key, aspect, by: 'hand-edit', label });
+  };
+  /** A room's finishes: its space's, or the bathrooms' (they are no space, but keep them too). */
+  const finishesOf = (roomId: string, label: string) => {
+    const name = now.rooms[roomId]?.name ?? '';
+    if (WET.test(name)) out.push({ space: BATHROOMS, aspect: 'finishes', by: 'hand-edit', label });
+    else add(spaceOfRoom(spaces, roomId), 'finishes', label);
   };
   const nameOf = (it: Item) => furnitureKind(it.assetId)?.name ?? 'Piece';
   const spaceOfItem = (it: Item, level: Level) =>
@@ -61,14 +68,14 @@ export function handEdits(accepted: Level, now: Level): Lock[] {
     ] as const) {
       if (was[side] === w[side] || !roomId) continue;
       const room = now.rooms[roomId]?.name ?? 'Room';
-      add(spaceOfRoom(spaces, roomId), 'finishes', `${room} wall (repainted)`);
+      finishesOf(roomId, `${room} wall (repainted)`);
     }
   }
   for (const r of Object.values(now.rooms)) {
     const was = accepted.rooms[r.id];
     if (!was || was.floorMaterial === r.floorMaterial) continue;
     const to = finish(r.floorMaterial)?.name ?? r.floorMaterial;
-    add(spaceOfRoom(spaces, r.id), 'finishes', `${r.name} floor (${to.toLowerCase()})`);
+    finishesOf(r.id, `${r.name} floor (${to.toLowerCase()})`);
   }
 
   const diff = renovationDiff(accepted, now);
@@ -89,3 +96,28 @@ export function handEdits(accepted: Level, now: Level): Lock[] {
     return true;
   });
 }
+
+/** Whether a lock is on a space whose rooms are `rooms` (by a room in common: keys can change). */
+export const lockCovers = (l: Lock, rooms: readonly string[]): boolean =>
+  l.space !== '*' && l.space.split('+').some((id) => rooms.includes(id));
+
+/**
+ * The aspects of the space made of `rooms` that stay as the plan has them: the person edited
+ * them by hand since accepting (`hand-edit` locks), so a version keeps them, not its answer.
+ */
+export function heldAspects(
+  locks: readonly Lock[] | undefined,
+  rooms: readonly string[],
+): Aspect[] {
+  const out = new Set<Aspect>();
+  for (const l of locks ?? []) if (l.by === 'hand-edit' && lockCovers(l, rooms)) out.add(l.aspect);
+  return [...out];
+}
+
+/** Whether the bathrooms' paint and floors stay as the plan has them. */
+export const bathroomsHeld = (locks: readonly Lock[] | undefined): boolean =>
+  !!locks?.some((l) => l.by === 'hand-edit' && l.space === BATHROOMS && l.aspect === 'finishes');
+
+/** Whether the walls stay as the plan has them (changed by hand since accepting). */
+export const wallsHeld = (locks: readonly Lock[] | undefined): boolean =>
+  !!locks?.some((l) => l.by === 'hand-edit' && l.aspect === 'walls');

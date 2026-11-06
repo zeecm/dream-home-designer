@@ -1,18 +1,11 @@
-import {
-  type LayoutOp,
-  type Level,
-  adoptLayout,
-  applyLayout,
-  planGeometry,
-  renovationChanges,
-  roomShapes,
-} from '@dhd/core';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type LayoutOp, type Level, adoptLayout, applyLayout, renovationChanges } from '@dhd/core';
+import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../editor';
 import { useProject, useStore } from '../store';
 import { changeText } from '../ui/Renovation';
 import { icons } from '../ui/icons';
 import { AiSettingsDialog } from './AiSettingsDialog';
+import { MiniLayout } from './MiniLayout';
 import { PROVIDERS, useAi } from './credentials';
 import { type Brief, WISHES, suggestLayouts } from './layouts';
 import { AiError } from './providers';
@@ -25,83 +18,6 @@ interface Option {
   ops: LayoutOp[];
   level: Level;
   refused: string[];
-}
-
-type P = { x: number; y: number };
-const pts = (ps: P[]) => ps.map((q) => `${q.x},${q.y}`).join(' ');
-
-/** The middle of a wall, and whether a wall of `level` runs through that point. */
-function middle(level: Level, id: string): P | null {
-  const w = level.walls[id];
-  const a = w && level.vertices[w.a];
-  const b = w && level.vertices[w.b];
-  return a && b ? { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } : null;
-}
-function onAWall(level: Level, p: P): boolean {
-  return Object.values(level.walls).some((w) => {
-    const a = level.vertices[w.a];
-    const b = level.vertices[w.b];
-    if (!a || !b) return false;
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const len2 = dx * dx + dy * dy;
-    if (len2 < 1e-9) return false;
-    const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
-    return Math.hypot(a.x + t * dx - p.x, a.y + t * dy - p.y) < Math.max(0.05, w.thickness / 2);
-  });
-}
-
-/**
- * A small drawing of a layout: rooms faintly, walls filled; walls that are new or changed
- * (glass, half height) in the accent colour, and walls taken down dashed.
- */
-function MiniLayout({ before, level }: { before: Level; level: Level }) {
-  const geom = useMemo(() => planGeometry(level), [level]);
-  const was = useMemo(() => planGeometry(before), [before]);
-  const rooms = useMemo(() => [...roomShapes(level).values()], [level]);
-  const all = geom.pieces.flatMap((p) => p.polygon);
-  if (!all.length) return null;
-  const changed = (id: string) => {
-    const old = before.walls[id];
-    const now = level.walls[id];
-    if (!old) {
-      // A piece of an old wall split by a new one isn't new.
-      const m = middle(level, id);
-      return !m || !onAWall(before, m);
-    }
-    return !!now && (old.build !== now.build || old.height !== now.height);
-  };
-  const gone = was.pieces.filter((p) => {
-    if (level.walls[p.wallId]) return false;
-    const m = middle(before, p.wallId);
-    return !m || !onAWall(level, m);
-  });
-  const xs = all.map((p) => p.x);
-  const ys = all.map((p) => p.y);
-  const x0 = Math.min(...xs) - 0.3;
-  const y0 = Math.min(...ys) - 0.3;
-  const w = Math.max(...xs) - x0 + 0.3;
-  const h = Math.max(...ys) - y0 + 0.3;
-  return (
-    <svg className="mini-layout" viewBox={`${x0} ${y0} ${w} ${h}`} aria-hidden="true">
-      {rooms.map((r, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: a fixed drawing
-        <polygon key={`r${i}`} className="mini-room" points={pts(r.outer)} />
-      ))}
-      {geom.pieces.map((p, i) => (
-        <polygon
-          // biome-ignore lint/suspicious/noArrayIndexKey: a fixed drawing
-          key={i}
-          className={changed(p.wallId) ? 'mini-new' : undefined}
-          points={pts(p.polygon)}
-        />
-      ))}
-      {gone.map((p, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: a fixed drawing
-        <polygon key={`g${i}`} className="mini-gone" points={pts(p.polygon)} />
-      ))}
-    </svg>
-  );
 }
 
 /** Suggested layouts from a short brief, each to look over and use as the renovation. */
