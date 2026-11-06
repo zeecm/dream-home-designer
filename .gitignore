@@ -12,3 +12,4 @@ apps/api/data/
 .wrangler/
 test-results/
 playwright-report/
+.claude/worktrees/
