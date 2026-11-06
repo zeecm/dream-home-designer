@@ -3033,6 +3033,18 @@ h3.field-label {
 .elec-warnings {
   margin: 0 0 4px;
 }
+/* Compact, over the top of the plan: one line of words, one row of buttons. */
+.trunking-bar {
+  gap: 4px;
+  padding: 5px 6px;
+}
+.trunking-bar-text {
+  font-size: var(--fs-small);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 2px;
+}
 .trunking-bar .btn {
   flex: 1 1 auto;
 }

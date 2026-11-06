@@ -1,24 +1,71 @@
 import {
   ELEC_KINDS,
   type ElecPoint,
+  type Level,
   type Vec2,
   addPoint,
   deletePoint,
+  onLedge,
   placePoint,
   pointPosition,
   pointRoom,
+  roomShapes,
   trunkingLength,
   trunkingPath,
   updatePoint,
 } from '@dhd/core';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../editor';
 import { glyphRadius } from '../electrical/electrical';
 import { ElecGlyph } from '../electrical/glyph';
 import { currentLevel } from '../store';
 import { formatLength } from '../units';
 import { type PlanPointer, type ToolContext, type ToolController, gridSnap } from './tools';
-import { worldToScreen } from './view';
+import { type Size, type View, fitBounds, worldToScreen } from './view';
+
+/** The trunking bar's height over the top of the plan (it never covers the plan's middle). */
+const BAR_H = 96;
+
+/** Where a run is likely to end: the nearest compressor, else the nearest aircon ledge. */
+function runTarget(level: Level, from: Vec2): Vec2 | null {
+  const dist = (p: Vec2) => Math.hypot(p.x - from.x, p.y - from.y);
+  const spots: Vec2[] = Object.values(level.points)
+    .filter((q) => q.kind === 'compressor' && q.at)
+    .map((q) => q.at as Vec2);
+  if (!spots.length) {
+    for (const [id, shape] of roomShapes(level)) {
+      const xs = shape.outer.map((p) => p.x);
+      const ys = shape.outer.map((p) => p.y);
+      const c = {
+        x: (Math.min(...xs) + Math.max(...xs)) / 2,
+        y: (Math.min(...ys) + Math.max(...ys)) / 2,
+      };
+      if (level.rooms[id] && onLedge(level, c)) spots.push(c);
+    }
+  }
+  return spots.sort((p, q) => dist(p) - dist(q))[0] ?? null;
+}
+
+/**
+ * The view for running trunking from `from`: as it is if the unit and where the run will
+ * likely end are both in sight below the bar, else panned (and zoomed out if need be) to them.
+ */
+export function runView(level: Level, view: View, size: Size, from: Vec2): View {
+  const to = runTarget(level, from) ?? from;
+  const pad = 0.6;
+  const min = { x: Math.min(from.x, to.x) - pad, y: Math.min(from.y, to.y) - pad };
+  const max = { x: Math.max(from.x, to.x) + pad, y: Math.max(from.y, to.y) + pad };
+  const area = { width: size.width, height: Math.max(1, size.height - BAR_H) };
+  const seen = (p: Vec2) => {
+    const s = worldToScreen(view, size, p);
+    return s.x >= 16 && s.x <= size.width - 16 && s.y >= BAR_H + 8 && s.y <= size.height - 16;
+  };
+  if (seen(min) && seen(max)) return view;
+  const fit = fitBounds({ min, max }, area, 24);
+  const zoom = Math.min(fit.zoom, view.zoom);
+  // Centred in the plan below the bar.
+  return { zoom, cx: fit.cx, cy: fit.cy - BAR_H / 2 / zoom };
+}
 
 /** How near (plan metres, or screen px zoomed out) a tap must be to a wall face or compressor. */
 const reach = (ctx: ToolContext) => Math.max(0.3, 14 / ctx.view.zoom);
@@ -27,7 +74,7 @@ const reach = (ctx: ToolContext) => Math.max(0.3, 14 / ctx.view.zoom);
  * Places electrical points: a wall kind on the wall face nearest the tap (within 0.3 m) at its
  * usual height, clear of doors and windows; a ceiling light or fan in a room; a compressor
  * anywhere (on the ledge). An aircon unit then runs its trunking: each tap a bend, a tap on a
- * compressor the end, or "New compressor here" puts one at the last bend.
+ * compressor or on the aircon ledge the end, or "Compressor here" puts one at the last bend.
  */
 export function useElectricalTool(ctx: ToolContext): ToolController {
   const kind = useEditor((s) => s.elecKind);
@@ -37,6 +84,21 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
   const info = ELEC_KINDS[kind];
   const { select, setTrunking } = useEditor.getState();
   const live = () => currentLevel() ?? ctx.level;
+
+  // A run starting: the unit and where the run will likely end are brought into sight.
+  const ctxRef = useRef(ctx);
+  ctxRef.current = ctx;
+  const runId = trunking?.id;
+  useEffect(() => {
+    if (!runId) return;
+    const c = ctxRef.current;
+    const level = currentLevel() ?? c.level;
+    const ac = level.points[runId];
+    const at = ac && pointPosition(level, ac)?.at;
+    if (!at || c.size.width <= 0) return;
+    const next = runView(level, c.view, c.size, at);
+    if (next !== c.view) useEditor.getState().setView(next, true);
+  }, [runId]);
 
   /** Where a point of the kind picked would go for this spot. */
   const spot = (world: Vec2, alt: boolean): ElecPoint | null => {
@@ -112,6 +174,17 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
           return true;
         }
         const at = gridSnap(p.world, 0.05, p.alt);
+        // A tap on the aircon ledge ends the run there, on a new compressor.
+        if (onLedge(ctx.level, at)) {
+          const c = addPoint(ctx.level.id, { kind: 'compressor', at });
+          ctx.dispatch(c.command, { coalesceKey: run.t.key });
+          ctx.dispatch(updatePoint(ctx.level.id, run.ac.id, { compressorId: c.pointId }), {
+            coalesceKey: run.t.key,
+          });
+          setTrunking(null);
+          select({ kind: 'point', id: run.ac.id });
+          return true;
+        }
         ctx.dispatch(
           updatePoint(ctx.level.id, run.ac.id, { route: [...(run.ac.route ?? []), at] }),
           { coalesceKey: run.t.key },
@@ -190,21 +263,16 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
                 pointerEvents="none"
               />
             )}
-            {/* At the foot of the plan: the unit was just placed on a wall, often a top one. */}
-            <foreignObject
-              x={8}
-              y={Math.max(8, size.height - 118 - 52)}
-              width={Math.max(0, size.width - 16)}
-              height={118}
-            >
+            {/* Over the top of the plan, as the wall tool's bar is; the view is moved below it. */}
+            <foreignObject x={8} y={8} width={Math.max(0, size.width - 16)} height={BAR_H - 12}>
               <div
                 className="draw-bar trunking-bar"
                 data-testid="trunking-bar"
                 onPointerDown={(e) => e.stopPropagation()}
                 onPointerUp={(e) => e.stopPropagation()}
               >
-                <span>
-                  Run the trunking: tap where it bends, then tap the compressor.{' '}
+                <span className="trunking-bar-text">
+                  Tap each bend, then the compressor or the ledge.{' '}
                   <span className="num">{formatLength(sofar, 1)}</span>
                 </span>
                 <span className="draw-bar-row">
@@ -223,7 +291,7 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
                     onClick={compressorHere}
                     title="Put a compressor at the last bend"
                   >
-                    New compressor here
+                    Compressor here
                   </button>
                   <button
                     type="button"

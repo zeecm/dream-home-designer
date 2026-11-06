@@ -18,6 +18,7 @@ import {
   SHEET_MM,
   type Variant,
   type Vec2,
+  atDefaultHeight,
   doorLeaves,
   doorStyle,
   doorSwing,
@@ -48,7 +49,6 @@ import {
   wallStatus,
 } from '@dhd/core';
 import type { ReactElement, ReactNode } from 'react';
-import { atDefaultHeight } from '../electrical/electrical';
 import { ElecGlyph } from '../electrical/glyph';
 import { changesAsText } from '../ui/Renovation';
 import { hackedPoints, sheetLevels } from './extent';
@@ -1580,7 +1580,9 @@ function elecLegend(points: SheetPoint[]): LegendKey[] {
   const live = points.filter((sp) => sp.state !== 'removed');
   for (const kind of ELEC_KIND_ORDER) {
     const of = live.filter((sp) => sp.p.kind === kind);
-    if (!of.length) continue;
+    const out = points.filter((sp) => sp.state === 'removed' && sp.p.kind === kind).length;
+    // A kind only taken out still has its symbol on the plan (in red): keyed too.
+    if (!of.length && !out) continue;
     const heights = [
       ...new Set(of.flatMap((sp) => (sp.p.wall ? [Math.round(sp.p.wall.height * 1000)] : []))),
     ].sort((a, b) => a - b);
@@ -1592,7 +1594,9 @@ function elecLegend(points: SheetPoint[]): LegendKey[] {
           : `${heights.join(', ')} mm`;
     keys.push({
       key: `elec-${kind}`,
-      label: `${ELEC_KINDS[kind].short}, ${where}, ×${of.length}`,
+      label: of.length
+        ? `${ELEC_KINDS[kind].short}, ${where}, ×${of.length}`
+        : `${ELEC_KINDS[kind].short}, taken out ×${out}`,
       count: of.length,
       swatch: (
         <g transform="translate(3 0.4)">
@@ -1770,7 +1774,11 @@ function ElectricalPlan({
         })}
       </g>
       <g className="elec-points">
-        {points.map((sp) => {
+        {/* Taken out first, so a new point in the same spot is drawn over it. */}
+        {[
+          ...points.filter((sp) => sp.state === 'removed'),
+          ...points.filter((sp) => sp.state !== 'removed'),
+        ].map((sp) => {
           const was = sp.state === 'moved' ? ch?.from.get(sp.p.id) : undefined;
           return (
             <g key={`${sp.state}:${sp.p.id}`}>

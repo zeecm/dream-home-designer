@@ -286,8 +286,15 @@ export function Palette() {
   const only3d = useEditor((s) => s.viewMode === '3d');
   const viewer = useStore((s) => s.role === 'viewer');
   const locked = only3d || viewer;
+  // A tool's options (the electrical kinds) can make the panel scroll: another tool starts it
+  // at the top again, its tools in sight.
+  const nav = useRef<HTMLElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the tool changes
+  useEffect(() => {
+    if (nav.current) nav.current.scrollTop = 0;
+  }, [tool]);
   return (
-    <nav className="panel palette" aria-label="Tools">
+    <nav ref={nav} className="panel palette" aria-label="Tools">
       <h2 className="panel-heading">Tools</h2>
       <ul className="tool-list">
         {TOOLS.map((t) => (

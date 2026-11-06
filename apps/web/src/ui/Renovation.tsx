@@ -1,7 +1,9 @@
 import {
   type ChangePlace,
+  type ElecChanges,
   type RenovationChange,
   type RenovationDiff,
+  electricalChanges,
   endRenovation,
   renovationChanges,
   renovationDiff,
@@ -137,6 +139,10 @@ function changeWords(c: RenovationChange): string {
       return c.change === 'added'
         ? `New room, ${formatArea(c.area)}`
         : `No longer a room of its own (was ${formatArea(c.area)})`;
+    case 'electrical': {
+      const verb = { new: 'New', moved: 'Relocate', removed: 'Take out' }[c.change];
+      return `${verb} ${c.change === 'new' ? c.name : `the ${c.name}`}${c.qty > 1 ? ` × ${c.qty}` : ''}`;
+    }
   }
 }
 
@@ -215,14 +221,38 @@ function ChangeList({ changes }: { changes: RenovationChange[] }) {
   );
 }
 
-/** One line for the bar: what's hacked and what's built. */
-export function diffLine(d: RenovationDiff): string {
+/** One line for the bar: what's hacked and what's built, and the points that change. */
+export function diffLine(d: RenovationDiff, elec?: ElecChanges): string {
   const parts: string[] = [];
   if (d.demolishedLength > 0) parts.push(`${formatLength(d.demolishedLength)} of wall hacked`);
   if (d.builtLength > 0) parts.push(`${formatLength(d.builtLength)} built`);
   const doors = openingsText(d);
   if (doors) parts.push(doors);
+  const points = elec ? pointsText(elec) : '';
+  if (points) parts.push(points);
   return parts.length ? parts.join(' · ') : 'No changes yet';
+}
+
+/** "Electrical: 2 new, 1 moved", or '' for none. */
+export function pointsText(ch: ElecChanges): string {
+  const count = (s: 'new' | 'moved') => [...ch.status.values()].filter((v) => v === s).length;
+  const parts = [
+    count('new') && `${count('new')} new`,
+    count('moved') && `${count('moved')} moved`,
+    ch.removed.length && `${ch.removed.length} taken out`,
+  ].filter(Boolean);
+  return parts.length ? `Electrical: ${parts.join(', ')}` : '';
+}
+
+/** What the renovation does to the first level's electrical points, or null without one. */
+function useElectricalChanges(): ElecChanges | null {
+  const doc = useProject();
+  const before = doc.levels[0];
+  const after = doc.renovation?.levels[0];
+  return useMemo(
+    () => (before && after ? electricalChanges(before, after) : null),
+    [before, after],
+  );
 }
 
 /**
@@ -252,6 +282,7 @@ export function RenovationBar() {
   const variant = useEditor((s) => s.variant);
   const setVariant = useEditor((s) => s.setVariant);
   const diff = useRenovationDiff();
+  const elec = useElectricalChanges();
   if (!has || !diff) return null;
   return (
     <div className="reno-bar">
@@ -278,7 +309,7 @@ export function RenovationBar() {
               ? 'Editing the flat as it is (and the renovation, where it is the same). '
               : 'Editing the renovation. '}
           </span>
-          {diffLine(diff)}
+          {diffLine(diff, elec ?? undefined)}
         </span>
       </span>
     </div>
@@ -330,6 +361,7 @@ export function RenovationSection() {
   const setVariant = useEditor((s) => s.setVariant);
   const diff = useRenovationDiff();
   const changes = useRenovationChanges(diff);
+  const elec = useElectricalChanges();
   if (!diff) {
     return (
       <section className="reno-section" aria-labelledby="reno-h">
@@ -379,6 +411,12 @@ export function RenovationSection() {
           <dt>Doors, windows, openings</dt>
           <dd>{openingsText(diff) || 'No change'}</dd>
         </div>
+        {elec && pointsText(elec) && (
+          <div>
+            <dt>Electrical points</dt>
+            <dd>{pointsText(elec).replace('Electrical: ', '')}</dd>
+          </div>
+        )}
         <div>
           <dt>Floor area</dt>
           <dd className="num">

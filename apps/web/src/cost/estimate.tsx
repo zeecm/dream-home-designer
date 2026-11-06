@@ -403,10 +403,9 @@ export function EstimateDialog({ onClose }: { onClose: () => void }) {
         <p className="dialog-note">{DISCLAIMER}</p>
         {!est.renovation && (
           <p className="dialog-note">
-            Start a renovation to price hacking, walls and floors
             {est.lines.some((l) => l.group === 'Electrical')
-              ? '. Electrical points are priced as new. Start a renovation to price only what changes.'
-              : '.'}
+              ? 'Start a renovation to price hacking, walls and floors, and only the electrical points that change: until then, every point is priced as new.'
+              : 'Start a renovation to price hacking, walls and floors.'}
           </p>
         )}
         <div className="estimate">

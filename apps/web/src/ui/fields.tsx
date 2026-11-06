@@ -35,6 +35,8 @@ interface LengthFieldProps {
   allowEmpty?: boolean;
   /** Show it in millimetres ("1150 mm"); still accepts m, cm or mm. */
   unit?: 'mm';
+  /** An out-of-range or unreadable value goes back to the last good one on blur. */
+  revertInvalid?: boolean;
   onCommit: (value: number | undefined) => void;
 }
 
@@ -92,6 +94,7 @@ export function LengthField({
   hint,
   allowEmpty,
   unit,
+  revertInvalid,
   onCommit,
 }: LengthFieldProps) {
   const fmt = (v: number) => (unit === 'mm' ? `${Math.round(v * 1000)} mm` : formatLength(v));
@@ -124,14 +127,16 @@ export function LengthField({
       return;
     }
     const v = parseLength(s.draft);
-    if (v === null || v < t.min || v > t.max) {
+    if (v === null || v < t.min - 1e-9 || v > t.max + 1e-9) {
       if (leaving) return;
       setError(
         v === null
           ? 'Enter a length such as 2.5 m, 250 cm, 2500 mm or just 2500.'
           : `Between ${fmt(t.min)} and ${fmt(t.max)}.`,
       );
-      edit.keep(s);
+      // Back to the last good value, the complaint saying why; or kept to correct.
+      if (revertInvalid) edit.reset();
+      else edit.keep(s);
       return;
     }
     if (t.value === undefined || Math.abs(v - t.value) > 1e-9) t.onCommit(v);

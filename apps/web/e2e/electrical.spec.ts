@@ -152,7 +152,7 @@ test.describe('desktop', () => {
     await clickAt(page, r.x + r.width * 0.8, r.y + r.height * 0.45);
     await clickAt(page, r.x + r.width * 0.3, r.y + r.height * 0.45);
     await clickAt(page, r.x + r.width * 0.3, r.y + r.height * 0.7);
-    await bar.getByRole('button', { name: 'New compressor here' }).click();
+    await bar.getByRole('button', { name: 'Compressor here' }).click();
     await expect(bar).toHaveCount(0);
     await expect(
       page.locator('[data-testid="electrical-layer"] [data-kind="compressor"]'),
@@ -172,7 +172,7 @@ test.describe('desktop', () => {
     await expect(
       dialog.locator('.estimate-line', { hasText: 'Aircon point (isolator), new' }),
     ).toContainText('$150–250');
-    await expect(dialog).toContainText('Start a renovation to price only what changes.');
+    await expect(dialog).toContainText('only the electrical points that change');
   });
 
   test('15: a socket in a bathroom warns on the plan and in its details', async ({ page }) => {
@@ -257,6 +257,63 @@ test.describe('desktop', () => {
     );
   });
 
+  test('a tap on the aircon ledge ends the run there on a new compressor; made a switch, the unit takes its compressor and trunking', async ({
+    page,
+  }) => {
+    const r = await roomBox(page, 'rm_main-bedroom');
+    await pick(page, /^Aircon/);
+    await clickAt(page, r.x + r.width * 0.5, r.y + 8);
+    const bar = page.getByTestId('trunking-bar');
+    await expect(bar).toBeVisible();
+    await clickAt(page, r.x + r.width * 0.5, r.y + r.height * 0.6);
+    const ledge = await roomBox(page, 'rm_air-con-ledge');
+    await clickAt(page, ledge.x + ledge.width * 0.5, ledge.y + ledge.height * 0.5);
+    await expect(bar).toHaveCount(0);
+    const comp = page.locator('[data-testid="electrical-layer"] [data-kind="compressor"]');
+    await expect(comp).toHaveCount(1);
+    const cb = await comp.locator('.elec-hit').boundingBox();
+    if (!cb) throw new Error('no compressor');
+    const mid = { x: cb.x + cb.width / 2, y: cb.y + cb.height / 2 };
+    expect(mid.x).toBeGreaterThan(ledge.x);
+    expect(mid.x).toBeLessThan(ledge.x + ledge.width);
+    expect(mid.y).toBeGreaterThan(ledge.y);
+    expect(mid.y).toBeLessThan(ledge.y + ledge.height);
+    await expect(page.locator('.elec-trunk')).toHaveCount(1);
+    // The unit selected, nothing to warn of: it runs to a compressor on the ledge.
+    await expect(page.getByTestId('trunking-length')).toBeVisible();
+    await expect(page.locator('.elec-warnings')).toHaveCount(0);
+
+    // Made a switch: placed again at a switch's height, its compressor and trunking gone.
+    await page.getByLabel('Kind').selectOption({ label: 'Switch' });
+    await expect(page.getByRole('textbox', { name: 'Height' })).toHaveValue('1050 mm');
+    await expect(comp).toHaveCount(0);
+    await expect(page.locator('.elec-trunk')).toHaveCount(0);
+    await expect(points(page)).toHaveCount(1);
+    // One undo brings all of it back.
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await expect(comp).toHaveCount(1);
+    await expect(page.locator('.elec-trunk')).toHaveCount(1);
+  });
+
+  test('a renovation’s new socket shows in its bar and its changes, room by room', async ({
+    page,
+  }) => {
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Plan a renovation' }).click();
+    const barText = page.locator('.reno-bar');
+    await expect(barText).toContainText('No changes yet');
+    const r = await roomBox(page, 'rm_bedroom');
+    await pick(page, /^Double socket/);
+    await clickAt(page, r.x + r.width * 0.75, r.y + r.height - 6);
+    await expect(points(page)).toHaveCount(1);
+    await expect(barText).toContainText('Electrical: 1 new');
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+    const list = page.locator('.reno-changes');
+    await expect(list).toContainText('Bedroom');
+    await expect(list).toContainText('New 13A double socket');
+  });
+
   test('17: a view link shows the symbols, without the tool', async ({ page, browser }) => {
     const r = await roomBox(page, 'rm_bedroom');
     await pick(page, /^Double socket/);
@@ -311,6 +368,45 @@ test.describe('phone', () => {
       x: a.x + ((b.x - a.x) * i) / n,
       y: a.y + ((b.y - a.y) * i) / n,
     }));
+
+  test('trunking by finger: the bar sits over the top of the plan, the ledge in sight below it; a tap there ends the run', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await waitSaved(page);
+    await page.evaluate(() => document.fonts.ready);
+    await page.getByRole('button', { name: /^Electrical/ }).tap();
+    await page
+      .locator('.tool-panel .elec-kind-list')
+      .getByRole('button', { name: /^Aircon/ })
+      .tap();
+    await page.waitForTimeout(300);
+    const r = await roomBox(page, 'rm_bedroom');
+    const wall = { x: r.x + r.width * 0.5, y: r.y + 3 };
+    await touches(page, line({ x: wall.x, y: wall.y + 30 }, wall));
+    const bar = page.getByTestId('trunking-bar');
+    await expect(bar).toBeVisible();
+    await page.waitForTimeout(300);
+    const plan = await page.locator('svg.plan-svg').boundingBox();
+    const bb = await bar.boundingBox();
+    if (!plan || !bb) throw new Error('no plan or bar');
+    // At the top, and short.
+    expect(bb.y - plan.y).toBeLessThan(20);
+    expect(bb.height).toBeLessThan(100);
+    // The ledge in sight, below the bar.
+    const ledge = await roomBox(page, 'rm_air-con-ledge');
+    expect(ledge.y).toBeGreaterThan(bb.y + bb.height);
+    expect(ledge.y + ledge.height).toBeLessThan(plan.y + plan.height);
+    const b = await roomBox(page, 'rm_bedroom');
+    await touches(page, [{ x: b.x + b.width * 0.5, y: b.y + b.height * 0.6 }]);
+    const l = await roomBox(page, 'rm_air-con-ledge');
+    await touches(page, [{ x: l.x + l.width * 0.5, y: l.y + l.height * 0.5 }]);
+    await expect(bar).toHaveCount(0);
+    await expect(
+      page.locator('[data-testid="electrical-layer"] [data-kind="compressor"]'),
+    ).toHaveCount(1);
+    await expect(page.locator('.elec-warnings')).toHaveCount(0);
+  });
 
   test('18: placed by finger with the magnifier, dragged along its wall, a decimal keypad, no sideways scroll', async ({
     page,

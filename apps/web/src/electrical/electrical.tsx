@@ -5,14 +5,20 @@ import {
   type ElecKind,
   type ElecPoint,
   type Level,
+  type PointPosition,
   type PointWarning,
+  type Vec2,
   WARNING_TEXT,
+  atDefaultHeight,
   defaultHeight,
   deletePoint,
+  maxHeight,
+  minHeight,
   pointName,
   pointPosition,
   pointRoom,
   pointWarnings,
+  setPointKind,
   trunkingMetres,
   trunkingPath,
   updatePoint,
@@ -62,36 +68,59 @@ export function beforeOf(project: { levels: Level[] }, level: Level): Level {
   );
 }
 
-/** Whether a point's height is its kind's usual one (then the plan shows no "h…"). */
-export function atDefaultHeight(level: Level, p: ElecPoint): boolean {
-  if (!p.wall) return true;
-  const pos = pointPosition(level, p);
-  if (!pos) return true;
-  const want = defaultHeight(level, p.kind, {
-    wallId: p.wall.wallId,
-    along: pos.along,
-    side: p.wall.side,
-  });
-  return Math.abs(want - p.wall.height) < 0.005;
-}
-
 /** A symbol's radius on the plan at this zoom (metres): readable zoomed out, not huge in. */
 export const glyphRadius = (zoom: number) => Math.max(0.07, 9 / zoom);
 
-const warnCache = new WeakMap<Level, Map<string, PointWarning[]>>();
-/** Every point's warnings on a level (kept per level object). */
-export function warningsOf(level: Level, before: Level): Map<string, PointWarning[]> {
-  let out = warnCache.get(level);
-  if (!out) {
-    out = new Map();
-    for (const p of Object.values(level.points ?? {})) {
-      const w = pointWarnings(level, p, before);
-      if (w.length) out.set(p.id, w);
+/** A value worked out once per level and flat as it is (both kept by object). */
+function cachedBy<T>(make: (level: Level, before: Level) => T) {
+  const cache = new WeakMap<Level, WeakMap<Level, T>>();
+  return (level: Level, before: Level): T => {
+    let inner = cache.get(level);
+    if (!inner) {
+      inner = new WeakMap();
+      cache.set(level, inner);
     }
-    warnCache.set(level, out);
+    let out = inner.get(before);
+    if (out === undefined) {
+      out = make(level, before);
+      inner.set(before, out);
+    }
+    return out;
+  };
+}
+
+/** Every point's warnings on a level, judged against the flat as it is. */
+export const warningsOf = cachedBy((level, before) => {
+  const out = new Map<string, PointWarning[]>();
+  for (const p of Object.values(level.points ?? {})) {
+    const w = pointWarnings(level, p, before);
+    if (w.length) out.set(p.id, w);
   }
   return out;
+});
+
+interface PointLayout {
+  p: ElecPoint;
+  pos: PointPosition;
+  /** Off its usual height: the plan shows "h…". */
+  tag: boolean;
+  warn?: PointWarning[];
 }
+
+/** Where each point and trunking run goes on the plan, independent of the zoom. */
+const layoutOf = cachedBy((level, before) => {
+  const warnings = warningsOf(level, before);
+  const points: PointLayout[] = [];
+  const trunks: { id: string; path: Vec2[] }[] = [];
+  for (const p of Object.values(level.points ?? {})) {
+    const path = trunkingPath(level, p);
+    if (path.length >= 2) trunks.push({ id: p.id, path });
+    const pos = pointPosition(level, p);
+    if (!pos) continue;
+    points.push({ p, pos, tag: !!p.wall && !atDefaultHeight(level, p), warn: warnings.get(p.id) });
+  }
+  return { points, trunks };
+});
 
 /**
  * The electrical points on the plan, in metres: each symbol on its wall face (or where it
@@ -112,29 +141,22 @@ export const ElectricalLayer = memo(function ElectricalLayer({
   interactive: boolean;
 }) {
   const on = useElectricalOn((s) => s.on);
-  const warnings = useMemo(() => warningsOf(level, before), [level, before]);
-  const points = Object.values(level.points ?? {});
+  const { points, trunks } = layoutOf(level, before);
   if (!on || points.length === 0) return null;
   const r = glyphRadius(zoom);
   // Screen pixels: the plan's strokes don't scale with it.
   const sw = 1.3;
   return (
     <g className="electrical" data-testid="electrical-layer">
-      {points.map((p) => {
-        const path = trunkingPath(level, p);
-        if (path.length < 2) return null;
-        return (
-          <polyline
-            key={`t${p.id}`}
-            className="elec-trunk"
-            points={path.map((q) => `${q.x},${q.y}`).join(' ')}
-            pointerEvents="none"
-          />
-        );
-      })}
-      {points.map((p) => {
-        const pos = pointPosition(level, p);
-        if (!pos) return null;
+      {trunks.map(({ id, path }) => (
+        <polyline
+          key={`t${id}`}
+          className="elec-trunk"
+          points={path.map((q) => `${q.x},${q.y}`).join(' ')}
+          pointerEvents="none"
+        />
+      ))}
+      {points.map(({ p, pos, tag, warn }) => {
         const selected = selection?.kind === 'point' && selection.id === p.id;
         const out = pos.normal ?? { x: 0, y: 0 };
         const reach = pos.normal ? GLYPH_DEPTH[p.kind] : 0;
@@ -143,8 +165,6 @@ export const ElectricalLayer = memo(function ElectricalLayer({
           x: pos.at.x + out.x * r * reach * 0.5,
           y: pos.at.y + out.y * r * reach * 0.5,
         };
-        const tag = !atDefaultHeight(level, p) && p.wall;
-        const warn = warnings.get(p.id);
         const tagAt = {
           x: pos.at.x + out.x * r * (reach + 1.1),
           y: pos.at.y + out.y * r * (reach + 1.1),
@@ -171,7 +191,7 @@ export const ElectricalLayer = memo(function ElectricalLayer({
                 sw={sw}
               />
             </g>
-            {tag && (
+            {tag && p.wall && (
               <text
                 className="elec-height"
                 x={tagAt.x}
@@ -348,21 +368,14 @@ export function PointInspector({ level, id }: { level: Level; id: string }) {
           .filter((k) => !!p.wall || ELEC_KINDS[k].place === ELEC_KINDS[p.kind].place)
           .map((k) => ({ value: k, label: ELEC_KINDS[k].name }))}
         onChange={(kind) => {
-          // A new kind takes its usual height unless this one was moved off its own.
-          const keep = p.wall && !atDefaultHeight(level, p);
-          const height =
-            p.wall && pos && !keep
-              ? defaultHeight(level, kind, {
-                  wallId: p.wall.wallId,
-                  along: pos.along,
-                  side: p.wall.side,
-                })
-              : p.wall?.height;
-          set({
-            kind,
-            ...(p.wall && height !== undefined ? { wall: { ...p.wall, height } } : {}),
-            ...(kind === 'switch' ? { gang: p.gang ?? 1 } : {}),
-          });
+          // Placed again for the new kind (its usual height, clear of doors); an aircon unit
+          // made something else takes its trunking and compressor with it.
+          try {
+            dispatch(setPointKind(level, id, kind));
+            if (kind !== 'aircon' && trunking?.id === id) useEditor.getState().setTrunking(null);
+          } catch (e) {
+            useStore.setState({ notice: (e as Error).message });
+          }
         }}
       />
       {p.wall && (
@@ -370,8 +383,9 @@ export function PointInspector({ level, id }: { level: Level; id: string }) {
           label={p.kind === 'aircon' ? 'Top above the floor' : 'Height'}
           unit="mm"
           value={p.wall.height}
-          min={0}
-          max={level.ceilingHeight}
+          min={minHeight(p.kind)}
+          max={maxHeight(level, p)}
+          revertInvalid
           hint={usual !== null ? `Usual: ${Math.round(usual * 1000)} mm` : undefined}
           onCommit={(v) => v !== undefined && p.wall && set({ wall: { ...p.wall, height: v } })}
         />

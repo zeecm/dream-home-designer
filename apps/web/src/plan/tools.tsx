@@ -9,6 +9,7 @@ import {
   type ShiftIds,
   type Vec2,
   addItem,
+  atDefaultHeight,
   deleteItem,
   deleteOpening,
   deletePoint,
@@ -42,7 +43,6 @@ import {
 } from '@dhd/core';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { type Selection, type Tool, useEditor } from '../editor';
-import { atDefaultHeight } from '../electrical/electrical';
 import { currentLevel, useStore } from '../store';
 import { formatLength } from '../units';
 import { cycle, movedVertices, nudge, objectPoint, planObjects } from './keyboard';
@@ -683,6 +683,7 @@ export function useSelectTool(ctx: ToolContext): ToolController {
           geom: ctx.geom,
           tolerance: Math.max(0.3, 14 / ctx.view.zoom),
           height: d.usual ? undefined : pt.wall?.height,
+          self: d.id,
         });
         if (!spot) return;
         const { at: _, ...wall } = spot;

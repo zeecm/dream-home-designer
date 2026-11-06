@@ -11,6 +11,7 @@ import {
   pointName,
   pointPosition,
   pointRoom,
+  pointTAt,
   roomArea,
   roomShape,
   roomShapes,
@@ -225,7 +226,9 @@ export function nudge(level: Level, sel: Selection, delta: Vec2): Command[] {
       if (l.length < 1e-9) return [];
       const along = (delta.x * (l.b.x - l.a.x) + delta.y * (l.b.y - l.a.y)) / l.length;
       if (Math.abs(along) < 1e-9) return [];
-      const t = Math.min(1, Math.max(0, p.wall.t + along / l.length));
+      // Kept on the face and out of doorways, as placing it is.
+      const t = pointTAt(level, p, p.wall.t * l.length + along);
+      if (t === null || Math.abs(t - p.wall.t) < 1e-9) return [];
       return [updatePoint(level.id, sel.id, { wall: { ...p.wall, t } })];
     }
     case 'room':
