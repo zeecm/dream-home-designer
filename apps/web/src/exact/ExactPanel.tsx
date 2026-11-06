@@ -13,8 +13,16 @@ import { useEditor } from '../editor';
 import { download, fileStem, shownDoors, view3dAspect } from '../exports';
 import { modelLibrary } from '../models';
 import { useLevel, useProject } from '../store';
-import { type ExactEngine, ExactUnsupported, NO_START, loadEngine } from './engine';
-import { ExactRun, type RunStatus, progressText } from './run';
+import {
+  BAD_DEVICE,
+  type ExactEngine,
+  ExactUnsupported,
+  NO_START,
+  forgetEngine,
+  loadEngine,
+} from './engine';
+import { baseExposure } from './exposure';
+import { ExactRun, MAX_SAMPLES, type RunPhase, type RunStatus, progressText } from './run';
 import { exactSettings, isPhone, renderSize } from './settings';
 
 /** What to render: the chosen view's camera, with ceilings on from inside a room. */
@@ -32,20 +40,42 @@ const SLOW_PREPARE = 5_000;
 
 type Stage =
   | { kind: 'waiting' }
-  | { kind: 'preparing'; slow: boolean }
+  | { kind: 'preparing' }
   | { kind: 'rendering' }
   | { kind: 'failed'; message: string };
 
-/** Asks for the plan's models and waits (up to MODEL_WAIT) for them; returns how many didn't come. */
+/** A render left for another camera: its last picture and where it got to, to come back to. */
+interface Kept {
+  canvas: HTMLCanvasElement;
+  status: RunStatus;
+  boxes: number;
+}
+
+/** A copy of `from` on a canvas of its own. */
+function copyCanvas(from: HTMLCanvasElement): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = from.width;
+  c.height = from.height;
+  c.getContext('2d')?.drawImage(from, 0, 0);
+  c.className = 'exact-canvas';
+  c.setAttribute('role', 'img');
+  c.setAttribute('aria-label', 'The exact render');
+  return c;
+}
+
+/**
+ * Asks for the plan's models and waits (up to MODEL_WAIT) for them, not for any that failed;
+ * returns how many didn't come.
+ */
 async function waitForModels(level: Level, signal: AbortSignal): Promise<number> {
   const files = new Set<string>();
   for (const it of Object.values(level.items)) {
     const f = furnitureKind(it.assetId)?.model;
     if (f) files.add(f);
   }
-  const missing = () => [...files].filter((f) => !modelLibrary.has(f));
+  const missing = () => [...files].filter((f) => !modelLibrary.settled(f));
   for (const f of missing()) modelLibrary.get(f);
-  if (!missing().length) return 0;
+  if (!missing().length) return countBoxes(level);
   await new Promise<void>((resolve) => {
     const done = () => {
       off();
@@ -59,6 +89,11 @@ async function waitForModels(level: Level, signal: AbortSignal): Promise<number>
     const timer = setTimeout(done, MODEL_WAIT);
     signal.addEventListener('abort', done);
   });
+  return countBoxes(level);
+}
+
+/** Pieces whose model isn't there (still loading, or failed): they show as boxes. */
+function countBoxes(level: Level): number {
   let n = 0;
   for (const it of Object.values(level.items)) {
     const f = furnitureKind(it.assetId)?.model;
@@ -67,12 +102,15 @@ async function waitForModels(level: Level, signal: AbortSignal): Promise<number>
   return n;
 }
 
+const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+
 /**
  * The Exact side of the render dialog: the 3D model itself, path traced on this device with
  * real light, so every wall, door, window and piece is exactly where the plan has it. It
  * starts by itself (it's free) and sharpens in place; Stop keeps the picture, Carry on
  * resumes from the same samples. Its body and foot stay mounted while the other side shows,
- * so switching back finds the picture as it was.
+ * so switching back finds the picture as it was; a render left for another camera ("Render
+ * from") is kept too, its last picture shown again on coming back.
  */
 export function ExactPanel({
   active,
@@ -104,6 +142,8 @@ export function ExactPanel({
   activeRef.current = active;
   const [stage, setStage] = useState<Stage>({ kind: 'waiting' });
   const [status, setStatus] = useState<RunStatus | null>(null);
+  // Getting ready is taking a while (or the first draw will): says the first time is longest.
+  const [slow, setSlow] = useState(false);
   // The picture's size: from the 3D view's shape as the dialog opens (every camera here has
   // it), so its frame is held at once and nothing moves when the picture comes.
   const [size, setSize] = useState<{ width: number; height: number } | null>(() => {
@@ -115,42 +155,61 @@ export function ExactPanel({
   const [boxes, setBoxes] = useState(0);
   // Said once to a screen reader, not every sample.
   const [announce, setAnnounce] = useState('');
-  // Started the first time Exact is shown (it opens there, unless this device can't).
-  const [wanted, setWanted] = useState(active);
-  useEffect(() => {
-    if (active) setWanted(true);
-  }, [active]);
   const unsupported = useRef(onUnsupported);
   unsupported.current = onUnsupported;
+  // Bumped by Try again (after a graphics card reset): a fresh render of the same view.
+  const [attempt, setAttempt] = useState(0);
+  // The view rendered: the chosen one, taken up only while this side shows (a choice made on
+  // the AI side waits until the person comes back here).
+  const [shown, setShown] = useState<ExactView | null>(active ? view : null);
+  useEffect(() => {
+    if (active) setShown(view);
+  }, [active, view]);
+  // Renders left for another camera, by its key.
+  const [kept, setKept] = useState<ReadonlyMap<string, Kept>>(new Map());
+  const keptHere = shown ? kept.get(shown.key) : undefined;
 
-  const job = wanted && view && level ? view.key : null;
+  const job = shown && level && !keptHere ? `${shown.key}#${attempt}` : null;
   // biome-ignore lint/correctness/useExhaustiveDependencies: one render per view (its key)
   useEffect(() => {
-    if (!job || !view || !level) return;
+    if (!job || !shown || !level) return;
     const ctrl = new AbortController();
     const { signal } = ctrl;
     let engine: ExactEngine | null = null;
+    let token = 0;
     let run: ExactRun | null = null;
     let built: ExactScene | null = null;
-    setStage({ kind: 'preparing', slow: false });
+    let picture = false;
+    setStage({ kind: 'preparing' });
     setStatus(null);
     setAnnounce('');
-    const slow = setTimeout(
-      () => setStage((s) => (s.kind === 'preparing' ? { kind: 'preparing', slow: true } : s)),
-      SLOW_PREPARE,
-    );
-    // Frees the render's GPU memory, context and canvas: on closing, on a new view, and if
-    // either came while it was still preparing (whatever has been made by then; a second
-    // call frees what was made since). The canvas goes first, whatever else fails.
+    setSlow(false);
+    const slowTimer = setTimeout(() => setSlow(true), SLOW_PREPARE);
+    // The engine itself is kept for the session (its shader compiled once); only this render's
+    // scene and pictures go, unless its context was lost. A render with a picture is kept for
+    // its camera (its last picture and where it got to), to come back to.
     const release = () => {
       const [e, r, b] = [engine, run, built];
       engine = null;
       run = null;
       built = null;
+      // (Not one the graphics card reset on: Try again wants a fresh one.)
+      if (e && r && picture && !e.lost) {
+        e.stop(); // the picture as it is now, in the snapshot
+        const st = r.status;
+        const entry: Kept = {
+          canvas: copyCanvas(e.snapshot),
+          status: { ...st, phase: st.phase === 'running' ? 'stopped' : st.phase },
+          boxes: countBoxes(level),
+        };
+        setKept((m) => new Map(m).set(shown.key, entry));
+      }
       e?.canvas.remove();
+      e?.snapshot.remove();
       r?.dispose();
       try {
-        e?.dispose();
+        if (e?.lost) forgetEngine(e);
+        else e?.release(token);
       } catch {
         // A context already lost has nothing left to free.
       }
@@ -158,7 +217,7 @@ export function ExactPanel({
       if (engineRef.current === e) engineRef.current = null;
       if (runRef.current === r) runRef.current = null;
     };
-    const cam = view.camera;
+    const cam = shown.camera;
     const settings = exactSettings(isPhone(), window.__DHD_EXACT_TEST__);
     const px = renderSize(cam.aspect, settings.long, settings.box);
     setSize(px);
@@ -172,11 +231,14 @@ export function ExactPanel({
           textureSize: settings.textureSize,
           tiles: 2,
         });
+        token = engine.claim();
         if (signal.aborted) return release();
         engineRef.current = engine;
-        engine.canvas.className = 'exact-canvas';
-        engine.canvas.setAttribute('role', 'img');
-        engine.canvas.setAttribute('aria-label', 'The exact render');
+        for (const c of [engine.canvas, engine.snapshot]) {
+          c.className = 'exact-canvas';
+          c.setAttribute('role', 'img');
+          c.setAttribute('aria-label', 'The exact render');
+        }
         host.current?.append(engine.canvas);
         const loading = await waitForModels(level, signal);
         if (signal.aborted) return release();
@@ -187,7 +249,7 @@ export function ExactPanel({
         const inside = cam.position.y < level.elevation + level.ceilingHeight;
         const room = inside ? roomIdAt(level, { x: cam.position.x, y: cam.position.z }) : null;
         built = buildExactScene(level, {
-          ceilings: view.ceilings,
+          ceilings: shown.ceilings,
           models: modelLibrary,
           daylight,
           lamps: lampsAuto(level, room, daylight.light),
@@ -199,13 +261,28 @@ export function ExactPanel({
           signal,
         );
         if (signal.aborted) return release();
+        // Exposed for a typical room at this hour until the first picture is metered.
+        engine.exposure = baseExposure(daylight.light);
+        if (!engine.drawn) {
+          // The first draw may build the shader and hold the page: say so first, painted.
+          setSlow(true);
+          await nextFrame();
+          await nextFrame();
+          if (signal.aborted) return release();
+        }
+        const said: Partial<Record<RunPhase, string>> = {
+          done: 'Render done',
+          capped: 'Render stopped at its time limit',
+          lost: 'The graphics card reset; your picture so far is kept',
+        };
         run = new ExactRun(engine, {
           target: settings.samples,
           cap: settings.cap,
           light: daylight.light,
           onChange: (s) => {
+            if (s.picture) picture = true;
             setStatus(s);
-            if (s.phase === 'done') setAnnounce('Render done');
+            setAnnounce(said[s.phase] ?? '');
           },
         });
         runRef.current = run;
@@ -216,22 +293,35 @@ export function ExactPanel({
         run.start();
       } catch (e) {
         if (signal.aborted) return release();
-        if (e instanceof ExactUnsupported && e.reason !== 'lost') {
-          unsupported.current(e.message);
-          setStage({ kind: 'failed', message: e.message });
+        // Nothing to keep from a render that couldn't start, its engine included.
+        if (engine) forgetEngine(engine);
+        release();
+        if (e instanceof ExactUnsupported) {
+          // This device can't (a lost context at the start included): AI impression instead.
+          const message = e.reason === 'lost' ? BAD_DEVICE : e.message;
+          unsupported.current(message);
+          setStage({ kind: 'failed', message });
         } else {
           setStage({ kind: 'failed', message: NO_START });
         }
       } finally {
-        clearTimeout(slow);
+        clearTimeout(slowTimer);
       }
     })();
     return () => {
       ctrl.abort();
-      clearTimeout(slow);
+      clearTimeout(slowTimer);
       release();
     };
   }, [job]);
+
+  // A kept render: its picture back in the frame.
+  useEffect(() => {
+    if (!keptHere) return;
+    host.current?.append(keptHere.canvas);
+    setSize({ width: keptHere.canvas.width, height: keptHere.canvas.height });
+    return () => keptHere.canvas.remove();
+  }, [keptHere]);
 
   // Drawing waits while the other side shows, and while the tab is hidden.
   useEffect(() => {
@@ -249,18 +339,83 @@ export function ExactPanel({
     return () => onPauseView?.(false);
   }, [working, onPauseView]);
 
+  const shownStatus = keptHere?.status ?? status;
+  // The graphics card reset: the last kept picture stands in for the canvas, which is blank.
+  const lost = !keptHere && status?.phase === 'lost';
+  useEffect(() => {
+    const e = engineRef.current;
+    if (!lost || !e) return;
+    e.canvas.remove();
+    host.current?.append(e.snapshot);
+  }, [lost]);
+
   const run = runRef.current;
-  const running = status?.phase === 'running';
-  const canCarryOn = status?.phase === 'stopped' || status?.phase === 'capped';
-  const picture = !!status?.picture;
+  const phase = shownStatus?.phase;
+  const picture = !!shownStatus?.picture;
   const name = project.name;
-  const progress = status ? Math.min(1, status.samples / status.target) : 0;
+  const progress = shownStatus ? Math.min(1, shownStatus.samples / shownStatus.target) : 0;
+  const shownBoxes = keptHere?.boxes ?? boxes;
+  const filename = `${fileStem(name)}-exact-render.png`;
 
   const save = async () => {
+    if (keptHere) {
+      const blob = await new Promise<Blob | null>((r) => keptHere.canvas.toBlob(r, 'image/png'));
+      if (blob) download(blob, filename);
+      return;
+    }
     const e = engineRef.current;
     if (!e) return;
-    download(await e.readPixels(), `${fileStem(name)}-exact-render.png`);
+    download(await e.readPixels(), filename);
   };
+  // A kept render can't go on (its samples went with the engine): a fresh one can.
+  const again = () => {
+    if (!shown) return;
+    const key = shown.key;
+    setKept((m) => {
+      const next = new Map(m);
+      next.delete(key);
+      return next;
+    });
+  };
+
+  let action: ReactNode;
+  if (keptHere) {
+    action = (
+      <button type="button" className="btn" onClick={again}>
+        Render again
+      </button>
+    );
+  } else if (lost) {
+    action = (
+      <button type="button" className="btn" onClick={() => setAttempt((n) => n + 1)}>
+        Try again
+      </button>
+    );
+  } else if (phase === 'stopped' || phase === 'capped') {
+    action = (
+      <button type="button" className="btn" onClick={() => run?.carryOn()}>
+        Carry on
+      </button>
+    );
+  } else if (phase === 'done') {
+    action =
+      (shownStatus?.target ?? MAX_SAMPLES) < MAX_SAMPLES ? (
+        <button type="button" className="btn" onClick={() => run?.more()}>
+          More samples
+        </button>
+      ) : null;
+  } else {
+    action = (
+      <button
+        type="button"
+        className="btn"
+        onClick={() => run?.stop()}
+        disabled={phase !== 'running' || !picture}
+      >
+        Stop
+      </button>
+    );
+  }
 
   return (
     <>
@@ -274,8 +429,8 @@ export function ExactPanel({
             ref={host}
             className="exact-picture"
             // What is drawn, for checking against the view (tests read these).
-            data-camera={job && view ? JSON.stringify(view.camera) : undefined}
-            data-ceilings={job && view ? String(view.ceilings) : undefined}
+            data-camera={shown ? JSON.stringify(shown.camera) : undefined}
+            data-ceilings={shown ? String(shown.ceilings) : undefined}
             style={
               size
                 ? {
@@ -286,14 +441,15 @@ export function ExactPanel({
                 : undefined
             }
           >
-            {stage.kind !== 'rendering' && !picture && (
+            {!picture && (
+              // Covers the canvas until its first good picture: a light, quiet frame.
               <output className="exact-wait">
                 {stage.kind === 'failed' ? (
                   stage.message
                 ) : (
                   <>
-                    <span>{view ? 'Preparing the scene…' : 'Taking the view…'}</span>
-                    {stage.kind === 'preparing' && stage.slow && (
+                    <span>{shown ? 'Preparing the scene…' : 'Taking the view…'}</span>
+                    {slow && (
                       <span className="exact-wait-note">
                         Getting the renderer ready; the first time takes longest.
                       </span>
@@ -313,12 +469,12 @@ export function ExactPanel({
               <strong>{variant === 'after' ? 'Renovation (after)' : 'As it is (before)'}.</strong>
             </>
           )}
-          {boxes > 0 && (
+          {shownBoxes > 0 && (
             <>
               {' '}
-              {boxes === 1
-                ? '1 piece was still loading and shows as a box.'
-                : `${boxes} pieces were still loading and show as boxes.`}
+              {shownBoxes === 1
+                ? '1 piece wasn’t loaded and shows as a box.'
+                : `${shownBoxes} pieces weren’t loaded and show as boxes.`}
             </>
           )}
         </p>
@@ -326,11 +482,11 @@ export function ExactPanel({
       <footer className="dialog-foot exact-foot" hidden={!active}>
         <div className="exact-progress">
           <p className="field-hint exact-progress-text" data-testid="exact-progress">
-            {status
-              ? progressText(status)
+            {shownStatus
+              ? progressText(shownStatus)
               : stage.kind === 'failed'
                 ? stage.message
-                : view
+                : shown
                   ? 'Preparing the scene…'
                   : 'Taking the view…'}
           </p>
@@ -342,15 +498,7 @@ export function ExactPanel({
           </p>
         </div>
         <div className="button-row exact-actions">
-          {canCarryOn ? (
-            <button type="button" className="btn" onClick={() => run?.carryOn()}>
-              Carry on
-            </button>
-          ) : (
-            <button type="button" className="btn" onClick={() => run?.stop()} disabled={!running}>
-              Stop
-            </button>
-          )}
+          {action}
           <button type="button" className="btn btn-primary" onClick={save} disabled={!picture}>
             Download
           </button>

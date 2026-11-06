@@ -250,6 +250,11 @@ export async function capture3dFrom(camera: SceneCamera): Promise<Blob> {
   });
 }
 
+/** The camera the 3D view is seen from now, or null when it isn't on screen. */
+export function view3dCamera(): SceneCamera | null {
+  return scene3d?.camera() ?? null;
+}
+
 /** The 3D view's shape (width over height), or null when it isn't on screen. */
 export function view3dAspect(): number | null {
   const c = scene3d?.canvas;

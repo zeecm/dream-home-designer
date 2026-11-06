@@ -24,6 +24,20 @@ export interface ExactEngineOptions {
 export interface ExactEngine {
   readonly canvas: HTMLCanvasElement;
   /**
+   * The picture as last kept (every few samples, and the first): what is left to show and
+   * download if the graphics context is lost.
+   */
+  readonly snapshot: HTMLCanvasElement;
+  /** Sizes and settings for the next render (the engine, and its shader, are kept). */
+  configure(opts: ExactEngineOptions): void;
+  /**
+   * Takes the engine for a render; returns the claim to `release` it with. A newer claim
+   * makes an older one's `release` do nothing.
+   */
+  claim(): number;
+  /** Ends claim `token`'s render: stops it and frees its scene and pictures (not the shader). */
+  release(token: number): void;
+  /**
    * Builds the scene for tracing (its BVH, materials, textures, lights and sky) and compiles
    * the tracer's shader; resolves when samples can be drawn. Rejects with `ExactUnsupported`
    * when this device's graphics can't run it.
@@ -34,6 +48,12 @@ export interface ExactEngine {
    * while the GPU is still on the last step: call it once a frame.
    */
   sample(): boolean;
+  /**
+   * The tracer has drawn in this context. Before that, a driver without parallel shader
+   * compiling (SwiftShader, some phones) still has its shader to build on the first draw,
+   * which can hold the page for many seconds.
+   */
+  readonly drawn: boolean;
   /** Samples drawn so far (fractional while a sample's tiles are under way). */
   readonly samples: number;
   /** The graphics context was lost (a GPU reset): no more samples; the canvas keeps its picture. */
@@ -51,7 +71,7 @@ export interface ExactEngine {
   readPixels(): Promise<Blob>;
   /** Stops any work still pending (a compile); the picture stays. */
   stop(): void;
-  /** Frees its GPU memory and its context; the canvas is left to the caller to remove. */
+  /** Frees its GPU memory and its context for good; the canvas is left to the caller to remove. */
   dispose(): void;
 }
 
@@ -84,8 +104,28 @@ export function hasWebGL2(): boolean {
   }
 }
 
-/** The path tracer, loaded only when an exact render is asked for (it is ~55 KB gzip). */
+/**
+ * The engine, kept for the session: its shader is compiled once (seconds, more on some
+ * phones), and each render only builds its scene. A lost context makes a fresh one.
+ */
+let shared: ExactEngine | null = null;
+
+/** The path tracer, loaded only when an exact render is asked for (about 60 KB gzip). */
 export async function loadEngine(opts: ExactEngineOptions): Promise<ExactEngine> {
   const { PathTracerEngine } = await import('./pathtracer');
-  return new PathTracerEngine(opts);
+  if (shared && !shared.lost) {
+    shared.configure(opts);
+    return shared;
+  }
+  shared?.dispose();
+  shared = null;
+  const engine = new PathTracerEngine(opts);
+  shared = engine;
+  return engine;
+}
+
+/** Drops the kept engine (its context was lost, or it failed to start). */
+export function forgetEngine(engine: ExactEngine): void {
+  if (shared === engine) shared = null;
+  engine.dispose();
 }

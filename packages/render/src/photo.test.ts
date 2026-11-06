@@ -1,5 +1,12 @@
 import { FLOOR_FINISHES, PAINTS, WALLPAPERS, customPaint } from '@dhd/core';
-import { Color, MeshPhongMaterial, MeshPhysicalMaterial, MeshStandardMaterial } from 'three';
+import {
+  Color,
+  DoubleSide,
+  FrontSide,
+  MeshPhongMaterial,
+  MeshPhysicalMaterial,
+  MeshStandardMaterial,
+} from 'three';
 import { describe, expect, it } from 'vitest';
 import { paletteEntry } from './materials';
 import {
@@ -122,6 +129,23 @@ describe('model materials', () => {
     const std = convertModelMaterial(phong) as MeshStandardMaterial;
     expect(std).toBeInstanceOf(MeshStandardMaterial);
     expect(hex(std)).toBe('#336699');
+  });
+
+  it('hands out only two-sided materials, model copies included', () => {
+    const set = new PhotoMaterials(true);
+    for (const id of ['wood-oak', 'paint-white', 'furniture-lamp', 'door', 'no-such-finish']) {
+      set.get(id);
+    }
+    const own = new MeshStandardMaterial({ color: '#884422' });
+    expect(set.model(own)).not.toBe(own);
+    set.model(new MeshPhongMaterial({ color: '#336699' }));
+    set.model(new MeshStandardMaterial({ transparent: true, opacity: 0.3 }), true);
+    const all = set.all();
+    expect(all.length).toBe(10);
+    for (const m of all) expect(m.side, m.name).toBe(DoubleSide);
+    // The library's own is left as it was.
+    expect(own.side).toBe(FrontSide);
+    set.dispose();
   });
 
   it('lets a lamp model’s bulb shine through it, without touching the library’s material', () => {

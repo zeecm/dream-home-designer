@@ -120,6 +120,7 @@ function physical(p: PhotoParams, map: THREE.Texture | null = null): THREE.MeshP
     ior: p.ior ?? 1.5,
     thickness: p.thickness ?? 0,
     emissive: p.emissive ?? '#000000',
+    side: THREE.DoubleSide,
   });
   if (p.emissive && p.emissive !== '#000000') m.emissiveIntensity = SHADE_LUMINANCE;
   return m;
@@ -127,7 +128,9 @@ function physical(p: PhotoParams, map: THREE.Texture | null = null): THREE.MeshP
 
 /**
  * The exact render's material set, handed to `LevelMeshes` in place of the 3D view's
- * `MaterialCache`: the same ids, so the same meshes, only lit for real.
+ * `MaterialCache`: the same ids, so the same meshes, only lit for real. Every material is
+ * two-sided: the tracer (0.0.23) lets a shadow ray through the face a one-sided material
+ * shows, so a ceiling or floor (a single plane) would let the sun and sky into a sealed room.
  */
 export class PhotoMaterials implements MaterialSource {
   private cache = new Map<string, THREE.MeshPhysicalMaterial>();
@@ -150,23 +153,27 @@ export class PhotoMaterials implements MaterialSource {
   }
 
   /**
-   * A model's own material made ready for the render: a standard one kept with its maps; a
-   * Basic, Lambert or Phong one (an uploaded model's) made standard with the same colour and
-   * map; plain see-through glass (as the model pipeline makes it) made transmissive. In a
-   * lamp (`shade`), nothing blocks the bulb's light. The model's material is left as it is
-   * (the 3D view shares it).
+   * A model's own material made ready for the render, as a copy (the 3D view shares the
+   * model's own, and its maps stay shared): a standard one kept with its maps; a Basic,
+   * Lambert or Phong one (an uploaded model's) made standard with the same colour and map;
+   * plain see-through glass (as the model pipeline makes it) made transmissive; two-sided, as
+   * every material here. A lamp's shade (`shade`) lets its bulb's light through.
    */
   model(src: THREE.Material, shade = false): THREE.Material {
     const key = `${src.uuid}/${shade}`;
     let m = this.models.get(key);
     if (m) return m;
-    m = convertModelMaterial(src);
-    if (shade) {
-      if (m === src) m = src.clone();
-      (m as Traced).castShadow = false;
-    }
+    const converted = convertModelMaterial(src);
+    m = converted === src ? src.clone() : converted;
+    m.side = THREE.DoubleSide;
+    if (shade) (m as Traced).castShadow = false;
     this.models.set(key, m);
     return m;
+  }
+
+  /** Every material handed out so far (for checks). */
+  all(): THREE.Material[] {
+    return [...this.cache.values(), ...this.models.values(), this.glass, this.frosted];
   }
 
   dispose(): void {
@@ -174,10 +181,8 @@ export class PhotoMaterials implements MaterialSource {
       m.map?.dispose();
       m.dispose();
     }
-    for (const [key, m] of this.models) {
-      // Only the copies made here; a model's own material belongs to the library.
-      if (!key.startsWith(`${m.uuid}/`)) m.dispose();
-    }
+    // Copies: their maps belong to the model library.
+    for (const m of this.models.values()) m.dispose();
     this.glass.dispose();
     this.frosted.dispose();
     this.cache.clear();

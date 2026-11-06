@@ -9,6 +9,7 @@ export {
   exactDaylight,
   isSpotLamp,
   lampLights,
+  lampShades,
   skyTexture,
 } from './exactScene';
 export { LevelMeshes, type LevelMeshOptions, type UpdateStats } from './levelMeshes';

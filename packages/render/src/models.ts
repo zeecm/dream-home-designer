@@ -70,7 +70,12 @@ export class ModelLibrary implements ModelSource {
     return this.loaded.has(file);
   }
 
-  /** Calls `fn` whenever a model finishes loading; returns the unsubscribe. */
+  /** Loaded, or failed for now (missing or broken): either way, nothing to wait for. */
+  settled(file: string): boolean {
+    return this.loaded.has(file) || this.failed.has(file);
+  }
+
+  /** Calls `fn` whenever a model loads or fails to; returns the unsubscribe. */
   onLoad(fn: () => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
@@ -125,6 +130,8 @@ export class ModelLibrary implements ModelSource {
         // Missing or broken: the stand-in box stays, retried twice, never every frame.
         this.failed.add(file);
         if (uploaded) this.failedAt.set(file, Date.now());
+        // Told too, so whoever waits for it can stop (it stays a box for now).
+        for (const fn of this.listeners) fn();
         if (n <= 2) {
           setTimeout(
             () => {

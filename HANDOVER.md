@@ -453,15 +453,30 @@ points, candela as is) and the ground. `lampsAuto` (core) turns lamps on at nigh
 daylight doesn't reach. The engine is `three-gpu-pathtracer@0.0.23` (WebGL 2), pinned, lazily
 loaded (61 KB gzip) behind `ExactEngine` (`apps/web/src/exact/engine.ts`); `ExactRun` drives
 it (a step a frame, never more than one GPU step queued: a fence per step; time cap, Stop,
-Carry on, paused when hidden or on the AI side); exposure is metered on the first picture and
-set for good at 8 samples (AgX, ±3 EV about a typical room at that hour). The 3D view's
-frameloop rests while Exact renders. Tests set `window.__DHD_EXACT_TEST__` (size box, samples).
+Carry on, More samples, paused when hidden or on the AI side). The frame stays covered until
+the first whole sample is metered (exposure: AgX, ±3 EV about a typical room at that hour, set
+for good at 8 samples). The engine is kept for the session (`loadEngine`): its shader is
+compiled once, each render only builds its scene (`claim`/`release`); a lost context makes a
+fresh one, and the last kept snapshot stands in, to see and download, with Try again. A render
+left for another camera ("Render from") is kept as its last picture. The 3D view's frameloop
+rests while Exact renders. Tests set `window.__DHD_EXACT_TEST__` (size box, samples, cap).
 - **Library bugs found (0.0.23 on three 0.170), handled in the adapter:** a mesh with several
   materials (geometry groups: every wall) shifts the material of every mesh after it, because
   materials are numbered per mesh but listed per slot; most paths then went black.
   `flattenForTracing` hands the tracer one mesh per material, in world space (same
   triangles). `WebGLPathTracer.dispose()` throws (`_renderQuad`); the adapter frees the parts.
   The detectors aren't exported; `PrecisionDetector` is imported from its source.
+  **Shadow rays pass through the shown face of a one-sided material** (its sidedness test
+  skips `side == material.side`), so ceilings and floors (single planes) let the sun and sky
+  into closed rooms: every material the exact scene uses is two-sided (`PhotoMaterials`,
+  model copies, the ground). A sealed room at noon now reads black (e2e); before, about
+  3,700 cd/m². `SpotLight.copy` drops the tracer's ad-hoc `radius`; `flattenForTracing` keeps
+  it, and expands instanced meshes.
+  Without `KHR_parallel_shader_compile` (SwiftShader, some phones) the shader is built on the
+  first draw, holding the page; that can't be timed or caught, so the dialog says "the first
+  time takes longest" before that draw. A failed link is caught (`LINK_STATUS` after compile).
+  Sharing GLB textures with the exact renderer leaves a dispose listener on them; with one
+  engine per session that holds one renderer, not one per render.
 - **Spike measurements (6 Nov, this cloud machine: 4 CPUs, no GPU, so Chromium's SwiftShader
   as in CI; the furnished sample from eye height):** prepare (flatten, BVH, textures, shader
   link) 0.3–0.8 s; SwiftShader compiles the tracer's shader on its first draw, about 25 s; then
@@ -470,16 +485,25 @@ frameloop rests while Exact renders. Tests set `window.__DHD_EXACT_TEST__` (size
   A GPU was not available here: the desktop and phone budgets (samples/s at 1600 px, first
   picture, Good in 45 s) are **not measured yet**; use `/dev/exact-spike.html` on the dev
   server on the reference devices.
-- **Sun through glazed windows reaches the floor** (spike `probe=auto`): at 4 pm, through a
-  kitchen window facing the sun, the sun patch read 2,547 cd/m² against 777 in the shade
-  beside it (3,536 with the pane left out; 32 samples, noisy); at 9 am 2,842 with glass and
-  2,889 without. No fallback needed.
-- **Tests:** `e2e/exact.spec.ts` (about 2.5 min under SwiftShader: one dialog flow with three
-  renders, the pixel test on a fixture room at 32 samples, the phone walk, no WebGL 2). The AI
-  render tests now click "AI impression" first.
-- **Seen, to check on a GPU at 256 samples:** at 20 samples a sunlit floor showed sparse
-  single dark pixels; the picture is warm where an oak floor bounces sunlight (physically so;
-  no white balance, which the spec leaves out).
+- **Sun through glazed windows reaches the floor** (spike `probe=auto`, redone after the
+  two-sided fix; the first numbers were inflated by the leak): at 4 pm, through a kitchen
+  window facing the sun, the patch read 208 cd/m² against 28 in the shade beside it, and 227
+  with the pane left out (the pane passes about 92%; 32 samples at 200 × 150, noisy). From eye
+  height in the living room at 4 pm the sun's patch through the window shows on the wall. No
+  fallback needed.
+- **Daylight-only interiors are grainy:** the sky lights a room only through its windows, which
+  the tracer's sky sampling doesn't aim at (no portals in 0.0.23), so at 32 samples a third of
+  pixels can still be black; the denoiser is stronger early and fades out slowly (gone at 512
+  samples). The way out, if 256 samples on a GPU aren't clean enough: area lights in the
+  window openings carrying the sky, with the sky kept as backdrop only (tracer `background`
+  vs `environment`).
+- **Tests:** `e2e/exact.spec.ts` (about 3 min under SwiftShader: one dialog flow (stop, carry
+  on, switch and back with the frame and focus kept, kept renders per camera, a context reset,
+  close and reopen), a sealed room, the pixel test on a fixture room at 32 samples, the phone
+  walk, no WebGL 2). The AI render tests now click "AI impression" first.
+- **Seen, to check on a GPU at 256 samples:** the grain above; the picture is warm where an
+  oak floor bounces sunlight and cool where only the sky lights a room (physically so; no
+  white balance, which the spec leaves out).
 - **Left for slice 2+:** Quality, Time, Lamps and Brightness settings; hints; full-screen
   viewer; real textures; Polish with AI; the slow-device estimate.
 

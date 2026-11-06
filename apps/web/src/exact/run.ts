@@ -8,6 +8,9 @@ import { autoExposure } from './exposure';
  * time spent hidden doesn't count), stopped and carried on at will.
  */
 
+/** The most samples More samples goes to. */
+export const MAX_SAMPLES = 1024;
+
 /** The exposure is set once more, for good, at this many samples (so it doesn't pump). */
 export const METER_AT = 8;
 
@@ -30,7 +33,10 @@ export interface RunStatus {
   target: number;
   /** Time spent drawing, ms (not counting time stopped or hidden). */
   elapsed: number;
-  /** A picture is on the canvas (the first, quarter-size one counts). */
+  /**
+   * The first good picture is on the canvas: a whole sample, metered and denoised (until
+   * then the frame stays covered, and there is nothing to download).
+   */
   picture: boolean;
 }
 
@@ -56,9 +62,11 @@ export class ExactRun {
   private limit: number;
   private id: number | null = null;
   private picture = false;
+  private firstMeter = false;
   private metered = false;
   private final = false;
   private disposed = false;
+  private target: number;
   private lastSamples = -1;
   private readonly now: () => number;
   private readonly frame: (cb: () => void) => number;
@@ -72,13 +80,14 @@ export class ExactRun {
     this.frame = opts.frame ?? ((cb) => requestAnimationFrame(cb));
     this.cancelFrame = opts.cancelFrame ?? ((id) => cancelAnimationFrame(id));
     this.limit = opts.cap;
+    this.target = opts.target;
   }
 
   get status(): RunStatus {
     return {
       phase: this.phase,
       samples: Math.floor(this.engine.samples),
-      target: this.opts.target,
+      target: this.target,
       elapsed: this.elapsed + (this.since === null ? 0 : this.now() - this.since),
       picture: this.picture,
     };
@@ -93,6 +102,19 @@ export class ExactRun {
     if (this.phase !== 'running') return;
     this.phase = 'stopped';
     this.halt();
+    this.emit();
+  }
+
+  /**
+   * More samples for a cleaner picture after it is done: twice as many (to MAX_SAMPLES), from
+   * the same samples.
+   */
+  more(): void {
+    if (this.phase !== 'done' || this.target >= MAX_SAMPLES) return;
+    this.target = Math.min(MAX_SAMPLES, this.target * 2);
+    this.limit = this.elapsed + this.opts.cap;
+    this.phase = 'running';
+    this.schedule();
     this.emit();
   }
 
@@ -149,9 +171,9 @@ export class ExactRun {
       return;
     }
     if (e.sample()) {
-      if (!this.picture) {
-        // Metered on the first picture, so it opens at about the right brightness.
-        this.picture = true;
+      if (!this.firstMeter && e.samples >= 1) {
+        // Metered on the first whole sample, and shown from then on.
+        this.firstMeter = true;
         this.meter(false);
       } else if (!this.metered && e.samples >= METER_AT) {
         this.metered = true;
@@ -159,7 +181,7 @@ export class ExactRun {
       }
     }
     const status = this.status;
-    if (status.samples >= this.opts.target) {
+    if (status.samples >= this.target) {
       this.phase = 'done';
       this.halt();
     } else if (status.elapsed >= this.limit) {
@@ -182,6 +204,10 @@ export class ExactRun {
         if (final) this.final = true;
         e.exposure = autoExposure(nits, this.opts.light);
         e.show();
+        if (!this.picture) {
+          this.picture = true;
+          this.emit();
+        }
       },
       () => {},
     );
@@ -211,9 +237,9 @@ export function progressText(s: RunStatus): string {
     case 'stopped':
       return `Stopped · ${s.samples} of ${s.target} samples · ${time}`;
     case 'lost':
-      return 'The graphics card reset; your picture so far is kept. Try again.';
+      return `The graphics card reset; your picture so far is kept (${s.samples} samples). Try again for a fresh one.`;
     default:
-      return `Sample ${Math.min(s.target, s.samples + 1)} of ${s.target} · ${time}`;
+      return s.picture ? `Sample ${s.samples} of ${s.target} · ${time}` : 'Preparing the scene…';
   }
 }
 

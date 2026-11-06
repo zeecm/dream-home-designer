@@ -22,6 +22,8 @@ export interface ExactTestOverride {
   width?: number;
   height?: number;
   samples?: number;
+  /** The time cap, ms (a slow test machine needs longer than a person's). */
+  cap?: number;
 }
 
 declare global {
@@ -54,6 +56,7 @@ export function exactSettings(phone: boolean, test?: ExactTestOverride): ExactSe
     textureSize: 512,
   };
   if (test?.width && test.height) s.box = { width: test.width, height: test.height };
+  if (test?.cap) s.cap = test.cap;
   return s;
 }
 

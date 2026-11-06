@@ -24,6 +24,7 @@ import {
 } from './exactScene';
 import { LevelMeshes } from './levelMeshes';
 import { MaterialCache } from './materials';
+import type { ModelSource } from './models';
 
 /** Pieces put down in a level (ids `it_t000`…). */
 function withItems(level: Level, pieces: [string, number, number][]): Level {
@@ -59,27 +60,62 @@ function sampleVersions(): { before: Level; after: Level } {
   return { before, after };
 }
 
-/** Every mesh under `root`, by name, with its position array (world transforms applied). */
+/** Every mesh under `root`, by name, with its vertex positions in world space. */
 function meshes(root: THREE.Object3D): Map<string, Float32Array[]> {
   root.updateMatrixWorld(true);
   const out = new Map<string, Float32Array[]>();
   root.traverse((o) => {
     if (!(o instanceof THREE.Mesh)) return;
     const list = out.get(o.name) ?? [];
-    list.push(Float32Array.from(o.geometry.getAttribute('position').array as Float32Array));
+    const pos = o.geometry.getAttribute('position').clone().applyMatrix4(o.matrixWorld);
+    list.push(Float32Array.from(pos.array as Float32Array));
     out.set(o.name, list);
   });
   return out;
+}
+
+/**
+ * A stand-in model library, every model loaded: a pole (a thin box from 0.35 to 0.95 m) and a
+ * shade round the point 0.12 m up, where the catalogue's globe pendant has its bulb.
+ */
+function fakeModels(): ModelSource {
+  const pole = new THREE.BoxGeometry(0.02, 0.6, 0.02).translate(0, 0.65, 0);
+  const shade = new THREE.BoxGeometry(0.3, 0.3, 0.3).translate(0, 0.12, 0);
+  const material = new THREE.MeshStandardMaterial({ color: '#cccccc', side: THREE.FrontSide });
+  return {
+    has: () => true,
+    get: () => {
+      const g = new THREE.Group();
+      for (const [name, geometry] of [
+        ['pole', pole],
+        ['shade', shade],
+      ] as const) {
+        const m = new THREE.Mesh(geometry, material);
+        m.name = name;
+        m.userData.shared = true;
+        g.add(m);
+      }
+      return g;
+    },
+  };
 }
 
 const noon = exactDaylight(DEFAULT_SITE, 300, 12);
 
 describe('the exact scene', () => {
   it('has exactly the 3D view’s meshes, vertex for vertex, plus only lights, ground and sky', () => {
+    const models = fakeModels();
     for (const level of Object.values(sampleVersions())) {
-      const view = new LevelMeshes(new MaterialCache(), { ceilings: true });
-      view.update(level);
-      const exact = buildExactScene(level, { ceilings: true, daylight: noon, lamps: true });
+      // A model in each, and pieces turned: their world positions must match too.
+      const lit = withItems(level, [['globe-pendant', 8.6, 3.6]]);
+      const view = new LevelMeshes(new MaterialCache(), { ceilings: true, models });
+      view.update(lit);
+      const exact = buildExactScene(lit, {
+        ceilings: true,
+        daylight: noon,
+        lamps: true,
+        models,
+      });
       const a = meshes(view.group);
       const b = meshes(exact.meshes.group);
       expect([...b.keys()].sort()).toEqual([...a.keys()].sort());
@@ -103,6 +139,44 @@ describe('the exact scene', () => {
       exact.dispose();
       view.dispose();
     }
+  });
+
+  it('makes every surface two-sided, so no sealed room lets light through a ceiling', () => {
+    const level = withItems(sampleVersions().after, [['globe-pendant', 8.6, 3.6]]);
+    const exact = buildExactScene(level, {
+      ceilings: true,
+      daylight: noon,
+      lamps: true,
+      models: fakeModels(),
+    });
+    let n = 0;
+    exact.scene.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      for (const m of [o.material].flat() as THREE.Material[]) {
+        expect(m.side, `${o.name} ${m.name}`).toBe(THREE.DoubleSide);
+        n++;
+      }
+    });
+    expect(n).toBeGreaterThan(100);
+    exact.dispose();
+  });
+
+  it('lets only a lamp model’s shade (round its bulb) pass its light, not its pole', () => {
+    const level = withItems(sampleFlatProject().levels[0] as Level, [['globe-pendant', 8.6, 3.6]]);
+    const exact = buildExactScene(level, {
+      ceilings: true,
+      daylight: noon,
+      lamps: true,
+      models: fakeModels(),
+    });
+    const lamp = exact.meshes.group.getObjectByName('item:it_t000');
+    const part = (name: string) =>
+      lamp?.getObjectByName(name) as THREE.Mesh<THREE.BufferGeometry, THREE.Material>;
+    const castShadow = (m: THREE.Mesh<THREE.BufferGeometry, THREE.Material>) =>
+      (m.material as THREE.Material & { castShadow?: boolean }).castShadow;
+    expect(castShadow(part('shade'))).toBe(false);
+    expect(castShadow(part('pole'))).not.toBe(false);
+    exact.dispose();
   });
 
   it('keeps the doors as the 3D view has them', () => {

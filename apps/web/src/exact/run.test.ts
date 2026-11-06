@@ -84,6 +84,31 @@ describe('an exact render’s run', () => {
     expect(h.seen.at(-1)?.phase).toBe('done');
   });
 
+  it('shows its first picture once a whole sample is metered, not before', async () => {
+    const h = harness(40);
+    h.run.start();
+    expect(h.run.status.picture).toBe(false);
+    h.frames(1);
+    expect(h.engine.meterings).toEqual([1]);
+    expect(h.run.status.picture).toBe(false);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(h.run.status.picture).toBe(true);
+    expect(h.seen.at(-1)?.picture).toBe(true);
+  });
+
+  it('takes more samples once done, from the same ones, twice as many', () => {
+    const h = harness(16);
+    h.run.start();
+    h.frames(50);
+    expect(h.run.status.phase).toBe('done');
+    h.run.more();
+    expect(h.run.status).toMatchObject({ phase: 'running', target: 32 });
+    h.frames(50);
+    expect(h.engine.samples).toBe(32);
+    expect(h.run.status.phase).toBe('done');
+  });
+
   it('meters the first picture, then sets the exposure for good at METER_AT samples', async () => {
     const h = harness(40);
     h.run.start();
@@ -166,9 +191,10 @@ describe('the progress line', () => {
     elapsed,
     picture: true,
   });
-  it('says the sample being drawn, then done, or where it stopped', () => {
-    expect(progressText(s('running', 47, 12_300))).toBe('Sample 48 of 256 · 0:12');
-    expect(progressText(s('running', 0, 0))).toBe('Sample 1 of 256 · 0:00');
+  it('counts finished samples, running or stopped, and prepares until the first picture', () => {
+    expect(progressText(s('running', 48, 12_300))).toBe('Sample 48 of 256 · 0:12');
+    expect(progressText({ ...s('running', 0, 0), picture: false })).toBe('Preparing the scene…');
+    expect(progressText(s('stopped', 48, 12_300))).toBe('Stopped · 48 of 256 samples · 0:12');
     expect(progressText(s('done', 256, 41_000))).toBe('Done · 256 samples · 0:41');
     expect(progressText(s('capped', 140, 120_000))).toBe(
       'Stopped at 2 min: 140 samples. Carry on for a cleaner picture.',

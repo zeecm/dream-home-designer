@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../editor';
 import { ExactPanel, type ExactView } from '../exact/ExactPanel';
 import { NO_WEBGL2, hasWebGL2 } from '../exact/engine';
-import { capture3dFrom, capture3dView, download, fileStem } from '../exports';
+import { capture3dFrom, capture3dView, download, fileStem, view3dCamera } from '../exports';
 import { useLevel, useProject } from '../store';
 import { icons } from '../ui/icons';
 import { AiSettingsDialog } from './AiSettingsDialog';
@@ -53,6 +53,9 @@ interface Shot {
 
 type Mode = 'exact' | 'ai';
 
+/** The exact render waits at most this long (ms) for the AI side's pictures to be taken. */
+const CAPTURE_WAIT = 4_000;
+
 /**
  * A photo-real picture of the 3D view, two ways. **Exact** (where it opens, every time): the
  * app path traces the 3D model itself on this device, so nothing is added or moved
@@ -76,9 +79,24 @@ export function RenderDialog({
   const { name, id: projectId } = useProject();
   const level = useLevel();
   const walking = useEditor((s) => !!s.walking);
+  // The cameras, at once: this view's, and (from high up or outside) eye height in its room.
+  // The exact render needs only these; the AI side's pictures of them follow.
+  const [cams] = useState(() => {
+    const here = view3dCamera();
+    if (!here) return null;
+    let eye: { camera: SceneCamera; room: string } | null = null;
+    if (!walking && level && sceneFacts(level, here).view !== 'eye') {
+      const e = eyeLevelCamera(level, here);
+      if (e) eye = { camera: e.camera, room: level.rooms[e.roomId]?.name ?? 'the room' };
+    }
+    return { here, eye };
+  });
   // The view as it is, and (from high up) from eye height in its room.
   const [shots, setShots] = useState<{ here: Shot; eye?: Shot & { room: string } } | null>(null);
-  const [from, setFrom] = useState<'here' | 'eye'>('here');
+  const [from, setFrom] = useState<'here' | 'eye'>(() => (cams?.eye ? 'eye' : 'here'));
+  const eyeRoom = cams?.eye?.room ?? shots?.eye?.room;
+  // A switch between Exact and AI impression hands focus to its twin on the other side.
+  const switched = useRef(false);
   // A render, with which picture it was made from.
   const [photo, setPhoto] = useState<{ blob: Blob; url: string; from: 'here' | 'eye' } | null>(
     null,
@@ -96,8 +114,14 @@ export function RenderDialog({
   // Exact, unless this browser can't (then why, and AI impression as today).
   const [noExact, setNoExact] = useState<string | null>(() => (hasWebGL2() ? null : NO_WEBGL2));
   const [mode, setMode] = useState<Mode>(() => (noExact ? 'ai' : 'exact'));
-  // Both pictures taken (or tried): the exact render starts from the chosen one.
+  // Both pictures taken (or tried): the exact render starts from the chosen one then, so the
+  // two don't share the GPU; or after CAPTURE_WAIT, whatever became of them.
   const [settled, setSettled] = useState(false);
+  const [waited, setWaited] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setWaited(true), CAPTURE_WAIT);
+    return () => clearTimeout(t);
+  }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: the view as the dialog opens on it
   useEffect(() => {
@@ -136,11 +160,14 @@ export function RenderDialog({
         const eyeBlob = await capture3dFrom(eye.camera);
         if (!live) return;
         setShots({ here, eye: { ...shot(eyeBlob, eye.camera), room } });
-        setFrom('eye');
+        // Already the choice when the dialog had the cameras as it opened.
+        if (!cams?.eye) setFrom('eye');
       } catch {
         // This view is still there to render from.
-        if (live)
+        if (live) {
           setStatus('Couldn’t take the eye-height picture, so the render will use this view.');
+          setFrom('here');
+        }
       }
     }
     return () => {
@@ -185,7 +212,7 @@ export function RenderDialog({
 
   // Where to render from: eye height in the room (the default from high up) or this view.
   const choice = (ai: boolean) =>
-    shots?.eye && (
+    eyeRoom && (
       <fieldset className="segmented segmented-fill render-from">
         <legend className="visually-hidden">Render from</legend>
         <button
@@ -197,7 +224,7 @@ export function RenderDialog({
             setShowView(true);
           }}
         >
-          From eye height <span className="render-from-note">in {shots.eye.room}</span>
+          From eye height <span className="render-from-note">in {eyeRoom}</span>
         </button>
         <button
           type="button"
@@ -223,22 +250,48 @@ export function RenderDialog({
         aria-pressed={mode === 'exact'}
         disabled={!!noExact}
         title={noExact ?? undefined}
-        onClick={() => setMode('exact')}
+        onClick={() => {
+          switched.current = true;
+          setMode('exact');
+        }}
       >
         Exact
       </button>
-      <button type="button" aria-pressed={mode === 'ai'} onClick={() => setMode('ai')}>
+      <button
+        type="button"
+        aria-pressed={mode === 'ai'}
+        onClick={() => {
+          switched.current = true;
+          setMode('ai');
+        }}
+      >
         AI impression
       </button>
     </fieldset>
   );
-  // The exact render's camera: the one chosen, with ceilings on from inside a room.
+  // The exact render's camera: the one chosen, with ceilings on from inside a room. From the
+  // cameras the dialog opened with (else, as a fallback, those of its pictures).
   const exactView: ExactView | null =
-    settled && shots
-      ? from === 'eye' && shots.eye
-        ? { camera: shots.eye.camera, ceilings: true, key: 'eye' }
-        : { camera: shots.here.camera, ceilings: walking, key: 'here' }
-      : null;
+    cams && (settled || waited)
+      ? from === 'eye' && cams.eye
+        ? { camera: cams.eye.camera, ceilings: true, key: 'eye' }
+        : { camera: cams.here, ceilings: walking, key: 'here' }
+      : settled && shots
+        ? from === 'eye' && shots.eye
+          ? { camera: shots.eye.camera, ceilings: true, key: 'eye' }
+          : { camera: shots.here.camera, ceilings: walking, key: 'here' }
+        : null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on switching sides
+  useEffect(() => {
+    if (!switched.current) return;
+    switched.current = false;
+    // The pressed button of the switch now in sight (the one clicked went with its side).
+    for (const b of ref.current?.querySelectorAll<HTMLButtonElement>(
+      '.render-mode button[aria-pressed="true"]',
+    ) ?? []) {
+      if (b.offsetParent !== null) b.focus();
+    }
+  }, [mode]);
 
   return (
     <dialog

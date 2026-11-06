@@ -88,7 +88,8 @@ export function exactDaylight(site: Site, day: number, hour: number): Daylight {
     sun,
     light,
     sky: {
-      zenith: lerp('#1c2740', '#7fa6d6', light),
+      // A clear sky's blue, held back a little: it lights the rooms as much as it is seen.
+      zenith: lerp('#1c2740', '#9cb8da', light),
       horizon: lerp('#33415e', '#dce6ee', light),
       ground: lerp('#0b0d10', '#8a8a84', light),
       nits: NIGHT_NITS + SKY_NITS * light,
@@ -163,6 +164,49 @@ export function lampLights(level: Level): THREE.Light[] {
   return out;
 }
 
+/**
+ * The parts of lamp models that hold the bulb (their box around it), whose material lets
+ * the bulb's light through; the base, pole and arm still cast shadows. A model with no part
+ * round its bulb gives up its nearest one.
+ */
+export function lampShades(group: THREE.Object3D, level: Level): Set<THREE.Mesh> {
+  group.updateMatrixWorld(true);
+  const bulbs = new Map(itemLights(level).map((l) => [l.itemId, l.position]));
+  const parts = new Map<string, THREE.Mesh[]>();
+  group.traverse((o) => {
+    if (!(o instanceof THREE.Mesh) || !o.userData.shared) return;
+    let p: THREE.Object3D | null = o;
+    while (p && !p.name.startsWith('item:')) p = p.parent;
+    const id = p?.name.slice(5);
+    if (!id || !bulbs.has(id)) return;
+    const list = parts.get(id) ?? [];
+    list.push(o);
+    parts.set(id, list);
+  });
+  const out = new Set<THREE.Mesh>();
+  for (const [id, list] of parts) {
+    const b = bulbs.get(id);
+    if (!b) continue;
+    const bulb = new THREE.Vector3(b.x, b.y, b.z);
+    const boxes = list.map((m) => {
+      if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+      return (m.geometry.boundingBox as THREE.Box3).clone().applyMatrix4(m.matrixWorld);
+    });
+    const round = list.filter((_, i) => boxes[i]?.clone().expandByScalar(0.03).containsPoint(bulb));
+    if (round.length) {
+      for (const m of round) out.add(m);
+      continue;
+    }
+    let best = 0;
+    boxes.forEach((box, i) => {
+      if (box.distanceToPoint(bulb) < (boxes[best] as THREE.Box3).distanceToPoint(bulb)) best = i;
+    });
+    const nearest = list[best];
+    if (nearest) out.add(nearest);
+  }
+  return out;
+}
+
 export interface ExactSceneOptions {
   /** Ceilings on: a view from inside (eye height, the walk); off for a cut-away orbit view. */
   ceilings: boolean;
@@ -190,13 +234,11 @@ export function buildExactScene(level: Level, opts: ExactSceneOptions): ExactSce
   const meshes = new LevelMeshes(materials, { ceilings: opts.ceilings, models: opts.models });
   meshes.update(level);
   for (const [id, open] of opts.doors ?? []) meshes.setDoorOpen(id, open);
-  // Models' own materials, made ready (and a lamp's let its bulb shine through).
+  // Models' own materials, made ready; in a lamp, its shade lets the bulb's light out.
+  const shades = lampShades(meshes.group, level);
   meshes.group.traverse((o) => {
     if (!(o instanceof THREE.Mesh) || !o.userData.shared) return;
-    let p: THREE.Object3D | null = o;
-    while (p && !p.name.startsWith('item:')) p = p.parent;
-    const item = p ? level.items[p.name.slice(5)] : undefined;
-    const shade = !!(item && furnitureKind(item.assetId)?.light);
+    const shade = shades.has(o);
     o.material = Array.isArray(o.material)
       ? o.material.map((m) => materials.model(m, shade))
       : materials.model(o.material, shade);
@@ -208,7 +250,8 @@ export function buildExactScene(level: Level, opts: ExactSceneOptions): ExactSce
   const cz = b ? (b.min.y + b.max.y) / 2 : 0;
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(400, 400),
-    new THREE.MeshStandardMaterial({ color: GROUND_COLOR, roughness: 1 }),
+    // Two-sided, as every surface here (see PhotoMaterials).
+    new THREE.MeshStandardMaterial({ color: GROUND_COLOR, roughness: 1, side: THREE.DoubleSide }),
   );
   ground.name = EXACT_EXTRAS.ground;
   ground.rotation.x = -Math.PI / 2;

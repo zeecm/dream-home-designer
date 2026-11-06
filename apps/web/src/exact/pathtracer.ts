@@ -41,10 +41,12 @@ interface Internals {
   _quad: FullScreenQuad;
 }
 
-/** Past this many samples the denoiser starts to fade, gone by twice as many. */
+/**
+ * Past this many samples the denoiser starts to fade, gone DENOISE_FADE samples later (a
+ * room lit only through its windows is still grainy at Good's 256, so it fades slowly).
+ */
 export const DENOISE_UNTIL = 64;
-/** The first picture is traced at this fraction of the size. */
-const LOW_RES = 0.25;
+export const DENOISE_FADE = 448;
 /** A shader compile longer than this is a device that can't. */
 const COMPILE_LIMIT = 30_000;
 
@@ -84,7 +86,7 @@ class TonePass extends THREE.ShaderMaterial {
 /**
  * The picture to the canvas: an edge-keeping smooth (glslSmartDeNoise, Michele Morrone,
  * BSD-2, as the library's DenoiseMaterial) mixed with the plain picture by `amount`, then
- * encoded as sRGB.
+ * encoded as sRGB. Its licence notice is in the shader text itself, so it ships with it.
  */
 class ShowPass extends THREE.ShaderMaterial {
   constructor() {
@@ -97,6 +99,23 @@ class ShowPass extends THREE.ShaderMaterial {
       },
       vertexShader: quadVertex,
       fragmentShader: /* glsl */ `
+        // smartDeNoise, from glslSmartDeNoise: https://github.com/BrutPitt/glslSmartDeNoise
+        // Copyright (c) 2018-2019 Michele Morrone. All rights reserved.
+        // Redistribution and use in source and binary forms, with or without modification,
+        // are permitted provided that the following conditions are met: 1. Redistributions of
+        // source code must retain the above copyright notice, this list of conditions and the
+        // following disclaimer. 2. Redistributions in binary form must reproduce the above
+        // copyright notice, this list of conditions and the following disclaimer in the
+        // documentation and/or other materials provided with the distribution.
+        // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY
+        // EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+        // OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT
+        // SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+        // INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+        // TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+        // BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+        // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
+        // WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
         uniform sampler2D map;
         uniform float amount;
         uniform float sigma;
@@ -192,14 +211,17 @@ class MeasurePass extends THREE.ShaderMaterial {
 const u = (m: THREE.ShaderMaterial, name: string) => m.uniforms[name] as THREE.IUniform;
 
 /** How different (display light, 0 to 1) a neighbour may be and still be smoothed in. */
-export const denoiseThreshold = (n: number) => 0.08 + 0.5 / Math.sqrt(Math.max(1, n));
+export const denoiseThreshold = (n: number) => 0.1 + 0.9 / Math.sqrt(Math.max(1, n));
 
 /** The denoiser's share of the picture after `n` samples: all of it, then fading out. */
 export const denoiseAmount = (n: number) =>
-  n <= DENOISE_UNTIL ? 1 : Math.max(0, 1 - (n - DENOISE_UNTIL) / DENOISE_UNTIL);
+  n <= DENOISE_UNTIL ? 1 : Math.max(0, 1 - (n - DENOISE_UNTIL) / DENOISE_FADE);
 
 export class PathTracerEngine implements ExactEngine {
   readonly canvas = document.createElement('canvas');
+  readonly snapshot = document.createElement('canvas');
+  /** The tracer has drawn in this context (its shader is built on the GPU, not just linked). */
+  drawn = false;
   lost = false;
   private renderer: THREE.WebGLRenderer;
   private tracer: WebGLPathTracer;
@@ -216,14 +238,18 @@ export class PathTracerEngine implements ExactEngine {
   private fence: WebGLSync | null = null;
   private issued = 0;
   private quick = 0;
+  private claims = 0;
+  /** The whole sample the snapshot was last taken at (-1: none yet). */
+  private kept = -1;
   private onLost = (e: Event) => {
     e.preventDefault();
     this.lost = true;
   };
 
-  constructor(private readonly opts: ExactEngineOptions) {
-    this.canvas.width = opts.width;
-    this.canvas.height = opts.height;
+  private opts: ExactEngineOptions;
+
+  constructor(opts: ExactEngineOptions) {
+    this.opts = opts;
     this.canvas.addEventListener('webglcontextlost', this.onLost);
     const gl = this.canvas.getContext('webgl2', {
       antialias: false,
@@ -232,39 +258,37 @@ export class PathTracerEngine implements ExactEngine {
       powerPreference: 'high-performance',
     });
     if (!gl) throw new ExactUnsupported(NO_WEBGL2, 'webgl2');
-    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, context: gl });
-    this.renderer.setPixelRatio(1);
-    this.renderer.setSize(opts.width, opts.height, false);
-    this.renderer.toneMapping = THREE.NoToneMapping;
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    if (!this.renderer.extensions.has('EXT_color_buffer_float')) {
-      throw new ExactUnsupported(NO_WEBGL2, 'webgl2');
+    let renderer: THREE.WebGLRenderer | null = null;
+    try {
+      renderer = new THREE.WebGLRenderer({ canvas: this.canvas, context: gl });
+      this.renderer = renderer;
+      renderer.setPixelRatio(1);
+      renderer.toneMapping = THREE.NoToneMapping;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      if (!renderer.extensions.has('EXT_color_buffer_float')) {
+        throw new ExactUnsupported(NO_WEBGL2, 'webgl2');
+      }
+      const precision = new PrecisionDetector(renderer).detect();
+      if (!precision.pass) throw new ExactUnsupported(BAD_DEVICE, 'device');
+      this.tracer = new WebGLPathTracer(renderer);
+    } catch (e) {
+      // Nothing kept: the context goes now, not when the page does.
+      this.canvas.removeEventListener('webglcontextlost', this.onLost);
+      renderer?.dispose();
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+      throw e;
     }
-    const precision = new PrecisionDetector(this.renderer).detect();
-    if (!precision.pass) throw new ExactUnsupported(BAD_DEVICE, 'device');
-
-    this.tracer = new WebGLPathTracer(this.renderer);
     this.inner = this.tracer as unknown as Internals;
-    this.tracer.textureSize.set(opts.textureSize, opts.textureSize);
-    this.tracer.bounces = opts.bounces;
-    this.tracer.transmissiveBounces = opts.transmissiveBounces;
     // Smooths the bright sparks a glossy bounce off a lit surface can leave.
     this.tracer.filterGlossyFactor = 0.5;
     this.tracer.multipleImportanceSampling = true;
-    const { _pathTracer: full, _lowResPathTracer: low } = this.inner;
-    full.tiles.set(opts.tiles, opts.tiles);
-    full.setSize(opts.width, opts.height);
-    low.setSize(
-      Math.max(1, Math.floor(opts.width * LOW_RES)),
-      Math.max(1, Math.floor(opts.height * LOW_RES)),
-    );
     const linear = {
       type: THREE.HalfFloatType,
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
       depthBuffer: false,
     };
-    this.display = new THREE.WebGLRenderTarget(opts.width, opts.height, linear);
+    this.display = new THREE.WebGLRenderTarget(1, 1, linear);
     // Sized as it meters (see luminance()).
     this.measureTarget = new THREE.WebGLRenderTarget(1, 1, {
       type: THREE.FloatType,
@@ -272,6 +296,52 @@ export class PathTracerEngine implements ExactEngine {
       magFilter: THREE.NearestFilter,
       depthBuffer: false,
     });
+    this.configure(opts);
+  }
+
+  configure(opts: ExactEngineOptions): void {
+    this.opts = opts;
+    const { width, height } = opts;
+    this.renderer.setSize(width, height, false);
+    this.snapshot.width = width;
+    this.snapshot.height = height;
+    this.tracer.textureSize.set(opts.textureSize, opts.textureSize);
+    this.tracer.bounces = opts.bounces;
+    this.tracer.transmissiveBounces = opts.transmissiveBounces;
+    const { _pathTracer: full, _lowResPathTracer: low } = this.inner;
+    full.tiles.set(opts.tiles, opts.tiles);
+    full.setSize(width, height);
+    // The library's quarter-size preview isn't used: the first picture shown is a whole,
+    // metered sample.
+    low.setSize(1, 1);
+    this.display.setSize(width, height);
+  }
+
+  claim(): number {
+    this.claims++;
+    return this.claims;
+  }
+
+  release(token: number): void {
+    if (token !== this.claims || this.disposed) return;
+    this.stopped = true;
+    this.clearFence();
+    if (this.lost) return;
+    // The scene's BVH, materials, textures and sky go (an empty scene in their place), and
+    // the pictures shrink to nothing; the compiled shader stays for the next render.
+    this.tracer.setScene(new THREE.Scene(), new THREE.PerspectiveCamera());
+    const { _pathTracer: full, _lowResPathTracer: low } = this.inner;
+    full.setSize(1, 1);
+    low.setSize(1, 1);
+    this.display.setSize(1, 1);
+    this.measureTarget.setSize(1, 1);
+  }
+
+  private clearFence() {
+    if (this.fence && !this.lost) {
+      (this.renderer.getContext() as WebGL2RenderingContext).deleteSync(this.fence);
+    }
+    this.fence = null;
   }
 
   get samples(): number {
@@ -291,20 +361,23 @@ export class PathTracerEngine implements ExactEngine {
     camera: THREE.PerspectiveCamera,
     signal?: AbortSignal,
   ): Promise<void> {
-    const { _pathTracer: full, _lowResPathTracer: low } = this.inner;
+    const full = this.inner._pathTracer;
+    this.stopped = false;
+    this.clearFence();
+    this.quick = 0;
+    this.kept = -1;
+    this.snapshot.getContext('2d')?.clearRect(0, 0, this.snapshot.width, this.snapshot.height);
+    this.configure(this.opts);
     this.tracer.setScene(flattenForTracing(scene), camera);
     // Without float blending the tracer averages samples itself, in two targets.
     const alpha = !this.renderer.extensions.has('EXT_float_blend');
     full.alpha = alpha;
-    low.alpha = alpha;
-    low.material = full.material;
     full.reset();
-    low.reset();
     // The first update sets the shader's defines for this scene and starts its compile
     // (in parallel where the browser can).
     full.update();
     const began = performance.now();
-    while (full.isCompiling || low.isCompiling) {
+    while (full.isCompiling) {
       if (this.stopped || signal?.aborted) throw new DOMException('Stopped', 'AbortError');
       if (this.lost) throw new ExactUnsupported(BAD_DEVICE, 'lost');
       if (performance.now() - began > COMPILE_LIMIT)
@@ -313,15 +386,16 @@ export class PathTracerEngine implements ExactEngine {
     }
     if (this.lost) throw new ExactUnsupported(BAD_DEVICE, 'lost');
     const gl = this.renderer.getContext();
-    // A shader the driver couldn't link: no picture would ever come.
-    const programs = this.renderer.info.programs ?? [];
-    const program = programs[programs.length - 1] as
-      | { diagnostics?: { runnable: boolean } }
-      | undefined;
-    if (program?.diagnostics && !program.diagnostics.runnable) {
-      throw new ExactUnsupported(NO_START, 'compile');
-    }
     if (gl.isContextLost()) throw new ExactUnsupported(BAD_DEVICE, 'lost');
+    // A shader the driver couldn't link: no picture would ever come. (Without
+    // KHR_parallel_shader_compile some drivers, SwiftShader among them, compile on the first
+    // draw instead; that stall can't be timed from here.)
+    for (const p of this.renderer.info.programs ?? []) {
+      const program = (p as { program?: WebGLProgram }).program;
+      if (program && !gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        throw new ExactUnsupported(NO_START, 'compile');
+      }
+    }
   }
 
   /**
@@ -361,20 +435,31 @@ export class PathTracerEngine implements ExactEngine {
 
   sample(): boolean {
     if (this.lost || this.stopped || !this.done()) return false;
-    const { _pathTracer: full, _lowResPathTracer: low } = this.inner;
-    // A whole quarter-size picture first (one tile, one sample), then the full size.
-    if (low.samples < 1) {
-      low.update();
-      this.draw(low.target);
-    } else {
-      full.update();
-      this.show();
-    }
+    // A tile of the next sample; the picture shown is only ever of whole samples' worth
+    // (covered until the first is metered).
+    this.inner._pathTracer.update();
+    this.show();
+    this.drawn = true;
+    this.keep();
     const gl = this.renderer.getContext() as WebGL2RenderingContext;
     this.fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
     gl.flush();
     this.issued = performance.now();
     return true;
+  }
+
+  /**
+   * Copies the picture just drawn to the snapshot: the first, then every 4 samples (the copy
+   * is a read back from the GPU, so not every step).
+   */
+  private keep(force = false) {
+    const n = Math.floor(this.inner._pathTracer.samples);
+    if (!force && this.kept >= 0 && n < this.kept + 4) return;
+    this.kept = n;
+    const c = this.snapshot.getContext('2d');
+    if (!c) return;
+    c.clearRect(0, 0, this.snapshot.width, this.snapshot.height);
+    c.drawImage(this.canvas, 0, 0, this.snapshot.width, this.snapshot.height);
   }
 
   /** Tiles a side, as now (it adapts to the GPU). */
@@ -384,8 +469,8 @@ export class PathTracerEngine implements ExactEngine {
 
   show(): void {
     if (this.lost) return;
-    const { _pathTracer: full, _lowResPathTracer: low } = this.inner;
-    this.draw(full.samples >= 1 ? full.target : low.target, full.samples);
+    const full = this.inner._pathTracer;
+    this.draw(full.target, full.samples);
   }
 
   private draw(target: THREE.WebGLRenderTarget, samples = 0) {
@@ -402,21 +487,20 @@ export class PathTracerEngine implements ExactEngine {
     // Early on, specks stand far from their neighbours: smoothed across wider differences
     // and further, tightening (edges kept) as the samples settle.
     u(this.showPass, 'threshold').value = denoiseThreshold(samples);
-    u(this.showPass, 'sigma').value = samples < 4 ? 6 : 4;
+    u(this.showPass, 'sigma').value = samples < 16 ? 7 : samples < 64 ? 5 : 4;
     this.quad.material = this.showPass;
     this.quad.render(r);
   }
 
   async luminance(): Promise<number> {
     if (this.lost || this.stopped) return 0;
-    const { _pathTracer: full, _lowResPathTracer: low } = this.inner;
-    const source = full.samples >= 1 ? full.target : low.target;
+    const full = this.inner._pathTracer;
+    const source = full.target;
     const r = this.renderer;
     // Blocks of the picture, each the mean of many pixels (an interior lit through its windows
-    // is mostly dark specks around bright ones for its first samples): 12 across once samples
-    // add up,
-    // 4 across the first (quarter-size, one sample) picture, whose pixels are mostly specks.
-    const across = Math.max(1, Math.min(full.samples >= 1 ? 12 : 4, Math.floor(source.width / 4)));
+    // is mostly dark specks around bright ones for its first samples): 6 across for the first
+    // samples, 12 once they add up.
+    const across = Math.max(1, Math.min(full.samples >= 4 ? 12 : 6, Math.floor(source.width / 4)));
     const down = Math.max(1, Math.round((across * source.height) / source.width));
     const t = this.measureTarget;
     if (t.width !== across || t.height !== down) t.setSize(across, down);
@@ -433,23 +517,32 @@ export class PathTracerEngine implements ExactEngine {
   }
 
   readPixels(): Promise<Blob> {
-    // Drawn and read in one go: the canvas needn't keep its picture between frames.
-    this.show();
+    // Drawn and read in one go: the canvas needn't keep its picture between frames. A lost
+    // context has none: the snapshot is what is left.
+    const from = this.lost ? this.snapshot : this.canvas;
+    if (!this.lost) {
+      this.show();
+      this.keep(true);
+    }
     return new Promise((resolve, reject) =>
-      this.canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('No picture'))), 'image/png'),
+      from.toBlob((b) => (b ? resolve(b) : reject(new Error('No picture'))), 'image/png'),
     );
   }
 
   stop(): void {
     this.stopped = true;
+    // What is on screen now is kept, should the context be lost later.
+    if (!this.lost) {
+      this.show();
+      this.keep(true);
+    }
   }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     this.stopped = true;
-    if (this.fence) (this.renderer.getContext() as WebGL2RenderingContext).deleteSync(this.fence);
-    this.fence = null;
+    this.clearFence();
     const { _pathTracer: full, _lowResPathTracer: low, _quad } = this.inner;
     // The library's own dispose() trips on a field it never sets; its parts are freed here.
     full.dispose();
@@ -464,6 +557,6 @@ export class PathTracerEngine implements ExactEngine {
     this.quad.dispose();
     this.canvas.removeEventListener('webglcontextlost', this.onLost);
     this.renderer.dispose();
-    this.renderer.forceContextLoss();
+    if (!this.lost) this.renderer.forceContextLoss();
   }
 }

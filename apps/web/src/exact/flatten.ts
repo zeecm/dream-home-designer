@@ -25,6 +25,9 @@ export function flattenForTracing(scene: THREE.Scene): THREE.Scene {
     if (o instanceof THREE.Light) {
       if (!visible(o)) return;
       const copy = o.clone(false) as THREE.Light;
+      // A spot's bulb size, which three's own copy leaves behind (the tracer reads it).
+      const radius = (o as THREE.Light & { radius?: number }).radius;
+      if (radius !== undefined) (copy as THREE.Light & { radius?: number }).radius = radius;
       // In world space, with its target (a sun's, a spot's) where it was.
       o.matrixWorld.decompose(copy.position, copy.quaternion, copy.scale);
       out.add(copy);
@@ -37,8 +40,21 @@ export function flattenForTracing(scene: THREE.Scene): THREE.Scene {
       return;
     }
     if (!(o instanceof THREE.Mesh) || !visible(o)) return;
+    if (o instanceof THREE.InstancedMesh) {
+      // Each instance as triangles of its own (a model's instanced leaves or legs).
+      const at = new THREE.Matrix4();
+      for (let i = 0; i < o.count; i++) {
+        o.getMatrixAt(i, at);
+        place(o, at.premultiply(o.matrixWorld));
+      }
+      return;
+    }
+    place(o, o.matrixWorld);
+  });
+  /** A mesh's triangles, moved by `matrix`, to their materials' buckets. */
+  function place(o: THREE.Mesh, matrix: THREE.Matrix4) {
     const src = plain(o.geometry as THREE.BufferGeometry);
-    const geom = (src.index ? src.toNonIndexed() : src).applyMatrix4(o.matrixWorld);
+    const geom = (src.index ? src.toNonIndexed() : src).applyMatrix4(matrix);
     if (geom !== src) src.dispose();
     const mats = [o.material].flat() as THREE.Material[];
     const groups = Array.isArray(o.material) && geom.groups.length ? geom.groups : null;
@@ -58,7 +74,7 @@ export function flattenForTracing(scene: THREE.Scene): THREE.Scene {
       if (count > 0) add(mats[grp.materialIndex ?? 0], slice(geom, grp.start, count));
     }
     geom.dispose();
-  });
+  }
   for (const [material, list] of buckets) {
     const merged = mergeGeometries(uniform(list, material), false);
     for (const g of list) g.dispose();

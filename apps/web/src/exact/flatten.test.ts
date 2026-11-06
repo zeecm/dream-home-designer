@@ -1,4 +1,4 @@
-import { DEFAULT_SITE, type Level, sampleFlatProject } from '@dhd/core';
+import { DEFAULT_SITE, type Level, furnitureKind, newItem, sampleFlatProject } from '@dhd/core';
 import { buildExactScene, exactDaylight } from '@dhd/render';
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
@@ -63,5 +63,42 @@ describe('the scene as the tracer takes it', () => {
     expect(flat.children.some((o) => o instanceof THREE.DirectionalLight)).toBe(true);
     expect(flat.environment).toBe(exact.scene.environment);
     exact.dispose();
+  });
+
+  it('keeps a ceiling light’s bulb size and where it points', () => {
+    const level = sampleFlatProject().levels[0] as Level;
+    const kind = furnitureKind('ceiling-light');
+    if (!kind) throw new Error('no ceiling light');
+    const lit = { ...level, items: { it_c: newItem('it_c', kind, { x: 8.3, y: 3.2 }, 0, 2.6) } };
+    const exact = buildExactScene(lit, {
+      ceilings: true,
+      daylight: exactDaylight(DEFAULT_SITE, 300, 21),
+      lamps: true,
+    });
+    const flat = flattenForTracing(exact.scene);
+    const spots = flat.children.filter((o): o is THREE.SpotLight => o instanceof THREE.SpotLight);
+    expect(spots).toHaveLength(1);
+    const spot = spots[0] as THREE.SpotLight & { radius?: number };
+    expect(spot.radius).toBe(0.05);
+    const down = spot.target.position.clone().sub(spot.position).normalize();
+    expect(down.y).toBeCloseTo(-1, 9);
+    exact.dispose();
+  });
+
+  it('gives each instance of an instanced mesh its own triangles', () => {
+    const scene = new THREE.Scene();
+    const material = new THREE.MeshStandardMaterial();
+    const many = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), material, 3);
+    for (let i = 0; i < 3; i++)
+      many.setMatrixAt(i, new THREE.Matrix4().makeTranslation(i * 2, 0, 0));
+    many.position.set(0, 5, 0);
+    scene.add(many);
+    const flat = flattenForTracing(scene);
+    const mesh = flat.children[0] as THREE.Mesh;
+    const pos = mesh.geometry.getAttribute('position');
+    expect(pos.count).toBe(3 * 36);
+    const box = new THREE.Box3().setFromBufferAttribute(pos as THREE.BufferAttribute);
+    expect(box.min.toArray()).toEqual([-0.5, 4.5, -0.5]);
+    expect(box.max.toArray()).toEqual([4.5, 5.5, 0.5]);
   });
 });

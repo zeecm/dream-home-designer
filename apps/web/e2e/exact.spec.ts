@@ -28,14 +28,19 @@ import { waitSaved } from './helpers';
  * (the tracer's shader is compiled on its first draw), so the tests keep their renders few.
  */
 
-const OVERRIDE = { width: 160, height: 120, samples: 16 };
+// A time cap far past the default 90 s: a slow CI runner can take half a minute to compile.
+const OVERRIDE = { width: 160, height: 120, samples: 16, cap: 600_000 };
 
-async function quick(page: Page, samples = OVERRIDE.samples) {
+async function quick(
+  page: Page,
+  samples = OVERRIDE.samples,
+  box = { width: OVERRIDE.width, height: OVERRIDE.height },
+) {
   await page.addInitScript(
     (o) => {
       window.__DHD_EXACT_TEST__ = o;
     },
-    { ...OVERRIDE, samples },
+    { ...OVERRIDE, ...box, samples },
   );
 }
 
@@ -131,9 +136,12 @@ test('opens on Exact and renders by itself, on this device: stop, carry on, swit
     'aria-pressed',
     'true',
   );
-  // From the orbit view: eye height in the room it is centred on.
+  // From the orbit view: eye height in the room it is centred on, chosen as it opens.
   const eye = dialog.getByRole('button', { name: 'From eye height in Living and dining' });
-  await expect(eye).toHaveAttribute('aria-pressed', 'true', { timeout: 30_000 });
+  await expect(eye).toHaveAttribute('aria-pressed', 'true');
+  // Until its first good picture the frame is covered, with nothing to download.
+  await expect(dialog.locator('.exact-wait')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Download' })).toBeDisabled();
   await expect(dialog.locator('.exact-picture')).toHaveAttribute('data-ceilings', 'true');
   await expect(dialog.getByText('Drawn by the app from your 3D model')).toBeVisible();
 
@@ -157,11 +165,20 @@ test('opens on Exact and renders by itself, on this device: stop, carry on, swit
   expect(await sampleCount(page)).toBe(held);
   await expect(dialog.getByRole('button', { name: 'Download' })).toBeEnabled();
 
-  // To AI impression and back: the picture and its count are kept.
+  // To AI impression and back: the picture and its count are kept, the dialog's frame and
+  // its switch stay where they were, and focus stays on the switch.
+  const frame = await dialog.boundingBox();
+  const switchAt = await dialog.getByRole('button', { name: 'AI impression' }).boundingBox();
   await dialog.getByRole('button', { name: 'AI impression' }).click();
   await expect(dialog.getByText('With Gemini (Google) (gemini-3-pro-image)')).toBeVisible();
   await expect(dialog.locator('canvas.exact-canvas')).toBeHidden();
+  await expect(dialog.getByRole('button', { name: 'AI impression' })).toBeFocused();
+  expect(await dialog.boundingBox()).toEqual(frame);
+  expect(await dialog.getByRole('button', { name: 'AI impression' }).boundingBox()).toEqual(
+    switchAt,
+  );
   await dialog.getByRole('button', { name: 'Exact', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: 'Exact', exact: true })).toBeFocused();
   await expect(dialog.locator('canvas.exact-canvas')).toBeVisible();
   expect(await sampleCount(page)).toBe(held);
 
@@ -169,6 +186,8 @@ test('opens on Exact and renders by itself, on this device: stop, carry on, swit
   await dialog.getByRole('button', { name: 'Carry on' }).click();
   await expect.poll(() => sampleCount(page), { timeout: 60_000 }).toBeGreaterThan(held);
   await expect(progress).toHaveText(/^Done · 16 samples · \d:\d\d$/, { timeout: 120_000 });
+  // Done: more samples on offer, for a cleaner picture.
+  await expect(dialog.getByRole('button', { name: 'More samples' })).toBeEnabled();
 
   // The whole render, with a picture key saved: nothing to a provider, nothing to the server.
   expect(outside(sent)).toEqual([]);
@@ -188,6 +207,15 @@ test('opens on Exact and renders by itself, on this device: stop, carry on, swit
   // From this view: a new render, of the cut-away view (no ceilings).
   await dialog.getByRole('button', { name: /^From this view/ }).click();
   await expect(dialog.locator('.exact-picture')).toHaveAttribute('data-ceilings', 'false');
+  await expect(progress).toHaveText(/^Sample [1-4] of 16/, { timeout: 60_000 });
+  // Back to eye height: its finished picture is still there, to download; and this view's,
+  // left part way, is kept too.
+  await eye.click();
+  await expect(progress).toHaveText(/^Done · 16 samples/);
+  await expect(dialog.getByRole('button', { name: 'Download' })).toBeEnabled();
+  await dialog.getByRole('button', { name: /^From this view/ }).click();
+  await expect(progress).toHaveText(/^Stopped · \d+ of 16 samples/);
+  await dialog.getByRole('button', { name: 'Render again' }).click();
   await expect(progress).toHaveText(/^Sample [1-4] of 16/, { timeout: 60_000 });
 
   // Nor for the second (a download counts itself, as every download does).
@@ -209,19 +237,137 @@ test('opens on Exact and renders by itself, on this device: stop, carry on, swit
   await page.mouse.move(box.x + box.width / 2 + 160, box.y + box.height / 2, { steps: 8 });
   await page.mouse.up();
   await expect.poll(async () => (await view.screenshot()).equals(shot)).toBe(false);
-  // Opened again: a fresh render.
+  // Opened again: a fresh render, from its first samples, drawing.
   await page.getByRole('button', { name: 'Photo-real render' }).click();
-  await expect(page.getByTestId('exact-progress')).toHaveText(
-    /^Preparing the scene…$|^Sample [1-4] of 16/,
+  await expect(page.getByTestId('exact-progress')).toHaveText(/^Sample [1-4] of 16/, {
+    timeout: 90_000,
+  });
+  const fresh = await sampleCount(page);
+  await expect.poll(() => sampleCount(page), { timeout: 90_000 }).toBeGreaterThan(fresh);
+  // The graphics card resets: the picture so far stays, to see and to download, and Try again
+  // offers a fresh render.
+  await page.evaluate(() =>
+    document
+      .querySelector<HTMLCanvasElement>('canvas.exact-canvas')
+      ?.getContext('webgl2')
+      ?.getExtension('WEBGL_lose_context')
+      ?.loseContext(),
   );
+  const again = page.getByRole('dialog', { name: 'Photo-real render' });
+  await expect(again.getByTestId('exact-progress')).toHaveText(/^The graphics card reset/);
+  await expect(again.locator('canvas.exact-canvas')).toBeVisible();
+  const kept = page.waitForEvent('download');
+  await again.getByRole('button', { name: 'Download' }).click();
+  const { statSync } = await import('node:fs');
+  // A picture, not an empty canvas (a blank 160 × 100 PNG is a few hundred bytes).
+  expect(statSync(await (await kept).path()).size).toBeGreaterThan(4_000);
+  await again.getByRole('button', { name: 'Try again' }).click();
+  await expect(again.getByTestId('exact-progress')).toHaveText(/^Preparing the scene…|^Sample/);
   await page
     .getByRole('dialog', { name: 'Photo-real render' })
     .getByRole('button', { name: 'Close' })
     .click();
+  // Gone from the page, and nothing went wrong on the way (closing included).
+  await expect(page.locator('dialog.render-dialog')).toHaveCount(0);
+  await expect(page.locator('canvas.exact-canvas')).toHaveCount(0);
+  await page.waitForTimeout(500);
   expect(errors).toEqual([]);
 });
 
 // ---------------------------------------------------------------- exactness, by its pixels
+
+/** Opens a project file, as Projects ▸ Open a project file does. */
+async function openFile(page: Page, project: Project) {
+  await page.locator('input[type="file"][accept=".json,application/json"]').setInputFiles({
+    name: 'exact.dreamhome.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(project)),
+  });
+  await waitSaved(page);
+  await expect(page.getByText(project.name).first()).toBeVisible();
+}
+
+/** Walks in at `at` facing `yaw` (the walk takes up the stored spot), at `hour` o'clock. */
+async function walkIn(page: Page, at: { x: number; y: number }, yaw: number, hour: number) {
+  await page.evaluate(
+    ([p, fov]) => {
+      localStorage.setItem(`dhd:walk:${localStorage.getItem('dhd:last')}`, JSON.stringify(p));
+      localStorage.setItem('dhd-walk-fov-2', String(fov));
+    },
+    [{ at, yaw, pitch: 0 }, 100] as const,
+  );
+  await page.keyboard.press('3');
+  await page.locator('.sun-control input[type="range"]').first().fill(String(hour));
+  await page.getByRole('button', { name: 'Walk through' }).click();
+  await expect(page.getByRole('button', { name: 'Leave walk' })).toBeVisible();
+}
+
+/** Renders from the walk to the end and returns the picture's pixels (RGBA) and size. */
+async function renderPixels(page: Page, samples: number) {
+  await page.getByRole('button', { name: 'Photo-real render' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Photo-real render' });
+  await expect(dialog.getByTestId('exact-progress')).toHaveText(
+    new RegExp(`^Done · ${samples} samples`),
+    { timeout: 180_000 },
+  );
+  const camera = await renderCamera(page);
+  const save = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download' }).click();
+  const { readFileSync, writeFileSync } = await import('node:fs');
+  const png = readFileSync(await (await save).path());
+  // Kept with the results, to look at when a check fails.
+  writeFileSync(test.info().outputPath('exact-render.png'), png);
+  const { width, height } = pngSize(png);
+  const rgba: number[] = await page.evaluate(async (b64) => {
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const img = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+    const c = new OffscreenCanvas(img.width, img.height);
+    const g = c.getContext('2d');
+    if (!g) throw new Error('no 2d');
+    g.drawImage(img, 0, 0);
+    return Array.from(g.getImageData(0, 0, img.width, img.height).data);
+  }, png.toString('base64'));
+  return { rgba, width, height, camera };
+}
+
+test('a sealed room with no window or lamp is dark at noon: no light through its ceiling', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await quick(page, 4, { width: 64, height: 48 });
+  await page.goto('/');
+  await waitSaved(page);
+  let s: EditorDoc = { doc: blankProject('Sealed room'), history: emptyHistory() };
+  const level = () => s.doc.levels[0] as Level;
+  const corners: [number, number][] = [
+    [0, 0],
+    [3, 0],
+    [3, 3],
+    [0, 3],
+    [0, 0],
+  ];
+  for (let i = 0; i + 1 < corners.length; i++) {
+    const [ax, ay] = corners[i] as [number, number];
+    const [bx, by] = corners[i + 1] as [number, number];
+    s = dispatch(
+      s,
+      drawWall(
+        level(),
+        { point: { x: ax, y: ay } },
+        { point: { x: bx, y: by } },
+        { thickness: 0.2 },
+      ).command,
+    );
+  }
+  await openFile(page, s.doc);
+  await walkIn(page, { x: 1.5, y: 2.6 }, -Math.PI / 2, 12);
+  const { rgba } = await renderPixels(page, 4);
+  let sum = 0;
+  for (let i = 0; i < rgba.length; i += 4)
+    sum += ((rgba[i] ?? 0) + (rgba[i + 1] ?? 0) + (rgba[i + 2] ?? 0)) / 3;
+  // Exposure lifts a dark room as far as it goes (+3 EV): sky or sun leaking in reads bright.
+  expect(sum / (rgba.length / 4)).toBeLessThan(8);
+});
 
 const RED = '#c0392b';
 const GREEN = '#3f9e4d';
@@ -370,49 +516,10 @@ test('the picture is the plan: walls where they are, the opening where it is, no
   await quick(page, 32);
   await page.goto('/');
   await waitSaved(page);
-  await page.locator('input[type="file"][accept=".json,application/json"]').setInputFiles({
-    name: 'exact-pixels.dreamhome.json',
-    mimeType: 'application/json',
-    buffer: Buffer.from(JSON.stringify(fixture())),
-  });
-  await waitSaved(page);
-  await expect(page.getByText('Exact pixels').first()).toBeVisible();
+  await openFile(page, fixture());
   // Standing near the south wall's window, looking north at the opening, at noon.
-  await page.evaluate(() => {
-    const pid = localStorage.getItem('dhd:last');
-    localStorage.setItem(
-      `dhd:walk:${pid}`,
-      JSON.stringify({ at: { x: 1.5, y: 3.55 }, yaw: -Math.PI / 2, pitch: 0 }),
-    );
-    localStorage.setItem('dhd-walk-fov-2', '100');
-  });
-  await page.keyboard.press('3');
-  await page.locator('.sun-control input[type="range"]').first().fill('12');
-  await page.getByRole('button', { name: 'Walk through' }).click();
-  await expect(page.getByRole('button', { name: 'Leave walk' })).toBeVisible();
-  await page.getByRole('button', { name: 'Photo-real render' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Photo-real render' });
-  await expect(dialog.getByTestId('exact-progress')).toHaveText(/^Done · 32 samples/, {
-    timeout: 180_000,
-  });
-  const camera = await renderCamera(page);
-  const save = page.waitForEvent('download');
-  await dialog.getByRole('button', { name: 'Download' }).click();
-  const { readFileSync, writeFileSync } = await import('node:fs');
-  const png = readFileSync(await (await save).path());
-  // Kept with the results, to look at when a check fails.
-  writeFileSync(test.info().outputPath('exact-render.png'), png);
-  const { width: w, height: h } = pngSize(png);
-  // The picture's pixels, read in the page.
-  const rgba: number[] = await page.evaluate(async (b64) => {
-    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-    const img = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
-    const c = new OffscreenCanvas(img.width, img.height);
-    const g = c.getContext('2d');
-    if (!g) throw new Error('no 2d');
-    g.drawImage(img, 0, 0);
-    return Array.from(g.getImageData(0, 0, img.width, img.height).data);
-  }, png.toString('base64'));
+  await walkIn(page, { x: 1.5, y: 3.55 }, -Math.PI / 2, 12);
+  const { rgba, width: w, height: h, camera } = await renderPixels(page, 32);
   const at = (name: string, p: [number, number, number]) => {
     const q = project(camera, w, h, p);
     const cx = Math.round(q.x);
@@ -442,10 +549,17 @@ test('the picture is the plan: walls where they are, the opening where it is, no
   }
   const through = at('the opening', [1.5, 1.0, -0.6]);
   expect(hueGap(through.h, hueOf(BLUE)), JSON.stringify(through)).toBeLessThan(25);
+  // The green and yellow walls read as their own paint, nearer it than any other in the room
+  // (warm light off the oak floor pulls their hues a little towards orange).
+  const paints = { red: RED, green: GREEN, yellow: YELLOW, blue: BLUE, oak: '#c49a6c' };
+  const nearest = (h: number) =>
+    Object.entries(paints).sort((a, b) => hueGap(h, hueOf(a[1])) - hueGap(h, hueOf(b[1])))[0]?.[0];
   const green = at('green wall', [0.08, 1.5, 1.2]);
-  expect(hueGap(green.h, hueOf(GREEN)), JSON.stringify(green)).toBeLessThan(25);
+  expect(nearest(green.h), JSON.stringify(green)).toBe('green');
+  expect(green.s).toBeGreaterThan(0.25);
   const yellow = at('yellow wall', [2.92, 1.6, 2.3]);
-  expect(hueGap(yellow.h, hueOf(YELLOW)), JSON.stringify(yellow)).toBeLessThan(25);
+  expect(nearest(yellow.h), JSON.stringify(yellow)).toBe('yellow');
+  expect(yellow.s).toBeGreaterThan(0.25);
   // Empty floor between the sofa and the camera: oak, nothing added on it.
   const floor = at('floor', [1.9, 0.01, 2.0]);
   expect(hueGap(floor.h, hueOf('#c49a6c')), JSON.stringify(floor)).toBeLessThan(25);
