@@ -48,6 +48,22 @@ function requests(page: Page): Request[] {
 
 const AI_HOSTS = /api\.openai\.com|generativelanguage\.googleapis\.com|api\.anthropic\.com/;
 
+/** Requests to an AI provider or to the app's server. */
+const outside = (list: Request[]) =>
+  list.map((r) => r.url()).filter((u) => AI_HOSTS.test(u) || /\/api\//.test(u));
+
+/**
+ * Waits for a new plan's own saving to settle (its plan image goes up to the server), so a
+ * network log taken after it holds only what the render does. Call before `page.goto`.
+ */
+function planImageUp(page: Page): () => Promise<void> {
+  let up = false;
+  page.on('requestfinished', (r) => {
+    if (r.method() === 'PUT' && /\/api\/projects\/[^/]+\/image$/.test(r.url())) up = true;
+  });
+  return () => expect.poll(() => up, { timeout: 60_000 }).toBe(true);
+}
+
 /** The sample number in "Sample n of N · 0:12" (or the samples when stopped or done). */
 async function sampleCount(page: Page): Promise<number> {
   const text = (await page.getByTestId('exact-progress').textContent()) ?? '';
@@ -101,15 +117,11 @@ test('opens on Exact and renders by itself, on this device: stop, carry on, swit
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push(m.text());
   });
-  // The new plan's own saving settles first: its plan image goes up to the server.
-  let imageUp = false;
-  page.on('requestfinished', (r) => {
-    if (r.method() === 'PUT' && /\/api\/projects\/[^/]+\/image$/.test(r.url())) imageUp = true;
-  });
+  const settled = planImageUp(page);
   await page.goto('/');
   await waitSaved(page);
   await page.keyboard.press('3');
-  await expect.poll(() => imageUp, { timeout: 60_000 }).toBe(true);
+  await settled();
   errors.length = 0; // from here on
   const sent = requests(page);
 
@@ -159,8 +171,6 @@ test('opens on Exact and renders by itself, on this device: stop, carry on, swit
   await expect(progress).toHaveText(/^Done · 16 samples · \d:\d\d$/, { timeout: 120_000 });
 
   // The whole render, with a picture key saved: nothing to a provider, nothing to the server.
-  const outside = (list: Request[]) =>
-    list.map((r) => r.url()).filter((u) => AI_HOSTS.test(u) || /\/api\//.test(u));
   expect(outside(sent)).toEqual([]);
 
   // Download: the rendered pixels, at the view's shape.
@@ -183,7 +193,10 @@ test('opens on Exact and renders by itself, on this device: stop, carry on, swit
   // Nor for the second (a download counts itself, as every download does).
   expect(outside(sent).filter((u) => !u.endsWith('/api/telemetry'))).toEqual([]);
 
-  // Closed mid-render: its canvas goes, the 3D view moves again.
+  // Closed mid-render (once drawing: software GL stalls the page while it compiles the
+  // tracer for a new picture): its canvas goes, the 3D view moves again.
+  await expect.poll(() => sampleCount(page), { timeout: 90_000 }).toBeGreaterThan(1);
+  await expect(dialog.getByRole('button', { name: 'Stop' })).toBeEnabled();
   await dialog.getByRole('button', { name: 'Close' }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.locator('canvas.exact-canvas')).toHaveCount(0);
@@ -454,6 +467,7 @@ test.describe('on a phone', () => {
   }) => {
     test.setTimeout(180_000);
     await quick(page);
+    const settled = planImageUp(page);
     await page.goto('/');
     await waitSaved(page);
     const pose = { at: { x: 8.3, y: 3.2 }, yaw: 2.4, pitch: 0 };
@@ -466,6 +480,9 @@ test.describe('on a phone', () => {
     const marker = page.locator('.minimap-view').locator('..');
     await expect(marker).toHaveAttribute('transform', /rotate/);
     const before = await marker.getAttribute('transform');
+    // No key saved: still nothing to a provider or the server.
+    await settled();
+    const sent = requests(page);
 
     await page.getByRole('button', { name: 'Photo-real render' }).tap();
     const dialog = page.getByRole('dialog', { name: 'Photo-real render' });
@@ -492,6 +509,8 @@ test.describe('on a phone', () => {
     await expect(dialog.getByTestId('exact-progress')).toHaveText(/^Sample \d+ of 16/, {
       timeout: 90_000,
     });
+    await expect.poll(() => sampleCount(page), { timeout: 60_000 }).toBeGreaterThan(1);
+    expect(outside(sent)).toEqual([]);
     // Upright, on its side, and on a small phone on its side: the picture, Stop and Download
     // in full view, the buttons a fingertip's size.
     for (const [width, height] of [
