@@ -29,6 +29,7 @@ import {
   setPointKind,
   trunkingLength,
   trunkingMetres,
+  trunkingStart,
   updatePoint,
 } from './electrical';
 import { blankProject } from './factory';
@@ -353,7 +354,10 @@ describe('electrical points (schema 9)', () => {
     let s = room(4, 3);
     const ac = tap(s, 'aircon', 1, 0.2);
     s = ac.s;
-    const start = pointPosition(flat(s), pt(flat(s), ac.id))?.at as { x: number; y: number };
+    // From beside the unit, 50 mm off its face.
+    const start = trunkingStart(flat(s), pt(flat(s), ac.id)) as { x: number; y: number };
+    const face = pointPosition(flat(s), pt(flat(s), ac.id))?.at as { x: number; y: number };
+    expect(Math.hypot(start.x - face.x, start.y - face.y)).toBeCloseTo(0.05, 9);
     // To a compressor 5 m of trunking away: 2 m along, then 3 m across.
     const comp = addPoint(LID, { kind: 'compressor', at: { x: start.x + 2, y: start.y - 3 } });
     s = dispatch(s, comp.command);

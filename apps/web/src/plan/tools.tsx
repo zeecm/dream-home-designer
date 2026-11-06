@@ -15,6 +15,7 @@ import {
   deletePoint,
   deleteVertex,
   deleteWall,
+  draggedRoute,
   duplicateOf,
   framePoint,
   furnitureKind,
@@ -23,6 +24,7 @@ import {
   moveRoom,
   moveTowards,
   moveVertex,
+  moveWithTrunking,
   newId,
   openingClearances,
   openingSpan,
@@ -667,7 +669,10 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         const ac = ctx.level.points[d.id];
         if (!ac?.route) return;
         const at = gridSnap(p.world, 0.05, p.alt);
-        const route = ac.route.map((q, i) => (i === d.index ? at : q));
+        // Its neighbours slide so the legs either side stay square (Alt: just this bend).
+        const route = p.alt
+          ? ac.route.map((q, i) => (i === d.index ? at : q))
+          : draggedRoute(ctx.level, ac, d.index, at);
         ctx.dispatch(updatePoint(levelId, d.id, { route }), { coalesceKey: d.key });
         return;
       }
@@ -676,7 +681,8 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         if (!pt) return;
         if (pt.at) {
           const at = gridSnap({ x: p.world.x - d.grab.x, y: p.world.y - d.grab.y }, 0.05, p.alt);
-          ctx.dispatch(updatePoint(levelId, d.id, { at }), { coalesceKey: d.key });
+          // A compressor takes the trunking into it along, square.
+          ctx.dispatch(moveWithTrunking(ctx.level, d.id, { at }), { coalesceKey: d.key });
           return;
         }
         // Along its wall, or onto another face near the pointer (a socket isn't picked up by
@@ -689,7 +695,7 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         });
         if (!spot) return;
         const { at: _, ...wall } = spot;
-        ctx.dispatch(updatePoint(levelId, d.id, { wall }), { coalesceKey: d.key });
+        ctx.dispatch(moveWithTrunking(ctx.level, d.id, { wall }), { coalesceKey: d.key });
         return;
       }
       if (d.kind === 'vertex') {

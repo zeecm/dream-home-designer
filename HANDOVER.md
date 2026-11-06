@@ -1408,3 +1408,28 @@ is resized). `.btn-small` is at least 44 px on phones and touch screens. e2e `li
 covers B1 9–15 and B2 3–5 on a desktop and a 390 px phone; criterion 16 (production accepts a
 v10 save) is for the deploy. Not done: the lift has no place on the plan; on a phone, choosing a
 lift leaves the verdict above the select (scroll up to see it; it is read out).
+
+**Square aircon trunking (6 Nov, the owner's "it trunks at strange angles"; no schema change):**
+`trunkingPath` now starts at `trunkingStart` (the unit's face point + `TRUNK_OFF` 50 mm along
+its normal; render no longer adds its own offset). Core `trunking.ts`: `trunkAxes` (the nearest
+wall's direction, squared to exact x/y when within 1e-6), `nextBend(level, from, cursor,
+{alt, target})` (along whichever axis is nearer the pointer; stops on a face's hug line, 50 mm
+off it, before or past the wall, within `TRUNK_SNAP` 0.3 m, or level with the compressor; else
+5 cm steps; `alt` free), `legInto` (the corner into a compressor: fewer walls crossed, then
+carrying straight on), `tidyRoute` (square legs kept, crooked ones re-run through `nextBend`, a
+corner into the compressor, `simplifyPath`), `movePathEnd`/`dragBend` (a moved end or bend
+slides its neighbour so legs stay square) with `moveWithTrunking` (compressor or unit dragged,
+one command) and `draggedRoute`, `wallsCrossed` (pieces, gaps and hubs of `planGeometry`), and
+`autoRoute(level, unit, compressor)`: Dijkstra on a grid of hug lines (every face's line square
+to the unit's wall, plus both ends' lines), never into a room but the unit's, the outside and
+the compressor's; costs: length, ×1.6 off a face, 0.2 per turn, 0.4 through a window, 0.8
+drilled, 3 by a door. `routeAlongWalls(level, unitId)` picks the unit's compressor, the nearest,
+or a new one at the nearest ledge's `labelPoint`, in one command. In the sample the main
+bedroom's run leaves by its side window, runs down the outside of the left wall and enters the
+ledge through it (the ledge doesn't touch the bedroom, so two crossings is the least). Web: the
+run's taps go through `nextBend`/`legInto`; a dashed preview (`trunk-preview`) with a corner
+dot and the leg's length; bar buttons Undo bend (an icon under 560 px), Compressor here, Route
+along the walls ("Along walls" under 560 px), Done; Inspector Route along the walls and
+Straighten (`straightenedRoute`, disabled when already straight). e2e `trunking.spec.ts`
+(desktop and a 390 px phone). Not done: a wall moved under a run (shiftWall, moveRoom) doesn't
+re-square its bends; Straighten fixes it.

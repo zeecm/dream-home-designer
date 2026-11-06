@@ -58,7 +58,8 @@ for any plan.
   widths, room sizes, the hacking plan and change list; print or save as PDF.
   [spec](docs/specs/dimensioned-export.md)
 - An electrical and lighting plan: sockets, switches, lights, data points and aircon with its
-  trunking, at their heights, kept clear of doors and windows; counted into the estimate and
+  trunking (square to the walls and hugging them, or routed along the walls to the ledge in
+  one tap), at their heights, kept clear of doors and windows; counted into the estimate and
   drawn on the contractor sheet with a schedule. [spec](docs/specs/electrical.md)
 - Clearance checks, slice 2: walkways from the main door to every room and bed side, their
   narrowest point drawn and measured; room to pull out dining chairs; door clashes (doors that

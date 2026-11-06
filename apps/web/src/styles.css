@@ -3100,6 +3100,29 @@ h3.field-label {
 }
 .trunking-bar .btn {
   flex: 1 1 auto;
+  gap: 6px;
+  padding: 0 10px;
+}
+.trunking-bar.draw-bar {
+  max-width: 540px;
+}
+.trunking-undo {
+  min-width: 44px;
+}
+.trunking-narrow {
+  display: none;
+}
+/* A phone: the bar keeps to one row of buttons, Undo bend an icon. */
+@media (max-width: 560px) {
+  .trunking-wide {
+    display: none;
+  }
+  .trunking-narrow {
+    display: inline;
+  }
+  .trunking-bar .btn {
+    padding: 0 8px;
+  }
 }
 @media (pointer: coarse) {
   .elec-kind-list button {
@@ -3125,6 +3148,12 @@ h3.field-label {
 }
 .point-facts dd {
   margin: 0;
+}
+/* An aircon unit's trunking: run it, route it along the walls, straighten it. */
+.point-trunking {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .elec-summary-row {
   display: flex;

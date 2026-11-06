@@ -590,12 +590,11 @@ export class LevelMeshes {
         at(u, pos.height, 0.0085, box(sw ? 0.018 : 0.03, sw ? 0.034 : 0.022, 0.002, dark));
       }
     }
-    // Trunking: along the route at the unit's top, then down to the compressor.
+    // Trunking: along the route at the unit's top (it starts beside the unit, 50 mm off the
+    // face, as the plan draws it), then down to the compressor.
     if (p.kind === 'aircon' && path.length >= 2) {
       const ty = y0 + pos.height - 0.06;
-      const route = path.map((q, i) =>
-        i === 0 ? { x: q.x + n.x * 0.05, y: q.y + n.y * 0.05 } : q,
-      );
+      const route = path;
       for (let i = 1; i < route.length; i++) {
         const a = route[i - 1] as Vec2;
         const b = route[i] as Vec2;

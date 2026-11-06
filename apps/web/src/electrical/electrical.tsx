@@ -18,7 +18,9 @@ import {
   pointPosition,
   pointRoom,
   pointWarnings,
+  routeAlongWalls,
   setPointKind,
+  straightenedRoute,
   trunkingMetres,
   trunkingPath,
   updatePoint,
@@ -34,6 +36,10 @@ import { ElecGlyph, GLYPH_DEPTH } from './glyph';
 import { SuggestButton } from './suggest';
 
 const KEY = 'dhd-electrical';
+
+/** What "Route along the walls" says when there's no clean route. */
+export const NO_ROUTE =
+  'No clean route along the walls to a compressor or the ledge: tap the bends instead.';
 
 /** Whether the plan shows electrical points (on unless switched off; remembered here). */
 export const useElectricalOn = create<{ on: boolean; set: (on: boolean) => void }>((set) => {
@@ -343,6 +349,19 @@ export function PointInspector({ level, id }: { level: Level; id: string }) {
     useEditor.getState().setTrunking({ id, key });
     useEditor.getState().select({ kind: 'point', id });
   };
+  const alongWalls = () => {
+    const routed = routeAlongWalls(level, id);
+    if (!routed) {
+      useStore.setState({ notice: NO_ROUTE });
+      return;
+    }
+    dispatch(routed.command);
+  };
+  // The run squared to the walls, if that changes it.
+  const straight =
+    p.kind === 'aircon' && (p.route?.length || p.compressorId)
+      ? straightenedRoute(level, p, trunkingPath(level, p))
+      : null;
   return (
     <>
       <div className="inspector-head">
@@ -419,9 +438,30 @@ export function PointInspector({ level, id }: { level: Level; id: string }) {
         )}
       </dl>
       {p.kind === 'aircon' && !running && (
-        <button type="button" className="btn" onClick={startRun}>
-          {p.route?.length || p.compressorId ? 'Run the trunking again' : 'Run trunking'}
-        </button>
+        <div className="point-trunking">
+          <button type="button" className="btn" onClick={startRun}>
+            {p.route?.length || p.compressorId ? 'Run the trunking again' : 'Run trunking'}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={alongWalls}
+            title="Route the trunking along the walls to the ledge"
+          >
+            Route along the walls
+          </button>
+          {(p.route?.length || p.compressorId) && (
+            <button
+              type="button"
+              className="btn"
+              disabled={!straight}
+              onClick={() => straight && set({ route: straight })}
+              title={straight ? 'Square every leg to the walls' : 'Already straight'}
+            >
+              Straighten
+            </button>
+          )}
+        </div>
       )}
       <button
         type="button"

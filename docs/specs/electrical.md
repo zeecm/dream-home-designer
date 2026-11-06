@@ -32,6 +32,10 @@ Removal 20–40. Sockets, lights [1]; the rest common practice.
   Drag along or to another wall.
 - Ceiling kinds and compressor: tap in a room or on the ledge.
 - Aircon: then "Run trunking": tap bends, end on a compressor (placed if none); bends drag.
+  Every leg runs square to the walls and hugs a face within 0.3 m (50 mm off it); Alt frees
+  the angle; a dashed preview shows the next leg and its length. "Route along the walls"
+  (bar and Inspector) routes it out through the outside wall or a window to the ledge in one
+  undo step; "Straighten" squares an existing run (6 Nov, owner's report).
 - Points follow their wall and splits; go with a deleted or hacked wall (one undo).
 - Phone: magnifier; height in mm, `inputmode="decimal"`.
 

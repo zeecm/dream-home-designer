@@ -531,14 +531,31 @@ export function trunkingLength(path: readonly Vec2[]): number {
   return s;
 }
 
-/** An aircon unit's trunking on the plan: from the unit, through its bends, to its compressor. */
+/** How far off a wall face trunking runs (its centre line, 50 mm): it hugs the wall. */
+export const TRUNK_OFF = 0.05;
+
+/**
+ * Where an aircon unit's trunking starts on the plan: beside the unit, TRUNK_OFF off its
+ * face, on the line the trunking hugs that wall along.
+ */
+export function trunkingStart(level: Level, p: ElecPoint): Vec2 | null {
+  const pos = pointPosition(level, p);
+  if (!pos) return null;
+  const n = pos.normal;
+  return n ? { x: pos.at.x + n.x * TRUNK_OFF, y: pos.at.y + n.y * TRUNK_OFF } : pos.at;
+}
+
+/**
+ * An aircon unit's trunking on the plan: from beside the unit, through its bends, to its
+ * compressor.
+ */
 export function trunkingPath(level: Level, p: ElecPoint): Vec2[] {
   if (p.kind !== 'aircon') return [];
-  const start = pointPosition(level, p);
+  const start = trunkingStart(level, p);
   if (!start) return [];
   const comp = p.compressorId ? level.points[p.compressorId] : undefined;
   const end = comp?.at;
-  return [start.at, ...(p.route ?? []), ...(end ? [end] : [])];
+  return [start, ...(p.route ?? []), ...(end ? [end] : [])];
 }
 
 /** The trunking's length, rounded to 10 cm as a contractor measures it. */

@@ -5,20 +5,24 @@ import {
   type Vec2,
   addPoint,
   deletePoint,
+  legInto,
+  nextBend,
   onLedge,
   placePoint,
   pointPosition,
   pointRoom,
   roomShapes,
+  routeAlongWalls,
   trunkingLength,
   trunkingPath,
   updatePoint,
 } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../editor';
-import { glyphRadius } from '../electrical/electrical';
+import { NO_ROUTE, glyphRadius } from '../electrical/electrical';
 import { ElecGlyph } from '../electrical/glyph';
-import { currentLevel } from '../store';
+import { currentLevel, useStore } from '../store';
+import { icons } from '../ui/icons';
 import { formatLength } from '../units';
 import { type PlanPointer, type ToolContext, type ToolController, gridSnap } from './tools';
 import { type Size, type View, fitBounds, worldToScreen } from './view';
@@ -26,13 +30,16 @@ import { type Size, type View, fitBounds, worldToScreen } from './view';
 /** The trunking bar's height over the top of the plan (it never covers the plan's middle). */
 const BAR_H = 96;
 
-/** Where a run is likely to end: the nearest compressor, else the nearest aircon ledge. */
-function runTarget(level: Level, from: Vec2): Vec2 | null {
+/**
+ * Where a run is likely to end: the nearest compressor, else (unless `compressors`) the
+ * nearest aircon ledge.
+ */
+function runTarget(level: Level, from: Vec2, compressors = false): Vec2 | null {
   const dist = (p: Vec2) => Math.hypot(p.x - from.x, p.y - from.y);
   const spots: Vec2[] = Object.values(level.points)
     .filter((q) => q.kind === 'compressor' && q.at)
     .map((q) => q.at as Vec2);
-  if (!spots.length) {
+  if (!spots.length && !compressors) {
     for (const [id, shape] of roomShapes(level)) {
       const xs = shape.outer.map((p) => p.x);
       const ys = shape.outer.map((p) => p.y);
@@ -80,6 +87,8 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
   const kind = useEditor((s) => s.elecKind);
   const trunking = useEditor((s) => s.trunking);
   const [ghost, setGhost] = useState<Vec2 | null>(null);
+  /** Where the pointer is while a run is going: the next bend's preview. */
+  const [aim, setAim] = useState<PlanPointer | null>(null);
   const [missed, setMissed] = useState<{ at: Vec2; why: string } | null>(null);
   const info = ELEC_KINDS[kind];
   const { select, setTrunking } = useEditor.getState();
@@ -158,37 +167,80 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
     });
   };
 
+  /** The run routed along the walls to the ledge: its own undo step, and the run ends. */
+  const alongWalls = () => {
+    const r = runningUnit();
+    if (!r) return;
+    const routed = routeAlongWalls(live(), r.ac.id);
+    if (!routed) {
+      useStore.setState({ notice: NO_ROUTE });
+      return;
+    }
+    ctx.dispatch(routed.command);
+    setTrunking(null);
+    select({ kind: 'point', id: r.ac.id });
+  };
+
+  /**
+   * What a tap here does to the run: the legs it adds from the last bend (square, as
+   * nextBend and legInto have them), and where it ends the run, if it does: on a compressor
+   * tapped, or on a new one on the aircon ledge.
+   */
+  const step = (level: Level, ac: ElecPoint, p: PlanPointer) => {
+    const path = trunkingPath(level, ac);
+    const last = path.at(-1);
+    if (!last) return null;
+    const prev = path.at(-2);
+    const comp = compressorAt(p);
+    const compAt = comp ? level.points[comp]?.at : undefined;
+    const ledge = !comp && onLedge(level, p.world) ? gridSnap(p.world, 0.05, p.alt) : undefined;
+    const end = compAt ?? ledge;
+    if (end) {
+      const corner = p.alt ? [] : legInto(level, last, end, { geom: ctx.geom, prev });
+      return { legs: [last, ...corner, end], comp, ledge };
+    }
+    const bend = nextBend(level, last, p.world, {
+      alt: p.alt,
+      geom: ctx.geom,
+      target: runTarget(level, last, true),
+    });
+    return bend ? { legs: [last, bend.at] } : null;
+  };
+
   return {
     cursor: 'copy',
     down: (p) => {
       setMissed(null);
       const run = runningUnit();
       if (run) {
-        const comp = compressorAt(p);
-        if (comp) {
-          ctx.dispatch(updatePoint(ctx.level.id, run.ac.id, { compressorId: comp }), {
+        const s = step(ctx.level, run.ac, p);
+        if (!s) return true;
+        const route = [
+          ...(run.ac.route ?? []),
+          ...s.legs.slice(1, s.comp || s.ledge ? -1 : undefined),
+        ];
+        if (s.comp) {
+          ctx.dispatch(updatePoint(ctx.level.id, run.ac.id, { route, compressorId: s.comp }), {
             coalesceKey: run.t.key,
           });
           setTrunking(null);
           select({ kind: 'point', id: run.ac.id });
           return true;
         }
-        const at = gridSnap(p.world, 0.05, p.alt);
         // A tap on the aircon ledge ends the run there, on a new compressor.
-        if (onLedge(ctx.level, at)) {
-          const c = addPoint(ctx.level.id, { kind: 'compressor', at });
+        if (s.ledge) {
+          const c = addPoint(ctx.level.id, { kind: 'compressor', at: s.ledge });
           ctx.dispatch(c.command, { coalesceKey: run.t.key });
-          ctx.dispatch(updatePoint(ctx.level.id, run.ac.id, { compressorId: c.pointId }), {
+          ctx.dispatch(updatePoint(ctx.level.id, run.ac.id, { route, compressorId: c.pointId }), {
             coalesceKey: run.t.key,
           });
           setTrunking(null);
           select({ kind: 'point', id: run.ac.id });
           return true;
         }
-        ctx.dispatch(
-          updatePoint(ctx.level.id, run.ac.id, { route: [...(run.ac.route ?? []), at] }),
-          { coalesceKey: run.t.key },
-        );
+        ctx.dispatch(updatePoint(ctx.level.id, run.ac.id, { route }), {
+          coalesceKey: run.t.key,
+        });
         return true;
       }
       if (trunking) setTrunking(null); // its unit went (undone, deleted)
@@ -213,9 +265,11 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
     move: (p, dragging) => {
       if (dragging) {
         setGhost(null);
+        setAim(null);
         return;
       }
       setGhost(p.world);
+      setAim(useEditor.getState().trunking ? p : null);
       setMissed((m) => (m && Math.hypot(p.screen.x - m.at.x, p.screen.y - m.at.y) < 40 ? m : null));
     },
     up: () => {},
@@ -246,22 +300,33 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
       const run = trunking ? level.points[trunking.id] : undefined;
       if (trunking && run?.kind === 'aircon') {
         const path = trunkingPath(level, run);
-        const last = path.at(-1);
-        const to = ghost && gridSnap(ghost, 0.05, false);
         const s = (q: Vec2) => worldToScreen(view, size, q);
-        const sofar =
-          trunkingLength(path) + (last && to ? Math.hypot(to.x - last.x, to.y - last.y) : 0);
+        // The next leg (and the corner into a compressor or the ledge) where a tap would put it.
+        const legs = (aim && step(level, run, aim)?.legs) ?? [];
+        const next = trunkingLength(legs);
+        const sofar = trunkingLength(path) + next;
+        const end = legs.at(-1);
+        const tag = end && s(end);
+        const label = formatLength(next);
         return (
           <>
-            {last && to && (
-              <line
-                className="elec-trunk-preview"
-                x1={s(last).x}
-                y1={s(last).y}
-                x2={s(to).x}
-                y2={s(to).y}
-                pointerEvents="none"
-              />
+            {next > 1e-3 && tag && (
+              <g pointerEvents="none" data-testid="trunk-preview">
+                <polyline
+                  className="elec-trunk-preview"
+                  points={legs.map((q) => `${s(q).x},${s(q).y}`).join(' ')}
+                />
+                <circle className="pending-corner" cx={tag.x} cy={tag.y} r={4} />
+                <g
+                  className="handle-length"
+                  transform={`translate(${Math.min(Math.max(tag.x + 14, 8), size.width - 76)} ${Math.max(tag.y - 18, BAR_H + 12)})`}
+                >
+                  <rect x={0} y={-11} width={68} height={22} rx={4} />
+                  <text x={34} textAnchor="middle" y={4} className="num">
+                    {label}
+                  </text>
+                </g>
+              </g>
             )}
             {/* Over the top of the plan, as the wall tool's bar is; the view is moved below it. */}
             <foreignObject x={8} y={8} width={Math.max(0, size.width - 16)} height={BAR_H - 12}>
@@ -278,11 +343,14 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
                 <span className="draw-bar-row">
                   <button
                     type="button"
-                    className="btn"
+                    className="btn trunking-undo"
                     disabled={!run.route?.length}
                     onClick={undoBend}
+                    aria-label="Undo bend"
+                    title="Undo bend (Backspace)"
                   >
-                    Undo bend
+                    {icons.undo}
+                    <span className="trunking-wide">Undo bend</span>
                   </button>
                   <button
                     type="button"
@@ -292,6 +360,16 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
                     title="Put a compressor at the last bend"
                   >
                     Compressor here
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={alongWalls}
+                    aria-label="Route along the walls"
+                    title="Route the trunking along the walls to the ledge"
+                  >
+                    <span className="trunking-wide">Route along the walls</span>
+                    <span className="trunking-narrow">Along walls</span>
                   </button>
                   <button
                     type="button"
