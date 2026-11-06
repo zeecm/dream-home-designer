@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { clearWidth, deliveryCheck, mainDoors, turnLimit } from './delivery';
+import {
+  clearWidth,
+  deliveryCheck,
+  diagonalFits,
+  diagonalRange,
+  mainDoors,
+  turnLimit,
+} from './delivery';
 import { sampleFlatProject } from './fixtures/sampleFlat';
 import { customKind, newItem, setProjectModels } from './furniture';
 import { migrate } from './migrate';
@@ -84,6 +91,19 @@ describe('the way in', () => {
     // Tilted on a 0.80 m diagonal, the big one goes.
     const tilted = withPiece({ w: 2.1, d: 1.0, h: 0.95 }, 'rm_bedroom', 0.8);
     expect(['fits', 'tight']).toContain(deliveryCheck(tilted.level, tilted.id).status);
+  });
+
+  it('a sofa diagonal is between the corner height and the shorter of depth and height', () => {
+    const r = diagonalRange(1.0, 0.95);
+    expect(r.min).toBeCloseTo(0.689, 3);
+    expect(r.max).toBeCloseTo(0.95);
+    expect(diagonalFits(0.8, 1.0, 0.95)).toBe(true);
+    expect(diagonalFits(1.5, 1.0, 0.95)).toBe(false);
+    // 5 mm either side is a measurement, not a mistake; more is.
+    expect(diagonalFits(0.954, 1.0, 0.95)).toBe(true);
+    expect(diagonalFits(0.96, 1.0, 0.95)).toBe(false);
+    expect(diagonalFits(0.685, 1.0, 0.95)).toBe(true);
+    expect(diagonalFits(0.68, 1.0, 0.95)).toBe(false);
   });
 
   it('a piece taller than any door goes in lying down', () => {

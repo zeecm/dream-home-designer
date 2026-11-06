@@ -76,6 +76,25 @@ export function turnLimit(width: number, space: number, t: number): number {
   return Math.max(0, best);
 }
 
+/** How far a typed diagonal may stray outside `diagonalRange` (a measurement, in metres). */
+export const DIAGONAL_TOLERANCE = 0.005;
+
+/**
+ * The possible diagonal depths of a sofa `d` deep and `h` high: its width across when tipped
+ * on its back (from the back's top to the seat's front bottom, the line a stick lies on, to
+ * the bottom back corner). At most the shorter of depth and height (a plain carry is already
+ * that wide), and at least the height of the right triangle's corner, d·h / √(d² + h²).
+ */
+export function diagonalRange(d: number, h: number): { min: number; max: number } {
+  return { min: (d * h) / Math.hypot(d, h), max: Math.min(d, h) };
+}
+
+/** Whether a measured diagonal is possible for a sofa `d` deep and `h` high. */
+export function diagonalFits(diagonal: number, d: number, h: number): boolean {
+  const r = diagonalRange(d, h);
+  return diagonal >= r.min - DIAGONAL_TOLERANCE && diagonal <= r.max + DIAGONAL_TOLERANCE;
+}
+
 interface Carry {
   l: number;
   t: number;
