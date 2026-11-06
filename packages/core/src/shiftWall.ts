@@ -6,6 +6,7 @@ import { syncRooms } from './rooms';
 import { type Level, type Vec2, type Wall, wallFaces } from './schema';
 import { projectOnSegment } from './snap';
 import { reclampOpenings } from './topology';
+import { followRuns } from './trunking';
 
 /**
  * Moving a wall sideways (along its normal), as dragging a selected wall does. Walls joined
@@ -133,6 +134,7 @@ export function shiftWall(from: Level, wallId: string, offset: number, ids: Shif
       keepFromFarEnds(lvl, start, followed, wallId);
       reclampOpenings(lvl);
       syncRooms(lvl);
+      followRuns(lvl);
     },
   };
 }

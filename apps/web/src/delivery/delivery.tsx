@@ -15,7 +15,7 @@ import {
   furnitureKind,
   mainDoors,
   newId,
-  rigidNote,
+  partsNote,
   setLift,
   worstDoor,
 } from '@dhd/core';
@@ -27,7 +27,7 @@ import { useProject, useStore } from '../store';
 import { LengthField } from '../ui/fields';
 import { icons } from '../ui/icons';
 import { formatLength, parseLength } from '../units';
-import { asRigid, deliveryText, liftNumbers, liftStatus, nb } from './words';
+import { deliveryText, liftNumbers, liftStatus, nb } from './words';
 
 /** Pieces whose way in is shown (the person's own always; others when asked). */
 export const useWayShown = create<{ ids: Set<string>; toggle: (id: string) => void }>((set) => ({
@@ -164,12 +164,12 @@ export function GettingItIn({ level, id }: { level: Level; id: string }) {
   const doors = useMemo(() => mainDoors(level), [level]);
   if (!item || !r) return null;
   const fit = 'lift' in r ? r.lift : undefined;
-  // A bed that's "too big" may well bend in: its note first, and the verdict softened.
-  const rigid = r.status === 'too-big' ? rigidNote(item.assetId) : null;
-  const bad = !rigid && (r.status === 'too-big' || r.status === 'unreachable');
+  // A bed comes flat: how its mattress and frame panels go, first.
+  const parts = partsNote(r);
+  const bad = r.status === 'too-big' || r.status === 'unreachable';
   const verdict = deliveryText(level, r, lift);
   // Under the verdict, a line about the lift (one line kept, so the controls don't jump).
-  const line = 'doors' in r ? (rigid ?? liftStatus(lift, fit)) : null;
+  const line = 'doors' in r ? liftStatus(lift, fit, !!parts) : null;
   // An own sofa too wide for a door, its diagonal not measured: tilted, it may go.
   const model = project.models?.[item.assetId];
   const askDiagonal =
@@ -189,15 +189,15 @@ export function GettingItIn({ level, id }: { level: Level; id: string }) {
               takes no paragraphs, and some screen readers don't treat it as live. */}
           {/* biome-ignore lint/a11y/useSemanticElements: see above */}
           <div className="way-verdict" role="status">
-            {rigid && (
-              <p className="note" data-testid="rigid-note">
-                {rigid}
+            {parts && (
+              <p className="note" data-testid="parts-note">
+                {parts}
               </p>
             )}
             <p className={`note${bad ? ' warning-text' : ''}`} data-testid="way-verdict">
-              {rigid ? asRigid(verdict) : verdict}
+              {verdict}
             </p>
-            {line && !rigid && (
+            {line && (
               <p className="note" data-testid="lift-line">
                 {line}
               </p>

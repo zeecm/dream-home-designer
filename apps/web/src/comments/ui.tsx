@@ -15,6 +15,7 @@ import { shareLink } from '../keys';
 import { useProject, useStore } from '../store';
 import { Segmented } from '../ui/fields';
 import { icons } from '../ui/icons';
+import { shownViewNow } from '../ui/oneView';
 import { type CommentAction, CommentError, errorText } from './api';
 import {
   canComment,
@@ -98,7 +99,7 @@ export function jumpTo(t: CommentThread) {
   const ed = useEditor.getState();
   if (ed.walking) ed.stopWalk();
   ed.setVariant(t.anchor.variant);
-  if (useEditor.getState().viewMode === '3d') ed.setViewMode('plan');
+  if (shownViewNow() === '3d') ed.setViewMode('plan');
   if (window.matchMedia?.(SHEET_QUERY).matches) c.setPanel(false);
   c.open(t.id, { jump: true });
 }

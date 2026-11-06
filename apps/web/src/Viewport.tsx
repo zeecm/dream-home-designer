@@ -13,6 +13,7 @@ import { LevelMeshes, MaterialCache, ModelLibrary } from '@dhd/render';
 import { OrbitControls } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import {
+  type KeyboardEvent,
   type MutableRefObject,
   useEffect,
   useLayoutEffect,
@@ -26,6 +27,7 @@ import { useEditor } from './editor';
 import { registerScene3d } from './exports';
 import { configureLoader, fetchUploaded } from './models';
 import { useLevel, useProject, useStore } from './store';
+import { icons } from './ui/icons';
 import { Joystick } from './walk/Joystick';
 import { MiniMap } from './walk/MiniMap';
 import { WalkControls, type WalkPose } from './walk/WalkControls';
@@ -441,6 +443,14 @@ function Capture() {
 
 const coarsePointer = () => window.matchMedia('(pointer: coarse)').matches;
 
+/**
+ * Closing the render dialog with Enter hands focus back to the button that opened it, and
+ * the key, still held, would open it again at once: a held key's repeats don't press it.
+ */
+const ignoreHeldKey = (e: KeyboardEvent) => {
+  if (e.repeat && (e.key === 'Enter' || e.key === ' ')) e.preventDefault();
+};
+
 export function Viewport() {
   const project = useProject();
   const level = useLevel();
@@ -452,6 +462,8 @@ export function Viewport() {
   // Comparing a renovation's before and after, side by side across a divider.
   const [comparing, setComparing] = useState(false);
   const [rendering, setRendering] = useState(false);
+  // Read once a render: the walk's sticks, the render button and the hints all follow it.
+  const coarse = coarsePointer();
   const viewer = useStore((st) => st.role === 'viewer');
   const [split, setSplit] = useState(0.5);
   const splitRef = useRef(0.5);
@@ -472,6 +484,16 @@ export function Viewport() {
   const compare = comparing && !walking && !!versions?.before && !!versions.after;
   const stick = useRef<Vec2>({ x: 0, y: 0 });
   const lookStick = useRef<Vec2>({ x: 0, y: 0 });
+  // The finger on the walk's render button, if one is down on it.
+  const renderTap = useRef<number | null>(null);
+  const openRender = () => {
+    // The mouse back from the walk, to use the dialog.
+    if (document.pointerLockElement) document.exitPointerLock();
+    // Let go of the sticks: the walk stands still while the dialog is open.
+    stick.current = { x: 0, y: 0 };
+    lookStick.current = { x: 0, y: 0 };
+    setRendering(true);
+  };
   const projectId = project.id;
   const pose = useRef<WalkPose | null>(null);
   // Leaving a walk forgets the pose here (WalkControls hands it to saveWalkPose as it goes).
@@ -575,6 +597,7 @@ export function Viewport() {
             stick={stick}
             lookStick={lookStick}
             pose={pose}
+            paused={rendering}
             initial={() => loadWalkPose(projectId, level)}
             onLeave={(p) => saveWalkPose(projectId, p)}
           />
@@ -601,28 +624,59 @@ export function Viewport() {
             Leave walk
           </button>
           <SoundToggle />
-          {!coarsePointer() && !viewer && (
+          {!viewer && (
+            // On touch screens a camera and "Render", clear of the sticks and the mini-map (under
+            // Footsteps; the map moves down for it). The view to render is the one walked to.
             <button
               type="button"
-              className="btn viewport-render viewport-render-walk"
-              onClick={() => {
-                // The mouse back from the walk, to use the dialog.
-                if (document.pointerLockElement) document.exitPointerLock();
-                setRendering(true);
+              className={`btn viewport-render viewport-render-walk${coarse ? ' viewport-render-icon' : ''}`}
+              // Named in full (the label says only "Render"), with a tooltip.
+              aria-label={coarse ? 'Photo-real render' : undefined}
+              title={coarse ? 'Photo-real render' : undefined}
+              onKeyDown={ignoreHeldKey}
+              // A second finger, while a thumb holds a stick: the browser makes no click of a
+              // tap during another touch, so the button answers its own finger's lift.
+              onPointerDown={(e) => {
+                if (e.pointerType !== 'touch') return;
+                renderTap.current = e.pointerId;
+                e.stopPropagation();
               }}
+              onPointerUp={(e) => {
+                if (renderTap.current !== e.pointerId) return;
+                renderTap.current = null;
+                // A touch is held by the button it began on: lifted off it, it is no tap.
+                const r = e.currentTarget.getBoundingClientRect();
+                const on =
+                  e.clientX >= r.left &&
+                  e.clientX <= r.right &&
+                  e.clientY >= r.top &&
+                  e.clientY <= r.bottom;
+                if (on) openRender();
+              }}
+              onPointerCancel={() => {
+                renderTap.current = null;
+              }}
+              onClick={openRender}
             >
-              Photo-real render
+              {coarse ? (
+                <>
+                  {icons.camera}
+                  <span aria-hidden="true">Render</span>
+                </>
+              ) : (
+                'Photo-real render'
+              )}
             </button>
           )}
           {level && <MiniMap level={level} pose={pose} />}
-          {coarsePointer() && (
+          {coarse && (
             <>
-              <Joystick stick={stick} />
-              <Joystick stick={lookStick} look />
+              <Joystick stick={stick} disabled={rendering} />
+              <Joystick stick={lookStick} look disabled={rendering} />
             </>
           )}
           <p className="viewport-hint">
-            {coarsePointer()
+            {coarse
               ? 'Left stick to walk · right stick or drag to look'
               : 'W A S D or arrows to walk · Shift to run · click to look with the mouse · Esc frees the mouse, Esc again leaves'}
           </p>
@@ -657,6 +711,7 @@ export function Viewport() {
             <button
               type="button"
               className={`btn viewport-render${versions ? ' viewport-render-low' : ''}`}
+              onKeyDown={ignoreHeldKey}
               onClick={() => setRendering(true)}
             >
               Photo-real render
@@ -664,7 +719,7 @@ export function Viewport() {
           )}
 
           <p className="viewport-hint">
-            {coarsePointer()
+            {coarse
               ? 'Drag to orbit · pinch to zoom · two fingers to pan'
               : 'Drag to orbit · right-drag to pan · scroll to zoom'}
           </p>

@@ -168,6 +168,13 @@ select {
   gap: 8px;
   min-width: 0;
 }
+/* The controls keep their size; the project name gives way. */
+.topbar-left {
+  flex: 1 1 auto;
+}
+.topbar-right {
+  flex: none;
+}
 .topbar-divider {
   width: 1px;
   height: 20px;
@@ -187,9 +194,13 @@ select {
   cursor: pointer;
   font-weight: 600;
   flex: none;
+  white-space: nowrap;
 }
-.brand:hover {
-  background: var(--active);
+/* Hover styles only where a pointer hovers: on touch, a tapped button would stay grey. */
+@media (hover: hover) {
+  .brand:hover {
+    background: var(--active);
+  }
 }
 .brand svg:last-child {
   color: var(--muted);
@@ -203,9 +214,36 @@ select {
   border: 1px solid transparent;
   border-radius: var(--radius-control);
   background: transparent;
+  flex: 0 1 auto;
+  width: 240px;
   min-width: 0;
   max-width: 40vw;
   text-overflow: ellipsis;
+}
+/* The phone's one view button; elsewhere the view switch shows all three. */
+.topbar .view-toggle {
+  display: none;
+}
+/* Every phone, upright or on its side (ONE_VIEW_QUERY in oneView.ts): one view at a time, so
+   one button to the other view, its icon beside its label. */
+@media (max-width: 720px), (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  .topbar-right > .segmented {
+    display: none;
+  }
+  .topbar .view-toggle {
+    display: inline-flex;
+    gap: 4px;
+    padding: 0 8px;
+  }
+  .view-toggle svg {
+    flex: none;
+  }
+}
+/* A tablet's top bar: the mark alone names the product, so the plan's name has the room. */
+@media (max-width: 900px) {
+  .brand-name {
+    display: none;
+  }
 }
 .project-name:hover {
   border-color: var(--border);
@@ -264,9 +302,11 @@ select {
   cursor: pointer;
   flex: none;
 }
-.icon-btn:hover:not(:disabled) {
-  background: var(--active);
-  color: var(--text);
+@media (hover: hover) {
+  .icon-btn:hover:not(:disabled) {
+    background: var(--active);
+    color: var(--text);
+  }
 }
 .icon-btn:disabled {
   color: var(--control);
@@ -286,17 +326,21 @@ select {
   cursor: pointer;
   font-weight: 500;
 }
-.btn:hover {
-  background: var(--raised);
+@media (hover: hover) {
+  .btn:hover {
+    background: var(--raised);
+  }
 }
 .btn-primary {
   background: var(--text);
   border-color: var(--text);
   color: var(--surface);
 }
-.btn-primary:hover {
-  background: var(--text);
-  opacity: 0.9;
+@media (hover: hover) {
+  .btn-primary:hover {
+    background: var(--text);
+    opacity: 0.9;
+  }
 }
 .link-btn {
   padding: 0;
@@ -552,6 +596,36 @@ select {
 .dialog-foot > .btn {
   justify-self: start;
 }
+/* On a phone, a dialog with a head, a body and a foot fills the screen: the head and the foot
+   stay put, the body scrolls between them. Its height follows the visual viewport (set by
+   sheetViewport.ts), so a keyboard pushes the foot up rather than covering it. */
+@media (max-width: 600px) {
+  .dialog:has(.dialog-body) {
+    inset: var(--vv-top, 0px) 0 auto 0;
+    width: 100%;
+    max-width: none;
+    height: var(--vv-height, 100dvh);
+    max-height: none;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .dialog:has(.dialog-body) .dialog-head {
+    flex: none;
+    min-height: 56px;
+    padding: max(4px, env(safe-area-inset-top)) 8px 4px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .dialog:has(.dialog-body) .dialog-body {
+    padding-top: 8px;
+  }
+  .dialog:has(.dialog-body) .dialog-foot {
+    flex: none;
+    padding: 12px 20px max(12px, env(safe-area-inset-bottom));
+    background: var(--surface);
+  }
+}
 .dialog-foot output:empty {
   display: none;
 }
@@ -642,8 +716,10 @@ select {
   text-align: left;
   cursor: pointer;
 }
-.tool:hover {
-  background: var(--raised);
+@media (hover: hover) {
+  .tool:hover {
+    background: var(--raised);
+  }
 }
 .tool[aria-pressed="true"] {
   background: var(--active);
@@ -735,6 +811,11 @@ select {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   font-size: var(--fs-small);
+}
+/* Its action keeps one line; the sentence wraps beside it. */
+.sample-banner .btn {
+  flex: none;
+  white-space: nowrap;
 }
 /* ---------------------------------------------------------------- getting started */
 
@@ -863,8 +944,16 @@ select {
   gap: 6px;
   color: var(--muted);
 }
+/* A short value keeps its line; a long label wraps beside it. */
 .reno-facts dd {
   margin: 0;
+  flex: none;
+  max-width: 60%;
+  text-align: right;
+}
+/* 16 px from the actions above: the one that throws work away stands apart. */
+.reno-discard {
+  margin-top: 8px;
 }
 .reno-changes {
   display: grid;
@@ -2028,34 +2117,45 @@ h3.field-label {
     text-overflow: ellipsis;
     padding: 0 6px;
   }
+  /* Every control a 40 px target; the name takes what is left, never under 48 px. */
   .project-name {
     font-size: var(--fs-body);
-    max-width: 24vw;
+    height: 40px;
+    min-width: 48px;
+    max-width: none;
+    padding: 0 4px;
+  }
+  .brand {
+    height: 40px;
+    gap: 2px;
+    padding: 0 4px;
   }
   /* Share is an icon on phones, so the view switch keeps its room. */
   .share-btn-label {
     display: none;
   }
   .share-btn {
-    padding: 0 10px;
+    width: 40px;
+    padding: 0;
   }
   .topbar-left,
   .topbar-right {
     gap: 4px;
   }
-  /* Two views side by side make no sense at phone width. */
-  .topbar-right > .segmented button:nth-child(2) {
-    display: none;
-  }
-  .topbar-right > .segmented button {
-    padding: 0 6px;
-  }
   .topbar {
-    gap: 6px;
-    padding: 0 6px;
+    gap: 4px;
+    padding: 0 4px;
+  }
+  .topbar .btn,
+  .topbar .icon-btn {
+    height: 40px;
   }
   .topbar .icon-btn {
-    width: 28px;
+    width: 40px;
+  }
+  /* Undo and Redo: one pair, no gap (each still 40 px). */
+  .topbar .icon-btn[aria-label="Undo"] {
+    margin-right: -4px;
   }
   .sample-banner {
     flex-wrap: wrap;
@@ -2171,7 +2271,9 @@ h3.field-label {
 @media (pointer: coarse) {
   .icon-btn,
   .btn,
-  .segmented button {
+  .segmented button,
+  .brand,
+  .project-name {
     min-height: 40px;
   }
   .icon-btn {
@@ -2356,16 +2458,11 @@ h3.field-label {
   }
   .topbar .btn,
   .topbar .icon-btn,
+  .topbar .brand,
+  .topbar .project-name,
   .topbar-right > .segmented button {
     min-height: 34px;
     height: 34px;
-  }
-  .topbar-right > .segmented button {
-    padding: 0 10px;
-  }
-  /* Two views side by side are too cramped this short. */
-  .topbar-right > .segmented button:nth-child(2) {
-    display: none;
   }
   .project-name {
     font-size: var(--fs-body);
@@ -2488,12 +2585,13 @@ h3.field-label {
     width: 140px;
     padding: 4px 10px;
   }
-  /* Top left, under the time: the right side has Leave walk and Footsteps, the bottom the
-     sticks. */
+  /* Along the top, beside the time: the right side has Leave walk, Footsteps and the camera,
+     the bottom the sticks. (Under the time it met the walk stick on a short screen, such as
+     Safari's 342 px.) */
   .minimap {
-    left: 8px;
+    left: 156px;
     right: auto;
-    top: 104px;
+    top: 8px;
     bottom: auto;
     transform: scale(0.56);
     transform-origin: top left;
@@ -2605,6 +2703,11 @@ h3.field-label {
   gap: 12px;
   padding: 0 20px 20px;
 }
+/* The settings test: one line per model, a long provider message wrapped. */
+.ai-status span {
+  display: block;
+  overflow-wrap: anywhere;
+}
 
 /* Checkboxes in the details panel: a whole row to tap on a touch screen. */
 @media (pointer: coarse) {
@@ -2664,10 +2767,86 @@ h3.field-label {
   color: var(--muted);
   font-size: var(--fs-small);
 }
+/* A phone on its side: a smaller picture, between the head and the foot. */
+@media (max-height: 500px) {
+  .render-pictures img {
+    max-height: 28vh;
+  }
+  .render-wait {
+    height: 28vh;
+  }
+}
+/* The foot: the model line, then the look beside the buttons (wrapping on a narrow screen). */
+.render-actions {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.render-look {
+  display: flex;
+  flex: 1 1 240px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.render-look .input {
+  flex: 1;
+  min-width: 0;
+}
+/* A long provider message scrolls in its own few lines, never pushing the actions away. */
+.foot-status {
+  max-height: 72px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+.foot-status:empty {
+  display: none;
+}
+/* A phone on its side: two lines, so the form above keeps its room. */
+@media (max-height: 500px) {
+  .foot-status {
+    max-height: 40px;
+  }
+}
 
-/* While walking (mouse and keyboard): under Footsteps. */
+/* While walking: under Footsteps. */
 .viewport-render-walk {
   top: 108px;
+}
+/* Touch screens: a camera and "Render" (a paid picture, not a screenshot) at a fingertip's
+   size, clear of the sticks; the mini-map under Footsteps steps down below it. */
+.viewport-render-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  min-width: 44px;
+  padding: 0 12px;
+}
+.viewport-render-icon svg {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+@media (pointer: coarse) {
+  .viewport-render-walk ~ .minimap {
+    top: 160px;
+  }
+}
+/* A phone on its side (320 to 500 px tall): the map and the render button along the top,
+   beside the time, so the right column (Leave walk, Footsteps) ends well above the sticks. */
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  .viewport-render-walk ~ .minimap {
+    top: 8px;
+  }
+  .viewport-render-walk {
+    top: 8px;
+    right: auto;
+    left: 258px;
+  }
+}
+/* Its own finger's tap, at once, even with a thumb on a stick. */
+.viewport-render-walk {
+  touch-action: manipulation;
 }
 
 .layouts-dialog {
@@ -2778,6 +2957,7 @@ h3.field-label {
 @media (pointer: coarse) {
   .dialog .btn,
   .dialog .icon-btn,
+  .dialog .segmented button,
   .trace-bar .btn {
     height: auto;
     min-height: 44px;
@@ -3012,16 +3192,6 @@ h3.field-label {
   overflow-wrap: anywhere;
 }
 
-/* Plan for contractors: on a phone, a sheet up from the bottom. */
-@media (max-width: 560px) {
-  .contractor-dialog {
-    width: 100vw;
-    max-width: 100vw;
-    margin: auto 0 0;
-    border-radius: var(--radius-card) var(--radius-card) 0 0;
-  }
-}
-
 /* ---------------------------------------------------------------- electrical points */
 
 /* In metres inside the plan; strokes stay in screen pixels (non-scaling, as all the plan). */
@@ -3062,6 +3232,7 @@ h3.field-label {
   font-weight: 700;
 }
 .elec-trunk-preview {
+  fill: none;
   stroke: var(--accent);
   stroke-width: 1.5;
   stroke-dasharray: 6 4;
@@ -3100,6 +3271,29 @@ h3.field-label {
 }
 .trunking-bar .btn {
   flex: 1 1 auto;
+  gap: 6px;
+  padding: 0 10px;
+}
+.trunking-bar.draw-bar {
+  max-width: 540px;
+}
+.trunking-undo {
+  min-width: 44px;
+}
+.trunking-narrow {
+  display: none;
+}
+/* A phone: the bar keeps to one row of buttons, Undo bend an icon. */
+@media (max-width: 560px) {
+  .trunking-wide {
+    display: none;
+  }
+  .trunking-narrow {
+    display: inline;
+  }
+  .trunking-bar .btn {
+    padding: 0 8px;
+  }
 }
 @media (pointer: coarse) {
   .elec-kind-list button {
@@ -3125,6 +3319,12 @@ h3.field-label {
 }
 .point-facts dd {
   margin: 0;
+}
+/* An aircon unit's trunking: run it, route it along the walls, straighten it. */
+.point-trunking {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .elec-summary-row {
   display: flex;
@@ -3612,13 +3812,17 @@ span.comment-pin {
     bottom: 2px;
     right: 2px;
   }
-  /* Room for Comments: a view link has nothing to undo, and the name gives way. */
+  /* A view link has nothing to undo. */
   .topbar-viewer .icon-btn[aria-label="Undo"],
   .topbar-viewer .icon-btn[aria-label="Redo"] {
     display: none;
   }
-  .project-name {
-    max-width: 18vw;
+}
+/* The first iPhone SE (320 px): the owner's controls leave the name under 48 px, too little
+   to read a word of, so it gives way; from 352 px it shows. */
+@media (max-width: 351px) {
+  .topbar:not(.topbar-viewer) .project-name {
+    display: none;
   }
 }
 

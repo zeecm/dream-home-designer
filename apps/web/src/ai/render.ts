@@ -1,5 +1,5 @@
 import type { AiSettings } from './credentials';
-import { AiError, anySignal, timeoutSignal } from './providers';
+import { AiError, anySignal, errorBody, failure, timeoutSignal } from './providers';
 
 /** Looks of a render to choose from. */
 export const RENDER_STYLES = {
@@ -15,6 +15,9 @@ const prompt = (style: RenderStyle) =>
   `This is a simple 3D model render of a room in a home. Turn it into a photorealistic interior photograph, as a professional architectural photographer would take it. Keep the same camera position and angle, the same room shape, walls, doors, windows and openings, and the same furniture in the same places, sizes and orientations. Add realistic materials, textures, soft shadows and natural light through the windows. ${RENDER_STYLES[style]} Do not add or remove walls, windows, doors or furniture. No people, no text.`;
 
 const TIMEOUT = 240_000;
+
+/** OpenAI image models known to take `input_fidelity` (gpt-image-1 and its snapshots). */
+export const HIGH_FIDELITY = /^gpt-image-1(-\d{4}-\d{2}-\d{2})?$/;
 
 async function blobToBase64(b: Blob): Promise<string> {
   const buf = new Uint8Array(await b.arrayBuffer());
@@ -67,8 +70,9 @@ export async function renderPhoto(
       form.append('image', view, 'view.png');
       form.append('prompt', prompt(style));
       form.append('size', 'auto');
-      // Keep the room as it is drawn (walls, furniture), not a loose impression of it.
-      form.append('input_fidelity', 'high');
+      // Keep the room as it is drawn (walls, furniture), not a loose impression of it: only
+      // where the model is known to take it (gpt-image-1-mini, say, turns it down).
+      if (HIGH_FIDELITY.test(ai.model)) form.append('input_fidelity', 'high');
       res = await fetch('https://api.openai.com/v1/images/edits', {
         method: 'POST',
         headers: { authorization: `Bearer ${ai.key}` },
@@ -102,18 +106,8 @@ export async function renderPhoto(
         'Renders need an OpenAI or Gemini key (Claude doesn’t make pictures).',
       );
     }
-    if (res.status === 401 || res.status === 403) {
-      throw new AiError('key', 'The key was refused. Check it in AI settings.');
-    }
-    if (res.status === 429) {
-      throw new AiError('quota', 'The key’s limit or quota is used up for now. Try again later.');
-    }
-    if (!res.ok) {
-      throw new AiError(
-        'unreadable',
-        `The provider turned the request down (${res.status}). Try again, or another look.`,
-      );
-    }
+    // What the provider said, so the person (and we) can see why.
+    if (!res.ok) throw failure(ai.provider, res.status, await errorBody(res), ai.key);
     body = (await res.json()) as typeof body;
   } catch (e) {
     if (e instanceof AiError) throw e;

@@ -570,7 +570,7 @@ renovation (`restore`), taking back its steps already carried, and stays held ba
 nothing. One undo step, which shows Before (`touchedVariant`).
 **AI: walls from a plan image (stage 1, 5 Nov):** bring your own key. Project menu "AI
 assistant…" (`ai/AiSettingsDialog.tsx`): Claude, OpenAI or Gemini, key and model (defaults
-`claude-opus-5-5`, `gpt-5`, `gemini-2.5-pro`), Test, Forget; kept in this tab
+`claude-opus-5-5`, `gpt-5`, `gemini-3-pro` since 6 Nov), Test, Forget; kept in this tab
 (sessionStorage), or on this device if ticked (`ai/credentials.ts`, key `dhd-ai`), never
 in a project, export, share link or `/api` request (e2e checks). Calls go straight from the
 browser to the provider (`ai/providers.ts`: the Anthropic SDK, lazy-loaded, with
@@ -607,13 +607,53 @@ opens on OpenAI. Renders switch between the render and the 3D view. Layout thumb
 rooms, new or changed walls in the accent colour and walls taken down dashed; an option with
 nothing applicable has no Use button. Touch: 44 px buttons in dialogs and the trace bar.
 
-**Photo-real renders (5 Nov):** "Photo-real render" on the 3D view (and, with a mouse, while
-walking) takes a picture of the view as it is (`capture3d`) and sends it, with a look (as
+**Photo-real renders (5 Nov):** "Photo-real render" on the 3D view (and while walking: under
+Footsteps, a 44 px camera icon on touch screens, with the mini-map moved down below it) takes a picture of the view as it is (`capture3d`) and sends it, with a look (as
 designed, warm modern, Scandinavian, modern luxe, industrial), to the person's image model
 (`ai/render.ts`: OpenAI `images/edits` with `gpt-image-1`, or Gemini
 `gemini-2.5-flash-image` generateContent with image output; Claude makes no pictures). The
 picture shows in the dialog to download. The prompt keeps the camera, room and furniture
-and asks only for materials and light. 
+and asks only for materials and light. While the dialog is open over a walk, the walk
+stands still (`paused` on `WalkControls`; the sticks let go and ignore a finger still down,
+`disabled` on `Joystick`), so the picture is the view the person saw; closing it carries on
+from the same spot (6 Nov, owner: "mobile doesn't have the render option in walk through";
+`e2e/walk-render.spec.ts`).
+
+**AI model pickers (6 Nov, owner reports: Gemini 400 with gemini-3-pro-image; type-in model
+names):** the AI assistant has two selects, "Model for plans and layouts" and, for OpenAI and
+Gemini, "Model for pictures", stored per key as `model` and `imageModel` (`credentials.ts`;
+`imageSettings()` uses the picture model, else `PROVIDERS[p].imageModel`). A saved key whose
+one model was an image model (the owner's case: gemini-3-pro-image was being sent to plan
+reading and Test as a JSON request) has it moved to pictures on load (`migrateKey`). Once a
+key is typed (600 ms pause), the selects fill from the provider's own list with that key,
+straight from the browser (`ai/models.ts`: Gemini `GET /v1beta/models`, OpenAI `GET
+/v1/models`, Anthropic `GET /v1/models`), friendly names where given, best first, the default
+marked "(recommended)" (Gemini: best listed Pro; pictures: the cheaper gemini-2.5-flash-image
+and gpt-image-1, since every render costs; `priceNote` labels "cheaper" / "about 3× the
+price"). A saved picture model, or the default a key saved before the choice renders with,
+is never changed by saving again. OpenAI text models are an allow-list (chat-completions
+models that take images); Gemini text models start `gemini-`. The selects keep the last list
+while a changed key's is looked up, falling back per job. If listing fails, `CURATED` in
+`credentials.ts` with a hint; a saved model not listed stays as "(saved)". Test checks the
+plans model with JSON and the picture model without making a picture (Gemini `countTokens`,
+OpenAI `GET /v1/models/{id}`), a line each; changing the provider, key or a model stops it.
+Every failed provider call (trace, layouts, render, Test, listing) now shows what the
+provider said (`failure`/`providerMessage` in `providers.ts`: `error.message`, cut to 200
+characters, shown as text, with keys and tokens redacted: sk-…, sk_live_…, AIza…, AQ.…,
+ya29.…, Bearer …, and long mixed-case or hex runs; lower-case model names stay): "Gemini
+turned the request down (400): …". Gemini's 400 "API key not valid" counts as a refused key.
+`input_fidelity: high` goes only to gpt-image-1 (`HIGH_FIDELITY`). A held Enter that closes
+the render dialog doesn't reopen it from the button focus returns to. Only a 401 or the
+provider's own "invalid key" is a key error; other 403s read "{Provider} refused the request
+(403): …" (OpenAI's organisation verification, say), and OpenAI's Test says the picture model
+only exists (verification may still be needed). Models show by name (the provider's, else
+`MODEL_NAMES` or one made from an OpenAI id; a shared name gets "preview" or the id). The
+render dialog keeps the model line and the Look select in its sticky foot, beside Render. In
+the walk, the camera says "Render" (named "Photo-real render") and answers a second finger
+while a thumb holds a stick (its own pointerup: browsers make no click of it); on phones on
+their side (320 to 500 px tall) the map and the camera sit along the top beside the time,
+clear of the sticks (`walk-render.spec.ts` checks 844 × 390, 750 × 342 and 568 × 320). The e2e AI specs abort
+any provider request a test doesn't mock (`ai-models.spec.ts`).
 
 **AI: suggested layouts (stage 2, 5 Nov):** "Suggest layouts with AI" in the plan's
 Renovation section opens a brief (who lives here, eight common wishes, anything else) and
@@ -1056,7 +1096,12 @@ pnpm --filter @dhd/edge run deploy:preview   # previews: dhd-api-preview
   the lift (the plan and the walk now play the lift's position as a last move); and the orbit
   controls left `touch-action: auto` on the 3D canvas, so a phone cancelled sideways swipes
   in walk mode (the owner's "can't look around without moving"). Swipe-to-look turns half a
-  circle per screen width on touch.
+  circle per screen width on touch. Three more (6 Nov), all from timing a busy page: the plan
+  timed double-clicks and flings by when its handlers ran, not by the events' `timeStamp`
+  (a slow redraw after the first press made a double-click two clicks; a late lift lost the
+  coast); a remounted plan (Before/After) drew one frame at size 0 until its ResizeObserver
+  reported, and a requested fit used the old size; a double-click on a small room landed on the
+  move handle its first click showed. The swipe e2e stamps its touches with the finger's times.
 - **Wall tool snapping:** a point landing inside a door or window moves to the nearer jamb
   (`jambSnap` in `snap.ts`), so an angle-snapped wall drawn to a doorway slants by up to half
   the door's width. The alternative, ending the wall straight but short of the doorway and
@@ -1392,14 +1437,19 @@ upright through a 2.00 m high door into a 1.40 m deep car." (criterion 2's 2.1 m
 first in `doors` (`openingId: 'lift'`) and in `worst`, and returns `lift`; `worstDoor` is
 exported; `DoorOnTheWay.tilted` marks a door passed only on the diagonal carry ("(tilted on its
 diagonal)" after the narrowest door, else "Tilted on its diagonal through …", and ", tilted"
-on the plan label). `rigidNote(assetId)` adds "A mattress bends and a frame usually comes
-flat; ask the shop." to a too-big bed. `updateModel` takes `diagonal: number | null` (null
+on the plan label). A bed (catalogue `comesFlat: 'bed'`, or added by size as a bed) is checked
+as its delivery parts (`deliveryParts`): the mattress w × d × 0.3 (folds in half along its
+length, unless wider than 1.7 m: a king), a headboard panel w × 0.1 × h and side rails
+d × 0.1 × 0.3; it fits when every part does (`DoorOnTheWay.parts`, `Delivery.parts`,
+`liftFitParts`), and `partsNote(r)` says why ("Comes flat: the mattress (folded in half) and
+frame panels each fit." / "Comes flat, but the mattress (too wide to fold) doesn’t fit; ask the
+shop."). Freestanding wardrobes stay rigid; built-ins aren't checked. `updateModel` takes `diagonal: number | null` (null
 removes it); `restoreVersion` copies the site with `structuredClone`. Web: the wording is in
 `delivery/words.ts` (unit-tested). "Getting it in" has a `role="status"` block: the verdict and
 one line under it (`liftStatus`: "Lift: not checked.", "No lift on the way in.", how it goes in,
-or, when the lift fails, "Ask the shop whether it comes apart…"), so a change is always read out
-and the controls below move less. A too-big bed (`rigidNote`) shows the mattress note first and
-"Checked as a rigid box, …" in muted text instead of a red verdict. Then [Add diagonal depth]
+or, when the lift fails, "Ask the shop whether it comes apart…"; a bed: "Lift: each part fits."),
+so a change is always read out and the controls below move less. A bed shows its `partsNote`
+first (`data-testid="parts-note"`), then the verdict as for any piece. Then [Add diagonal depth]
 for an own sofa too wide for a door, unmeasured or saved out of range (scrolls to and focuses
 the field, `behavior: auto` under reduced motion), From, and the Lift select with its hint (a
 preset's numbers; on a view link the select is disabled but shown in `--text` on `--raised`,
@@ -1420,3 +1470,49 @@ the car).", or the first invalid part, not zod's JSON. e2e `lift.spec.ts` covers
 B2 3–5 on a desktop and a 390 px phone, plus the mattress, the 18 mm panel and a saved
 out-of-range diagonal; criterion 16 (production accepts a
 v10 save) is for the deploy. Not done: the lift has no place on the plan.
+
+**Square aircon trunking, inside the flat (6–7 Nov, the owner's "it trunks at strange angles";
+no schema change):** `trunkingPath` starts at `trunkingStart` (the unit's face point +
+`TRUNK_OFF` 50 mm along its normal; render no longer adds its own offset). Product rule (PM,
+7 Nov): **no trunking on the façade**; routes stay inside, through rooms and corridors, never
+the shelter or a door opening, into the ledge only through a wall bordering it. Core
+`trunking.ts`: `trunkAxes`/`unitAxes`/`axesOf` (squared to exact x/y within 1e-6);
+`nextBend(level, from, cursor, {alt, target, axes})` picks the axis nearest the pointer's way
+among the unit's, the last leg's and the nearest wall's, snaps to a face's hug line within
+`TRUNK_SNAP` 0.3 m (before or past the wall) or level with the compressor, else 5 cm steps,
+and `stopShort` keeps it 50 mm short of the first face in its way (any angle) unless the
+pointer is past that wall; `legInto` (into a compressor: `alongWalls` routes it with
+`wallRoute`, else an L corner that never doubles back); `tidyRoute` (legs square to the
+last leg, the unit or the nearest wall kept; crooked ones projected exactly, so no jog;
+`hugLegs` slides middle legs up to 1.5 m onto a parallel face when that crosses no new wall;
+the way in routed); `fromLegs` (bends as the meeting points of legs that keep their
+directions) behind `movePathEnd`, `followRuns` (called in `moveVertex`, `shiftWall` and
+`moveRoom` recipes: legs that hugged a face follow it, the first leg follows the unit) and
+`dragBend`/`draggedRoute` (with `snapToFaces`); `moveWithTrunking(level0, id, patch, geom)`
+(compressor or unit dragged; the Select tool keeps the level from the drag's start in its
+drag state and recomputes from it every move); `wallsCrossed`; `wallRoute`/`autoRoute`:
+Dijkstra on a grid of hug lines square to the unit's wall, over rooms bucketed in 1 m cells
+(first within 3 m of the unit's room and the ledge, then the whole plan); rooms allowed: all
+but shelters and other ledges, never 'outside'; no door or shelter-wall crossings; costs
+length ×(1 + 1.5 off a face + 0.3 away from the unit's room and the ledge), 0.2 a turn, 0.4
+by a window or passage, 0.8 drilled; a 612-wall plan routes well under 400 ms (test).
+`routeAlongWalls(level, unitId, geom)` → `{command, compressorId}` or `{error}` (`NO_LEDGE`,
+`NO_INSIDE_ROUTE`); a new compressor goes towards the unit's end of the ledge, clear of the
+name. `pointWarnings` adds `trunk-shelter` for a hand run through a shelter wall. Web: taps
+go through `nextBend`/`legInto` and merge straight-on bends; the dashed preview (no fill)
+shows from finger-down, clears on the tap; the bar reads "2.9 m + 1.2 m next"; Undo bend is an
+icon and "Route along the walls" reads "Along walls" under 560 px (its name follows); the
+details sheet folds during a run; a pinch that leaves the last bend under the bar is undone
+once the plan settles; Inspector Route along the walls and Straighten (memoised); the
+estimate prints trunking to one place. e2e `trunking.spec.ts` (desktop and a 390 px phone).
+Checked: a renovation's After runs route the same way. QA round 2 (7 Nov): `legInto` squares
+the way in to the unit's or the nearest wall, never to an Alt leg, so an Alt bend never moves;
+Straighten falls back to `wallRoute` between the run's ends when the squared run isn't neat
+(`neatRun`: every leg over 0.35 m on a hug line, no doorway) and takes out jogs under `JOG`
+15 cm where that crosses no new wall (a jog the walls force, a face 0.2 m off the next, stays);
+a route joins other units' trunking (`sharedLegs`, 0.25 a metre, holes free) and avoids
+running over a door head (+0.6); "No inside route…" clears on success or another selection;
+on phones a run starts zoomed to the unit's room and the ledge; a new compressor sits at the
+ledge's far side towards the unit, and room labels keep clear of it (two circles along it; the
+name alone if the name and area don't fit).
+

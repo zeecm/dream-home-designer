@@ -40,7 +40,7 @@ for any plan.
 - Any wall colour (a colour picker) and eight wallpapers.
 - AI with your own key (Claude, OpenAI or Gemini): trace walls from a plan image, looked over
   before it goes in. [spec](docs/specs/ai-layouts.md)
-- Photo-real renders of any 3D or walk-through view, with your own OpenAI or Gemini key.
+- Photo-real renders of any 3D or walk-through view (phones too), with your own OpenAI or Gemini key.
 - AI suggested layouts from a short brief: up to three, checked against what HDB lets you
   change, one click to make one the renovation.
 - Structural and household-shelter walls marked (hatched), with hacking warnings: shelter
@@ -58,7 +58,8 @@ for any plan.
   widths, room sizes, the hacking plan and change list; print or save as PDF.
   [spec](docs/specs/dimensioned-export.md)
 - An electrical and lighting plan: sockets, switches, lights, data points and aircon with its
-  trunking, at their heights, kept clear of doors and windows; counted into the estimate and
+  trunking (square to the walls and hugging them, or routed along the walls to the ledge in
+  one tap), at their heights, kept clear of doors and windows; counted into the estimate and
   drawn on the contractor sheet with a schedule. [spec](docs/specs/electrical.md)
 - Clearance checks, slice 2: walkways from the main door to every room and bed side, their
   narrowest point drawn and measured; room to pull out dining chairs; door clashes (doors that
@@ -77,12 +78,16 @@ for any plan.
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
 
 ### Planned
-1. Slice 2s, the rest: notch depths on the contractor sheet and the estimate on every level.
+1. AI interior designer: a whole renovation proposed for the flat (walls HDB allows, room
+   uses, furniture, carpentry, paint), checked like your own edits, then changed room by room
+   or by aspect with feedback and locks; a cost estimate before every run.
+   [spec](docs/specs/ai-interior-designer.md)
+2. Slice 2s, the rest: notch depths on the contractor sheet and the estimate on every level.
    (The lift check and a diagonal you can edit are done.)
-2. Ageing parents check: wheelchair turning space, step-free routes, 850 mm doors, grab bars
+3. Ageing parents check: wheelchair turning space, step-free routes, 850 mm doors, grab bars
    in the bathroom (HDB EASE items).
-3. Storage meter: wardrobe and cabinet space against the household, room by room.
-4. A wall seen straight on (elevation): carpentry, windows, sockets and switches at height.
+4. Storage meter: wardrobe and cabinet space against the household, room by room.
+5. A wall seen straight on (elevation): carpentry, windows, sockets and switches at height.
 
 More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
 

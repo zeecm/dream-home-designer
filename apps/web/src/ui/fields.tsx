@@ -196,7 +196,9 @@ export function LengthField({
               const el = e.currentTarget;
               // Refused: stay in the field, its text selected to type again (a blur would
               // leave the complaint behind, and the next Escape would let go of the object).
-              if (commit()) requestAnimationFrame(() => el.select());
+              // Selected now, not on the next frame: keys typed before a late frame would
+              // add to the refused text, and the frame would then select them too.
+              if (commit()) el.select();
               else el.blur();
             }
             if (e.key === 'Escape') {

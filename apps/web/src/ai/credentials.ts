@@ -12,29 +12,113 @@ export type Provider = 'anthropic' | 'openai' | 'gemini';
 export interface AiSettings {
   provider: Provider;
   key: string;
+  /** Reads plans and suggests layouts. */
   model: string;
+  /** Makes pictures (OpenAI and Gemini); the provider's default when not chosen. */
+  imageModel?: string;
   /** Kept on this device (localStorage); otherwise only until the tab closes. */
   remember?: boolean;
 }
 
 export const PROVIDERS: Record<
   Provider,
-  { name: string; model: string; keyHint: string; imageModel?: string }
+  {
+    name: string;
+    /** In sentences: "Gemini turned the request down". */
+    short: string;
+    model: string;
+    keyHint: string;
+    /** The picture model when none was chosen (a key saved before the choice existed). */
+    imageModel?: string;
+  }
 > = {
-  anthropic: { name: 'Claude (Anthropic)', model: 'claude-opus-5-5', keyHint: 'sk-ant-…' },
-  openai: { name: 'OpenAI', model: 'gpt-5', keyHint: 'sk-…', imageModel: 'gpt-image-1' },
+  anthropic: {
+    name: 'Claude (Anthropic)',
+    short: 'Claude',
+    model: 'claude-opus-5-5',
+    keyHint: 'sk-ant-…',
+  },
+  openai: {
+    name: 'OpenAI',
+    short: 'OpenAI',
+    model: 'gpt-5',
+    keyHint: 'sk-…',
+    imageModel: 'gpt-image-1',
+  },
   gemini: {
     name: 'Gemini (Google)',
-    model: 'gemini-2.5-pro',
+    short: 'Gemini',
+    model: 'gemini-3-pro',
     keyHint: 'AIza…',
     imageModel: 'gemini-2.5-flash-image',
   },
 };
 
+/**
+ * The models to offer when the provider's own list can't be had (a network or key problem),
+ * best first. Names exactly as the providers list them.
+ */
+export const CURATED: Record<Provider, { text: string[]; image: string[] }> = {
+  anthropic: { text: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'], image: [] },
+  openai: { text: ['gpt-5'], image: ['gpt-image-1'] },
+  gemini: {
+    text: ['gemini-3-pro', 'gemini-2.5-pro', 'gemini-2.5-flash'],
+    image: ['gemini-3-pro-image', 'gemini-3.1-flash-image', 'gemini-2.5-flash-image'],
+  },
+};
+
+/**
+ * Names to show for the built-in models, as their providers write them, for when the
+ * provider's own list (with its names) can't be had. The id stays the option's value.
+ */
+export const MODEL_NAMES: Record<string, string> = {
+  'claude-opus-5-5': 'Claude Opus 5.5',
+  'claude-sonnet-5-5': 'Claude Sonnet 5.5',
+  'claude-haiku-5-5': 'Claude Haiku 5.5',
+  'gemini-3-pro': 'Gemini 3 Pro',
+  'gemini-2.5-pro': 'Gemini 2.5 Pro',
+  'gemini-2.5-flash': 'Gemini 2.5 Flash',
+  'gemini-3-pro-image': 'Gemini 3 Pro Image',
+  'gemini-3.1-flash-image': 'Gemini 3.1 Flash Image',
+  'gemini-2.5-flash-image': 'Gemini 2.5 Flash Image',
+};
+
+/**
+ * What a picture costs, next to the provider's others, where we know it: shown in the picture
+ * select, so a dearer model is a choice made knowingly. Rough: keep up with the providers' prices.
+ */
+export function priceNote(id: string): string | undefined {
+  if (/^gemini-2\.5-flash-image/.test(id) || /^gpt-image-1-mini/.test(id)) return 'cheaper';
+  if (/^gemini-3-pro-image/.test(id)) return 'about 3× the price';
+  return undefined;
+}
+
+/** Whether a provider makes pictures. */
+export const makesPictures = (p: Provider) => !!PROVIDERS[p].imageModel;
+
+interface SavedKey {
+  key: string;
+  model: string;
+  imageModel?: string;
+  remember?: boolean;
+}
+
 interface Stored {
   active: Provider;
   /** Each key with its own choice: on this device (remember), or this tab only. */
-  keys: Partial<Record<Provider, { key: string; model: string; remember?: boolean }>>;
+  keys: Partial<Record<Provider, SavedKey>>;
+}
+
+/**
+ * A saved key brought up to date. Before the picture model had its own choice, some people
+ * put an image model (gemini-3-pro-image, say) in the one Model field: it was never used
+ * for pictures, and it made reading plans fail. It becomes the picture model, and plans go
+ * back to the default.
+ */
+export function migrateKey(p: Provider, k: SavedKey): SavedKey {
+  const model = k.model || PROVIDERS[p].model;
+  if (k.imageModel || !makesPictures(p) || !/image/i.test(model)) return { ...k, model };
+  return { ...k, model: PROVIDERS[p].model, imageModel: model };
 }
 
 const KEY = 'dhd-ai';
@@ -49,14 +133,14 @@ function parse(raw: string | null, remember: boolean): Stored | null {
     return {
       active: v.provider,
       keys: {
-        [v.provider]: { key: v.key, model: v.model || PROVIDERS[v.provider].model, remember },
+        [v.provider]: migrateKey(v.provider, { key: v.key, model: v.model ?? '', remember }),
       },
     };
   }
   if (!isProvider(v.active) || !v.keys) return null;
   const keys: Stored['keys'] = {};
   for (const [p, k] of Object.entries(v.keys)) {
-    if (isProvider(p) && k?.key) keys[p] = { ...k, remember };
+    if (isProvider(p) && k?.key) keys[p] = migrateKey(p, { ...k, remember });
   }
   return { active: v.active, keys };
 }
@@ -81,7 +165,17 @@ let current = active(stored);
 
 function active(s: Stored | null): AiSettings | null {
   const k = s?.keys[s.active];
-  return s && k ? { provider: s.active, key: k.key, model: k.model, remember: !!k.remember } : null;
+  return s && k ? settingsOf(s.active, k) : null;
+}
+
+function settingsOf(provider: Provider, k: SavedKey): AiSettings {
+  return {
+    provider,
+    key: k.key,
+    model: k.model,
+    ...(k.imageModel ? { imageModel: k.imageModel } : {}),
+    remember: !!k.remember,
+  };
 }
 
 function write(s: Stored | null) {
@@ -121,6 +215,7 @@ export function saveAi(settings: AiSettings | null, readsPlans = true) {
       [settings.provider]: {
         key: settings.key,
         model: settings.model,
+        ...(settings.imageModel ? { imageModel: settings.imageModel } : {}),
         remember: !!settings.remember,
       },
     },
@@ -144,19 +239,26 @@ export function aiSettings(): AiSettings | null {
   return current;
 }
 
-/** A provider's saved key and model, if there is one. */
+/** A provider's saved key and models, if there is one. */
 export function keyFor(p: Provider): AiSettings | null {
   const k = stored?.keys[p];
-  return k ? { provider: p, key: k.key, model: k.model, remember: !!k.remember } : null;
+  return k ? settingsOf(p, k) : null;
 }
 
-/** The key to make pictures with: the one in use if it can, else another saved one that can. */
+/** The model a key makes pictures with: the one chosen, or the provider's default. */
+export const pictureModel = (s: AiSettings): string | undefined =>
+  makesPictures(s.provider) ? s.imageModel || PROVIDERS[s.provider].imageModel : undefined;
+
+/**
+ * The key to make pictures with, `model` set to its picture model: the one in use if it can,
+ * else another saved one that can.
+ */
 export function imageSettings(): AiSettings | null {
   const order: Provider[] = current ? [current.provider, 'openai', 'gemini'] : ['openai', 'gemini'];
   for (const p of order) {
-    const model = PROVIDERS[p].imageModel;
     const k = keyFor(p);
-    if (model && k) return { ...k, model };
+    const model = k && pictureModel(k);
+    if (k && model) return { ...k, model };
   }
   return null;
 }

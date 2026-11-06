@@ -149,7 +149,8 @@ const qtyText = (l: CostLine) =>
     ? ''
     : l.unit === 'each'
       ? `${l.qty}`
-      : `${l.unit === 'ft run' ? l.qty : l.qty.toFixed(l.unit === 'm' ? 2 : 1)} ${l.unit}`;
+      : // Trunking is measured to 10 cm, so it reads to one place.
+        `${l.unit === 'ft run' ? l.qty : l.qty.toFixed(l.unit === 'm' && l.group !== 'Electrical' ? 2 : 1)} ${l.unit}`;
 
 /** The estimate as plain text: lines, total and disclaimer (for Copy and Print). */
 export function estimateText(est: CostEstimate, name: string): string {

@@ -163,6 +163,26 @@ export const icons = {
       <circle cx="8" cy="8" r="2" />
     </Icon>
   ),
+  camera: (
+    <Icon>
+      <path d="M2 5.5A1.5 1.5 0 0 1 3.5 4h1.75l1-1.5h3.5l1 1.5h1.75A1.5 1.5 0 0 1 14 5.5v6a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" />
+      <circle cx="8" cy="8.5" r="2.25" />
+    </Icon>
+  ),
+  /** The 3D view. */
+  cube: (
+    <Icon>
+      <path d="M8 1.75l5.5 3v6.5L8 14.25l-5.5-3v-6.5z" />
+      <path d="M2.5 4.75L8 7.75l5.5-3M8 7.75v6.5" />
+    </Icon>
+  ),
+  /** The plan view: rooms seen from above. */
+  floorPlan: (
+    <Icon>
+      <rect x="2.5" y="2.5" width="11" height="11" />
+      <path d="M2.5 8.5h5v5M7.5 2.5v3" />
+    </Icon>
+  ),
 };
 
 /** The product's mark: a plan corner with a door swing, drawn in the accent. */
