@@ -1,31 +1,10 @@
 import { type Page, expect, test } from '@playwright/test';
-import { waitSaved } from './helpers';
+import { centre, placeFridge, waitSaved } from './helpers';
 
 /** Shots for looking at, when SHOTS is set to a folder. */
 const shot = async (page: Page, name: string) => {
   if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/${name}.png` });
 };
-
-/** Places a fridge in the sample's kitchen, in Plan view, and returns its plan element. */
-async function placeFridge(page: Page) {
-  await page.getByRole('button', { name: /^Furniture/ }).click();
-  await page.getByRole('navigation', { name: 'Tools' }).getByLabel('Find furniture').fill('fridge');
-  await page
-    .getByRole('navigation', { name: 'Tools' })
-    .getByRole('button', { name: /^Fridge/ })
-    .first()
-    .click();
-  const room = page.locator('[data-hit="room:rm_kitchen"]');
-  const box = await room.boundingBox();
-  if (!box) throw new Error('no kitchen');
-  await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.5);
-  const fridge = page.locator('[data-hit^="item:"]').first();
-  await expect(fridge).toHaveCount(1);
-  await page.getByRole('button', { name: /^Select/ }).click();
-  await page.keyboard.press('Escape');
-  await waitSaved(page);
-  return fridge;
-}
 
 /** Selects the fridge by its lower edge: its pin's bubble stands over its middle. */
 async function selectBelowPin(page: Page) {
@@ -33,12 +12,6 @@ async function selectBelowPin(page: Page) {
   if (!box) throw new Error('no fridge');
   await page.mouse.click(box.x + box.width / 2, box.y + box.height - 3);
   await expect(page.getByRole('heading', { name: 'Fridge' })).toBeVisible();
-}
-
-async function centre(page: Page, selector: string) {
-  const box = await page.locator(selector).first().boundingBox();
-  if (!box) throw new Error(`nothing at ${selector}`);
-  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
 test('a viewer comments on the fridge; the owner sees it, moves the fridge and replies', async ({
@@ -305,4 +278,76 @@ test('from 3D, a comment in the panel opens the plan at its pin', async ({ page 
   expect(Math.abs(pin.x + 14 - (plan.x + plan.width / 2))).toBeLessThan(4);
   await page.emulateMedia({ colorScheme: 'dark' });
   await shot(page, 'jump-dark');
+});
+
+test('a post refused because comments closed meanwhile keeps its words, to copy', async ({
+  page,
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await page.getByRole('button', { name: 'Share' }).click();
+  const viewLink = await page.getByLabel('View-only link').inputValue();
+
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const viewer = await ctx.newPage();
+  await viewer.goto(viewLink);
+  await viewer.keyboard.press('1');
+  await viewer.getByRole('button', { name: 'Comment K', exact: true }).click();
+  const at = await centre(viewer, '[data-hit="room:rm_kitchen"]');
+  await viewer.mouse.click(at.x, at.y);
+  const compose = viewer.locator('[data-comment-compose]');
+  await compose.getByLabel('Your name').fill('Mum');
+  await compose.getByLabel('Comment').fill('Wok smell goes everywhere.');
+
+  // Meanwhile the owner allows comments by the edit link only.
+  await page.getByRole('button', { name: 'Edit link only' }).click();
+  await expect(page.getByRole('button', { name: 'Edit link only' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+
+  await compose.getByRole('button', { name: 'Post' }).click();
+  await expect(compose.getByRole('alert')).toHaveText(
+    'Only people with the edit link can comment on this plan.',
+  );
+  // The words stay, locked, with a way to copy them; the composer doesn't close.
+  await expect(compose.getByLabel('Comment')).toHaveValue('Wok smell goes everywhere.');
+  await expect(compose.getByRole('button', { name: 'Post' })).toBeDisabled();
+  await expect(compose.getByRole('button', { name: 'Copy text' })).toBeVisible();
+  await expect(viewer.getByRole('button', { name: 'Comment K', exact: true })).toHaveCount(0);
+  await shot(viewer, 'refused');
+  await ctx.close();
+});
+
+test('comments on the flat as it is are pointed out from the renovation', async ({ page }) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await page.getByRole('button', { name: 'Comment K', exact: true }).click();
+  const at = await centre(page, '[data-hit="room:rm_kitchen"]');
+  await page.mouse.click(at.x, at.y);
+  const compose = page.locator('[data-comment-compose]');
+  await compose.getByLabel('Your name').fill('Wei Ling');
+  await compose.getByLabel('Comment').fill('Keep the kitchen wall?');
+  await compose.getByRole('button', { name: 'Post' }).click();
+  const pin = page.getByRole('button', { name: /^Comment by Wei Ling on Kitchen/ });
+  await expect(pin).toBeVisible();
+
+  // Starting a renovation shows After, where the comment isn't drawn: a notice says where.
+  await page.getByRole('button', { name: /^Select/ }).click();
+  await page.getByRole('button', { name: 'Plan a renovation' }).click();
+  await expect(page.locator('.reno-bar').getByRole('button', { name: 'After' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(pin).toHaveCount(0);
+  const notice = page.locator('.comment-elsewhere');
+  await expect(notice).toHaveText('1 comment is on the flat as it is. Show');
+  await shot(page, 'elsewhere');
+  await notice.getByRole('button', { name: 'Show' }).click();
+  await expect(pin).toBeVisible();
+  await expect(notice).toHaveCount(0);
 });

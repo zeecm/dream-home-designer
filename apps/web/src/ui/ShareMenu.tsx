@@ -48,13 +48,15 @@ function ShareBody() {
   const owner = role === 'owner' && backend?.kind === 'remote';
   const claim = useStore((s) => s.claim);
   const [claiming, setClaiming] = useState(false);
+  // Once a change is sent, the first read's answer is out of date: it mustn't undo it.
+  const changed = useRef(false);
 
   useEffect(() => {
     if (!owner || !backend?.getShare) return;
     let live = true;
     backend
       .getShare(id)
-      .then((k) => live && setEdit(k))
+      .then((k) => live && !changed.current && setEdit(k))
       .catch((e: Error) => live && setError(e.message));
     return () => {
       live = false;
@@ -63,6 +65,7 @@ function ShareBody() {
 
   const change = (on: boolean, reset = false) => {
     if (!backend?.setShare) return;
+    changed.current = true;
     setError(null);
     backend
       .setShare(id, on, reset)

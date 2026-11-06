@@ -159,14 +159,32 @@ export function CommentsOnPlan({ view, size, tool }: { view: View; size: Size; t
     // After the canvas's own effects in this render: its fit, which hasn't yet seen a view
     // set here, would put the whole plan back.
     const frame = requestAnimationFrame(() => {
-      const at = anchorPosition(projectNow(), anchor).at;
       const ed = useEditor.getState();
       const v = ed.view ?? view;
       // A zoom where a room fits: at least 40 px a metre.
-      ed.setView({ cx: at.x, cy: at.y, zoom: Math.max(v.zoom, 40) }, true);
+      centre(anchor, { ...v, zoom: Math.max(v.zoom, 40) });
     });
     return () => cancelAnimationFrame(frame);
   }, [jumpToken, fitRequested, thread?.id, size.width, size.height]);
+
+  /**
+   * Puts a pin where it can be seen: the middle of the plan, or on a phone the middle of
+   * the strip the sheet leaves above it (the sheet's height guessed until it is measured).
+   */
+  const centre = (anchor: CommentAnchor, v: View) => {
+    const at = anchorPosition(projectNow(), anchor).at;
+    let y = size.height / 2;
+    const el = box.current;
+    if (sheets && el) {
+      const top = el.getBoundingClientRect().top;
+      const sheetTop = card.current?.getBoundingClientRect().top ?? window.innerHeight * 0.5;
+      const strip = Math.min(size.height, sheetTop - top);
+      // The pin stands on its tip: its bubble wants the room above it.
+      y = Math.max(40, strip / 2 + 16);
+    }
+    const s = worldToScreen(v, size, at);
+    useEditor.getState().setView(panBy(v, size.width / 2 - s.x, y - s.y), true);
+  };
 
   // The card's height: a popover moves up to fit it; on a phone, the plan moves so the pin
   // sits in the strip above the sheet. Measured as it changes (a ResizeObserver), not per frame.
@@ -187,24 +205,31 @@ export function CommentsOnPlan({ view, size, tool }: { view: View; size: Size; t
     ro.observe(target);
     return () => ro.disconnect();
   }, [cardKey, sheets]);
+  // On a phone, once the sheet is measured, the plan moves so the pin sits in the middle
+  // of the strip above it: for a new comment, a tap on a pin, a jump or a link.
   const panned = useRef<string | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: once per opened card
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once per opened card (and jump)
   useEffect(() => {
-    const key = active ? (openId ?? 'draft') : null;
-    if (!sheets || !activeAt || !key || !box.current || cardH === 0) {
-      if (!key) panned.current = null;
+    const key = active ? `${cardKey}:${jumpToken}` : null;
+    if (!key) {
+      panned.current = null;
       return;
     }
-    if (panned.current === key) return;
-    panned.current = key;
-    const top = box.current.getBoundingClientRect().top;
-    const strip = window.innerHeight - cardH - top;
-    if (strip <= 80) return;
-    const want = Math.max(48, strip / 2);
-    if (activeAt.y > 40 && activeAt.y < strip - 40) return;
-    const ed = useEditor.getState();
-    ed.setView(panBy(ed.view ?? view, 0, want - activeAt.y), true);
-  }, [sheets, cardH, active, openId]);
+    if (!sheets || !active || cardH === 0 || fitRequested || panned.current === key) return;
+    const anchor = active;
+    // After a jump's own centring (a frame), so this one has the last word.
+    let inner = 0;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => {
+        panned.current = key;
+        centre(anchor, useEditor.getState().view ?? view);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(outer);
+      cancelAnimationFrame(inner);
+    };
+  }, [sheets, cardH, cardKey, jumpToken, fitRequested]);
 
   // Escape closes the thread wherever focus is (a button that went with a reply leaves it on
   // the page), unless a dialog or a field elsewhere has it.
@@ -245,13 +270,16 @@ export function CommentsOnPlan({ view, size, tool }: { view: View; size: Size; t
   const drawing = tool === 'wall' || tool === 'room';
   const pos = (p: AnchorPlace) => worldToScreen(view, size, p.at);
 
-  let popStyle: React.CSSProperties | undefined;
-  if (activeAt && !sheets) {
-    const right = activeAt.x + POP_GAP + POP_W <= size.width - 8;
-    const left = right ? activeAt.x + POP_GAP : Math.max(8, activeAt.x - POP_GAP - POP_W);
-    const top = Math.max(8, Math.min(activeAt.y - 40, size.height - 8 - (cardH || 320)));
-    popStyle = { left, top, maxHeight: size.height - top - 8 };
-  }
+  const popStyle = activeAt && !sheets ? placePopover(activeAt, size, cardH) : undefined;
+  const drawingHere = tool === 'wall' || tool === 'room';
+
+  // Comments on the other version of the flat aren't drawn here: say so, with a way there.
+  const elsewhere =
+    project.renovation && doc && shown
+      ? doc.threads.filter(
+          (t) => !t.resolved && t.anchor.variant !== variant && t.anchor.levelId === baseLevel,
+        ).length
+      : 0;
 
   const cardBody =
     draft && active === draft.anchor ? (
@@ -261,7 +289,28 @@ export function CommentsOnPlan({ view, size, tool }: { view: View; size: Size; t
     ) : null;
 
   return (
-    <div ref={box} className="comment-pins" data-export="skip" aria-label="Comments on the plan">
+    <div
+      ref={box}
+      // With Select, a pin answers only to its bubble: a tap on the piece under it selects it.
+      className={`comment-pins${tool === 'select' ? ' comment-pins-select' : ''}`}
+      data-export="skip"
+      aria-label="Comments on the plan"
+    >
+      {elsewhere > 0 && !drawingHere && (
+        <p className="comment-elsewhere">
+          {elsewhere === 1 ? '1 comment is' : `${elsewhere} comments are`} on{' '}
+          {variant === 'after' ? 'the flat as it is' : 'the renovation'}.{' '}
+          <button
+            type="button"
+            className="link-btn"
+            onClick={() =>
+              useEditor.getState().setVariant(variant === 'after' ? 'before' : 'after')
+            }
+          >
+            Show
+          </button>
+        </p>
+      )}
       {pins.map((p) => {
         const s = pos(p.place);
         if (s.x < -40 || s.y < -40 || s.x > size.width + 40 || s.y > size.height + 40) return null;
@@ -346,9 +395,51 @@ export function CommentsOnPlan({ view, size, tool }: { view: View; size: Size; t
   );
 }
 
+type Box = { left: number; top: number; right: number; bottom: number };
+const overlaps = (a: Box, b: Box) =>
+  a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+
 /**
- * A phone's sheet: full width, above the keyboard (its bottom follows the visual viewport)
- * and at most the viewport less 160 px high, so the pin stays in sight above it.
+ * Where the popover goes: beside the pin (right, left), below or above it, whichever fits
+ * the pane without covering the pin; else the corner of the pane furthest from it.
+ */
+function placePopover(at: { x: number; y: number }, size: Size, h: number): React.CSSProperties {
+  const M = 8;
+  const w = Math.min(POP_W, size.width - 2 * M);
+  const height = Math.min(h || 320, size.height - 2 * M);
+  const pin: Box = { left: at.x - 18, right: at.x + 18, top: at.y - 40, bottom: at.y + 4 };
+  const clampX = (x: number) => Math.max(M, Math.min(x, size.width - M - w));
+  const clampY = (y: number) => Math.max(M, Math.min(y, size.height - M - height));
+  const tries = [
+    { left: at.x + POP_GAP, top: clampY(at.y - 40) },
+    { left: at.x - POP_GAP - w, top: clampY(at.y - 40) },
+    { left: clampX(at.x - w / 2), top: at.y + 12 },
+    { left: clampX(at.x - w / 2), top: at.y - 40 - M - height },
+  ];
+  const fits = (c: { left: number; top: number }) =>
+    c.left >= M &&
+    c.top >= M &&
+    c.left + w <= size.width - M &&
+    c.top + height <= size.height - M &&
+    !overlaps({ left: c.left, top: c.top, right: c.left + w, bottom: c.top + height }, pin);
+  let best = tries.find(fits);
+  if (!best) {
+    const corners = [
+      { left: M, top: M },
+      { left: size.width - M - w, top: M },
+      { left: M, top: size.height - M - height },
+      { left: size.width - M - w, top: size.height - M - height },
+    ];
+    const far = (c: { left: number; top: number }) =>
+      Math.hypot(c.left + w / 2 - at.x, c.top + height / 2 - at.y);
+    best = corners.find(fits) ?? corners.reduce((a, b) => (far(b) > far(a) ? b : a));
+  }
+  return { left: best.left, top: best.top, width: w, maxHeight: size.height - best.top - M };
+}
+
+/**
+ * A phone's sheet: full width, above the keyboard (its bottom follows the visual viewport).
+ * It may shrink to what's left above the keyboard: its fields scroll, its buttons stay.
  */
 function Sheet({
   children,
@@ -372,7 +463,7 @@ function Sheet({
   return (
     <div
       ref={cardRef}
-      className="comment-sheet"
+      className={`comment-sheet${box.max < 320 ? ' comment-sheet-tight' : ''}`}
       style={{ bottom: box.bottom, maxHeight: box.max }}
       onKeyDown={(e) => {
         if (e.key === 'Escape' && !e.defaultPrevented) {
@@ -392,5 +483,7 @@ function measure() {
   const vv = window.visualViewport;
   const h = vv?.height ?? window.innerHeight;
   const bottom = vv ? Math.max(0, window.innerHeight - (vv.offsetTop + vv.height)) : 0;
-  return { bottom, max: Math.max(220, h - 160) };
+  // Room above for the pin when there is room; above a keyboard, what is left (its fields
+  // scroll, its buttons stay at its foot).
+  return { bottom, max: Math.max(Math.min(h - 8, 200), h - 160) };
 }

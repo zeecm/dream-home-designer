@@ -33,3 +33,30 @@ export async function clickImage(page: Page, px: number, py: number) {
 }
 
 export const floorArea = (page: Page) => page.locator('.total-figure');
+
+/** Places a fridge in the sample's kitchen (desktop, Plan view), back in Select after. */
+export async function placeFridge(page: Page) {
+  const tools = page.getByRole('navigation', { name: 'Tools' });
+  await page.getByRole('button', { name: /^Furniture/ }).click();
+  await tools.getByLabel('Find furniture').fill('fridge');
+  await tools
+    .getByRole('button', { name: /^Fridge/ })
+    .first()
+    .click();
+  const box = await page.locator('[data-hit="room:rm_kitchen"]').boundingBox();
+  if (!box) throw new Error('no kitchen');
+  await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  const fridge = page.locator('[data-hit^="item:"]').first();
+  await expect(fridge).toHaveCount(1);
+  await page.getByRole('button', { name: /^Select/ }).click();
+  await page.keyboard.press('Escape');
+  await waitSaved(page);
+  return fridge;
+}
+
+/** The middle of the first element matching `selector`, on screen. */
+export async function centre(page: Page, selector: string) {
+  const box = await page.locator(selector).first().boundingBox();
+  if (!box) throw new Error(`nothing at ${selector}`);
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}

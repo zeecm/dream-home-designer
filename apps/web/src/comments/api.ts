@@ -39,10 +39,19 @@ export const ERROR_COPY: Record<string, string> = {
   network: 'Couldn’t post. Check your connection and try again.',
 };
 
-export const errorText = (e: unknown): string =>
-  e instanceof CommentError
+/** What the person was doing, for the copy when the network fails. */
+export type CommentAction = 'post' | 'save' | 'delete';
+
+const NETWORK: Record<CommentAction, string> = {
+  post: 'Couldn’t post. Check your connection and try again.',
+  save: 'Couldn’t save that. Check your connection and try again.',
+  delete: 'Couldn’t delete. Check your connection and try again.',
+};
+
+export const errorText = (e: unknown, action: CommentAction = 'post'): string =>
+  e instanceof CommentError && e.code !== 'network'
     ? (ERROR_COPY[e.code] ?? e.message)
-    : (ERROR_COPY.network ?? 'Something went wrong.');
+    : NETWORK[action];
 
 export interface Fetched {
   doc: CommentsDoc;
