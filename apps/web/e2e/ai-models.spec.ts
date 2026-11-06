@@ -165,6 +165,8 @@ test('the picture model chosen is the one renders use, and a refusal shows the p
   await page.keyboard.press('3');
   await page.getByRole('button', { name: 'Photo-real render' }).click();
   const render = page.getByRole('dialog', { name: 'Photo-real render' });
+  // The dialog opens on Exact (drawn on the device); this is the image model's side.
+  await render.getByRole('button', { name: 'AI impression' }).click();
   await expect(render.getByRole('img', { name: 'The 3D view' })).toBeVisible();
   await expect(render).toContainText('With Gemini (Google) (gemini-3-pro-image)');
   await render.getByRole('button', { name: 'Render' }).click();

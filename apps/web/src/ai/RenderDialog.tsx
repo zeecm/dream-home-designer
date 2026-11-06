@@ -7,6 +7,8 @@ import {
 } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../editor';
+import { ExactPanel, type ExactView } from '../exact/ExactPanel';
+import { NO_WEBGL2, hasWebGL2 } from '../exact/engine';
 import { capture3dFrom, capture3dView, download, fileStem } from '../exports';
 import { useLevel, useProject } from '../store';
 import { icons } from '../ui/icons';
@@ -40,22 +42,34 @@ const keepIdeas = (projectId: string, text: string) => {
   }
 };
 
-/** A picture of the 3D view to send, with the facts of what it shows. */
+/** A picture of the 3D view to send, with the facts of what it shows and its camera. */
 interface Shot {
   blob: Blob;
   url: string;
   facts?: SceneFacts;
-  /** Where it was taken from, to mark on the plan sent with it. */
-  camera?: SceneCamera;
+  /** Where it was taken from: the exact render's camera, and marked on the plan sent. */
+  camera: SceneCamera;
 }
 
+type Mode = 'exact' | 'ai';
+
 /**
- * The 3D view as it is, made into a photo-real picture by the person's image model. From
- * high up or outside the rooms (an orbit or cut-away view) it offers, and starts on, the
- * same direction from eye height in the room the view is centred on: from above, rooms
- * read as bigger than they are and models fill them with furniture that wouldn't fit.
+ * A photo-real picture of the 3D view, two ways. **Exact** (where it opens, every time): the
+ * app path traces the 3D model itself on this device, so nothing is added or moved
+ * (`ExactPanel`). **AI impression**: the 3D view as it is, made into a photo-real picture by
+ * the person's image model. From high up or outside the rooms (an orbit or cut-away view) both
+ * offer, and start on, the same direction from eye height in the room the view is centred on:
+ * from above, rooms read as bigger than they are and models fill them with furniture that
+ * wouldn't fit. Both use the same chosen camera, so switching compares like for like.
  */
-export function RenderDialog({ onClose }: { onClose: () => void }) {
+export function RenderDialog({
+  onClose,
+  onPauseView,
+}: {
+  onClose: () => void;
+  /** The 3D view underneath stops drawing (true) while an exact render runs. */
+  onPauseView?: (paused: boolean) => void;
+}) {
   const ref = useRef<HTMLDialogElement>(null);
   useAi(); // re-render when keys change
   const ai = imageSettings();
@@ -79,6 +93,11 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
   const [showView, setShowView] = useState(false);
   const view = shots ? (from === 'eye' && shots.eye ? shots.eye : shots.here) : null;
   const highUp = (shots?.here.facts?.height ?? 0) > OVERHEAD_HEIGHT;
+  // Exact, unless this browser can't (then why, and AI impression as today).
+  const [noExact, setNoExact] = useState<string | null>(() => (hasWebGL2() ? null : NO_WEBGL2));
+  const [mode, setMode] = useState<Mode>(() => (noExact ? 'ai' : 'exact'));
+  // Both pictures taken (or tried): the exact render starts from the chosen one.
+  const [settled, setSettled] = useState(false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: the view as the dialog opens on it
   useEffect(() => {
@@ -92,6 +111,10 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
       return { blob, url, camera, facts: level ? sceneFacts(level, camera) : undefined };
     };
     void (async () => {
+      await take();
+      if (live) setSettled(true);
+    })();
+    async function take() {
       let here: Shot;
       let camera: SceneCamera;
       try {
@@ -119,7 +142,7 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
         if (live)
           setStatus('Couldn’t take the eye-height picture, so the render will use this view.');
       }
-    })();
+    }
     return () => {
       live = false;
       for (const u of urls) URL.revokeObjectURL(u);
@@ -160,10 +183,68 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
     setBusy(null);
   };
 
+  // Where to render from: eye height in the room (the default from high up) or this view.
+  const choice = (ai: boolean) =>
+    shots?.eye && (
+      <fieldset className="segmented segmented-fill render-from">
+        <legend className="visually-hidden">Render from</legend>
+        <button
+          type="button"
+          aria-pressed={from === 'eye'}
+          disabled={ai && !!busy}
+          onClick={() => {
+            setFrom('eye');
+            setShowView(true);
+          }}
+        >
+          From eye height <span className="render-from-note">in {shots.eye.room}</span>
+        </button>
+        <button
+          type="button"
+          aria-pressed={from === 'here'}
+          disabled={ai && !!busy}
+          onClick={() => {
+            setFrom('here');
+            setShowView(true);
+          }}
+        >
+          From this view{' '}
+          <span className="render-from-note">
+            ({highUp ? 'overhead' : 'outside the rooms'}: rooms may look larger)
+          </span>
+        </button>
+      </fieldset>
+    );
+  const switcher = (
+    <fieldset className="segmented segmented-fill render-mode">
+      <legend className="visually-hidden">How to render</legend>
+      <button
+        type="button"
+        aria-pressed={mode === 'exact'}
+        disabled={!!noExact}
+        title={noExact ?? undefined}
+        onClick={() => setMode('exact')}
+      >
+        Exact
+      </button>
+      <button type="button" aria-pressed={mode === 'ai'} onClick={() => setMode('ai')}>
+        AI impression
+      </button>
+    </fieldset>
+  );
+  // The exact render's camera: the one chosen, with ceilings on from inside a room.
+  const exactView: ExactView | null =
+    settled && shots
+      ? from === 'eye' && shots.eye
+        ? { camera: shots.eye.camera, ceilings: true, key: 'eye' }
+        : { camera: shots.here.camera, ceilings: walking, key: 'here' }
+      : null;
+
   return (
     <dialog
       ref={ref}
       className="dialog render-dialog"
+      data-mode={mode}
       aria-labelledby="render-h"
       tabIndex={-1}
       // Only its own close: React passes a dialog opened inside it up the tree too.
@@ -175,43 +256,27 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
           {icons.close}
         </button>
       </header>
-      <div className="dialog-body">
+      <ExactPanel
+        active={mode === 'exact'}
+        view={exactView}
+        switcher={switcher}
+        choice={choice(false)}
+        onUnsupported={(why) => {
+          setNoExact(why);
+          setMode('ai');
+        }}
+        onPauseView={onPauseView}
+      />
+      <div className="dialog-body" hidden={mode !== 'ai'}>
+        {switcher}
+        {noExact && <p className="field-hint render-mode-note">{noExact}</p>}
         <p className="dialog-note">
           Your image model turns this view into a photograph-like picture, keeping the room and
           furniture as they are (plus anything your own ideas add). It’s an impression: details can
           differ. Best from inside a room: walk through, look where you like, then render.
         </p>
         <div className="render-pictures">
-          {shots?.eye && (
-            <fieldset className="segmented segmented-fill render-from">
-              <legend className="visually-hidden">Render from</legend>
-              <button
-                type="button"
-                aria-pressed={from === 'eye'}
-                disabled={!!busy}
-                onClick={() => {
-                  setFrom('eye');
-                  setShowView(true);
-                }}
-              >
-                From eye height <span className="render-from-note">in {shots.eye.room}</span>
-              </button>
-              <button
-                type="button"
-                aria-pressed={from === 'here'}
-                disabled={!!busy}
-                onClick={() => {
-                  setFrom('here');
-                  setShowView(true);
-                }}
-              >
-                From this view{' '}
-                <span className="render-from-note">
-                  ({highUp ? 'overhead' : 'outside the rooms'}: rooms may look larger)
-                </span>
-              </button>
-            </fieldset>
-          )}
+          {choice(true)}
           {view === shots?.here && shots.here.facts && shots.here.facts.view !== 'eye' && (
             // An honest word on what a view from above does to a render.
             <p className="field-hint render-warning">
@@ -282,7 +347,7 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
       </div>
       {/* The look and the model in the foot, always in sight: however short the screen, and
           however far the picture has scrolled, it shows which model (and cost) a render uses. */}
-      <footer className="dialog-foot">
+      <footer className="dialog-foot" hidden={mode !== 'ai'}>
         {ai ? (
           <p className="field-hint render-model">
             With {PROVIDERS[ai.provider].name} ({ai.model}), on your key: a few cents a picture.

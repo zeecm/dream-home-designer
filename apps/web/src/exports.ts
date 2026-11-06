@@ -250,6 +250,25 @@ export async function capture3dFrom(camera: SceneCamera): Promise<Blob> {
   });
 }
 
+/** The 3D view's shape (width over height), or null when it isn't on screen. */
+export function view3dAspect(): number | null {
+  const c = scene3d?.canvas;
+  return c && c.width > 0 && c.height > 0 ? c.width / c.height : null;
+}
+
+/**
+ * How far each inside door stands open in the 3D view now (a walk opens them as it nears;
+ * the orbit view leaves them as built, standing open), by opening id.
+ */
+export function shownDoors(): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const o of scene3d?.level()?.children ?? []) {
+    const { door, open } = o.userData as { door?: string; open?: number };
+    if (door && typeof open === 'number') out.set(door, open);
+  }
+  return out;
+}
+
 export async function download3dImage() {
   const name = useStore.getState().editor.doc.name;
   download(await capture3d(), `${fileStem(name)}-3d.png`);

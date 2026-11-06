@@ -120,6 +120,8 @@ test('on a phone: a photo-real render from the spot walked to, the walk standing
   await page.waitForTimeout(800);
   expect(await pose()).toBe(held);
   await thumb.lift();
+  // The dialog opens on Exact (drawn on the device); this is the image model's side.
+  await dialog.getByRole('button', { name: 'AI impression' }).tap();
   // The picture is taken of the walk's view (slowly, drawn in software at the phone's pixels).
   await expect(dialog.getByRole('img', { name: 'The 3D view' })).toBeVisible({ timeout: 60_000 });
   // At eye height already: no choice of where to render from.
@@ -205,6 +207,8 @@ for (const [width, height] of [
       await page.getByRole('button', { name: 'Switch to 3D' }).tap();
       await page.getByRole('button', { name: 'Photo-real render' }).tap();
       const dialog = page.getByRole('dialog', { name: 'Photo-real render' });
+      // The dialog opens on Exact (drawn on the device); this is the image model's side.
+      await dialog.getByRole('button', { name: 'AI impression' }).tap();
       await expect(dialog.getByText('With Gemini (Google) (gemini-3-pro-image)')).toBeInViewport({
         ratio: 1,
       });

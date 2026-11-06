@@ -37,7 +37,35 @@ const palette: Record<string, { color: string; roughness: number; emissive?: str
 };
 const fallback: (typeof palette)[string] = { color: '#ff00ff', roughness: 1 };
 
-export class MaterialCache {
+/** A material id's colour and roughness as the 3D view draws it (magenta for an unknown id). */
+export function paletteEntry(id: string): { color: string; roughness: number; emissive?: string } {
+  const custom = palette[id] ? undefined : finish(id);
+  return palette[id] ?? (custom ? { color: custom.color, roughness: custom.roughness } : fallback);
+}
+
+/** Where `LevelMeshes` gets its materials: the 3D view's, or the exact render's. */
+export interface MaterialSource {
+  get(id: string): THREE.Material;
+  /** Clear glass: windows, glass walls, clear-glazed door leaves. */
+  readonly glass: THREE.Material;
+  /** Frosted or fluted glass in a door. */
+  readonly frosted: THREE.Material;
+}
+
+/** A wallpaper's pattern as a texture, tiled at its real size (wall UVs run in metres). */
+export function wallpaperTexture(id: string): THREE.CanvasTexture | null {
+  const paper = isWallpaper(id) ? wallpaperCanvas(id) : null;
+  if (!paper) return null;
+  const map = new THREE.CanvasTexture(paper);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(1 / TILE, 1 / TILE);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.anisotropy = 4;
+  return map;
+}
+
+export class MaterialCache implements MaterialSource {
   private cache = new Map<string, THREE.Material>();
   readonly glass = new THREE.MeshStandardMaterial({
     color: '#9cc7e0',
@@ -60,20 +88,8 @@ export class MaterialCache {
     let m = this.cache.get(id);
     if (!m) {
       // A custom paint carries its colour in its id.
-      const custom = palette[id] ? undefined : finish(id);
-      const p =
-        palette[id] ?? (custom ? { color: custom.color, roughness: custom.roughness } : fallback);
-      // A wallpaper's pattern, tiled at its real size (wall UVs run in metres).
-      const paper = isWallpaper(id) ? wallpaperCanvas(id) : null;
-      let map: THREE.Texture | null = null;
-      if (paper) {
-        map = new THREE.CanvasTexture(paper);
-        map.wrapS = THREE.RepeatWrapping;
-        map.wrapT = THREE.RepeatWrapping;
-        map.repeat.set(1 / TILE, 1 / TILE);
-        map.colorSpace = THREE.SRGBColorSpace;
-        map.anisotropy = 4;
-      }
+      const p = paletteEntry(id);
+      const map = wallpaperTexture(id);
       m = new THREE.MeshStandardMaterial({
         color: map ? '#ffffff' : p.color,
         map,

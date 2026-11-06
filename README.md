@@ -87,7 +87,8 @@ for any plan.
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
 - Exact render: a photo-real picture drawn on your device from the 3D model itself (true
   light through the windows, lamps, soft shadows), so nothing is added or moved; free, no
-  key. [spec](docs/specs/exact-render.md)
+  key. Slice 1 built (the Exact side of the render dialog, Good quality); settings, real
+  textures and AI polish next. [spec](docs/specs/exact-render.md)
 
 ### Planned
 1. Slice 2s, the rest: notch depths on the contractor sheet and the estimate on every level.

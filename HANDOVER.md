@@ -444,6 +444,45 @@ Checked with the skill's `lint.mjs` and `inspect.mjs` (0 FAIL, 0 WARN at 1440, 7
 run the inspector with a `--no-sandbox` Chrome wrapper as root). Whether `/` should become
 the welcome page (and the app move) is the owner's call.
 
+**Exact render (slices 0 and 1, [spec](docs/specs/exact-render.md)):** the render dialog opens
+on **Exact | AI impression**, on Exact every time. Exact path traces the 3D model on the
+device: `buildExactScene` (packages/render) builds the same `LevelMeshes` as the 3D view with
+`PhotoMaterials` (physical versions of the same material ids) and adds only the sun, the sky
+(an equirect float texture), every lamp (`lampLights`: flush ceiling lights as spots, the rest
+points, candela as is) and the ground. `lampsAuto` (core) turns lamps on at night or in a room
+daylight doesn't reach. The engine is `three-gpu-pathtracer@0.0.23` (WebGL 2), pinned, lazily
+loaded (61 KB gzip) behind `ExactEngine` (`apps/web/src/exact/engine.ts`); `ExactRun` drives
+it (a step a frame, never more than one GPU step queued: a fence per step; time cap, Stop,
+Carry on, paused when hidden or on the AI side); exposure is metered on the first picture and
+set for good at 8 samples (AgX, ±3 EV about a typical room at that hour). The 3D view's
+frameloop rests while Exact renders. Tests set `window.__DHD_EXACT_TEST__` (size box, samples).
+- **Library bugs found (0.0.23 on three 0.170), handled in the adapter:** a mesh with several
+  materials (geometry groups: every wall) shifts the material of every mesh after it, because
+  materials are numbered per mesh but listed per slot; most paths then went black.
+  `flattenForTracing` hands the tracer one mesh per material, in world space (same
+  triangles). `WebGLPathTracer.dispose()` throws (`_renderQuad`); the adapter frees the parts.
+  The detectors aren't exported; `PrecisionDetector` is imported from its source.
+- **Spike measurements (6 Nov, this cloud machine: 4 CPUs, no GPU, so Chromium's SwiftShader
+  as in CI; the furnished sample from eye height):** prepare (flatten, BVH, textures, shader
+  link) 0.3–0.8 s; SwiftShader compiles the tracer's shader on its first draw, about 25 s; then
+  35–45 k pixel-samples a second (160 × 120: about 1.5 samples/s; 320 × 180: 0.6/s). 16 samples
+  at 160 × 120 take 35–50 s in all, inside the 60 s CI budget, so the pixel test runs in CI.
+  A GPU was not available here: the desktop and phone budgets (samples/s at 1600 px, first
+  picture, Good in 45 s) are **not measured yet**; use `/dev/exact-spike.html` on the dev
+  server on the reference devices.
+- **Sun through glazed windows reaches the floor** (spike `probe=auto`): at 4 pm, through a
+  kitchen window facing the sun, the sun patch read 2,547 cd/m² against 777 in the shade
+  beside it (3,536 with the pane left out; 32 samples, noisy); at 9 am 2,842 with glass and
+  2,889 without. No fallback needed.
+- **Tests:** `e2e/exact.spec.ts` (about 2.5 min under SwiftShader: one dialog flow with three
+  renders, the pixel test on a fixture room at 32 samples, the phone walk, no WebGL 2). The AI
+  render tests now click "AI impression" first.
+- **Seen, to check on a GPU at 256 samples:** at 20 samples a sunlit floor showed sparse
+  single dark pixels; the picture is warm where an oak floor bounces sunlight (physically so;
+  no white balance, which the spec leaves out).
+- **Left for slice 2+:** Quality, Time, Lamps and Brightness settings; hints; full-screen
+  viewer; real textures; Polish with AI; the slow-device estimate.
+
 ## 5. Owner to-dos
 
 - **Before the repo goes public:** `apps/web/public/samples/hdb-3room-type4.pdf` (and its PNG
