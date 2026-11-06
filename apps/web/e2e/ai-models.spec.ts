@@ -74,15 +74,26 @@ test('the model selects fill from the key’s own model list', async ({ page }) 
   ]);
   await expect(plans).toHaveValue('gemini-3-pro');
   const pictures = dialog.getByLabel('Model for pictures (photo-real renders)');
+  // The cheaper picture model suggested; the dearer one says so.
   await expect(pictures.locator('option')).toHaveText([
-    'Nano Banana Pro (recommended)',
-    'Nano Banana',
+    'Nano Banana (recommended, cheaper)',
+    'Nano Banana Pro (about 3× the price)',
   ]);
-  await expect(pictures).toHaveValue('gemini-3-pro-image');
+  await expect(pictures).toHaveValue('gemini-2.5-flash-image');
   // Asked once typing stopped, with the key, of Google only.
   expect(asked).toHaveLength(1);
   expect(asked[0]?.url).toContain('pageSize=200');
   expect(asked[0]?.key).toBe(KEY);
+  // Typing on keeps the list shown until the new key's comes: no jump back to the usual ones.
+  await dialog.getByLabel('API key').press('End');
+  await dialog.getByLabel('API key').pressSequentially('x');
+  expect(await optionTexts(page, 'Model for plans and layouts')).toEqual([
+    'Gemini 3 Pro (recommended)',
+    'Gemini 2.5 Pro',
+    'Gemini 2.5 Flash',
+  ]);
+  await expect.poll(() => asked.length).toBe(2);
+  expect(asked[1]?.key).toBe(`${KEY}x`);
   // Claude makes no pictures: no picture model to pick.
   await dialog.getByLabel('Provider').selectOption('anthropic');
   await expect(dialog.getByLabel('Model for pictures (photo-real renders)')).toHaveCount(0);
@@ -100,9 +111,9 @@ test('when the models can’t be listed, the usual ones are offered', async ({ p
     'gemini-2.5-flash',
   ]);
   expect(await optionTexts(page, 'Model for pictures (photo-real renders)')).toEqual([
-    'gemini-3-pro-image (recommended)',
+    'gemini-2.5-flash-image (recommended, cheaper)',
+    'gemini-3-pro-image (about 3× the price)',
     'gemini-3.1-flash-image',
-    'gemini-2.5-flash-image',
   ]);
   // A refused key says so.
   await page.route('https://api.openai.com/v1/models', (route) =>
@@ -140,7 +151,8 @@ test('the picture model chosen is the one renders use, and a refusal shows the p
   await dialog.getByLabel('API key').fill(KEY);
   const pictures = dialog.getByLabel('Model for pictures (photo-real renders)');
   await expect(pictures.locator('option')).toHaveCount(2);
-  await pictures.selectOption('gemini-2.5-flash-image');
+  // The dearer one, picked knowingly.
+  await pictures.selectOption('gemini-3-pro-image');
   await dialog.getByRole('button', { name: 'Save' }).click();
   await expect(dialog).toHaveCount(0);
   const stored = JSON.parse(
@@ -148,20 +160,59 @@ test('the picture model chosen is the one renders use, and a refusal shows the p
   );
   expect(stored.keys.gemini).toMatchObject({
     model: 'gemini-3-pro',
-    imageModel: 'gemini-2.5-flash-image',
+    imageModel: 'gemini-3-pro-image',
   });
 
   await page.keyboard.press('3');
   await page.getByRole('button', { name: 'Photo-real render' }).click();
   const render = page.getByRole('dialog', { name: 'Photo-real render' });
   await expect(render.getByRole('img', { name: 'The 3D view' })).toBeVisible();
-  await expect(render).toContainText('With Gemini (Google) (gemini-2.5-flash-image)');
+  await expect(render).toContainText('With Gemini (Google) (gemini-3-pro-image)');
   await render.getByRole('button', { name: 'Render' }).click();
   await expect(render).toContainText(
     'Gemini turned the request down (400): Unsupported aspect ratio for this model (key [key]).',
   );
   await expect(render).not.toContainText(KEY);
-  expect(rendered).toEqual([`${GEMINI}/models/gemini-2.5-flash-image:generateContent`]);
+  expect(rendered).toEqual([`${GEMINI}/models/gemini-3-pro-image:generateContent`]);
+});
+
+test('saving a key again never changes its picture model by itself', async ({ page }) => {
+  await page.route(isList, (route) => route.fulfill({ status: 200, json: geminiModels }));
+  // A key saved before the picture choice (renders with the default), and one with the
+  // dearer model picked.
+  await page.addInitScript(() => {
+    window.sessionStorage.setItem(
+      'dhd-ai',
+      JSON.stringify({
+        active: 'gemini',
+        keys: {
+          gemini: { key: 'AIza-old-key-1234567890', model: 'gemini-2.5-pro' },
+          openai: { key: 'sk-old-key-1234567890', model: 'gpt-5', imageModel: 'gpt-image-1-mini' },
+        },
+      }),
+    );
+  });
+  const dialog = await openSettings(page);
+  const pictures = dialog.getByLabel('Model for pictures (photo-real renders)');
+  await expect(pictures.locator('option')).toHaveCount(2);
+  await expect(pictures).toHaveValue('gemini-2.5-flash-image');
+  await expect(dialog.getByLabel('Model for plans and layouts')).toHaveValue('gemini-2.5-pro');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  const stored = async () =>
+    JSON.parse((await page.evaluate(() => window.sessionStorage.getItem('dhd-ai'))) ?? '{}');
+  expect((await stored()).keys.gemini).toMatchObject({
+    model: 'gemini-2.5-pro',
+    imageModel: 'gemini-2.5-flash-image',
+  });
+  // A saved model the list doesn't have (the listing is blocked here) stays, marked saved.
+  await page.getByRole('button', { name: 'Projects' }).click();
+  await page.getByRole('button', { name: 'AI assistant…' }).click();
+  await dialog.getByLabel('Provider').selectOption('openai');
+  await expect(dialog).toContainText('Couldn’t list the models on this key');
+  await expect(pictures).toHaveValue('gpt-image-1-mini');
+  await expect(pictures.locator('option').first()).toHaveText('gpt-image-1-mini (saved, cheaper)');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  expect((await stored()).keys.openai.imageModel).toBe('gpt-image-1-mini');
 });
 
 test('Test checks both models, without making a picture', async ({ page }) => {
@@ -177,7 +228,7 @@ test('Test checks both models, without making a picture', async ({ page }) => {
   await page.route(endsWith(':countTokens'), (route) =>
     route.fulfill({
       status: 404,
-      json: { error: { code: 404, message: 'models/gemini-3-pro-image is not found.' } },
+      json: { error: { code: 404, message: 'models/gemini-2.5-flash-image is not found.' } },
     }),
   );
   const dialog = await openSettings(page);
@@ -192,7 +243,63 @@ test('Test checks both models, without making a picture', async ({ page }) => {
   const status = dialog.locator('.ai-status');
   await expect(status).toContainText('Plans and layouts (gemini-3-pro): it works.');
   await expect(status).toContainText(
-    'Pictures (gemini-3-pro-image): Gemini turned the request down (404): models/gemini-3-pro-image is not found.',
+    'Pictures (gemini-2.5-flash-image): Gemini turned the request down (404): models/gemini-2.5-flash-image is not found.',
   );
   expect(generated).toEqual([`${GEMINI}/models/gemini-3-pro:generateContent`]);
+});
+
+test('a test still running when the provider changes says nothing afterwards', async ({ page }) => {
+  await page.route(isList, (route) => route.fulfill({ status: 200, json: geminiModels }));
+  let answer: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    answer = resolve;
+  });
+  await page.route(endsWith(':generateContent'), async (route) => {
+    await held;
+    await route
+      .fulfill({
+        status: 200,
+        json: { candidates: [{ content: { parts: [{ text: '{"ok": true}' }] } }] },
+      })
+      .catch(() => {}); // the page cancelled it
+  });
+  const dialog = await openSettings(page);
+  await dialog.getByLabel('Provider').selectOption('gemini');
+  await dialog.getByLabel('API key').fill(KEY);
+  await dialog.getByRole('button', { name: 'Test' }).click();
+  const status = dialog.locator('.ai-status');
+  await expect(status).toHaveText('Testing…');
+  await dialog.getByLabel('Provider').selectOption('anthropic');
+  await expect(status).toHaveText('');
+  answer();
+  await page.waitForTimeout(500);
+  await expect(status).toHaveText('');
+  // Back on Gemini, testing again isn't held up by the stopped one.
+  await dialog.getByLabel('Provider').selectOption('gemini');
+  await dialog.getByLabel('API key').fill(KEY);
+  await expect(dialog.getByRole('button', { name: 'Test' })).toBeEnabled();
+});
+
+test('closing the render dialog with a held Enter doesn’t open it again', async ({ page }) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('3');
+  const open = page.getByRole('button', { name: 'Photo-real render' });
+  await open.focus();
+  await page.keyboard.press('Enter');
+  const render = page.getByRole('dialog', { name: 'Photo-real render' });
+  await expect(render).toBeVisible();
+  await render.getByRole('button', { name: 'Close' }).focus();
+  // Held down: the first press closes it, the repeats land on the button it came from.
+  await page.keyboard.down('Enter');
+  await expect(render).toHaveCount(0);
+  await expect(open).toBeFocused();
+  await page.keyboard.down('Enter');
+  await page.keyboard.down('Enter');
+  await page.keyboard.up('Enter');
+  await page.waitForTimeout(300);
+  await expect(render).toHaveCount(0);
+  // A fresh press still opens it.
+  await page.keyboard.press('Enter');
+  await expect(render).toBeVisible();
 });

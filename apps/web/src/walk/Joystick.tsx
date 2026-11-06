@@ -7,7 +7,16 @@ const RADIUS = 48;
  * A thumb stick for touch screens: drag the knob; release to stop. One walks (bottom left),
  * the other looks (bottom right).
  */
-export function Joystick({ stick, look = false }: { stick: StickInput; look?: boolean }) {
+export function Joystick({
+  stick,
+  look = false,
+  disabled = false,
+}: {
+  stick: StickInput;
+  look?: boolean;
+  /** Let go and ignore the finger (a dialog is open over the walk). */
+  disabled?: boolean;
+}) {
   const base = useRef<HTMLDivElement>(null);
   const [knob, setKnob] = useState({ x: 0, y: 0 });
   const active = useRef<number | null>(null);
@@ -37,6 +46,12 @@ export function Joystick({ stick, look = false }: { stick: StickInput; look?: bo
     setKnob({ x: 0, y: 0 });
     stick.current = { x: 0, y: 0 };
   };
+  // Disabled mid-gesture: the knob springs back, and the finger still down is ignored until
+  // it lifts and touches again.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on being disabled
+  useEffect(() => {
+    if (disabled) stop();
+  }, [disabled]);
 
   return (
     <div
@@ -46,6 +61,7 @@ export function Joystick({ stick, look = false }: { stick: StickInput; look?: bo
       aria-hidden="true"
       data-testid={look ? 'look-stick' : 'walk-stick'}
       onPointerDown={(e) => {
+        if (disabled) return;
         active.current = e.pointerId;
         e.currentTarget.setPointerCapture(e.pointerId);
         update(e);

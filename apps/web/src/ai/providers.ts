@@ -129,18 +129,31 @@ export class HttpError extends Error {
 /** The longest provider message shown. */
 const MESSAGE_MAX = 200;
 
+/** A token's dotted parts after its first (sk-proj-abc.def123, AQ.abc.def): all of it goes. */
+const DOTTED = String.raw`(?:\.[\w*-]+)*`;
+
+/** Whether a long run of token characters looks like a secret rather than words or a name. */
+const secretLike = (s: string) =>
+  (/[A-Z]/.test(s) && /[a-z]/.test(s) && /\d/.test(s)) || /^[a-f0-9]{32,}$/i.test(s);
+
 /**
- * `text` on one line, without anything that looks like an API key: `key` itself, and the
- * shapes of Anthropic's, OpenAI's and Google's keys.
+ * `text` on one line, without anything that looks like an API key or token: `key` itself;
+ * the shapes of Anthropic's and OpenAI's keys (sk-…), Google's (AIza…, AQ.…, ya29.…) and
+ * others' (sk_live_…); and any long random-looking run (base64 or hex). Lower-case names
+ * such as models/gemini-2.5-flash-image-preview stay readable.
  */
 export function redact(text: string, key?: string): string {
   let out = text;
   const k = key?.trim();
   if (k && k.length >= 6) out = out.split(k).join('[key]');
   return out
-    .replace(/\bsk-[A-Za-z0-9_*-]{6,}/g, '[key]')
-    .replace(/\bAIza[0-9A-Za-z_-]{10,}/g, '[key]')
-    .replace(/\b(Bearer|key=)\s*[A-Za-z0-9._~+/=-]{12,}/gi, '$1 [key]')
+    .replace(new RegExp(String.raw`\bsk-[\w*-]{6,}${DOTTED}`, 'g'), '[key]')
+    .replace(/\bsk_[a-z]+_[\w*]{8,}/g, '[key]')
+    .replace(/\bAIza[\w-]{10,}/g, '[key]')
+    .replace(new RegExp(String.raw`\bAQ\.[\w-]{20,}${DOTTED}`, 'g'), '[key]')
+    .replace(new RegExp(String.raw`\bya29\.[\w-]{10,}${DOTTED}`, 'g'), '[key]')
+    .replace(/\b(Bearer|key=)\s*[\w.~+/=-]{12,}/gi, '$1 [key]')
+    .replace(/[\w\-.+/=]{32,}/g, (run) => (secretLike(run) ? '[key]' : run))
     .replace(/[\p{Cc}\s]+/gu, ' ')
     .trim();
 }

@@ -350,6 +350,15 @@ export function TopBar() {
             { value: '3d', label: '3D', title: '3D only (3)' },
           ]}
         />
+        {/* On a phone, one button to the other view: the screen already shows which is on. */}
+        <button
+          type="button"
+          className="btn view-toggle"
+          title={viewMode === '3d' ? 'Plan only (1)' : '3D only (3)'}
+          onClick={() => setViewMode(viewMode === '3d' ? 'plan' : '3d')}
+        >
+          {viewMode === '3d' ? 'Plan' : '3D'}
+        </button>
       </div>
     </header>
   );

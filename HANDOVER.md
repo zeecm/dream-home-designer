@@ -607,13 +607,17 @@ opens on OpenAI. Renders switch between the render and the 3D view. Layout thumb
 rooms, new or changed walls in the accent colour and walls taken down dashed; an option with
 nothing applicable has no Use button. Touch: 44 px buttons in dialogs and the trace bar.
 
-**Photo-real renders (5 Nov):** "Photo-real render" on the 3D view (and, with a mouse, while
-walking) takes a picture of the view as it is (`capture3d`) and sends it, with a look (as
+**Photo-real renders (5 Nov):** "Photo-real render" on the 3D view (and while walking: under
+Footsteps, a 44 px camera icon on touch screens, with the mini-map moved down below it) takes a picture of the view as it is (`capture3d`) and sends it, with a look (as
 designed, warm modern, Scandinavian, modern luxe, industrial), to the person's image model
 (`ai/render.ts`: OpenAI `images/edits` with `gpt-image-1`, or Gemini
 `gemini-2.5-flash-image` generateContent with image output; Claude makes no pictures). The
 picture shows in the dialog to download. The prompt keeps the camera, room and furniture
-and asks only for materials and light. 
+and asks only for materials and light. While the dialog is open over a walk, the walk
+stands still (`paused` on `WalkControls`; the sticks let go and ignore a finger still down,
+`disabled` on `Joystick`), so the picture is the view the person saw; closing it carries on
+from the same spot (6 Nov, owner: "mobile doesn't have the render option in walk through";
+`e2e/walk-render.spec.ts`).
 
 **AI model pickers (6 Nov, owner reports: Gemini 400 with gemini-3-pro-image; type-in model
 names):** the AI assistant has two selects, "Model for plans and layouts" and, for OpenAI and
@@ -624,14 +628,22 @@ reading and Test as a JSON request) has it moved to pictures on load (`migrateKe
 key is typed (600 ms pause), the selects fill from the provider's own list with that key,
 straight from the browser (`ai/models.ts`: Gemini `GET /v1beta/models`, OpenAI `GET
 /v1/models`, Anthropic `GET /v1/models`), friendly names where given, best first, the default
-marked "(recommended)" (Gemini: best listed Pro; gemini-3-pro-image, else
-gemini-2.5-flash-image). If listing fails, `CURATED` in `credentials.ts` with a hint; a saved
-model not listed stays as "(saved)". Test checks the plans model with JSON and the picture
-model without making a picture (Gemini `countTokens`, OpenAI `GET /v1/models/{id}`), a line
-each. Every failed provider call (trace, layouts, render, Test, listing) now shows what the
+marked "(recommended)" (Gemini: best listed Pro; pictures: the cheaper gemini-2.5-flash-image
+and gpt-image-1, since every render costs; `priceNote` labels "cheaper" / "about 3× the
+price"). A saved picture model, or the default a key saved before the choice renders with,
+is never changed by saving again. OpenAI text models are an allow-list (chat-completions
+models that take images); Gemini text models start `gemini-`. The selects keep the last list
+while a changed key's is looked up, falling back per job. If listing fails, `CURATED` in
+`credentials.ts` with a hint; a saved model not listed stays as "(saved)". Test checks the
+plans model with JSON and the picture model without making a picture (Gemini `countTokens`,
+OpenAI `GET /v1/models/{id}`), a line each; changing the provider, key or a model stops it.
+Every failed provider call (trace, layouts, render, Test, listing) now shows what the
 provider said (`failure`/`providerMessage` in `providers.ts`: `error.message`, cut to 200
-characters, anything key-like redacted, shown as text): "Gemini turned the request down
-(400): …". Gemini's 400 "API key not valid" counts as a refused key. The e2e AI specs abort
+characters, shown as text, with keys and tokens redacted: sk-…, sk_live_…, AIza…, AQ.…,
+ya29.…, Bearer …, and long mixed-case or hex runs; lower-case model names stay): "Gemini
+turned the request down (400): …". Gemini's 400 "API key not valid" counts as a refused key.
+`input_fidelity: high` goes only to gpt-image-1 (`HIGH_FIDELITY`). A held Enter that closes
+the render dialog doesn't reopen it from the button focus returns to. The e2e AI specs abort
 any provider request a test doesn't mock (`ai-models.spec.ts`).
 
 **AI: suggested layouts (stage 2, 5 Nov):** "Suggest layouts with AI" in the plan's

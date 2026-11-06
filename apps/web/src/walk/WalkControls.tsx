@@ -69,6 +69,7 @@ export function WalkControls({
   stick,
   lookStick,
   pose,
+  paused = false,
   initial,
   onLeave,
 }: {
@@ -78,6 +79,11 @@ export function WalkControls({
   lookStick?: StickInput;
   /** Shared with the mini-map, which reads it every frame. */
   pose: MutableRefObject<WalkPose | null>;
+  /**
+   * Stand still: no walking or looking (a render's dialog is open, and the picture is of the
+   * view as it was). The pose and lens are kept, so the walk carries on from there.
+   */
+  paused?: boolean;
   /** Where to start (the last walk's spot), or null for the plan's start point. */
   initial?: () => WalkPose | null;
   /** Told where the walk ended, however it ended (Esc, another view, another plan). */
@@ -100,6 +106,8 @@ export function WalkControls({
   const keys = useRef(new Set<string>());
   const leave = useRef(onLeave);
   leave.current = onLeave;
+  const still = useRef(paused);
+  still.current = paused;
   // Hold on to the pose object itself: the canvas has its own renderer, so the parent can
   // clear its ref before this cleanup runs.
   useEffect(() => {
@@ -160,7 +168,7 @@ export function WalkControls({
     el.style.touchAction = 'none';
     const look = (dx: number, dy: number, speed = LOOK_SPEED) => {
       const p = pose.current;
-      if (!p) return;
+      if (!p || still.current) return;
       p.yaw += dx * speed;
       p.pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, p.pitch - dy * speed));
     };
@@ -236,7 +244,7 @@ export function WalkControls({
 
   useFrame((_, dt) => {
     const p = pose.current;
-    if (!p) return;
+    if (!p || still.current) return;
     const ls = lookStick?.current;
     if (ls && (ls.x !== 0 || ls.y !== 0)) {
       const t = Math.min(dt, 0.1) * STICK_TURN;

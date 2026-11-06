@@ -1,5 +1,5 @@
 import { type AiSettings, CURATED, PROVIDERS, type Provider } from './credentials';
-import { AiError, errorBody, failure, timeoutSignal } from './providers';
+import { AiError, anySignal, errorBody, failure, timeoutSignal } from './providers';
 
 /** A model to choose: its id exactly as the provider lists it, and a name to show. */
 export interface ModelOption {
@@ -90,8 +90,8 @@ export function parseGemini(body: unknown): ModelLists {
       id,
       name: typeof m.displayName === 'string' && m.displayName ? m.displayName : id,
     };
-    if (/image/.test(id)) image.push(option);
-    else if (!GEMINI_NOT_TEXT.test(id)) text.push(option);
+    if (/image|nano-banana/.test(id)) image.push(option);
+    else if (/^gemini-/.test(id) && !GEMINI_NOT_TEXT.test(id)) text.push(option);
   }
   return { text: tidy(text), image: tidy(image) };
 }
@@ -102,14 +102,11 @@ export function parseOpenAi(body: unknown): ModelLists {
   const ids = (Array.isArray(data) ? data : [])
     .map((m) => m?.id)
     .filter((id): id is string => typeof id === 'string');
-  const text = ids.filter(
-    (id) =>
-      /^(gpt-|o\d)/.test(id) &&
-      // Chat models that take images and answer to a strict schema.
-      !/^gpt-(3|4)(\.5)?(-|$)/.test(id) &&
-      !/audio|realtime|tts|transcribe|image|search|instruct|embedding|moderation|codex|computer|oss|deep-research/.test(
-        id,
-      ),
+  // Only chat-completions models that take an image and answer to a strict schema (and
+  // their dated snapshots): not o1-mini or o3-mini (no images), nor the -pro models (not
+  // on chat completions), audio, search or the like.
+  const text = ids.filter((id) =>
+    /^(gpt-(4o|4\.1|5(\.\d+)?)(-mini|-nano)?|o1|o3|o4-mini)(-\d{4}-\d{2}-\d{2})?$/.test(id),
   );
   const image = ids.filter((id) => /^gpt-image-/.test(id));
   const opt = (id: string) => ({ id, name: id });
@@ -142,9 +139,9 @@ export function curated(p: Provider): ModelLists {
 }
 
 /**
- * The model to suggest from those listed: the provider's default when listed; for Gemini,
- * the best Pro for plans and gemini-3-pro-image (else gemini-2.5-flash-image) for pictures;
- * otherwise the best listed.
+ * The model to suggest from those listed: the provider's default when listed (for pictures,
+ * the cheaper gemini-2.5-flash-image and gpt-image-1: every render costs); for Gemini's
+ * plans, the best Pro; otherwise the best listed.
  */
 export function recommended(
   p: Provider,
@@ -153,11 +150,6 @@ export function recommended(
 ): string | undefined {
   if (p === 'gemini' && kind === 'text') {
     return ids.find((id) => rank(id).tier === 0 && !SNAPSHOT.test(id)) ?? ids[0];
-  }
-  if (p === 'gemini' && kind === 'image') {
-    return (
-      ['gemini-3-pro-image', 'gemini-2.5-flash-image'].find((id) => ids.includes(id)) ?? ids[0]
-    );
   }
   const fallback = kind === 'text' ? PROVIDERS[p].model : PROVIDERS[p].imageModel;
   return fallback && ids.includes(fallback) ? fallback : ids[0];
@@ -178,7 +170,10 @@ async function getJson(
     throw new AiError('network', 'Couldn’t reach the provider (network or browser block).');
   }
   if (!res.ok) throw failure(p, res.status, await errorBody(res), key);
-  return (await res.json()) as unknown;
+  const body = (await res.json()) as unknown;
+  // An answer that comes after the key changed (or the dialog closed) is never used.
+  signal.throwIfAborted();
+  return body;
 }
 
 /**
@@ -235,8 +230,13 @@ export async function listModels(
  * Checks the key can use its picture model without making a picture: Gemini counts the
  * tokens of a word (free), OpenAI looks the model up.
  */
-export async function checkPictureModel(ai: AiSettings, model: string): Promise<void> {
-  const signal = timeoutSignal(30_000);
+export async function checkPictureModel(
+  ai: AiSettings,
+  model: string,
+  cancel?: AbortSignal,
+): Promise<void> {
+  const timeout = timeoutSignal(30_000);
+  const signal = cancel ? anySignal([cancel, timeout]) : timeout;
   const k = ai.key.trim();
   let res: Response;
   try {
@@ -253,6 +253,7 @@ export async function checkPictureModel(ai: AiSettings, model: string): Promise<
             signal,
           });
   } catch {
+    if (cancel?.aborted) throw new AiError('cancelled', 'Cancelled.');
     throw new AiError('network', 'Couldn’t reach the provider. Check your connection.');
   }
   if (!res.ok) throw failure(ai.provider, res.status, await errorBody(res), k);

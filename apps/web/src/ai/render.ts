@@ -16,6 +16,9 @@ const prompt = (style: RenderStyle) =>
 
 const TIMEOUT = 240_000;
 
+/** OpenAI image models known to take `input_fidelity` (gpt-image-1 and its snapshots). */
+export const HIGH_FIDELITY = /^gpt-image-1(-\d{4}-\d{2}-\d{2})?$/;
+
 async function blobToBase64(b: Blob): Promise<string> {
   const buf = new Uint8Array(await b.arrayBuffer());
   let s = '';
@@ -67,8 +70,9 @@ export async function renderPhoto(
       form.append('image', view, 'view.png');
       form.append('prompt', prompt(style));
       form.append('size', 'auto');
-      // Keep the room as it is drawn (walls, furniture), not a loose impression of it.
-      form.append('input_fidelity', 'high');
+      // Keep the room as it is drawn (walls, furniture), not a loose impression of it: only
+      // where the model is known to take it (gpt-image-1-mini, say, turns it down).
+      if (HIGH_FIDELITY.test(ai.model)) form.append('input_fidelity', 'high');
       res = await fetch('https://api.openai.com/v1/images/edits', {
         method: 'POST',
         headers: { authorization: `Bearer ${ai.key}` },
