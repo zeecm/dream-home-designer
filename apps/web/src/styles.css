@@ -2951,3 +2951,102 @@ h3.field-label {
     border-radius: var(--radius-card) var(--radius-card) 0 0;
   }
 }
+
+/* ---------------------------------------------------------------- electrical points */
+
+/* In metres inside the plan; strokes stay in screen pixels (non-scaling, as all the plan). */
+.elec-hit {
+  fill: transparent;
+  stroke: none;
+}
+.elec-ring {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-width: 1.5px;
+}
+.elec-point:hover .elec-ring,
+.elec-point:hover .elec-hit {
+  fill: var(--accent-soft);
+}
+.elec-trunk {
+  fill: none;
+  stroke: var(--wall);
+  stroke-width: 1.4px;
+  stroke-dasharray: 6 4;
+}
+.elec-height {
+  fill: var(--wall);
+  font-weight: 600;
+  stroke: var(--surface);
+  stroke-width: 3px;
+  paint-order: stroke;
+  stroke-linejoin: round;
+}
+.elec-warn circle {
+  fill: var(--negative);
+  stroke: var(--surface);
+  stroke-width: 1.5px;
+}
+.elec-warn text {
+  fill: #ffffff;
+  font-weight: 700;
+}
+.elec-trunk-preview {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+.elec-icon {
+  flex: none;
+  color: var(--text);
+}
+.elec-icon-wall {
+  stroke: currentColor;
+  stroke-width: 2.4;
+}
+.elec-kind-list button {
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
+  height: auto;
+  min-height: 40px;
+  padding: 2px 8px 2px 4px;
+  text-align: left;
+}
+.elec-warnings {
+  margin: 0 0 4px;
+}
+.trunking-bar .btn {
+  flex: 1 1 auto;
+}
+@media (pointer: coarse) {
+  .elec-kind-list button {
+    min-height: 44px;
+  }
+  .trunking-bar .btn {
+    min-height: 44px;
+  }
+}
+/* Compact rows beside the plan; one sideways row on a phone (the tool panel). */
+.palette .elec-kind-list button {
+  min-height: 34px;
+}
+.point-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: var(--fs-body);
+}
+.point-facts dt {
+  color: var(--muted);
+}
+.point-facts dd {
+  margin: 0;
+}
+.elec-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}

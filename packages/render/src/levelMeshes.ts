@@ -1,5 +1,8 @@
 import {
+  COMPRESSOR_DEPTH,
   DOOR_LEAF_THICKNESS,
+  ELEC_KINDS,
+  type ElecPoint,
   type FurnitureMaterial,
   type Item,
   type LeafPose,
@@ -19,7 +22,9 @@ import {
   openingSpan,
   openingsOnWall,
   outsideOpenings,
+  pointPosition,
   roomShapes,
+  trunkingPath,
   wallFootprints,
   wallFrame,
   wallPieces,
@@ -112,6 +117,10 @@ function placeLeaves(group: THREE.Object3D, poses: LeafPose[]): void {
     mesh.rotation.y = -Math.atan2(l.b.y - l.a.y, l.b.x - l.a.x);
   });
 }
+
+/** Where a switch's rockers sit across its plate, one per gang. */
+const gangs = (n: number, w: number) =>
+  Array.from({ length: n }, (_, i) => (i - (n - 1) / 2) * (w / (n + 0.5)));
 
 export class LevelMeshes {
   readonly group = new THREE.Group();
@@ -279,6 +288,23 @@ export class LevelMeshes {
         this.modelFor(item) ? 'model' : 'boxes',
       ].join('/');
       put(`item:${item.id}`, key, () => this.buildItem(item, level.elevation));
+    }
+
+    // Electrical points on walls (faceplates, aircon units), compressors and trunking; not
+    // ceiling points, and nothing to walk into.
+    for (const p of Object.values(level.points ?? {})) {
+      if (ELEC_KINDS[p.kind].place === 'ceiling') continue;
+      const pos = pointPosition(level, p);
+      if (!pos) continue;
+      const path = trunkingPath(level, p);
+      const key = [
+        p.kind,
+        p.gang ?? 1,
+        pointsKey([pos.at, pos.normal ?? { x: 0, y: 0 }, ...path]),
+        r(pos.height),
+        r(level.elevation),
+      ].join('/');
+      put(`point:${p.id}`, key, () => this.buildPoint(p, level, path));
     }
 
     for (const [id, part] of this.parts) {
@@ -498,6 +524,98 @@ export class LevelMeshes {
       out.push(mesh);
     }
     return out;
+  }
+
+  /** A point in 3D: a white plate 8 mm proud of its wall, an aircon unit, a compressor. */
+  private buildPoint(p: ElecPoint, level: Level, path: Vec2[]): THREE.Object3D[] {
+    const pos = pointPosition(level, p);
+    if (!pos) return [];
+    const info = ELEC_KINDS[p.kind];
+    const y0 = level.elevation;
+    const white = this.materials.get('faceplate');
+    const dark = this.materials.get('faceplate-detail');
+    const group = new THREE.Group();
+    group.name = `point:${p.id}`;
+    group.userData = { kind: 'point', pointId: p.id };
+    const box = (w: number, h: number, d: number, m: THREE.Material) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+      mesh.name = `point:${p.id}`;
+      return mesh;
+    };
+    if (p.kind === 'compressor') {
+      const { w, h } = info.plate;
+      const mesh = box(w, h, COMPRESSOR_DEPTH, white);
+      mesh.position.set(pos.at.x, y0 + h / 2, pos.at.y);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      // The fan's grille, on its front (plan +y).
+      const fan = new THREE.Mesh(new THREE.CylinderGeometry(h * 0.33, h * 0.33, 0.01, 24), dark);
+      fan.rotation.x = Math.PI / 2;
+      fan.position.set(pos.at.x - w * 0.12, y0 + h / 2, pos.at.y + COMPRESSOR_DEPTH / 2 + 0.004);
+      group.add(mesh, fan);
+      return [group];
+    }
+    const n = pos.normal;
+    const d = pos.dir;
+    if (!n || !d) return [];
+    const turn = -Math.atan2(d.y, d.x);
+    // In the wall's own frame: x along it, y up, z out of the face.
+    const at = (u: number, up: number, out: number, mesh: THREE.Object3D) => {
+      mesh.position.set(pos.at.x + d.x * u + n.x * out, y0 + up, pos.at.y + d.y * u + n.y * out);
+      // Face +z out of the wall: the box's z along the normal.
+      mesh.rotation.y = turn;
+      if (n.x * -d.y + n.y * d.x < 0) mesh.rotation.y = turn + Math.PI;
+      group.add(mesh);
+    };
+    if (p.kind === 'aircon') {
+      const { w, h } = info.plate;
+      const depth = 0.22;
+      const unit = box(w, h, depth, white);
+      unit.castShadow = true;
+      at(0, pos.height - h / 2, depth / 2, unit);
+      // Its louvre along the bottom front.
+      at(0, pos.height - h + 0.04, depth + 0.002, box(w * 0.9, 0.025, 0.004, dark));
+    } else {
+      const { w, h } = info.plate;
+      at(0, pos.height, 0.004, box(w, h, 0.008, white));
+      // Something on the plate so it reads: an outlet's slot, a switch's rocker per gang.
+      const marks =
+        p.kind === 'socket-double'
+          ? [-w / 4, w / 4]
+          : p.kind === 'switch'
+            ? gangs(p.gang ?? 1, w)
+            : [0];
+      for (const u of marks) {
+        const sw = p.kind === 'switch';
+        at(u, pos.height, 0.0085, box(sw ? 0.018 : 0.03, sw ? 0.034 : 0.022, 0.002, dark));
+      }
+    }
+    // Trunking: along the route at the unit's top, then down to the compressor.
+    if (p.kind === 'aircon' && path.length >= 2) {
+      const ty = y0 + pos.height - 0.06;
+      const route = path.map((q, i) =>
+        i === 0 ? { x: q.x + n.x * 0.05, y: q.y + n.y * 0.05 } : q,
+      );
+      for (let i = 1; i < route.length; i++) {
+        const a = route[i - 1] as Vec2;
+        const b = route[i] as Vec2;
+        const len = Math.hypot(b.x - a.x, b.y - a.y);
+        if (len < 1e-3) continue;
+        const seg = box(len + 0.06, 0.06, 0.06, white);
+        seg.position.set((a.x + b.x) / 2, ty, (a.y + b.y) / 2);
+        seg.rotation.y = -Math.atan2(b.y - a.y, b.x - a.x);
+        group.add(seg);
+      }
+      const end = route[route.length - 1] as Vec2;
+      const comp = p.compressorId ? level.points[p.compressorId] : undefined;
+      const top = y0 + (comp ? ELEC_KINDS.compressor.plate.h : 0);
+      if (comp && ty - top > 0.01) {
+        const drop = box(0.06, ty - top, 0.06, white);
+        drop.position.set(end.x, (ty + top) / 2, end.y);
+        group.add(drop);
+      }
+    }
+    return [group];
   }
 
   private buildRoom(

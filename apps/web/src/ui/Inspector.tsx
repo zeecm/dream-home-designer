@@ -58,6 +58,7 @@ import {
 import { CarpentryLine, CostSummary } from '../cost/estimate';
 import { GettingItIn } from '../delivery/delivery';
 import { useEditor } from '../editor';
+import { ElectricalSummary, PointInspector } from '../electrical/electrical';
 import { roomsBeside } from '../plan/keyboard';
 import { OPENING_PRESETS, ROOM_NAMES } from '../presets';
 import { currentLevel, useLevel, useProject, useStore } from '../store';
@@ -201,6 +202,8 @@ export function Inspector() {
     body = <OpeningInspector key={key} level={level} id={selection.id} />;
   } else if (selection?.kind === 'item' && level.items[selection.id]) {
     body = <ItemInspector key={key} level={level} id={selection.id} />;
+  } else if (selection?.kind === 'point' && level.points?.[selection.id]) {
+    body = <PointInspector key={key} level={level} id={selection.id} />;
   } else if (selection?.kind === 'room' && level.rooms[selection.id]) {
     body = <RoomInspector key={key} level={level} id={selection.id} />;
   }
@@ -315,6 +318,7 @@ function PlanSummary({ level }: { level: Level }) {
       </dl>
       <StructuralSuggestion />
       <ClearanceSummary />
+      <ElectricalSummary level={level} />
       <RenovationSection />
       <CostSummary />
       <LengthField

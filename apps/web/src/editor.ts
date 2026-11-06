@@ -1,4 +1,4 @@
-import type { OpeningKind, Variant } from '@dhd/core';
+import type { ElecKind, OpeningKind, Variant } from '@dhd/core';
 import { create } from 'zustand';
 import type { View } from './plan/view';
 import { DEFAULT_OPENING_WIDTH } from './presets';
@@ -17,14 +17,16 @@ export type Tool =
   | 'passage'
   | 'measure'
   | 'calibrate'
-  | 'furniture';
+  | 'furniture'
+  | 'electrical';
 
 export type Selection =
   | { kind: 'vertex'; id: string }
   | { kind: 'wall'; id: string }
   | { kind: 'opening'; id: string }
   | { kind: 'room'; id: string }
-  | { kind: 'item'; id: string };
+  | { kind: 'item'; id: string }
+  | { kind: 'point'; id: string };
 
 export type ViewMode = 'plan' | 'split' | '3d';
 
@@ -47,6 +49,15 @@ export interface EditorState {
   /** The catalogue piece the Furniture tool places. */
   furnitureKind: string;
   setFurnitureKind: (id: string) => void;
+  /** The kind of point the Electrical tool places. */
+  elecKind: ElecKind;
+  setElecKind: (k: ElecKind) => void;
+  /**
+   * An aircon unit whose trunking is being run (Electrical tool): each tap is a bend, a tap
+   * on a compressor ends it. `key` makes the run one undo step.
+   */
+  trunking: { id: string; key: string } | null;
+  setTrunking: (t: { id: string; key: string } | null) => void;
   /** Bumped to focus the selected room's name field. */
   renameToken: number;
   requestRename: () => void;
@@ -118,12 +129,16 @@ export const useEditor = create<EditorState>((set) => ({
     set((s) => ({ openingWidths: { ...s.openingWidths, [kind]: width } })),
   furnitureKind: 'sofa-3',
   setFurnitureKind: (furnitureKind) => set({ furnitureKind }),
+  elecKind: 'socket-double',
+  setElecKind: (elecKind) => set({ elecKind, trunking: null }),
+  trunking: null,
+  setTrunking: (trunking) => set({ trunking }),
   renameToken: 0,
   requestRename: () => set((s) => ({ renameToken: s.renameToken + 1 })),
   directionToken: 0,
   revealDirection: () =>
     set((s) => ({ selection: null, tool: 'select', directionToken: s.directionToken + 1 })),
-  setTool: (tool) => set({ tool, hover: null }),
+  setTool: (tool) => set({ tool, hover: null, trunking: null }),
   select: (selection) => set({ selection }),
   setHover: (hover) => set({ hover }),
   setView: (view, byUser) => set(byUser ? { view, viewAdjusted: true } : { view }),
@@ -137,7 +152,9 @@ export const useEditor = create<EditorState>((set) => ({
   variant: 'before',
   // The other version may not have what's selected or half-drawn.
   setVariant: (variant) =>
-    set((s) => (s.variant === variant ? {} : { variant, selection: null, hover: null })),
+    set((s) =>
+      s.variant === variant ? {} : { variant, selection: null, hover: null, trunking: null },
+    ),
   // Walking takes the whole stage (and isn't remembered as the view mode).
   startWalk: () => {
     track('walk');
@@ -151,6 +168,7 @@ export const useEditor = create<EditorState>((set) => ({
       tool: 'select',
       selection: null,
       hover: null,
+      trunking: null,
       fitRequested: true,
       viewAdjusted: false,
       ...(s.walking ? { viewMode: s.walking.returnTo, walking: null } : {}),

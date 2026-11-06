@@ -17,12 +17,14 @@ import { type PixelBox, inkBounds } from '../assets';
 import { ClearanceLayer } from '../clearance/clearance';
 import { DeliveryLayer } from '../delivery/delivery';
 import { type Tool, useEditor } from '../editor';
+import { ElectricalLayer } from '../electrical/electrical';
 import { currentLevel, useLevel, useProject, useStore } from '../store';
 import { Compass, describeNorth } from '../ui/Compass';
 import { uploadPlanImage, usePlanImage, useUploadPicker } from '../ui/PlanImage';
 import { RenovationMarks } from '../ui/Renovation';
 import { icons } from '../ui/icons';
 import { useCalibrateTool, useOpeningTool, useRoomTool, useWallTool } from './drawTools';
+import { useElectricalTool } from './electricalTool';
 import { useFurnitureTool } from './furnitureTool';
 import { describe } from './keyboard';
 import {
@@ -83,9 +85,9 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
    * chair, the next chair). A piece that goes on top of others or above them (a table lamp,
    * a ceiling light) is placed over a piece as anywhere else.
    */
-  const placing = (own: ToolController, kind: 'item' | 'opening'): ToolController => {
+  const placing = (own: ToolController, kind: 'item' | 'opening' | 'point'): ToolController => {
     const handle = (p: PlanPointer) =>
-      kind === 'item' && p.hit?.kind !== kind && (select.grabs?.(p) ?? false);
+      (kind === 'item' || kind === 'point') && p.hit?.kind !== kind && (select.grabs?.(p) ?? false);
     const over = () => {
       const k = kind === 'item' && furnitureKind(useEditor.getState().furnitureKind);
       return !!k && (!!k.ceiling || (k.elevation ?? 0) > 0);
@@ -100,7 +102,9 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
       return !!it && furnitureLayer(furnitureKind(it.assetId)) === furnitureLayer(picked);
     };
     const onOwn = (p: PlanPointer) =>
-      (p.hit?.kind === kind && (!over() || raised(p.hit.id))) || handle(p);
+      // Running trunking, a tap on a point (the compressor) is the run's, not a drag.
+      !(kind === 'point' && useEditor.getState().trunking) &&
+      ((p.hit?.kind === kind && (!over() || raised(p.hit.id))) || handle(p));
     return {
       ...own,
       grabs: (p) => onOwn(p) || (own.grabs?.(p) ?? false),
@@ -127,7 +131,7 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
         if (!routed.current) return own.up(p);
         routed.current = false;
         select.up(p);
-        if (h && !h.moved && !(ctx && onDrawnHandle(ctx, h.start))) {
+        if (kind === 'item' && h && !h.moved && !(ctx && onDrawnHandle(ctx, h.start))) {
           own.down(h.start);
           own.up(p);
         }
@@ -142,7 +146,7 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
         } else own.touchCancel?.();
       },
       overlay: (o) =>
-        kind === 'item' ? (
+        kind === 'item' || kind === 'point' ? (
           <>
             {!overOwn.current && !routed.current && own.overlay(o)}
             {select.overlay(o)}
@@ -165,6 +169,7 @@ function useTool(tool: Tool, ctx: ToolContext): ToolController {
     passage: placing(useOpeningTool(ctx, 'passage'), 'opening'),
     calibrate: useCalibrateTool(ctx),
     furniture: placing(useFurnitureTool(ctx), 'item'),
+    electrical: placing(useElectricalTool(ctx), 'point'),
   };
   return tools[tool];
 }
@@ -441,7 +446,8 @@ export function PlanCanvas() {
     tool === 'furniture' ||
     tool === 'door' ||
     tool === 'window' ||
-    tool === 'passage';
+    tool === 'passage' ||
+    tool === 'electrical';
   const touch = useRef<{
     start: PlanPointer;
     moved: boolean;
@@ -461,7 +467,8 @@ export function PlanCanvas() {
     tool === 'room' ||
     tool === 'measure' ||
     tool === 'calibrate' ||
-    (tool === 'select' && claimed && start.hit?.kind === 'vertex');
+    tool === 'electrical' ||
+    (tool === 'select' && claimed && (start.hit?.kind === 'vertex' || start.hit?.kind === 'point'));
   /** A finger held still on a point shows the magnifier too, after a moment. */
   const loupeHold = useRef<number | undefined>(undefined);
   const hideLoupe = () => {
@@ -550,7 +557,11 @@ export function PlanCanvas() {
         const sel = useEditor.getState().selection;
         const selectedWall = kind === 'wall' && sel?.kind === 'wall' && sel.id === t.start.hit?.id;
         t.claimed =
-          (kind === 'vertex' || kind === 'opening' || kind === 'item' || selectedWall) &&
+          (kind === 'vertex' ||
+            kind === 'opening' ||
+            kind === 'item' ||
+            kind === 'point' ||
+            selectedWall) &&
           active.down(t.start);
         if (!t.claimed) {
           pan.current = t.start.screen;
@@ -848,6 +859,13 @@ export function PlanCanvas() {
             <RenovationMarks />
             <ClearanceLayer level={level} />
             <DeliveryLayer level={level} zoom={v.zoom} />
+            <ElectricalLayer
+              level={level}
+              before={before ?? level}
+              zoom={v.zoom}
+              selection={selection}
+              interactive={tool === 'select' || tool === 'electrical'}
+            />
             <TraceDraftLayer />
             <PlanHighlights
               level={level}

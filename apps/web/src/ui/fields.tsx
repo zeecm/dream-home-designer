@@ -33,6 +33,8 @@ interface LengthFieldProps {
   max?: number;
   hint?: string;
   allowEmpty?: boolean;
+  /** Show it in millimetres ("1150 mm"); still accepts m, cm or mm. */
+  unit?: 'mm';
   onCommit: (value: number | undefined) => void;
 }
 
@@ -89,9 +91,11 @@ export function LengthField({
   max = 100,
   hint,
   allowEmpty,
+  unit,
   onCommit,
 }: LengthFieldProps) {
-  const shown = value === undefined ? '' : formatLength(value);
+  const fmt = (v: number) => (unit === 'mm' ? `${Math.round(v * 1000)} mm` : formatLength(v));
+  const shown = value === undefined ? '' : fmt(value);
   const edit = useEdit(shown, { value, min, max, allowEmpty, onCommit });
   const [error, setError] = useState<string | null>(null);
   // Escape blurs the field; the blur that follows must not commit what was typed.
@@ -125,7 +129,7 @@ export function LengthField({
       setError(
         v === null
           ? 'Enter a length such as 2.5 m, 250 cm, 2500 mm or just 2500.'
-          : `Between ${formatLength(t.min)} and ${formatLength(t.max)}.`,
+          : `Between ${fmt(t.min)} and ${fmt(t.max)}.`,
       );
       edit.keep(s);
       return;

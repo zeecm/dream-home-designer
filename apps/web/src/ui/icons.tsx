@@ -45,6 +45,14 @@ export const icons = {
       <path d="M3.5 11v1.5M12.5 11v1.5" />
     </Icon>
   ),
+  electrical: (
+    <Icon>
+      <path d="M2.5 4.5h11" />
+      <path d="M4 4.5a4 4 0 0 0 8 0" />
+      <path d="M6.3 8.2 5.6 10M9.7 8.2l.7 1.8" />
+      <path d="M8 12.5V14" />
+    </Icon>
+  ),
   door: (
     <Icon>
       <path d="M2.5 13.5h3M10.5 13.5h3" />

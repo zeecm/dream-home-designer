@@ -2,6 +2,7 @@ import { FURNITURE, type FurnitureKind, type OpeningKind, customKind } from '@dh
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { AddBySize } from '../delivery/delivery';
 import { type Tool, useEditor } from '../editor';
+import { KindPalette } from '../electrical/electrical';
 import { addModelFile } from '../models';
 import { TOOL_HINTS } from '../plan/tools';
 import { OPENING_PRESETS, type Preset, THICKNESS_PRESETS } from '../presets';
@@ -25,6 +26,7 @@ export const TOOLS: ToolDef[] = [
   { id: 'window', label: 'Window', key: 'N', icon: icons.window },
   { id: 'passage', label: 'Opening', key: 'O', icon: icons.passage },
   { id: 'furniture', label: 'Furniture', key: 'I', icon: icons.furniture },
+  { id: 'electrical', label: 'Electrical', key: 'E', icon: icons.electrical },
   { id: 'measure', label: 'Measure', key: 'M', icon: icons.measure },
   { id: 'calibrate', label: 'Set scale', key: 'C', icon: icons.calibrate },
 ];
@@ -92,6 +94,7 @@ export function ToolOptions({ tool, idPrefix = '' }: { tool: Tool; idPrefix?: st
     );
   }
   if (tool === 'furniture') return <Catalogue idPrefix={idPrefix} />;
+  if (tool === 'electrical') return <KindPalette idPrefix={idPrefix} />;
   if (tool === 'door' || tool === 'window' || tool === 'passage') {
     return (
       <Choices

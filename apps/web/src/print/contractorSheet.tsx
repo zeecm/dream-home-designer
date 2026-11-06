@@ -1,6 +1,11 @@
 import {
   type Bounds,
   type DimensionChain,
+  ELEC_KINDS,
+  ELEC_KIND_ORDER,
+  type ElecChanges,
+  type ElecKind,
+  type ElecPoint,
   type Level,
   type OpeningTag,
   PAPER_MM,
@@ -16,16 +21,21 @@ import {
   doorLeaves,
   doorStyle,
   doorSwing,
+  electricalChanges,
   framePoint,
   furnitureKind,
   isGlass,
   isHalfWall,
   itemFootprint,
   itemSize,
+  placeLabel,
   planDimensions,
   planExtent,
   planGeometry,
   pointInPolygon,
+  pointName,
+  pointPosition,
+  pointRoom,
   renovationChanges,
   roomArea,
   roomShape,
@@ -33,9 +43,13 @@ import {
   roundChain,
   sheetDrawingArea,
   sheetScale,
+  trunkingMetres,
+  trunkingPath,
   wallStatus,
 } from '@dhd/core';
 import type { ReactElement, ReactNode } from 'react';
+import { atDefaultHeight } from '../electrical/electrical';
+import { ElecGlyph } from '../electrical/glyph';
 import { changesAsText } from '../ui/Renovation';
 import { hackedPoints, sheetLevels } from './extent';
 import { printFrame } from './frame';
@@ -53,6 +67,8 @@ export interface SheetOptions {
   variant: Variant;
   /** Loose furniture as outlines; built-ins are always drawn. */
   furniture: boolean;
+  /** An electrical plan page (and its schedule) after the plan. */
+  electrical?: boolean;
 }
 
 // Colours for paper.
@@ -986,6 +1002,8 @@ interface LegendKey {
   key: string;
   label: string;
   swatch: ReactNode;
+  /** How many of it (the electrical page's points). */
+  count?: number;
 }
 
 function legendKeys(
@@ -1126,8 +1144,14 @@ function TitleColumn({
   page,
   pages,
   date,
+  subtitle = 'Plan for contractors',
+  note,
 }: {
   sheet: Sheet;
+  /** What the page is, under the project's name. */
+  subtitle?: string;
+  /** A last line, bold, under the caveat (the electrical page's licensed worker). */
+  note?: string;
   project: Project;
   levelName: string;
   version: string;
@@ -1178,7 +1202,7 @@ function TitleColumn({
     y += opts.gap ?? 0;
   };
   text(project.name, 4.2, { bold: true, cls: 'sheet-name', gap: 1, shrink: true });
-  text('Plan for contractors', 2.6, { color: MUTED, gap: 4 });
+  text(subtitle, 2.6, { color: MUTED, gap: 4 });
   const row = (k: string, v: string, cls?: string) => {
     const lines = wrap(v, 2.3, width - 18);
     out.push(
@@ -1273,8 +1297,9 @@ function TitleColumn({
   text('For discussion, not for construction. Check on site.', 2.2, {
     bold: true,
     cls: 'sheet-caveat',
-    gap: 4,
+    gap: note ? 1 : 4,
   });
+  if (note) text(note, 2.2, { bold: true, cls: 'sheet-note', gap: 4 });
   if (legend?.length) {
     out.push(
       <text key="lh" x={x} y={n2(y)} fontSize={2.3} fontWeight={700} fill={INK}>
@@ -1284,7 +1309,7 @@ function TitleColumn({
     y += 3.4;
     for (const k of legend) {
       out.push(
-        <g key={`k${k.key}`} className="legend-key" data-key={k.key}>
+        <g key={`k${k.key}`} className="legend-key" data-key={k.key} data-count={k.count}>
           <g transform={`translate(${x} ${n2(y - 2.1)})`}>{k.swatch}</g>
           <text x={x + 8.5} y={n2(y)} fontSize={2.2} fill={INK}>
             {k.label}
@@ -1468,6 +1493,419 @@ function ChangesPage({
   );
 }
 
+// ---------------------------------------------------------------------------- electrical
+
+/** A point's symbol radius on paper, mm. */
+const ELEC_R = 1.5;
+const ELEC_TEXT = 1.7;
+
+type ElecState = 'same' | 'new' | 'moved' | 'removed';
+
+/** Each point of the version printed, with what the renovation does to it. */
+interface SheetPoint {
+  p: ElecPoint;
+  level: Level;
+  state: ElecState;
+}
+
+function sheetPoints(level: Level, before: Level, ch: ElecChanges | null): SheetPoint[] {
+  const shown = Object.values(level.points ?? {}).map((p) => ({
+    p,
+    level,
+    state: (ch?.status.get(p.id) ?? 'same') as ElecState,
+  }));
+  const removed = (ch?.removed ?? []).map((p) => ({ p, level: before, state: 'removed' as const }));
+  return [...shown, ...removed];
+}
+
+const ELEC_INK: Record<ElecState, string> = {
+  same: INK,
+  new: NEW,
+  moved: NEW,
+  removed: HACK,
+};
+
+/** A point's symbol on paper at its place (sheet mm). */
+function PointMark({
+  sp,
+  sheet,
+  ink,
+  faint,
+}: { sp: SheetPoint; sheet: Sheet; ink: string; faint?: boolean }) {
+  const pos = pointPosition(sp.level, sp.p);
+  if (!pos) return null;
+  const c = sheet.P(pos.at);
+  const tag = !faint && sp.p.wall && !atDefaultHeight(sp.level, sp.p);
+  const out = pos.normal ?? { x: 0, y: 0 };
+  const reach = pos.normal ? 4.2 : 2.6;
+  return (
+    <g
+      className="elec-mark"
+      data-point={sp.p.id}
+      data-kind={sp.p.kind}
+      data-change={faint ? 'was' : sp.state}
+      opacity={faint ? 0.35 : undefined}
+    >
+      <g transform={`translate(${n2(c.x)} ${n2(c.y)})`}>
+        <ElecGlyph
+          kind={sp.p.kind}
+          gang={sp.p.gang}
+          r={ELEC_R}
+          normal={pos.normal}
+          stroke={ink}
+          fill="#ffffff"
+          sw={0.22}
+        />
+      </g>
+      {tag && sp.p.wall && (
+        <text
+          x={n2(c.x + out.x * reach)}
+          y={n2(c.y + out.y * reach)}
+          dy="0.36em"
+          fontSize={ELEC_TEXT}
+          textAnchor="middle"
+          fill={ink}
+          {...HALO}
+        >
+          {`h${Math.round(sp.p.wall.height * 1000)}`}
+        </text>
+      )}
+    </g>
+  );
+}
+
+/** Legend rows for the electrical page: each kind there, its heights and how many. */
+function elecLegend(points: SheetPoint[]): LegendKey[] {
+  const keys: LegendKey[] = [];
+  const live = points.filter((sp) => sp.state !== 'removed');
+  for (const kind of ELEC_KIND_ORDER) {
+    const of = live.filter((sp) => sp.p.kind === kind);
+    if (!of.length) continue;
+    const heights = [
+      ...new Set(of.flatMap((sp) => (sp.p.wall ? [Math.round(sp.p.wall.height * 1000)] : []))),
+    ].sort((a, b) => a - b);
+    const where =
+      ELEC_KINDS[kind].place === 'ceiling'
+        ? 'ceiling'
+        : kind === 'compressor'
+          ? 'ledge'
+          : `${heights.join(', ')} mm`;
+    keys.push({
+      key: `elec-${kind}`,
+      label: `${ELEC_KINDS[kind].short}, ${where}, ×${of.length}`,
+      count: of.length,
+      swatch: (
+        <g transform="translate(3 0.4)">
+          <ElecGlyph
+            kind={kind}
+            gang={1}
+            r={kind === 'aircon' || kind === 'compressor' ? 0.75 : 1.1}
+            normal={ELEC_KINDS[kind].place === 'wall' ? { x: 0, y: 1 } : undefined}
+            stroke={INK}
+            fill="#ffffff"
+            sw={0.2}
+          />
+        </g>
+      ),
+    });
+  }
+  const has = (s: ElecState) => points.some((sp) => sp.state === s);
+  const dot = (ink: string, faint = false) => (
+    <circle
+      cx={3}
+      cy={1.2}
+      r={1.1}
+      fill="#ffffff"
+      stroke={ink}
+      strokeWidth={0.3}
+      opacity={faint ? 0.35 : 1}
+    />
+  );
+  if (has('new')) keys.push({ key: 'elec-new', label: 'New point', swatch: dot(NEW) });
+  if (has('moved'))
+    keys.push({
+      key: 'elec-moved',
+      label: 'Moved point (faint: where it was)',
+      swatch: (
+        <>
+          {dot(NEW)}
+          <circle
+            cx={0.8}
+            cy={1.2}
+            r={0.7}
+            fill="none"
+            stroke={INK}
+            strokeWidth={0.2}
+            opacity={0.35}
+          />
+        </>
+      ),
+    });
+  if (has('removed'))
+    keys.push({ key: 'elec-removed', label: 'Point taken out', swatch: dot(HACK) });
+  if (points.some((sp) => sp.p.kind === 'aircon' && (sp.p.route?.length || sp.p.compressorId)))
+    keys.push({
+      key: 'elec-trunking',
+      label: 'Aircon trunking, with its length',
+      swatch: (
+        <line
+          x1={0}
+          y1={1.2}
+          x2={6}
+          y2={1.2}
+          stroke={INK}
+          strokeWidth={0.25}
+          strokeDasharray="1 0.6"
+        />
+      ),
+    });
+  return keys;
+}
+
+/** The electrical plan: the walls grey, the points black (or as the renovation changes them). */
+function ElectricalPlan({
+  level,
+  before,
+  geom,
+  sheet,
+  guarded,
+  points,
+  ch,
+}: {
+  level: Level;
+  before: Level;
+  geom: PlanGeometry;
+  sheet: Sheet;
+  guarded: ReadonlySet<string>;
+  points: SheetPoint[];
+  ch: ElecChanges | null;
+}) {
+  const shapes = roomShapes(level);
+  return (
+    <g className="plan electrical-plan">
+      <g className="floors">
+        {[...shapes.values()].map((s, i) => (
+          <path
+            // biome-ignore lint/suspicious/noArrayIndexKey: rooms in order
+            key={i}
+            d={[s.outer, ...s.holes]
+              .filter((r) => r.length >= 3)
+              .map((r) => `M ${pts(r.map(sheet.P))} Z`)
+              .join(' ')}
+            fillRule="evenodd"
+            fill="#ffffff"
+          />
+        ))}
+      </g>
+      <g className="elec-base" opacity={0.32}>
+        <Walls level={level} geom={geom} sheet={sheet} guarded={guarded} />
+        <Openings geom={geom} sheet={sheet} added={new Set()} cut={new Set()} />
+      </g>
+      <g className="elec-rooms">
+        {Object.values(level.rooms).map((r) => {
+          const s = shapes.get(r.id);
+          if (!s || s.outer.length < 3) return null;
+          // Clear of the points' symbols.
+          const avoid = points.flatMap((sp) => {
+            const at = sp.state !== 'removed' && pointPosition(sp.level, sp.p)?.at;
+            return at ? [{ c: at, r: 3.2 / sheet.k }] : [];
+          });
+          const half = { x: textWidth(r.name, 2.2) / 2 / sheet.k, y: 1.4 / sheet.k };
+          const c = sheet.P(placeLabel(s.outer, half, avoid, s.holes));
+          return (
+            <text
+              key={r.id}
+              x={n2(c.x)}
+              y={n2(c.y)}
+              fontSize={2.2}
+              textAnchor="middle"
+              fill={MUTED}
+              {...HALO}
+            >
+              {r.name}
+            </text>
+          );
+        })}
+      </g>
+      <g className="elec-trunking">
+        {points.map((sp) => {
+          if (sp.state === 'removed') return null;
+          const path = trunkingPath(sp.level, sp.p);
+          if (path.length < 2) return null;
+          const q = path.map(sheet.P);
+          // Its length beside the longest stretch.
+          let best = 0;
+          for (let i = 1; i < q.length; i++) {
+            const a = q[i - 1] as Vec2;
+            const b = q[i] as Vec2;
+            const c0 = q[best] as Vec2;
+            const c1 = q[best + 1] as Vec2;
+            if (Math.hypot(b.x - a.x, b.y - a.y) > Math.hypot(c1.x - c0.x, c1.y - c0.y))
+              best = i - 1;
+          }
+          const a = q[best] as Vec2;
+          const b = q[best + 1] as Vec2;
+          const ink = ELEC_INK[sp.state];
+          return (
+            <g key={sp.p.id} data-trunking={sp.p.id}>
+              <polyline
+                points={pts(q)}
+                fill="none"
+                stroke={ink}
+                strokeWidth={0.3}
+                strokeDasharray="1.2 0.7"
+              />
+              <text
+                x={n2((a.x + b.x) / 2)}
+                y={n2((a.y + b.y) / 2 - 1.2)}
+                fontSize={ELEC_TEXT}
+                textAnchor="middle"
+                fill={ink}
+                {...HALO}
+              >
+                {`${trunkingMetres(sp.level, sp.p).toFixed(1)} m`}
+              </text>
+            </g>
+          );
+        })}
+      </g>
+      <g className="elec-points">
+        {points.map((sp) => {
+          const was = sp.state === 'moved' ? ch?.from.get(sp.p.id) : undefined;
+          return (
+            <g key={`${sp.state}:${sp.p.id}`}>
+              {was && (
+                <PointMark
+                  sp={{ p: was, level: before, state: 'same' }}
+                  sheet={sheet}
+                  ink={INK}
+                  faint
+                />
+              )}
+              <PointMark sp={sp} sheet={sheet} ink={ELEC_INK[sp.state]} />
+            </g>
+          );
+        })}
+      </g>
+    </g>
+  );
+}
+
+/** The schedule's rows: room, point, how many, height, and (After) the change. */
+function scheduleRows(points: SheetPoint[]) {
+  const rows = new Map<
+    string,
+    { room: string; what: string; qty: number; height: string; change: string; kind: ElecKind }
+  >();
+  for (const sp of points) {
+    const room = pointRoom(sp.level, sp.p) ?? 'Outside';
+    const height =
+      ELEC_KINDS[sp.p.kind].place === 'ceiling'
+        ? 'Ceiling'
+        : sp.p.wall
+          ? String(Math.round(sp.p.wall.height * 1000))
+          : '–';
+    const change = { same: '', new: 'New', moved: 'Move', removed: 'Take out' }[sp.state];
+    const what = pointName(sp.p);
+    const key = [room, what, height, change].join('|');
+    const r = rows.get(key);
+    if (r) r.qty += 1;
+    else rows.set(key, { room, what, qty: 1, height, change, kind: sp.p.kind });
+  }
+  return [...rows.values()].sort(
+    (a, b) =>
+      a.room.localeCompare(b.room) ||
+      ELEC_KIND_ORDER.indexOf(a.kind) - ELEC_KIND_ORDER.indexOf(b.kind) ||
+      a.change.localeCompare(b.change),
+  );
+}
+
+function SchedulePage({
+  sheet,
+  rows,
+  first,
+  renovation,
+  title,
+  label,
+}: {
+  sheet: Sheet;
+  rows: ReturnType<typeof scheduleRows>;
+  first: boolean;
+  renovation: boolean;
+  title: ReactNode;
+  label: string;
+}) {
+  const x = SHEET_MM.margin + 8;
+  const right = sheet.w - SHEET_MM.margin - SHEET_MM.title - 8;
+  let y = SHEET_MM.margin + 12;
+  const out: ReactNode[] = [];
+  if (first) {
+    out.push(
+      <text key="h" x={x} y={y} fontSize={4.2} fontWeight={700} fill={INK}>
+        Electrical schedule
+      </text>,
+    );
+    y += 6;
+    out.push(
+      <text key="lew" className="sheet-lew" x={x} y={y} fontSize={2.8} fontWeight={700} fill={INK}>
+        Work by a Licensed Electrical Worker.
+      </text>,
+    );
+    y += 8;
+  }
+  const cols = [x, x + 52, x + 120, x + 135, x + 158];
+  const head = ['Room', 'Point', 'Qty', 'Height (mm)', renovation ? 'Change' : ''];
+  out.push(
+    <g key="head" className="schedule-head">
+      {head.map((h, i) => (
+        <text key={h || i} x={cols[i]} y={y} fontSize={2.6} fontWeight={700} fill={INK}>
+          {h}
+        </text>
+      ))}
+      <line x1={x} y1={y + 1.6} x2={right} y2={y + 1.6} stroke={INK} strokeWidth={0.25} />
+    </g>,
+  );
+  y += 6;
+  rows.forEach((r, i) => {
+    const ink = r.change === 'Take out' ? HACK : r.change ? NEW : INK;
+    out.push(
+      // biome-ignore lint/suspicious/noArrayIndexKey: rows in order
+      <g key={i} className="schedule-row" data-kind={r.kind} data-qty={r.qty}>
+        <text x={cols[0]} y={n2(y)} fontSize={2.6} fill={INK}>
+          {r.room}
+        </text>
+        <text x={cols[1]} y={n2(y)} fontSize={2.6} fill={INK}>
+          {r.what}
+        </text>
+        <text x={cols[2]} y={n2(y)} fontSize={2.6} fill={INK}>
+          {r.qty}
+        </text>
+        <text x={cols[3]} y={n2(y)} fontSize={2.6} fill={INK}>
+          {r.height}
+        </text>
+        <text x={cols[4]} y={n2(y)} fontSize={2.6} fill={ink}>
+          {r.change}
+        </text>
+        <line
+          x1={x}
+          y1={n2(y + 1.6)}
+          x2={right}
+          y2={n2(y + 1.6)}
+          stroke={FAINT}
+          strokeWidth={0.15}
+        />
+      </g>,
+    );
+    y += 4.6;
+  });
+  return (
+    <Frame sheet={sheet} label={label}>
+      {out}
+      {title}
+    </Frame>
+  );
+}
+
 // ---------------------------------------------------------------------------- the sheets
 
 export interface ContractorSheets {
@@ -1555,9 +1993,24 @@ export function contractorPages(
     }
     listPages.push(cur);
   }
-  const total = 1 + listPages.length;
-  const title = (page: number, legend: LegendKey[] | null) => (
+  // The electrical plan and its schedule, after the rest.
+  const elecCh = opts.electrical && diff ? electricalChanges(before, level) : null;
+  const elecPoints = opts.electrical ? sheetPoints(level, before, elecCh) : [];
+  const elecRows = scheduleRows(elecPoints);
+  const perPage = Math.max(1, Math.floor((sheet.h - 2 * SHEET_MM.margin - 40) / 4.6));
+  const schedulePages: (typeof elecRows)[] = [];
+  for (let i = 0; i < elecRows.length; i += perPage)
+    schedulePages.push(elecRows.slice(i, i + perPage));
+  if (opts.electrical && !schedulePages.length) schedulePages.push([]);
+  const elecPages = opts.electrical ? 1 + schedulePages.length : 0;
+  const total = 1 + listPages.length + elecPages;
+  const title = (
+    page: number,
+    legend: LegendKey[] | null,
+    extra: { subtitle?: string; note?: string } = {},
+  ) => (
     <TitleColumn
+      {...extra}
       sheet={sheet}
       project={project}
       levelName={before.name}
@@ -1617,6 +2070,44 @@ export function contractorPages(
       />,
     );
   });
+  if (opts.electrical) {
+    const at = 2 + listPages.length;
+    const lew = 'Work by a Licensed Electrical Worker.';
+    pages.push(
+      <Frame
+        key="e1"
+        sheet={sheet}
+        label={`Electrical plan of ${project.name}, page ${at} of ${total}`}
+      >
+        <g className="electrical-page" data-points={elecPoints.length}>
+          <ElectricalPlan
+            level={level}
+            before={before}
+            geom={geom}
+            sheet={sheet}
+            guarded={guarded}
+            points={elecPoints}
+            ch={elecCh}
+          />
+        </g>
+        {title(at, elecLegend(elecPoints), { subtitle: 'Electrical plan', note: lew })}
+      </Frame>,
+    );
+    schedulePages.forEach((rows, i) => {
+      pages.push(
+        <SchedulePage
+          // biome-ignore lint/suspicious/noArrayIndexKey: pages in order
+          key={`s${i}`}
+          sheet={sheet}
+          rows={rows}
+          first={i === 0}
+          renovation={!!elecCh}
+          title={title(at + 1 + i, null, { subtitle: 'Electrical schedule', note: lew })}
+          label={`Electrical schedule for ${project.name}, page ${at + 1 + i} of ${total}`}
+        />,
+      );
+    });
+  }
   return { pages, scale: sheet.scale, fits: sheet.fits };
 }
 

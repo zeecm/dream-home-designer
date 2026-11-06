@@ -11,6 +11,7 @@ import {
   addItem,
   deleteItem,
   deleteOpening,
+  deletePoint,
   deleteVertex,
   deleteWall,
   duplicateOf,
@@ -25,7 +26,9 @@ import {
   openingClearances,
   openingSpan,
   placeFurniture,
+  placePoint,
   planRoomMove,
+  pointPosition,
   roomJoined,
   settleVertex,
   shiftBlocked,
@@ -35,9 +38,11 @@ import {
   splitWall,
   updateItem,
   updateOpening,
+  updatePoint,
 } from '@dhd/core';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { type Selection, type Tool, useEditor } from '../editor';
+import { atDefaultHeight } from '../electrical/electrical';
 import { currentLevel, useStore } from '../store';
 import { formatLength } from '../units';
 import { cycle, movedVertices, nudge, objectPoint, planObjects } from './keyboard';
@@ -103,6 +108,8 @@ export const TOOL_HINTS: Record<Tool, string> = {
     'Pick a piece, then tap or click to place it. Near a wall it backs onto it; a table lamp or a light goes over a piece. Turn it in its details, or with R.',
   calibrate:
     'Tap both ends of a length you know on the plan image, or drag along it, then enter the real length.',
+  electrical:
+    'Pick a point, then tap a wall for a socket or switch (it goes on the face, at its usual height), or a room for a light. Drag one along its wall or to another.',
 };
 
 /** Rounds to a grid step unless Alt is held. */
@@ -182,6 +189,20 @@ type Drag =
       moved: boolean;
       key: string;
     }
+  /** An electrical point: along its wall (or onto another), or across the plan. */
+  | {
+      kind: 'point';
+      id: string;
+      /** Where on it it was picked up (plan metres), for a point on the plan. */
+      grab: Vec2;
+      /** At its usual height as the drag began: it takes the usual height wherever it lands. */
+      usual: boolean;
+      start: Vec2;
+      moved: boolean;
+      key: string;
+    }
+  /** A bend of a selected aircon unit's trunking. */
+  | { kind: 'bend'; id: string; index: number; start: Vec2; moved: boolean; key: string }
   /** The turn handle in front of a selected piece. */
   | { kind: 'rotate'; id: string; start: Vec2; moved: boolean; key: string }
   /** A selected room's move handle: the room and what it carries move together. */
@@ -304,6 +325,24 @@ interface NudgeRun {
 /** Settle a run of arrow-key nudges this long after the last press. */
 const NUDGE_SETTLE_MS = 500;
 
+/** How near (screen px) a press must land on a trunking bend to drag it. */
+const BEND_REACH = 18;
+
+/** The bend of the selected aircon unit's trunking under the pointer, if any. */
+export function bendAt(ctx: ToolContext, p: PlanPointer): { id: string; index: number } | null {
+  const sel = useEditor.getState().selection;
+  const ac = sel?.kind === 'point' ? ctx.level.points[sel.id] : undefined;
+  if (!sel || ac?.kind !== 'aircon' || !ac.route?.length) return null;
+  let best: { index: number; d: number } | null = null;
+  ac.route.forEach((q, index) => {
+    const s = worldToScreen(ctx.view, ctx.size, q);
+    const d = Math.hypot(s.x - p.screen.x, s.y - p.screen.y);
+    if (d <= BEND_REACH && (!best || d < best.d)) best = { index, d };
+  });
+  const b = best as { index: number; d: number } | null;
+  return b ? { id: sel.id, index: b.index } : null;
+}
+
 export function useSelectTool(ctx: ToolContext): ToolController {
   const drag = useRef<Drag | null>(null);
   const { select, setHover } = useEditor.getState();
@@ -383,7 +422,7 @@ export function useSelectTool(ctx: ToolContext): ToolController {
   return {
     cursor: 'default',
     // On a touch screen, a finger on a selected piece's handle takes it at once.
-    grabs: (p) => handleAt(p) !== null || onRoomHandle(ctx, p) !== null,
+    grabs: (p) => handleAt(p) !== null || onRoomHandle(ctx, p) !== null || bendAt(ctx, p) !== null,
     // The system took the touch, or a second finger came down to pinch: take the drag back.
     touchCancel: () => {
       const d = drag.current;
@@ -392,6 +431,17 @@ export function useSelectTool(ctx: ToolContext): ToolController {
     },
     down: (p) => {
       settleRun();
+      const bend = bendAt(ctx, p);
+      if (bend) {
+        drag.current = {
+          kind: 'bend',
+          ...bend,
+          start: p.screen,
+          moved: false,
+          key: `bend:${bend.id}:${Date.now()}`,
+        };
+        return true;
+      }
       const handle = handleAt(p);
       if (handle) {
         const key = `handle:${handle.id}:${Date.now()}`;
@@ -486,6 +536,19 @@ export function useSelectTool(ctx: ToolContext): ToolController {
             start: p.screen,
             grab: { x: p.world.x - it.position.x, y: p.world.y - it.position.z },
             turn: it.rotationY,
+            moved: false,
+            key,
+          };
+      } else if (h.kind === 'point') {
+        const pt = ctx.level.points[h.id];
+        const at = pt && pointPosition(ctx.level, pt)?.at;
+        if (pt && at)
+          drag.current = {
+            kind: 'point',
+            id: h.id,
+            grab: { x: p.world.x - at.x, y: p.world.y - at.y },
+            usual: atDefaultHeight(ctx.level, pt),
+            start: p.screen,
             moved: false,
             key,
           };
@@ -596,6 +659,34 @@ export function useSelectTool(ctx: ToolContext): ToolController {
         if (Math.abs(off - d.offset) < 1e-9 && d.offset !== 0) return;
         d.offset = off;
         ctx.dispatch(shiftWall(d.level, d.id, off, d.ids), { coalesceKey: d.key });
+        return;
+      }
+      if (d.kind === 'bend') {
+        const ac = ctx.level.points[d.id];
+        if (!ac?.route) return;
+        const at = gridSnap(p.world, 0.05, p.alt);
+        const route = ac.route.map((q, i) => (i === d.index ? at : q));
+        ctx.dispatch(updatePoint(levelId, d.id, { route }), { coalesceKey: d.key });
+        return;
+      }
+      if (d.kind === 'point') {
+        const pt = ctx.level.points[d.id];
+        if (!pt) return;
+        if (pt.at) {
+          const at = gridSnap({ x: p.world.x - d.grab.x, y: p.world.y - d.grab.y }, 0.05, p.alt);
+          ctx.dispatch(updatePoint(levelId, d.id, { at }), { coalesceKey: d.key });
+          return;
+        }
+        // Along its wall, or onto another face near the pointer (a socket isn't picked up by
+        // where on its symbol it was grabbed: the face is under the pointer).
+        const spot = placePoint(ctx.level, pt.kind, gridSnap(p.world, 0.01, p.alt), {
+          geom: ctx.geom,
+          tolerance: Math.max(0.3, 14 / ctx.view.zoom),
+          height: d.usual ? undefined : pt.wall?.height,
+        });
+        if (!spot) return;
+        const { at: _, ...wall } = spot;
+        ctx.dispatch(updatePoint(levelId, d.id, { wall }), { coalesceKey: d.key });
         return;
       }
       if (d.kind === 'vertex') {
@@ -763,11 +854,13 @@ export function useSelectTool(ctx: ToolContext): ToolController {
               )
             : sel.kind === 'wall'
               ? deleteWall(levelId, sel.id, ctx.level)
-              : sel.kind === 'opening'
-                ? deleteOpening(levelId, sel.id)
-                : sel.kind === 'vertex'
-                  ? deleteVertex(levelId, sel.id)
-                  : null;
+              : sel.kind === 'point'
+                ? deletePoint(levelId, sel.id, live())
+                : sel.kind === 'opening'
+                  ? deleteOpening(levelId, sel.id)
+                  : sel.kind === 'vertex'
+                    ? deleteVertex(levelId, sel.id)
+                    : null;
         if (!cmd) return false;
         const was = useStore.getState().editor.doc;
         ctx.dispatch(cmd);
@@ -816,6 +909,7 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       }
       if (dw?.kind === 'opening' && dw.moved) return <OpeningClearances ctx={o} id={dw.id} />;
       if (dw?.kind === 'room') return <RoomMoveHandle ctx={o} drag={dw} />;
+      if (sel?.kind === 'point') return <BendHandles ctx={o} id={sel.id} />;
       if (sel?.kind === 'room') return <RoomMoveHandle ctx={o} />;
       const it = sel?.kind === 'item' ? o.level.items[sel.id] : undefined;
       if (!it) return null;
@@ -849,6 +943,23 @@ export function useSelectTool(ctx: ToolContext): ToolController {
       );
     },
   };
+}
+
+/** A selected aircon unit's trunking bends, as handles to drag. */
+export function BendHandles({ ctx, id }: { ctx: ToolContext; id: string }) {
+  const ac = ctx.level.points[id];
+  if (ac?.kind !== 'aircon' || !ac.route?.length) return null;
+  return (
+    <g className="bend-handles" pointerEvents="none" data-testid="bend-handles">
+      {ac.route.map((q, i) => {
+        const s = worldToScreen(ctx.view, ctx.size, q);
+        return (
+          // biome-ignore lint/suspicious/noArrayIndexKey: bends in order
+          <rect key={i} x={s.x - 6} y={s.y - 6} width={12} height={12} className="size-handle" />
+        );
+      })}
+    </g>
+  );
 }
 
 /**
