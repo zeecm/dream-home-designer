@@ -1,3 +1,4 @@
+import { type SceneFacts, sceneSheet } from '@dhd/core';
 import type { AiSettings } from './credentials';
 import { AiError, anySignal, errorBody, failure, timeoutSignal } from './providers';
 
@@ -11,8 +12,18 @@ export const RENDER_STYLES = {
 } as const;
 export type RenderStyle = keyof typeof RENDER_STYLES;
 
-const prompt = (style: RenderStyle) =>
-  `This is a simple 3D model render of a room in a home. Turn it into a photorealistic interior photograph, as a professional architectural photographer would take it. Keep the same camera position and angle, the same room shape, walls, doors, windows and openings, and the same furniture in the same places, sizes and orientations. Add realistic materials, textures, soft shadows and natural light through the windows. ${RENDER_STYLES[style]} Do not add or remove walls, windows, doors or furniture. No people, no text.`;
+/**
+ * What to ask the image model: the picture made photographic, and (given the facts of the
+ * view) a short sheet of what is really there, so a view from high up isn't read as a big
+ * room and filled with furniture that wouldn't fit.
+ */
+export function renderPrompt(style: RenderStyle, facts?: SceneFacts): string {
+  const base = `This is a simple 3D model render of a room in a home. Turn it into a photorealistic interior photograph, as a professional architectural photographer would take it. Keep the same camera position and angle, the same room shape, walls, doors, windows and openings, and the same furniture in the same places, sizes and orientations. Add realistic materials, textures, soft shadows and natural light through the windows. ${RENDER_STYLES[style]} Do not add or remove walls, windows, doors or furniture. Plants and décor may go only on surfaces already there (a shelf, a table), never on empty floor. No people, no text.`;
+  if (!facts) return base;
+  // The sheet fits its own length (pieces dropped and counted), its instruction first.
+  const sheet = sceneSheet(facts, { finishes: style === 'as' });
+  return `${base}\n\nThe true scene, measured: ${sheet}`;
+}
 
 const TIMEOUT = 240_000;
 
@@ -46,13 +57,18 @@ async function fitWithin(png: Blob, max: number): Promise<Blob> {
   );
 }
 
-/** A photo-real picture of `view` (a PNG of the 3D view) by the person's image model. */
+/**
+ * A photo-real picture of `view` (a PNG of the 3D view) by the person's image model, told
+ * the facts of the view when given them.
+ */
 export async function renderPhoto(
   ai: AiSettings,
   picture: Blob,
   style: RenderStyle,
   signal?: AbortSignal,
+  facts?: SceneFacts,
 ): Promise<Blob> {
+  const prompt = renderPrompt(style, facts);
   const timeout = timeoutSignal(TIMEOUT);
   const both = signal ? anySignal([signal, timeout]) : timeout;
   let res: Response;
@@ -68,7 +84,7 @@ export async function renderPhoto(
       const form = new FormData();
       form.append('model', ai.model);
       form.append('image', view, 'view.png');
-      form.append('prompt', prompt(style));
+      form.append('prompt', prompt);
       form.append('size', 'auto');
       // Keep the room as it is drawn (walls, furniture), not a loose impression of it: only
       // where the model is known to take it (gpt-image-1-mini, say, turns it down).
@@ -91,7 +107,7 @@ export async function renderPhoto(
                 role: 'user',
                 parts: [
                   { inline_data: { mime_type: 'image/png', data: await blobToBase64(view) } },
-                  { text: prompt(style) },
+                  { text: prompt },
                 ],
               },
             ],

@@ -619,6 +619,33 @@ stands still (`paused` on `WalkControls`; the sticks let go and ignore a finger 
 from the same spot (6 Nov, owner: "mobile doesn't have the render option in walk through";
 `e2e/walk-render.spec.ts`).
 
+**Renders at true scale (6 Nov, owner: "a high pov makes it look like a big room and the
+render adds furniture … that wouldn't actually fit"):** the prompt now carries a scene sheet
+(`sceneFacts` and `sceneSheet` in `core/src/sceneFacts.ts`; `renderPrompt` in
+`ai/render.ts`). It gives the room the view is of (the camera's room at eye height, else
+where the view's middle meets the floor), its size across and into the picture, its area and
+ceiling height, and any rooms open to it (joined by room boundaries) or seen through a doorway.
+It gives the camera's height and field of view, and whether it is at eye height, overhead
+(above 2.2 m) or outside every room. Furniture is listed only when its box is in the frustum
+and, below the wall tops, something of it is in plain sight past the walls, up to 25
+pieces, largest first, with sizes and where it stands ("against the left wall, by the
+window"). Finishes are listed only for the "As designed" look. The sheet starts with the
+instruction (keep the size, don't add, remove, enlarge or move furniture, leave empty floor
+empty), so the length cap (`MAX_SHEET`, 3000) can only drop pieces ("and N more"), never it.
+Room and piece names (uploaded models' too) are cleaned (`clean`, 40 characters: no newlines
+or direction overrides) and quoted as labels. From an orbit or
+outside view the dialog offers "From eye height in <room>" (the default) or "From this view
+(overhead: rooms may look larger)" with a warning; the walk skips the choice.
+`eyeLevelCamera` stands a person 1.6 m up in that room (or its open-plan space), facing the
+view's direction across the floor (turned up to 60° if the view ahead is under 2.5 m),
+backed towards the wall behind but a step clear of walls, door leaves and furniture, and
+not facing a tall piece (over 1.2 m) closer than 1.5 m, 70° across, tilted down 8°.
+`Capture.renderFrom` in `Viewport.tsx` draws it with the same renderer and a temporary copy
+of the level with ceilings (in their paint, unlit), lit as the walk is (no sun shadows, the
+walk's sky and even light), reads the canvas, and puts the view's lights back and redraws it
+before the browser shows a frame, so the screen doesn't move. If the eye-height picture
+fails, "this view" stays, with a note. `e2e/render-scale.spec.ts`.
+
 **AI model pickers (6 Nov, owner reports: Gemini 400 with gemini-3-pro-image; type-in model
 names):** the AI assistant has two selects, "Model for plans and layouts" and, for OpenAI and
 Gemini, "Model for pictures", stored per key as `model` and `imageModel` (`credentials.ts`;

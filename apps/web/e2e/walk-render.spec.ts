@@ -122,6 +122,8 @@ test('on a phone: a photo-real render from the spot walked to, the walk standing
   await thumb.lift();
   // The picture is taken of the walk's view (slowly, drawn in software at the phone's pixels).
   await expect(dialog.getByRole('img', { name: 'The 3D view' })).toBeVisible({ timeout: 60_000 });
+  // At eye height already: no choice of where to render from.
+  await expect(dialog.getByRole('button', { name: /^From eye height/ })).toHaveCount(0);
 
   // Fresh touches on either stick do nothing while the dialog is open.
   for (const s of [walkStick, lookStick]) {

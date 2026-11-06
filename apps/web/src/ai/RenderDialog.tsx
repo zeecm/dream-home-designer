@@ -1,6 +1,14 @@
+import {
+  OVERHEAD_HEIGHT,
+  type SceneCamera,
+  type SceneFacts,
+  eyeLevelCamera,
+  sceneFacts,
+} from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
-import { capture3d, download, fileStem } from '../exports';
-import { useProject } from '../store';
+import { useEditor } from '../editor';
+import { capture3dFrom, capture3dView, download, fileStem } from '../exports';
+import { useLevel, useProject } from '../store';
 import { icons } from '../ui/icons';
 import { AiSettingsDialog } from './AiSettingsDialog';
 import { PROVIDERS, imageSettings, useAi } from './credentials';
@@ -15,37 +23,85 @@ const STYLE_NAMES: Record<RenderStyle, string> = {
   industrial: 'Industrial',
 };
 
-/** The 3D view as it is, made into a photo-real picture by the person's image model. */
+/** A picture of the 3D view to send, with the facts of what it shows. */
+interface Shot {
+  blob: Blob;
+  url: string;
+  facts?: SceneFacts;
+}
+
+/**
+ * The 3D view as it is, made into a photo-real picture by the person's image model. From
+ * high up or outside the rooms (an orbit or cut-away view) it offers, and starts on, the
+ * same direction from eye height in the room the view is centred on: from above, rooms
+ * read as bigger than they are and models fill them with furniture that wouldn't fit.
+ */
 export function RenderDialog({ onClose }: { onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   useAi(); // re-render when keys change
   const ai = imageSettings();
   const name = useProject().name;
-  const [view, setView] = useState<{ blob: Blob; url: string } | null>(null);
-  const [photo, setPhoto] = useState<{ blob: Blob; url: string } | null>(null);
+  const level = useLevel();
+  const walking = useEditor((s) => !!s.walking);
+  // The view as it is, and (from high up) from eye height in its room.
+  const [shots, setShots] = useState<{ here: Shot; eye?: Shot & { room: string } } | null>(null);
+  const [from, setFrom] = useState<'here' | 'eye'>('here');
+  // A render, with which picture it was made from.
+  const [photo, setPhoto] = useState<{ blob: Blob; url: string; from: 'here' | 'eye' } | null>(
+    null,
+  );
   const [style, setStyle] = useState<RenderStyle>('as');
   const [busy, setBusy] = useState<AbortController | null>(null);
   const [status, setStatus] = useState('');
   const [settings, setSettings] = useState(false);
   // With a render made: show it, or the view it was made from, to compare.
   const [showView, setShowView] = useState(false);
+  const view = shots ? (from === 'eye' && shots.eye ? shots.eye : shots.here) : null;
+  const highUp = (shots?.here.facts?.height ?? 0) > OVERHEAD_HEIGHT;
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the view as the dialog opens on it
   useEffect(() => {
     const d = ref.current;
     if (d && !d.open) d.showModal();
-    // The view as it is when the dialog opens.
-    let url = '';
+    const urls: string[] = [];
     let live = true;
-    void capture3d()
-      .then((blob) => {
+    const shot = (blob: Blob, facts?: SceneFacts): Shot => {
+      const url = URL.createObjectURL(blob);
+      urls.push(url);
+      return { blob, url, facts };
+    };
+    void (async () => {
+      let here: Shot;
+      let camera: SceneCamera;
+      try {
+        const view = await capture3dView();
         if (!live) return; // closed before the picture was ready
-        url = URL.createObjectURL(blob);
-        setView({ blob, url });
-      })
-      .catch(() => live && setStatus('Couldn’t take a picture of the 3D view.'));
+        camera = view.camera;
+        here = shot(view.blob, level ? sceneFacts(level, camera) : undefined);
+        setShots({ here });
+      } catch {
+        if (live) setStatus('Couldn’t take a picture of the 3D view.');
+        return;
+      }
+      // A walk is at eye height already.
+      if (walking || !level || here.facts?.view === 'eye') return;
+      try {
+        const eye = eyeLevelCamera(level, camera);
+        if (!eye) return;
+        const room = level.rooms[eye.roomId]?.name ?? 'the room';
+        const eyeBlob = await capture3dFrom(eye.camera);
+        if (!live) return;
+        setShots({ here, eye: { ...shot(eyeBlob, sceneFacts(level, eye.camera)), room } });
+        setFrom('eye');
+      } catch {
+        // This view is still there to render from.
+        if (live)
+          setStatus('Couldn’t take the eye-height picture, so the render will use this view.');
+      }
+    })();
     return () => {
       live = false;
-      if (url) URL.revokeObjectURL(url);
+      for (const u of urls) URL.revokeObjectURL(u);
     };
   }, []);
   useEffect(() => () => (photo ? URL.revokeObjectURL(photo.url) : undefined), [photo]);
@@ -58,8 +114,12 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
     setBusy(ctrl);
     setStatus('Rendering… this can take a minute or two.');
     try {
-      const blob = await renderPhoto(ai, view.blob, style, ctrl.signal);
-      setPhoto({ blob, url: URL.createObjectURL(blob) });
+      const blob = await renderPhoto(ai, view.blob, style, ctrl.signal, view.facts);
+      setPhoto({
+        blob,
+        url: URL.createObjectURL(blob),
+        from: view === shots?.eye ? 'eye' : 'here',
+      });
       setShowView(false);
       setStatus('');
     } catch (e) {
@@ -90,13 +150,59 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
           walk through, look where you like, then render.
         </p>
         <div className="render-pictures">
+          {shots?.eye && (
+            <fieldset className="segmented segmented-fill render-from">
+              <legend className="visually-hidden">Render from</legend>
+              <button
+                type="button"
+                aria-pressed={from === 'eye'}
+                disabled={!!busy}
+                onClick={() => {
+                  setFrom('eye');
+                  setShowView(true);
+                }}
+              >
+                From eye height <span className="render-from-note">in {shots.eye.room}</span>
+              </button>
+              <button
+                type="button"
+                aria-pressed={from === 'here'}
+                disabled={!!busy}
+                onClick={() => {
+                  setFrom('here');
+                  setShowView(true);
+                }}
+              >
+                From this view{' '}
+                <span className="render-from-note">
+                  ({highUp ? 'overhead' : 'outside the rooms'}: rooms may look larger)
+                </span>
+              </button>
+            </fieldset>
+          )}
+          {view === shots?.here && shots.here.facts && shots.here.facts.view !== 'eye' && (
+            // An honest word on what a view from above does to a render.
+            <p className="field-hint render-warning">
+              From {highUp ? 'above' : 'outside'}, rooms look bigger than they are and image models
+              tend to add furniture that wouldn’t fit. The model is told the true sizes, but eye
+              height is truer to life.
+            </p>
+          )}
           {photo && view && (
             <fieldset className="segmented">
               <legend className="visually-hidden">Show</legend>
               <button type="button" aria-pressed={!showView} onClick={() => setShowView(false)}>
                 Render
               </button>
-              <button type="button" aria-pressed={showView} onClick={() => setShowView(true)}>
+              <button
+                type="button"
+                aria-pressed={showView}
+                onClick={() => {
+                  // The picture the render was made from.
+                  setShowView(true);
+                  setFrom(photo.from);
+                }}
+              >
                 3D view
               </button>
             </fieldset>
@@ -104,7 +210,13 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
           {view ? (
             <img
               src={(photo && !showView ? photo : view).url}
-              alt={photo && !showView ? 'The render' : 'The 3D view'}
+              alt={
+                photo && !showView
+                  ? 'The render'
+                  : view === shots?.eye
+                    ? `The 3D view from eye height in ${shots.eye.room}`
+                    : 'The 3D view'
+              }
             />
           ) : (
             <div className="render-wait">Taking a picture of the view…</div>
