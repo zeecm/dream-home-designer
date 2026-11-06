@@ -90,6 +90,8 @@ test('from the orbit view, a render starts from eye height and tells the model t
   // The model line stays in the foot.
   await expect(dialog.locator('.dialog-foot .render-model')).toBeVisible();
 
+  // The person's own ideas go with it.
+  await dialog.getByLabel('Your own ideas (optional)').fill('terrazzo floor, warm evening light');
   await dialog.getByRole('button', { name: 'Render' }).click();
   // Where to render from can't change under a render in progress.
   await expect(eye).toBeDisabled();
@@ -113,6 +115,7 @@ test('from the orbit view, a render starts from eye height and tells the model t
   expect(prompts.images[0]).toBe(2);
   expect(atEye.startsWith('Edit the first image.')).toBe(true);
   expect(atEye).toContain('The second image is the floor plan of the whole home');
+  expect(atEye).toContain('in their words: "terrazzo floor, warm evening light".');
 
   // From the view itself: honest about it, and the list follows the picture.
   await here.click();

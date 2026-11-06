@@ -104,7 +104,7 @@ ${JSON.stringify(planForModel(level))}
 
 The household: ${brief.household || 'not said'}.
 They would like: ${brief.wishes.length ? brief.wishes.join('; ') : 'no particular wishes'}.
-${brief.notes ? `They also said: ${brief.notes}` : ''}
+${brief.notes.trim() ? `Their own ideas, in their words (follow them ahead of your own taste wherever HDB rules and the locked walls allow; where one can't be done, say why in that option's reasons): ${brief.notes.trim().slice(0, 1000)}` : ''}
 
 Suggest up to three different renovation layouts that suit them, each a realistic, buildable change an HDB-registered contractor could do. For each: a short name, a one-sentence summary, two or three reasons it suits them, and the operations:
 - remove_wall (wallId): hack a wall that isn't locked.

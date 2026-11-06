@@ -251,11 +251,14 @@ test('suggested layouts from a brief: checked against what may change, one made 
   const dialog = page.getByRole('dialog', { name: 'Suggest layouts' });
   await dialog.getByLabel('Who lives here').fill('a couple working from home');
   await dialog.getByLabel('A study or home office').check();
+  await dialog.getByLabel('Your own ideas').fill('an island kitchen open to the living room');
   await dialog.getByRole('button', { name: 'Suggest layouts' }).click();
   const cards = dialog.locator('.layout-option');
   await expect(cards).toHaveCount(3);
   expect(prompt).toContain('a couple working from home');
   expect(prompt).toContain('A study or home office');
+  expect(prompt).toContain('Their own ideas, in their words');
+  expect(prompt).toContain('an island kitchen open to the living room');
   await expect(cards.nth(0)).toContainText('Hack');
   await expect(cards.nth(1)).toContainText('glass partition');
   // An outside wall stays, whatever the model said.

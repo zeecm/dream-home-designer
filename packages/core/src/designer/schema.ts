@@ -70,6 +70,8 @@ export const DesignBrief = z.object({
   wishes: z.array(z.string().max(200)).max(20),
   style: z.union([StyleId, z.literal('designer')]),
   colours: z.string().max(300),
+  /** Their own ideas for the design, in their words (absent in briefs saved before). */
+  ideas: z.string().max(2000).default(''),
   /** S$, the renovation (hacking, carpentry, floors, paint, electrical). Null: not sure. */
   budget: z.object({ low: z.number().min(0), high: z.number().min(0) }).nullable(),
   walls: z.enum(['keep', 'allowed', 'structural']),
@@ -94,6 +96,7 @@ export const defaultBrief = (): DesignBrief => ({
   wishes: [],
   style: 'designer',
   colours: '',
+  ideas: '',
   budget: null,
   walls: 'allowed',
   keep: { items: {}, text: '' },

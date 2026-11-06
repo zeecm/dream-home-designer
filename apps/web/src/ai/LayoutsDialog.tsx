@@ -172,13 +172,18 @@ export function LayoutsDialog({
             ))}
           </fieldset>
           <label className="field">
-            <span className="field-label">Anything else</span>
-            <input
-              className="input"
-              placeholder="e.g. keep the second bedroom; we cook a lot"
+            <span className="field-label">Your own ideas</span>
+            <textarea
+              className="input textarea"
+              rows={3}
+              maxLength={1000}
+              placeholder="e.g. open the kitchen to the living room with an island; keep the second bedroom; we cook a lot"
               value={brief.notes}
               onChange={(e) => setBrief({ ...brief, notes: e.target.value })}
             />
+            <span className="field-hint">
+              Layouts follow them where HDB rules allow, and say why when they can’t.
+            </span>
           </label>
           {!ai && (
             <p className="field-hint">

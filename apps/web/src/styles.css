@@ -2758,6 +2758,14 @@ h3.field-label {
 .render-pictures {
   padding: 0 20px 12px;
 }
+/* The person's own ideas, inset like the picture above. */
+.render-ideas {
+  padding: 0 20px 16px;
+}
+.render-ideas .textarea {
+  min-height: 0;
+  resize: vertical;
+}
 .render-pictures .segmented {
   margin-bottom: 8px;
 }

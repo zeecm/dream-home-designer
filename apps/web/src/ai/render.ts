@@ -3,6 +3,7 @@ import {
   SKETCH_KEY,
   type SceneCamera,
   type SceneFacts,
+  clean,
   planSketch,
   sceneSheet,
 } from '@dhd/core';
@@ -27,13 +28,32 @@ const PLAN_NOTE = `The second image is the floor plan of the whole home seen fro
 /** Said again at the end, where a model weighs it most: the same picture, only real. */
 const LAST_WORD =
   'The result must match the image line for line: only the materials and the light change. Nothing added, removed or moved.';
+const LAST_WORD_WITH_IDEAS =
+  'The result must match the image line for line: only the materials, the light and what their ideas ask for change. Nothing else added, removed or moved.';
+
+/** Longest idea text sent, in characters. */
+export const MAX_IDEAS = 600;
+
+/**
+ * The person's ideas as the prompt quotes them: one line, no control or invisible
+ * characters, no double quotes of their own (they'd end the quote), at most MAX_IDEAS.
+ */
+export function ownIdeas(text: string): string {
+  return clean(text.replace(/["“”]/g, "'").replace(/\s+/g, ' '), MAX_IDEAS);
+}
 
 /**
  * What to ask the image model: the picture made photographic, and (given the facts of the
  * view) a short sheet of what is really there, so a view from high up isn't read as a big
  * room and filled with furniture that wouldn't fit.
  */
-export function renderPrompt(style: RenderStyle, facts?: SceneFacts, plan = false): string {
+export function renderPrompt(
+  style: RenderStyle,
+  facts?: SceneFacts,
+  plan = false,
+  /** The person's own ideas for the picture, in their words. */
+  ideas = '',
+): string {
   // Daylight "through the windows" with none in sight has a model add one to explain it.
   const glazed = facts?.openings.some((o) => o.kind === 'window' || o.kind === 'glass') ?? true;
   const light = glazed
@@ -41,11 +61,16 @@ export function renderPrompt(style: RenderStyle, facts?: SceneFacts, plan = fals
     : 'soft, even indoor light, as there is no window in view';
   const base = `${plan ? 'Edit the first image. ' : 'Edit this image. '}It is an exact 3D model of a real home, drawn to scale: not a sketch to interpret or improve. Make it look like a real photograph of this exact room by changing only how the surfaces look (realistic materials and textures) and the light (${light}, soft shadows, light bouncing off the walls). ${RENDER_STYLES[style]} Every edge must stay where it is: the same camera, framing and perspective; the same walls, corners, ceiling and floor; the same doors, windows and openings, the same sizes and in the same places; the same furniture, in the same places, sizes and orientations. Add nothing: no furniture, rugs, lamps, curtains, pictures, plants, décor, people or text. Remove nothing. Never add a door, doorway, arch, opening, niche or window: a solid wall stays solid, and empty floor stays empty.`;
   const key = plan ? `\n\n${PLAN_NOTE}` : '';
-  if (!facts) return `${base}${key}\n\n${LAST_WORD}`;
+  const own = ownIdeas(ideas);
+  const theirs = own
+    ? `\n\nThe person's own ideas for this picture, in their words: "${own}". Follow them for materials, colours, light and styling. Where they ask for something to be added (plants, a rug, curtains, art), add just that, in a size that fits. Walls, doors, windows, openings and the room's size never change, whatever they say.`
+    : '';
+  const last = own ? LAST_WORD_WITH_IDEAS : LAST_WORD;
+  if (!facts) return `${base}${key}${theirs}\n\n${last}`;
   // The sheet fits its own length (pieces and openings dropped and counted), its
   // instruction first.
   const sheet = sceneSheet(facts, { finishes: style === 'as' });
-  return `${base}${key}\n\nThe true scene, measured: ${sheet}\n\n${LAST_WORD}`;
+  return `${base}${key}${theirs}\n\nThe true scene, measured: ${sheet}\n\n${last}`;
 }
 
 const TIMEOUT = 240_000;
@@ -111,13 +136,14 @@ export async function renderPhoto(
   picture: Blob,
   style: RenderStyle,
   signal?: AbortSignal,
-  facts?: SceneFacts,
-  plan?: Blob,
+  /** The facts of the view, the floor plan to send with it, and the person's own ideas. */
+  more: { facts?: SceneFacts; plan?: Blob; ideas?: string } = {},
 ): Promise<Blob> {
+  const { facts, plan, ideas } = more;
   // An older OpenAI image model (dall-e-2) takes one picture: the view alone.
   const withPlan =
     plan && (ai.provider !== 'openai' || MANY_IMAGES.test(ai.model)) ? plan : undefined;
-  const prompt = renderPrompt(style, facts, !!withPlan);
+  const prompt = renderPrompt(style, facts, !!withPlan, ideas);
   const timeout = timeoutSignal(TIMEOUT);
   const both = signal ? anySignal([signal, timeout]) : timeout;
   let res: Response;

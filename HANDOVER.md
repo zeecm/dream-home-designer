@@ -1097,6 +1097,11 @@ pnpm --filter @dhd/edge run deploy           # production: dhd-api
 pnpm --filter @dhd/edge run deploy:preview   # previews: dhd-api-preview
 ```
 
+**A schema bump deploys both APIs** (`deploy` and `deploy:preview`), then checks each with a
+POST of `testdata/hdb4room.json` (a fresh id) through its own Pages host. Branch previews
+route `/api` to `dhd-api-preview`: left behind at schema 7, it refused every save from a
+schema-10 preview ("schemaVersion 10 not supported (want 1-7)"; owner, 6 Nov).
+
 **Cloudflare resources:**
 - **Pages:** the `dream-home-designer` project, Git-connected. It binds `API` to `dhd-api` in
   production and to `dhd-api-preview` in previews.

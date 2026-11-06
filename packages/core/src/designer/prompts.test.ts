@@ -125,3 +125,18 @@ describe('prompts (criterion 23)', () => {
     expect(p.tail).toContain('A super single bed');
   });
 });
+
+describe('the household’s own ideas', () => {
+  it('go to the designer cleaned and cut, with the rule to follow them', async () => {
+    const { DesignBrief, defaultBrief } = await import('./schema');
+    const { briefData } = await import('./describe');
+    const { SYSTEM_PROMPT } = await import('./prompts');
+    const brief = { ...defaultBrief(), ideas: 'An island kitchen\nopen to the living room\u202e' };
+    const data = briefData(brief, aliasesFor(sampleLevel()));
+    expect(data.ownIdeas).toBe('An island kitchen open to the living room');
+    expect(SYSTEM_PROMPT).toContain('"ownIdeas" in the brief are the household\'s own ideas');
+    // A brief saved before there were ideas still reads, with none.
+    const { ideas: _, ...old } = defaultBrief();
+    expect(DesignBrief.parse(old).ideas).toBe('');
+  });
+});

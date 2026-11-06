@@ -194,6 +194,7 @@ export function briefData(brief: DesignBrief, aliases: AliasMap) {
     wishes: brief.wishes.map((w) => t(w, 200)),
     style: brief.style === 'designer' ? 'the designer’s choice' : STYLE_NAMES[brief.style],
     colours: t(brief.colours, 300),
+    ownIdeas: t(brief.ideas ?? '', 2000),
     budgetSgd: brief.budget ? [brief.budget.low, brief.budget.high] : 'not sure',
     walls: {
       keep: 'keep every wall as it is',

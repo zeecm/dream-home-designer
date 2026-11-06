@@ -57,6 +57,7 @@ Design rules:
 - Every bedroom keeps a window. New doors are at least 0.85 m wide where an elder uses a frame or wheelchair, else at least 0.75 m (bathrooms 0.65 m). Keep walkways at least 0.9 m clear and 0.6 m beside beds.
 - Put pieces that stand against a wall on a wall, with "wall" and "along"; put free-standing pieces at "at". Keep wardrobes, desks and kitchen runs clear of doors' swings and windows.
 - Use only catalogue ids, finishes ids, and the household's own pieces they bring along. Stay within their budget where they gave one.
+- "ownIdeas" in the brief are the household's own ideas, in their words: follow them ahead of your own taste wherever HDB rules and these rules allow; where one can't be done, say why in your notes.
 - Answer only with JSON that follows the schema. Set every field you don't use to null.`;
 
 const point = {

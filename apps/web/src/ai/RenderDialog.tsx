@@ -13,7 +13,7 @@ import { icons } from '../ui/icons';
 import { AiSettingsDialog } from './AiSettingsDialog';
 import { PROVIDERS, imageSettings, useAi } from './credentials';
 import { AiError } from './providers';
-import { RENDER_STYLES, type RenderStyle, planImage, renderPhoto } from './render';
+import { MAX_IDEAS, RENDER_STYLES, type RenderStyle, planImage, renderPhoto } from './render';
 
 const STYLE_NAMES: Record<RenderStyle, string> = {
   as: 'As designed',
@@ -21,6 +21,22 @@ const STYLE_NAMES: Record<RenderStyle, string> = {
   scandi: 'Scandinavian',
   luxe: 'Modern luxe',
   industrial: 'Industrial',
+};
+
+const IDEAS_KEY = 'dhd-render-ideas';
+const readIdeas = () => {
+  try {
+    return sessionStorage.getItem(IDEAS_KEY) ?? '';
+  } catch {
+    return '';
+  }
+};
+const keepIdeas = (text: string) => {
+  try {
+    sessionStorage.setItem(IDEAS_KEY, text);
+  } catch {
+    // Not kept: no matter.
+  }
 };
 
 /** A picture of the 3D view to send, with the facts of what it shows. */
@@ -53,6 +69,8 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
     null,
   );
   const [style, setStyle] = useState<RenderStyle>('as');
+  // The person's own ideas, kept for the next render in this tab.
+  const [ideas, setIdeas] = useState(readIdeas);
   const [busy, setBusy] = useState<AbortController | null>(null);
   const [status, setStatus] = useState('');
   const [settings, setSettings] = useState(false);
@@ -123,7 +141,11 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
       } catch {
         plan = undefined; // the view and its facts still go
       }
-      const blob = await renderPhoto(ai, view.blob, style, ctrl.signal, view.facts, plan);
+      const blob = await renderPhoto(ai, view.blob, style, ctrl.signal, {
+        facts: view.facts,
+        plan,
+        ideas,
+      });
       setPhoto({
         blob,
         url: URL.createObjectURL(blob),
@@ -231,6 +253,27 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
             <div className="render-wait">Taking a picture of the view…</div>
           )}
         </div>
+        {ai && (
+          <label className="field render-ideas">
+            <span className="field-label">Your own ideas (optional)</span>
+            <textarea
+              className="input textarea"
+              rows={2}
+              maxLength={MAX_IDEAS}
+              disabled={!!busy}
+              placeholder="e.g. terrazzo floor, warm evening light, linen curtains, a big plant by the window"
+              value={ideas}
+              onChange={(e) => {
+                setIdeas(e.target.value);
+                keepIdeas(e.target.value);
+              }}
+            />
+            <span className="field-hint">
+              Materials, colours, light and things to add. Walls, doors and windows stay as
+              designed.
+            </span>
+          </label>
+        )}
       </div>
       {/* The look and the model in the foot, always in sight: however short the screen, and
           however far the picture has scrolled, it shows which model (and cost) a render uses. */}
