@@ -26,8 +26,8 @@ function wallWords(level: Level, wallId: string): string {
 
 /**
  * `text` with any alias the prompts used (W3, D2, R1, P4) put in words, from what it stands
- * for on `level` (or `base`, the plan it was designed on). One we don't know is "a wall",
- * "a door", "a room" or "a piece".
+ * for on `level` (or `base`, the plan it was designed on). A line naming something that
+ * isn't there at all is said again whole ("the designer named a wall that isn't on the plan").
  */
 export function humanize(
   text: string,
@@ -35,7 +35,8 @@ export function humanize(
   level: Level,
   base?: Level,
 ): string {
-  return text.replace(/\b([WDRP])(\d{1,3})\b/g, (_, kind: string, n: string) => {
+  let unknown: string | null = null;
+  const out = text.replace(/\b([WDRP])(\d{1,3})\b/g, (whole, kind: string, n: string) => {
     const id = aliases[`${kind}${n}`];
     const on = (l: Level | undefined) => {
       if (!id || !l) return null;
@@ -53,14 +54,21 @@ export function humanize(
       }
       return null;
     };
-    return (
-      on(level) ??
-      on(base) ??
-      ({ W: 'a wall', D: 'a door', R: 'a room', P: 'a piece' } as Record<string, string>)[kind] ??
-      'it'
-    );
+    const words = on(level) ?? on(base);
+    if (!words) unknown ??= kind;
+    return words ?? whole;
   });
+  // A name the designer made up: the line as a whole, in words, rather than "a wall a wall".
+  return unknown ? (UNKNOWN[unknown] ?? out) : out;
 }
+
+/** What a line about something not on the plan says instead. */
+const UNKNOWN: Record<string, string> = {
+  W: 'One wall change was left out: the designer named a wall that isn’t on the plan.',
+  D: 'One change was left out: the designer named a door or opening that isn’t on the plan.',
+  R: 'One room was left out: the designer named a room that isn’t on the plan.',
+  P: 'One piece was left out: the designer named a piece of yours that isn’t in the flat.',
+};
 
 /** The room a problem is in, by name, if it says. */
 export function problemRoom(p: DesignProblem, level: Level): string | null {

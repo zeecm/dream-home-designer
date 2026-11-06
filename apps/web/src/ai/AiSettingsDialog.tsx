@@ -94,6 +94,7 @@ export function AiSettingsDialog({
   focus?: 'prices';
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const prices = useRef<(() => boolean) | null>(null);
   const active = useAi();
   const savedKeys = useSavedProviders();
   const first = initial ?? active?.provider ?? 'anthropic';
@@ -259,6 +260,11 @@ export function AiSettingsDialog({
         className="dialog-form"
         onSubmit={(e) => {
           e.preventDefault();
+          // Prices typed but not complete: say so, and keep the dialog open.
+          if (prices.current && !prices.current()) {
+            document.getElementById('ai-prices')?.scrollIntoView({ block: 'center' });
+            return;
+          }
           saveAi(settings(), readsPlans);
           close();
         }}
@@ -386,6 +392,7 @@ export function AiSettingsDialog({
           <SpendSettings
             model={text.value || PROVIDERS[provider].model}
             focus={focus === 'prices'}
+            commitRef={prices}
           />
         </div>
         <footer className="dialog-foot">

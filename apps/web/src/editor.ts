@@ -81,7 +81,10 @@ export interface EditorState {
   /** `byUser` marks a pan or zoom, which stops automatic refitting. */
   setView: (v: View, byUser?: boolean) => void;
   setViewMode: (m: ViewMode) => void;
-  requestFit: () => void;
+  /** `padding`: pixels to spare round the plan (a designer's sheet asks for more). */
+  requestFit: (padding?: number) => void;
+  /** The padding the fit asked for uses. */
+  fitPadding: number;
   fitDone: () => void;
   /** Called when another project opens. */
   reset: () => void;
@@ -203,7 +206,9 @@ export const useEditor = create<EditorState>((set) => ({
     set((s) => ({ walking: { returnTo: s.viewMode }, viewMode: '3d' }));
   },
   stopWalk: () => set((s) => (s.walking ? { viewMode: s.walking.returnTo, walking: null } : {})),
-  requestFit: () => set({ fitRequested: true, viewAdjusted: false }),
+  fitPadding: 48,
+  requestFit: (padding = 48) =>
+    set({ fitRequested: true, viewAdjusted: false, fitPadding: padding }),
   fitDone: () => set({ fitRequested: false }),
   reset: () =>
     set((s) => ({

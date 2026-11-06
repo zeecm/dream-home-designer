@@ -1,5 +1,5 @@
 import { PRICES, PRICES_AS_OF, type Price, priceOf } from '@dhd/core';
-import { useEffect, useRef, useState } from 'react';
+import { type MutableRefObject, useEffect, useRef, useState } from 'react';
 import {
   CAPS,
   hasOverride,
@@ -16,7 +16,16 @@ import {
  * In AI settings: the tab's limit and what it has spent, and the prices used for the model
  * in use (US$ per million tokens), which the person can set to their own.
  */
-export function SpendSettings({ model, focus }: { model: string; focus?: boolean }) {
+export function SpendSettings({
+  model,
+  focus,
+  commitRef,
+}: {
+  model: string;
+  focus?: boolean;
+  /** Set to a function that saves any prices typed (true), or shows why it can't (false). */
+  commitRef?: MutableRefObject<(() => boolean) | null>;
+}) {
   const { spend, cap, prices } = useSpend();
   const price = priceOf(model, prices);
   const listed = priceOf(model, PRICES);
@@ -35,14 +44,14 @@ export function SpendSettings({ model, focus }: { model: string; focus?: boolean
   const KEYS = ['input', 'cachedInput', 'output'] as const;
   const text = (k: (typeof KEYS)[number]) => draft[k] ?? (price ? String(price[k]) : '');
   /** Saves the three prices once each is filled in with a number; never a part of them. */
-  const commit = () => {
-    if (!Object.keys(draft).length) return;
+  const commit = (): boolean => {
+    if (!Object.keys(draft).length) return true;
     const input = priceInput(text('input'));
     const cachedInput = priceInput(text('cachedInput'));
     const output = priceInput(text('output'));
     if (input === null || cachedInput === null || output === null) {
       setHint('Enter all three prices, in US$ per million tokens, to use them.');
-      return;
+      return false;
     }
     const saved = setPrice(model, {
       input,
@@ -53,11 +62,13 @@ export function SpendSettings({ model, focus }: { model: string; focus?: boolean
     });
     if (!saved) {
       setHint('Input and output prices must be more than 0.');
-      return;
+      return false;
     }
     setDraft({});
     setHint('');
+    return true;
   };
+  if (commitRef) commitRef.current = commit;
   const field = (k: (typeof KEYS)[number], label: string) => (
     <label className="field">
       <span className="field-label">{label}</span>
@@ -66,7 +77,7 @@ export function SpendSettings({ model, focus }: { model: string; focus?: boolean
         inputMode="decimal"
         value={text(k)}
         onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
-        onBlur={commit}
+        onBlur={() => commit()}
       />
     </label>
   );

@@ -5232,19 +5232,31 @@ textarea {
   min-height: 32px;
   cursor: pointer;
 }
+/* In the stage's flow, under the banner (it never covers it). */
 .designer-walk-pill {
-  position: absolute;
-  top: 8px;
-  left: 50%;
-  z-index: 6;
-  transform: translateX(-50%);
+  display: block;
+  width: fit-content;
+  max-width: calc(100% - 16px);
+  margin: 6px auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: 4px 12px;
   border-radius: 999px;
   background: var(--text);
   color: var(--surface);
   font-size: var(--fs-small);
   white-space: nowrap;
-  pointer-events: none;
+}
+/* A narrow 3D view (Split beside the designer's column): the time goes to the foot, clear
+   of Walk through and the render button at the top right. */
+.viewport {
+  container-type: inline-size;
+}
+@container (max-width: 460px) {
+  .app:not(.app-walking) .sun-control {
+    top: auto;
+    bottom: 64px;
+  }
 }
 @media (pointer: coarse) {
   .designer-change .btn,

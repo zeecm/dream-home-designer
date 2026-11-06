@@ -998,12 +998,12 @@ export function DesignerPanel() {
   const [size, setSize] = useState<'folded' | 'half' | 'full'>('half');
   // biome-ignore lint/correctness/useExhaustiveDependencies: on a change of the sheet's size
   useEffect(() => {
-    const f = requestAnimationFrame(() => useEditor.getState().requestFit());
+    const f = requestAnimationFrame(() => useEditor.getState().requestFit(64));
     return () => cancelAnimationFrame(f);
   }, [size, sheet]);
   useEffect(
     () => () => {
-      requestAnimationFrame(() => useEditor.getState().requestFit());
+      requestAnimationFrame(() => useEditor.getState().requestFit(64));
     },
     [],
   );

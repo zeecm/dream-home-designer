@@ -149,6 +149,20 @@ export function DesignerBar() {
   const run = useDesigner((s) => s.run);
   const panel = useDesigner((s) => s.panel);
   const selected = useDesigner((s) => s.selected);
+  // The bar coming or going changes the plan's height: fit the plan to what's left, with a
+  // margin, so nothing of it is cut under the bar or the designer's sheet.
+  const barShown = !!preview || (!!run && !panel);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: when the bar comes or goes
+  useEffect(() => {
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => useEditor.getState().requestFit(64));
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+  }, [barShown]);
   // Esc leaves the preview (when nothing else wants it).
   useEffect(() => {
     if (!preview) return;

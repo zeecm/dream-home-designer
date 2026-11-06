@@ -326,7 +326,13 @@ export function PlanCanvas() {
         max: { x: Math.max(...corners.map((c) => c.x)), y: Math.max(...corners.map((c) => c.y)) },
       };
     }
-    setView(fitBounds(b, size));
+    // The padding asked for, but never more than an eighth of a small pane (a phone's plan
+    // above the designer's sheet is short: a fixed margin would shrink the plan to a dot).
+    const pad = Math.min(
+      useEditor.getState().fitPadding,
+      Math.max(16, Math.min(size.width, size.height) / 8),
+    );
+    setView(fitBounds(b, size, pad));
     lastFit.current = { at: Date.now(), ink, image: image.status };
     // Only a fit that was asked for answers the request. This run may be a refit (the plan
     // image measured) left over from a commit before a view switch asked for one: clearing
@@ -1059,7 +1065,7 @@ export function PlanCanvas() {
           className="icon-btn"
           aria-label="Fit plan"
           title="Fit plan (F)"
-          onClick={requestFit}
+          onClick={() => requestFit()}
         >
           {icons.fit}
         </button>

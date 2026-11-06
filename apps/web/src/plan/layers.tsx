@@ -491,11 +491,28 @@ function roomLabels(level: Level, geom: PlanGeometry, zoom: number): RoomLabel[]
     // Nowhere clear at all (a room the designer filled): the room's own label point, well
     // inside it, rather than a spot squeezed against a wall; the halo keeps it readable.
     const clear = labelClearance(at, half, poly, [], shape.holes) >= 0;
+    const spot = clear ? at : placeLabel(poly, half, [], shape.holes);
+    // The area's line (under the name) over a symbol (a compressor on a ledge): left out,
+    // rather than drawn with the symbol through it; the room list has it.
+    const areaBox = {
+      x0: spot.x - (area.length * 6.8) / 2 / zoom,
+      x1: spot.x + (area.length * 6.8) / 2 / zoom,
+      y0: spot.y + 3 / zoom,
+      y1: spot.y + 18 / zoom,
+    };
+    const areaHit = swings.some(({ c, r: rad }) => {
+      const dx = c.x - Math.max(areaBox.x0, Math.min(c.x, areaBox.x1));
+      const dy = c.y - Math.max(areaBox.y0, Math.min(c.y, areaBox.y1));
+      return dx * dx + dy * dy < rad * rad * 0.5;
+    });
     out.push({
       id: r.id,
       name,
-      area: areaFits ? area : null,
-      at: clear ? at : placeLabel(poly, half, [], shape.holes),
+      area:
+        areaFits && !(areaHit && labelClearance(spot, half, poly, swings, shape.holes) < 0)
+          ? area
+          : null,
+      at: spot,
       half,
     });
   }

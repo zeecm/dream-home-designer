@@ -238,6 +238,22 @@ test.describe('desktop', () => {
     );
     expect(saved.renovation).toBeUndefined();
     expect(Object.keys(saved.levels[0].items)).toHaveLength(0);
+    // Undo and Redo wait while a version is on show, and say why.
+    await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Undo' })).toHaveAttribute(
+      'title',
+      'Undo isn’t available while previewing',
+    );
+    // Walking the version: a reminder that it isn't the plan, clear of the banner.
+    await page.keyboard.press('3');
+    await page.getByRole('button', { name: 'Walk through' }).click();
+    const pill = page.locator('.designer-walk-pill');
+    await expect(pill).toHaveText('Previewing V1, not your plan');
+    const pb = await pill.boundingBox();
+    const bb = await page.locator('.sample-banner').boundingBox();
+    expect((pb?.y ?? 0) >= (bb?.y ?? 0) + (bb?.height ?? 0) - 1).toBe(true);
+    await page.getByRole('button', { name: 'Leave walk' }).click();
+    await page.keyboard.press('1');
     // Before | V1 in the bar.
     await page.locator('.designer-bar').getByRole('button', { name: 'Before' }).click();
     await expect.poll(() => pieces.count()).toBe(0);
@@ -606,6 +622,20 @@ test.describe('desktop', () => {
       );
     });
   }
+
+  test('a price left empty keeps AI settings open, with why', async ({ page }) => {
+    await setup(page);
+    await openSample(page);
+    await page.getByRole('button', { name: 'Projects' }).click();
+    await page.getByRole('button', { name: /AI assistant/ }).click();
+    const dialog = page.getByRole('dialog', { name: 'AI assistant' });
+    await dialog.getByLabel('Output').fill('');
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('alert')).toHaveText(
+      'Enter all three prices, in US$ per million tokens, to use them.',
+    );
+  });
 
   test('a view-only link has no designer (42)', async ({ page, browser }) => {
     await setup(page);
