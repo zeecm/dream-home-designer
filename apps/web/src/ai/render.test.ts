@@ -55,6 +55,7 @@ const bedroom: SceneFacts = {
       height: 2.1,
       sill: 0,
       where: 'in the middle of the picture',
+      partly: false,
       near: 'Bedroom 2',
       far: 'Living',
     },
@@ -125,6 +126,15 @@ describe('the render prompt', () => {
       openings: [{ ...(bedroom.openings[0] as SceneFacts['openings'][number]), kind: 'window' }],
     });
     expect(lit).toContain('natural daylight through the windows');
+  });
+
+  it('with the floor plan sent too, says which image is which and what the plan shows', () => {
+    const p = renderPrompt('as', bedroom, true);
+    expect(p.startsWith('Edit the first image.')).toBe(true);
+    expect(p).toContain('The second image is the floor plan of the whole home');
+    expect(p).toContain('never draw it');
+    expect(p).toContain('a doorway or opening the plan shows stays open');
+    expect(renderPrompt('as', bedroom)).not.toContain('second image');
   });
 
   it('says an empty room stays empty', () => {

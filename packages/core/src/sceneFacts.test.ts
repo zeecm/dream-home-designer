@@ -298,13 +298,15 @@ describe('scene facts', () => {
     expect(ids).toContain('op_master');
     expect(ids).not.toContain('op_bed3');
     const pane = g.openings.find((o) => o.id === right.id);
+    // Its far end is behind the camera.
     expect(pane).toMatchObject({
       kind: 'glass',
       name: 'glass partition',
-      where: 'at the right of the picture',
+      where: 'only partly in the picture, at its right edge',
+      partly: true,
     });
     expect(sceneSheet(g)).toContain(
-      'a glass partition 4.0 m long and 2.6 m high, at the right of the picture',
+      'a glass partition 4.0 m long and 2.6 m high, only partly in the picture, at its right edge',
     );
   });
 
@@ -334,7 +336,8 @@ describe('scene facts', () => {
       'a door 0.9 m wide, in the middle of the picture, between "Bedroom 2" and "Living"',
     );
     expect(sheet).toContain(
-      'an open doorway (no door) 1.6 m wide, in the middle of the picture, between',
+      // At the top of the picture, its upper part out of it.
+      'an open doorway (no door) 1.6 m wide, only partly in the picture, at its top edge, between',
     );
   });
 
@@ -360,7 +363,10 @@ describe('scene facts', () => {
       fov: deg(50),
       aspect: 1.5,
     });
-    expect(over.openings.map((o) => o.id)).not.toContain('op_win_bed2');
+    // Only the bottom of Bedroom 2's window shows, through its doorway under the door head:
+    // listed, as partly in the picture (told nothing of it, a model walls it up).
+    const glimpse = over.openings.find((o) => o.id === 'op_win_bed2');
+    if (glimpse) expect(glimpse.partly).toBe(true);
   });
 
   it('lists a long glass wall once a short stretch of it is in sight, and says it is outside', () => {

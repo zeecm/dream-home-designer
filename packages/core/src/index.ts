@@ -36,3 +36,4 @@ export * from './suggest';
 export * from './trunking';
 export * from './designer';
 export * from './sceneFacts';
+export * from './planSketch';

@@ -77,8 +77,13 @@ export interface SceneOpeningFact {
   height: number;
   /** Above the floor, metres (a window's sill). */
   sill: number;
-  /** Where it shows across the picture: "at the left of the picture". */
+  /**
+   * Where it shows across the picture: "at the left of the picture", or "only partly in the
+   * picture, at its left edge".
+   */
   where: string;
+  /** Only partly in sight: cut by the picture's edge, or mostly hidden. */
+  partly: boolean;
   /** The rooms either side by name: the camera's side first (null: outside or none). */
   near: string | null;
   far: string | null;
@@ -112,8 +117,10 @@ export const MAX_SCENE_ITEMS = 25;
 export const MAX_SCENE_OPENINGS = 12;
 /** Points across an opening's width tested for sight, at least. */
 const MIN_PROBES = 7;
-/** How much of an opening's width must be in sight (metres; less for a narrow one). */
+/** Less of an opening's width in sight than this is "only partly" (metres; less if narrow). */
 const MIN_SEEN = 0.25;
+/** Less of an opening's probes in sight than this share is "only partly". */
+const PARTLY = 0.6;
 const NEAR = 0.05;
 const MAX_ROOMS = 6;
 
@@ -448,21 +455,42 @@ function openingsInSight(
     // or past a door frame), or a model told of it may draw one where none shows.
     const side = (at.x - mid.x) * fr.n.x + (at.y - mid.y) * fr.n.y >= 0 ? 1 : -1;
     const off = fr.half + 0.05;
-    const yMid = y0 + height / 2;
-    // Probes at most a quarter of a metre apart, so a long glass wall counts once a short
-    // stretch of it shows, as a door does.
+    // Probes at most a quarter of a metre apart across its width, each low, half way and
+    // high up: a column is in sight if any of them is. A long glass wall counts once a
+    // short stretch of it shows, as a door does.
     const len = u1 - u0;
     const n = Math.max(MIN_PROBES, Math.ceil(len / 0.25));
     const xs: number[] = [];
+    const ys: number[] = [];
+    let cut = false;
+    let hits = 0;
     for (let i = 0; i < n; i++) {
       const c = framePoint(fr, u0 + (len * (i + 0.5)) / n, 0);
       const p = { x: c.x + fr.n.x * off * side, y: c.y + fr.n.y * off * side };
-      const p3 = { x: c.x, y: yMid, z: c.y };
-      if (!inFrustum(f, p3) || !seen(p, sill + height / 2)) continue;
-      const d = sub3(p3, f.eye);
+      let first: V3 | null = null;
+      for (const k of [0.15, 0.5, 0.85]) {
+        const h = sill + height * k;
+        const p3 = { x: c.x, y: level.elevation + h, z: c.y };
+        if (!inFrustum(f, p3)) {
+          cut = true;
+          continue;
+        }
+        if (!seen(p, h)) continue;
+        hits++;
+        first ??= p3;
+      }
+      if (!first) continue;
+      const d = sub3(first, f.eye);
       xs.push(dot3(d, f.right) / (dot3(d, f.forward) * f.tanX));
+      ys.push(dot3(d, f.up) / (dot3(d, f.forward) * f.tanY));
     }
-    if (xs.length * (len / n) < Math.min(MIN_SEEN, 0.3 * len) - 1e-9) return;
+    // Any of it in sight is listed, a sliver too: told nothing of an opening it can half
+    // see, a model closes it up.
+    if (!xs.length) return;
+    // Only partly in the picture: cut by its edge, or much of it hidden (behind a door
+    // frame, past a wall's end).
+    const partly =
+      cut || hits < PARTLY * n * 3 || xs.length * (len / n) < Math.min(MIN_SEEN, 0.3 * len) - 1e-9;
     const beside = (k: number) =>
       roomIdAt(level, {
         x: mid.x + fr.n.x * (fr.half + 0.3) * k,
@@ -470,8 +498,11 @@ function openingsInSight(
       });
     // Where it shows across the picture.
     const x = xs.reduce((t, v) => t + v, 0) / xs.length;
-    const where =
-      x < -0.33
+    const y = ys.reduce((t, v) => t + v, 0) / ys.length;
+    const edge = Math.abs(x) >= Math.abs(y) ? (x < 0 ? 'left' : 'right') : y > 0 ? 'top' : 'bottom';
+    const where = partly
+      ? `only partly in the picture, at its ${edge} edge`
+      : x < -0.33
         ? 'at the left of the picture'
         : x > 0.33
           ? 'at the right of the picture'
@@ -487,6 +518,7 @@ function openingsInSight(
       height,
       sill,
       where,
+      partly,
       near,
       far,
       dist: Math.hypot(mid.x - at.x, mid.y - at.y),
@@ -932,7 +964,7 @@ export function sceneSheet(
 }
 
 const OTHERWISE_SOLID =
-  'Every other wall in view is solid, with no other doors, doorways, arches, openings, niches or windows.';
+  'One only partly in the picture stays as the plan has it, open or glazed, not walled up. Every other wall in view is solid, with no other doors, doorways, arches, openings, niches or windows.';
 
 /**
  * "a sliding door 1.6 m wide, at the left of the picture, into "Bedroom"", or a window's size
