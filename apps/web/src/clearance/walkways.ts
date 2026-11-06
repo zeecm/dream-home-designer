@@ -1,4 +1,4 @@
-import { type Level, type WalkwayReport, walkwayReport } from '@dhd/core';
+import { type Level, type Variant, type WalkwayReport, walkwayReport } from '@dhd/core';
 import { create } from 'zustand';
 import { useEditor } from '../editor';
 import { currentLevel, useStore } from '../store';
@@ -13,6 +13,8 @@ export interface WalkwayState {
   report: WalkwayReport | null;
   /** The level the report is for (it may trail the one shown by up to a timer's wait). */
   level: Level | null;
+  /** The version (Before or After) it is for. */
+  variant: Variant | null;
   /** Bumped by each check that follows a release: the drop's announcement waits for it. */
   released: number;
   /** Whether checks run (the clearance switch). */
@@ -22,6 +24,7 @@ export interface WalkwayState {
 export const useWalkways = create<WalkwayState>(() => ({
   report: null,
   level: null,
+  variant: null,
   released: 0,
   on: true,
 }));
@@ -48,6 +51,7 @@ function run(released = false) {
   useWalkways.setState({
     report,
     level,
+    variant: useEditor.getState().variant,
     ...(released ? { released: prev.released + 1 } : {}),
   });
 }
@@ -94,8 +98,12 @@ export function startWalkways(on: boolean) {
       // After the tool's own pointerup has made its last edit.
       setTimeout(() => run(true), 0);
     };
-    window.addEventListener('pointerup', up, true);
-    window.addEventListener('pointercancel', up, true);
+    // However the press ends: let go, cancelled, capture lost, or the window left mid-drag
+    // (its pointerup never comes), so the flag never sticks.
+    for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+      window.addEventListener(type, up, true);
+    }
+    window.addEventListener('blur', up);
   }
   run();
 }

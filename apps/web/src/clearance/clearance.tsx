@@ -74,7 +74,12 @@ export function useWalkwayReport(): WalkwayReport | null {
   const on = useClearanceOn((s) => s.on);
   useEffect(() => startWalkways(on), [on]);
   const report = useWalkways((s) => s.report);
-  return on ? report : null;
+  const of = useWalkways((s) => s.level);
+  const ofVariant = useWalkways((s) => s.variant);
+  const level = useLevel();
+  const variant = useEditor((s) => s.variant);
+  // Only the version and level shown (Before's pinches never draw on After while it catches up).
+  return on && level && of?.id === level.id && ofVariant === variant ? report : null;
 }
 
 /**

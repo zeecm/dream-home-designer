@@ -1119,18 +1119,23 @@ issues, grid}` and `walkwayStatus`. The rooms are rastered (`grid.ts`) at 50 mm,
 outside the rooms and floor pieces (`blocks`), filled by cell centre plus every cell an edge
 crosses so thin glass stays closed. An exact distance transform (Felzenszwalb, keeping each
 cell's nearest obstacle) gives each cell a width (2 × distance); doorways and passages get a
-throat (span × wall + 0.45 m each side) whose cells take the widest free stretch across the
-doorway left by furniture, else wide. A bucketed (10 mm) maximin search from the main door's
-throat (`entranceDoor` in `delivery.ts`: the first `mainDoors` only if it leads outside) finds
-each room's widest way; where the raster comes within 0.10 m of the need, the narrow stretch is
-measured exactly (nearest polygon, then the nearest on the far side; their sum). The need is
+throat (span × wall + 0.45 m each side) whose cells are twice their exact distance to the
+nearest piece (walls don't count there), else wide; a pinch measured in a throat needs at most
+the span less 0.02. A bucketed (10 mm) maximin search from the main door's throat
+(`entranceDoor` in `delivery.ts`: the first `mainDoors` only if it leads outside) finds each
+room's widest way, a room counting as reached only past its doors' throats; where the raster comes within 0.10 m of the need, the narrow stretch is
+measured exactly (nearest polygon, then the nearest on the far side, or where the rooms end on
+the raster when no wall is drawn there; their sum). The need is
 0.90 m, 0.60 m to a room only reached through a room with a bed (an en-suite) and to bed sides
-(`bedSides`: the slice 1 zones with room, a single bed's better side, from the bedroom's doors);
+(`bedSides`: the slice 1 zones with room, a single bed's better side, from the bedroom's doors
+to the rest of the flat, not its en-suite's; the bare searches kept per room);
 never more than the flat's own widest way to that target less 0.02 (cached per target with
 the bare raster, keyed by walls, corners, openings and rooms). Blamed: the pieces either side
-of the pinch, or those narrowing or standing in the bare way (wall-to-wall pinch, closed way);
-one issue per piece and pinch, `to` listing every room and bed side beyond it. About 15–20 ms
-on the sample with 40 pieces. `clearance.ts`: dining chairs (`DINING_TABLES`/`DINING_CHAIRS`,
+of the pinch; for a closed way, those standing in the bare way (else those narrowing it); for a
+wall-to-wall pinch, those narrowing the bare way. One issue per piece and pinch (routes held up
+by the same pieces at the same need merge, the narrowest shown), `to` listing every room and
+bed side beyond it. About 20–30 ms on the sample with 40 pieces (timing tests take the median
+of 7 runs: the spec's bounds under `PERF=1`, three times them otherwise). `clearance.ts`: dining chairs (`DINING_TABLES`/`DINING_CHAIRS`,
 `chairsOf`, a chair within 0.30 m of a table) need 0.75 m from the table edge through the
 chair's centre (`side: 'back'`); `clearance-doors.ts`: `doorClashes` (sweeps overlapping
 > 20 mm, cached with the walls) and `doorFrontIssues` (`REACH` of hinged fronts, the fridge's

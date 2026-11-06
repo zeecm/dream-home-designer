@@ -239,7 +239,8 @@ export class Search {
  * The widest way from the seeds to every cell (maximin over the cells' widths, 8 ways, no
  * corner cutting), bucketed by `step`; widths above `wide` count as wide. With `only`, the
  * search keeps to cells of that room. `first[r]` gets the first cell of room r reached at its
- * best width (popped in order of width, then breadth first, so near its way in).
+ * best width (popped in order of width, then breadth first, so near its way in), not counting
+ * cells marked in `notIn` (a doorway's throat: the room is reached once through it).
  */
 export function widestWays(
   g: Grid,
@@ -247,7 +248,14 @@ export function widestWays(
   seeds: readonly number[],
   seedWidth: number | null,
   out: Search,
-  opts: { wide: number; step: number; room?: Int16Array; only?: number; first?: Int32Array },
+  opts: {
+    wide: number;
+    step: number;
+    room?: Int16Array;
+    only?: number;
+    first?: Int32Array;
+    notIn?: Int16Array;
+  },
 ) {
   out.fit(g.n);
   out.id++;
@@ -310,7 +318,7 @@ export function widestWays(
       if (done[k] === id) continue;
       done[k] = id;
       const bk = b[k] as number;
-      if (first && room) {
+      if (first && room && !(opts.notIn && (opts.notIn[k] as number) >= 0)) {
         const r = room[k] as number;
         if (r >= 0 && (first[r] as number) < 0) first[r] = k;
       }

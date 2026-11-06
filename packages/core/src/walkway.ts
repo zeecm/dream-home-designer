@@ -5,7 +5,7 @@ import {
   bedSides,
   blocks,
 } from './clearance';
-import { box, clipHalf, near as nearBoxes, nearestOnPolygon } from './convex';
+import { box, near as nearBoxes, nearestOnPolygon } from './convex';
 import { entranceDoor } from './delivery';
 import { itemFootprint } from './furniture';
 import { pointInPolygon } from './geometry';
@@ -108,6 +108,8 @@ interface Bare {
   search: Search;
   first: Int32Array;
   caps: Map<string, number>;
+  /** The bare plan's widest ways inside a bedroom from its doors (by room and seed doors). */
+  roomSearches: Map<string, Search>;
 }
 
 const bareCache = new WeakMap<
@@ -279,7 +281,13 @@ function bareOf(level: Level): Bare {
   const search = new Search(g.n);
   const first = new Int32Array(rooms.length).fill(-1);
   if (startCells.length) {
-    widestWays(g, width, startCells, null, search, { wide: WIDE, step: STEP, room, first });
+    widestWays(g, width, startCells, null, search, {
+      wide: WIDE,
+      step: STEP,
+      room,
+      first,
+      notIn: throatOf,
+    });
   }
   const bare: Bare = {
     g,
@@ -298,6 +306,7 @@ function bareOf(level: Level): Bare {
     search,
     first,
     caps: new Map(),
+    roomSearches: new Map(),
   };
   if (Object.isFrozen(level.walls)) {
     bareCache.set(level.walls, {
@@ -310,39 +319,25 @@ function bareOf(level: Level): Bare {
   return bare;
 }
 
-/** A throat's clear width with furniture in it: the widest free stretch across the doorway. */
-interface ThroatClear {
-  w: number;
-  ends: [number, number];
-  by: number[];
-}
-
-function throatClear(t: Throat, fps: Vec2[][]): ThroatClear {
-  const { f } = t;
-  const u = (p: Vec2) => (p.x - f.a.x) * f.d.x + (p.y - f.a.y) * f.d.y;
-  const v = (p: Vec2) => (p.x - f.a.x) * f.n.x + (p.y - f.a.y) * f.n.y;
-  const e = 0.005;
-  const cut: { a: number; b: number; i: number }[] = [];
-  fps.forEach((fp, i) => {
-    if (!nearBoxes(fp, t.poly)) return;
-    let c = clipHalf(fp, (p) => u(p) - (t.u0 + e));
-    c = clipHalf(c, (p) => t.u1 - e - u(p));
-    c = clipHalf(c, (p) => v(p) + t.s - e);
-    c = clipHalf(c, (p) => t.s - e - v(p));
-    if (c.length < 3) return;
-    const us = c.map(u);
-    cut.push({ a: Math.min(...us), b: Math.max(...us), i });
-  });
-  if (!cut.length) return { w: Number.POSITIVE_INFINITY, ends: [t.u0, t.u1], by: [] };
-  cut.sort((p, q) => p.a - q.a);
-  let best: [number, number] = [t.u0, t.u0];
-  let at = t.u0;
-  for (const k of cut) {
-    if (k.a - at > best[1] - best[0]) best = [at, k.a];
-    at = Math.max(at, k.b);
+/**
+ * A doorway's throat with furniture about: each of its open cells as wide as twice its
+ * distance to the nearest piece (walls don't count there: the doorway's own width is the
+ * door's business), wide when no piece is near.
+ */
+function throatWidths(t: Throat, fps: Vec2[][], g: Grid, width: Float32Array) {
+  const reach = WIDE / 2;
+  const close = fps.filter((fp) => nearBoxes(fp, t.poly, reach));
+  for (const k of t.cells) {
+    if ((width[k] as number) < 0) continue;
+    if (!close.length) {
+      width[k] = WIDE;
+      continue;
+    }
+    const p = cellCentre(g, k);
+    let d = reach;
+    for (const fp of close) d = Math.min(d, nearestOnPolygon(p, fp).d);
+    width[k] = Math.min(WIDE, 2 * d);
   }
-  if (t.u1 - at > best[1] - best[0]) best = [at, t.u1];
-  return { w: Math.max(0, best[1] - best[0]), ends: best, by: cut.map((k) => k.i) };
 }
 
 /** The obstacles a narrow point is measured against: the bare polygons, then the pieces. */
@@ -352,8 +347,36 @@ interface Obstacles {
   ids: string[];
 }
 
-/** Across a narrow point: the nearest obstacle, then the nearest on the other side. */
-function across(p: Vec2, obs: Obstacles): { have: number; a: Vec2; b: Vec2; by: number[] } | null {
+/** The raster the polygons were drawn on, to find "outside the rooms", which has none. */
+interface Raster {
+  g: Grid;
+  solid: Uint8Array;
+  owner: Int32Array;
+}
+
+/**
+ * How far from p along u the rooms end (the first cell outside them), within REFINE_R; null
+ * if a wall or piece comes first, or nothing does.
+ */
+function toOutside(p: Vec2, u: Vec2, r: Raster): number | null {
+  const step = r.g.c / 2;
+  for (let t = step; t <= REFINE_R; t += step) {
+    const k = cellAt(r.g, { x: p.x + u.x * t, y: p.y + u.y * t });
+    if (k < 0) return null;
+    if (r.solid[k]) return r.owner[k] === OUTSIDE ? Math.max(0, t - step / 2) : null;
+  }
+  return null;
+}
+
+/**
+ * Across a narrow point: the nearest obstacle, then the nearest on the other side (a polygon,
+ * or where the rooms end on the raster).
+ */
+function across(
+  p: Vec2,
+  obs: Obstacles,
+  raster: Raster,
+): { have: number; a: Vec2; b: Vec2; by: number[] } | null {
   let A = -1;
   let a: Vec2 = p;
   let dA = Number.POSITIVE_INFINITY;
@@ -385,12 +408,19 @@ function across(p: Vec2, obs: Obstacles): { have: number; a: Vec2; b: Vec2; by: 
     if ((q.at.x - p.x) * ux + (q.at.y - p.y) * uy <= 1e-6) continue;
     if (!best || q.d < best.d) best = q;
   }
+  // Beyond the rooms' edge (a boundary with nothing drawn past it) before any polygon.
+  const out = toOutside(p, { x: ux, y: uy }, raster);
+  if (out !== null && (!best || out < best.d)) {
+    return { have: dA + out, a, b: { x: p.x + ux * out, y: p.y + uy * out }, by: [A] };
+  }
   if (!best) return null;
   return { have: dA + best.d, a, b: best.at, by: [A, best.i] };
 }
 
 interface Measure {
   have: number;
+  /** The need there: a doorway's pinch never needs more than the doorway is wide. */
+  need: number;
   /** Measured exactly (else the raster's width). */
   exact: boolean;
   pinch: [Vec2, Vec2] | null;
@@ -404,16 +434,17 @@ interface Measure {
 /** The narrowest point of a way, measured exactly where the raster says it's near `need`. */
 function measure(
   path: number[],
-  g: Grid,
+  raster: Raster,
   width: Float32Array,
   throatOf: Int16Array,
   throats: Throat[],
-  clears: ThroatClear[] | null,
   need: number,
   obs: Obstacles,
 ): Measure {
+  const { g } = raster;
   let out: Measure = {
     have: Number.POSITIVE_INFINITY,
+    need,
     exact: false,
     pinch: null,
     by: [],
@@ -425,8 +456,9 @@ function measure(
     if (w < out.have) out = { ...out, have: w, at: k };
   }
   let exact: Measure | null = null;
+  // The worst point: the most short of what it needs.
   const consider = (m: Measure) => {
-    if (!exact || m.have < exact.have) exact = m;
+    if (!exact || m.have - m.need < exact.have - exact.need) exact = m;
   };
   // Each stretch of the way narrower than need + slack.
   let stretches = 0;
@@ -450,29 +482,16 @@ function measure(
       tried.add(q);
       const cell = path[q] as number;
       const t = throatOf[cell] as number;
-      if (t >= 0) {
-        const th = throats[t] as Throat;
-        const cl = clears?.[t];
-        if (!cl || !Number.isFinite(cl.w)) continue;
-        const at = (u: number) => ({ x: th.f.a.x + th.f.d.x * u, y: th.f.a.y + th.f.d.y * u });
-        consider({
-          have: cl.w,
-          exact: true,
-          pinch: [at(cl.ends[0]), at(cl.ends[1])],
-          by: cl.by,
-          inThroat: true,
-          at: q,
-        });
-        continue;
-      }
-      const r = across(cellCentre(g, cell), obs);
+      const th = t >= 0 ? throats[t] : undefined;
+      const r = across(cellCentre(g, cell), obs, raster);
       if (r)
         consider({
           have: r.have,
+          need: th ? Math.min(need, th.u1 - th.u0 - CAP_MARGIN) : need,
           exact: true,
           pinch: [r.a, r.b],
           by: r.by,
-          inThroat: false,
+          inThroat: !!th,
           at: q,
         });
     }
@@ -561,20 +580,23 @@ export function walkwayReport(level: Level): WalkwayReport {
       owner[k] = nBare + i;
     }),
   );
-  const clears = throats.map((t) => throatClear(t, fps));
   buffers.fit(g);
   distanceField(g, solid, buffers);
   const width = widthBuf;
   for (let k = 0; k < g.n; k++) {
-    const t = throatOf[k] as number;
-    width[k] = solid[k]
-      ? -1
-      : t >= 0
-        ? Math.min(WIDE, (clears[t] as ThroatClear).w)
-        : Math.min(WIDE, 2 * Math.sqrt(buffers.d2[k] as number) * g.c);
+    width[k] = solid[k] ? -1 : Math.min(WIDE, 2 * Math.sqrt(buffers.d2[k] as number) * g.c);
   }
+  for (const t of throats) throatWidths(t, fps, g, width);
   const first = new Int32Array(rooms.length).fill(-1);
-  widestWays(g, width, bare.startCells, null, mainSearch, { wide: WIDE, step: STEP, room, first });
+  widestWays(g, width, bare.startCells, null, mainSearch, {
+    wide: WIDE,
+    step: STEP,
+    room,
+    first,
+    notIn: throatOf,
+  });
+  const bareRaster: Raster = { g, solid: bare.solid, owner: bare.owner };
+  const raster: Raster = { g, solid, owner };
 
   const bareObs: Obstacles = { polys: bare.polys, nBare, ids: [] };
   const obs: Obstacles = { polys: [...bare.polys, ...fps], nBare, ids: pieces.map((p) => p.id) };
@@ -586,7 +608,7 @@ export function walkwayReport(level: Level): WalkwayReport {
     const key = roomIdx === undefined ? '' : `${roomIdx}|${base}`;
     const known = bare.caps.get(key);
     if (key && known !== undefined) return known;
-    const m = measure(cells, g, bare.width, throatOf, throats, null, base, bareObs);
+    const m = measure(cells, bareRaster, bare.width, throatOf, throats, base, bareObs);
     const cap = m.exact ? m.have : Number.POSITIVE_INFINITY;
     if (key) bare.caps.set(key, cap);
     return cap;
@@ -627,11 +649,17 @@ export function walkwayReport(level: Level): WalkwayReport {
     const need = Math.min(base, cap - CAP_MARGIN);
     const capped = need < base - 1e-9;
     if (now.cell < 0) {
-      // Closed: the pieces standing in the bare way's gap.
-      const blamed = narrowing(bareWay, need);
+      // Closed: the pieces standing in the bare way (else those narrowing it).
+      const standing = new Set<string>();
+      for (const k of bareWay) {
+        if (solid[k] && (owner[k] as number) >= nBare) {
+          standing.add(obs.ids[(owner[k] as number) - nBare] as string);
+        }
+      }
+      const blamed = standing.size ? [...standing] : narrowing(bareWay, need);
       const hit = bareWay.findIndex((k) => solid[k] && (owner[k] as number) >= nBare);
       const p = cellCentre(g, bareWay[Math.max(0, hit)] as number);
-      const r = across(p, bareObs);
+      const r = across(p, bareObs, bareRaster);
       routes.push({
         route: kind,
         to,
@@ -646,21 +674,19 @@ export function walkwayReport(level: Level): WalkwayReport {
       return;
     }
     const cells = now.search.path(now.cell);
-    const m = measure(cells, g, width, throatOf, throats, clears, need, obs);
-    const ok = m.have >= need - 0.005;
+    const m = measure(cells, raster, width, throatOf, throats, need, obs);
+    const ok = m.have >= m.need - 0.005;
     let blamed: string[] = [];
     if (!ok) {
-      blamed = m.inThroat
-        ? m.by.map((i) => obs.ids[i] as string)
-        : (m.by.map(pieceOf).filter((id) => !!id) as string[]);
+      blamed = m.by.map(pieceOf).filter((id) => !!id) as string[];
       // Wall to wall: the furniture pushed the way round to a narrower gap of the flat's.
       if (!blamed.length) blamed = narrowing(bareWay, need);
     }
     const route: WalkwayRoute = {
       route: kind,
       to,
-      need,
-      capped,
+      need: Math.min(need, m.need),
+      capped: capped || m.need < need - 1e-9,
       have: Math.max(0, m.have),
       ok,
       pinch: ok ? null : m.pinch,
@@ -719,11 +745,21 @@ export function walkwayReport(level: Level): WalkwayReport {
     if (r < 0) continue;
     const sides = bedSides(level, bed);
     if (!sides.length) continue;
-    const doors = throats.filter(
+    const all = throats.filter(
       (t) => t.rooms.includes(r) && !(t.rooms[0] === r && t.rooms[1] === r),
     );
+    // In from the rest of the flat: not through its own en-suite.
+    const fromFlat = all.filter((t) => t.rooms.some((q) => q !== r && direct.has(q)));
+    const doors = fromFlat.length ? fromFlat : all;
     const own = r !== bare.startRoom && doors.length > 0;
     const seeds = own ? doors.flatMap((t) => t.cells.filter((c) => room[c] === r)) : [];
+    const seedKey = `${r}|${doors.map((t) => t.openingId).join(',')}`;
+    let bareRoom = own ? bare.roomSearches.get(seedKey) : undefined;
+    if (own && !bareRoom) {
+      bareRoom = new Search(g.n);
+      widestWays(g, bare.width, seeds, null, bareRoom, { wide: WIDE, step: STEP, room, only: r });
+      bare.roomSearches.set(seedKey, bareRoom);
+    }
     for (const side of sides) {
       const zoneCells: number[] = [];
       fillPolygon(g, side.zone, (c) => {
@@ -744,16 +780,10 @@ export function walkwayReport(level: Level): WalkwayReport {
         return cell;
       };
       const to = { bedId: bed.id, side: side.side };
-      if (own) {
-        widestWays(g, bare.width, seeds, null, auxSearch, {
-          wide: WIDE,
-          step: STEP,
-          room,
-          only: r,
-        });
-        const bc = best(auxSearch, bare.width);
+      if (own && bareRoom) {
+        const bc = best(bareRoom, bare.width);
         if (bc < 0) continue;
-        const bareWay = auxSearch.path(bc);
+        const bareWay = bareRoom.path(bc);
         widestWays(g, width, seeds, null, auxSearch, { wide: WIDE, step: STEP, room, only: r });
         judge(
           to,
@@ -776,23 +806,22 @@ export function walkwayReport(level: Level): WalkwayReport {
     }
   }
 
-  // One issue per piece and pinch, naming every room and bed side beyond it. A bedroom
-  // doorway narrowed by a piece is the room's circulation route's to report.
-  const groups = new Map<string, { routes: WalkwayRoute[]; blamed: Set<string> }>();
-  const key = (p: Vec2) => `${Math.round(p.x * 100)},${Math.round(p.y * 100)}`;
+  // One issue per piece and pinch, naming every room and bed side beyond it: routes held up
+  // by the same pieces at the same need are one pinch (the narrowest of them is shown). A
+  // bedroom doorway narrowed by a piece is the room's circulation route's to report.
+  const groups = new Map<string, { routes: WalkwayRoute[]; blamed: string[] }>();
   for (const r of routes) {
     if (r.ok || !r.blamed.length || !r.pinch) continue;
     if (r.route === 'bed' && pinchOf.get(r)?.inThroat) continue;
-    const ends = [key(r.pinch[0]), key(r.pinch[1])].sort().join('|');
-    const k = `${r.route}|${ends}|${Math.round(r.need * 100)}|${Math.round(r.have * 100)}`;
-    const grp = groups.get(k) ?? { routes: [], blamed: new Set<string>() };
+    const blamed = [...new Set(r.blamed)].sort();
+    const k = `${r.route}|${blamed.join(',')}|${Math.round(r.need * 100)}`;
+    const grp = groups.get(k) ?? { routes: [], blamed };
     grp.routes.push(r);
-    for (const id of r.blamed) grp.blamed.add(id);
     groups.set(k, grp);
   }
   const issues: Extract<ClearanceIssue, { kind: 'walkway' }>[] = [];
   for (const grp of groups.values()) {
-    const r0 = grp.routes[0] as WalkwayRoute;
+    const r0 = grp.routes.reduce((p, q) => (q.have < p.have ? q : p));
     for (const itemId of grp.blamed) {
       issues.push({
         kind: 'walkway',

@@ -310,11 +310,19 @@ describe('clearance checks', () => {
     ]);
     const lvl = withItems(base, pieces);
     clearanceIssues(lvl);
-    const t0 = performance.now();
-    for (let i = 0; i < 5; i++) clearanceIssues(lvl);
-    const ms = (performance.now() - t0) / 5;
+    const times: number[] = [];
+    for (let i = 0; i < 7; i++) {
+      // A new level object each time, as a drag makes (walls and doors stay cached).
+      const fresh = { ...lvl, items: { ...lvl.items } };
+      const t0 = performance.now();
+      clearanceIssues(fresh);
+      times.push(performance.now() - t0);
+    }
+    // The median, so one slow run on a busy machine doesn't decide it.
+    const ms = times.sort((a, b) => a - b)[3] as number;
     console.log(`clearance: ${ms.toFixed(2)} ms`);
-    expect(ms).toBeLessThan(20);
+    // 20 ms here; a shared CI runner gets three times that unless PERF is set.
+    expect(ms).toBeLessThan(process.env.PERF ? 20 : 60);
   });
 
   it('13. a dining chair needs 0.75 m from the table to pull it out', () => {

@@ -54,6 +54,7 @@ import {
   doorIssueLines,
   doorsWithIssues,
   hasClearanceRule,
+  issueText,
   itemIssueLines,
   itemsWithIssues,
   useClearanceIssues,
@@ -406,10 +407,10 @@ function ItemClearances({ level, id }: { level: Level; id: string }) {
   // A dining table: its chairs' room to pull out is part of it.
   const table = DINING_TABLES.has(level.items[id]?.assetId ?? '');
   const chairs = table ? chairsOf(level, id) : [];
-  for (const c of chairs) {
-    for (const l of itemIssueLines(level, c, issues)) {
-      if (l.startsWith('Pulling out') && !lines.includes(l)) lines.push(l);
-    }
+  for (const i of issues) {
+    if (i.kind !== 'zone' || i.side !== 'back' || !chairs.includes(i.itemId)) continue;
+    const l = issueText(level, i, issues);
+    if (!lines.includes(l)) lines.push(l);
   }
   // A rug or a lamp has nothing to check: say nothing rather than "room to use it".
   if (!lines.length && !hasClearanceRule(level, id)) return null;
