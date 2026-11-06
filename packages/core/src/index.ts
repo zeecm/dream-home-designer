@@ -31,3 +31,4 @@ export * from './dimensions';
 export * from './electrical';
 export * from './clearance-doors';
 export * from './walkway';
+export * from './suggest';
