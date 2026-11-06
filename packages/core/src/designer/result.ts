@@ -1,8 +1,9 @@
+import { freeze } from 'immer';
 import { type ClearanceIssue, clearanceIssues } from '../clearance';
 import { type CostEstimate, type Rates, TYPICAL_RATES, costEstimate } from '../cost';
 import { type Delivery, deliverable, deliveryCheck, entranceDoor, rigidNote } from '../delivery';
 import { FLOOR_FINISHES, PAINTS, WALLPAPERS, customPaint } from '../finishes';
-import { type FurnitureKind, furnitureKind, itemSize } from '../furniture';
+import { type FurnitureKind, furnitureKind, itemFootprint, itemSize } from '../furniture';
 import { placeLabel, pointInPolygon } from '../geometry';
 import { planGeometry } from '../plan';
 import { roomShapes } from '../rooms';
@@ -25,7 +26,7 @@ import {
   roomsBeside,
   spacesOf,
 } from './spaces';
-import { rotationOf, seededId, settled } from './util';
+import { hash, levelFingerprint, rotationOf, seededId, settled, stableJson } from './util';
 import { type Note, applyDesignWalls } from './walls';
 
 /**
@@ -116,6 +117,24 @@ export function wallFinishOf(
 
 const centreOf = (it: Item): Vec2 => ({ x: it.position.x, y: it.position.z });
 
+/** Pieces of the kitchen's wet area: plumbing and gas stay where they are. */
+const WET_PIECES = new Set(['kitchen-sink', 'kitchen-hob']);
+const wetText = (id: string) =>
+  `${id === 'kitchen-sink' ? 'Sink cabinet: the sink' : 'Hob cabinet: the hob'} stays in the kitchen’s wet area.`;
+
+/** A footprint pulled 1 cm in, so corners on a room's edge read as inside it. */
+const inset = (fp: Vec2[]): Vec2[] => {
+  const c = fp.reduce((p, q) => ({ x: p.x + q.x / fp.length, y: p.y + q.y / fp.length }), {
+    x: 0,
+    y: 0,
+  });
+  return fp.map((p) => {
+    const d = Math.hypot(p.x - c.x, p.y - c.y) || 1;
+    const k = Math.min(0.01, d / 2) / d;
+    return { x: p.x + (c.x - p.x) * k, y: p.y + (c.y - p.y) * k };
+  });
+};
+
 /** A point well inside a room. */
 function roomLabel(level: Level, roomId: string): Vec2 {
   const s = roomShapes(level).get(roomId);
@@ -124,11 +143,38 @@ function roomLabel(level: Level, roomId: string): Vec2 {
     : { x: Number.NaN, y: Number.NaN };
 }
 
+const memo = new Map<string, DesignResult>();
+
+/**
+ * The result, kept per version and plan: the same version on the same plan (the preview, the
+ * Accept dialog, Compare) is worked out once. Frozen: treat it as read-only.
+ */
 export function designResult(
   baseLevel: Level,
   beforeLevel: Level,
   design: DesignInput,
   opts: DesignOptions = {},
+): DesignResult {
+  const key = [
+    design.id,
+    levelFingerprint(baseLevel),
+    levelFingerprint(beforeLevel),
+    hash(stableJson(design)),
+    hash(stableJson(opts)),
+  ].join('|');
+  const hit = memo.get(key);
+  if (hit) return hit;
+  const out = freeze(work(baseLevel, beforeLevel, design, opts), true);
+  memo.set(key, out);
+  if (memo.size > 8) memo.delete(memo.keys().next().value as string);
+  return out;
+}
+
+function work(
+  baseLevel: Level,
+  beforeLevel: Level,
+  design: DesignInput,
+  opts: DesignOptions,
 ): DesignResult {
   const { brief, aliases, concept } = design;
   const repaired: Note[] = [];
@@ -194,6 +240,14 @@ export function designResult(
       refused.push({ text: `Use the ${room.name} as “${r.name}”: it stays as it is.`, roomId: id });
       continue;
     }
+    const as = roomKind(r.name);
+    if (SHELTER_ROOM.test(r.name) || as === 'bathroom' || as === 'none') {
+      refused.push({
+        text: `Name the ${room.name} “${r.name}”: that is a name for a shelter, a bathroom or a ledge.`,
+        roomId: id,
+      });
+      continue;
+    }
     const keep = brief.rooms[id]?.use === 'keep';
     if (!keep) {
       room.name = r.name;
@@ -245,6 +299,7 @@ export function designResult(
   const resultSpaces: ResultSpace[] = [];
   const placedNew = new Set<string>();
   const usedIds = new Set<string>();
+  const placedBrought = new Set<string>();
   for (const s of spaces) {
     const key = storedFor(s);
     if (key) taken.add(key);
@@ -265,10 +320,25 @@ export function designResult(
     if (!answer || !key) continue;
     notes.push(...answer.notes.map((text) => ({ text, space: s.key })));
 
-    // Clear the space, but for what the brief keeps where it is.
+    const faces = facesOf(named, s.rooms, geom);
+    const longest = (f: Face) => Math.max(0, ...clearStretches(f, 0, 1).map(([a, b]) => b - a));
+    const byLength = [...faces].sort((p, q) => longest(q) - longest(p));
+    const wants = answer.items
+      .map((a) => resolveWant(a, { s, key, faces, byLength }))
+      .filter((w): w is Want & { priority: number } => !!w)
+      .sort((p, q) => p.priority - q.priority || (p.ref < q.ref ? -1 : p.ref > q.ref ? 1 : 0));
+    // The sink and the hob stay where they are unless the answer puts new ones in.
+    const replaces = new Set(wants.map((w) => w.kind.id).filter((id) => WET_PIECES.has(id)));
+
+    // Clear the space, but for what the brief keeps where it is (and the sink and hob).
+    const takenOut: Item[] = [];
     for (const it of Object.values(lvl.items)) {
       if (!inRooms(s.rooms, centreOf(it))) continue;
       if (brief.keep.items[it.id] === 'in-place') continue;
+      if (WET_PIECES.has(it.assetId)) {
+        if (!replaces.has(it.assetId)) continue;
+        takenOut.push(it);
+      }
       delete lvl.items[it.id];
     }
     const ix = spaceIndex(named, geom, s.rooms);
@@ -276,22 +346,35 @@ export function designResult(
       const kind = furnitureKind(it.assetId);
       if (kind && inRooms(s.rooms, centreOf(it))) addToIndex(ix, it, kind);
     }
-    const faces = facesOf(named, s.rooms, geom);
-    const longest = (f: Face) => Math.max(0, ...clearStretches(f, 0, 1).map(([a, b]) => b - a));
-    const byLength = [...faces].sort((p, q) => longest(q) - longest(p));
 
-    const wants = answer.items
-      .map((a) => resolveWant(a, { s, key, faces, byLength }))
-      .filter((w): w is Want & { priority: number } => !!w)
-      .sort((p, q) => p.priority - q.priority || (p.ref < q.ref ? -1 : p.ref > q.ref ? 1 : 0));
+    const placedKinds = new Set<string>();
     for (const want of wants) {
       const out = placePiece(ix, want);
       repaired.push(...out.repaired.map((n) => ({ ...n, space: s.key })));
       dropped.push(...out.dropped.map((n) => ({ ...n, space: s.key })));
-      if (!out.item) continue;
-      lvl.items[out.item.id] = out.item;
-      rs.items.push(out.item.id);
-      if (!want.brought) placedNew.add(out.item.id);
+      const item = out.item;
+      if (!item) continue;
+      // Wherever repair moved it, a sink or a hob stands wholly in the kitchen's wet area.
+      if (WET_PIECES.has(want.kind.id) && !inset(itemFootprint(item, want.kind)).every(inKitchen)) {
+        ix.placed = ix.placed.filter((p) => p.id !== item.id);
+        dropped.push({ text: wetText(want.kind.id), ref: want.ref, space: s.key });
+        continue;
+      }
+      lvl.items[item.id] = item;
+      rs.items.push(item.id);
+      placedKinds.add(want.kind.id);
+      if (want.brought) placedBrought.add(item.id);
+      else placedNew.add(item.id);
+    }
+    for (const it of takenOut) {
+      if (placedKinds.has(it.assetId)) continue;
+      lvl.items[it.id] = it;
+      const what = it.assetId === 'kitchen-sink' ? 'sink' : 'hob';
+      repaired.push({
+        text: `Kept the ${what} where it is: the new one didn’t fit.`,
+        space: s.key,
+        itemId: it.id,
+      });
     }
 
     // Feature walls: a finish on the face towards this space only.
@@ -393,13 +476,17 @@ export function designResult(
       // Placed on whichever wall fits: the space must be the kitchen itself.
       const inSpace = !probe && ctx.s.rooms.some((id) => inKitchen(roomLabel(named, id)));
       if (!(probe ? inKitchen(probe) : inSpace)) {
-        const what = k.id === 'kitchen-sink' ? 'Sink cabinet: the sink' : 'Hob cabinet: the hob';
-        return leftOut(`${what} stays in the kitchen’s wet area.`);
+        return leftOut(wetText(k.id));
       }
     }
+    if (brought && placedBrought.has(brought.id)) {
+      return leftOut(`Your ${nameOf(k)} is placed once already; left out here.`);
+    }
     let id = brought?.id ?? seededId('it', design.id, ctx.key, a.ref);
-    for (let n = 2; usedIds.has(id); n++) id = seededId('it', design.id, ctx.key, a.ref, n);
-    usedIds.add(id);
+    if (!brought) {
+      for (let n = 2; usedIds.has(id); n++) id = seededId('it', design.id, ctx.key, a.ref, n);
+      usedIds.add(id);
+    }
     return {
       id,
       ref: a.ref,
@@ -416,6 +503,17 @@ export function designResult(
       brought,
       priority: priorityOf(k),
     };
+  }
+
+  // Pieces the brief brings that no space placed: said, not lost silently.
+  for (const [id, how] of Object.entries(brief.keep.items).sort(([a], [b]) => (a < b ? -1 : 1))) {
+    const it = start.items[id];
+    if (how !== 'bring' || !it || lvl.items[id]) continue;
+    const kind = furnitureKind(it.assetId);
+    dropped.push({
+      text: `Your ${kind ? nameOf(kind) : 'piece'} isn’t in the design: the designer didn’t place it.`,
+      itemId: id,
+    });
   }
 
   // 4. Electrical points, worked out locally on the designed level.
@@ -494,7 +592,16 @@ export function designResult(
         checked.get(k) ??
         deliveryCheck(level, id, { from, ...(opts.site?.lift ? { lift: opts.site.lift } : {}) });
       checked.set(k, d);
-      if (d.status === 'too-big' || d.status === 'hinges') {
+      if (d.status === 'unreachable') {
+        const kind = furnitureKind(it.assetId);
+        const where = room ? (level.rooms[room]?.name ?? 'its room') : 'its room';
+        problems.push({
+          kind: 'delivery',
+          delivery: d,
+          itemId: id,
+          text: `The ${kind ? nameOf(kind) : 'piece'} can’t be carried into ${where}: there’s no way in from the main door.`,
+        });
+      } else if (d.status === 'too-big' || d.status === 'hinges') {
         const kind = furnitureKind(it.assetId);
         const where = room ? (level.rooms[room]?.name ?? 'its room') : 'its room';
         const what = `The ${kind ? nameOf(kind) : 'piece'}`;

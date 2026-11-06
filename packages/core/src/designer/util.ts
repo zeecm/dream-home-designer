@@ -69,13 +69,17 @@ const isSorted = (level: Level) =>
     return keys.every((id, i) => i === 0 || (keys[i - 1] as string) < id);
   });
 
-/** Control characters and line separators, which have no place in a name or a prompt. */
+/**
+ * Control characters, line separators, and the invisible ones that reorder or hide text
+ * (bidi controls, zero-width spaces and joiners, the byte-order mark): no place in a name.
+ */
 // biome-ignore lint/suspicious/noControlCharactersInRegex: taking them out is the point
 const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
+const INVISIBLE = /[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g;
 
 /** Text from the plan or a model, safe to put in a prompt or a list: no control characters, cut. */
 export function clean(s: string, max: number): string {
-  const t = s.replace(CONTROL, ' ').trim();
+  const t = s.replace(CONTROL, ' ').replace(INVISIBLE, '').trim();
   return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
 }
 

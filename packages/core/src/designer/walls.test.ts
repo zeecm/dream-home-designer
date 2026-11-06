@@ -6,6 +6,7 @@ import { aliasesFor } from './aliases';
 import unsafeConcept from './fixtures/concept-unsafe.json';
 import {
   SAMPLE_KEYS,
+  SPLIT_BEDROOM,
   answer,
   parsed,
   sampleConcept,
@@ -145,7 +146,10 @@ describe('the concept’s walls (criteria 2–5)', () => {
 
   it('new walls: on the axes, ends snapped onto walls, never through a wet room', () => {
     // A partition across the Bedroom, drawn a little off: straightened and snapped.
-    const r = run([op({ op: 'add_wall', a: { x: 3.3, y: 1.62 }, b: { x: 6.45, y: 1.6 } })]);
+    const r = run([
+      op({ op: 'add_wall', a: { x: 5.7, y: 0.12 }, b: { x: 5.72, y: 3.0 } }),
+      SPLIT_BEDROOM[1]!,
+    ]);
     expect(r.refused).toEqual([]);
     const fresh = Object.values(r.level.walls).filter((w) => !level.walls[w.id]);
     expect(fresh.length).toBeGreaterThan(0);
@@ -154,9 +158,9 @@ describe('the concept’s walls (criteria 2–5)', () => {
       const b = r.level.vertices[w.b]!;
       expect(Math.min(Math.abs(a.x - b.x), Math.abs(a.y - b.y))).toBeLessThan(1e-9);
     }
-    const xs = fresh.flatMap((w) => [r.level.vertices[w.a]!.x, r.level.vertices[w.b]!.x]);
-    expect(Math.min(...xs)).toBeCloseTo(3.266, 3);
-    expect(Math.max(...xs)).toBeCloseTo(6.495, 3);
+    const ys = fresh.flatMap((w) => [r.level.vertices[w.a]!.y, r.level.vertices[w.b]!.y]);
+    expect(Math.min(...ys)).toBeCloseTo(0.075, 3);
+    expect(Math.max(...ys)).toBeCloseTo(3.098, 3);
     expect(Object.keys(r.level.rooms).length).toBe(Object.keys(level.rooms).length + 1);
     // Ends that meet nothing, and walls in a bathroom, are refused.
     expect(
@@ -168,15 +172,55 @@ describe('the concept’s walls (criteria 2–5)', () => {
     ).toMatch(/bathroom/);
   });
 
+  it('a new wall never moves a window or the main door, nor ties into a structural wall unasked', () => {
+    // From the living room's window wall to the front wall, landing on the main door.
+    const across = op({ op: 'add_wall', a: { x: 9.116, y: 1.65 }, b: { x: 9.116, y: 6.0 } });
+    const r = run([across]);
+    expect(r.applied).toEqual([]);
+    expect(r.refused[0]?.text).toMatch(/: its end would land on a (window|doorway)\.$/);
+    expect(r.level.openings).toEqual(level.openings);
+    expect(r.structural).toEqual([]);
+    // Across the dry kitchen, tied into the structural wall by Bath/WC 2.
+    const tied = op({ op: 'add_wall', a: { x: 4.532, y: 5.0 }, b: { x: 6.291, y: 5.0 } });
+    expect(run([tied]).refused[0]?.text).toContain(LOCK_TEXT.structural);
+    const allowed = run([tied], 'structural');
+    expect(allowed.applied[0]?.text).toMatch(/\(structural\)$/);
+    expect(allowed.structural).toEqual([aliases.W20]);
+    // The reviewer's case, allowed structural changes: still refused, nothing moved.
+    const again = run([across], 'structural');
+    expect(again.applied).toEqual([]);
+    expect(again.level.openings).toEqual(level.openings);
+  });
+
+  it('a room is never cut off from the main door', () => {
+    // The Bedroom's only door.
+    const r = run([op({ op: 'remove_opening', opening: 'D4' })]);
+    expect(r.applied).toEqual([]);
+    expect(r.refused[0]?.text).toBe(
+      'Close up the door between Living and dining and Bedroom: it would leave Bedroom with no way in.',
+    );
+    expect(r.level.openings[aliases.D4 as string]).toBeDefined();
+    // A wall leaving part of a room with no way in, unless a later op opens one.
+    const alone = run([SPLIT_BEDROOM[0]!]);
+    expect(alone.applied).toEqual([]);
+    expect(alone.refused[0]?.text).toMatch(/with no way in\.$/);
+    expect(run(SPLIT_BEDROOM).applied).toHaveLength(2);
+    // Moving a door is fine: closed up, then a new one in the same wall.
+    const moved = run([
+      op({ op: 'remove_opening', opening: 'D4' }),
+      op({ op: 'add_door', wall: 'W10', t: 0.6, width: 0.9 }),
+    ]);
+    expect(moved.refused).toEqual([]);
+  });
+
   it('5: rooms are named and given uses by alias or by a point after the walls', () => {
-    const split = op({ op: 'add_wall', a: { x: 3.27, y: 1.6 }, b: { x: 6.49, y: 1.6 } });
     const c: Concept = {
       ...sampleConcept(),
-      walls: [split],
+      walls: SPLIT_BEDROOM,
       rooms: [
         {
           room: null,
-          at: { x: 4.8, y: 2.4 },
+          at: { x: 6.1, y: 1.5 },
           name: 'Study',
           use: 'study',
           intent: 'Kevin works here.',
@@ -225,6 +269,37 @@ describe('the concept’s walls (criteria 2–5)', () => {
     expect(text).toContain('Name a room “Nowhere”: there’s no room there after the wall changes.');
     expect(text).toContain(
       'Use the Household shelter as “Store room”: the household shelter stays the shelter.',
+    );
+    // Nor is a room given a shelter's or a bathroom's name.
+    const odd: Concept = {
+      ...sampleConcept(),
+      walls: [],
+      rooms: [
+        {
+          room: 'R1',
+          at: null,
+          name: 'Bomb shelter',
+          use: 'store',
+          intent: '',
+          floor: 'concrete',
+          paint: 'paint-grey',
+        },
+        {
+          room: 'R2',
+          at: null,
+          name: 'Master bath',
+          use: 'master',
+          intent: '',
+          floor: 'tile-grey',
+          paint: 'paint-white',
+        },
+      ],
+    };
+    const o = designResult(level, level, sampleDesign({ concept: odd, answers: {} }));
+    expect(o.level.rooms.rm_bedroom?.name).toBe('Bedroom');
+    expect(o.level.rooms['rm_main-bedroom']?.name).toBe('Main bedroom');
+    expect(o.refused.map((n) => n.text)).toContain(
+      'Name the Bedroom “Bomb shelter”: that is a name for a shelter, a bathroom or a ledge.',
     );
     // A bedroom with no window after the walls is a problem (criterion 14 too).
     expect(r.problems.map((p) => p.text)).not.toContain(

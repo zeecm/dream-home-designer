@@ -6,6 +6,7 @@ import {
   type Concept,
   type DesignBrief,
   type DesignInput,
+  type DesignOp,
   type SpaceDesign,
   defaultBrief,
   parseConcept,
@@ -113,3 +114,25 @@ export function answer(
     notes: [],
   };
 }
+
+/** A wall op with every field it doesn't use null. */
+export const wallOp = (o: Partial<DesignOp> & { op: DesignOp['op'] }): DesignOp => ({
+  wall: null,
+  opening: null,
+  a: null,
+  b: null,
+  height: null,
+  t: null,
+  width: null,
+  style: null,
+  ...o,
+});
+
+/**
+ * The Bedroom split by a new partition at x 5.7 (between its window and the living-room
+ * wall), with a door from the living room into the narrow part it makes.
+ */
+export const SPLIT_BEDROOM: DesignOp[] = [
+  wallOp({ op: 'add_wall', a: { x: 5.7, y: 0.08 }, b: { x: 5.7, y: 3.09 } }),
+  wallOp({ op: 'add_door', wall: 'W8', t: 0.5, width: 0.8 }),
+];

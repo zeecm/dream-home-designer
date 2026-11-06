@@ -10,6 +10,7 @@ import { applyLevel } from '../topology';
 import { WET } from './locks';
 import { type Aspect, BATHROOMS, type Part } from './schema';
 import { type Space, roomsBeside, spacesOf } from './spaces';
+import { openingSpanOnPlan } from './walls';
 
 /**
  * Accepting a version: what is ticked goes into the renovation in one undo step, starting a
@@ -21,10 +22,11 @@ import { type Space, roomsBeside, spacesOf } from './spaces';
  */
 
 export interface AcceptOptions {
-  /** The level the version was designed on: pieces in After that aren't in it (nor in the
-   * version) were placed by hand since, and are kept. Without it, every piece in After that
-   * the version doesn't have is treated as placed by hand. */
-  base?: Level;
+  /**
+   * The level the version was designed on (`Design.baseLevel`). A piece in After that isn't in
+   * it, isn't in the version and wasn't made by a design was placed by hand since, and is kept.
+   */
+  base: Level;
   removeHandPlaced?: boolean;
   label?: string;
 }
@@ -35,14 +37,38 @@ const centre = (it: Item): Vec2 => ({ x: it.position.x, y: it.position.z });
 export const aspectOf = (it: Item): Aspect =>
   furnitureKind(it.assetId)?.carpentry ? 'built-ins' : 'furniture';
 
-/** Whether the space's outline in `target` differs from `now` (so it needs the version's walls). */
+/** A piece a design made: its id is seeded (`it_d` and seven characters), never random. */
+export const isDesignedId = (id: string) => /^it_d[0-9a-z]{7}$/.test(id);
+
+/** A room's doors, windows and openings, by where they are: kind, width and both ends. */
+function openingsOf(level: Level, roomId: string): string[] {
+  const mm = (v: number) => Math.round(v * 1000);
+  return Object.values(level.openings)
+    .filter((o) => roomsBeside(level, o.wallId).includes(roomId))
+    .map((o) => {
+      const span = openingSpanOnPlan(level, o.id);
+      const ends = (span ?? [])
+        .map((p) => `${mm(p.x)},${mm(p.y)}`)
+        .sort()
+        .join('/');
+      return `${o.kind}|${mm(o.width)}|${ends}`;
+    })
+    .sort();
+}
+
+/**
+ * Whether the space in `target` differs from `now` in its outline or its doors and windows,
+ * so it needs the version's walls.
+ */
 export function dependsOnWalls(now: Level, target: Level, space: Space): boolean {
   const matched = matchRooms(now, target);
   return space.rooms.some((id) => {
     const was = matched.get(id);
     const a = target.rooms[id];
     const b = was ? now.rooms[was] : undefined;
-    return !a || !b || Math.abs(roomArea(target, a) - roomArea(now, b)) > 0.05;
+    if (!a || !b || !was) return true;
+    if (Math.abs(roomArea(target, a) - roomArea(now, b)) > 0.05) return true;
+    return openingsOf(target, id).join(';') !== openingsOf(now, was).join(';');
   });
 }
 
@@ -61,12 +87,7 @@ export function allowedParts(now: Level, target: Level, parts: Part[]): Part[] {
  * The level After becomes: `now` (After as it is, or the flat as it is with no renovation)
  * with the parts taken from `target` (a DesignResult's level).
  */
-export function mergeDesign(
-  now: Level,
-  target: Level,
-  parts: Part[],
-  opts: AcceptOptions = {},
-): Level {
+export function mergeDesign(now: Level, target: Level, parts: Part[], opts: AcceptOptions): Level {
   const ok = allowedParts(now, target, parts);
   const walls = ok.some((p) => p.aspect === 'walls');
   const has = (space: string, aspect: Part['aspect']) =>
@@ -109,8 +130,13 @@ export function mergeDesign(
       const s = shapes.get(id);
       return !!s && pointInPolygon(p, s.outer) && !s.holes.some((h) => pointInPolygon(p, h));
     });
-  const base = opts.base;
-  const byHand = (it: Item) => !target.items[it.id] && (!base || !base.items[it.id]);
+  const byHand = (it: Item) =>
+    !target.items[it.id] && !opts.base.items[it.id] && !isDesignedId(it.id);
+  /** Whether a piece of the version goes in: its own space and aspect are ticked. */
+  const ticked = (it: Item) => {
+    const s = spaces.find((x) => inRooms(x.rooms, centre(it)));
+    return !!s && has(s.key, aspectOf(it));
+  };
 
   for (const s of spaces) {
     for (const aspect of ['furniture', 'built-ins'] as const) {
@@ -118,6 +144,9 @@ export function mergeDesign(
       for (const it of Object.values(out.items)) {
         if (aspectOf(it) !== aspect || !inRooms(s.rooms, centre(it))) continue;
         if (byHand(it) && !opts.removeHandPlaced) continue;
+        // A piece the version moves elsewhere (brought along) goes only if it goes in there.
+        const there = target.items[it.id];
+        if (there && !ticked(there)) continue;
         delete out.items[it.id];
       }
       for (const it of Object.values(target.items)) {
@@ -193,7 +222,7 @@ export function acceptDesign(
   levelId: string,
   target: Level,
   parts: Part[],
-  opts: AcceptOptions = {},
+  opts: AcceptOptions,
 ): Command {
   return {
     label: opts.label ?? 'Use design',
