@@ -73,6 +73,16 @@ test('a viewer comments on the fridge; the owner sees it, moves the fridge and r
   await expect(tools).toHaveCount(2);
   await expect(viewer.getByRole('button', { name: /^Wall/ })).toHaveCount(0);
   await viewer.keyboard.press('1');
+  // Drawing tools' keys do nothing on a view link.
+  await viewer.locator('svg.plan-svg').focus();
+  for (const key of ['w', 'd', 'e', 'r']) {
+    await viewer.keyboard.press(key);
+    await expect(viewer.getByRole('button', { name: 'Select V' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  }
+  await expect(viewer.locator('.draw-bar, .elec-kind-list')).toHaveCount(0);
 
   // Comment on the fridge: its name, once, then the text.
   await viewer.getByRole('button', { name: 'Comment K', exact: true }).click();
@@ -229,9 +239,41 @@ test('the owner closes comments; a viewer can still read them', async ({ page, b
   );
   await ctx.close();
 
-  // The plan PNG has no pins (they're not in the SVG at all).
-  expect(await page.locator('.plan-svg .comment-pin').count()).toBe(0);
+  // The pin is on screen in the comment colour, but not in the plan as a picture.
+  await page.emulateMedia({ colorScheme: 'light' });
+  const onScreen = await page.getByTestId('plan').screenshot();
+  expect(await commentPixels(page, onScreen)).toBeGreaterThan(30);
+  await page.getByRole('button', { name: 'Projects' }).click();
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 60_000 }),
+    page.getByRole('button', { name: 'Plan as a picture (PNG)', exact: true }).click(),
+  ]);
+  const png = Buffer.concat(await (await download.createReadStream()).toArray());
+  expect(png.length).toBeGreaterThan(20_000);
+  expect(await commentPixels(page, png)).toBe(0);
 });
+
+/** How many pixels of a PNG are the pins' colour (light theme, #b54708). */
+async function commentPixels(page: Page, png: Buffer): Promise<number> {
+  return page.evaluate(async (b64) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${b64}`;
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = img.width;
+    c.height = img.height;
+    const g = c.getContext('2d');
+    if (!g) return -1;
+    g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const near = (v: number | undefined, to: number) => Math.abs((v ?? 0) - to) < 24;
+      if (near(d[i], 181) && near(d[i + 1], 71) && near(d[i + 2], 8)) n++;
+    }
+    return n;
+  }, png.toString('base64'));
+}
 
 test('from 3D, a comment in the panel opens the plan at its pin', async ({ page }) => {
   await page.goto('/');

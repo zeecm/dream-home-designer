@@ -18,6 +18,7 @@ import { icons } from '../ui/icons';
 import { CommentError, errorText } from './api';
 import {
   canComment,
+  commentId,
   findThread,
   noCommentReason,
   useCanComment,
@@ -280,6 +281,8 @@ export function Composer({ onClose }: { onClose: () => void }) {
         onChange={(v) => {
           setText(v);
           setDiscarding(false);
+          // Other words are another post: a retry of the same words keeps its ids.
+          if (error) useComments.getState().renewDraft();
         }}
         onSubmit={() => void post()}
         placeholder="What do you think?"
@@ -383,7 +386,14 @@ export function ThreadCard({
   const may = canComment(role, setting);
   const owner = role === 'owner';
   const [name, setName] = useState(savedName);
-  const [reply, setReply] = useState('');
+  const [reply, setReplyText] = useState('');
+  // The reply's id, kept across retries of the same words (the server takes it once); a
+  // new one after it posts or when the words change.
+  const [replyId, setReplyId] = useState(() => commentId('m'));
+  const setReply = (v: string) => {
+    setReplyText(v);
+    setReplyId(commentId('m'));
+  };
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -414,7 +424,7 @@ export function ThreadCard({
     if (busy || !reply.trim() || tooLong(reply) || (askName && !name.trim())) return;
     const who = (askName ? name : savedName).trim();
     void act(async () => {
-      await useComments.getState().reply(thread.id, reply.trim(), who);
+      await useComments.getState().reply(thread.id, reply.trim(), who, replyId);
       useComments.getState().setName(who);
       setReply('');
       // The Reply button goes with the text: keep focus in the field, not on the page.
@@ -985,6 +995,9 @@ export function CommentsLive() {
  * Starts comments for the open plan (on the server only), and follows a `?c=<thread>` link
  * once they have loaded.
  */
+/** What a thread id in a link may look like. */
+const THREAD_ID = /^[a-z0-9_~-]{1,64}$/;
+
 export function useCommentsLink() {
   const id = useProject().id;
   const remote = useStore((s) => s.backend?.kind === 'remote');
@@ -1005,6 +1018,9 @@ export function useCommentsLink() {
     if (!attached || status === 'loading' || status === 'error') return;
     url.searchParams.delete('c');
     window.history.replaceState(null, '', url);
+    // Only comments that loaded can say a comment is gone: a plan kept in this browser, or a
+    // server without comments, has nothing to say about it.
+    if (status !== 'ready' || !THREAD_ID.test(c)) return;
     const t = findThread(useComments.getState().doc, c);
     if (!t) {
       useStore.setState({ notice: 'That comment was deleted.' });

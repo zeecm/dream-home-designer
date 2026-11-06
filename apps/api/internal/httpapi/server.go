@@ -261,7 +261,11 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request) {
 	}
 	// Holding the comments' lock: a comment write can't read "none yet" before the delete
 	// and write them back after it.
-	unlock := s.commentLocks.lock(id)
+	unlock, err := s.commentLocks.lock(r.Context(), id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	defer unlock()
 	if err := s.store.Delete(r.Context(), id); err != nil {
 		s.fail(w, err)

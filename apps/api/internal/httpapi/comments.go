@@ -34,30 +34,42 @@ type projectLocks struct {
 }
 
 type projectLock struct {
-	mu    sync.Mutex
+	// held is a one-place channel: full while someone holds the lock, so waiting for it can
+	// give up when the request's context ends.
+	held  chan struct{}
 	users int
 }
 
-func (p *projectLocks) lock(id string) func() {
+// lock waits for the project's lock and returns its unlock, or the context's error if the
+// caller went away first.
+func (p *projectLocks) lock(ctx context.Context, id string) (func(), error) {
 	p.mu.Lock()
 	if p.locks == nil {
 		p.locks = map[string]*projectLock{}
 	}
 	l := p.locks[id]
 	if l == nil {
-		l = &projectLock{}
+		l = &projectLock{held: make(chan struct{}, 1)}
 		p.locks[id] = l
 	}
 	l.users++
 	p.mu.Unlock()
-	l.mu.Lock()
-	return func() {
-		l.mu.Unlock()
+	leave := func() {
 		p.mu.Lock()
 		if l.users--; l.users == 0 {
 			delete(p.locks, id)
 		}
 		p.mu.Unlock()
+	}
+	select {
+	case l.held <- struct{}{}:
+		return func() {
+			<-l.held
+			leave()
+		}, nil
+	case <-ctx.Done():
+		leave()
+		return nil, ctx.Err()
 	}
 }
 
@@ -199,12 +211,12 @@ func (s *Server) commentWrite(w http.ResponseWriter, r *http.Request, created in
 	}
 	actor := comments.Actor{Role: string(role), AuthHash: authorHash(id, key)}
 
-	unlock := s.commentLocks.lock(id)
-	defer unlock()
-	// The caller may have gone while it waited for the lock.
-	if r.Context().Err() != nil {
+	// The caller may go while it waits for the lock: then there is nothing to answer.
+	unlock, err := s.commentLocks.lock(r.Context(), id)
+	if err != nil {
 		return
 	}
+	defer unlock()
 	for attempt := 0; attempt < commentAttempts; attempt++ {
 		if attempt > 0 {
 			select {
@@ -338,7 +350,11 @@ func (s *Server) commentFail(w http.ResponseWriter, err error) {
 func (s *Server) clearComments(ctx context.Context, id string) {
 	if cs, ok := s.store.(store.CommentStore); ok {
 		// Not while a comment write is between its read and its write.
-		defer s.commentLocks.lock(id)()
+		unlock, err := s.commentLocks.lock(ctx, id)
+		if err != nil {
+			return
+		}
+		defer unlock()
 		if err := cs.DeleteComments(ctx, id); err != nil {
 			s.log.Error("clear leftover comments", "id", id, "err", err)
 		}

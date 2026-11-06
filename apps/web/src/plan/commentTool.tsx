@@ -1,7 +1,7 @@
 import { AFTER_SUFFIX, type Vec2, anchorFor } from '@dhd/core';
 import { useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { useComments } from '../comments/store';
+import { mayComment, useComments } from '../comments/store';
 import { type Selection, useEditor } from '../editor';
 import { cycle, objectPoint, planObjects } from './keyboard';
 import { parseHit } from './layers';
@@ -45,7 +45,8 @@ export function useCommentTool(ctx: ToolContext): ToolController {
 
   const place = (world: Vec2, hit: Selection | null) => {
     const level = ctx.level;
-    if (!level) return;
+    // The right to comment may have gone since the tool was picked.
+    if (!level || !mayComment()) return;
     const { variant } = useEditor.getState();
     const levelId = level.id.endsWith(AFTER_SUFFIX)
       ? level.id.slice(0, -AFTER_SUFFIX.length)

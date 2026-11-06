@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -524,4 +525,33 @@ func TestOpenProjectComments(t *testing.T) {
 	if res, _ := do(t, "PATCH", url, []byte(`{"setting":"off"}`), viewer(keyMum)); res.StatusCode != http.StatusForbidden {
 		t.Fatalf("open project setting: %d", res.StatusCode)
 	}
+}
+
+// A request that goes while it waits for a project's lock stops waiting, and leaves no
+// entry behind.
+func TestProjectLockGivesUpWithItsRequest(t *testing.T) {
+	var p projectLocks
+	unlock, err := p.lock(context.Background(), "prj_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.lock(ctx, "prj_a")
+		done <- err
+	}()
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("waiting lock: %v", err)
+	}
+	unlock()
+	if p.size() != 0 {
+		t.Fatalf("%d entries left", p.size())
+	}
+	again, err := p.lock(context.Background(), "prj_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again()
 }

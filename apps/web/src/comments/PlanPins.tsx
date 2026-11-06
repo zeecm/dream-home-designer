@@ -5,7 +5,7 @@ import {
   anchorPosition,
   threadsView,
 } from '@dhd/core';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { type Tool, useEditor } from '../editor';
 import { type Size, type View, panBy, worldToScreen } from '../plan/view';
@@ -69,65 +69,74 @@ export function CommentsOnPlan({ view, size, tool }: { view: View; size: Size; t
     ? level.id.slice(0, -AFTER_SUFFIX.length)
     : level?.id;
   const here = (a: CommentAnchor) => a.variant === variant && a.levelId === baseLevel;
+  const name = useComments((s) => s.name);
 
-  const pins: Pin[] = [];
-  if (doc) {
-    const unread = new Map(
-      [...threadsView(doc, seen).open].map((i) => [i.thread.id, i.unread] as const),
-    );
-    for (const t of doc.threads) {
-      const isOpen = t.id === openId;
-      if (!here(t.anchor) || (!shown && !isOpen) || (t.resolved && !showResolved && !isOpen)) {
-        continue;
+  // Where the pins are on the plan: worked out when the plan or the comments change, not on
+  // every frame of a pan or a zoom (only the step to the screen is).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `here` reads variant and baseLevel
+  const pins = useMemo(() => {
+    const out: Pin[] = [];
+    if (doc) {
+      const unread = new Map(
+        threadsView(doc, seen).open.map((i) => [i.thread.id, i.unread] as const),
+      );
+      for (const t of doc.threads) {
+        const isOpen = t.id === openId;
+        if (!here(t.anchor) || (!shown && !isOpen) || (t.resolved && !showResolved && !isOpen)) {
+          continue;
+        }
+        const first = t.messages[0];
+        out.push({
+          key: t.id,
+          threadId: t.id,
+          anchor: t.anchor,
+          place: anchorPosition(project, t.anchor),
+          initial: initialOf(first?.name ?? ''),
+          replies: t.messages.length - 1,
+          label: `Comment by ${first?.name ?? 'someone'} on ${t.anchor.label}`,
+          state: t.resolved ? 'resolved' : 'open',
+          unread: unread.get(t.id) ?? false,
+        });
       }
-      const first = t.messages[0];
-      pins.push({
-        key: t.id,
-        threadId: t.id,
-        anchor: t.anchor,
-        place: anchorPosition(project, t.anchor),
-        initial: initialOf(first?.name ?? ''),
-        replies: t.messages.length - 1,
-        label: `Comment by ${first?.name ?? 'someone'} on ${t.anchor.label}`,
-        state: t.resolved ? 'resolved' : 'open',
-        unread: unread.get(t.id) ?? false,
+    }
+    for (const p of pending) {
+      if (!here(p.anchor)) continue;
+      out.push({
+        key: p.id,
+        threadId: null,
+        anchor: p.anchor,
+        place: anchorPosition(project, p.anchor),
+        initial: initialOf(p.name),
+        replies: 0,
+        label: '',
+        state: 'posting',
+        unread: false,
       });
     }
-  }
-  for (const p of pending) {
-    if (!here(p.anchor)) continue;
-    pins.push({
-      key: p.id,
-      threadId: null,
-      anchor: p.anchor,
-      place: anchorPosition(project, p.anchor),
-      initial: initialOf(p.name),
-      replies: 0,
-      label: '',
-      state: 'posting',
-      unread: false,
-    });
-  }
-  const posting = pending.length > 0;
-  if (draft && here(draft.anchor) && !posting) {
-    pins.push({
-      key: 'draft',
-      threadId: null,
-      anchor: draft.anchor,
-      place: anchorPosition(project, draft.anchor),
-      initial: initialOf(useComments.getState().name || '+'),
-      replies: 0,
-      label: '',
-      state: 'draft',
-      unread: false,
-    });
-  }
-  // Newest on top: later pins draw later; the open one above all.
-  pins.sort((a, b) => Number(a.threadId === openId) - Number(b.threadId === openId));
+    if (draft && here(draft.anchor) && pending.length === 0) {
+      out.push({
+        key: 'draft',
+        threadId: null,
+        anchor: draft.anchor,
+        place: anchorPosition(project, draft.anchor),
+        initial: initialOf(name || '+'),
+        replies: 0,
+        label: '',
+        state: 'draft',
+        unread: false,
+      });
+    }
+    // Newest on top: later pins draw later; the open one above all.
+    return out.sort((a, b) => Number(a.threadId === openId) - Number(b.threadId === openId));
+  }, [doc, seen, pending, draft, openId, shown, showResolved, project, variant, baseLevel, name]);
 
   const thread = doc?.threads.find((t) => t.id === openId && here(t.anchor)) ?? null;
   const active = draft && here(draft.anchor) ? draft.anchor : thread?.anchor;
-  const activeAt = active ? worldToScreen(view, size, anchorPosition(project, active).at) : null;
+  const activePlace = useMemo(
+    () => (active ? anchorPosition(project, active) : null),
+    [active, project],
+  );
+  const activeAt = activePlace ? worldToScreen(view, size, activePlace.at) : null;
 
   const close = () => {
     const c = useComments.getState();
@@ -160,11 +169,24 @@ export function CommentsOnPlan({ view, size, tool }: { view: View; size: Size; t
   }, [jumpToken, fitRequested, thread?.id, size.width, size.height]);
 
   // The card's height: a popover moves up to fit it; on a phone, the plan moves so the pin
-  // sits in the strip above the sheet.
+  // sits in the strip above the sheet. Measured as it changes (a ResizeObserver), not per frame.
+  const cardKey = draft ? `d:${draft.id}` : thread ? `t:${thread.id}` : null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: per opened card
   useLayoutEffect(() => {
     const el = card.current;
-    if (el) setCardH(sheets ? el.getBoundingClientRect().height : el.scrollHeight);
-  });
+    if (!el) {
+      setCardH(0);
+      return;
+    }
+    // A popover's own content (its height may be capped); a sheet as it stands.
+    const target = sheets ? el : (el.firstElementChild ?? el);
+    const chrome = sheets ? 0 : el.offsetHeight - el.clientHeight + 24; // border and padding
+    const measure = () => setCardH(Math.ceil(target.getBoundingClientRect().height) + chrome);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(target);
+    return () => ro.disconnect();
+  }, [cardKey, sheets]);
   const panned = useRef<string | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: once per opened card
   useEffect(() => {
@@ -186,9 +208,11 @@ export function CommentsOnPlan({ view, size, tool }: { view: View; size: Size; t
 
   // Escape closes the thread wherever focus is (a button that went with a reply leaves it on
   // the page), unless a dialog or a field elsewhere has it.
+  const latest = useRef({ open: false, close });
+  latest.current = { open: !!thread && !draft, close };
   useEffect(() => {
-    if (!thread || draft) return;
     const key = (e: KeyboardEvent) => {
+      if (!latest.current.open) return;
       if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('dialog[open]'))
         return;
       const t = e.target as Element | null;
@@ -200,11 +224,11 @@ export function CommentsOnPlan({ view, size, tool }: { view: View; size: Size; t
       )
         return;
       e.preventDefault();
-      close();
+      latest.current.close();
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  });
+  }, []);
 
   // A click away from the thread closes it (a draft only closes by Cancel or Escape).
   useEffect(() => {

@@ -37,9 +37,14 @@ export interface PendingPost {
   text: string;
 }
 
-/** The composer: a new comment at an anchor. */
+/**
+ * The composer: a new comment at an anchor. Its ids are made with it, so a retry after a
+ * lost answer is the same post (the server takes it once), not a second thread.
+ */
 export interface Draft {
   anchor: CommentAnchor;
+  id: string;
+  messageId: string;
 }
 
 interface CommentsState {
@@ -77,9 +82,12 @@ interface CommentsState {
   setPanel: (open: boolean) => void;
   open: (threadId: string | null, opts?: { jump?: boolean }) => void;
   startDraft: (anchor: CommentAnchor) => void;
+  /** New ids for the draft: its text changed, so it is another post. */
+  renewDraft: () => void;
   cancelDraft: () => void;
   post: (text: string, name: string) => Promise<void>;
-  reply: (threadId: string, text: string, name: string) => Promise<void>;
+  /** `messageId` is the caller's, kept across retries of the same reply. */
+  reply: (threadId: string, text: string, name: string, messageId: string) => Promise<void>;
   resolve: (threadId: string, resolved: boolean) => Promise<void>;
   deleteThread: (threadId: string) => Promise<void>;
   deleteReply: (threadId: string, messageId: string) => Promise<void>;
@@ -113,15 +121,22 @@ export function noCommentReason(role: Role | null, setting: CommentSetting): str
     : 'Only people with the edit link can comment on this plan.';
 }
 
+/** The comment (or reply) is already deleted. */
+const isGone = (e: unknown) => e instanceof CommentError && e.status === 404 && e.code === 'gone';
+
 let poller: Poller | null = null;
 let detach: (() => void) | null = null;
+/** Bumped as each write's answer lands: a poll that started before one is out of date. */
+let writes = 0;
 
 export const useComments = create<CommentsState>((set, get) => {
   /** Takes a document the server sent, unless it is older than the one held. */
   const accept = (f: Fetched) => {
     const s = get();
     // An older answer (a poll overtaken by a write) is dropped; another epoch is a plan
-    // made again under the same id, whose versions start afresh.
+    // made again under the same id, whose versions start afresh. A document without an
+    // epoch (no comments yet) never replaces one that has had comments.
+    if (s.doc?.epoch && !f.doc.epoch) return;
     if (s.doc && f.doc.epoch === s.doc.epoch && f.doc.version < s.doc.version) return;
     const before = s.doc?.epoch === f.doc.epoch ? s.doc : null;
     set({
@@ -160,7 +175,11 @@ export const useComments = create<CommentsState>((set, get) => {
     const id = get().projectId;
     if (!id) return;
     try {
-      accept(await fn(id));
+      const answer = await fn(id);
+      writes++;
+      // Another plan opened meanwhile: this answer is not its comments.
+      if (get().projectId !== id) return;
+      accept(answer);
       if (done) get().announce(done);
     } catch (e) {
       if (e instanceof CommentError && e.status === 403) void get().refresh(true);
@@ -238,9 +257,11 @@ export const useComments = create<CommentsState>((set, get) => {
     refresh: async (fresh = false, signal?: AbortSignal) => {
       const id = get().projectId;
       if (!id || get().status === 'off' || get().status === 'unsupported') return;
+      const started = writes;
       try {
         const res = await fetchComments(id, fresh ? null : get().etag, signal);
-        if (get().projectId !== id) return;
+        // A write answered meanwhile: its document is newer than this one.
+        if (get().projectId !== id || writes !== started) return;
         if ('notModified' in res) {
           if (res.role && res.role !== get().role) set({ role: res.role });
           if (get().status !== 'ready') set({ status: 'ready' });
@@ -278,7 +299,15 @@ export const useComments = create<CommentsState>((set, get) => {
       poller?.reschedule();
     },
 
-    startDraft: (anchor) => set({ draft: { anchor }, openThread: null }),
+    startDraft: (anchor) =>
+      set({
+        draft: { anchor, id: commentId('t'), messageId: commentId('m') },
+        openThread: null,
+      }),
+    renewDraft: () =>
+      set((s) =>
+        s.draft ? { draft: { ...s.draft, id: commentId('t'), messageId: commentId('m') } } : {},
+      ),
     cancelDraft: () => set({ draft: null }),
 
     post: async (text, name) => {
@@ -286,13 +315,13 @@ export const useComments = create<CommentsState>((set, get) => {
       const draft = s.draft;
       if (!draft || !s.projectId) return;
       const p: PendingPost = {
-        id: commentId('t'),
-        messageId: commentId('m'),
+        id: draft.id,
+        messageId: draft.messageId,
         anchor: draft.anchor,
         name,
         text,
       };
-      set({ pending: [...s.pending, p] });
+      set({ pending: [...s.pending.filter((x) => x.id !== p.id), p] });
       try {
         await run(
           (id) =>
@@ -306,8 +335,7 @@ export const useComments = create<CommentsState>((set, get) => {
       }
     },
 
-    reply: async (threadId, text, name) => {
-      const messageId = commentId('m');
+    reply: async (threadId, text, name, messageId) => {
       await run((id) => api.reply(id, threadId, { id: messageId, name, text }), 'Reply posted.');
       track('comment');
       markSeen(threadId);
@@ -325,8 +353,8 @@ export const useComments = create<CommentsState>((set, get) => {
       try {
         await run((id) => api.deleteThread(id, threadId), 'Comment deleted.');
       } catch (e) {
-        // Already gone: what was wanted.
-        if (!(e instanceof CommentError && e.status === 404)) throw e;
+        // Already gone: what was wanted (not any 404: a plan that's gone is an error).
+        if (!isGone(e)) throw e;
         void get().refresh(true);
       }
       if (get().openThread === threadId) set({ openThread: null });
@@ -336,7 +364,7 @@ export const useComments = create<CommentsState>((set, get) => {
       try {
         await run((id) => api.deleteReply(id, threadId, messageId), 'Reply deleted.');
       } catch (e) {
-        if (!(e instanceof CommentError && e.status === 404)) throw e;
+        if (!isGone(e)) throw e;
         void get().refresh(true);
       }
     },
@@ -386,6 +414,12 @@ export function useCommentRole(): Role | null {
 /** The same outside React. */
 export const commentRole = (): Role | null =>
   useComments.getState().role ?? useStore.getState().role;
+
+/** Whether this browser may comment on the open plan now, outside React. */
+export function mayComment(): boolean {
+  const c = useComments.getState();
+  return c.status === 'ready' && !!c.doc && canComment(commentRole(), c.doc.setting);
+}
 
 /** Whether this browser may comment on the open plan now (comments loaded, rights held). */
 export function useCanComment(): boolean {

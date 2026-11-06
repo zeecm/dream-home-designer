@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Viewport } from './Viewport';
 import { keepWithAccount, pullFromAccount, useAccount } from './account';
 import { TraceBar } from './ai/TracePanel';
-import { canComment, commentRole, useCanComment, useComments } from './comments/store';
+import { mayComment, useCanComment, useComments } from './comments/store';
 import { CommentsLive, CommentsPanel, useCommentsLink } from './comments/ui';
 import { type Tool, type ViewMode, useEditor } from './editor';
 import { absorbLinkKey } from './keys';
@@ -50,9 +50,7 @@ function useShortcuts() {
       if (ed.walking) return; // walking has its own keys
       const tool = TOOLS.find((t) => t.key.toLowerCase() === k);
       if (tool) {
-        const c = useComments.getState();
-        const commenting = !!c.doc && canComment(commentRole(), c.doc.setting);
-        if (tool.id === 'comment' && !commenting) return;
+        if (tool.id === 'comment' && !mayComment()) return;
         // View-only: Select and Comment are the tools there are.
         if (useStore.getState().role === 'viewer' && tool.id !== 'select' && tool.id !== 'comment')
           return;
@@ -80,9 +78,21 @@ function useShortcuts() {
         ed.setTool('select');
       }
     });
+    // Losing the right to comment (the owner closed comments, an edit link was reset)
+    // drops the Comment tool, and any comment half written.
+    const dropComment = () => {
+      const ed = useEditor.getState();
+      if (ed.tool !== 'comment' || mayComment()) return;
+      ed.setTool('select');
+      useComments.getState().cancelDraft();
+    };
+    const offComments = useComments.subscribe(dropComment);
+    const offRole = useStore.subscribe((s, prev) => s.role !== prev.role && dropComment());
     return () => {
       window.removeEventListener('keydown', onKey);
       unsubscribe();
+      offComments();
+      offRole();
     };
   }, []);
 }
