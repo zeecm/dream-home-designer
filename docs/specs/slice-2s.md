@@ -312,7 +312,7 @@ at the main door.
 - No main door: "Add the main door first." as now. The lift is not judged.
 - No lift: no lift step and no Lift line.
 - Plan without a renovation, and After: one lift for the project.
-- Mattresses and foam bend; the check treats everything as rigid (so it may say no to a mattress that bends in).
+- A bed is checked in its delivery parts (my-furniture.md, "Beds come flat"): the mattress may fold in half, unless it's a king; everything else is rigid.
 - The car's corner-to-corner diagonals aren't used, so the check can say no to a thin piece that movers could angle in.
 
 ### Out of scope
