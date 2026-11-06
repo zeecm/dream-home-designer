@@ -2085,7 +2085,8 @@ h3.field-label {
     justify-content: start;
   }
   .tool {
-    width: 38px;
+    /* All ten in the row on a 390 px phone (8 px each side, 2 px apart), 32 to 38 px wide. */
+    width: clamp(32px, calc((100vw - 34px) / 10), 38px);
     height: 44px;
   }
   .inspector {
@@ -2489,6 +2490,22 @@ h3.field-label {
   }
   .app-walking .viewport-hint {
     display: none;
+  }
+}
+
+/* Too short for the ten tools in one column at a fingertip's size (a phone on its side is
+   340 to 430 px tall): two columns. */
+@media (orientation: landscape) and (max-height: 480px) and (pointer: coarse) {
+  :root {
+    --palette-width: 92px;
+  }
+  .tool-list {
+    grid-template-columns: repeat(2, 40px);
+    gap: 2px;
+  }
+  .tool {
+    width: 40px;
+    height: 40px;
   }
 }
 
