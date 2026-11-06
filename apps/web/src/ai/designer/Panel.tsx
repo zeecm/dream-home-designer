@@ -1,15 +1,11 @@
 import {
   type Aspect,
-  BATHROOMS,
   type Design,
   type DesignResult,
-  type Lock,
   type RunEstimate,
   type StepPrompt,
-  aspectOf,
   lockCovers,
   renovationChanges,
-  roomIdAt,
   usageTotals,
 } from '@dhd/core';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
@@ -32,6 +28,7 @@ import {
   changedText,
   contextFor,
   estimateFor,
+  heldHead,
   heldRows,
   needsCostCheck,
   onPlanNow,
@@ -388,20 +385,7 @@ function ChangeSomething({ d, next }: { d: Design; next: number }) {
   // One row per space and part (a lock holds the whole part): unlocking a row unlocks it all.
   const rows = useMemo(() => {
     const after = project.renovation?.levels[0];
-    const head = (l: Lock): string => {
-      if (l.space === '*') return '';
-      if (l.space === BATHROOMS) return 'Bathrooms’ paint and floors';
-      const s = r?.spaces.find((x) => lockCovers(l, x.rooms));
-      const name = s?.name ?? 'A room';
-      const what = ASPECT_NAMES[l.aspect].toLowerCase();
-      if (l.aspect !== 'furniture' && l.aspect !== 'built-ins') return `${name} ${what}`;
-      const n = Object.values(after?.items ?? {}).filter((it) => {
-        const room = after && roomIdAt(after, { x: it.position.x, y: it.position.z });
-        return aspectOf(it) === l.aspect && !!room && !!s?.rooms.includes(room);
-      }).length;
-      return `${name} ${what}, ${n === 1 ? 'its 1 piece' : `all ${n} pieces`} as now`;
-    };
-    return heldRows(from.held, head);
+    return heldRows(from.held, (l) => heldHead(l, r?.spaces ?? [], after));
   }, [from.held, r, project]);
   const [unlocked, setUnlocked] = useState<string[]>([]);
   const held = useMemo(

@@ -5,7 +5,6 @@ import {
   type Level,
   type Part,
   type Project,
-  acceptDesign,
   levelFingerprint,
   spacesOf,
 } from '@dhd/core';
@@ -18,11 +17,11 @@ import { defaultPicks } from './compare';
 import { sharedQuestion } from './once';
 import {
   type ChangeRequest,
+  acceptCommand,
   acceptedNow,
   changeFrom,
   changePlan,
   contextFor,
-  onPlanNow,
   resultFor,
 } from './plan';
 import { type DraftDesign, type RunPlan, type RunState, blankStep, runDesign } from './run';
@@ -525,25 +524,23 @@ export { acceptedNow };
 export async function acceptVersion(d: Design, parts: Part[], removeHandPlaced: boolean) {
   const project = doc();
   // Worked out on After as it is now (or the flat, with no renovation), keeping what was
-  // changed by hand since the last accept.
-  const v = onPlanNow(d, useDesigner.getState().designs, project);
-  const r = resultFor(
+  // changed by hand since the last accept; the plan as it was is kept with the record.
+  const made = acceptCommand(
+    d,
+    useDesigner.getState().designs,
     project,
-    { ...v, base: { ...v.base, variant: 'after' } },
+    parts,
     designOpts(project),
+    {
+      removeHandPlaced,
+      label: `Use design V${d.n}`,
+    },
   );
-  const before = project.levels[0];
-  if (!r || !before) return false;
+  if (!made) return false;
   useEditor.getState().setPreview(null);
   useDesigner.setState({ previewing: false });
   const was = useStore.getState().editor;
-  useStore.getState().dispatch(
-    acceptDesign(before.id, r.level, parts, {
-      base: d.baseLevel,
-      removeHandPlaced,
-      label: `Use design V${d.n}`,
-    }),
-  );
+  useStore.getState().dispatch(made.command);
   const now = useStore.getState().editor;
   if (now === was) return false;
   useEditor.getState().setVariant('after');
@@ -552,7 +549,12 @@ export async function acceptVersion(d: Design, parts: Part[], removeHandPlaced: 
   if (after) {
     const next: Design = {
       ...d,
-      accepted: { at: new Date().toISOString(), parts, level: structuredClone(after) },
+      accepted: {
+        at: new Date().toISOString(),
+        parts,
+        level: structuredClone(after),
+        prior: made.prior,
+      },
     };
     upsert(next);
     await (await store()).put(next);

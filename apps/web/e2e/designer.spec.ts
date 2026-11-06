@@ -541,7 +541,7 @@ test.describe('desktop', () => {
     await expect(held).toContainText(/sofa \(moved\)/i);
     // It says what is held: the room's furniture, all of it, as it is now.
     await expect(held).toContainText(
-      /Living and dining furniture, all \d+ pieces as now: 3-seat sofa \(moved\)/,
+      /Living and dining furniture, all \d+ pieces, as now: 3-seat sofa \(moved\)/,
     );
     // × unlocks it; Keep locks it again.
     await held.getByRole('button', { name: /^Unlock .*sofa \(moved\)/i }).click();
@@ -610,6 +610,41 @@ test.describe('desktop', () => {
     expect(v1Changes).toBeGreaterThan(0);
     await expect(wallChanges('V2')).toHaveText(String(v1Changes));
     await c.getByRole('button', { name: 'Done' }).click();
+
+    // From V1 again, with the sofa's row unlocked: V3 redesigns the living room, and it is
+    // V3's furniture there (the model's), not After's with the moved sofa.
+    await p.getByRole('tab', { name: /^V1/ }).click();
+    await p.getByRole('button', { name: 'Change something' }).click();
+    await held.getByRole('button', { name: /^Unlock .*sofa \(moved\)/i }).click();
+    await expect(
+      p.getByRole('checkbox', { name: 'Keep Living and dining: furniture' }),
+    ).not.toBeChecked();
+    const before3 = m.calls.length;
+    await p.getByRole('button', { name: /^Make V3 · about US\$/ }).click();
+    const check3 = page.getByRole('dialog', { name: 'Make V3' });
+    if (await check3.isVisible().catch(() => false)) {
+      await check3.getByRole('button', { name: /^Make V3 · about/ }).click();
+    }
+    await expect(p.getByRole('tab', { name: 'V3' })).toHaveAttribute('aria-selected', 'true', {
+      timeout: 30_000,
+    });
+    await expect(p.getByText(/^Done in /)).toBeVisible({ timeout: 30_000 });
+    const living3 = m.calls.slice(before3).find((x) => x.step.startsWith('furnish "Living'));
+    expect(living3?.body).not.toMatch(/sofa \(moved\)/i);
+    await expect(page.locator('.designer-bar')).toContainText('Previewing V3');
+    // V1's sofa (moved) is gone from V3's living room; V3's own pieces are there.
+    await expect(sofa).toHaveCount(0);
+    const afterIds = Object.keys((await saved()).renovation.levels[0].items);
+    const shownIds = await page
+      .locator('[data-hit^="item:"]')
+      .evaluateAll((els) => els.map((e) => (e.getAttribute('data-hit') ?? '').slice(5)));
+    expect(shownIds.filter((id) => !afterIds.includes(id)).length).toBeGreaterThan(5);
+    // Accept would say nothing is kept as changed by hand for it.
+    await p.getByRole('button', { name: 'Accept…' }).click();
+    const accept3 = page.getByRole('dialog', { name: 'Put V3 into your renovation' });
+    await expect(accept3).toBeVisible();
+    await expect(accept3).not.toContainText('Kept as you changed them');
+    await accept3.getByRole('button', { name: 'Cancel' }).click();
   });
 
   test('Esc with Compare open during a run closes Compare and never stops the run', async ({
