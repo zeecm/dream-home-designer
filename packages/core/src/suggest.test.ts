@@ -25,6 +25,7 @@ import {
   SUGGEST_NOTES,
   type Suggestion,
   addPoints,
+  noRoomFor,
   roomKind,
   suggestPoints,
   suggestionCost,
@@ -293,6 +294,53 @@ describe('suggestPoints: a kitchen', () => {
     const none = suggestPoints(kitchen());
     expect(ofRule(none.points, 'counter')).toHaveLength(0);
     expect(none.notes.map((x) => x.text)).toContain(SUGGEST_NOTES.counter);
+  });
+
+  /** A 4 × 3 m kitchen with a window on its top wall, `width` wide, centred `at` along it. */
+  const windowed = (at: number, width: number, pieces: [string, Vec2, number?, number?][]) => {
+    let s = door(plan(box(4, 3), [['Kitchen', { x: 2, y: 1.5 }]]), [4, 3], [0, 3], 0.5);
+    const l = flat(s);
+    const r = addOpening(l.id, {
+      wallId: wallAlong(l, [0, 0], [4, 0]),
+      kind: 'window',
+      t: at / 4,
+      width,
+      height: 1.2,
+      sill: 0.9,
+    });
+    s = dispatch(s, r.command);
+    return withItems(flat(s), pieces);
+  };
+
+  it('suggests no counter socket again once a run’s sockets are added, a window over it', () => {
+    // A 2.4 m run under a 1.2 m window: its first socket is pushed along to the run's end.
+    const l = windowed(0.85, 1.2, [['built-in-kitchen-base', { x: 1.25, y: 0.35 }]]);
+    const first = suggestPoints(l).points;
+    const counter = ofRule(first, 'counter');
+    expect(counter.length).toBeGreaterThan(0);
+    for (const c of counter) expect(inOpening(l, { ...c.point, id: 'x' } as ElecPoint)).toBe(false);
+    const again = suggestPoints(
+      withPoints(
+        l,
+        first.map((p) => p.point),
+      ),
+    );
+    expect(again.points.map((p) => p.key)).toEqual([]);
+    // Nor with only the counter sockets added.
+    const some = suggestPoints(
+      withPoints(
+        l,
+        counter.map((p) => p.point),
+      ),
+    );
+    expect(ofRule(some.points, 'counter')).toEqual([]);
+  });
+
+  it('notes a hood socket a window leaves no room for', () => {
+    const l = windowed(2.15, 1.0, run3());
+    const out = suggestPoints(l);
+    expect(ofRule(out.points, 'hood')).toHaveLength(0);
+    expect(out.notes.map((n) => n.text)).toContain(noRoomFor('hood socket'));
   });
 
   it('rounds a 4.2 m run’s 3.5 sockets up to four', () => {

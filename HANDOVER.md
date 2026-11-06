@@ -1313,7 +1313,12 @@ and focus goes back to the button; a polite live region counts the points. Ghost
 strength, a dashed ring; left out: a grey ring with ×); a click or tap toggles one (routed
 first in `PlanCanvas`) and the status line says what and why. Hovering a row outlines its room
 and fades the rest; tapping its name fits the room. Suggestions are worked out again 150 ms
-after an edit; Add uses a fresh run, so it never sends a point on a deleted wall. Toasts
+after an edit (the panel and plan share one run; a drag costs one run after it ends); Add
+uses a fresh run, so it never sends a point on a deleted wall, and if that differs from what
+is shown it shows it instead and waits for another click. An Add the store refuses (no edit
+right, the renovation guard) neither rings nor closes. Counter sockets are counted per run
+(only the shortfall is suggested, and "already there" is checked again where each lands); a
+point with no clear spot is dropped with a note (`noRoomFor`). Toasts
 "Added 6 points to Main bedroom." / "Added 23 points." with Undo (`toastFor`). Added points
 ring in `--suggest` for 600 ms (none with reduced motion). Phone: the sheet is half the
 screen, the plan refits the walls above it, buttons 44 px. In a renovation, points go in After

@@ -1,4 +1,5 @@
 import {
+  AFTER_SUFFIX,
   type ElecPoint,
   type Level,
   RULE_NAMES,
@@ -17,9 +18,9 @@ import { create } from 'zustand';
 import { range, useRates } from '../cost/estimate';
 import { useEditor } from '../editor';
 import { MAX_ZOOM, MIN_ZOOM, type Size, fitBounds } from '../plan/view';
-import { currentLevel, useLevel, useProject, useStore } from '../store';
+import { currentLevel, useLevel, useStore } from '../store';
 import { icons } from '../ui/icons';
-import { KindIcon, beforeOf, glyphRadius, useElectricalOn } from './electrical';
+import { KindIcon, glyphRadius, useElectricalOn } from './electrical';
 import { ElecGlyph, GLYPH_DEPTH } from './glyph';
 
 /**
@@ -44,6 +45,8 @@ interface SuggestState {
   next: string | null | undefined;
   /** When the panel opened on a phone: the plan refits the walls above the grown sheet. */
   fitAll: number;
+  /** Bumped to show the suggestions as they are now, without the 150 ms wait. */
+  refresh: number;
   openPanel: () => void;
   close: () => void;
   toggle: (s: Suggestion, roomName: string) => void;
@@ -62,6 +65,7 @@ export const useSuggest = create<SuggestState>((set, get) => ({
   focus: null,
   next: undefined,
   fitAll: 0,
+  refresh: 0,
   openPanel: () => {
     useElectricalOn.getState().set(true);
     const ed = useEditor.getState();
@@ -119,8 +123,14 @@ export function useSuggestHere(): boolean {
   return !renovating || variant === 'after';
 }
 
-/** The flat as it is, for judging structural walls. */
-const statusOf = (level: Level) => beforeOf(useStore.getState().editor.doc, level);
+/**
+ * The flat as it is, for judging structural walls: a renovation's level is judged on the
+ * plan's; any other on itself (so an edit doesn't make the cached suggestions miss).
+ */
+const statusFrom = (levels: readonly Level[], level: Level): Level =>
+  level.id.endsWith(AFTER_SUFFIX)
+    ? (levels.find((l) => `${l.id}${AFTER_SUFFIX}` === level.id) ?? level)
+    : level;
 
 /**
  * The suggestions for the level shown, worked out again 150 ms after the last edit (an undo
@@ -130,7 +140,9 @@ export function useSuggestions(): { level: Level; result: Suggestions } | null {
   const open = useSuggest((s) => s.open);
   const here = useSuggestHere();
   const level = useLevel();
-  const project = useProject();
+  // The plan's levels change only with an edit to the flat as it is (a renovation's Before).
+  const planLevels = useStore((s) => s.editor.doc.levels);
+  const refresh = useSuggest((s) => s.refresh);
   const [shown, setShown] = useState<Level | undefined>();
   useEffect(() => {
     if (!open) {
@@ -145,19 +157,39 @@ export function useSuggestions(): { level: Level; result: Suggestions } | null {
     const t = setTimeout(() => setShown(level), 150);
     return () => clearTimeout(t);
   }, [open, level, shown]);
+  // Asked for as it is now (an Add that found the plan changed).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on a request only
+  useEffect(() => {
+    if (open && refresh) setShown(level);
+  }, [refresh]);
   // Opened just now, or another level: at once.
   const lvl = shown && shown.id === level?.id ? shown : level;
+  // Kept by object: worked out again only when the level shown or the flat it's judged on is.
+  const status = lvl && statusFrom(planLevels, lvl);
   return useMemo(() => {
-    if (!open || !here || !lvl) return null;
-    return { level: lvl, result: suggestPoints(lvl, { statusOf: beforeOf(project, lvl) }) };
-  }, [open, here, lvl, project]);
+    if (!open || !here || !lvl || !status) return null;
+    return { level: lvl, result: suggestFor(lvl, status) };
+  }, [open, here, lvl, status]);
+}
+
+/**
+ * The panel and the plan ask for the same suggestions: the last kept here too, so a level
+ * core can't cache (one just opened, not frozen) is still worked out once.
+ */
+let last: { level: Level; status: Level; result: Suggestions } | null = null;
+function suggestFor(level: Level, status: Level): Suggestions {
+  if (last?.level === level && last.status === status) return last.result;
+  const result = suggestPoints(level, { statusOf: status });
+  last = { level, status, result };
+  return result;
 }
 
 /** Suggestions as they are now (no wait), for adding: never points on a wall since deleted. */
 function freshSuggestions(): { level: Level; result: Suggestions } | null {
   const level = currentLevel();
   if (!level) return null;
-  return { level, result: suggestPoints(level, { statusOf: statusOf(level) }) };
+  const levels = useStore.getState().editor.doc.levels;
+  return { level, result: suggestFor(level, statusFrom(levels, level)) };
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -180,7 +212,10 @@ function addThese(level: Level, points: readonly Suggestion[], label: string): s
       points.map((p) => p.point),
       label,
     );
+    const before = useStore.getState().editor;
     useStore.getState().dispatch(r.command);
+    // Not made (no right to edit, or the renovation refused it): nothing to say it was.
+    if (useStore.getState().editor === before) return null;
     useSuggest.setState({ added: { ids: r.ids, at: Date.now() } });
     return r.ids;
   } catch (e) {
@@ -284,11 +319,27 @@ export function SuggestPanel() {
     useSuggest.setState({ next: undefined });
   }, [next]);
 
+  /**
+   * Whether what would be added is what the panel shows: an edit in the last 150 ms may have
+   * changed it, and then the panel shows it as it is now, for another click.
+   */
+  const asShown = (fresh: readonly Suggestion[], pick: (p: Suggestion) => boolean) => {
+    const sig = (xs: readonly Suggestion[]) =>
+      JSON.stringify(xs.filter(pick).map((p) => [p.key, p.point]));
+    if (data && sig(fresh) === sig(data.result.points)) return true;
+    useSuggest.setState({
+      refresh: Date.now(),
+      status: 'The suggestions changed with your last edit. Check them, then add.',
+    });
+    return false;
+  };
   const addRoom = (id: string, name: string) => {
     const fresh = freshSuggestions();
     if (!fresh) return;
     const left = useSuggest.getState().out;
-    const pts = fresh.result.points.filter((p) => p.roomId === id && !left.has(p.key));
+    const mine = (p: Suggestion) => p.roomId === id && !left.has(p.key);
+    if (!asShown(fresh.result.points, mine)) return;
+    const pts = fresh.result.points.filter(mine);
     const label = `Add ${plural(pts.length, 'point')} to ${name}`;
     const i = withPoints.findIndex((r) => r.id === id);
     const after = withPoints.slice(i + 1).find((r) => r.kept.length > 0);
@@ -298,7 +349,9 @@ export function SuggestPanel() {
     const fresh = freshSuggestions();
     if (!fresh) return;
     const left = useSuggest.getState().out;
-    const pts = fresh.result.points.filter((p) => !left.has(p.key));
+    const kept = (p: Suggestion) => !left.has(p.key);
+    if (!asShown(fresh.result.points, kept)) return;
+    const pts = fresh.result.points.filter(kept);
     if (addThese(fresh.level, pts, `Add ${plural(pts.length, 'suggested point')}`)) close();
   };
   const toggle = (s: Suggestion, name: string) => useSuggest.getState().toggle(s, name);

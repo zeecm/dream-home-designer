@@ -130,6 +130,10 @@ export const SUGGEST_NOTES = {
   hob: 'Add a hob cabinet for hood and cooker points.',
 } as const;
 
+/** A point that had no clear spot (a window, a door or another point in the way). */
+export const noRoomFor = (what: string) =>
+  `No clear wall for the ${what}: a window, door or another point is in the way.`;
+
 const WHY = {
   light: 'Ceiling light.',
   table: 'Light over the dining table.',
@@ -887,9 +891,14 @@ class Suggester {
         const corner = this.u(bf.face, side === 'left' ? bl : br);
         const along = corner + Math.sign(corner - bf.uc) * BEDSIDE_OUT;
         if (this.there('socket-double', bf.face, along, BEDSIDE_HEIGHT)) continue;
-        const p = this.onWall('socket-double', bf.face, along, BEDSIDE_HEIGHT, NUDGE);
+        // Never nudged in behind the bed's own head.
+        const blocked: [number, number][] = [
+          ...this.blockedOn(bf.face, 'socket-double', BEDSIDE_HEIGHT),
+          [bf.u0, bf.u1],
+        ];
+        const p = this.onWall('socket-double', bf.face, along, BEDSIDE_HEIGHT, NUDGE, blocked);
         if (!p) {
-          this.note(r.id, SUGGEST_NOTES.bed);
+          this.note(r.id, noRoomFor('bedside socket'));
           continue;
         }
         const where = `Bedside, ${side}`;
@@ -915,6 +924,7 @@ class Suggester {
       if (this.there('socket-double', bf.face, bf.uc, DESK_HEIGHT)) continue;
       const p = this.onWall('socket-double', bf.face, bf.uc, DESK_HEIGHT, NUDGE);
       if (p) this.add(1, r.id, 'desk', `desk:${desk.id}`, p, WHY.desk, 'Behind the desk');
+      else this.note(r.id, noRoomFor('desk socket'));
     }
   }
 
@@ -947,6 +957,7 @@ class Suggester {
         return;
       }
     }
+    this.note(r.id, noRoomFor('desk or dresser socket'));
   }
 
   /** A single socket behind each fridge against a wall. */
@@ -957,6 +968,7 @@ class Suggester {
       if (this.there('socket-single', bf.face, bf.uc, LOW)) continue;
       const p = this.onWall('socket-single', bf.face, bf.uc, LOW, NUDGE, []);
       if (p) this.add(1, r.id, 'fridge', `fridge:${fr.id}`, p, WHY.fridge, 'Behind the fridge');
+      else this.note(r.id, noRoomFor('fridge socket'));
     }
   }
 
@@ -1002,17 +1014,35 @@ class Suggester {
         u <= hi - w / 2 + 1e-9 &&
         forbidden.every(([a, b]) => u <= a + 1e-9 || u >= b - 1e-9);
       const n = Math.max(1, Math.round(len / COUNTER_EVERY + 1e-9));
-      for (let i = 0; i < n; i++) {
+      // Sockets over this run already (at counter height, either kind): only the shortfall.
+      const have = this.existing.filter((q) => {
+        if (!q.wall || !isSocket(q.kind)) return false;
+        if (q.wall.wallId !== face.wallId || q.wall.side !== face.side) return false;
+        const qa = q.wall.t * face.f.length;
+        return (
+          qa >= lo - 1e-9 &&
+          qa <= hi + 1e-9 &&
+          Math.abs(q.wall.height - COUNTER_HEIGHT) <= THERE_HEIGHT + 1e-9
+        );
+      }).length;
+      let short = n - have;
+      for (let i = 0; i < n && short > 0; i++) {
         const nominal = lo + (len * (i + 0.5)) / n;
+        // The nearest clear spot to its share of the run, then the next, and so on.
         const spots = [nominal, ...forbidden.flat(), lo + w / 2, hi - w / 2]
           .filter(ok)
           .sort((a, b) => Math.abs(a - nominal) - Math.abs(b - nominal));
-        const along = spots[0];
-        if (along === undefined) continue;
-        if (this.there('socket-double', face, along, COUNTER_HEIGHT)) continue;
-        const p = this.onWall('socket-double', face, along, COUNTER_HEIGHT, len, []);
-        if (p?.wall && ok(p.wall.t * face.f.length))
+        for (const along of spots) {
+          if (this.there('socket-double', face, along, COUNTER_HEIGHT)) continue;
+          const p = this.onWall('socket-double', face, along, COUNTER_HEIGHT, len, []);
+          const u = p?.wall ? p.wall.t * face.f.length : null;
+          // Where it lands: still clear of the sink and hob, and not by another socket.
+          if (!p || u === null || !ok(u) || this.there('socket-double', face, u, COUNTER_HEIGHT))
+            continue;
           this.add(1, r.id, 'counter', `counter:${first}:${i}`, p, WHY.counter, `Counter ${i + 1}`);
+          short--;
+          break;
+        }
       }
       for (const { it, u0, u1 } of items) {
         if (it.assetId !== 'kitchen-hob') continue;
@@ -1023,10 +1053,12 @@ class Suggester {
         if (!this.there('socket-single', face, c, hood)) {
           const p = this.onWall('socket-single', face, c, hood, NUDGE, []);
           if (p) this.add(1, r.id, 'hood', `hood:${it.id}`, p, WHY.hood, 'Hood');
+          else this.note(r.id, noRoomFor('hood socket'));
         }
         if (!this.there('cooker', face, c, COOKER_HEIGHT)) {
           const p = this.onWall('cooker', face, c, COOKER_HEIGHT, NUDGE, []);
           if (p) this.add(1, r.id, 'cooker', `cooker:${it.id}`, p, WHY.cooker, 'Under the hob');
+          else this.note(r.id, noRoomFor('cooker point'));
         }
       }
     }
@@ -1085,7 +1117,10 @@ class Suggester {
             b.hi - b.lo - (a.hi - a.lo),
         );
       face = bare[0] ?? null;
-      if (!face) return null;
+      if (!face) {
+        this.note(r.id, noRoomFor('TV wall points'));
+        return null;
+      }
       anchor = face.key;
       const s = this.longest(
         face,
@@ -1102,12 +1137,15 @@ class Suggester {
       ['data', 0.15],
       ['socket-double', 0.45],
     ];
+    let missed = false;
     set.forEach(([kind, off], i) => {
       const along = centre + off;
       if (this.there(kind, at, along, LOW)) return;
       const p = this.onWall(kind, at, along, LOW, NUDGE);
       if (p) this.add(1, r.id, 'tv-wall', `tv:${anchor}:${i}`, p, WHY.tv, 'TV wall');
+      else missed = true;
     });
+    if (missed) this.note(r.id, noRoomFor('TV wall points'));
     return at.key;
   }
 
@@ -1189,6 +1227,7 @@ class Suggester {
         return;
       }
     }
+    this.note(r.id, noRoomFor('water heater point'));
   }
 
   /** The compressor on the aircon ledge, where the level has none. */

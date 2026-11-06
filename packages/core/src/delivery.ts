@@ -149,7 +149,9 @@ export function doorGraph(level: Level, geom: PlanGeometry = planGeometry(level)
     if (!free.has(a)) free.set(a, new Set());
     free.get(a)?.add(b);
   };
-  for (const wall of Object.values(level.walls)) {
+  // By id, so the way found doesn't depend on the order the walls were stored in.
+  const walls = Object.values(level.walls).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  for (const wall of walls) {
     if (!isBoundary(wall)) continue;
     const f = geom.frames[wall.id];
     if (!f) continue;
