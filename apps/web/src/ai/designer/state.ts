@@ -13,6 +13,7 @@ import { useRates } from '../../cost/estimate';
 import { useEditor } from '../../editor';
 import { setLeaveGuard, useStore } from '../../store';
 import { type AiSettings, aiSettings } from '../credentials';
+import { sharedQuestion } from './once';
 import { type ChangeRequest, changePlan, contextFor, resultFor } from './plan';
 import { type DraftDesign, type RunPlan, type RunState, runDesign } from './run';
 import { addUsage, countRun, overLimit, priceTable } from './spend';
@@ -140,20 +141,26 @@ export const stopRun = () => useDesigner.getState().run?.ctrl.abort();
  * Before another plan opens: with a design running, asks whether to stop it (its finished
  * steps are kept) and open the other plan, or keep designing.
  */
+const leaveQuestion = sharedQuestion(
+  () =>
+    new Promise<boolean>((resolve) => {
+      useDesigner.setState({
+        leaving: (go) => {
+          useDesigner.setState({ leaving: null });
+          const run = useDesigner.getState().run;
+          if (!go) return resolve(false);
+          if (!run) return resolve(true);
+          run.ctrl.abort();
+          // Once the run has ended and saved what it finished.
+          void run.ended.then(() => resolve(true));
+        },
+      });
+    }),
+);
 export function askToLeave(): Promise<boolean> {
-  const run = useDesigner.getState().run;
-  if (!run) return Promise.resolve(true);
-  return new Promise((resolve) => {
-    useDesigner.setState({
-      leaving: (go) => {
-        useDesigner.setState({ leaving: null });
-        if (!go) return resolve(false);
-        run.ctrl.abort();
-        // Once the run has ended and saved what it finished.
-        void run.ended.then(() => resolve(true));
-      },
-    });
-  });
+  if (!useDesigner.getState().run) return Promise.resolve(true);
+  // Asked already (a second way of opening a plan): the same question, the same answer.
+  return leaveQuestion();
 }
 setLeaveGuard(askToLeave);
 
@@ -422,9 +429,9 @@ export async function deleteDesign(d: Design) {
       action: {
         label: 'Undo',
         run: () => {
-          void s.put(d).then(() => {
-            upsert(d);
-            useDesigner.setState({ selected: d.id });
+          void s.restore(d).then((back) => {
+            upsert(back);
+            useDesigner.setState({ selected: back.id });
           });
         },
       },

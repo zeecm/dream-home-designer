@@ -258,27 +258,34 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
   // The limit: checked before each step; one question at a time while paused.
   let asking: Promise<boolean> | null = null;
   let stopping = false;
+  // Once the person says finish, the rest of the run goes on past the limit.
+  let allowOver = false;
+  const aborted = new Promise<boolean>((resolve) => {
+    if (o.signal.aborted) resolve(false);
+    o.signal.addEventListener('abort', () => resolve(false), { once: true });
+  });
   const mayStart = async (): Promise<boolean> => {
     if (stopping || o.signal.aborted) return false;
-    if (!o.overLimit?.()) return true;
+    if (allowOver || !o.overLimit?.()) return true;
     if (!asking) {
       state.phase = 'paused';
       say(`Paused: this tab has reached its limit. ${usdText(spentSoFar())} spent on this design.`);
       update();
       asking = (o.confirmOver?.() ?? Promise.resolve(false)).then((go) => {
         state.phase = 'running';
-        if (!go) stopping = true;
+        if (go) allowOver = true;
+        else stopping = true;
         update();
         return go;
       });
     }
-    const go = await asking;
-    // Asked once per pause: a later step asks again only if the limit is passed again.
-    asking = null;
+    // Stop while paused ends the wait too.
+    const go = await Promise.race([asking, aborted]);
     return go && !o.signal.aborted;
   };
 
   let cap = 2;
+  let lastThought = 0;
 
   /** Meters one request (`finished`: its answer came to an end, with its own usage). */
   const meter = (p: StepPrompt, sink: StepSink, st: StepState, ms: number, finished: boolean) => {
@@ -361,8 +368,14 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
             onStart: () => onStart?.(),
             onEvent: bump,
             onThinking: (line) => {
+              if (line === st.thinking) return;
               st.thinking = line;
-              update();
+              // At most four repaints a second while it thinks.
+              const now = Date.now();
+              if (now - lastThought >= 250) {
+                lastThought = now;
+                update();
+              }
             },
           },
           doFetch,
@@ -372,7 +385,8 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       } finally {
         clearTimeout(timer);
       }
-      const refused = error instanceof HttpFail;
+      // Refused before it began: nothing billed. Anything that streamed is metered.
+      const refused = error instanceof HttpFail && sink.events.length === 0;
       if (!refused) meter(p, sink, st, Date.now() - t0, !error && sink.stop !== null);
       if (error) {
         if (o.signal.aborted) {
@@ -517,6 +531,9 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     update();
 
     const bounds = levelBounds(r.level);
+    // A run-stopping error (a refused key, a quota): set before the first room's gate opens,
+    // so no other room is sent after it.
+    let runError: unknown = null;
     const room = async (s: (typeof spaces)[number], onStart?: () => void) => {
       const st = state.steps.find((x) => x.key === s.key) as StepState;
       if (!(await mayStart())) {
@@ -543,7 +560,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
         }
       } catch (e) {
         if (e instanceof Stopped) design.spaces[s.key] = { name: s.name, status: 'cancelled' };
-        throw e;
+        runError ??= e;
       } finally {
         onStart?.();
         update();
@@ -557,10 +574,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       const gate = new Promise<void>((resolve) => {
         release = resolve;
       });
-      let runError: unknown = null;
-      const firstDone = room(first, release).catch((e) => {
-        runError ??= e;
-      });
+      const firstDone = room(first, release);
       await gate;
       const queue = [...rest];
       await new Promise<void>((resolve) => {
@@ -569,14 +583,10 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
           while (queue.length && running < cap && !runError && !stopping && !o.signal.aborted) {
             const s = queue.shift() as (typeof spaces)[number];
             running++;
-            room(s)
-              .catch((e) => {
-                runError ??= e;
-              })
-              .finally(() => {
-                running--;
-                pump();
-              });
+            room(s).finally(() => {
+              running--;
+              pump();
+            });
           }
           if (running === 0) resolve();
         };
@@ -586,7 +596,10 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       if (runError) throw runError;
     }
     const done = state.steps.filter((s) => s.status === 'done').length;
-    if (stopping) return ended('stopped');
+    if (stopping || o.signal.aborted) {
+      say('Stopped. Finished steps are kept.');
+      return ended('stopped');
+    }
     const total = spentSoFar();
     say(
       done === state.steps.length

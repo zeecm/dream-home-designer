@@ -30,6 +30,12 @@ describe('the stable prefix and Claude’s cache minimum', () => {
   it('is above each Claude model’s cache minimum for the sample flat', () => {
     expect(minCacheable('claude-opus-5-5')).toBe(512);
     expect(minCacheable('claude-opus-4-6')).toBe(4096);
+    expect(minCacheable('claude-sonnet-5-5')).toBe(512);
+    expect(minCacheable('claude-sonnet-5')).toBe(1024);
+    expect(minCacheable('claude-sonnet-4-6')).toBe(1024);
+    expect(minCacheable('claude-opus-4-20250514')).toBe(1024);
+    expect(minCacheable('claude-opus-4-7')).toBe(2048);
+    expect(minCacheable('claude-haiku-5-5')).toBe(512);
     for (const model of MODELS) expect(stable).toBeGreaterThan(minCacheable(model));
   });
 

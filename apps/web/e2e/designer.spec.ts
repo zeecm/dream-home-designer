@@ -57,6 +57,7 @@ async function mock(
 ) {
   const calls: Call[] = [];
   const unanswered: string[] = [];
+  lastUnanswered = unanswered;
   for (const p of Object.keys(HOSTS) as P[]) {
     await page.route(HOSTS[p], async (route: Route) => {
       const req = route.request();
@@ -146,6 +147,15 @@ async function designFlat(page: Page) {
   await check.getByRole('button', { name: /^Design my flat · about US\$/ }).click();
   await expect(panel(page).getByText(/^Done in /)).toBeVisible({ timeout: 30_000 });
 }
+
+/** What the latest mock couldn't answer: checked after every test. */
+let lastUnanswered: string[] = [];
+test.beforeEach(() => {
+  lastUnanswered = [];
+});
+test.afterEach(() => {
+  expect(lastUnanswered, 'requests no fixture answers').toEqual([]);
+});
 
 test.describe('desktop', () => {
   test('brief, cost check, a run step by step, the preview, Left out, and Accept with Undo (29–33)', async ({
@@ -304,6 +314,14 @@ test.describe('desktop', () => {
     expect(Object.keys(after.items)).toHaveLength(n);
     // The walls are the flat's own.
     expect(Object.keys(after.walls).sort()).toEqual(Object.keys(saved.levels[0].walls).sort());
+
+    // Previewing a version again, Undo waits: the plan's history isn't touched out of sight.
+    await panel(page).getByRole('tab', { name: /^V1/ }).click();
+    await expect(page.locator('.designer-bar')).toContainText('Previewing V1');
+    await page.keyboard.press('Control+z');
+    await page.getByRole('button', { name: 'Back to my plan' }).click();
+    await expect(page.locator('.reno-bar')).toBeVisible();
+    await expect.poll(() => page.locator('[data-hit^="item:"]').count()).toBe(n);
   });
 
   test('Change something ▸ Kitchen, Furniture: one request with the feedback; V2 (35)', async ({
@@ -518,6 +536,52 @@ test.describe('desktop', () => {
     for (const r of held) r();
     // The first plan keeps its version, with the layout done.
     expect((await storedFor(page, first)).designs).toBe(1);
+  });
+
+  test('deleting the open plan mid-run, then Keep designing: nothing deleted, no error', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    const held: (() => void)[] = [];
+    await mock(page, {
+      reply: (c) => (c.step === 'layout' ? null : new Promise<void>((r) => held.push(r))),
+    });
+    // A plan that can be deleted, open: the sample imported as a plan of one's own.
+    await openSample(page);
+    const sample = planId(page);
+    const doc = await page.evaluate(
+      async (pid) => (await fetch(`/api/projects/${pid}`)).json(),
+      sample,
+    );
+    await page.locator('input[type="file"][accept=".json,application/json"]').setInputFiles({
+      name: 'my-flat.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify({ ...doc, name: 'My flat' })),
+    });
+    await expect.poll(() => planId(page)).not.toBe(sample);
+    await waitSaved(page);
+    const doomed = planId(page);
+    await page.keyboard.press('1');
+    await page.getByRole('button', { name: 'Design my flat with AI' }).click();
+    await page.getByRole('button', { name: 'Next: check the cost' }).click();
+    await page.getByRole('button', { name: /^Design my flat · about US\$/ }).click();
+    await expect.poll(() => held.length).toBeGreaterThan(0);
+    await page.getByRole('button', { name: 'Projects' }).click();
+    await page.getByRole('button', { name: 'Manage your plans…' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Your plans' });
+    await dialog.getByRole('button', { name: 'Delete My flat' }).click();
+    await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+    const ask = page.getByRole('dialog', { name: 'Stop designing and open the other plan?' });
+    await ask.getByRole('button', { name: 'Keep designing' }).click();
+    await expect(ask).toHaveCount(0);
+    await expect(dialog.getByRole('listitem')).toHaveCount(2);
+    await expect(dialog).not.toContainText('Couldn’t delete');
+    expect(planId(page)).toBe(doomed);
+    await page.keyboard.press('Escape');
+    await expect(panel(page).getByRole('button', { name: 'Stop' })).toBeVisible();
+    await panel(page).getByRole('button', { name: 'Stop' }).click();
+    for (const r of held) r();
   });
 
   for (const provider of ['openai', 'gemini'] as const) {

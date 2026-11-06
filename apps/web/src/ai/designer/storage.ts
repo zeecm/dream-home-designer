@@ -24,6 +24,11 @@ export interface DesignStore {
   /** Stores a new version, numbered one past the plan's highest; how many old ones went. */
   create(d: Omit<Design, 'n'>): Promise<{ design: Design; pruned: number }>;
   put(d: Design): Promise<void>;
+  /**
+   * Puts a deleted version back (Undo). It keeps its number unless another version has taken
+   * it since, and then it gets the next one: numbers are never shared.
+   */
+  restore(d: Design): Promise<Design>;
   remove(projectId: string, id: string): Promise<void>;
   removeProject(projectId: string): Promise<void>;
   getBrief(projectId: string): Promise<DesignBrief | null>;
@@ -42,6 +47,12 @@ export function fromRecord(raw: unknown): Design | null {
 }
 
 const toRecord = (d: Design): Stored => ({ ...structuredClone(d), schemaVersion: RECORD_VERSION });
+
+/** `d` with a number no other version of `mine` has. */
+export function renumbered(d: Design, mine: Design[]): Design {
+  if (!mine.some((x) => x.n === d.n && x.id !== d.id)) return d;
+  return { ...d, n: Math.max(0, ...mine.map((x) => x.n)) + 1 };
+}
 
 /** The versions to remove so `list` keeps at most MAX_VERSIONS: oldest unaccepted first. */
 export function toPrune(list: Design[]): Design[] {
@@ -78,6 +89,11 @@ export function memoryStore(): DesignStore {
     },
     async put(d) {
       designs.set(k(d.projectId, d.id), toRecord(d));
+    },
+    async restore(d) {
+      const back = renumbered(d, await list(d.projectId));
+      designs.set(k(d.projectId, d.id), toRecord(back));
+      return back;
     },
     async remove(projectId, id) {
       designs.delete(k(projectId, id));
@@ -137,6 +153,15 @@ function idbStore(db: IDBDatabase): DesignStore {
       const tx = db.transaction('designs', 'readwrite');
       tx.objectStore('designs').put(toRecord(d));
       await finished(tx);
+    },
+    async restore(d) {
+      const tx = db.transaction('designs', 'readwrite');
+      const store = tx.objectStore('designs');
+      const ended = finished(tx);
+      const back = renumbered(d, await all(store, d.projectId));
+      store.put(toRecord(back));
+      await ended;
+      return back;
     },
     async remove(projectId, id) {
       const tx = db.transaction('designs', 'readwrite');

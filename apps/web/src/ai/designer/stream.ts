@@ -47,13 +47,44 @@ export interface StreamHooks {
 /** Claude's smallest cacheable prefix, in tokens, by model (the claude-api reference). */
 export function minCacheable(model: string): number {
   const m = model.toLowerCase();
-  if (/opus-4-[56]|haiku-4-5/.test(m)) return 4096;
-  if (/opus-4-7|haiku-3-5|mythos-preview/.test(m)) return 2048;
-  if (/opus-4-8|opus-4-1|opus-4\b|opus-4-0|sonnet-4|sonnet-5\b|sonnet-5-0/.test(m)) return 1024;
+  if (/opus-4-[56](?!\d)|haiku-4-5(?!\d)/.test(m)) return 4096;
+  if (/opus-4-7(?!\d)|haiku-3-5(?!\d)|mythos-preview/.test(m)) return 2048;
+  // Opus 4.8, 4.1 and 4 (dated or not), the Sonnet 4s, Sonnet 5 (not 5.5).
+  if (
+    /opus-4-[18](?!\d)|opus-4(?:-0)?(?!-?\d)|opus-4-\d{8}|sonnet-4(?!-?\d)|sonnet-4-\d{8}|sonnet-4-[56](?!\d)|sonnet-5(?:-0)?(?!-?\d)|sonnet-5-\d{8}/.test(
+      m,
+    )
+  )
+    return 1024;
   return 512;
 }
 
 const ANTHROPIC_VERSION = '2026-10-21';
+
+/**
+ * The Claude models the designer's requests are written for (claude-api models.md): adaptive
+ * thinking with summaries, `output_config` effort and a JSON schema. Older ones differ
+ * (Haiku 4.5 takes no effort; some take thinking budgets), so they aren't offered.
+ */
+export const DESIGNER_CLAUDE = [
+  'claude-opus-5-5',
+  'claude-opus-5',
+  'claude-sonnet-5-5',
+  'claude-sonnet-5',
+  'claude-haiku-5-5',
+  'claude-fable-5-1',
+  'claude-fable-5',
+];
+/** Where the server-side refusal fallback (`fallbacks: 'default'`) applies: the Opus 5 line. */
+const FALLBACK = /^claude-opus-5(-5)?$/;
+/** OpenAI models that take `reasoning_effort`. */
+const REASONING = /^(gpt-5|o\d)/;
+
+/** Why the designer can't use this model, or null when it can. */
+export function designerCannotUse(ai: { provider: string; model: string }): string | null {
+  if (ai.provider !== 'anthropic' || DESIGNER_CLAUDE.includes(ai.model.trim())) return null;
+  return `The designer works with Claude Opus 5.5 or 5, Sonnet 5.5 or 5, Haiku 5.5 and Fable 5; “${ai.model}” isn’t one of them. Choose one in AI settings.`;
+}
 const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 
 /** A short stable label for a run's cache (OpenAI routes requests with it), not the plan's id. */
@@ -74,6 +105,7 @@ export function requestFor(
 ): { url: string; headers: Record<string, string>; body: Record<string, unknown> } {
   const stable = `${p.prefix}${p.shared}`;
   if (ai.provider === 'anthropic') {
+    const fallback = FALLBACK.test(ai.model.trim());
     // Cache the stable blocks (the prefix, then the room steps' shared concept), each only
     // once the prompt up to it is long enough for the model to cache at all.
     const min = minCacheable(ai.model) * 3.2;
@@ -90,7 +122,7 @@ export function requestFor(
       headers: {
         'x-api-key': ai.key,
         'anthropic-version': ANTHROPIC_VERSION,
-        'anthropic-beta': FALLBACK_BETA,
+        ...(fallback ? { 'anthropic-beta': FALLBACK_BETA } : {}),
         // The person's own key in their own browser: what this header is for.
         'anthropic-dangerous-direct-browser-access': 'true',
       },
@@ -104,7 +136,7 @@ export function requestFor(
         thinking: { type: 'adaptive', display: 'summarized' },
         output_config: { effort, format: { type: 'json_schema', schema: p.schema } },
         // A declined request is retried on Anthropic's recommended model, not failed.
-        fallbacks: 'default',
+        ...(fallback ? { fallbacks: 'default' } : {}),
       },
     };
   }
@@ -117,7 +149,7 @@ export function requestFor(
         stream: true,
         stream_options: { include_usage: true },
         max_completion_tokens: p.maxTokens,
-        reasoning_effort: effort,
+        ...(REASONING.test(ai.model) ? { reasoning_effort: effort } : {}),
         // Every step of a run shares its prefix: one cache key routes them together.
         prompt_cache_key: cacheKey(stable),
         response_format: {
@@ -212,7 +244,8 @@ export async function streamStep(
   };
   const think = (t: string) => {
     sink.thinking += t;
-    const line = sink.thinking.trim().split('\n').pop()?.trim();
+    // The last line, from the tail only (the whole text grows long).
+    const line = sink.thinking.slice(-400).trim().split('\n').pop()?.trim();
     if (line) hooks.onThinking?.(line);
   };
   const read = READERS[ai.provider];

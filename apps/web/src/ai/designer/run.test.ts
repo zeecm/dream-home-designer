@@ -11,7 +11,7 @@ import type { AiSettings, Provider } from '../credentials';
 import { answerFor, promptOf } from './fixtures/sample';
 import { type FixtureUsage, anthropicStream, geminiStream, openaiStream } from './fixtures/streams';
 import { type DraftDesign, QUIET_MS, type RunOptions, type RunState, runDesign } from './run';
-import { requestFor } from './stream';
+import { designerCannotUse, requestFor } from './stream';
 
 const level = sampleFlatProject('prj_test').levels[0] as Level;
 const brief: DesignBrief = {
@@ -313,10 +313,9 @@ describe('the runner (criteria 25–28)', () => {
     ).toEqual(['cancelled', 'cancelled', 'cancelled', 'skipped']);
   });
 
-  it('pauses before the next step once past the limit; Finish goes on, Stop keeps what’s done (28)', async () => {
+  const limited = (prov: ReturnType<typeof provider>) => {
     let spent = 0;
     const asks: ((go: boolean) => void)[] = [];
-    const prov = provider('anthropic', { auto: true });
     const r = start('anthropic', {
       fetch: prov.fetch,
       onUsage: (u) => {
@@ -325,18 +324,115 @@ describe('the runner (criteria 25–28)', () => {
       overLimit: () => spent >= 0.03,
       confirmOver: () => new Promise<boolean>((res) => asks.push(res)),
     });
+    return { r, asks };
+  };
+
+  it('pauses before the next step once past the limit; Finish goes on to the end, asked once (28)', async () => {
+    const prov = provider('anthropic', { auto: true });
+    const { r, asks } = limited(prov);
     await until(() => r.last()?.phase === 'paused', 'paused');
     // The layout cost more than the limit: no room has started.
     expect(prov.calls).toHaveLength(1);
     expect(r.last()?.said).toMatch(/limit/);
     asks[0]?.(true);
-    await until(() => asks.length === 2 || r.last()?.phase === 'done', 'next question');
-    // Still over: asked again before the next step; this time, stop here.
-    asks[1]?.(false);
+    const { state } = await r.run;
+    // Once told to finish, it doesn't ask again before every step.
+    expect(asks).toHaveLength(1);
+    expect(state.phase).toBe('done');
+    expect(state.steps.filter((s) => s.status === 'done')).toHaveLength(5);
+  });
+
+  it('Stop here, at the limit, keeps what’s done (28)', async () => {
+    const prov = provider('anthropic', { auto: true });
+    const { r, asks } = limited(prov);
+    await until(() => r.last()?.phase === 'paused', 'paused');
+    asks[0]?.(false);
     const { state, design } = await r.run;
     expect(state.phase).toBe('stopped');
-    expect(state.steps.filter((s) => s.status === 'done')).toHaveLength(2);
-    expect(Object.values(design.spaces).filter((s) => s.status === 'done')).toHaveLength(1);
+    expect(prov.calls).toHaveLength(1);
+    expect(state.steps.filter((s) => s.status === 'done')).toHaveLength(1);
+    expect(design.concept).not.toBeNull();
+  });
+
+  it('Stop while paused at the limit ends the run (no hang)', async () => {
+    const prov = provider('anthropic', { auto: true });
+    const { r } = limited(prov);
+    await until(() => r.last()?.phase === 'paused', 'paused');
+    r.ctrl.abort();
+    const { state } = await r.run;
+    expect(state.phase).toBe('stopped');
+    expect(prov.calls).toHaveLength(1);
+  });
+
+  it('a refused key on room 1 sends no other room', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) =>
+        c.step !== 'layout'
+          ? new Response(
+              JSON.stringify({
+                type: 'error',
+                error: { type: 'authentication_error', message: 'invalid x-api-key' },
+              }),
+              { status: 401 },
+            )
+          : null,
+    });
+    const r = start('anthropic', { fetch: prov.fetch });
+    const { state } = await r.run;
+    expect(state.phase).toBe('halted');
+    expect(state.halt?.kind).toBe('key');
+    expect(prov.calls).toHaveLength(2);
+  });
+
+  it('a stream that fails mid-answer is metered (estimated), then tried again', async () => {
+    const broken = [
+      'event: message_start',
+      `data: ${JSON.stringify({ type: 'message_start', message: { model: 'claude-opus-5-5', usage: { input_tokens: 1000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 1 } } })}`,
+      '',
+      'event: content_block_delta',
+      `data: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '{"items":[' } })}`,
+      '',
+      'event: error',
+      `data: ${JSON.stringify({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } })}`,
+      '',
+      '',
+    ].join('\n');
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) =>
+        /Kitchen/.test(c.step) && n === 1
+          ? new Response(broken, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+          : null,
+    });
+    const r = start('anthropic', { fetch: prov.fetch });
+    await until(() => prov.calls.filter((c) => /Kitchen/.test(c.step)).length === 1, 'kitchen');
+    await vi.advanceTimersByTimeAsync(10_000);
+    const { state } = await r.run;
+    expect(state.phase).toBe('done');
+    const kitchen = state.steps.find((s) => s.label === 'Kitchen');
+    const cut = state.usage.filter((u) => u.step === kitchen?.key);
+    expect(cut).toHaveLength(2);
+    expect(cut[0]).toMatchObject({ estimated: true, input: 1000 });
+    expect(kitchen?.retries).toBe(1);
+  });
+
+  it('repaints at most four times a second while the model thinks', async () => {
+    const thinking = Array.from({ length: 200 }, (_, i) => `Thought ${i}\n`);
+    const prov = provider('anthropic', { auto: true });
+    const fetchThinking: typeof fetch = async (url, init) => {
+      const res = await prov.fetch(url, init);
+      const body = JSON.parse(String(init?.body));
+      const a = answerFor(promptOf(body));
+      return new Response(anthropicStream(a?.answer, USAGE, { thinking }), {
+        status: res.status,
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    };
+    const r = start('anthropic', { fetch: fetchThinking });
+    await r.run;
+    // Five steps of 200 thinking lines each; the clock stands still, so one repaint each.
+    expect(r.states.length).toBeLessThan(60);
   });
 
   it('a step that goes quiet for two minutes fails; the rest go on', async () => {
@@ -421,6 +517,25 @@ describe('the requests', () => {
       response_format: { type: 'json_schema', json_schema: { strict: true } },
     });
     expect(String(r.body.prompt_cache_key)).toMatch(/^dhd-/);
+  });
+
+  it('sends Claude’s fallback only where it applies, and refuses models it isn’t written for', () => {
+    const opus = requestFor(AI.anthropic, prompt);
+    expect(opus.body.fallbacks).toBe('default');
+    expect(opus.headers['anthropic-beta']).toBe('server-side-fallback-2026-07-01');
+    const haiku = requestFor({ ...AI.anthropic, model: 'claude-haiku-5-5' }, prompt);
+    expect(haiku.body.fallbacks).toBeUndefined();
+    expect(haiku.headers['anthropic-beta']).toBeUndefined();
+    expect(designerCannotUse(AI.anthropic)).toBeNull();
+    expect(designerCannotUse({ ...AI.anthropic, model: 'claude-sonnet-5-5' })).toBeNull();
+    expect(designerCannotUse({ ...AI.anthropic, model: 'claude-haiku-4-5' })).toMatch(
+      /“claude-haiku-4-5” isn’t one of them/,
+    );
+    expect(designerCannotUse(AI.openai)).toBeNull();
+    // OpenAI: reasoning effort only to models that reason.
+    expect(
+      requestFor({ ...AI.openai, model: 'gpt-4o' }, prompt).body.reasoning_effort,
+    ).toBeUndefined();
   });
 
   it('Gemini: streamGenerateContent as SSE, with thinking', () => {

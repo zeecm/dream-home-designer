@@ -1,6 +1,16 @@
 import { PRICES, PRICES_AS_OF, type Price, priceOf } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
-import { CAPS, hasOverride, resetSpend, setCap, setPrice, tokens, usd, useSpend } from './spend';
+import {
+  CAPS,
+  hasOverride,
+  priceInput,
+  resetSpend,
+  setCap,
+  setPrice,
+  tokens,
+  usd,
+  useSpend,
+} from './spend';
 
 /**
  * In AI settings: the tab's limit and what it has spent, and the prices used for the model
@@ -17,30 +27,42 @@ export function SpendSettings({ model, focus }: { model: string; focus?: boolean
     ref.current?.querySelector<HTMLInputElement>('input')?.focus();
   }, [focus]);
   const [draft, setDraft] = useState<Record<string, string>>({});
-  const field = (k: 'input' | 'cachedInput' | 'output', label: string) => (
+  const [hint, setHint] = useState('');
+  const KEYS = ['input', 'cachedInput', 'output'] as const;
+  const text = (k: (typeof KEYS)[number]) => draft[k] ?? (price ? String(price[k]) : '');
+  /** Saves the three prices once each is filled in with a number; never a part of them. */
+  const commit = () => {
+    if (!Object.keys(draft).length) return;
+    const input = priceInput(text('input'));
+    const cachedInput = priceInput(text('cachedInput'));
+    const output = priceInput(text('output'));
+    if (input === null || cachedInput === null || output === null) {
+      setHint('Enter all three prices, in US$ per million tokens, to use them.');
+      return;
+    }
+    const saved = setPrice(model, {
+      input,
+      cachedInput,
+      cacheWrite: price?.cacheWrite ?? null,
+      output,
+      checked: false,
+    });
+    if (!saved) {
+      setHint('Input and output prices must be more than 0.');
+      return;
+    }
+    setDraft({});
+    setHint('');
+  };
+  const field = (k: (typeof KEYS)[number], label: string) => (
     <label className="field">
       <span className="field-label">{label}</span>
       <input
         className="input num"
         inputMode="decimal"
-        value={draft[k] ?? (price ? String(price[k]) : '')}
+        value={text(k)}
         onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
-        onBlur={() => {
-          const v = Number(draft[k]);
-          if (!Number.isFinite(v) || v < 0 || draft[k] === undefined) return;
-          const base: Price = price ?? {
-            input: 0,
-            cachedInput: 0,
-            cacheWrite: null,
-            output: 0,
-            checked: false,
-          };
-          setPrice(model, { ...base, [k]: v });
-          setDraft((d) => {
-            const { [k]: _, ...rest } = d;
-            return rest;
-          });
-        }}
+        onBlur={commit}
       />
     </label>
   );
@@ -96,6 +118,11 @@ export function SpendSettings({ model, focus }: { model: string; focus?: boolean
             </button>
           )}
         </p>
+        {hint && (
+          <p className="field-hint error-text" role="alert">
+            {hint}
+          </p>
+        )}
       </fieldset>
     </div>
   );

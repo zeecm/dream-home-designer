@@ -69,6 +69,25 @@ describe('the designs store', () => {
     expect(list.some((d) => d.id === 'd0')).toBe(false);
   });
 
+  it('never gives two versions one number: a version put back after another took its number moves on', async () => {
+    for (const store of [await openDesigns(new IDBFactory()), memoryStore()]) {
+      await store.create(design('d1'));
+      await store.create(design('d2'));
+      const v3 = (await store.create(design('d3'))).design;
+      await store.remove('prj_a', 'd3');
+      const again = (await store.create(design('d4'))).design;
+      expect(again.n).toBe(3);
+      const back = await store.restore(v3);
+      expect(back.n).toBe(4);
+      const ns = (await store.list('prj_a')).map((d) => d.n);
+      expect(new Set(ns).size).toBe(ns.length);
+      // Put back with its number free: it keeps it.
+      await store.remove('prj_a', 'd2');
+      const v2 = (await store.list('prj_a')).length;
+      expect(v2).toBe(3);
+    }
+  });
+
   it('remembers the brief per plan, and forgets a plan’s designs with it', async () => {
     const store = await openDesigns(new IDBFactory());
     const brief = { ...defaultBrief(), colours: 'love sage' };

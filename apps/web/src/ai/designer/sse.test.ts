@@ -51,4 +51,22 @@ describe('the SSE parser', () => {
     expect(p.push('data: a\r\rdata: b\r')).toEqual([{ event: 'message', data: 'a' }]);
     expect(p.push('\r\n')).toEqual([{ event: 'message', data: 'b' }]);
   });
+
+  it('lets go of the response when reading fails', async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(ctrl) {
+        ctrl.enqueue(new TextEncoder().encode('data: {"a":1}\n\ndata: {"b":2}\n\n'));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    await expect(
+      readSse(body, () => {
+        throw new Error('an error event');
+      }),
+    ).rejects.toThrow('an error event');
+    expect(cancelled).toBe(true);
+  });
 });

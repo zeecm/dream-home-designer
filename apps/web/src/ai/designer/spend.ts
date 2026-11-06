@@ -71,18 +71,44 @@ function loadCap(): number | null {
 }
 let cap: number | null = typeof window === 'undefined' ? DEFAULT_CAP : loadCap();
 
+const positive = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
+const nonNegative = (v: unknown): v is number =>
+  typeof v === 'number' && Number.isFinite(v) && v >= 0;
+
+/**
+ * A price the meter can trust, or null: input and output above 0 (a zero would let a run
+ * pass the limit unseen), cached input and cache writes 0 or more.
+ */
+export function validPrice(p: unknown): Price | null {
+  if (!p || typeof p !== 'object') return null;
+  const v = p as Partial<Price>;
+  if (!positive(v.input) || !positive(v.output) || !nonNegative(v.cachedInput)) return null;
+  if (v.cacheWrite !== null && v.cacheWrite !== undefined && !nonNegative(v.cacheWrite))
+    return null;
+  return {
+    input: v.input,
+    cachedInput: v.cachedInput,
+    cacheWrite: v.cacheWrite ?? null,
+    output: v.output,
+    checked: false,
+  };
+}
+
+/** A price typed in a field: a number, or null for empty or not a number. */
+export function priceInput(text: string): number | null {
+  const t = text.trim();
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 function loadPrices(): Record<string, Price> {
-  const v = readJson<Record<string, Partial<Price>>>(local, PRICE_KEY) ?? {};
+  const v = readJson<Record<string, unknown>>(local, PRICE_KEY) ?? {};
   const out: Record<string, Price> = {};
+  // A stored price that doesn't hold up is dropped (the list price applies again).
   for (const [id, p] of Object.entries(v)) {
-    if (!p || typeof p !== 'object') continue;
-    out[id] = {
-      input: finite(p.input),
-      cachedInput: finite(p.cachedInput),
-      cacheWrite: p.cacheWrite === null ? null : finite(p.cacheWrite),
-      output: finite(p.output),
-      checked: false,
-    };
+    const ok = validPrice(p);
+    if (ok) out[id] = ok;
   }
   return out;
 }
@@ -133,15 +159,18 @@ export function setCap(v: number | null) {
 }
 
 /** Sets this browser's price for `model`; null goes back to the list price. */
-export function setPrice(model: string, p: Price | null) {
+export function setPrice(model: string, p: Price | null): boolean {
   const id = model.trim().toLowerCase();
+  const ok = p ? validPrice(p) : null;
+  if (p && !ok) return false;
   const next = { ...overrides };
-  if (p) next[id] = { ...p, checked: false };
+  if (ok) next[id] = ok;
   else delete next[id];
   overrides = next;
   prices = { ...PRICES, ...overrides };
   writeJson(local, PRICE_KEY, Object.keys(next).length ? next : null);
   emit();
+  return true;
 }
 
 /** Whether `more` US$ would take the tab past its limit. */

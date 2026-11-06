@@ -81,6 +81,10 @@ export async function readSse(
     }
     for (const e of parser.push(decoder.decode())) onEvent(e);
     for (const e of parser.end()) onEvent(e);
+  } catch (e) {
+    // An error event, or the connection lost: let go of the response, not just this read.
+    await reader.cancel(e).catch(() => {});
+    throw e;
   } finally {
     reader.releaseLock();
   }

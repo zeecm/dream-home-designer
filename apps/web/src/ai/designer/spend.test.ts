@@ -89,4 +89,28 @@ describe('the tab’s meter and limit (28)', () => {
     expect(s.usd(0.873)).toBe('US$0.87');
     expect(s.usd(12.4)).toBe('US$12');
   });
+
+  it('never trusts a price that would hide spending: empty, zero or broken ones are refused', async () => {
+    const s = await import('./spend');
+    expect(s.priceInput('')).toBeNull();
+    expect(s.priceInput('  ')).toBeNull();
+    expect(s.priceInput('abc')).toBeNull();
+    expect(s.priceInput('-1')).toBeNull();
+    expect(s.priceInput('0.2')).toBe(0.2);
+    const p = { input: 4, cachedInput: 0.2, cacheWrite: 5, output: 20, checked: false };
+    expect(s.validPrice(p)).toEqual(p);
+    expect(s.validPrice({ ...p, input: 0 })).toBeNull();
+    expect(s.validPrice({ ...p, output: Number.NaN })).toBeNull();
+    expect(s.validPrice({ ...p, cachedInput: undefined })).toBeNull();
+    expect(s.setPrice('claude-opus-5-5', { ...p, output: 0 })).toBe(false);
+    // A bad price already stored is dropped on load: the list price applies again.
+    window.localStorage.setItem(
+      'dhd-ai-prices',
+      JSON.stringify({ 'claude-opus-5-5': { input: 'x', output: 0 }, 'gpt-5': p }),
+    );
+    s.reloadSpend();
+    expect(s.priceTable()['claude-opus-5-5']?.output).toBe(20);
+    expect(s.hasOverride('claude-opus-5-5')).toBe(false);
+    expect(s.hasOverride('gpt-5')).toBe(true);
+  });
 });

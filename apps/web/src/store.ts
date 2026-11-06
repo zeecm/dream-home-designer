@@ -112,9 +112,10 @@ interface State {
   /**
    * Deletes plans this browser owns and takes plans shared with it off its list; sample
    * copies are kept. If the open plan goes, the newest one left (or a new sample) opens.
-   * Resolves to the names that couldn't be deleted.
+   * Resolves to the names that couldn't be deleted, or 'kept' when the person chose to keep
+   * designing on the open plan (nothing deleted, nothing wrong).
    */
-  deletePlans: (ids: string[]) => Promise<string[]>;
+  deletePlans: (ids: string[]) => Promise<string[] | 'kept'>;
   save: () => Promise<void>;
   /** Resolves a save conflict: reload the server's version, or overwrite it with ours. */
   resolveConflict: (keep: 'theirs' | 'mine') => Promise<void>;
@@ -383,6 +384,8 @@ export const useStore = create<State>((set, get) => {
     },
     undo: () => {
       if (!canEdit(get())) return;
+      // A designer's version on show: the plan's history waits until it is back.
+      if (useEditor.getState().preview) return;
       const step = get().editor.history.past.at(-1);
       const next = coreUndo(get().editor);
       if (next === get().editor) return;
@@ -391,6 +394,8 @@ export const useStore = create<State>((set, get) => {
     },
     redo: () => {
       if (!canEdit(get())) return;
+      // A designer's version on show: the plan's history waits until it is back.
+      if (useEditor.getState().preview) return;
       const step = get().editor.history.future[0];
       const next = coreRedo(get().editor);
       if (next === get().editor) return;
@@ -477,11 +482,19 @@ export const useStore = create<State>((set, get) => {
       const gone = new Set(doomed.map((r) => r.id));
       // Move off the open plan first, so nothing saves it back as it goes.
       if (gone.has(get().editor.doc.id)) {
+        // A design running on it asks first; "keep designing" keeps the plan.
+        const kept = !(await leaveGuard());
         const next = get().recent.find((r) => !gone.has(r.id));
-        if (next) await get().load(next.id);
-        else await get().openSample();
-        // Couldn't get off it (the server is away): delete nothing rather than the open plan.
-        if (gone.has(get().editor.doc.id)) return doomed.map((r) => r.name);
+        if (!kept) {
+          if (next) await get().load(next.id);
+          else await get().openSample();
+        }
+        if (gone.has(get().editor.doc.id)) {
+          // The person chose to keep designing on it: nothing deleted, and nothing wrong.
+          if (kept) return 'kept';
+          // Couldn't get off it (the server is away): delete nothing rather than the open plan.
+          return doomed.map((r) => r.name);
+        }
       }
       const failed: string[] = [];
       for (const r of doomed) {

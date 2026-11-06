@@ -7,7 +7,8 @@ import {
   renovationChanges,
   usageTotals,
 } from '@dhd/core';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useEditor } from '../../editor';
 import { useProject } from '../../store';
 import { icons } from '../../ui/icons';
@@ -45,6 +46,7 @@ import {
   stopRun,
   useDesigner,
 } from './state';
+import { designerCannotUse } from './stream';
 
 /**
  * The Designer panel: the run as it goes (steps, the meter, Stop), then the versions (tabs
@@ -497,7 +499,7 @@ function ChangeSomething({ d, r, next }: { d: Design; r: DesignResult; next: num
       <button
         type="button"
         className="btn btn-primary btn-block"
-        disabled={nothing || !ai || !est}
+        disabled={nothing || !ai || !est || !!designerCannotUse(ai)}
         onClick={go}
         data-spends=""
       >
@@ -529,7 +531,16 @@ function ChangeSomething({ d, r, next }: { d: Design; r: DesignResult; next: num
   );
 }
 
-function Card({ d, r, running }: { d: Design; r: DesignResult; running: boolean }) {
+/** The version's card: kept as it is while a run's steps tick (its props don't change). */
+const Card = memo(function Card({
+  d,
+  r,
+  running,
+}: {
+  d: Design;
+  r: DesignResult;
+  running: boolean;
+}) {
   const project = useProject();
   const after = project.renovation?.levels[0];
   const ai = useAi();
@@ -651,7 +662,12 @@ function Card({ d, r, running }: { d: Design; r: DesignResult; running: boolean 
                 {s.intent && <span className="designer-intent">{s.intent}</span>}
               </button>
               {!ok && !running && (
-                <button type="button" className="link-btn" onClick={() => finish([s.key])}>
+                <button
+                  type="button"
+                  className="link-btn"
+                  disabled={!ai || !!designerCannotUse(ai)}
+                  onClick={() => finish([s.key])}
+                >
                   Try this room again
                   {typeof roomEst.get(s.key) === 'number'
                     ? ` · about ${usd(roomEst.get(s.key) as number)}`
@@ -663,7 +679,13 @@ function Card({ d, r, running }: { d: Design; r: DesignResult; running: boolean 
         })}
       </ul>
       {missing.length > 0 && !running && finishEst && (
-        <button type="button" className="btn btn-block" onClick={() => finish()} data-spends="">
+        <button
+          type="button"
+          className="btn btn-block"
+          disabled={!ai || !!designerCannotUse(ai)}
+          onClick={() => finish()}
+          data-spends=""
+        >
           Finish the design{finishEst.usd ? ` · about ${usd(finishEst.usd.typical)}` : ''}
         </button>
       )}
@@ -756,7 +778,7 @@ function Card({ d, r, running }: { d: Design; r: DesignResult; running: boolean 
             <button
               type="button"
               className="btn"
-              disabled={!ai}
+              disabled={!ai || !!designerCannotUse(ai)}
               onClick={() => useDesigner.setState({ mode: 'change' })}
             >
               Change something
@@ -787,9 +809,15 @@ function Card({ d, r, running }: { d: Design; r: DesignResult; running: boolean 
       )}
     </article>
   );
-}
+});
 
-function Tabs({ designs, selected }: { designs: Design[]; selected: string | null }) {
+const Tabs = memo(function Tabs({
+  designs,
+  selected,
+}: {
+  designs: Design[];
+  selected: string | null;
+}) {
   const after = useProject().renovation?.levels[0];
   const list = useRef<HTMLDivElement>(null);
   const move = (i: number) => {
@@ -830,10 +858,23 @@ function Tabs({ designs, selected }: { designs: Design[]; selected: string | nul
       })}
     </div>
   );
-}
+});
 
 export function DesignerPanel() {
-  const st = useDesigner();
+  // What the panel shows, not the whole store (a run updates it often).
+  const st = useDesigner(
+    useShallow((s) => ({
+      designs: s.designs,
+      selected: s.selected,
+      previewing: s.previewing,
+      mode: s.mode,
+      run: s.run,
+      last: s.last,
+      note: s.note,
+      memory: s.memory,
+      accepting: s.accepting,
+    })),
+  );
   const project = useProject();
   const ai = useAi();
   const [settings, setSettings] = useState(false);
@@ -929,6 +970,14 @@ export function DesignerPanel() {
         ) : d && r ? (
           <Card d={d} r={r} running={running && st.run?.designId === d.id} />
         ) : null}
+        {ai && designerCannotUse(ai) && st.designs.length > 0 && (
+          <p className="field-hint">
+            {designerCannotUse(ai)}{' '}
+            <button type="button" className="link-btn" onClick={() => setSettings(true)}>
+              AI settings
+            </button>
+          </p>
+        )}
         {!ai && st.designs.length > 0 && (
           <p className="field-hint">
             Changing a design needs your AI key.{' '}

@@ -4,6 +4,7 @@ import { Segmented } from '../../ui/fields';
 import { type AiSettings, PROVIDERS } from '../credentials';
 import { LARGE_INPUT, MAX_STEP_INPUT } from './plan';
 import { tokens, usd, useSpend } from './spend';
+import { designerCannotUse } from './stream';
 
 /**
  * The cost check before a run: about how much, at most how much, against what this tab has
@@ -70,6 +71,7 @@ export function CostCheck(p: CostCheckProps) {
   const high = p.est.usd?.high ?? null;
   const over = cap !== null && high !== null && spend.usd + high > cap;
   const tooBig = p.est.steps.some((s) => s.input > MAX_STEP_INPUT);
+  const unsupported = designerCannotUse(p.ai);
   const provider = PROVIDERS[p.ai.provider];
   const label =
     typical === null ? p.action : `${over ? p.anyway : p.action} · about ${usd(typical)}`;
@@ -123,6 +125,14 @@ export function CostCheck(p: CostCheckProps) {
         {p.est.input > LARGE_INPUT && (
           <p className="field-hint">This plan is large, so each step sends more.</p>
         )}
+        {unsupported && (
+          <p className="notice-warning">
+            {unsupported}{' '}
+            <button type="button" className="link-btn" onClick={p.onEditPrices}>
+              AI settings
+            </button>
+          </p>
+        )}
         {tooBig && (
           <p className="notice-warning">
             This plan is too large to design in one go. Design a few rooms at a time (Change
@@ -153,7 +163,7 @@ export function CostCheck(p: CostCheckProps) {
           <button
             type="button"
             className="btn btn-primary"
-            disabled={tooBig}
+            disabled={tooBig || !!unsupported}
             onClick={p.onStart}
             data-spends=""
           >

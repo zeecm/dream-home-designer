@@ -25,7 +25,12 @@ const sse = (event: string | null, data: unknown) =>
 export function anthropicStream(
   answer: unknown,
   usage: FixtureUsage,
-  opts: { model?: string; stop?: 'end_turn' | 'max_tokens' | 'refusal'; thinking?: string } = {},
+  opts: {
+    model?: string;
+    stop?: 'end_turn' | 'max_tokens' | 'refusal';
+    /** The thinking summary, streamed as these pieces. */
+    thinking?: string[];
+  } = {},
 ): string {
   const text = typeof answer === 'string' ? answer : JSON.stringify(answer);
   const out = [
@@ -52,11 +57,13 @@ export function anthropicStream(
       index: 0,
       content_block: { type: 'thinking', thinking: '' },
     }),
-    sse('content_block_delta', {
-      type: 'content_block_delta',
-      index: 0,
-      delta: { type: 'thinking_delta', thinking: opts.thinking ?? 'Looking at the walls first.' },
-    }),
+    ...(opts.thinking ?? ['Looking at the walls first.']).map((t) =>
+      sse('content_block_delta', {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'thinking_delta', thinking: t },
+      }),
+    ),
     sse('content_block_stop', { type: 'content_block_stop', index: 0 }),
     sse('content_block_start', {
       type: 'content_block_start',
