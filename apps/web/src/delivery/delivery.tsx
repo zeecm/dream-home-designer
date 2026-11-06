@@ -6,6 +6,8 @@ import {
   addModel,
   deliverable,
   deliveryCheck,
+  diagonalFits,
+  diagonalRange,
   furnitureKind,
   mainDoors,
   newId,
@@ -246,6 +248,9 @@ export const DeliveryLayer = memo(function DeliveryLayer({
   );
 });
 
+/** The Add by size fields that can be refused. */
+type Field = 'name' | 'w' | 'd' | 'h' | 'diag';
+
 const SHAPES: { id: NonNullable<CustomModel['shape']>; label: string }[] = [
   { id: 'sofa', label: 'Sofa' },
   { id: 'bed', label: 'Bed' },
@@ -304,6 +309,10 @@ function AddBySizeDialog({
   const [diag, setDiag] = useState('');
   const [colour, setColour] = useState<NonNullable<CustomModel['material']>>('fabric');
   const [error, setError] = useState('');
+  const [diagError, setDiagError] = useState('');
+  /** Fields refused on the last try, in the form's order. */
+  const [invalid, setInvalid] = useState<ReadonlySet<Field>>(new Set());
+  const inputs = useRef<Partial<Record<Field, HTMLInputElement | null>>>({});
   useEffect(() => {
     const dlg = ref.current;
     if (dlg && !dlg.open) dlg.showModal();
@@ -312,24 +321,49 @@ function AddBySizeDialog({
     const v = parseLength(t);
     return v !== null && v >= 0.05 && v <= 6 ? v : null;
   };
+  // The diagonal a sofa this deep and high can have, once both are known.
+  const sd0 = size(d);
+  const sh0 = size(h);
+  const range = sd0 !== null && sh0 !== null ? diagonalRange(sd0, sh0) : null;
+  const rangeText = (r: { min: number; max: number }) =>
+    nb(`${r.min.toFixed(2)}\u2013${r.max.toFixed(2)} m`);
+  /** Marks the fields refused and takes the person to the first (on a phone, scrolled to). */
+  const refuse = (bad: Field[]) => {
+    setInvalid(new Set(bad));
+    const first = bad[0] && inputs.current[bad[0]];
+    if (first) {
+      first.focus({ preventScroll: true });
+      first.scrollIntoView({ block: 'center' });
+    }
+  };
   const save = () => {
     const sw = size(w);
     const sd = size(d);
     const sh = size(h);
     if (!name.trim() || sw === null || sd === null || sh === null) {
       setError('Give it a name and a width, depth and height between 0.05 and 6 m.');
+      setDiagError('');
+      refuse(
+        (
+          [
+            ['name', !name.trim()],
+            ['w', sw === null],
+            ['d', sd === null],
+            ['h', sh === null],
+          ] as const
+        )
+          .filter(([, bad]) => bad)
+          .map(([f]) => f),
+      );
       return;
     }
-    const sdiag = shape === 'sofa' && diag.trim() ? size(diag) : null;
-    // A diagonal is at least the shorter of depth and height, and at most their diagonal.
-    if (
-      shape === 'sofa' &&
-      diag.trim() &&
-      (sdiag === null || sdiag < Math.min(sd, sh) - 0.005 || sdiag > Math.hypot(sd, sh) + 0.005)
-    ) {
-      setError(
-        `The diagonal depth is between ${formatLength(Math.min(sd, sh))} and ${formatLength(Math.hypot(sd, sh))} for this depth and height.`,
-      );
+    setError('');
+    const sdiag = shape === 'sofa' && diag.trim() ? parseLength(diag) : null;
+    // Tipped on its back, a sofa is narrower than its depth or height, but not by much.
+    if (shape === 'sofa' && diag.trim() && (sdiag === null || !diagonalFits(sdiag, sd, sh))) {
+      const r = diagonalRange(sd, sh);
+      setDiagError(`Between ${r.min.toFixed(2)} and ${nb(formatLength(r.max))} for this sofa.`);
+      refuse(['diag']);
       return;
     }
     const id = newId('mdl');
@@ -353,15 +387,26 @@ function AddBySizeDialog({
     );
     onAdded(id);
   };
-  const lengthInput = (label: string, value: string, set: (v: string) => void) => (
+  const fixed = (f: Field) => setInvalid((s) => new Set([...s].filter((g) => g !== f)));
+  const fieldProps = (f: Field) => ({
+    ref: (el: HTMLInputElement | null) => {
+      inputs.current[f] = el;
+    },
+    className: `input${invalid.has(f) ? ' invalid' : ''}`,
+    'aria-invalid': invalid.has(f),
+  });
+  const lengthInput = (f: Field, label: string, value: string, set: (v: string) => void) => (
     <label className="field">
       <span className="field-label">{label}</span>
       <input
-        className="input"
+        {...fieldProps(f)}
         inputMode="decimal"
         placeholder="e.g. 2.1 m or 2100"
         value={value}
-        onChange={(e) => set(e.target.value)}
+        onChange={(e) => {
+          set(e.target.value);
+          fixed(f);
+        }}
       />
     </label>
   );
@@ -400,11 +445,14 @@ function AddBySizeDialog({
             <label className="field">
               <span className="field-label">Name</span>
               <input
-                className="input"
+                {...fieldProps('name')}
                 value={name}
                 maxLength={80}
                 placeholder="e.g. My sofa"
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  fixed('name');
+                }}
               />
             </label>
             <fieldset className="wish-list">
@@ -422,22 +470,32 @@ function AddBySizeDialog({
                 ))}
               </span>
             </fieldset>
-            {lengthInput('Width', w, setW)}
-            {lengthInput('Depth', d, setD)}
-            {lengthInput('Height', h, setH)}
+            {lengthInput('w', 'Width', w, setW)}
+            {lengthInput('d', 'Depth', d, setD)}
+            {lengthInput('h', 'Height', h, setH)}
             {shape === 'sofa' && (
               <label className="field">
                 <span className="field-label">Diagonal depth (optional)</span>
                 <input
-                  className="input"
+                  {...fieldProps('diag')}
                   inputMode="decimal"
-                  placeholder="e.g. 0.8 m"
                   value={diag}
-                  onChange={(e) => setDiag(e.target.value)}
+                  aria-describedby={`${diagError ? 'add-size-diag-err ' : ''}add-size-diag-hint`}
+                  onChange={(e) => {
+                    setDiag(e.target.value);
+                    setDiagError('');
+                    fixed('diag');
+                  }}
                 />
-                <span className="field-hint">
-                  From the top of the back to the front edge of the seat: movers tilt a sofa through
-                  a door on this.
+                {diagError && (
+                  <span id="add-size-diag-err" className="field-hint error-text" role="alert">
+                    {diagError}
+                  </span>
+                )}
+                <span id="add-size-diag-hint" className="field-hint" data-testid="diagonal-hint">
+                  Lay a straight stick from the top of the back to the front of the seat. Measure
+                  from the bottom back corner straight to the stick.
+                  {range && ` For this sofa: ${rangeText(range)}.`} Leave empty if not measured.
                 </span>
               </label>
             )}
