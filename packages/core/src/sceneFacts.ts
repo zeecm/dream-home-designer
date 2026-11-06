@@ -78,11 +78,11 @@ export interface SceneOpeningFact {
   /** Above the floor, metres (a window's sill). */
   sill: number;
   /**
-   * Where it shows across the picture: "at the left of the picture", or "only partly in the
-   * picture, at its left edge".
+   * Where it shows across the picture, and why only some of it does: "at the left of the
+   * picture", "…, cut off by the picture's left edge", "…, partly hidden behind a wall".
    */
   where: string;
-  /** Only partly in sight: cut by the picture's edge, or mostly hidden. */
+  /** Only partly in sight: cut off by the picture's edge, or much of it hidden. */
   partly: boolean;
   /** The rooms either side by name: the camera's side first (null: outside or none). */
   near: string | null;
@@ -117,9 +117,11 @@ export const MAX_SCENE_ITEMS = 25;
 export const MAX_SCENE_OPENINGS = 12;
 /** Points across an opening's width tested for sight, at least. */
 const MIN_PROBES = 7;
-/** Less of an opening's width in sight than this is "only partly" (metres; less if narrow). */
-const MIN_SEEN = 0.25;
-/** Less of an opening's probes in sight than this share is "only partly". */
+/** "a", "a and b", "a, b and c". */
+const listed = (xs: string[]) =>
+  xs.length > 1 ? `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}` : (xs[0] ?? '');
+
+/** Less of an opening's probes in the picture in plain sight than this share is "hidden". */
 const PARTLY = 0.6;
 const NEAR = 0.05;
 const MAX_ROOMS = 6;
@@ -424,6 +426,7 @@ function doorName(o: Opening): string {
 function openingsInSight(
   level: Level,
   f: CameraFrame,
+  view: SceneView,
   seen: (p: Vec2, h: number) => boolean,
 ): SceneOpeningFact[] {
   const geom = planGeometry(level);
@@ -460,53 +463,66 @@ function openingsInSight(
     // short stretch of it shows, as a door does.
     const len = u1 - u0;
     const n = Math.max(MIN_PROBES, Math.ceil(len / 0.25));
+    // Across the picture, each probe in sight; which of the picture's edges cut it off;
+    // how many probes are in the picture and how many of those are in plain sight.
     const xs: number[] = [];
-    const ys: number[] = [];
-    let cut = false;
+    const edges = new Set<string>();
+    let behind = false;
+    let inFrame = 0;
     let hits = 0;
     for (let i = 0; i < n; i++) {
       const c = framePoint(fr, u0 + (len * (i + 0.5)) / n, 0);
       const p = { x: c.x + fr.n.x * off * side, y: c.y + fr.n.y * off * side };
-      let first: V3 | null = null;
       for (const k of [0.15, 0.5, 0.85]) {
         const h = sill + height * k;
-        const p3 = { x: c.x, y: level.elevation + h, z: c.y };
-        if (!inFrustum(f, p3)) {
-          cut = true;
+        const d = sub3({ x: c.x, y: level.elevation + h, z: c.y }, f.eye);
+        const z = dot3(d, f.forward);
+        if (z < NEAR) {
+          behind = true;
           continue;
         }
+        const sx = dot3(d, f.right) / (z * f.tanX);
+        const sy = dot3(d, f.up) / (z * f.tanY);
+        if (Math.abs(sx) > 1 || Math.abs(sy) > 1) {
+          if (sx < -1) edges.add('left');
+          if (sx > 1) edges.add('right');
+          if (sy > 1) edges.add('top');
+          if (sy < -1) edges.add('bottom');
+          continue;
+        }
+        inFrame++;
         if (!seen(p, h)) continue;
         hits++;
-        first ??= p3;
+        xs.push(sx);
       }
-      if (!first) continue;
-      const d = sub3(first, f.eye);
-      xs.push(dot3(d, f.right) / (dot3(d, f.forward) * f.tanX));
-      ys.push(dot3(d, f.up) / (dot3(d, f.forward) * f.tanY));
     }
     // Any of it in sight is listed, a sliver too: told nothing of an opening it can half
     // see, a model closes it up.
     if (!xs.length) return;
-    // Only partly in the picture: cut by its edge, or much of it hidden (behind a door
-    // frame, past a wall's end).
-    const partly =
-      cut || hits < PARTLY * n * 3 || xs.length * (len / n) < Math.min(MIN_SEEN, 0.3 * len) - 1e-9;
+    const cut = behind || edges.size > 0;
+    // Much of it hidden (behind a door frame, past a wall's end). Only at eye height: from
+    // above, the walls always hide the low part of a doorway.
+    const hidden = view === 'eye' && hits < PARTLY * inFrame;
+    const partly = cut || hidden;
     const beside = (k: number) =>
       roomIdAt(level, {
         x: mid.x + fr.n.x * (fr.half + 0.3) * k,
         y: mid.y + fr.n.y * (fr.half + 0.3) * k,
       });
-    // Where it shows across the picture.
+    // Where it shows across the picture, and why only some of it does.
     const x = xs.reduce((t, v) => t + v, 0) / xs.length;
-    const y = ys.reduce((t, v) => t + v, 0) / ys.length;
-    const edge = Math.abs(x) >= Math.abs(y) ? (x < 0 ? 'left' : 'right') : y > 0 ? 'top' : 'bottom';
-    const where = partly
-      ? `only partly in the picture, at its ${edge} edge`
-      : x < -0.33
+    const across =
+      x < -0.33
         ? 'at the left of the picture'
         : x > 0.33
           ? 'at the right of the picture'
           : 'in the middle of the picture';
+    const order = ['left', 'right', 'top', 'bottom'].filter((e) => edges.has(e));
+    const where = cut
+      ? `${across}, cut off by ${order.length ? `the picture's ${listed(order)} ${order.length > 1 ? 'edges' : 'edge'}` : 'the edge of the picture'}`
+      : hidden
+        ? `${across}, partly hidden behind a wall`
+        : across;
     const near = name(beside(side));
     const far = name(beside(-side));
     out.push({
@@ -692,7 +708,7 @@ export function sceneFacts(level: Level, c: SceneCamera): SceneFacts {
   listed.sort((a, b) => b.footprintArea - a.footprintArea || a.id.localeCompare(b.id));
   const items = listed.slice(0, MAX_SCENE_ITEMS).map(({ footprintArea: _, ...it }) => it);
 
-  const openings = openingsInSight(level, f, seen);
+  const openings = openingsInSight(level, f, view, seen);
 
   const fovUp = (c.fov * 180) / Math.PI;
   const fovAcross = (2 * Math.atan(Math.tan(c.fov / 2) * c.aspect) * 180) / Math.PI;
@@ -964,7 +980,10 @@ export function sceneSheet(
 }
 
 const OTHERWISE_SOLID =
-  'One only partly in the picture stays as the plan has it, open or glazed, not walled up. Every other wall in view is solid, with no other doors, doorways, arches, openings, niches or windows.';
+  'Every other wall in view is solid, with no other doors, doorways, arches, openings, niches or windows.';
+/** Said when an opening is listed as cut off or partly hidden. */
+const PARTLY_KEPT =
+  'An opening cut off by the edge or partly hidden stays exactly as listed: a door stays a door and a doorway stays open, never walled up.';
 
 /**
  * "a sliding door 1.6 m wide, at the left of the picture, into "Bedroom"", or a window's size
@@ -1006,5 +1025,6 @@ function openingsLine(facts: SceneFacts, m: number): string {
   const listed = facts.openings.slice(0, m).map((o) => openingWords(o, facts.view));
   const rest = total - listed.length;
   const all = [...listed, ...(rest ? [`and ${rest} more`] : [])];
-  return `Doors, windows and openings in view, ${total} and no others: ${all.join('; ')}. ${OTHERWISE_SOLID}`;
+  const kept = facts.openings.slice(0, m).some((o) => o.partly) ? ` ${PARTLY_KEPT}` : '';
+  return `Doors, windows and openings in view, ${total} and no others: ${all.join('; ')}.${kept} ${OTHERWISE_SOLID}`;
 }

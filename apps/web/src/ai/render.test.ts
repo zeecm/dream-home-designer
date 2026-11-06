@@ -1,6 +1,6 @@
 import { MAX_SHEET, type SceneFacts } from '@dhd/core';
 import { describe, expect, it } from 'vitest';
-import { HIGH_FIDELITY, RENDER_STYLES, renderPrompt } from './render';
+import { HIGH_FIDELITY, MANY_IMAGES, RENDER_STYLES, renderPrompt } from './render';
 
 describe('OpenAI render options', () => {
   it('asks for high input fidelity only of models known to take it', () => {
@@ -144,5 +144,14 @@ describe('the render prompt', () => {
 
   it('without the facts, is the plain prompt', () => {
     expect(renderPrompt('as')).not.toContain('measured');
+  });
+});
+
+describe('which OpenAI image models get the plan too', () => {
+  it('the gpt-image models take several pictures; an older one gets the view alone', () => {
+    for (const m of ['gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5']) {
+      expect(MANY_IMAGES.test(m)).toBe(true);
+    }
+    expect(MANY_IMAGES.test('dall-e-2')).toBe(false);
   });
 });

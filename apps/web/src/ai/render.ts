@@ -50,6 +50,9 @@ export function renderPrompt(style: RenderStyle, facts?: SceneFacts, plan = fals
 
 const TIMEOUT = 240_000;
 
+/** OpenAI image models that take several pictures (the view and the plan). */
+export const MANY_IMAGES = /^gpt-image-/;
+
 /** OpenAI image models known to take `input_fidelity` (gpt-image-1 and its snapshots). */
 export const HIGH_FIDELITY = /^gpt-image-1(-\d{4}-\d{2}-\d{2})?$/;
 
@@ -85,7 +88,8 @@ async function fitWithin(png: Blob, max: number): Promise<Blob> {
  * knows the home around the view, not only what the picture shows.
  */
 export async function planImage(level: Level, camera: SceneCamera, px = 1024): Promise<Blob> {
-  const { svg, width, height } = planSketch(level, camera, px);
+  // The view's shape: a model may make its picture the shape of the last one it is given.
+  const { svg, width, height } = planSketch(level, camera, px, camera.aspect);
   const img = new Image();
   img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   await img.decode();
@@ -110,7 +114,10 @@ export async function renderPhoto(
   facts?: SceneFacts,
   plan?: Blob,
 ): Promise<Blob> {
-  const prompt = renderPrompt(style, facts, !!plan);
+  // An older OpenAI image model (dall-e-2) takes one picture: the view alone.
+  const withPlan =
+    plan && (ai.provider !== 'openai' || MANY_IMAGES.test(ai.model)) ? plan : undefined;
+  const prompt = renderPrompt(style, facts, !!withPlan);
   const timeout = timeoutSignal(TIMEOUT);
   const both = signal ? anySignal([signal, timeout]) : timeout;
   let res: Response;
@@ -126,9 +133,9 @@ export async function renderPhoto(
       const form = new FormData();
       form.append('model', ai.model);
       // With the plan, both go as `image[]`, the view first (kept most closely).
-      if (plan) {
+      if (withPlan) {
         form.append('image[]', view, 'view.png');
-        form.append('image[]', plan, 'plan.png');
+        form.append('image[]', withPlan, 'plan.png');
       } else {
         form.append('image', view, 'view.png');
       }
@@ -155,8 +162,15 @@ export async function renderPhoto(
                 role: 'user',
                 parts: [
                   { inline_data: { mime_type: 'image/png', data: await blobToBase64(view) } },
-                  ...(plan
-                    ? [{ inline_data: { mime_type: 'image/png', data: await blobToBase64(plan) } }]
+                  ...(withPlan
+                    ? [
+                        {
+                          inline_data: {
+                            mime_type: 'image/png',
+                            data: await blobToBase64(withPlan),
+                          },
+                        },
+                      ]
                     : []),
                   { text: prompt },
                 ],

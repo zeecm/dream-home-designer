@@ -302,11 +302,11 @@ describe('scene facts', () => {
     expect(pane).toMatchObject({
       kind: 'glass',
       name: 'glass partition',
-      where: 'only partly in the picture, at its right edge',
+      where: "at the right of the picture, cut off by the picture's right, top and bottom edges",
       partly: true,
     });
     expect(sceneSheet(g)).toContain(
-      'a glass partition 4.0 m long and 2.6 m high, only partly in the picture, at its right edge',
+      "a glass partition 4.0 m long and 2.6 m high, at the right of the picture, cut off by the picture's right, top and bottom edges",
     );
   });
 
@@ -337,7 +337,7 @@ describe('scene facts', () => {
     );
     expect(sheet).toContain(
       // At the top of the picture, its upper part out of it.
-      'an open doorway (no door) 1.6 m wide, only partly in the picture, at its top edge, between',
+      "an open doorway (no door) 1.6 m wide, in the middle of the picture, cut off by the picture's top edge, between",
     );
   });
 
@@ -366,7 +366,7 @@ describe('scene facts', () => {
     // Only the bottom of Bedroom 2's window shows, through its doorway under the door head:
     // listed, as partly in the picture (told nothing of it, a model walls it up).
     const glimpse = over.openings.find((o) => o.id === 'op_win_bed2');
-    if (glimpse) expect(glimpse.partly).toBe(true);
+    expect(glimpse?.where).toBe('in the middle of the picture');
   });
 
   it('lists a long glass wall once a short stretch of it is in sight, and says it is outside', () => {
@@ -406,6 +406,19 @@ describe('scene facts', () => {
     expect(sheet).not.toContain('""');
     // Still a room (not the outside), by a placeholder.
     expect(sheet).toContain('between "Unnamed room" and "Bedroom 2"');
+  });
+
+  it('from an orbit view, an opening wholly in the picture is neither cut off nor hidden', () => {
+    const f = sceneFacts(hdb4RoomLevel(), {
+      position: { x: 5.25, y: 8, z: 20 },
+      target: { x: 5.25, y: 0, z: 5 },
+      fov: deg(45),
+      aspect: 1.5,
+    });
+    const front = f.openings.find((o) => o.id === 'op_main');
+    // The walls hide the bottom of the front door from up here: that is no "partly".
+    expect(front?.partly).toBe(false);
+    expect(front?.where).not.toMatch(/cut off|hidden/);
   });
 
   it('doesn’t face straight into a tall piece', () => {
