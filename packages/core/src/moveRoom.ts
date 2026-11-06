@@ -1,3 +1,4 @@
+import { ELEC_KINDS, JAMB_CLEAR } from './electrical';
 import { pointInPolygon } from './geometry';
 import type { Command } from './history';
 import { newId } from './ids';
@@ -272,7 +273,9 @@ function applyMove(lvl: Movable, start: Level, move: RoomMove, delta: Vec2): voi
     const pa = w && lvl.vertices[w.a];
     const pb = w && lvl.vertices[w.b];
     if (!w || !pa || !pb || Math.hypot(pb.x - pa.x, pb.y - pa.y) >= CLOSED) continue;
+    // One holding a door, a window or a socket stays, as the move keeps room for them.
     if (Object.values(start.openings).some((o) => o.wallId === w.id)) continue;
+    if (Object.values(start.points ?? {}).some((p) => p.wall?.wallId === w.id)) continue;
     const keep = !move.vertices.includes(w.a) && start.vertices[w.a] ? w.a : w.b;
     const drop = keep === w.a ? w.b : w.a;
     delete lvl.walls[w.id];
@@ -453,6 +456,12 @@ export function moveBlocked(from: Level, move: RoomMove, delta: Vec2): boolean {
       if (op.wallId !== w.id) continue;
       const fromAnchor = anchor === 'a' ? op.t * length0 : (1 - op.t) * length0;
       need = Math.max(need, fromAnchor + op.width / 2 + MIN_JOINED);
+    }
+    // And for its sockets and switches, each kept its distance from the anchor end too.
+    for (const p of Object.values(from.points ?? {})) {
+      if (p.wall?.wallId !== w.id) continue;
+      const fromAnchor = anchor === 'a' ? p.wall.t * length0 : (1 - p.wall.t) * length0;
+      need = Math.max(need, fromAnchor + ELEC_KINDS[p.kind].plate.w / 2 + JAMB_CLEAR);
     }
     if (Math.hypot(now.x, now.y) < Math.min(need, length0)) return true;
   }
