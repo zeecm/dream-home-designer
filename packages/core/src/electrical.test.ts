@@ -6,6 +6,8 @@ import {
   moveVertex,
   renameRoom,
   splitWall,
+  updateOpening,
+  updateRoom,
   updateWall,
 } from './commands';
 import { TYPICAL_RATES, costEstimate } from './cost';
@@ -14,9 +16,12 @@ import {
   defaultHeight,
   deletePoint,
   electricalChanges,
+  inOpening,
+  maxHeight,
   placePoint,
   pointCounts,
   pointPosition,
+  pointTAt,
   pointWarnings,
   trunkingLength,
   trunkingMetres,
@@ -28,7 +33,7 @@ import { furnitureKind, newItem } from './furniture';
 import { type EditorDoc, dispatch, emptyHistory, redo, undo } from './history';
 import { AFTER_SUFFIX } from './levels';
 import { loadProject } from './migrate';
-import { carriedToRenovation, startRenovation } from './renovation';
+import { type Carry, carriedToRenovation, startRenovation } from './renovation';
 import { ElecPoint, type Level, type Project, SCHEMA_VERSION } from './schema';
 
 /** A w × d room, 100 mm walls, centred on lines from (0, 0); `extra` walls drawn after. */
@@ -406,6 +411,161 @@ describe('electrical points (schema 9)', () => {
       fromLines[x.point as string] = (fromLines[x.point as string] ?? 0) + x.qty;
     expect(fromLines).toEqual(counts);
     expect(counts).toEqual({ 'socket-double': 1, switch: 1, aircon: 1, light: 1 });
+  });
+
+  it('a door or window put over a point moves it to the jamb, in the same undo step', () => {
+    let s = room(4, 3);
+    const sock = tap(s, 'socket-single', 2, 0.2);
+    s = sock.s;
+    const wid = pt(flat(s), sock.id).wall?.wallId as string;
+    const x = () => pointPosition(flat(s), pt(flat(s), sock.id))?.at.x ?? Number.NaN;
+    expect(x()).toBeCloseTo(2, 6);
+    // A 0.9 m door centred at x = 1.9: the socket goes to its right jamb (2.35) + 50 + half.
+    const fromA = flat(s).vertices[flat(s).walls[wid]?.a ?? '']?.x === 0;
+    const tAt = (v: number) => (fromA ? v / 4 : 1 - v / 4);
+    const door = addOpening(LID, {
+      wallId: wid,
+      kind: 'door',
+      t: tAt(1.9),
+      width: 0.9,
+      height: 2.1,
+      sill: 0,
+    });
+    s = dispatch(s, door.command);
+    expect(x()).toBeCloseTo(2.35 + 0.05 + 0.043, 6);
+    expect(inOpening(flat(s), pt(flat(s), sock.id))).toBe(false);
+    s = undo(s);
+    expect(flat(s).openings[door.openingId]).toBeUndefined();
+    expect(x()).toBeCloseTo(2, 6);
+    s = redo(s);
+    // Dragged on along the wall, the door pushes it ahead; widened, likewise.
+    s = dispatch(s, updateOpening(LID, door.openingId, { t: tAt(2.1) }));
+    expect(x()).toBeCloseTo(2.55 + 0.05 + 0.043, 6);
+    s = dispatch(s, updateOpening(LID, door.openingId, { width: 1.2 }));
+    expect(x()).toBeCloseTo(2.7 + 0.05 + 0.043, 6);
+    expect(inOpening(flat(s), pt(flat(s), sock.id))).toBe(false);
+    // A window high above a socket leaves it be.
+    const low = tap(s, 'socket-single', 3.4, 0.2);
+    s = low.s;
+    const at = pt(flat(s), low.id).wall?.t;
+    s = dispatch(
+      s,
+      addOpening(LID, { wallId: wid, kind: 'window', t: tAt(3.4), width: 0.6, height: 1, sill: 1 })
+        .command,
+    );
+    expect(pt(flat(s), low.id).wall?.t).toBe(at);
+  });
+
+  it('a point left in an opening of the renovation counts as taken out', () => {
+    const s = room(4, 3);
+    const sock = tap(s, 'socket-double', 2, 0.2);
+    const before = flat(sock.s);
+    const after = structuredClone(before);
+    const p = pt(after, sock.id);
+    const wid = p.wall?.wallId as string;
+    after.openings.op_x = {
+      id: 'op_x',
+      wallId: wid,
+      kind: 'door',
+      t: p.wall?.t ?? 0.5,
+      width: 0.9,
+      height: 2.1,
+      sill: 0,
+    };
+    expect(inOpening(after, p)).toBe(true);
+    const ch = electricalChanges(before, after);
+    expect(ch.removed.map((q) => q.id)).toEqual([sock.id]);
+    expect(ch.status.has(sock.id)).toBe(false);
+    // And a new one put there is not priced as new.
+    after.points.pt_new = { ...structuredClone(p), id: 'pt_new' };
+    expect(electricalChanges(before, after).status.has('pt_new')).toBe(false);
+  });
+
+  it('nothing goes on glass; on a half wall a point stays under its top, an aircon not at all', () => {
+    let s = room(4, 3);
+    const south = wallAlong(flat(s), [0, 0], [4, 0]);
+    const west = wallAlong(flat(s), [0, 3], [0, 0]);
+    s = dispatch(s, updateWall(LID, south, { build: 'glass' }));
+    expect(placePoint(flat(s), 'socket-single', { x: 2, y: 0.2 })).toBeNull();
+    s = dispatch(s, updateWall(LID, west, { height: 1 }));
+    const sw = placePoint(flat(s), 'switch', { x: 0.2, y: 1.5 });
+    // 1.0 m top, less 50 mm, less half the 86 mm plate: 907 mm, not 1050.
+    expect(sw?.height).toBeCloseTo(0.907, 6);
+    expect(placePoint(flat(s), 'socket-single', { x: 0.2, y: 1.5 })?.height).toBeCloseTo(0.3, 6);
+    expect(placePoint(flat(s), 'aircon', { x: 0.2, y: 1.5 })).toBeNull();
+    // Asked for higher than the top: no.
+    expect(placePoint(flat(s), 'switch', { x: 0.2, y: 1.5 }, { height: 1.05 })).toBeNull();
+    // The highest it can go there, and under a room's own lower ceiling elsewhere.
+    if (!sw) throw new Error('no switch');
+    const { at: _, ...place } = sw;
+    const r = addPoint(LID, { kind: 'switch', wall: place });
+    s = dispatch(s, r.command);
+    expect(maxHeight(flat(s), pt(flat(s), r.pointId))).toBeCloseTo(0.907, 6);
+    const east = tap(s, 'socket-single', 3.8, 1.5);
+    s = east.s;
+    expect(maxHeight(flat(s), pt(flat(s), east.id))).toBeCloseTo(2.6, 6);
+    const roomId = Object.keys(flat(s).rooms)[0] as string;
+    s = dispatch(s, updateRoom(LID, roomId, { ceilingHeight: 2.4 }));
+    expect(maxHeight(flat(s), pt(flat(s), east.id))).toBeCloseTo(2.4, 6);
+  });
+
+  it('pointTAt slides a point along its wall, never into a doorway or past the corner', () => {
+    let s = room(4, 3);
+    const sock = tap(s, 'socket-single', 2, 0.2);
+    s = sock.s;
+    const wid = pt(flat(s), sock.id).wall?.wallId as string;
+    const fromA = flat(s).vertices[flat(s).walls[wid]?.a ?? '']?.x === 0;
+    const u = (x: number) => (fromA ? x : 4 - x);
+    const xOf = (t: number | null) => (t === null ? Number.NaN : fromA ? t * 4 : 4 - t * 4);
+    s = dispatch(
+      s,
+      addOpening(LID, {
+        wallId: wid,
+        kind: 'door',
+        t: fromA ? 0.75 : 0.25,
+        width: 0.9,
+        height: 2.1,
+        sill: 0,
+      }).command,
+    );
+    const p = pt(flat(s), sock.id);
+    expect(xOf(pointTAt(flat(s), p, u(2.1)))).toBeCloseTo(2.1, 6);
+    // Into the door (2.55 to 3.45): back to the nearer jamb.
+    expect(xOf(pointTAt(flat(s), p, u(2.6)))).toBeCloseTo(2.55 - 0.05 - 0.043, 6);
+    // Past the inside corner (the 100 mm wall's face at 0.05): held on the face.
+    expect(xOf(pointTAt(flat(s), p, u(-0.5)))).toBeCloseTo(0.05 + 0.043, 6);
+  });
+
+  it('a Before edit moving a point along its wall carries over an After height change', () => {
+    let s = dispatch(room(4, 3), startRenovation());
+    const spot = placePoint(flat(s), 'socket-single', { x: 2, y: 0.2 });
+    if (!spot) throw new Error('nowhere');
+    const { at: _, ...wall } = spot;
+    const sock = { id: '' };
+    const r = addPoint(LID, { kind: 'socket-single', wall });
+    sock.id = r.pointId;
+    s = dispatch(s, carriedToRenovation(r.command));
+    expect(pt(reno(s), sock.id).wall).toEqual(wall);
+    // The renovation raises it; the flat as it is has it a little further along.
+    s = dispatch(s, updatePoint(A, sock.id, { wall: { ...wall, height: 1.15 } }));
+    const outcome: Carry = {};
+    s = dispatch(
+      s,
+      carriedToRenovation(
+        updatePoint(LID, sock.id, { wall: { ...wall, t: wall.t + 0.1 } }),
+        outcome,
+      ),
+    );
+    expect(outcome.conflict).toBe(false);
+    expect(outcome.carried).toBe(true);
+    expect(pt(reno(s), sock.id).wall).toEqual({ ...wall, t: wall.t + 0.1, height: 1.15 });
+    // Both changing the height differently: a conflict.
+    const again: Carry = {};
+    dispatch(
+      s,
+      carriedToRenovation(updatePoint(LID, sock.id, { wall: { ...wall, height: 0.45 } }), again),
+    );
+    expect(again.conflict).toBe(true);
   });
 
   it('points carry to the renovation like the rest of the flat, and follow a moved corner', () => {

@@ -99,9 +99,15 @@ function overlapping(p: [Vec2, Vec2], q: [Vec2, Vec2]): boolean {
  * edit changed goes over where the renovation's is as it was (or already as the edit made it),
  * and the renovation keeps the fields it changed itself (a wall's paint, a door's width).
  * 'conflict' where both changed the same field differently, or one removed what the other
- * changed; 'same' where the renovation already has it.
+ * changed; 'same' where the renovation already has it. Fields in `deep` (records themselves)
+ * merge field by field.
  */
-function merge(was: unknown, edited: unknown, there: unknown): unknown | 'conflict' | 'same' {
+function merge(
+  was: unknown,
+  edited: unknown,
+  there: unknown,
+  deep: readonly string[] = [],
+): unknown | 'conflict' | 'same' {
   if (same(there, edited)) return 'same';
   if (was === undefined) return there === undefined ? edited : 'conflict';
   if (edited === undefined) return same(there, was) ? undefined : 'conflict';
@@ -109,8 +115,16 @@ function merge(was: unknown, edited: unknown, there: unknown): unknown | 'confli
   const a = was as Record<string, unknown>;
   const b = edited as Record<string, unknown>;
   const out = { ...(there as Record<string, unknown>) };
+  const isRecord = (v: unknown) => typeof v === 'object' && v !== null && !Array.isArray(v);
   for (const f of new Set([...Object.keys(a), ...Object.keys(b)])) {
     if (same(a[f], b[f])) continue;
+    // A nested record (a point's place on its wall) merges field by field itself.
+    if (deep.includes(f) && isRecord(a[f]) && isRecord(b[f]) && isRecord(out[f])) {
+      const sub = merge(a[f], b[f], out[f]);
+      if (sub === 'conflict') return 'conflict';
+      if (sub !== 'same') out[f] = sub;
+      continue;
+    }
     if (!same(out[f], a[f]) && !same(out[f], b[f])) return 'conflict';
     if (b[f] === undefined) delete out[f];
     else out[f] = b[f];
@@ -136,7 +150,7 @@ function planCarry(old: Level, now: Level, there: Level): Change[] | 'none' | 'c
     const h = has[key] ?? {};
     for (const id of new Set([...Object.keys(w), ...Object.keys(e)])) {
       if (same(w[id], e[id])) continue;
-      const to = merge(w[id], e[id], h[id]);
+      const to = merge(w[id], e[id], h[id], key === 'points' ? ['wall'] : []);
       if (to === 'conflict') return 'conflict';
       if (to !== 'same') changes.push({ key, id, to });
     }

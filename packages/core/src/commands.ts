@@ -1,5 +1,6 @@
 import type { Draft } from 'immer';
 import type { z } from 'zod';
+import { clearPointsOn } from './electrical';
 import { furnitureKind } from './furniture';
 import { clampOpeningT } from './geometry';
 import type { Command } from './history';
@@ -247,6 +248,8 @@ export function addOpening(
         if (!wall) throw new Error(`wall ${opening.wallId} not found`);
         if (isBoundary(wall)) throw new Error('a room boundary has no wall to put an opening in');
         lvl.openings[openingId] = { ...opening, id: openingId };
+        // Sockets and switches it lands on move to its jambs, in the same undo step.
+        clearPointsOn(lvl, opening.wallId);
       },
     },
   };
@@ -424,6 +427,7 @@ export function updateOpening(levelId: string, openingId: string, patch: Opening
       }
       if (o.kind !== 'window') o.sill = 0;
       o.t = clampOpeningT(length, o.width, o.t);
+      clearPointsOn(lvl, o.wallId);
     },
   };
 }

@@ -1,3 +1,4 @@
+import { type Draft, current, isDraft } from 'immer';
 import { furnitureKind, itemFootprint } from './furniture';
 import { pointInPolygon } from './geometry';
 import type { Command } from './history';
@@ -6,7 +7,17 @@ import { draftLevel } from './levels';
 import { type PlanGeometry, planGeometry } from './plan';
 import { renovationDiff } from './renovation';
 import { roomShapes } from './rooms';
-import { type ElecKind, ElecPoint, type Level, type Vec2, isBoundary, wallFaces } from './schema';
+import {
+  type ElecKind,
+  ElecPoint,
+  type Level,
+  type Vec2,
+  type Wall,
+  isBoundary,
+  isGlass,
+  isHalfWall,
+  wallFaces,
+} from './schema';
 import { wallStatus } from './structural';
 
 /**
@@ -202,6 +213,44 @@ export function overCounter(level: Level, place: WallPlace): boolean {
  * water heater 2000, a cooker 600, a doorbell 1200; ceiling points at the ceiling.
  */
 export function defaultHeight(level: Level, kind: ElecKind, place?: WallPlace): number {
+  const usual = usualHeight(level, kind, place);
+  // On a half wall, no higher than its top lets it (an aircon unit can't go on one at all).
+  const w = place && level.walls[place.wallId];
+  const cap = w && kind !== 'aircon' ? highestOn(level, w, kind) : Number.POSITIVE_INFINITY;
+  return Math.min(usual, cap);
+}
+
+/** The top of a half wall a point's plate stays JAMB_CLEAR under; none for a full wall. */
+function wallTop(level: Level, w: Wall): number {
+  return w.height !== undefined && isHalfWall(w, level.ceilingHeight)
+    ? w.height
+    : Number.POSITIVE_INFINITY;
+}
+
+/** The highest a point of `kind` can sit on wall `w` (its height, as it is measured). */
+function highestOn(level: Level, w: Wall, kind: ElecKind): number {
+  const top = wallTop(level, w) - JAMB_CLEAR;
+  const h = ELEC_KINDS[kind].plate.h;
+  return Math.floor((kind === 'aircon' ? top : top - h / 2) * 1000 + 1e-6) / 1000;
+}
+
+/**
+ * The highest a point can go: under its room's ceiling (the level's, where the room sets
+ * none), and on a half wall under its top.
+ */
+export function maxHeight(level: Level, p: ElecPoint): number {
+  const pos = pointPosition(level, p);
+  if (!pos) return level.ceilingHeight;
+  if (!p.wall || !pos.normal) return ceilingAt(level, pos.at);
+  const ceiling = ceilingAt(level, {
+    x: pos.at.x + pos.normal.x * 0.05,
+    y: pos.at.y + pos.normal.y * 0.05,
+  });
+  const w = level.walls[p.wall.wallId];
+  return Math.min(ceiling, w ? highestOn(level, w, p.kind) : ceiling);
+}
+
+function usualHeight(level: Level, kind: ElecKind, place?: WallPlace): number {
   const room = place ? roomOfPlace(level, place) : undefined;
   const ceiling = room?.ceilingHeight ?? level.ceilingHeight;
   switch (kind) {
@@ -260,7 +309,7 @@ function verticalSpan(kind: ElecKind, height: number): [number, number] {
  * Where along a wall face a point can go, as near `along` as it can: kept on the face
  * between the inside corners, never in a door or passage (moved to the nearer jamb, its
  * plate JAMB_CLEAR from it), and in a window's width only under its sill (or over its head).
- * Null if the face has no room for it.
+ * Null if the face has no room for it, on a glass wall, or above a half wall's top.
  */
 export function clearAlong(
   level: Level,
@@ -270,7 +319,9 @@ export function clearAlong(
   height: number,
 ): number | null {
   const f = geom.frames[place.wallId];
-  if (!f || isBoundary(f.wall)) return null;
+  // Nothing goes on glass, nor higher on a half wall than its top.
+  if (!f || isBoundary(f.wall) || isGlass(f.wall)) return null;
+  if (height > highestOn(level, f.wall, kind) + 1e-9) return null;
   const half = ELEC_KINDS[kind].plate.w / 2;
   const span = place.side === 'left' ? f.left : f.right;
   const lo = Math.max(0, span[0]) + half;
@@ -346,6 +397,64 @@ export function placePoint(
   const wall = { wallId: best.place.wallId, t, side: best.place.side, height };
   const pos = pointPosition(level, { id: 'probe', kind, wall });
   return { ...wall, at: pos?.at ?? p };
+}
+
+/**
+ * Where along its wall a wall point goes moved to `along` metres from vertex a: clear of
+ * openings and corners as clearAlong has it. Its new `t`, or null with no room.
+ */
+export function pointTAt(
+  level: Level,
+  p: ElecPoint,
+  along: number,
+  geom: PlanGeometry = planGeometry(level),
+): number | null {
+  const pw = p.wall;
+  const f = pw && geom.frames[pw.wallId];
+  if (!pw || !f || f.length < 1e-9) return null;
+  const u = clearAlong(level, geom, p.kind, { wallId: pw.wallId, along, side: pw.side }, pw.height);
+  return u === null ? null : Math.min(1, Math.max(0, u / f.length));
+}
+
+/**
+ * Moves the points on a wall clear of its doors and windows (as clearAlong does), for a
+ * recipe that has just added or moved one there. A point with nowhere to go stays.
+ */
+export function clearPointsOn(lvl: Draft<Level> | Level, wallId: string): void {
+  const on = Object.values(lvl.points ?? {}).filter((p) => p.wall?.wallId === wallId);
+  if (on.length === 0) return;
+  const level = (isDraft(lvl) ? current(lvl) : lvl) as Level;
+  const geom = planGeometry(level);
+  const len = geom.frames[wallId]?.length ?? 0;
+  for (const p of on) {
+    const was = level.points[p.id];
+    if (!was?.wall || !p.wall) continue;
+    const t = pointTAt(level, was, was.wall.t * len, geom);
+    if (t !== null && Math.abs(t - was.wall.t) > 1e-9) p.wall.t = t;
+  }
+}
+
+/** Whether a wall point's plate overlaps a door, passage or window on its wall. */
+export function inOpening(level: Level, p: ElecPoint): boolean {
+  const pos = p.wall && pointPosition(level, p);
+  const w = p.wall && level.walls[p.wall.wallId];
+  const a = w && level.vertices[w.a];
+  const b = w && level.vertices[w.b];
+  if (!p.wall || !pos || !a || !b) return false;
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  const half = ELEC_KINDS[p.kind].plate.w / 2;
+  const [bottom, top] = verticalSpan(p.kind, p.wall.height);
+  return Object.values(level.openings).some((o) => {
+    if (o.wallId !== p.wall?.wallId) return false;
+    const sill = o.kind === 'window' ? o.sill : 0;
+    const c = o.t * len;
+    return (
+      top > sill + 1e-6 &&
+      bottom < sill + o.height - 1e-6 &&
+      pos.along + half > c - o.width / 2 + 1e-6 &&
+      pos.along - half < c + o.width / 2 - 1e-6
+    );
+  });
 }
 
 /** A polyline's length. */
@@ -431,7 +540,8 @@ const MOVED = 0.05;
 /**
  * A renovation's points compared with the flat's, by id: new (not there before, a changed
  * kind, or on a wall the renovation hacks and builds again), moved (onto another wall face, or
- * more than 50 mm), removed (gone, a changed kind, or on a hacked wall).
+ * more than 50 mm), removed (gone, a changed kind, on a hacked wall, or left in a door or
+ * window's span in the renovation).
  */
 export function electricalChanges(before: Level, after: Level): ElecChanges {
   const status = new Map<string, 'new' | 'moved'>();
@@ -458,11 +568,14 @@ export function electricalChanges(before: Level, after: Level): ElecChanges {
       return t >= -1e-6 && t <= 1 + 1e-6 && Math.hypot(c.x - q.x, c.y - q.y) < 0.01;
     });
   };
+  // A point left in a doorway or window (After) can't be there: it's taken out.
+  const blocked = (q: ElecPoint) => inOpening(after, q);
   for (const p of Object.values(bp)) {
     const q = ap[p.id];
-    if (!q || q.kind !== p.kind || onHacked(p)) removed.push(p);
+    if (!q || q.kind !== p.kind || onHacked(p) || blocked(q)) removed.push(p);
   }
   for (const q of Object.values(ap)) {
+    if (blocked(q)) continue;
     const p = bp[q.id];
     if (!p || p.kind !== q.kind || removed.includes(p)) {
       status.set(q.id, 'new');
