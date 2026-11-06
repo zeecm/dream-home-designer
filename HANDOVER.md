@@ -474,6 +474,12 @@ frameloop rests while Exact renders. Tests set `window.__DHD_EXACT_TEST__` (size
   kitchen window facing the sun, the sun patch read 2,547 cd/m² against 777 in the shade
   beside it (3,536 with the pane left out; 32 samples, noisy); at 9 am 2,842 with glass and
   2,889 without. No fallback needed.
+- **Tests:** `e2e/exact.spec.ts` (about 2.5 min under SwiftShader: one dialog flow with three
+  renders, the pixel test on a fixture room at 32 samples, the phone walk, no WebGL 2). The AI
+  render tests now click "AI impression" first.
+- **Seen, to check on a GPU at 256 samples:** at 20 samples a sunlit floor showed sparse
+  single dark pixels; the picture is warm where an oak floor bounces sunlight (physically so;
+  no white balance, which the spec leaves out).
 - **Left for slice 2+:** Quality, Time, Lamps and Brightness settings; hints; full-screen
   viewer; real textures; Polish with AI; the slow-device estimate.
 

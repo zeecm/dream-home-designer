@@ -73,6 +73,8 @@ test('from the orbit view, a render starts from eye height and tells the model t
 
   await page.getByRole('button', { name: 'Photo-real render' }).click();
   const dialog = page.getByRole('dialog', { name: 'Photo-real render' });
+  // The dialog opens on Exact (drawn on the device); this is the image model's side.
+  await dialog.getByRole('button', { name: 'AI impression' }).click();
   const eye = dialog.getByRole('button', { name: 'From eye height in Living and dining' });
   const here = dialog.getByRole('button', {
     name: 'From this view (overhead: rooms may look larger)',
@@ -134,6 +136,8 @@ test.describe('on a phone', () => {
     await page.getByRole('button', { name: 'Switch to 3D' }).click();
     await page.getByRole('button', { name: 'Photo-real render' }).click();
     const dialog = page.getByRole('dialog', { name: 'Photo-real render' });
+    // The dialog opens on Exact (drawn on the device); this is the image model's side.
+    await dialog.getByRole('button', { name: 'AI impression' }).click();
     const eye = dialog.getByRole('button', { name: /^From eye height in / });
     await expect(eye).toHaveAttribute('aria-pressed', 'true', { timeout: 30_000 });
     const img = dialog.getByRole('img', { name: /^The 3D view from eye height/ });

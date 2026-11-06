@@ -149,6 +149,8 @@ test('a photo-real render of the 3D view with an image model, to download', asyn
   await page.keyboard.press('3');
   await page.getByRole('button', { name: 'Photo-real render' }).click();
   const dialog = page.getByRole('dialog', { name: 'Photo-real render' });
+  // The dialog opens on Exact (drawn on the device); this is the image model's side.
+  await dialog.getByRole('button', { name: 'AI impression' }).click();
   await expect(dialog.getByRole('img', { name: 'The 3D view' })).toBeVisible();
   await expect(dialog).toContainText('With OpenAI (gpt-image-1)');
   await dialog.getByLabel('Look').selectOption('scandi');
@@ -177,6 +179,8 @@ test('without an image model, a render asks for an OpenAI or Gemini key', async 
   await page.keyboard.press('3');
   await page.getByRole('button', { name: 'Photo-real render' }).click();
   const dialog = page.getByRole('dialog', { name: 'Photo-real render' });
+  // The dialog opens on Exact (drawn on the device); this is the image model's side.
+  await dialog.getByRole('button', { name: 'AI impression' }).click();
   await expect(dialog).toContainText('Renders need an OpenAI or Gemini key');
   await expect(dialog.getByRole('button', { name: 'Render' })).toBeDisabled();
   // Adding one starts on a provider that makes pictures, and keeps Claude reading plans.

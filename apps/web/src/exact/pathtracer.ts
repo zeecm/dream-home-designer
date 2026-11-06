@@ -351,7 +351,7 @@ export class PathTracerEngine implements ExactEngine {
     else this.quick = 0;
     let next = n;
     if (this.quick >= 4 && n > 1) next = n - 1;
-    else if (ms > 100 && tilePx > 128 * 128 && n < 8) next = n + 1;
+    else if (ms > 100 && tilePx > 256 * 256 && n < 8) next = n + 1;
     // Only between samples: a sample's tiles are laid out as it starts.
     if (next !== n && Number.isInteger(full.samples)) {
       full.tiles.set(next, next);

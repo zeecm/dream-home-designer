@@ -10,7 +10,7 @@ import {
   sunDirection,
   sunPosition,
 } from '@dhd/core';
-import { LevelMeshes, MaterialCache, ModelLibrary } from '@dhd/render';
+import { LevelMeshes, MaterialCache } from '@dhd/render';
 import { OrbitControls } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import {
@@ -26,7 +26,7 @@ import * as THREE from 'three';
 import { RenderDialog } from './ai/RenderDialog';
 import { useEditor } from './editor';
 import { canvasBlob, registerScene3d } from './exports';
-import { configureLoader, fetchUploaded } from './models';
+import { modelLibrary } from './models';
 import { useLevel, useProject, useStore } from './store';
 import { icons } from './ui/icons';
 import { Joystick } from './walk/Joystick';
@@ -38,7 +38,7 @@ import { loadWalkPose, saveWalkPose } from './walk/pose';
 
 const materials = new MaterialCache();
 /** The furniture models, fetched once each for the session (Pages serves /models). */
-const models = new ModelLibrary('/models/', fetchUploaded, configureLoader);
+const models = modelLibrary;
 const FOV = 40;
 
 /**
@@ -578,6 +578,8 @@ export function Viewport() {
   // Comparing a renovation's before and after, side by side across a divider.
   const [comparing, setComparing] = useState(false);
   const [rendering, setRendering] = useState(false);
+  // An exact render is drawing: the view rests, so the GPU serves one job.
+  const [resting, setResting] = useState(false);
   // Read once a render: the walk's sticks, the render button and the hints all follow it.
   const coarse = coarsePointer();
   const viewer = useStore((st) => st.role === 'viewer');
@@ -649,7 +651,12 @@ export function Viewport() {
 
   return (
     <div className="viewport" data-testid="viewport-wrap">
-      <Canvas shadows camera={{ fov: FOV, near: 0.05, far: 500 }} data-testid="viewport">
+      <Canvas
+        shadows
+        camera={{ fov: FOV, near: 0.05, far: 500 }}
+        frameloop={resting ? 'never' : 'always'}
+        data-testid="viewport"
+      >
         <color attach="background" args={[background]} />
         <hemisphereLight
           args={[
@@ -733,7 +740,15 @@ export function Viewport() {
         )}
       </Canvas>
       <SunControl walking={walking} />
-      {rendering && <RenderDialog onClose={() => setRendering(false)} />}
+      {rendering && (
+        <RenderDialog
+          onClose={() => {
+            setRendering(false);
+            setResting(false);
+          }}
+          onPauseView={setResting}
+        />
+      )}
       {walking ? (
         <>
           <button type="button" className="btn viewport-action" onClick={stopWalk}>
