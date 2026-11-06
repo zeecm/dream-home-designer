@@ -2605,6 +2605,11 @@ h3.field-label {
   gap: 12px;
   padding: 0 20px 20px;
 }
+/* The settings test: one line per model, a long provider message wrapped. */
+.ai-status span {
+  display: block;
+  overflow-wrap: anywhere;
+}
 
 /* Checkboxes in the details panel: a whole row to tap on a touch screen. */
 @media (pointer: coarse) {

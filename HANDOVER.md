@@ -570,7 +570,7 @@ renovation (`restore`), taking back its steps already carried, and stays held ba
 nothing. One undo step, which shows Before (`touchedVariant`).
 **AI: walls from a plan image (stage 1, 5 Nov):** bring your own key. Project menu "AI
 assistant…" (`ai/AiSettingsDialog.tsx`): Claude, OpenAI or Gemini, key and model (defaults
-`claude-opus-5-5`, `gpt-5`, `gemini-2.5-pro`), Test, Forget; kept in this tab
+`claude-opus-5-5`, `gpt-5`, `gemini-3-pro` since 6 Nov), Test, Forget; kept in this tab
 (sessionStorage), or on this device if ticked (`ai/credentials.ts`, key `dhd-ai`), never
 in a project, export, share link or `/api` request (e2e checks). Calls go straight from the
 browser to the provider (`ai/providers.ts`: the Anthropic SDK, lazy-loaded, with
@@ -614,6 +614,25 @@ designed, warm modern, Scandinavian, modern luxe, industrial), to the person's i
 `gemini-2.5-flash-image` generateContent with image output; Claude makes no pictures). The
 picture shows in the dialog to download. The prompt keeps the camera, room and furniture
 and asks only for materials and light. 
+
+**AI model pickers (6 Nov, owner reports: Gemini 400 with gemini-3-pro-image; type-in model
+names):** the AI assistant has two selects, "Model for plans and layouts" and, for OpenAI and
+Gemini, "Model for pictures", stored per key as `model` and `imageModel` (`credentials.ts`;
+`imageSettings()` uses the picture model, else `PROVIDERS[p].imageModel`). A saved key whose
+one model was an image model (the owner's case: gemini-3-pro-image was being sent to plan
+reading and Test as a JSON request) has it moved to pictures on load (`migrateKey`). Once a
+key is typed (600 ms pause), the selects fill from the provider's own list with that key,
+straight from the browser (`ai/models.ts`: Gemini `GET /v1beta/models`, OpenAI `GET
+/v1/models`, Anthropic `GET /v1/models`), friendly names where given, best first, the default
+marked "(recommended)" (Gemini: best listed Pro; gemini-3-pro-image, else
+gemini-2.5-flash-image). If listing fails, `CURATED` in `credentials.ts` with a hint; a saved
+model not listed stays as "(saved)". Test checks the plans model with JSON and the picture
+model without making a picture (Gemini `countTokens`, OpenAI `GET /v1/models/{id}`), a line
+each. Every failed provider call (trace, layouts, render, Test, listing) now shows what the
+provider said (`failure`/`providerMessage` in `providers.ts`: `error.message`, cut to 200
+characters, anything key-like redacted, shown as text): "Gemini turned the request down
+(400): …". Gemini's 400 "API key not valid" counts as a refused key. The e2e AI specs abort
+any provider request a test doesn't mock (`ai-models.spec.ts`).
 
 **AI: suggested layouts (stage 2, 5 Nov):** "Suggest layouts with AI" in the plan's
 Renovation section opens a brief (who lives here, eight common wishes, anything else) and
