@@ -465,6 +465,24 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
                 onChange={(e) => setBrief({ ...brief, colours: e.target.value })}
               />
             </label>
+            <div className="field">
+              <label className="field-label" htmlFor="brief-ideas">
+                Your own ideas
+              </label>
+              <textarea
+                id="brief-ideas"
+                aria-describedby="brief-ideas-hint"
+                className="input textarea"
+                rows={4}
+                maxLength={2000}
+                placeholder="e.g. an island kitchen open to the living room; a reading nook by the window; a full-height shoe cabinet at the door"
+                value={brief.ideas}
+                onChange={(e) => setBrief({ ...brief, ideas: e.target.value })}
+              />
+              <span className="field-hint" id="brief-ideas-hint">
+                The designer follows them where HDB rules allow, and says why when it can’t.
+              </span>
+            </div>
           </div>
         );
       case 'budget': {

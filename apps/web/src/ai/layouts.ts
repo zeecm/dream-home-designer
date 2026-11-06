@@ -1,4 +1,4 @@
-import { LayoutSuggestions, type Level, planForModel } from '@dhd/core';
+import { LayoutSuggestions, type Level, clean, planForModel } from '@dhd/core';
 import type { AiSettings } from './credentials';
 import { AiError, askForJson, lowerEnums } from './providers';
 
@@ -97,14 +97,16 @@ export const LAYOUT_SCHEMA = {
   additionalProperties: false,
 };
 
-export const layoutPrompt = (level: Level, brief: Brief) =>
-  `You are an experienced Singapore residential architect and interior designer. Here is an HDB flat as it is, as JSON (metres; walls by id with the rooms either side; "locked" walls are outside walls, structural (load-bearing) walls, the household shelter's or bathrooms' and must not be changed):
+export const layoutPrompt = (level: Level, brief: Brief) => {
+  // Their own words, one line and quoted: a paragraph of theirs can't read as the prompt's.
+  const notes = clean(brief.notes.replace(/["“”]/g, "'").replace(/\s+/g, ' '), 1000);
+  return `You are an experienced Singapore residential architect and interior designer. Here is an HDB flat as it is, as JSON (metres; walls by id with the rooms either side; "locked" walls are outside walls, structural (load-bearing) walls, the household shelter's or bathrooms' and must not be changed):
 
 ${JSON.stringify(planForModel(level))}
 
 The household: ${brief.household || 'not said'}.
 They would like: ${brief.wishes.length ? brief.wishes.join('; ') : 'no particular wishes'}.
-${brief.notes ? `They also said: ${brief.notes}` : ''}
+${notes ? `Their own ideas, in their words (follow them ahead of your own taste wherever HDB rules and the locked walls allow; where one can't be done, say so in that option's summary): "${notes}"` : ''}
 
 Suggest up to three different renovation layouts that suit them, each a realistic, buildable change an HDB-registered contractor could do. For each: a short name, a one-sentence summary, two or three reasons it suits them, and the operations:
 - remove_wall (wallId): hack a wall that isn't locked.
@@ -115,6 +117,7 @@ Suggest up to three different renovation layouts that suit them, each a realisti
 - remove_opening (openingId): close up a door or opening (never a window).
 - rename_room (at: a point inside the room after the change, name): name a room for its new use.
 Set every field an operation doesn't use to null. Keep every bedroom with a window, keep doors at least 0.75 m wide (0.65 m for a bathroom) and corridors at least 0.9 m, never touch locked walls, and keep the kitchen's wet area where it is.`;
+};
 
 /** Up to three layouts from the person's model, checked against the schema. */
 export async function suggestLayouts(

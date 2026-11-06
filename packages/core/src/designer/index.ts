@@ -105,5 +105,5 @@ export {
   spacesOf,
 } from './spaces';
 export { type UsageOpts, usageOf, usageTotals } from './usage';
-export { levelFingerprint } from './util';
+export { clean, levelFingerprint } from './util';
 export { KEEP_TEXT, LOCK_TEXT, type Note, applyDesignWalls, canonicalIds } from './walls';

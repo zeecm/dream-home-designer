@@ -13,7 +13,7 @@ import { icons } from '../ui/icons';
 import { AiSettingsDialog } from './AiSettingsDialog';
 import { PROVIDERS, imageSettings, useAi } from './credentials';
 import { AiError } from './providers';
-import { RENDER_STYLES, type RenderStyle, planImage, renderPhoto } from './render';
+import { MAX_IDEAS, RENDER_STYLES, type RenderStyle, planImage, renderPhoto } from './render';
 
 const STYLE_NAMES: Record<RenderStyle, string> = {
   as: 'As designed',
@@ -21,6 +21,23 @@ const STYLE_NAMES: Record<RenderStyle, string> = {
   scandi: 'Scandinavian',
   luxe: 'Modern luxe',
   industrial: 'Industrial',
+};
+
+/** The person's ideas for renders, kept per plan for this tab. */
+const ideasKey = (projectId: string) => `dhd-render-ideas:${projectId}`;
+const readIdeas = (projectId: string) => {
+  try {
+    return sessionStorage.getItem(ideasKey(projectId)) ?? '';
+  } catch {
+    return '';
+  }
+};
+const keepIdeas = (projectId: string, text: string) => {
+  try {
+    sessionStorage.setItem(ideasKey(projectId), text);
+  } catch {
+    // Not kept: no matter.
+  }
 };
 
 /** A picture of the 3D view to send, with the facts of what it shows. */
@@ -42,7 +59,7 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   useAi(); // re-render when keys change
   const ai = imageSettings();
-  const name = useProject().name;
+  const { name, id: projectId } = useProject();
   const level = useLevel();
   const walking = useEditor((s) => !!s.walking);
   // The view as it is, and (from high up) from eye height in its room.
@@ -53,6 +70,8 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
     null,
   );
   const [style, setStyle] = useState<RenderStyle>('as');
+  // The person's own ideas, kept for the next render in this tab.
+  const [ideas, setIdeas] = useState(() => readIdeas(projectId));
   const [busy, setBusy] = useState<AbortController | null>(null);
   const [status, setStatus] = useState('');
   const [settings, setSettings] = useState(false);
@@ -123,7 +142,11 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
       } catch {
         plan = undefined; // the view and its facts still go
       }
-      const blob = await renderPhoto(ai, view.blob, style, ctrl.signal, view.facts, plan);
+      const blob = await renderPhoto(ai, view.blob, style, ctrl.signal, {
+        facts: view.facts,
+        plan,
+        ideas,
+      });
       setPhoto({
         blob,
         url: URL.createObjectURL(blob),
@@ -155,8 +178,8 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
       <div className="dialog-body">
         <p className="dialog-note">
           Your image model turns this view into a photograph-like picture, keeping the room and
-          furniture as they are. It’s an impression: details can differ. Best from inside a room:
-          walk through, look where you like, then render.
+          furniture as they are (plus anything your own ideas add). It’s an impression: details can
+          differ. Best from inside a room: walk through, look where you like, then render.
         </p>
         <div className="render-pictures">
           {shots?.eye && (
@@ -231,6 +254,31 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
             <div className="render-wait">Taking a picture of the view…</div>
           )}
         </div>
+        {ai && (
+          <div className="field render-ideas">
+            <label className="field-label" htmlFor="render-ideas">
+              Your own ideas (optional)
+            </label>
+            <textarea
+              id="render-ideas"
+              aria-describedby="render-ideas-hint"
+              className="input textarea"
+              rows={2}
+              maxLength={MAX_IDEAS}
+              disabled={!!busy}
+              placeholder="e.g. terrazzo floor, warm evening light, linen curtains, a big plant in the corner"
+              value={ideas}
+              onChange={(e) => {
+                setIdeas(e.target.value);
+                keepIdeas(projectId, e.target.value);
+              }}
+            />
+            <span className="field-hint" id="render-ideas-hint">
+              Materials, colours, light and things to add. Walls, doors and windows stay as
+              designed.
+            </span>
+          </div>
+        )}
       </div>
       {/* The look and the model in the foot, always in sight: however short the screen, and
           however far the picture has scrolled, it shows which model (and cost) a render uses. */}
