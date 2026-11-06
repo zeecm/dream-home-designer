@@ -620,13 +620,32 @@ function hugLegs(level: Level, pts: Vec2[], geom: PlanGeometry): Vec2[] {
 /** A leg shorter than this between two that run on the same way is a jog, to take out. */
 export const JOG = 0.15;
 
+/** Whether a path has a jog: a leg under JOG between two legs running the same way. */
+export function hasJog(path: readonly Vec2[]): boolean {
+  for (let i = 1; i + 2 < path.length; i++) {
+    const a = path[i] as Vec2;
+    const b = path[i + 1] as Vec2;
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const u = unit(sub(a, path[i - 1] as Vec2));
+    const w = unit(sub(path[i + 2] as Vec2, b));
+    if (len > 1e-9 && len < JOG && u && w && dot(u, w) > 1 - 1e-9) return true;
+  }
+  return false;
+}
+
 /**
  * Jogs taken out: where a leg under JOG joins two legs running the same way, the leg after
- * it moves across onto the line of the one before (or, that leg being the first, from the
- * unit, the one before onto the one after's), where that goes through no wall the legs
- * didn't already. The first point stays put.
+ * it moves across onto the line of the one before; else the one before onto the one after's
+ * (for the first leg, from the unit, the jog moves to the unit: a short stub out from it,
+ * then straight on). Only where that goes through no wall the legs didn't already. The first
+ * point stays put, and with `fixedEnd` the last.
  */
-function removeJogs(level: Level, pts: Vec2[], geom: PlanGeometry): Vec2[] {
+export function removeJogs(
+  level: Level,
+  pts: readonly Vec2[],
+  geom: PlanGeometry,
+  fixedEnd = false,
+): Vec2[] {
   let out = pts.map((p) => ({ ...p }));
   const crossed = (a: Vec2 | undefined, b: Vec2 | undefined) =>
     a && b ? new Set(wallsCrossed(level, a, b, geom).map((w) => w.wallId)) : new Set<string>();
@@ -648,15 +667,26 @@ function removeJogs(level: Level, pts: Vec2[], geom: PlanGeometry): Vec2[] {
     const was = [crossed(b, p3), crossed(p3, after)];
     const now = [crossed(a, p3n), crossed(p3n, after)];
     const nextSquare = !after || Math.abs(dot(unit(sub(after, p3)) ?? w, w)) < 1e-6;
-    if (nextSquare && now.every((n, k) => within(n, was[k] as Set<string>))) {
+    const p3Fixed = fixedEnd && i + 2 === out.length - 1;
+    if (!p3Fixed && nextSquare && now.every((n, k) => within(n, was[k] as Set<string>))) {
       out[i + 2] = p3n;
       out[i + 1] = { ...a };
       out = simplifyPath(out);
       i = 0;
       continue;
     }
-    // Else the leg before moves onto the line after, unless it's the first (from the unit).
-    if (i - 1 === 0) continue;
+    // Else the leg before moves onto the line after; the first leg (from the unit, which
+    // stays) by a short stub out from the unit first.
+    if (i - 1 === 0) {
+      const stub = { x: p0.x - step.x, y: p0.y - step.y };
+      const was1 = new Set([...crossed(p0, a), ...crossed(a, b)]);
+      const now1 = new Set([...crossed(p0, stub), ...crossed(stub, b)]);
+      if (within(now1, was1)) {
+        out = simplifyPath([out[0] as Vec2, stub, ...out.slice(i + 1)]);
+        i = 0;
+      }
+      continue;
+    }
     const pm = out[i - 2] as Vec2;
     const p0n = { x: p0.x - step.x, y: p0.y - step.y };
     const was2 = [crossed(pm, p0), crossed(p0, a)];
@@ -941,7 +971,7 @@ export function followRuns(lvl: Draft<Level>): void {
             const a = path[lastLeg] as Vec2;
             return { x: end.x + anchor.x - a.x, y: end.y + anchor.y - a.y };
           })();
-    const next = fromLegs(path, start, freeEnd, anchors);
+    const next = removeJogs(after, fromLegs(path, start, freeEnd, anchors), g1, !!comp);
     const route = next.slice(1, comp ? -1 : undefined);
     const same =
       route.length === was.route.length &&
@@ -963,7 +993,7 @@ const THROUGH_COST: Record<TrunkCrossing['through'], number> = {
   door: 0.8,
 };
 /** A leg off every face (across the ceiling) costs this much more a metre. */
-const OFF_WALL = 1.5;
+const OFF_WALL = 3;
 /** A leg in a room other than the unit's or the ledge costs this much more a metre. */
 const AWAY = 0.3;
 /** Each turn, in metres. */
@@ -1075,8 +1105,12 @@ function sharedLegs(level: Level, except?: string): [Vec2, Vec2][] {
 
 /** Joining another unit's trunking costs this a metre (against 1 for a new run). */
 const SHARE = 0.25;
-/** A leg along a wall over a doorway's head costs this more (it's avoided if it can be). */
-const DOOR_HEAD = 0.6;
+/**
+ * A leg along a wall over a doorway's head costs this more: about half a typical run, so a
+ * route goes round a doorway where that's within about 1.5 times as long, or where it can
+ * share another unit's trunk.
+ */
+const DOOR_HEAD = 3.5;
 
 /** The walls of the household shelter (wallStatus 'shelter'). */
 function shelterWalls(level: Level): Set<string> {
@@ -1372,7 +1406,7 @@ function routeWithin(job: RouteJob, window: Box | null): { route: Vec2[] | null;
   const path = nodes.map((k) => at(Math.floor(k / NV), k % NV));
   path[0] = { ...start };
   path[path.length - 1] = { ...compressor };
-  return { route: simplifyPath(path).slice(1, -1), whole };
+  return { route: removeJogs(level, simplifyPath(path), geom, true).slice(1, -1), whole };
 }
 
 /** Where a run along the walls ends: the unit's compressor, the nearest one, or a new one. */
@@ -1458,7 +1492,8 @@ function legHugs(geom: PlanGeometry, a: Vec2, b: Vec2): boolean {
   if (!e) return true;
   return obstacles(geom).faces.some((f) => {
     if (Math.abs(dot(f.normal, e)) > 1e-6) return false;
-    if (Math.abs(dot(sub(a, f.origin), f.normal)) > 1e-6) return false;
+    // On its hug line, or a jog's width off it (a run kept straight past a step in the wall).
+    if (Math.abs(dot(sub(a, f.origin), f.normal)) > JOG + 1e-6) return false;
     const ua = dot(sub(a, f.f.a), f.f.d);
     const ub = dot(sub(b, f.f.a), f.f.d);
     const lo = Math.max(Math.min(ua, ub), f.lo - TRUNK_OFF);
@@ -1472,6 +1507,7 @@ function legHugs(geom: PlanGeometry, a: Vec2, b: Vec2): boolean {
  * last (into the compressor) and short turns on a wall's hug line, and through no doorway.
  */
 function neatRun(level: Level, path: readonly Vec2[], geom: PlanGeometry): boolean {
+  if (hasJog(path)) return false;
   for (let i = 1; i < path.length; i++) {
     const a = path[i - 1] as Vec2;
     const b = path[i] as Vec2;
