@@ -284,6 +284,49 @@ describe('the runner (criteria 25–28)', () => {
     expect(Object.values(finish.design.spaces).every((s) => s.status === 'done')).toBe(true);
   });
 
+  it('a dropped connection is tried again (after 3 s, then 10 s) before it stops the run', async () => {
+    const prov = provider('anthropic', { auto: true });
+    let drops = 2;
+    const flaky = (async (u: string | URL | Request, i?: RequestInit) => {
+      if (drops > 0) {
+        drops--;
+        throw new TypeError('Failed to fetch');
+      }
+      return prov.fetch(u, i);
+    }) as typeof fetch;
+    const r = start('anthropic', { fetch: flaky });
+    await until(() => !!r.last()?.steps.some((s) => s.wait?.net), 'a wait for the connection');
+    expect(r.last()?.steps.find((s) => s.wait)?.wait).toEqual({
+      seconds: 3,
+      attempt: 1,
+      net: true,
+    });
+    await vi.advanceTimersByTimeAsync(3000);
+    await until(() => !!r.last()?.steps.some((s) => s.wait?.seconds === 10), 'the second wait');
+    await vi.advanceTimersByTimeAsync(10_000);
+    const { state } = await r.run;
+    expect(state.phase).toBe('done');
+    expect(state.steps.every((s) => s.status === 'done')).toBe(true);
+  });
+
+  it('still unreachable after the tries: halted, saying so (the panel says what is kept)', async () => {
+    const down = (async () => {
+      throw new TypeError('Failed to fetch');
+    }) as typeof fetch;
+    const r = start('gemini', { fetch: down });
+    await until(() => !!r.last()?.steps.some((s) => s.wait?.net), 'first wait');
+    await vi.advanceTimersByTimeAsync(3000);
+    await until(() => !!r.last()?.steps.some((s) => s.wait?.seconds === 10), 'second wait');
+    await vi.advanceTimersByTimeAsync(10_000);
+    const { state, design } = await r.run;
+    expect(state.phase).toBe('halted');
+    expect(state.halt).toEqual({
+      kind: 'network',
+      message: 'Couldn’t reach Gemini, even after trying again.',
+    });
+    expect(design.concept).toBeNull();
+  });
+
   it('Stop aborts every request in flight and counts the cut-off steps as estimated (27)', async () => {
     const prov = provider('anthropic');
     const r = start('anthropic', { fetch: prov.fetch });

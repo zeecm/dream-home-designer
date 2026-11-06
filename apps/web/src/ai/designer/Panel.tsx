@@ -165,7 +165,8 @@ function RunView({ run, live }: { run: Running; live: boolean }) {
             {st.wait && (
               <span className="step-note">
                 {' '}
-                Waiting {st.wait.seconds} s ({st.wait.attempt} of 2)
+                {st.wait.net ? 'Connection dropped; trying again in' : 'Waiting'} {st.wait.seconds}{' '}
+                s ({st.wait.attempt} of 2)
               </span>
             )}
           </span>
@@ -242,17 +243,39 @@ function RunView({ run, live }: { run: Running; live: boolean }) {
   );
 }
 
+/**
+ * Why a run stopped, what of it is kept, and the way on: finish the version it saved, or
+ * (nothing saved yet) the same run again.
+ */
 function HaltNotice({
   halt,
+  kept,
+  action,
+  disabled,
   onSettings,
-}: { halt: NonNullable<RunState['halt']>; onSettings: () => void }) {
+}: {
+  halt: NonNullable<RunState['halt']>;
+  /** Whether any step was saved (a version exists). */
+  kept: boolean;
+  action: { label: string; run: () => void } | null;
+  disabled: boolean;
+  onSettings: () => void;
+}) {
   return (
     <div className="notice-warning designer-halt" role="alert">
-      <span>{halt.message}</span>
-      {halt.kind === 'key' && (
+      <span>
+        {halt.message} {kept ? 'Steps already done are kept.' : 'Nothing was designed yet.'}
+      </span>
+      {halt.kind === 'key' ? (
         <button type="button" className="link-btn" onClick={onSettings}>
           AI settings
         </button>
+      ) : (
+        action && (
+          <button type="button" className="btn btn-small" disabled={disabled} onClick={action.run}>
+            {action.label}
+          </button>
+        )
       )}
     </div>
   );
@@ -692,6 +715,14 @@ const Card = memo(function Card({
     if (needsCostCheck(est, spent(), capUsd())) setFinishing({ est, ...(only ? { only } : {}) });
     else finishDesign(d, est.usd?.typical ?? null, only);
   };
+  // The stopped run's notice asked to finish this version: once, when nothing runs.
+  const finishNow = useDesigner((st) => st.finishNow === d.id);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on the ask, not on each render
+  useEffect(() => {
+    if (!finishNow || running || busy) return;
+    useDesigner.setState({ finishNow: null });
+    finish();
+  }, [finishNow, running, busy]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: once per version and run, not per render
   const finishEst = useMemo(
     () => (missing.length && !running ? estimateOf() : null),
@@ -1023,6 +1054,7 @@ export function DesignerPanel() {
       memory: s.memory,
       accepting: s.accepting,
       wantSide: s.wantSide,
+      starting: s.starting,
     })),
   );
   const project = useProject();
@@ -1071,6 +1103,9 @@ export function DesignerPanel() {
   const accepting = st.designs.find((x) => x.id === st.accepting);
   const said = st.run?.state.said ?? st.last?.state.said ?? '';
   const halt = (st.run ?? st.last)?.state.halt;
+  // The version a stopped run saved, if it saved any step: what its notice finishes.
+  const stoppedId = (st.run ?? st.last)?.designId ?? null;
+  const stopped = stoppedId ? st.designs.find((x) => x.id === stoppedId) : undefined;
   const folded = st.run
     ? `Step ${progressOf(st.run.state).step} of ${progressOf(st.run.state).of} · ${usd(usageTotals(st.run.state.usage).usd ?? 0)}`
     : null;
@@ -1160,7 +1195,29 @@ export function DesignerPanel() {
       </p>
       {st.memory && <p className="field-hint">Designs will be lost when you close this tab.</p>}
       <div className="designer-body">
-        {halt && <HaltNotice halt={halt} onSettings={() => setSettings(true)} />}
+        {halt && (
+          <HaltNotice
+            halt={halt}
+            kept={!!stopped}
+            action={
+              stopped
+                ? {
+                    label: 'Finish the design',
+                    run: () =>
+                      useDesigner.setState({
+                        selected: stopped.id,
+                        mode: 'card',
+                        finishNow: stopped.id,
+                      }),
+                  }
+                : st.last
+                  ? { label: 'Try again', run: st.last.again }
+                  : null
+            }
+            disabled={!ai || !!st.run || st.starting}
+            onSettings={() => setSettings(true)}
+          />
+        )}
         {runView && <RunView run={runView} live={running} />}
         {st.designs.length === 0 && !running && (
           <div className="designer-empty">

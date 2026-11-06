@@ -50,8 +50,11 @@ export interface StepState {
   /** The model's latest thinking line, while it runs. */
   thinking: string;
   error: string | null;
-  /** Waiting out a rate limit: seconds left, and which wait of two. */
-  wait: { seconds: number; attempt: number } | null;
+  /**
+   * Waiting out a rate limit, or for the connection to come back: seconds left, and which
+   * wait of two.
+   */
+  wait: { seconds: number; attempt: number; net?: boolean } | null;
   /** Requests made again (an unreadable answer, a step too long, a busy server). */
   retries: number;
   /** Cut off by Stop: the most it may still be billed (its prompt, and output to its limit). */
@@ -121,6 +124,37 @@ export const QUIET_MS = 120_000;
 /** Waits after a rate limit when the provider doesn't say how long. */
 const RATE_WAITS = [15, 30];
 const SERVER_WAIT = 10;
+/** Seconds before each try again after the connection dropped (a phone locked, a blip). */
+export const NET_WAITS = [3, 10];
+/** Longest wait for the tab to be in view and online again before a try, ms. */
+const BACK_MS = 10 * 60_000;
+
+/**
+ * Resolves once the page is in view and online (a phone suspends a hidden tab's requests,
+ * so trying while it is hidden only fails again), or after BACK_MS.
+ */
+function backOnline(signal: AbortSignal): Promise<void> {
+  const ready = () =>
+    (typeof document === 'undefined' || document.visibilityState !== 'hidden') &&
+    (typeof navigator === 'undefined' || navigator.onLine !== false);
+  if (ready()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', check);
+      window.removeEventListener('online', check);
+      signal.removeEventListener('abort', done);
+      resolve();
+    };
+    const check = () => {
+      if (ready()) done();
+    };
+    const timer = setTimeout(done, BACK_MS);
+    document.addEventListener('visibilitychange', check);
+    window.addEventListener('online', check);
+    signal.addEventListener('abort', done);
+  });
+}
 const LOWER: Record<Effort, Effort | null> = { high: 'medium', medium: 'low', low: null };
 
 class Stopped extends Error {}
@@ -346,6 +380,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     let effort = p.effort;
     let waits = 0;
     let server = 0;
+    let net = 0;
     let unreadable = 0;
     let long = 0;
     for (;;) {
@@ -430,7 +465,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
             throw new Halted({
               kind: 'quota',
               message:
-                'Your key has run out of quota or credit. Steps already done are kept. Top up with your provider, then finish the design.',
+                'Your key has run out of quota or credit. Top up with your provider, then go on.',
             });
           }
           if (kind === 'key') throw new Halted({ kind: 'key', message: said.message });
@@ -457,12 +492,26 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
           }
           return fail(st, `${st.label}: ${said.message}`);
         }
+        // The connection dropped (a phone locked, a blip): once back in view and online,
+        // try again a couple of times before stopping.
+        if (net < NET_WAITS.length) {
+          const seconds = NET_WAITS[net] ?? 10;
+          net++;
+          st.retries++;
+          st.wait = { seconds, attempt: net, net: true };
+          update();
+          await backOnline(o.signal);
+          for (let s = seconds; s > 0; s--) {
+            st.wait = { seconds: s, attempt: net, net: true };
+            update();
+            await sleep(1000, o.signal);
+          }
+          continue;
+        }
         const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
         throw new Halted({
           kind: offline ? 'offline' : 'network',
-          message: offline
-            ? 'You’re offline. Steps already done are kept; finish the design once you’re back online.'
-            : `Couldn’t reach ${name}. Steps already done are kept; finish the design in a moment.`,
+          message: offline ? 'You’re offline.' : `Couldn’t reach ${name}, even after trying again.`,
         });
       }
       if (sink.stop === 'refusal') return fail(st, `${st.label}: the model declined this request.`);
@@ -646,7 +695,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     }
     state.halt = {
       kind: 'network',
-      message: e instanceof AiError ? e.message : 'Something went wrong. Finished steps are kept.',
+      message: e instanceof AiError ? e.message : 'Something went wrong.',
     };
     return ended('halted');
   }

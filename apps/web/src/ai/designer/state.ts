@@ -49,6 +49,8 @@ export interface Running {
   remaining: number | null;
   /** Settles once the run has ended and its last step is saved. */
   ended: Promise<void>;
+  /** The same run again from its start: for one that ended before saving any step. */
+  again: () => void;
 }
 
 interface DesignerState {
@@ -78,6 +80,11 @@ interface DesignerState {
   comparing: string[] | null;
   /** A side the preview is to show, once (Compare's columns): the preview obeys it, then clears it. */
   wantSide: 'before' | 'version' | null;
+  /**
+   * A version to finish now (the button on a stopped run's notice): its card asks the cost
+   * check if one is due and runs the missing steps, then clears it.
+   */
+  finishNow: string | null;
 }
 
 export const useDesigner = create<DesignerState>(() => ({
@@ -97,6 +104,7 @@ export const useDesigner = create<DesignerState>(() => ({
   leaving: null,
   comparing: null,
   wantSide: null,
+  finishNow: null,
 }));
 
 const newDesignId = () =>
@@ -340,6 +348,7 @@ async function beginRun(b: Begin, started: () => void) {
     paused: null,
     remaining: null,
     ended,
+    again: () => void begin(b),
   };
   useDesigner.setState({
     run: running,

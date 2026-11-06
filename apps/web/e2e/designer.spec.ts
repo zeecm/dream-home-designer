@@ -793,6 +793,52 @@ test.describe('desktop', () => {
     expect(stored).not.toMatch(/sk-ant|x-api-key/);
   });
 
+  test('the connection drops: tried again, then a notice with the way on (Try again, Finish)', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const m = await mock(page);
+    // Every request fails as a dropped connection while `down` (registered last: runs first).
+    let down: 'all' | 'rooms' | null = 'all';
+    await page.route(HOSTS.anthropic, async (route) => {
+      const req = route.request();
+      if (req.method() !== 'POST' || !down) return route.fallback();
+      const step = answerFor(promptOf(JSON.parse(req.postData() ?? '{}')))?.step;
+      if (down === 'all' || step !== 'layout') return route.abort('internetdisconnected');
+      return route.fallback();
+    });
+    await openSample(page);
+    await page.getByRole('button', { name: 'Design my flat with AI' }).click();
+    await page.getByRole('button', { name: 'Next: check the cost' }).click();
+    await page.getByRole('button', { name: /^Design my flat · about US\$/ }).click();
+    const p = panel(page);
+    // Tried again on its own first, saying so.
+    await expect(p.getByText(/Connection dropped; trying again in \d+ s/)).toBeVisible({
+      timeout: 30_000,
+    });
+    // Nothing saved: the notice says so, and Try again runs the design afresh.
+    const notice = p.locator('.designer-halt');
+    await expect(notice).toContainText('even after trying again. Nothing was designed yet.', {
+      timeout: 40_000,
+    });
+    down = 'rooms';
+    await notice.getByRole('button', { name: 'Try again' }).click();
+    // The layout goes through; the rooms fail: a version is kept, and the notice finishes it.
+    await expect(notice).toContainText('Steps already done are kept.', { timeout: 60_000 });
+    await expect(p.getByRole('tab', { name: /^V1/ })).toBeVisible();
+    down = null;
+    const before = m.calls.length;
+    await notice.getByRole('button', { name: 'Finish the design' }).click();
+    const check = page.getByRole('dialog', { name: 'Finish the design' });
+    if (await check.isVisible().catch(() => false)) {
+      await check.getByRole('button', { name: /^Finish the design · about/ }).click();
+    }
+    await expect(p.getByText(/^Done in /)).toBeVisible({ timeout: 30_000 });
+    expect(m.calls.slice(before).every((c) => c.step !== 'layout')).toBe(true);
+    await expect(notice).toHaveCount(0);
+  });
+
   test('deleting a plan deletes its designs, one at a time and with Clear all', async ({
     page,
   }) => {
