@@ -14,7 +14,7 @@ import type { Vec2 } from '@dhd/core';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { TraceDraftLayer } from '../ai/DraftLayer';
 import { type PixelBox, inkBounds } from '../assets';
-import { ClearanceLayer } from '../clearance/clearance';
+import { ClearanceAnnouncement, ClearanceLayer } from '../clearance/clearance';
 import { DeliveryLayer } from '../delivery/delivery';
 import { type Tool, useEditor } from '../editor';
 import { ElectricalLayer } from '../electrical/electrical';
@@ -857,7 +857,7 @@ export function PlanCanvas() {
               }
             />
             <RenovationMarks />
-            <ClearanceLayer level={level} />
+            <ClearanceLayer level={level} geom={geom} view={v} size={size} />
             <DeliveryLayer level={level} zoom={v.zoom} />
             <ElectricalLayer
               level={level}
@@ -911,6 +911,7 @@ export function PlanCanvas() {
       </p>
       <p className="visually-hidden" aria-live="polite">
         {describe(level, selection)}
+        <ClearanceAnnouncement level={level} selection={selection} />
       </p>
 
       {/* Out of the way as soon as a drawing tool is picked, so it never blocks a click. */}

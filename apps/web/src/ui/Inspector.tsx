@@ -1,6 +1,6 @@
 import {
   AFTER_SUFFIX,
-  CLEARANCE_RULES,
+  DINING_TABLES,
   type DoorStyle,
   FLOOR_FINISHES,
   type ItemPatch,
@@ -9,6 +9,7 @@ import {
   PAINTS,
   WALLPAPERS,
   addItem,
+  chairsOf,
   cornerSpot,
   customPaint,
   deleteItem,
@@ -50,10 +51,16 @@ import {
 import { wallpaperCanvas } from '@dhd/render';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
+  doorIssueLines,
+  doorsWithIssues,
+  hasClearanceRule,
   itemIssueLines,
   itemsWithIssues,
   useClearanceIssues,
   useClearanceOn,
+  useOtherLevels,
+  useWalkwayReport,
+  walkwayLine,
 } from '../clearance/clearance';
 import { CarpentryLine, CostSummary } from '../cost/estimate';
 import { GettingItIn } from '../delivery/delivery';
@@ -396,8 +403,16 @@ function ItemClearances({ level, id }: { level: Level; id: string }) {
   const h = useId();
   if (!on) return null;
   const lines = itemIssueLines(level, id, issues);
+  // A dining table: its chairs' room to pull out is part of it.
+  const table = DINING_TABLES.has(level.items[id]?.assetId ?? '');
+  const chairs = table ? chairsOf(level, id) : [];
+  for (const c of chairs) {
+    for (const l of itemIssueLines(level, c, issues)) {
+      if (l.startsWith('Pulling out') && !lines.includes(l)) lines.push(l);
+    }
+  }
   // A rug or a lamp has nothing to check: say nothing rather than "room to use it".
-  if (!lines.length && !CLEARANCE_RULES[level.items[id]?.assetId ?? '']) return null;
+  if (!lines.length && !hasClearanceRule(level, id)) return null;
   return (
     <section className="stack" aria-labelledby={h}>
       <h3 id={h} className="section-title">
@@ -409,6 +424,8 @@ function ItemClearances({ level, id }: { level: Level; id: string }) {
             <li key={l}>{l}</li>
           ))}
         </ul>
+      ) : table && !chairs.length ? (
+        <p className="field-hint">Add chairs to check the room to sit.</p>
       ) : (
         <p className="field-hint">Room to use it.</p>
       )}
@@ -416,41 +433,91 @@ function ItemClearances({ level, id }: { level: Level; id: string }) {
   );
 }
 
-/** In the plan details: the switch, how many pieces have a problem, and a way to each. */
+/** A door's clearances, only when its leaves hit another door or a piece's doors. */
+function DoorClearances({ level, id }: { level: Level; id: string }) {
+  const on = useClearanceOn((s) => s.on);
+  const issues = useClearanceIssues();
+  const h = useId();
+  if (!on) return null;
+  const lines = doorIssueLines(level, id, issues);
+  if (!lines.length) return null;
+  return (
+    <section className="stack" aria-labelledby={h}>
+      <h3 id={h} className="section-title">
+        Clearances
+      </h3>
+      <ul className="clearance-list warning-text">
+        {lines.map((l) => (
+          <li key={l}>{l}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * In the plan details: the switch, how many pieces and doors have a problem, a way to each,
+ * and the walkways from the main door.
+ */
 function ClearanceSummary() {
   const { on, set } = useClearanceOn();
   const issues = useClearanceIssues();
+  const report = useWalkwayReport();
   const pieces = itemsWithIssues(issues);
+  const doors = doorsWithIssues(issues);
   const level = useLevel();
+  const others = useOtherLevels(level);
+  const stops = [
+    ...pieces.map((id) => ({ kind: 'item' as const, id })),
+    ...doors.map((id) => ({ kind: 'opening' as const, id })),
+  ];
   const next = () => {
-    const at = pieces.indexOf(useClearanceOn.getState().shown ?? '');
-    const id = pieces[(at + 1) % pieces.length];
-    const it = id ? level?.items[id] : undefined;
-    if (!id || !it) return;
-    useClearanceOn.setState({ shown: id });
+    const at = stops.findIndex((s) => s.id === useClearanceOn.getState().shown);
+    const stop = stops[(at + 1) % stops.length];
+    if (!stop || !level) return;
+    let centre: { x: number; y: number } | null = null;
+    if (stop.kind === 'item') {
+      const it = level.items[stop.id];
+      if (it) centre = { x: it.position.x, y: it.position.z };
+    } else {
+      const o = level.openings[stop.id];
+      const w = o && level.walls[o.wallId];
+      const a = w && level.vertices[w.a];
+      const b = w && level.vertices[w.b];
+      if (o && a && b) centre = { x: a.x + (b.x - a.x) * o.t, y: a.y + (b.y - a.y) * o.t };
+    }
+    if (!centre) return;
+    useClearanceOn.setState({ shown: stop.id });
     const ed = useEditor.getState();
     // Into view, at the zoom it was.
-    if (ed.view) ed.setView({ ...ed.view, cx: it.position.x, cy: it.position.z }, true);
-    ed.select({ kind: 'item', id });
+    if (ed.view) ed.setView({ ...ed.view, cx: centre.x, cy: centre.y }, true);
+    ed.select(stop);
   };
+  const what = [
+    pieces.length ? `${pieces.length} ${pieces.length === 1 ? 'piece' : 'pieces'}` : '',
+    doors.length ? `${doors.length} ${doors.length === 1 ? 'door' : 'doors'}` : '',
+  ].filter(Boolean);
+  const way = on && level && report ? walkwayLine(level, report, others) : null;
   return (
     <div className="field">
       <label className="check-row">
         <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} />
         <span>Clearance checks</span>
       </label>
-      {on && pieces.length > 0 && (
+      {on && stops.length > 0 && (
         <div className="note structural-guess">
-          <span className="warning-text">
-            {pieces.length === 1
-              ? '1 piece is short of room'
-              : `${pieces.length} pieces are short of room`}{' '}
-            or in the way.
+          <span className="warning-text" data-testid="clearance-count">
+            {what.join(' and ')} {stops.length === 1 ? 'is' : 'are'} short of room or in the way.
           </span>
           <button type="button" className="btn btn-small" onClick={next}>
             Show next
           </button>
         </div>
+      )}
+      {way && (
+        <p className={`field-hint${way.warn ? ' warning-text' : ''}`} data-testid="walkway-line">
+          {way.text}
+        </p>
       )}
     </div>
   );
@@ -988,6 +1055,8 @@ function OpeningInspector({ level, id }: { level: Level; id: string }) {
   return (
     <>
       <Header title={title} onClose={clear} />
+      {/* First, so a phone's sheet shows it without scrolling. */}
+      <DoorClearances level={level} id={id} />
       <Segmented
         label="Kind"
         value={o.kind}
