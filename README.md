@@ -57,10 +57,14 @@ for any plan.
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
+- Dimensioned plan export for contractors: a scaled PDF with chain dimensions, door and
+  window widths, title block, hacking legend and change list.
+  [spec](docs/specs/dimensioned-export.md)
 
 ### Planned
 1. Clearance checks, slice 2: walkways from the main door, dining chairs, labels on the plan.
-2. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
+
+More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
 
 ## What it does
 
