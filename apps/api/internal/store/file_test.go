@@ -113,3 +113,28 @@ func TestFileStoreKeepsModelsAcrossReopen(t *testing.T) {
 		t.Fatalf("models after delete and reopen: %v", hs)
 	}
 }
+
+func TestFileStoreKeepsCommentsAcrossReopen(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	s, _ := NewFile(dir)
+	_ = s.Create(ctx, Record{ID: "prj_c", Name: "C", Doc: []byte(`{}`)})
+	if err := s.PutComments(ctx, "prj_c", CommentsRec{}, []byte(`{"threads":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewFile(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := reopened.GetComments(ctx, "prj_c"); err != nil || got.Version != 1 || string(got.Doc) != `{"threads":[]}` {
+		t.Fatalf("comments after reopen: %+v %v", got, err)
+	}
+	if err := reopened.Delete(ctx, "prj_c"); err != nil {
+		t.Fatal(err)
+	}
+	again, _ := NewFile(dir)
+	_ = again.Create(ctx, Record{ID: "prj_c", Name: "C", Doc: []byte(`{}`)})
+	if got, _ := again.GetComments(ctx, "prj_c"); got.Version != 0 {
+		t.Fatalf("comments after delete and reopen: %+v", got)
+	}
+}

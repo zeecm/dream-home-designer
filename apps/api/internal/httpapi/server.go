@@ -2,6 +2,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -19,6 +20,9 @@ type Server struct {
 	store store.Store
 	log   *slog.Logger
 	mux   *http.ServeMux
+	now   func() time.Time
+	// commentLocks serialises comment writes per project.
+	commentLocks projectLocks
 }
 
 // Option configures a Server.
@@ -38,7 +42,7 @@ func New(s store.Store, log *slog.Logger, opts ...Option) *Server {
 	for _, opt := range opts {
 		opt(&o)
 	}
-	srv := &Server{store: s, log: log, mux: http.NewServeMux()}
+	srv := &Server{store: s, log: log, mux: http.NewServeMux(), now: time.Now}
 	srv.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -64,6 +68,7 @@ func New(s store.Store, log *slog.Logger, opts ...Option) *Server {
 	srv.mux.HandleFunc("POST /telemetry", srv.telemetry)
 	srv.mux.HandleFunc("GET /projects/{id}/versions", srv.versions)
 	srv.mux.HandleFunc("GET /projects/{id}/versions/{version}", srv.version)
+	srv.routeComments()
 	return srv
 }
 
@@ -204,6 +209,7 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	s.clearComments(r.Context(), env.ID)
 	if owner != "" {
 		w.Header().Set("X-Owner-Token", owner)
 		w.Header().Set("X-Role", string(RoleOwner))
@@ -253,6 +259,14 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request) {
 	if !s.allow(w, r, id, func(r Role) bool { return r == RoleOwner || r == RoleOpen }) {
 		return
 	}
+	// Holding the comments' lock: a comment write can't read "none yet" before the delete
+	// and write them back after it.
+	unlock, err := s.commentLocks.lock(r.Context(), id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer unlock()
 	if err := s.store.Delete(r.Context(), id); err != nil {
 		s.fail(w, err)
 		return
@@ -277,6 +291,9 @@ func (s *Server) readDoc(w http.ResponseWriter, r *http.Request) ([]byte, projec
 func (s *Server) fail(w http.ResponseWriter, err error) {
 	var conflict *store.ConflictError
 	switch {
+	case errors.Is(err, context.Canceled):
+		// The caller went away: nothing to answer, and nothing went wrong here.
+		w.WriteHeader(499)
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, store.ErrNoImage):
 		writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, store.ErrExists):

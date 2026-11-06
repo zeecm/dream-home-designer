@@ -30,7 +30,8 @@ export type UsageEvent =
   | 'renovation'
   | 'share'
   | 'download'
-  | 'restore-version';
+  | 'restore-version'
+  | 'comment';
 
 /** Counts a step of using the app, once per visit (per detail). */
 export function track(name: UsageEvent, detail = '') {

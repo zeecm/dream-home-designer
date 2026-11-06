@@ -25,7 +25,8 @@ test('a view link only looks; an edit link saves to the owner’s plan until it 
   const viewer = await (await browser.newContext()).newPage();
   await viewer.goto(viewLink);
   await expect(viewer.getByText('View only.')).toBeVisible();
-  await expect(viewer.getByRole('button', { name: /^Wall/ })).toBeDisabled();
+  // Its tools are Select and Comment: nothing to draw with.
+  await expect(viewer.getByRole('button', { name: /^Wall/ })).toHaveCount(0);
   await expect(viewer.getByRole('button', { name: 'Make my own copy' })).toBeVisible();
 
   // The edit link: rename a room; it saves to the owner's plan.

@@ -1,6 +1,6 @@
 import { Container, getContainer } from '@cloudflare/containers';
 import { type AuthEnv, d1Store, handleAuth } from './auth';
-import { allowCreate, d1Quota } from './quota';
+import { allowComment, allowCreate, d1Quota } from './quota';
 
 export interface Env extends AuthEnv {
   /** Accounts (D1): people, sessions and the plans they keep. */
@@ -8,6 +8,8 @@ export interface Env extends AuthEnv {
   API: DurableObjectNamespace<ApiContainer>;
   WRITE_LIMIT: RateLimit;
   CREATE_LIMIT: RateLimit;
+  /** Comment writes per address per minute (optional: missing, comments aren't limited). */
+  COMMENT_LIMIT?: RateLimit;
   R2_ENDPOINT: string;
   R2_BUCKET: string;
   R2_ACCESS_KEY: string;
@@ -30,7 +32,11 @@ export const EVENT_NAMES = new Set([
   'share',
   'download',
   'restore-version',
+  'comment',
 ]);
+
+/** A comment write: any non-GET under /projects/{id}/comments (after /api is stripped). */
+export const COMMENT_PATH = /^\/projects\/[^/]+\/comments(\/|$)/;
 
 /**
  * Telemetry from the app, kept here rather than in the API: errors go to the Worker's logs
@@ -104,6 +110,30 @@ const json = (body: unknown, status: number) =>
     headers: { 'Content-Type': 'application/json' },
   });
 
+/** A 429 that says when to try again: the per-minute limits' window. */
+const tooMany = (body: unknown) =>
+  new Response(JSON.stringify(body), {
+    status: 429,
+    headers: { 'Content-Type': 'application/json', 'Retry-After': '60' },
+  });
+
+/**
+ * The per-minute comment limit. A deploy without the binding (its namespace not set up)
+ * lets comments through and says so in the logs, rather than failing every write.
+ */
+async function commentRateOk(env: Env, client: string): Promise<boolean> {
+  if (!env.COMMENT_LIMIT) {
+    console.error('commentLimitUnbound');
+    return true;
+  }
+  try {
+    return (await env.COMMENT_LIMIT.limit({ key: client })).success;
+  } catch (e) {
+    console.error('commentLimitUnavailable', e);
+    return true;
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -116,13 +146,32 @@ export default {
       if (url.pathname.includes('%')) return json({ error: 'bad path' }, 400);
       const client = clientKey(request.headers.get('CF-Connecting-IP'));
       const write = await env.WRITE_LIMIT.limit({ key: client });
-      if (!write.success) return json({ error: 'too many writes, slow down' }, 429);
+      if (!write.success) return tooMany({ error: 'too many writes, slow down' });
       if (request.method === 'POST' && url.pathname === '/projects') {
         const create = await env.CREATE_LIMIT.limit({ key: client });
         if (!create.success)
-          return json({ error: 'too many new projects, try again in a minute' }, 429);
+          return tooMany({ error: 'too many new projects, try again in a minute' });
         if (env.DB && !(await allowCreate(d1Quota(env.DB), client, { secret: env.KEYS_SECRET }))) {
-          return json({ error: 'you have started a lot of plans today; try again tomorrow' }, 429);
+          return tooMany({ error: 'you have started a lot of plans today; try again tomorrow' });
+        }
+      }
+      if (COMMENT_PATH.test(url.pathname)) {
+        if (!(await commentRateOk(env, client))) {
+          return tooMany({
+            error: "You're commenting very fast. Wait a minute and try again.",
+            code: 'comment_rate',
+          });
+        }
+        // The day's cap counts posts (new comments and replies), not resolves or deletes.
+        if (
+          request.method === 'POST' &&
+          env.DB &&
+          !(await allowComment(d1Quota(env.DB), client, { secret: env.KEYS_SECRET }))
+        ) {
+          return tooMany({
+            error: "That's a lot of comments for one day. Try again tomorrow.",
+            code: 'comment_daily',
+          });
         }
       }
     }

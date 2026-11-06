@@ -63,6 +63,7 @@ import {
   useWalkwayReport,
   walkwayLine,
 } from '../clearance/clearance';
+import { CommentPinsSwitch } from '../comments/ui';
 import { CarpentryLine, CostSummary } from '../cost/estimate';
 import { GettingItIn } from '../delivery/delivery';
 import { useEditor } from '../editor';
@@ -189,7 +190,8 @@ export function Inspector() {
     reveal.current = directionToken;
     setUserOpen(true);
   }, [directionToken]);
-  const open = userOpen ?? (!!selection || tool !== 'select');
+  // The Comment tool keeps it folded: on a phone the plan is what you comment on.
+  const open = userOpen ?? (!!selection || (tool !== 'select' && tool !== 'comment'));
   // biome-ignore lint/correctness/useExhaustiveDependencies: after a reveal, once open
   useEffect(() => {
     if (!open || !reveal.current) return;
@@ -235,6 +237,8 @@ export function Inspector() {
       <fieldset className="inspector-body" disabled={viewer}>
         {body}
       </fieldset>
+      {/* A way of looking, not a change: a view link can use it too. */}
+      {!selection && <CommentPinsSwitch />}
       {selection && <ToolPanel />}
     </aside>
   );

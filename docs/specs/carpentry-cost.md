@@ -63,6 +63,7 @@ CP is common practice.
   contractors."
 
 ## Slice 2
+Slice 2s prices every level: [slice-2s.md](slice-2s.md#c2-the-estimate-on-every-level-pr-3).
 Platform bed, study and display cabinets, carpentry options, floor-tile hacking, electrical and
 plumbing, rates in the project (schema change), a quote-request PDF, condo rates.
 

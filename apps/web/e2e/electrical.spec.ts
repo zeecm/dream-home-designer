@@ -329,7 +329,8 @@ test.describe('desktop', () => {
     await expect(viewer.getByText('View only.')).toBeVisible();
     await viewer.keyboard.press('1');
     await expect(points(viewer)).toHaveCount(1);
-    await expect(viewer.getByRole('button', { name: /^Electrical/ })).toBeDisabled();
+    // A view link gets Select and Comment only.
+    await expect(viewer.getByRole('button', { name: /^Electrical/ })).toHaveCount(0);
     await viewer.keyboard.press('e');
     await expect(viewer.locator('.elec-kind-list')).toHaveCount(0);
   });

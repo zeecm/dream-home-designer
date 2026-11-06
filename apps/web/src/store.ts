@@ -79,7 +79,13 @@ interface State {
   dismissNotice: () => void;
   /** A short confirmation after a destructive edit, offering Undo. */
   /** A short message; with Undo unless `undo` is false. */
-  toast: { text: string; at: number; undo?: boolean } | null;
+  toast: {
+    text: string;
+    at: number;
+    undo?: boolean;
+    /** Another action in place of Undo (a resolved comment's Reopen). */
+    action?: { label: string; run: () => void };
+  } | null;
   /** What this browser may do with the open project; a viewer can't change it. */
   role: Role;
   /** Opens a copy of the open project as a new plan of this browser's own. */

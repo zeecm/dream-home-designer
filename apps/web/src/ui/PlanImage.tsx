@@ -210,6 +210,9 @@ export function PlanImagePanel() {
   const dispatch = useStore((s) => s.dispatch);
   const setTool = useEditor((s) => s.setTool);
   const { picker, open, sample, error, busy } = useUploadPicker();
+  // A view link can't change the plan image: no Upload, Replace or Remove to offer.
+  const viewer = useStore((s) => s.role === 'viewer');
+  if (viewer) return null;
 
   if (!underlay) {
     return (

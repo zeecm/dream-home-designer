@@ -1,0 +1,128 @@
+{
+  "version": 7,
+  "epoch": "5e1f0a2b3c4d",
+  "setting": "all",
+  "threads": [
+    {
+      "id": "t_8f2k1q",
+      "anchor": {
+        "levelId": "lvl_ground",
+        "variant": "after",
+        "at": {
+          "x": 3.21,
+          "y": 4.05
+        },
+        "target": {
+          "kind": "wall",
+          "id": "w_12",
+          "t": 0.42,
+          "off": 0.05
+        },
+        "label": "Wall · Kitchen / Living"
+      },
+      "resolved": null,
+      "messages": [
+        {
+          "id": "m_3j9d0a",
+          "name": "Mum",
+          "role": "viewer",
+          "text": "Glass sliding door?",
+          "at": "2026-11-06T09:41:03Z",
+          "mine": false
+        },
+        {
+          "id": "m_4k1p2z",
+          "name": "Jun Hao",
+          "role": "editor",
+          "text": "Glass sliding door,\n$1.2k in the estimate",
+          "at": "2026-11-06T09:41:03Z",
+          "mine": true
+        }
+      ]
+    },
+    {
+      "id": "t_fridge",
+      "anchor": {
+        "levelId": "lvl_ground",
+        "variant": "after",
+        "at": {
+          "x": 6.2,
+          "y": 1.1
+        },
+        "target": {
+          "kind": "item",
+          "id": "it_fridge",
+          "rel": {
+            "x": 0.1,
+            "y": -0.05
+          }
+        },
+        "label": "Fridge"
+      },
+      "resolved": {
+        "name": "Wei Ling",
+        "at": "2026-11-06T09:41:03Z"
+      },
+      "messages": [
+        {
+          "id": "m_fr1",
+          "name": "Jun Hao",
+          "role": "editor",
+          "text": "Blocks the service yard?",
+          "at": "2026-11-06T09:41:03Z",
+          "mine": true
+        }
+      ]
+    },
+    {
+      "id": "t_room",
+      "anchor": {
+        "levelId": "lvl_ground",
+        "variant": "before",
+        "at": {
+          "x": 2,
+          "y": 8
+        },
+        "target": {
+          "kind": "room",
+          "id": "rm_master"
+        },
+        "label": "Master bedroom"
+      },
+      "resolved": null,
+      "messages": [
+        {
+          "id": "m_rm1",
+          "name": "Dad",
+          "role": "viewer",
+          "text": "2.4 m wardrobe enough for both of you?",
+          "at": "2026-11-06T09:41:03Z",
+          "mine": false
+        }
+      ]
+    },
+    {
+      "id": "t_spot",
+      "anchor": {
+        "levelId": "lvl_ground",
+        "variant": "before",
+        "at": {
+          "x": -0.4,
+          "y": 3
+        },
+        "label": "Spot on the plan"
+      },
+      "resolved": null,
+      "messages": [
+        {
+          "id": "m_sp1",
+          "name": "Wei Ling",
+          "role": "owner",
+          "text": "妈妈, what about here? 👩‍👧",
+          "at": "2026-11-06T09:41:03Z",
+          "mine": false
+        }
+      ]
+    }
+  ]
+}

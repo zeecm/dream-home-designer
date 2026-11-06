@@ -2,6 +2,7 @@ import { renameProject, variantLevels } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { signInUrl, useAccount } from '../account';
 import { AiSettingsDialog } from '../ai/AiSettingsDialog';
+import { CommentsButton } from '../comments/ui';
 import { type ViewMode, useEditor } from '../editor';
 import {
   download3dImage,
@@ -290,10 +291,11 @@ export function TopBar() {
   const { undo, redo } = useStore.getState();
   const viewMode = useEditor((s) => s.viewMode);
   const setViewMode = useEditor((s) => s.setViewMode);
+  const viewer = useStore((s) => s.role === 'viewer');
   const status = syncText(sync, local);
 
   return (
-    <header className="topbar">
+    <header className={`topbar${viewer ? ' topbar-viewer' : ''}`}>
       <div className="topbar-left">
         <ProjectMenu />
         <span className="topbar-divider" aria-hidden="true" />
@@ -315,6 +317,7 @@ export function TopBar() {
       </div>
       <div className="topbar-right">
         <AccountButton />
+        <CommentsButton />
         <ShareMenu />
         <button
           type="button"

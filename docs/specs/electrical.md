@@ -56,6 +56,7 @@ Removal 20–40. Sockets, lights [1]; the rest common practice.
   kind, qty, height), "Work by a Licensed Electrical Worker."
 
 ## Slice 2
+Slice 2s builds "Suggest points" per room: [slice-2s.md](slice-2s.md#a-suggested-electrical-points-per-room-pr-1).
 "Suggest points" per room type and furniture (bedroom: sockets each side of the bed, switch
 by the door, centre light, aircon on the bed wall), switch-to-light links, sockets hidden
 by furniture, circuits, 3D ceiling points.

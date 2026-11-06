@@ -1279,3 +1279,37 @@ by a Licensed Electrical Worker.") and a schedule page (room, point, qty, height
 schedule on its own page rather than squeezed into the title column. e2e `electrical.spec.ts`
 covers criteria 11–18. Not yet: slice 2; a kind changed in the Inspector isn't re-checked
 against openings; the plan doesn't colour After's new or moved points.
+
+**Comments on the plan (6 Nov, spec `docs/specs/plan-comments.md`, slice 1; no schema change):**
+comments are their own resource, never in the project document, its undo or its history. **API
+first:** deploy the API and edge (new `COMMENT_LIMIT` rate-limit namespaces 2005/2006, 30 a
+minute) before the web; an old API answers the routes with a plain-text 404, and the web then
+hides Comments. Go `internal/comments` holds the format (`version`, a random `epoch` from the
+first write, the owner's `setting` all/edit/off, `threads` with `anchor`, `resolved`,
+`messages` stamped with the poster's role and `authHash` = sha256(id|author key)), validation
+(names 1–40 runes, text 1–1000 after trimming, no control or format characters but the
+joiner and a flag's tags, labels tidied to 80, coordinates ±1000 m, ids `^[a-z0-9_-]{1,40}$`,
+bodies ≤ 16 KB, 50 messages a thread, 300 a plan, 1 MB) and the operations as pure functions;
+the view drops `authHash` and sets `mine`. `store.CommentStore` (memory, file
+`data/comments/<id>.json`, R2 `comments/<id>.json` with If-Match/If-None-Match and a HEAD of
+the project only when there are none). Handlers apply each write under a per-project lock with
+up to 5 tries (503 `busy`); ETag `"<epoch>.<version>"`, 304 on If-None-Match; writes need
+`X-Comment-Author` (32 base64url) and JSON. A project delete (holding the lock) copies them to
+`deleted/<id>.comments.json` and deletes them before the project; a create clears leftovers.
+Rights come from `X-Role` plus the setting (the client works them out, so a 304 never carries
+stale rights); open (unclaimed) plans can't be moderated. Edge: `COMMENT_LIMIT` per address for
+non-GET `/projects/*/comments`, and 300 posts a day per visitor through `allowDaily` in the same
+`create_quota` table (the create key's input unchanged); both fail open and log. Core
+`comments.ts`: zod `CommentsDoc` (tested on the Go fixture `internal/comments/testdata`),
+`anchorFor` (the Select hit: item with `rel` in its frame, point, opening, wall with `t`/`off`,
+room, else a spot; labels like "Wall · Living / Kitchen"), `anchorPosition` (follows moved and
+turned pieces and grown walls; gone: `removed`, `removed-in-renovation`, `no-renovation`,
+`no-level`), `threadsView`, `commentsText`. Web `comments/`: `useComments` (zustand; polling
+30 s with the panel or a thread open, 2 min otherwise, paused while hidden, at once on focus,
+5 min after errors; a 403 refetches), the Comment tool (K, second in the palette; viewers get
+Select and Comment only), HTML pins over the plan (`data-export="skip"`, newest on top, no
+grouping), the composer and thread as a popover or, on phones, a sheet above the keyboard
+(`visualViewport`), the Comments panel in the details column (a 50dvh sheet on phones), "Who can
+comment" in the share menu, `?c=<thread>` links, and the "Comments on the plan" switch in the
+plan details. e2e `comments.spec.ts`. Cut from slice 1 (tech lead): grouping pins, "Comment on
+this" in the Inspector, the hover chip, and the Worker answering 304s itself.
