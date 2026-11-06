@@ -358,7 +358,7 @@ export function TopBar() {
         <button
           type="button"
           className="btn view-toggle"
-          aria-label={shown === '3d' ? 'Show plan' : 'Show 3D view'}
+          aria-label={shown === '3d' ? 'Switch to Plan' : 'Switch to 3D'}
           title={canHover ? (shown === '3d' ? 'Plan only (1)' : '3D only (3)') : undefined}
           onClick={() => setViewMode(shown === '3d' ? 'plan' : '3d')}
         >

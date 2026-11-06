@@ -75,7 +75,7 @@ for (const width of [320, 360, 390]) {
       await page.goto('/');
       await waitSaved(page);
       const names = await expectBarFits(page, 40);
-      expect(names).toEqual(expect.arrayContaining(['Share', 'Undo', 'Redo', 'Show 3D view']));
+      expect(names).toEqual(expect.arrayContaining(['Share', 'Undo', 'Redo', 'Switch to 3D']));
       // The project name keeps room enough to read a word or two; on the first SE it gives way.
       const name = page.getByLabel('Project name');
       if (width < 352) await expect(name).toBeHidden();
@@ -86,11 +86,11 @@ for (const width of [320, 360, 390]) {
       const toggle = page.locator('.view-toggle');
       const rest = await toggle.evaluate((b) => getComputedStyle(b).backgroundColor);
       await expect(toggle).not.toHaveAttribute('title');
-      await page.getByRole('button', { name: 'Show 3D view' }).tap();
+      await page.getByRole('button', { name: 'Switch to 3D' }).tap();
       await expect(page.getByTestId('viewport-wrap')).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Show plan', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Switch to Plan', exact: true })).toBeVisible();
       expect(await toggle.evaluate((b) => getComputedStyle(b).backgroundColor)).toBe(rest);
-      await page.getByRole('button', { name: 'Show plan', exact: true }).tap();
+      await page.getByRole('button', { name: 'Switch to Plan', exact: true }).tap();
       await expect(page.locator('svg.plan-svg')).toBeVisible();
       await expect(page.getByTestId('viewport-wrap')).toHaveCount(0);
     });
@@ -99,7 +99,7 @@ for (const width of [320, 360, 390]) {
       await page.goto(await viewLink(browser));
       await expect(page.getByRole('button', { name: 'Make my own copy' })).toBeVisible();
       const names = await expectBarFits(page, 40);
-      expect(names).toContain('Show 3D view');
+      expect(names).toContain('Switch to 3D');
       expect(names).not.toContain('Undo');
     });
 
@@ -146,7 +146,7 @@ for (const name of ['iPhone 13 landscape', 'iPhone SE landscape'] as const) {
       await page.goto('/');
       await waitSaved(page);
       await expect(page.locator('.topbar-right > .segmented')).toBeHidden();
-      await expect(page.getByRole('button', { name: 'Show 3D view' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Switch to 3D' })).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
     });
   });
@@ -164,12 +164,12 @@ test('Split under 720 px shows one view, the button goes to the other, and wider
   // The last single view chosen (the plan, here), never the two stacked.
   await expect(page.locator('main.stage')).toHaveClass(/stage-plan/);
   await expect(page.getByTestId('viewport-wrap')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Show 3D view' }).click();
+  await page.getByRole('button', { name: 'Switch to 3D' }).click();
   await expect(page.locator('main.stage')).toHaveClass(/stage-3d/);
   // Split chosen by key on a narrow screen keeps the view on screen.
   await page.keyboard.press('2');
   await expect(page.locator('main.stage')).toHaveClass(/stage-3d/);
-  await expect(page.getByRole('button', { name: 'Show plan', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Switch to Plan', exact: true })).toBeVisible();
   await page.setViewportSize({ width: 1280, height: 800 });
   await expect(page.locator('main.stage')).toHaveClass(/stage-split/);
 });
