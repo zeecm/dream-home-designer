@@ -289,6 +289,8 @@ export function TopBar() {
   const local = useStore((s) => s.backend?.kind === 'local');
   const canUndo = useStore((s) => s.canUndo);
   const canRedo = useStore((s) => s.canRedo);
+  // A designer's version on show: the plan's history waits until it is back.
+  const previewing = useEditor((s) => !!s.preview);
   const { undo, redo } = useStore.getState();
   const viewMode = useEditor((s) => s.viewMode);
   const setViewMode = useEditor((s) => s.setViewMode);
@@ -327,9 +329,9 @@ export function TopBar() {
           type="button"
           className="icon-btn"
           onClick={undo}
-          disabled={!canUndo}
+          disabled={!canUndo || previewing}
           aria-label="Undo"
-          title="Undo (Ctrl/⌘ Z)"
+          title={previewing ? 'Undo isn’t available while previewing' : 'Undo (Ctrl/⌘ Z)'}
         >
           {icons.undo}
         </button>
@@ -337,9 +339,9 @@ export function TopBar() {
           type="button"
           className="icon-btn"
           onClick={redo}
-          disabled={!canRedo}
+          disabled={!canRedo || previewing}
           aria-label="Redo"
-          title="Redo (Ctrl/⌘ ⇧ Z)"
+          title={previewing ? 'Redo isn’t available while previewing' : 'Redo (Ctrl/⌘ ⇧ Z)'}
         >
           {icons.redo}
         </button>

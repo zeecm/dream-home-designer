@@ -1,4 +1,4 @@
-import type { ElecKind, OpeningKind, Variant } from '@dhd/core';
+import type { ElecKind, Level, OpeningKind, Variant } from '@dhd/core';
 import { create } from 'zustand';
 import type { View } from './plan/view';
 import { DEFAULT_OPENING_WIDTH } from './presets';
@@ -81,7 +81,10 @@ export interface EditorState {
   /** `byUser` marks a pan or zoom, which stops automatic refitting. */
   setView: (v: View, byUser?: boolean) => void;
   setViewMode: (m: ViewMode) => void;
-  requestFit: () => void;
+  /** `padding`: pixels to spare round the plan (a designer's sheet asks for more). */
+  requestFit: (padding?: number) => void;
+  /** The padding the fit asked for uses. */
+  fitPadding: number;
   fitDone: () => void;
   /** Called when another project opens. */
   reset: () => void;
@@ -95,6 +98,20 @@ export interface EditorState {
   /** Which version of the flat is shown and edited, when the plan has a renovation. */
   variant: Variant;
   setVariant: (v: Variant) => void;
+  /**
+   * A designer's version shown in place of the plan, read-only (not in the plan yet), or
+   * null. `side` 'before' shows the flat as it is, for comparing.
+   */
+  preview: DesignPreview | null;
+  setPreview: (p: DesignPreview | null) => void;
+}
+
+export interface DesignPreview {
+  level: Level;
+  before: Level;
+  /** "V2". */
+  label: string;
+  side: 'before' | 'version';
 }
 
 const VIEW_KEY = 'dhd:view';
@@ -168,6 +185,16 @@ export const useEditor = create<EditorState>((set) => ({
   sunHour: 15,
   setSunHour: (sunHour) => set({ sunHour }),
   variant: 'before',
+  preview: null,
+  // A version shown can't be edited: the tools go back to Select; nothing stays selected.
+  setPreview: (preview) =>
+    set((s) =>
+      preview && !s.preview
+        ? { preview, tool: 'select', selection: null, hover: null, trunking: null }
+        : preview
+          ? { preview }
+          : { preview: null, selection: null, hover: null },
+    ),
   // The other version may not have what's selected or half-drawn.
   setVariant: (variant) =>
     set((s) =>
@@ -179,7 +206,9 @@ export const useEditor = create<EditorState>((set) => ({
     set((s) => ({ walking: { returnTo: s.viewMode }, viewMode: '3d' }));
   },
   stopWalk: () => set((s) => (s.walking ? { viewMode: s.walking.returnTo, walking: null } : {})),
-  requestFit: () => set({ fitRequested: true, viewAdjusted: false }),
+  fitPadding: 48,
+  requestFit: (padding = 48) =>
+    set({ fitRequested: true, viewAdjusted: false, fitPadding: padding }),
   fitDone: () => set({ fitRequested: false }),
   reset: () =>
     set((s) => ({
@@ -187,6 +216,7 @@ export const useEditor = create<EditorState>((set) => ({
       selection: null,
       hover: null,
       trunking: null,
+      preview: null,
       fitRequested: true,
       viewAdjusted: false,
       ...(s.walking ? { viewMode: s.walking.returnTo, walking: null } : {}),

@@ -41,7 +41,9 @@ export function PlansDialog({ onClose }: { onClose: () => void }) {
     const failed = await deletePlans(ids);
     setBusy(false);
     setConfirm(null);
-    setStatus(failed.length ? `Couldn’t delete ${failed.join(', ')}. Try again later.` : what);
+    // Kept (a design is running on it, and the person kept designing): nothing to report.
+    if (failed === 'kept') setStatus('');
+    else setStatus(failed.length ? `Couldn’t delete ${failed.join(', ')}. Try again later.` : what);
     // The button pressed has gone with its row: keep focus in the dialog.
     ref.current?.focus();
   };

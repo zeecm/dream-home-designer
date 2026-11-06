@@ -1,0 +1,123 @@
+{
+  "items": [
+    {
+      "ref": "lamp2",
+      "assetId": "floor-lamp-arc",
+      "keep": null,
+      "wall": null,
+      "along": null,
+      "at": { "x": 9.5, "y": 2.2 },
+      "rotation": 0,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "An arc lamp."
+    },
+    {
+      "ref": "sink1",
+      "assetId": "kitchen-sink",
+      "keep": null,
+      "wall": "W12",
+      "along": 2.0,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "A bar sink in the living room."
+    },
+    {
+      "ref": "far1",
+      "assetId": "sofa-3",
+      "keep": null,
+      "wall": null,
+      "along": null,
+      "at": { "x": 10000, "y": 3 },
+      "rotation": 0,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "Far away."
+    },
+    {
+      "ref": "skew1",
+      "assetId": "armchair",
+      "keep": null,
+      "wall": null,
+      "along": null,
+      "at": { "x": 8, "y": 3 },
+      "rotation": 45,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "At an angle."
+    },
+    {
+      "ref": "mine1",
+      "assetId": "sofa-3",
+      "keep": "P99",
+      "wall": "W12",
+      "along": 2,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "Their own sofa."
+    },
+    {
+      "ref": "Sofa_3",
+      "assetId": "Sofa_3",
+      "keep": null,
+      "wall": "W12",
+      "along": 2.2,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "A sofa, its id typed loosely."
+    },
+    {
+      "ref": "loo1",
+      "assetId": "toilet",
+      "keep": null,
+      "wall": null,
+      "along": null,
+      "at": { "x": 8, "y": 4 },
+      "rotation": 0,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "A toilet in the living room."
+    },
+    {
+      "ref": "kid1",
+      "assetId": "person-child",
+      "keep": null,
+      "wall": null,
+      "along": null,
+      "at": { "x": 8, "y": 4.5 },
+      "rotation": 0,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "Ethan."
+    },
+    {
+      "ref": "big1",
+      "assetId": "sofa-3",
+      "keep": null,
+      "wall": null,
+      "along": null,
+      "at": { "x": 7.6, "y": 4.4 },
+      "rotation": 0,
+      "width": 9.5,
+      "depth": 0.9,
+      "height": null,
+      "why": "A very long sofa."
+    }
+  ],
+  "faces": [{ "wall": "W34", "finish": "paint-sage" }, { "wall": "W12", "finish": "sage-ish" }],
+  "notes": ["To open the kitchen I'd need to change walls.", "Two", "Three", "Four"]
+}

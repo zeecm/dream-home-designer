@@ -1,0 +1,97 @@
+{
+  "name": "Warm Japandi for three generations",
+  "summary": "A calm, warm flat with a glass kitchen for daily cooking, a quiet room for Mdm Lim near the bathroom, and a family living and dining room with storage by the door.",
+  "style": {
+    "name": "Warm Japandi",
+    "mood": "Pale oak, warm white walls and soft sage, with charcoal accents and clean low lines.",
+    "palette": [
+      { "name": "Warm white", "hex": "#EFE4D2", "use": "walls" },
+      { "name": "Sage", "hex": "#bccab3", "use": "feature" },
+      { "name": "Pale oak", "hex": "#c49a6c", "use": "wood" },
+      { "name": "Charcoal", "hex": "#4b4e52", "use": "accent" }
+    ]
+  },
+  "walls": [
+    {
+      "op": "Glass_Wall",
+      "wall": "W28",
+      "opening": null,
+      "a": null,
+      "b": null,
+      "height": null,
+      "t": null,
+      "width": null,
+      "style": null
+    },
+    {
+      "op": "remove_wall",
+      "wall": "W21",
+      "opening": null,
+      "a": null,
+      "b": null,
+      "height": null,
+      "t": null,
+      "width": null,
+      "style": null
+    }
+  ],
+  "rooms": [
+    {
+      "room": "R2",
+      "at": null,
+      "name": "Master bedroom",
+      "use": "master",
+      "intent": "Mei Ling and Kevin's room: a queen bed, a full-height wardrobe and bedside tables.",
+      "floor": "wood-oak",
+      "paint": "paint-warm"
+    },
+    {
+      "room": "R1",
+      "at": null,
+      "name": "Mdm Lim's room",
+      "use": "parents",
+      "intent": "A super single bed, a built-in wardrobe and an armchair, close to Bath/WC 2.",
+      "floor": "vinyl-ash",
+      "paint": "paint-warm"
+    },
+    {
+      "room": "R3",
+      "at": null,
+      "name": "Living and dining",
+      "use": "living",
+      "intent": "Sofa under the window facing a fluted feature wall, dining for four by the door.",
+      "floor": "wood-oak",
+      "paint": "paint-warm"
+    },
+    {
+      "room": "R6",
+      "at": null,
+      "name": "Dry kitchen",
+      "use": "kitchen",
+      "intent": "The fridge and a pantry corner, open to the dining.",
+      "floor": "tile-white",
+      "paint": "paint-warm"
+    },
+    {
+      "room": "R9",
+      "at": null,
+      "name": "Kitchen",
+      "use": "kitchen",
+      "intent": "Sink, hob and washer behind the new glass partition.",
+      "floor": "tile-white",
+      "paint": "paint-white"
+    }
+  ],
+  "bathrooms": [
+    { "room": "R4", "floor": "tile-grey", "paint": "paint-white" },
+    { "room": "R5", "floor": "tile-grey", "paint": "paint-white" }
+  ],
+  "reasons": [
+    "The glass kitchen keeps cooking smells in but lets light through.",
+    "Mdm Lim's room is beside Bath/WC 2 with a 0.90 m door.",
+    "Storage at the door keeps shoes and school bags out of the living room."
+  ],
+  "notes": [
+    "Opening the shelter wall isn't something HDB allows; the living room stays as it is there."
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "items": [
+    {
+      "ref": "sink1",
+      "assetId": "kitchen-sink",
+      "keep": null,
+      "wall": "W37",
+      "along": 1.9,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "The sink where the plumbing is, beside the window."
+    },
+    {
+      "ref": "base1",
+      "assetId": "kitchen-base",
+      "keep": null,
+      "wall": "W37",
+      "along": 2.62,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "Drawers next to the sink."
+    },
+    {
+      "ref": "hob1",
+      "assetId": "kitchen-hob",
+      "keep": null,
+      "wall": "W36",
+      "along": null,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "The hob on the gas side, away from the window."
+    },
+    {
+      "ref": "wash1",
+      "assetId": "washer",
+      "keep": null,
+      "wall": "W34",
+      "along": 2.45,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "Under the side window, near the ledge for drying."
+    },
+    {
+      "ref": "wall1",
+      "assetId": "kitchen-wall",
+      "keep": null,
+      "wall": "W37",
+      "along": 2.2,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "Cabinets over the counter."
+    }
+  ],
+  "faces": [{ "wall": "W37", "finish": "paint-white" }],
+  "notes": []
+}

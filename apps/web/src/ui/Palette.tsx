@@ -288,6 +288,8 @@ export function Palette() {
   const tool = useEditor((s) => s.tool);
   const setTool = useEditor((s) => s.setTool);
   const only3d = useShownView() === '3d';
+  // A designer's version on show is read-only: look and measure, nothing else.
+  const previewing = useEditor((s) => !!s.preview);
   const viewer = useStore((s) => s.role === 'viewer');
   const commenting = useCanComment();
   // A view link gets Select and Comment, not a row of greyed-out drawing tools; Comment only
@@ -312,7 +314,7 @@ export function Palette() {
               type="button"
               className="tool"
               aria-pressed={tool === t.id}
-              disabled={only3d}
+              disabled={only3d || (previewing && t.id !== 'select' && t.id !== 'measure')}
               onClick={() => setTool(t.id)}
               title={`${t.label} (${t.key})`}
             >

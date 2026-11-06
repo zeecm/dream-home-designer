@@ -826,7 +826,7 @@ function insidePoint(level: Level, roomId: string): Vec2 | null {
  * The renovation's rooms matched to the flat's by where they are (each one's inside point in
  * the other), not by id: a wall hacked and drawn again can leave a room with a new id.
  */
-function matchRooms(before: Level, after: Level): Map<string, string> {
+export function matchRooms(before: Level, after: Level): Map<string, string> {
   const out = new Map<string, string>();
   for (const a of Object.values(after.rooms)) {
     const pa = insidePoint(after, a.id);

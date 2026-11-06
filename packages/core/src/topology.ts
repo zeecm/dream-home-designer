@@ -151,9 +151,14 @@ export function flipSwing<S extends 'leftIn' | 'leftOut' | 'rightIn' | 'rightOut
   return `${hinge}${side}` as S;
 }
 
-/** Makes a level draft equal to `next`, record by record (small undo patches). */
-export function applyLevel(d: Draft<Level>, next: Level): void {
-  for (const key of ['vertices', 'walls', 'openings', 'rooms', 'points'] as const) {
+/**
+ * Makes a level draft equal to `next`, record by record (small undo patches). Furniture is
+ * left as it is unless `opts.items` asks for it too: wall edits keep the pieces, while a
+ * whole designed level (acceptDesign) brings its own.
+ */
+export function applyLevel(d: Draft<Level>, next: Level, opts: { items?: boolean } = {}): void {
+  const keys = ['vertices', 'walls', 'openings', 'rooms', 'points'] as const;
+  for (const key of opts.items ? [...keys, 'items' as const] : keys) {
     d[key] ??= {};
     const cur = d[key] as Record<string, unknown>;
     const want = (next[key] ?? {}) as Record<string, unknown>;
