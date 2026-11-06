@@ -331,6 +331,8 @@ export const useStore = create<State>((set, get) => {
     dispatch: (cmd, opts) => {
       // Nothing is edited until a real project is open (not while loading or unreachable).
       if (!canEdit(get())) return;
+      // A designer's version on show isn't the plan: nothing edits it.
+      if (useEditor.getState().preview) return;
       const editorBefore = get().editor;
       // An edit to the flat as it is carries over to the renovation, where that hasn't
       // changed the same thing itself. A drag or a run of nudges (one coalesce key) once held
@@ -654,9 +656,16 @@ export const useProject = () => useStore((s) => s.editor.doc);
 /** The level shown and edited: the plan's, or its renovation's when viewing "after". */
 export function useLevel(): Level | undefined {
   const variant = useEditor((s) => s.variant);
-  return useStore((s) => variantLevels(s.editor.doc, variant)[0]);
+  const preview = useEditor((s) => s.preview);
+  const level = useStore((s) => variantLevels(s.editor.doc, variant)[0]);
+  // A designer's version, previewed: shown in the plan's place, read-only.
+  if (preview) return preview.side === 'before' ? preview.before : preview.level;
+  return level;
 }
 
 /** useLevel outside React, as it is now. */
-export const currentLevel = (): Level | undefined =>
-  variantLevels(useStore.getState().editor.doc, useEditor.getState().variant)[0];
+export const currentLevel = (): Level | undefined => {
+  const { preview, variant } = useEditor.getState();
+  if (preview) return preview.side === 'before' ? preview.before : preview.level;
+  return variantLevels(useStore.getState().editor.doc, variant)[0];
+};

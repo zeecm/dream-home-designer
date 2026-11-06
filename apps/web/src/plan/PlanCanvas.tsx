@@ -13,6 +13,7 @@ import {
 import type { Vec2 } from '@dhd/core';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { TraceDraftLayer } from '../ai/DraftLayer';
+import { DesignFocusLayer } from '../ai/designer/focus';
 import { type PixelBox, inkBounds } from '../assets';
 import { ClearanceAnnouncement, ClearanceLayer } from '../clearance/clearance';
 import { CommentsOnPlan } from '../comments/PlanPins';
@@ -927,6 +928,7 @@ export function PlanCanvas() {
               interactive={tool === 'select' || tool === 'electrical' || tool === 'comment'}
             />
             <SuggestLayer zoom={v.zoom} size={size} />
+            <DesignFocusLayer size={size} />
             <TraceDraftLayer />
             <PlanHighlights
               level={level}

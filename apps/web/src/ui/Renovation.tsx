@@ -10,7 +10,7 @@ import {
   startRenovation,
 } from '@dhd/core';
 import { useMemo, useState } from 'react';
-import { LayoutsDialog } from '../ai/LayoutsDialog';
+import { DesignerEntry } from '../ai/designer/Entry';
 import { useEditor } from '../editor';
 import { pts } from '../plan/layers';
 import { useProject, useStore } from '../store';
@@ -323,9 +323,17 @@ export function RenovationBar() {
  */
 export function RenovationMarks() {
   const variant = useEditor((s) => s.variant);
-  const diff = useRenovationDiff();
+  const preview = useEditor((s) => s.preview);
+  const planDiff = useRenovationDiff();
+  // A designer's version on show: what it changes from the flat as it is.
+  const previewDiff = useMemo(
+    () =>
+      preview && preview.side === 'version' ? renovationDiff(preview.before, preview.level) : null,
+    [preview],
+  );
+  const diff = preview ? previewDiff : planDiff;
   if (!diff) return null;
-  const after = variant === 'after';
+  const after = preview ? true : variant === 'after';
   return (
     <g className={`reno-marks ${after ? 'reno-after' : 'reno-before'}`} pointerEvents="none">
       <defs>
@@ -382,7 +390,7 @@ export function RenovationSection() {
         >
           Plan a renovation
         </button>
-        <SuggestLayouts />
+        <DesignerEntry />
       </section>
     );
   }
@@ -448,7 +456,7 @@ export function RenovationSection() {
       >
         Make it the plan
       </button>
-      <SuggestLayouts />
+      <DesignerEntry />
       {/* The destructive action goes last (Undo still brings the renovation back). */}
       <button
         type="button"
@@ -461,20 +469,5 @@ export function RenovationSection() {
         Discard the renovation
       </button>
     </section>
-  );
-}
-
-/** Opens the suggested layouts (AI, with the person's key). */
-function SuggestLayouts() {
-  const [open, setOpen] = useState(false);
-  const viewer = useStore((s) => s.role === 'viewer');
-  if (viewer) return null;
-  return (
-    <>
-      <button type="button" className="btn" onClick={() => setOpen(true)}>
-        Suggest layouts with AI
-      </button>
-      {open && <LayoutsDialog onClose={() => setOpen(false)} />}
-    </>
   );
 }

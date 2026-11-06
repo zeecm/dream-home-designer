@@ -105,7 +105,14 @@ function MiniLayout({ before, level }: { before: Level; level: Level }) {
 }
 
 /** Suggested layouts from a short brief, each to look over and use as the renovation. */
-export function LayoutsDialog({ onClose }: { onClose: () => void }) {
+export function LayoutsDialog({
+  onClose,
+  onDesign,
+}: {
+  onClose: () => void;
+  /** Opens the whole-flat designer instead. */
+  onDesign?: () => void;
+}) {
   const ref = useRef<HTMLDialogElement>(null);
   const ai = useAi();
   const hasRenovation = !!useProject().renovation;
@@ -201,6 +208,22 @@ export function LayoutsDialog({ onClose }: { onClose: () => void }) {
           Outside walls, structural walls, the household shelter and bathrooms stay as they are. Any
           you use becomes the renovation, to look at in 3D, walk through and change further. Hacking
           walls needs HDB approval and an HDB-registered contractor: these are ideas, not approvals.
+          {onDesign && (
+            <>
+              {' '}
+              Want furniture and paint too?{' '}
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => {
+                  close();
+                  onDesign();
+                }}
+              >
+                Design my flat
+              </button>
+            </>
+          )}
         </p>
         <div className="ai-form">
           <label className="field">

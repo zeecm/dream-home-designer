@@ -12,6 +12,7 @@ import {
   useAi,
   useSavedProviders,
 } from './credentials';
+import { SpendSettings } from './designer/SpendSettings';
 import { type ModelLists, checkPictureModel, curated, listModels, recommended } from './models';
 import { AiError, askForJson } from './providers';
 
@@ -74,10 +75,13 @@ function withFallback(p: Provider, found: ModelLists): { lists: ModelLists; shor
 export function AiSettingsDialog({
   onClose,
   initial,
+  focus,
 }: {
   onClose: () => void;
   /** The provider to show first (renders need one that makes pictures). */
   initial?: Provider;
+  /** Opened at the price table (from the designer's cost check). */
+  focus?: 'prices';
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const active = useAi();
@@ -363,6 +367,10 @@ export function AiSettingsDialog({
               </p>
             )}
           </div>
+          <SpendSettings
+            model={text.value || PROVIDERS[provider].model}
+            focus={focus === 'prices'}
+          />
         </div>
         <footer className="dialog-foot">
           <p className="field-hint ai-status" aria-live="polite">
