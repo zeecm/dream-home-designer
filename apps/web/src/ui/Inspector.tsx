@@ -991,14 +991,14 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
       <LengthField
         label="Width"
         value={size.w}
-        min={0.05}
+        min={0.01}
         max={10}
         onCommit={(v) => v !== undefined && set({ scale: { x: v / base.w } })}
       />
       <LengthField
         label="Depth"
         value={size.d}
-        min={0.05}
+        min={0.01}
         max={10}
         onCommit={(v) => {
           if (v === undefined) return;

@@ -7,7 +7,7 @@ import {
   sampleFlatProject,
 } from '@dhd/core';
 import { describe, expect, it } from 'vitest';
-import { deliveryText, liftLine, liftNumbers } from './words';
+import { asRigid, deliveryText, liftLine, liftNumbers, liftStatus } from './words';
 
 const level = sampleFlatProject('prj_t').levels[0] as Level;
 const { typical } = LIFT_PRESETS;
@@ -59,8 +59,15 @@ describe('the lift in words', () => {
       'Too big for the lift door: 0.90 m wide; it needs 0.95 m on its side.',
     );
     expect(
-      text({ fit: 'too-big', fails: 'car', spare: 0, standUp: { need: 2.1, allows: 1.918 } }),
-    ).toBe('Too long to stand up through the lift door (needs 2.10 m, the door allows 1.92 m).');
+      text({
+        fit: 'too-big',
+        fails: 'car',
+        spare: 0,
+        standUp: { need: 2.1, allows: 1.918, door: 2, room: 1.4, side: 'depth' },
+      }),
+    ).toBe(
+      'Too long to stand up in the lift: at 2.10 m long, it can’t be turned upright through a 2.00 m high door into a 1.40 m deep car.',
+    );
     expect(text({ fit: 'too-big', fails: 'car', spare: 0 })).toBe(
       'Doesn’t fit in the lift (1.10 × 1.40 m, 2.30 m high), even on end or tilted.',
     );
@@ -70,6 +77,28 @@ describe('the lift in words', () => {
     const r = way({ fit: 'fits', how: 'end', spare: 0.1 }, { tilted: true });
     expect(deliveryText(level, r, typical).replace(/ /g, ' ')).toBe(
       'Fits through every door on the way in. Narrowest: the main door, 0.86 m (tilted on its diagonal).',
+    );
+  });
+
+  it('the line under the verdict: not checked, no lift, how, or what to ask', () => {
+    expect(liftStatus(undefined, undefined)).toBe('Lift: not checked.');
+    expect(liftStatus(null, undefined)).toBe('No lift on the way in.');
+    expect(liftStatus(typical, { fit: 'fits', how: 'end', spare: 0.1 })).toBe(
+      'Lift: fits stood on end.',
+    );
+    expect(liftStatus(typical, { fit: 'too-big', fails: 'car', spare: 0 })).toMatch(
+      /these sizes are typical\.$/,
+    );
+    expect(
+      liftStatus({ ...typical, preset: 'measured' }, { fit: 'too-big', fails: 'car', spare: 0 }),
+    ).toBe('Ask the shop whether it comes apart.');
+  });
+
+  it('a bed’s verdict is softened: checked as a rigid box', () => {
+    expect(
+      asRigid('Doesn’t fit in the lift (1.10 × 1.40 m, 2.30 m high), even on end or tilted.'),
+    ).toBe(
+      'Checked as a rigid box, doesn’t fit in the lift (1.10 × 1.40 m, 2.30 m high), even on end or tilted.',
     );
   });
 });

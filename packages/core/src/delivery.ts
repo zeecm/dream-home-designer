@@ -209,9 +209,11 @@ export interface LiftFit {
   tilted?: boolean;
   /**
    * In the car it would fit only stood up, and it's too long to stand up as it comes in
-   * through the door: its length, and the longest the door and the car's depth allow.
+   * through the door: its length, the longest the door and the car allow, and what limits
+   * that: the door's height and the car's side it turns in (its depth, or its width when
+   * tilted across).
    */
-  standUp?: { need: number; allows: number };
+  standUp?: { need: number; allows: number; door: number; room: number; side: 'depth' | 'width' };
 }
 
 /**
@@ -239,7 +241,14 @@ export function liftFit(
 
   // The poses that fit the car alone: which dimension is up, the car's slack, and the room
   // to stand it up in (the car's side in the plane it turns in).
-  const poses: { how: LiftPose; up: number; tall: boolean; spare: number; room: number }[] = [];
+  const poses: {
+    how: LiftPose;
+    up: number;
+    tall: boolean;
+    spare: number;
+    room: number;
+    side: 'depth' | 'width';
+  }[] = [];
   const standing: [LiftPose, number][] = [
     ['upright', 2],
     ['back', 1],
@@ -251,7 +260,14 @@ export function liftFit(
     const floor = z <= ch + EPS ? rectFit(p, q, cw, cd) : null;
     if (floor !== null) {
       // Stood up in the plane of the door: the car's depth to turn in.
-      poses.push({ how, up, tall: z > dh + EPS, spare: Math.min(ch - z, floor), room: cd });
+      poses.push({
+        how,
+        up,
+        tall: z > dh + EPS,
+        spare: Math.min(ch - z, floor),
+        room: cd,
+        side: 'depth',
+      });
     }
   }
   // Tilted: one dimension across the car, the other two at an angle in the plane it leaves.
@@ -262,14 +278,14 @@ export function liftFit(
       (dims[rest[0]] as number) >= (dims[rest[1]] as number) ? rest : [rest[1], rest[0]];
     const p = dims[ip] as number;
     const q = dims[iq] as number;
-    for (const [a, b] of [
-      [cw, cd],
-      [cd, cw],
+    for (const [a, b, side] of [
+      [cw, cd, 'depth'],
+      [cd, cw, 'width'],
     ] as const) {
       // Square in that plane is one of the standing poses; only an angle adds a way.
       if (across <= a + EPS && p > Math.max(b, ch) + EPS && rectFit(p, q, b, ch) !== null) {
         // It leans in the plane of the car's other side, and is stood up in that plane.
-        poses.push({ how: 'tilted', up: ip, tall: true, spare: 0, room: b });
+        poses.push({ how: 'tilted', up: ip, tall: true, spare: 0, room: b, side });
         break;
       }
     }
@@ -288,7 +304,13 @@ export function liftFit(
         // Thicker than the car is deep, it can't be turned at all: no length to quote, and
         // "doesn't fit in the lift" says it better.
         if (allows > EPS && (!standUp || allows > standUp.allows)) {
-          standUp = { need: dims[pose.up] as number, allows };
+          standUp = {
+            need: dims[pose.up] as number,
+            allows,
+            door: dh,
+            room: pose.room,
+            side: pose.side,
+          };
         }
       }
     }

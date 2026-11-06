@@ -27,7 +27,7 @@ import { useProject, useStore } from '../store';
 import { LengthField } from '../ui/fields';
 import { icons } from '../ui/icons';
 import { formatLength, parseLength } from '../units';
-import { deliveryText, liftLine, liftNumbers, nb } from './words';
+import { asRigid, deliveryText, liftNumbers, liftStatus, nb } from './words';
 
 /** Pieces whose way in is shown (the person's own always; others when asked). */
 export const useWayShown = create<{ ids: Set<string>; toggle: (id: string) => void }>((set) => ({
@@ -136,6 +136,19 @@ function focusDiagonal() {
   el.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' });
 }
 
+/**
+ * After the lift changes, brings the verdict into view: on a phone's short sheet it is
+ * above the lift's controls. (It is also read out: it's a status.)
+ */
+function revealVerdict() {
+  requestAnimationFrame(() => {
+    const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    document
+      .querySelector('.way-verdict')
+      ?.scrollIntoView({ block: 'nearest', behavior: still ? 'auto' : 'smooth' });
+  });
+}
+
 /** In a piece's details: whether it gets in, from which main door, and a way to show it. */
 export function GettingItIn({ level, id }: { level: Level; id: string }) {
   const project = useProject();
@@ -150,10 +163,13 @@ export function GettingItIn({ level, id }: { level: Level; id: string }) {
   const viewer = useStore((s) => s.role === 'viewer');
   const doors = useMemo(() => mainDoors(level), [level]);
   if (!item || !r) return null;
-  const bad = r.status === 'too-big' || r.status === 'unreachable';
   const fit = 'lift' in r ? r.lift : undefined;
-  const line = fit ? liftLine(fit) : null;
+  // A bed that's "too big" may well bend in: its note first, and the verdict softened.
   const rigid = r.status === 'too-big' ? rigidNote(item.assetId) : null;
+  const bad = !rigid && (r.status === 'too-big' || r.status === 'unreachable');
+  const verdict = deliveryText(level, r, lift);
+  // Under the verdict, a line about the lift (one line kept, so the controls don't jump).
+  const line = 'doors' in r ? (rigid ?? liftStatus(lift, fit)) : null;
   // An own sofa too wide for a door, its diagonal not measured: tilted, it may go.
   const model = project.models?.[item.assetId];
   const askDiagonal =
@@ -173,23 +189,20 @@ export function GettingItIn({ level, id }: { level: Level; id: string }) {
               takes no paragraphs, and some screen readers don't treat it as live. */}
           {/* biome-ignore lint/a11y/useSemanticElements: see above */}
           <div className="way-verdict" role="status">
+            {rigid && (
+              <p className="note" data-testid="rigid-note">
+                {rigid}
+              </p>
+            )}
             <p className={`note${bad ? ' warning-text' : ''}`} data-testid="way-verdict">
-              {deliveryText(level, r, lift)}
+              {rigid ? asRigid(verdict) : verdict}
             </p>
-            {line && (
+            {line && !rigid && (
               <p className="note" data-testid="lift-line">
                 {line}
               </p>
             )}
           </div>
-          {fit?.fit === 'too-big' && (
-            <p className="field-hint">
-              {lift?.preset === 'measured'
-                ? 'Ask the shop whether it comes apart.'
-                : 'Ask the shop whether it comes apart, or measure your lift: these sizes are typical.'}
-            </p>
-          )}
-          {rigid && <p className="field-hint">{rigid}</p>}
           {askDiagonal && (
             <div className="way-ask">
               <p className="note">Measured its diagonal depth? Tilted, it may get through.</p>
@@ -261,6 +274,7 @@ function LiftChoice({ lift }: { lift: Lift | null | undefined }) {
           ? 'Car width is across the door; depth is from the door to the back wall.'
           : `${lift ? liftNumbers(lift) : ''}. Same lift for every piece in this plan.`;
   const choose = (v: LiftChoiceValue) => {
+    revealVerdict();
     if (v === 'unset') dispatch(setLift(undefined));
     else if (v === 'none') dispatch(setLift(null));
     else if (v === 'measured') {
@@ -311,6 +325,7 @@ function LiftMeasurements({ lift }: { lift: Lift }) {
     const next = structuredClone(lift);
     change(next);
     dispatch(setLift(next));
+    revealVerdict();
   };
   const field = (
     label: string,
@@ -488,7 +503,7 @@ function AddBySizeDialog({
   }, []);
   const size = (t: string) => {
     const v = parseLength(t);
-    return v !== null && v >= 0.05 && v <= 6 ? v : null;
+    return v !== null && v >= 0.01 && v <= 6 ? v : null;
   };
   // The diagonal a sofa this deep and high can have, once both are known.
   const sd0 = size(d);
@@ -510,7 +525,7 @@ function AddBySizeDialog({
     const sd = size(d);
     const sh = size(h);
     if (!name.trim() || sw === null || sd === null || sh === null) {
-      setError('Give it a name and a width, depth and height between 0.05 and 6 m.');
+      setError('Give it a name and a width, depth and height between 0.01 and 6 m.');
       setDiagError('');
       refuse(
         (

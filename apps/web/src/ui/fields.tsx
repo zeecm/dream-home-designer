@@ -124,8 +124,11 @@ export function LengthField({
     if (!edit.editing()) setError(null);
   }, [shown]);
 
-  /** `leaving`: the field is going away (another selection); a bad value is dropped. */
-  const commit = (leaving = false) => {
+  /**
+   * `leaving`: the field is going away (another selection); a bad value is dropped. True
+   * when the value was refused (and the field says why).
+   */
+  const commit = (leaving = false): boolean | undefined => {
     if (cancelled.current) {
       cancelled.current = false;
       edit.reset();
@@ -153,7 +156,7 @@ export function LengthField({
       // Back to the last good value, the complaint saying why; or kept to correct.
       if (revertInvalid) edit.reset();
       else edit.keep(s);
-      return;
+      return true;
     }
     if (t.value === undefined || Math.abs(v - t.value) > 1e-9) t.onCommit(v);
     if (leaving) return;
@@ -189,7 +192,13 @@ export function LengthField({
           onChange={(e) => edit.type(e.target.value)}
           onBlur={() => commit()}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') e.currentTarget.blur();
+            if (e.key === 'Enter') {
+              const el = e.currentTarget;
+              // Refused: stay in the field, its text selected to type again (a blur would
+              // leave the complaint behind, and the next Escape would let go of the object).
+              if (commit()) requestAnimationFrame(() => el.select());
+              else el.blur();
+            }
             if (e.key === 'Escape') {
               cancelled.current = true;
               setError(null);

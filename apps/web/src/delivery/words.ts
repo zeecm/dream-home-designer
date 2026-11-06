@@ -33,7 +33,9 @@ function liftVerdict(lift: Lift, f: LiftFit): string {
     return `Too big for the lift door: ${len(lift.door.width)} wide; it needs ${len(f.need ?? 0)} on its side.`;
   }
   if (f.standUp) {
-    return `Too long to stand up through the lift door (needs ${len(f.standUp.need)}, the door allows ${len(f.standUp.allows)}).`;
+    // What the family measured: the door's height and the car's side, not the limit worked out.
+    const u = f.standUp;
+    return `Too long to stand up in the lift: at ${len(u.need)} long, it can’t be turned upright through a ${len(u.door)} high door into a ${len(u.room)} ${u.side === 'depth' ? 'deep' : 'wide'} car.`;
   }
   const c = lift.car;
   return `Doesn’t fit in the lift (${c.width.toFixed(2)} × ${len(c.depth)}, ${len(c.height)} high), even on end or tilted.`;
@@ -96,4 +98,21 @@ export function deliveryText(level: Level, r: Delivery, lift?: Lift | null): str
       return `Too big for ${where}: ${nb(formatLength(w.clear))} wide; it needs ${nb(formatLength(w.need ?? 0))} on its side.`;
     }
   }
+}
+
+/** A bed's verdict, softened: the check treats it as a rigid box, which a mattress isn't. */
+export const asRigid = (verdict: string) =>
+  `Checked as a rigid box, ${verdict.charAt(0).toLowerCase()}${verdict.slice(1)}`;
+
+/** The lift's line under the verdict: how it goes in, or why there's nothing to say. */
+export function liftStatus(lift: Lift | null | undefined, f: LiftFit | undefined): string | null {
+  if (lift === undefined) return 'Lift: not checked.';
+  if (lift === null) return 'No lift on the way in.';
+  if (!f) return null;
+  if (f.fit === 'too-big') {
+    return lift.preset === 'measured'
+      ? 'Ask the shop whether it comes apart.'
+      : 'Ask the shop whether it comes apart, or measure your lift: these sizes are typical.';
+  }
+  return liftLine(f);
 }
