@@ -488,7 +488,16 @@ function roomLabels(level: Level, geom: PlanGeometry, zoom: number): RoomLabel[]
         continue;
       }
     }
-    out.push({ id: r.id, name, area: areaFits ? area : null, at, half });
+    // Nowhere clear at all (a room the designer filled): the room's own label point, well
+    // inside it, rather than a spot squeezed against a wall; the halo keeps it readable.
+    const clear = labelClearance(at, half, poly, [], shape.holes) >= 0;
+    out.push({
+      id: r.id,
+      name,
+      area: areaFits ? area : null,
+      at: clear ? at : placeLabel(poly, half, [], shape.holes),
+      half,
+    });
   }
   return out;
 }

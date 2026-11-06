@@ -1,6 +1,7 @@
 import {
   type ChangePlace,
   type ElecChanges,
+  type Level,
   type RenovationChange,
   type RenovationDiff,
   electricalChanges,
@@ -10,7 +11,7 @@ import {
   startRenovation,
 } from '@dhd/core';
 import { useMemo, useState } from 'react';
-import { LayoutsDialog } from '../ai/LayoutsDialog';
+import { DesignerEntry } from '../ai/designer/Entry';
 import { useEditor } from '../editor';
 import { pts } from '../plan/layers';
 import { useProject, useStore } from '../store';
@@ -222,7 +223,7 @@ function ChangeList({ changes }: { changes: RenovationChange[] }) {
 }
 
 /** One line for the bar: what's hacked and what's built, and the points that change. */
-export function diffLine(d: RenovationDiff, elec?: ElecChanges): string {
+export function diffLine(d: RenovationDiff, elec?: ElecChanges, furniture = ''): string {
   const parts: string[] = [];
   if (d.demolishedLength > 0) parts.push(`${formatLength(d.demolishedLength)} of wall hacked`);
   if (d.builtLength > 0) parts.push(`${formatLength(d.builtLength)} built`);
@@ -230,6 +231,7 @@ export function diffLine(d: RenovationDiff, elec?: ElecChanges): string {
   if (doors) parts.push(doors);
   const points = elec ? pointsText(elec) : '';
   if (points) parts.push(points);
+  if (furniture) parts.push(furniture);
   return parts.length ? parts.join(' · ') : 'No changes yet';
 }
 
@@ -242,6 +244,29 @@ export function pointsText(ch: ElecChanges): string {
     ch.removed.length && `${ch.removed.length} taken out`,
   ].filter(Boolean);
   return parts.length ? `Electrical: ${parts.join(', ')}` : '';
+}
+
+/** "Furniture: 31 new, 2 moved, 1 taken out", or '' when the pieces are as they were. */
+export function furnitureText(before: Level, after: Level): string {
+  let added = 0;
+  let moved = 0;
+  for (const it of Object.values(after.items)) {
+    const was = before.items[it.id];
+    if (!was) added++;
+    else if (
+      Math.abs(was.position.x - it.position.x) > 0.005 ||
+      Math.abs(was.position.z - it.position.z) > 0.005 ||
+      Math.abs(was.rotationY - it.rotationY) > 1e-3
+    )
+      moved++;
+  }
+  const removed = Object.keys(before.items).filter((id) => !after.items[id]).length;
+  const parts = [
+    added && `${added} new`,
+    moved && `${moved} moved`,
+    removed && `${removed} taken out`,
+  ].filter(Boolean);
+  return parts.length ? `Furniture: ${parts.join(', ')}` : '';
 }
 
 /** What the renovation does to the first level's electrical points, or null without one. */
@@ -283,6 +308,13 @@ export function RenovationBar() {
   const setVariant = useEditor((s) => s.setVariant);
   const diff = useRenovationDiff();
   const elec = useElectricalChanges();
+  const doc = useProject();
+  const before = doc.levels[0];
+  const after = doc.renovation?.levels[0];
+  const furniture = useMemo(
+    () => (before && after ? furnitureText(before, after) : ''),
+    [before, after],
+  );
   if (!has || !diff) return null;
   return (
     <div className="reno-bar">
@@ -309,7 +341,7 @@ export function RenovationBar() {
               ? 'Editing the flat as it is (and the renovation, where it is the same). '
               : 'Editing the renovation. '}
           </span>
-          {diffLine(diff, elec ?? undefined)}
+          {diffLine(diff, elec ?? undefined, furniture)}
         </span>
       </span>
     </div>
@@ -323,9 +355,17 @@ export function RenovationBar() {
  */
 export function RenovationMarks() {
   const variant = useEditor((s) => s.variant);
-  const diff = useRenovationDiff();
+  const preview = useEditor((s) => s.preview);
+  const planDiff = useRenovationDiff();
+  // A designer's version on show: what it changes from the flat as it is.
+  const previewDiff = useMemo(
+    () =>
+      preview && preview.side === 'version' ? renovationDiff(preview.before, preview.level) : null,
+    [preview],
+  );
+  const diff = preview ? previewDiff : planDiff;
   if (!diff) return null;
-  const after = variant === 'after';
+  const after = preview ? true : variant === 'after';
   return (
     <g className={`reno-marks ${after ? 'reno-after' : 'reno-before'}`} pointerEvents="none">
       <defs>
@@ -382,7 +422,7 @@ export function RenovationSection() {
         >
           Plan a renovation
         </button>
-        <SuggestLayouts />
+        <DesignerEntry />
       </section>
     );
   }
@@ -448,7 +488,7 @@ export function RenovationSection() {
       >
         Make it the plan
       </button>
-      <SuggestLayouts />
+      <DesignerEntry />
       {/* The destructive action goes last (Undo still brings the renovation back). */}
       <button
         type="button"
@@ -461,20 +501,5 @@ export function RenovationSection() {
         Discard the renovation
       </button>
     </section>
-  );
-}
-
-/** Opens the suggested layouts (AI, with the person's key). */
-function SuggestLayouts() {
-  const [open, setOpen] = useState(false);
-  const viewer = useStore((s) => s.role === 'viewer');
-  if (viewer) return null;
-  return (
-    <>
-      <button type="button" className="btn" onClick={() => setOpen(true)}>
-        Suggest layouts with AI
-      </button>
-      {open && <LayoutsDialog onClose={() => setOpen(false)} />}
-    </>
   );
 }

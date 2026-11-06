@@ -1,0 +1,84 @@
+{
+  "items": [
+    {
+      "ref": "bed1",
+      "assetId": "bed-super-single",
+      "keep": null,
+      "wall": "W5",
+      "along": 1.2,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "A super single is easy to get in and out of, headboard on the inside wall."
+    },
+    {
+      "ref": "ward1",
+      "assetId": "built-in-wardrobe",
+      "keep": null,
+      "wall": "W10",
+      "along": 2.15,
+      "at": null,
+      "rotation": null,
+      "width": 1.8,
+      "depth": 0.6,
+      "height": null,
+      "why": "Full-height storage beside the door, clear of its swing."
+    },
+    {
+      "ref": "side1",
+      "assetId": "bedside",
+      "keep": null,
+      "wall": "W5",
+      "along": 0.4,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "Water and glasses within reach."
+    },
+    {
+      "ref": "chair1",
+      "assetId": "armchair",
+      "keep": null,
+      "wall": null,
+      "along": null,
+      "at": { "x": 5.75, "y": 1.0 },
+      "rotation": 90,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "A firm chair with arms to sit and stand from."
+    },
+    {
+      "ref": "lamp1",
+      "assetId": "table-lamp",
+      "keep": null,
+      "wall": null,
+      "along": null,
+      "at": { "x": 3.52, "y": 0.4 },
+      "rotation": 0,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "A soft light by the bed at night."
+    },
+    {
+      "ref": "light1",
+      "assetId": "ceiling-light",
+      "keep": null,
+      "wall": null,
+      "along": null,
+      "at": { "x": 4.88, "y": 1.6 },
+      "rotation": 0,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "Even light for the whole room."
+    }
+  ],
+  "faces": [{ "wall": "W5", "finish": "paint-sage" }],
+  "notes": []
+}

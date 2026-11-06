@@ -28,6 +28,7 @@ import {
 import type { Patch } from 'immer';
 import { create } from 'zustand';
 import { forgetWithAccount, keepWithAccount } from './account';
+import { designStore } from './ai/designer/storage';
 import { getAsset, putAsset } from './assets';
 import {
   type Backend,
@@ -111,9 +112,10 @@ interface State {
   /**
    * Deletes plans this browser owns and takes plans shared with it off its list; sample
    * copies are kept. If the open plan goes, the newest one left (or a new sample) opens.
-   * Resolves to the names that couldn't be deleted.
+   * Resolves to the names that couldn't be deleted, or 'kept' when the person chose to keep
+   * designing on the open plan (nothing deleted, nothing wrong).
    */
-  deletePlans: (ids: string[]) => Promise<string[]>;
+  deletePlans: (ids: string[]) => Promise<string[] | 'kept'>;
   save: () => Promise<void>;
   /** Resolves a save conflict: reload the server's version, or overwrite it with ours. */
   resolveConflict: (keep: 'theirs' | 'mine') => Promise<void>;
@@ -288,6 +290,8 @@ export const useStore = create<State>((set, get) => {
   };
 
   const createFrom = async (doc: Project, sample = false) => {
+    // A design running on the plan open now: the person decides first.
+    if (!(await leaveGuard())) return;
     await flush();
     set({ sync: { kind: 'loading' } });
     try {
@@ -331,6 +335,8 @@ export const useStore = create<State>((set, get) => {
     dispatch: (cmd, opts) => {
       // Nothing is edited until a real project is open (not while loading or unreachable).
       if (!canEdit(get())) return;
+      // A designer's version on show isn't the plan: nothing edits it.
+      if (useEditor.getState().preview) return;
       const editorBefore = get().editor;
       // An edit to the flat as it is carries over to the renovation, where that hasn't
       // changed the same thing itself. A drag or a run of nudges (one coalesce key) once held
@@ -378,6 +384,8 @@ export const useStore = create<State>((set, get) => {
     },
     undo: () => {
       if (!canEdit(get())) return;
+      // A designer's version on show: the plan's history waits until it is back.
+      if (useEditor.getState().preview) return;
       const step = get().editor.history.past.at(-1);
       const next = coreUndo(get().editor);
       if (next === get().editor) return;
@@ -386,6 +394,8 @@ export const useStore = create<State>((set, get) => {
     },
     redo: () => {
       if (!canEdit(get())) return;
+      // A designer's version on show: the plan's history waits until it is back.
+      if (useEditor.getState().preview) return;
       const step = get().editor.history.future[0];
       const next = coreRedo(get().editor);
       if (next === get().editor) return;
@@ -400,6 +410,7 @@ export const useStore = create<State>((set, get) => {
         });
         return fallBack();
       }
+      if (get().editor.doc.id !== id && !(await leaveGuard())) return;
       if (get().editor.doc.id !== id) await flush();
       set({ sync: { kind: 'loading' } });
       try {
@@ -471,11 +482,19 @@ export const useStore = create<State>((set, get) => {
       const gone = new Set(doomed.map((r) => r.id));
       // Move off the open plan first, so nothing saves it back as it goes.
       if (gone.has(get().editor.doc.id)) {
+        // A design running on it asks first; "keep designing" keeps the plan.
+        const kept = !(await leaveGuard());
         const next = get().recent.find((r) => !gone.has(r.id));
-        if (next) await get().load(next.id);
-        else await get().openSample();
-        // Couldn't get off it (the server is away): delete nothing rather than the open plan.
-        if (gone.has(get().editor.doc.id)) return doomed.map((r) => r.name);
+        if (!kept) {
+          if (next) await get().load(next.id);
+          else await get().openSample();
+        }
+        if (gone.has(get().editor.doc.id)) {
+          // The person chose to keep designing on it: nothing deleted, and nothing wrong.
+          if (kept) return 'kept';
+          // Couldn't get off it (the server is away): delete nothing rather than the open plan.
+          return doomed.map((r) => r.name);
+        }
       }
       const failed: string[] = [];
       for (const r of doomed) {
@@ -490,6 +509,10 @@ export const useStore = create<State>((set, get) => {
         }
         set({ recent: forgetRecent(r.id) });
         forgetWithAccount(r.id);
+        // Its designs go with it: they hold the brief and what each room is for.
+        await designStore()
+          .then((s) => s.removeProject(r.id))
+          .catch(() => {});
       }
       return failed;
     },
@@ -649,14 +672,30 @@ window.addEventListener('beforeunload', (e) => {
   if (backend?.kind === 'remote' && unsaved) e.preventDefault();
 });
 
+/**
+ * Asked before another plan opens; false keeps this one open. The designer sets it while a
+ * design runs (stop it and open the other plan, or keep designing).
+ */
+let leaveGuard: () => Promise<boolean> = async () => true;
+export const setLeaveGuard = (fn: () => Promise<boolean>) => {
+  leaveGuard = fn;
+};
+
 export const useProject = () => useStore((s) => s.editor.doc);
 
 /** The level shown and edited: the plan's, or its renovation's when viewing "after". */
 export function useLevel(): Level | undefined {
   const variant = useEditor((s) => s.variant);
-  return useStore((s) => variantLevels(s.editor.doc, variant)[0]);
+  const preview = useEditor((s) => s.preview);
+  const level = useStore((s) => variantLevels(s.editor.doc, variant)[0]);
+  // A designer's version, previewed: shown in the plan's place, read-only.
+  if (preview) return preview.side === 'before' ? preview.before : preview.level;
+  return level;
 }
 
 /** useLevel outside React, as it is now. */
-export const currentLevel = (): Level | undefined =>
-  variantLevels(useStore.getState().editor.doc, useEditor.getState().variant)[0];
+export const currentLevel = (): Level | undefined => {
+  const { preview, variant } = useEditor.getState();
+  if (preview) return preview.side === 'before' ? preview.before : preview.level;
+  return variantLevels(useStore.getState().editor.doc, variant)[0];
+};

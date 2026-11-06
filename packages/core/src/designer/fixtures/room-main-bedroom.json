@@ -1,0 +1,71 @@
+{
+  "items": [
+    {
+      "ref": "bed1",
+      "assetId": "bed-queen",
+      "keep": null,
+      "wall": "W5",
+      "along": 1.4,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "The bed faces the window, headboard on the quiet inside wall."
+    },
+    {
+      "ref": "side1",
+      "assetId": "bedside",
+      "keep": null,
+      "wall": "W5",
+      "along": 0.37,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "Kevin's side."
+    },
+    {
+      "ref": "side2",
+      "assetId": "bedside",
+      "keep": null,
+      "wall": "W5",
+      "along": 2.43,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "Mei Ling's side."
+    },
+    {
+      "ref": "ward1",
+      "assetId": "built-in-wardrobe",
+      "keep": null,
+      "wall": "W7",
+      "along": 1.25,
+      "at": null,
+      "rotation": null,
+      "width": 2.2,
+      "depth": 0.55,
+      "height": null,
+      "why": "A full-height wardrobe along the side wall, stopping short of the window."
+    },
+    {
+      "ref": "light1",
+      "assetId": "ceiling-light",
+      "keep": null,
+      "wall": null,
+      "along": null,
+      "at": { "x": 1.7, "y": 1.6 },
+      "rotation": 0,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "Main light."
+    }
+  ],
+  "faces": [{ "wall": "W5", "finish": "wallpaper-linen" }],
+  "notes": ["A study corner would fit in the alcove by the bathroom if the wardrobe were slimmer."]
+}

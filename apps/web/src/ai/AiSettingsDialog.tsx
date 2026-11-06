@@ -12,6 +12,7 @@ import {
   useAi,
   useSavedProviders,
 } from './credentials';
+import { SpendSettings } from './designer/SpendSettings';
 import {
   type ModelLists,
   checkPictureModel,
@@ -84,10 +85,13 @@ function withFallback(p: Provider, found: ModelLists): { lists: ModelLists; shor
 export function AiSettingsDialog({
   onClose,
   initial,
+  focus,
 }: {
   onClose: () => void;
   /** The provider to show first (renders need one that makes pictures). */
   initial?: Provider;
+  /** Opened at the price table (from the designer's cost check). */
+  focus?: 'prices';
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const active = useAi();
@@ -264,7 +268,8 @@ export function AiSettingsDialog({
             With an AI model of your choice, on your own key: trace walls from a plan image, suggest
             layouts, and make photo-real renders (OpenAI or Gemini). Your key is kept in this
             browser only and goes, with what you send, only to the provider you pick. Each run costs
-            a few cents on your account with them.
+            a few cents on your account with them; designing a whole flat costs more, about
+            US$0.30–1.50, and is shown before it runs.
           </p>
           <div className="ai-form">
             <label className="field">
@@ -378,6 +383,10 @@ export function AiSettingsDialog({
               </p>
             )}
           </div>
+          <SpendSettings
+            model={text.value || PROVIDERS[provider].model}
+            focus={focus === 'prices'}
+          />
         </div>
         <footer className="dialog-foot">
           <p className="field-hint ai-status foot-status" aria-live="polite">

@@ -3,11 +3,12 @@ import { drawWall, moveVertex, setWallLength, splitWall, updateOpening } from '.
 import { emptyLevel } from './factory';
 import { hdb4RoomProject } from './fixtures/hdb4room';
 import { type EditorDoc, dispatch, emptyHistory, undo } from './history';
+import { draftLevel } from './levels';
 import { NewerSchemaError, loadProject } from './migrate';
 import { roomArea } from './rooms';
 import { Project } from './schema';
 import { snapPoint } from './snap';
-import { mergeVertex, repairLevel, settleVertex } from './topology';
+import { applyLevel, mergeVertex, repairLevel, settleVertex } from './topology';
 
 const L = 'lvl_ground';
 const lvl = (s: EditorDoc) => s.doc.levels[0]!;
@@ -181,5 +182,23 @@ describe('mergeVertex with boundaries', () => {
     mergeVertex(l, 'p', 'q');
     expect(Object.keys(l.walls)).toEqual(['wal']);
     expect(l.openings.win?.wallId).toBe('wal');
+  });
+});
+
+describe('applyLevel', () => {
+  it('leaves furniture alone unless asked', () => {
+    const next = structuredClone(lvl(fresh()));
+    next.items.it_sofa = {
+      id: 'it_sofa',
+      assetId: 'sofa-3',
+      position: { x: 2, y: 0, z: 2 },
+      rotationY: 0,
+      scale: { x: 1, y: 1, z: 1 },
+      flags: { snapWall: true, collidable: true },
+    };
+    const apply = (opts?: { items?: boolean }) =>
+      dispatch(fresh(), { label: 'x', recipe: (d) => applyLevel(draftLevel(d, L), next, opts) });
+    expect(lvl(apply()).items.it_sofa).toBeUndefined();
+    expect(lvl(apply({ items: true })).items.it_sofa?.assetId).toBe('sofa-3');
   });
 });

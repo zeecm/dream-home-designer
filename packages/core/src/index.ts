@@ -34,3 +34,4 @@ export * from './walkway';
 export * from './comments';
 export * from './suggest';
 export * from './trunking';
+export * from './designer';

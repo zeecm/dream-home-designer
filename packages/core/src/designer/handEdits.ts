@@ -1,0 +1,91 @@
+import { finish } from '../finishes';
+import { furnitureKind } from '../furniture';
+import { renovationDiff } from '../renovation';
+import type { Item, Level } from '../schema';
+import { aspectOf } from './accept';
+import type { Lock } from './schema';
+import { type Space, roomIdAt, roomsBeside, spaceOfRoom, spacesOf } from './spaces';
+
+/**
+ * What the person changed by hand since a version was accepted (`accepted`, After as it was
+ * then) in After as it is now: pieces moved, resized, added or removed, wall faces
+ * repainted, floors changed, walls changed. Each is a lock on its space and aspect, so the
+ * next iteration keeps it (and the person can unlock it).
+ */
+export function handEdits(accepted: Level, now: Level): Lock[] {
+  const spaces = spacesOf(now);
+  const out: Lock[] = [];
+  const add = (space: Space | undefined, aspect: Lock['aspect'], label: string) => {
+    if (space) out.push({ space: space.key, aspect, by: 'hand-edit', label });
+  };
+  const nameOf = (it: Item) => furnitureKind(it.assetId)?.name ?? 'Piece';
+  const spaceOfItem = (it: Item, level: Level) =>
+    spaceOfRoom(spaces, roomIdAt(level, { x: it.position.x, y: it.position.z }));
+  const same = (p: number, q: number, eps: number) => Math.abs(p - q) <= eps;
+
+  const ids = [...new Set([...Object.keys(accepted.items), ...Object.keys(now.items)])].sort();
+  for (const id of ids) {
+    const was = accepted.items[id];
+    const is = now.items[id];
+    if (was && !is) {
+      // Where it was, in the rooms of now (a removed piece's room is still there).
+      add(spaceOfItem(was, now), aspectOf(was), `${nameOf(was)} (removed)`);
+      continue;
+    }
+    if (!is) continue;
+    if (!was) {
+      add(spaceOfItem(is, now), aspectOf(is), `${nameOf(is)} (added)`);
+      continue;
+    }
+    const moved =
+      !same(was.position.x, is.position.x, 0.01) ||
+      !same(was.position.z, is.position.z, 0.01) ||
+      !same(was.position.y, is.position.y, 0.01) ||
+      !same(was.rotationY, is.rotationY, 1e-3);
+    const resized =
+      !same(was.scale.x, is.scale.x, 1e-3) ||
+      !same(was.scale.y, is.scale.y, 1e-3) ||
+      !same(was.scale.z, is.scale.z, 1e-3);
+    if (moved || resized) {
+      add(spaceOfItem(is, now), aspectOf(is), `${nameOf(is)} (${moved ? 'moved' : 'resized'})`);
+    }
+  }
+
+  for (const w of Object.values(now.walls)) {
+    const was = accepted.walls[w.id];
+    if (!was) continue;
+    const [l, r] = roomsBeside(now, w.id);
+    for (const [side, roomId] of [
+      ['materialLeft', l],
+      ['materialRight', r],
+    ] as const) {
+      if (was[side] === w[side] || !roomId) continue;
+      const room = now.rooms[roomId]?.name ?? 'Room';
+      add(spaceOfRoom(spaces, roomId), 'finishes', `${room} wall (repainted)`);
+    }
+  }
+  for (const r of Object.values(now.rooms)) {
+    const was = accepted.rooms[r.id];
+    if (!was || was.floorMaterial === r.floorMaterial) continue;
+    const to = finish(r.floorMaterial)?.name ?? r.floorMaterial;
+    add(spaceOfRoom(spaces, r.id), 'finishes', `${r.name} floor (${to.toLowerCase()})`);
+  }
+
+  const diff = renovationDiff(accepted, now);
+  if (
+    diff.demolished.length ||
+    diff.built.length ||
+    diff.openingsAdded.length ||
+    diff.openingsRemoved.length
+  ) {
+    out.push({ space: '*', aspect: 'walls', by: 'hand-edit', label: 'Walls and doors (changed)' });
+  }
+  // One lock per space, aspect and label.
+  const seen = new Set<string>();
+  return out.filter((l) => {
+    const k = `${l.space}|${l.aspect}|${l.label}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}

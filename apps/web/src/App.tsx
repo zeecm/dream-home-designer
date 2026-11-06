@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import { Viewport } from './Viewport';
 import { keepWithAccount, pullFromAccount, useAccount } from './account';
 import { TraceBar } from './ai/TracePanel';
+import { DesignerBar, DesignerDialogs } from './ai/designer/Entry';
+import { DesignerPanel } from './ai/designer/Panel';
+import { useDesigner } from './ai/designer/state';
 import { mayComment, useCanComment, useComments } from './comments/store';
 import { CommentsLive, CommentsPanel, useCommentsLink } from './comments/ui';
 import { type Tool, type ViewMode, useEditor } from './editor';
@@ -52,6 +55,8 @@ function useShortcuts() {
       const tool = TOOLS.find((t) => t.key.toLowerCase() === k);
       if (tool) {
         if (tool.id === 'comment' && !mayComment()) return;
+        // A designer's version on show: looking and measuring only.
+        if (ed.preview && tool.id !== 'select' && tool.id !== 'measure') return;
         // View-only: Select and Comment are the tools there are.
         if (useStore.getState().role === 'viewer' && tool.id !== 'select' && tool.id !== 'comment')
           return;
@@ -272,6 +277,8 @@ export function App() {
   useModelSync();
   useCommentsLink();
   const commentsOpen = useComments((s) => s.panelOpen);
+  const designerOpen = useDesigner((s) => s.panel);
+  const previewing = useEditor((s) => !!s.preview);
 
   useEffect(() => {
     // StrictMode runs effects twice in dev; only start once.
@@ -334,12 +341,13 @@ export function App() {
   return (
     <div className={walking ? 'app app-walking' : 'app'}>
       <TopBar />
-      <div className="workspace">
+      <div className={designerOpen && !commentsOpen ? 'workspace workspace-designer' : 'workspace'}>
         <Palette />
         <main className={`panel stage stage-${viewMode}`}>
           <SampleBanner />
           <ViewOnlyBanner />
-          <RenovationBar />
+          {previewing ? null : <RenovationBar />}
+          <DesignerBar />
           <TraceBar />
           <Guide />
           <Notice />
@@ -351,9 +359,10 @@ export function App() {
             <LoadingVeil />
           </div>
         </main>
-        {commentsOpen ? <CommentsPanel /> : <Inspector />}
+        {commentsOpen ? <CommentsPanel /> : designerOpen ? <DesignerPanel /> : <Inspector />}
       </div>
       <CommentsLive />
+      <DesignerDialogs />
       <h1 className="visually-hidden">{name} · Dream Home Designer</h1>
     </div>
   );

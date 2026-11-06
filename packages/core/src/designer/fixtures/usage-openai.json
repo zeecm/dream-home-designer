@@ -1,0 +1,38 @@
+[
+  {
+    "id": "chatcmpl-1",
+    "object": "chat.completion.chunk",
+    "model": "gpt-5-2025-08-07",
+    "choices": [
+      { "index": 0, "delta": { "role": "assistant", "content": "" }, "finish_reason": null }
+    ],
+    "usage": null
+  },
+  {
+    "id": "chatcmpl-1",
+    "object": "chat.completion.chunk",
+    "model": "gpt-5-2025-08-07",
+    "choices": [{ "index": 0, "delta": { "content": "{\"items\":[" }, "finish_reason": null }],
+    "usage": null
+  },
+  {
+    "id": "chatcmpl-1",
+    "object": "chat.completion.chunk",
+    "model": "gpt-5-2025-08-07",
+    "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }],
+    "usage": null
+  },
+  {
+    "id": "chatcmpl-1",
+    "object": "chat.completion.chunk",
+    "model": "gpt-5-2025-08-07",
+    "choices": [],
+    "usage": {
+      "prompt_tokens": 6350,
+      "completion_tokens": 5210,
+      "total_tokens": 11560,
+      "prompt_tokens_details": { "cached_tokens": 4096, "audio_tokens": 0 },
+      "completion_tokens_details": { "reasoning_tokens": 3840, "audio_tokens": 0 }
+    }
+  }
+]
