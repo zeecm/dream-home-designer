@@ -12,8 +12,10 @@ import type { Item, Level, Project, Site, Vec2 } from '../schema';
 import { SHELTER_ROOM } from '../structural';
 import { type Suggestion, roomKind, suggestPoints } from '../suggest';
 import { walkwayReport } from '../walkway';
+import { aspectOf } from './accept';
 import { type AliasMap, resolveAlias } from './aliases';
 import { fixedSize, priorityOf, resolveAsset } from './catalogue';
+import { heldAspects, wallsHeld } from './handEdits';
 import { WET } from './locks';
 import { type Want, addToIndex, nameOf, placePiece, spaceIndex } from './place';
 import type { Concept, DesignInput, DesignItem, RoomUse, SpaceDesign, SpaceStatus } from './schema';
@@ -182,12 +184,15 @@ function work(
   const notes: Note[] = (concept?.notes ?? []).map((text) => ({ text }));
   const start = settled(baseLevel);
   const before = settled(beforeLevel);
+  // Parts the person changed by hand since accepting stay as the plan has them.
+  const locks = design.request?.locks;
+  const held = (rooms: readonly string[]) => heldAspects(locks, rooms);
 
-  // 1. Walls.
+  // 1. Walls (none, if the person changed the walls by hand since accepting).
   const walls = applyDesignWalls(
     start,
     before,
-    concept?.walls ?? [],
+    wallsHeld(locks) ? [] : (concept?.walls ?? []),
     brief.walls,
     aliases,
     design.id,
@@ -254,6 +259,7 @@ function work(
       uses[id] = r.use;
     }
     intents[id] = r.intent;
+    if (held([id]).includes('finishes')) continue;
     floorRoom(id, r.floor);
     paintRoom(id, r.paint);
   }
@@ -319,6 +325,7 @@ function work(
     resultSpaces.push(rs);
     if (!answer || !key) continue;
     notes.push(...answer.notes.map((text) => ({ text, space: s.key })));
+    const keepAs = held(s.rooms);
 
     const faces = facesOf(named, s.rooms, geom);
     const longest = (f: Face) => Math.max(0, ...clearStretches(f, 0, 1).map(([a, b]) => b - a));
@@ -326,6 +333,8 @@ function work(
     const wants = answer.items
       .map((a) => resolveWant(a, { s, key, faces, byLength }))
       .filter((w): w is Want & { priority: number } => !!w)
+      // What is held stays as the plan has it: the answer's pieces of that part aren't placed.
+      .filter((w) => !keepAs.includes(w.kind.carpentry ? 'built-ins' : 'furniture'))
       .sort((p, q) => p.priority - q.priority || (p.ref < q.ref ? -1 : p.ref > q.ref ? 1 : 0));
     // The sink and the hob stay where they are unless the answer puts new ones in.
     const replaces = new Set(wants.map((w) => w.kind.id).filter((id) => WET_PIECES.has(id)));
@@ -335,6 +344,7 @@ function work(
     for (const it of Object.values(lvl.items)) {
       if (!inRooms(s.rooms, centreOf(it))) continue;
       if (brief.keep.items[it.id] === 'in-place') continue;
+      if (keepAs.includes(aspectOf(it))) continue;
       if (WET_PIECES.has(it.assetId)) {
         if (!replaces.has(it.assetId)) continue;
         takenOut.push(it);
@@ -378,7 +388,7 @@ function work(
     }
 
     // Feature walls: a finish on the face towards this space only.
-    for (const f of answer.faces) {
+    for (const f of keepAs.includes('finishes') ? [] : answer.faces) {
       const wallId = resolveAlias(aliases, f.wall);
       const w = wallId ? lvl.walls[wallId] : undefined;
       const towards = faces.filter((x) => x.wallId === wallId);

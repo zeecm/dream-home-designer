@@ -3,7 +3,7 @@ import { furnitureKind } from '../furniture';
 import { renovationDiff } from '../renovation';
 import type { Item, Level } from '../schema';
 import { aspectOf } from './accept';
-import type { Lock } from './schema';
+import type { Aspect, Lock } from './schema';
 import { type Space, roomIdAt, roomsBeside, spaceOfRoom, spacesOf } from './spaces';
 
 /**
@@ -89,3 +89,24 @@ export function handEdits(accepted: Level, now: Level): Lock[] {
     return true;
   });
 }
+
+/** Whether a lock is on a space whose rooms are `rooms` (by a room in common: keys can change). */
+export const lockCovers = (l: Lock, rooms: readonly string[]): boolean =>
+  l.space !== '*' && l.space.split('+').some((id) => rooms.includes(id));
+
+/**
+ * The aspects of the space made of `rooms` that stay as the plan has them: the person edited
+ * them by hand since accepting (`hand-edit` locks), so a version keeps them, not its answer.
+ */
+export function heldAspects(
+  locks: readonly Lock[] | undefined,
+  rooms: readonly string[],
+): Aspect[] {
+  const out = new Set<Aspect>();
+  for (const l of locks ?? []) if (l.by === 'hand-edit' && lockCovers(l, rooms)) out.add(l.aspect);
+  return [...out];
+}
+
+/** Whether the walls stay as the plan has them (changed by hand since accepting). */
+export const wallsHeld = (locks: readonly Lock[] | undefined): boolean =>
+  !!locks?.some((l) => l.by === 'hand-edit' && l.aspect === 'walls');
