@@ -100,15 +100,22 @@ export function deliveryText(level: Level, r: Delivery, lift?: Lift | null): str
   }
 }
 
-/** A bed's verdict, softened: the check treats it as a rigid box, which a mattress isn't. */
-export const asRigid = (verdict: string) =>
-  `Checked as a rigid box, ${verdict.charAt(0).toLowerCase()}${verdict.slice(1)}`;
-
-/** The lift's line under the verdict: how it goes in, or why there's nothing to say. */
-export function liftStatus(lift: Lift | null | undefined, f: LiftFit | undefined): string | null {
+/**
+ * The lift's line under the verdict: how it goes in, or why there's nothing to say. A piece
+ * in parts (a bed) goes part by part, and its note above says what to ask the shop.
+ */
+export function liftStatus(
+  lift: Lift | null | undefined,
+  f: LiftFit | undefined,
+  inParts = false,
+): string | null {
   if (lift === undefined) return 'Lift: not checked.';
   if (lift === null) return 'No lift on the way in.';
   if (!f) return null;
+  if (inParts) {
+    if (f.fit === 'too-big') return null;
+    return f.fit === 'fits' ? 'Lift: each part fits.' : 'Lift: each part just fits.';
+  }
   if (f.fit === 'too-big') {
     return lift.preset === 'measured'
       ? 'Ask the shop whether it comes apart.'

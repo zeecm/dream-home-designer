@@ -271,26 +271,38 @@ test.describe('desktop', () => {
     await expect(way(page)).toContainText('Measured its diagonal depth?');
   });
 
-  test('a mattress too stiff for the lift: its note first, the verdict softened, no alarm', async ({
+  test('a bed comes flat: a queen mattress folds for the lift; a king’s doesn’t, so ask the shop', async ({
     page,
   }) => {
-    await page.getByRole('button', { name: /^Furniture/ }).click();
-    await page.getByRole('button', { name: /^Add by size/ }).click();
-    const dialog = page.getByRole('dialog', { name: 'Add your furniture' });
-    await dialog.getByLabel('Name').fill('Queen mattress');
-    await dialog.getByRole('button', { name: 'Bed' }).click();
-    await dialog.getByLabel('Width').fill('1.52');
-    await dialog.getByLabel('Depth', { exact: true }).fill('1.90');
-    await dialog.getByLabel('Height').fill('0.30');
-    await dialog.getByRole('button', { name: 'Add and place it' }).click();
-    await placeIn(page, 'rm_living-and-dining', 'Queen mattress', false, 0.7);
-    await liftSelect(page).selectOption({ label: 'Typical HDB lift' });
+    const addBed = async (name: string, w: string, x: number) => {
+      await page.getByRole('button', { name: /^Furniture/ }).click();
+      await page.getByRole('button', { name: /^Add by size/ }).click();
+      const dialog = page.getByRole('dialog', { name: 'Add your furniture' });
+      await dialog.getByLabel('Name').fill(name);
+      await dialog.getByRole('button', { name: 'Bed' }).click();
+      await dialog.getByLabel('Width').fill(w);
+      await dialog.getByLabel('Depth', { exact: true }).fill('1.90');
+      await dialog.getByLabel('Height').fill('0.30');
+      await dialog.getByRole('button', { name: 'Add and place it' }).click();
+      await placeIn(page, 'rm_living-and-dining', name, false, x);
+    };
     const status = way(page).getByRole('status');
+    await addBed('Queen mattress', '1.52', 0.7);
+    await liftSelect(page).selectOption({ label: 'Typical HDB lift' });
     await expect(status.locator('p').first()).toHaveText(
-      'A mattress bends and a frame usually comes flat; ask the shop.',
+      'Comes flat: the mattress (folded in half) and frame panels each fit.',
     );
-    await expect(verdict(page)).toHaveText(/^Checked as a rigid box, doesn’t fit in the lift /);
+    await expect(verdict(page)).toHaveText(/^Fits through every door on the way in\./);
     await expect(verdict(page)).not.toHaveClass(/warning-text/);
+    await expect(liftLine(page)).toHaveText('Lift: each part fits.');
+
+    await page.keyboard.press('Escape');
+    await addBed('King mattress', '1.83', 0.3);
+    await expect(status.locator('p').first()).toHaveText(
+      'Comes flat, but the mattress (too wide to fold) doesn’t fit; ask the shop.',
+    );
+    await expect(verdict(page)).toHaveText(/^Doesn’t fit in the lift /);
+    await expect(verdict(page)).toHaveClass(/warning-text/);
     await expect(way(page)).not.toContainText('comes apart');
     await expect(way(page).getByText(/ask the shop/)).toHaveCount(1);
   });

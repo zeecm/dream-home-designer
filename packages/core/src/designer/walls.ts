@@ -1,11 +1,13 @@
 import { produce } from 'immer';
 import { addOpening, deleteOpening, deleteWall, drawWall, updateWall } from '../commands';
-import { entranceDoor } from '../delivery';
+import { doorGraph, doorSearch, entranceDoor } from '../delivery';
 import type { Command } from '../history';
+import { planGeometry } from '../plan';
 import { renovationBreaches } from '../renovation';
 import { type Level, type Opening, type Project, type Vec2, isBoundary } from '../schema';
 import { segmentIntersection } from '../snap';
-import { SHELTER_ROOM, sidesOf } from '../structural';
+import { SHELTER_ROOM, sidesOf, wallStatuses } from '../structural';
+import { roomKind } from '../suggest';
 import { type AliasMap, resolveAlias } from './aliases';
 import { WET, type WallLock, designLocks } from './locks';
 import type { DesignBrief, DesignOp } from './schema';
@@ -40,6 +42,8 @@ export const NEW_WALL = { thickness: 0.1, skew: (2 * Math.PI) / 180, snap: 0.15,
 /** New doors at least this wide (a bathroom's 0.65 m). */
 export const MIN_DOOR = 0.75;
 export const MIN_BATH_DOOR = 0.65;
+/** A new wall's end stays this far from any opening in the wall it meets. */
+export const OPENING_CLEAR = 0.1;
 
 export interface WallsResult {
   level: Level;
@@ -71,32 +75,56 @@ export function applyDesignWalls(
   seed: string,
 ): WallsResult {
   const start = settled(base);
+  if (walls === 'keep') {
+    return {
+      level: start,
+      refused: ops.map(() => ({ text: KEEP_TEXT })),
+      applied: [],
+      structural: [],
+    };
+  }
   const locks = designLocks(before, start);
-  const mainDoors = new Set(
-    [entranceDoor(before), entranceDoor(start)].filter((x): x is string => !!x),
+  const statuses = wallStatuses(before);
+  const mainDoors = [entranceDoor(before), entranceDoor(start)].filter(
+    (x): x is string => !!x && !!start.openings[x],
   );
-  let lvl: Level = start;
-  const refused: Note[] = [];
-  const applied: Note[] = [];
-  const structural: string[] = [];
-  const apply = (cmd: Command) => {
-    const doc = { levels: [lvl] } as unknown as Project;
-    lvl = produce(doc, (d) => cmd.recipe(d))?.levels[0] ?? lvl;
-  };
+  // Windows and the main door stay exactly where they are, whatever an op does to their wall.
+  const fixed = [
+    ...Object.values(start.openings)
+      .filter((o) => o.kind === 'window')
+      .map((o) => o.id),
+    ...mainDoors,
+  ].map((id) => ({ id, span: openingSpanOnPlan(start, id) }));
   const between = (wallId: string) => {
     const names = sidesOf(start, wallId).map((s) => s ?? 'outside');
     return `the wall between ${names.join(' and ')}`;
   };
-
-  for (const o of ops) {
+  const described = ops.map((o) =>
+    describe(o, start, resolveAlias(aliases, o.wall), resolveAlias(aliases, o.opening), between),
+  );
+  const about = (o: DesignOp) => {
     const wallId = resolveAlias(aliases, o.wall);
     const openingId = resolveAlias(aliases, o.opening);
-    const what = describe(o, start, wallId, openingId, between);
-    try {
-      if (walls === 'keep') {
-        refused.push({ text: KEEP_TEXT });
-        continue;
-      }
+    return { ...(wallId ? { wallId } : {}), ...(openingId ? { openingId } : {}) };
+  };
+
+  /** The ops in order, but for those in `skip`; each refused op left out with why. */
+  const run = (skip: Set<number>) => {
+    let lvl: Level = start;
+    const applied: { i: number; note: Note }[] = [];
+    const refused: { i: number; note: Note }[] = [];
+    const structural: string[] = [];
+    const apply = (cmd: Command) => {
+      const doc = { levels: [lvl] } as unknown as Project;
+      lvl = produce(doc, (d) => cmd.recipe(d))?.levels[0] ?? lvl;
+    };
+    ops.forEach((o, i) => {
+      if (skip.has(i)) return;
+      const wallId = resolveAlias(aliases, o.wall);
+      const openingId = resolveAlias(aliases, o.opening);
+      const what = described[i] as string;
+      const was = lvl;
+      const touched: string[] = [];
       /** A wall the op may change: there, and not locked (structural only if the brief allows). */
       const changeable = (id: string | null, alias: string | null): string => {
         const w = id ? lvl.walls[id] : undefined;
@@ -104,68 +132,157 @@ export function applyDesignWalls(
         const lock = locks.get(id);
         if (lock === 'structural' || lock === 'likely') {
           if (walls !== 'structural') throw new Refused(LOCK_TEXT[lock]);
-          if (!structural.includes(id)) structural.push(id);
+          touched.push(id);
         } else if (lock) throw new Refused(LOCK_TEXT[lock]);
         return id;
       };
-      let flagged = false;
-      if (o.op === 'remove_wall' || o.op === 'half_wall' || o.op === 'glass_wall') {
-        const id = changeable(wallId, o.wall);
-        flagged = structural.includes(id);
-        const w = lvl.walls[id]!;
-        if (o.op === 'remove_wall') apply(deleteWall(lvl.id, id, lvl));
-        else if (isBoundary(w)) throw new Refused('a room boundary isn’t a wall.');
-        else if (o.op === 'glass_wall') {
-          apply(updateWall(lvl.id, id, { build: 'glass', thickness: Math.min(w.thickness, 0.08) }));
-        } else {
-          const h = Math.min(lvl.ceilingHeight - 0.1, Math.max(0.6, o.height ?? 1));
-          apply(updateWall(lvl.id, id, { height: h }));
+      try {
+        if (o.op === 'remove_wall' || o.op === 'half_wall' || o.op === 'glass_wall') {
+          const id = changeable(wallId, o.wall);
+          const w = lvl.walls[id]!;
+          if (o.op === 'remove_wall') apply(deleteWall(lvl.id, id, lvl));
+          else if (isBoundary(w)) throw new Refused('a room boundary isn’t a wall.');
+          else if (o.op === 'glass_wall') {
+            apply(
+              updateWall(lvl.id, id, { build: 'glass', thickness: Math.min(w.thickness, 0.08) }),
+            );
+          } else {
+            const h = Math.min(lvl.ceilingHeight - 0.1, Math.max(0.6, o.height ?? 1));
+            apply(updateWall(lvl.id, id, { height: h }));
+          }
+        } else if (o.op === 'add_door') {
+          const id = changeable(wallId, o.wall);
+          apply(addOpening(lvl.id, newDoor(lvl, id, o)).command);
+        } else if (o.op === 'remove_opening') {
+          const op = openingId ? lvl.openings[openingId] : undefined;
+          if (!op || !openingId) {
+            throw new Refused(`there’s no door or window “${o.opening ?? ''}” on the plan.`);
+          }
+          if (op.kind === 'window') throw new Refused(WINDOWS_STAY);
+          if (mainDoors.includes(openingId)) throw new Refused('the main door stays.');
+          changeable(op.wallId, o.opening);
+          apply(deleteOpening(lvl.id, openingId));
+        } else if (o.op === 'add_wall') {
+          const { ends, onto } = newWallEnds(lvl, o);
+          // Tying into a wall is work on it: never the shelter's, a structural one only if allowed.
+          for (const id of onto) {
+            const lock = locks.get(id);
+            if (lock === 'shelter') throw new Refused(LOCK_TEXT.shelter);
+            // An outside wall can be structural too: its status decides.
+            const status = statuses.get(id) ?? lock;
+            if (status === 'structural' || status === 'likely') {
+              if (walls !== 'structural') throw new Refused(LOCK_TEXT[status]);
+              touched.push(id);
+            }
+          }
+          const [a, b] = ends;
+          apply(
+            drawWall(lvl, { point: a }, { point: b }, { thickness: NEW_WALL.thickness }).command,
+          );
         }
-      } else if (o.op === 'add_door') {
-        const id = changeable(wallId, o.wall);
-        flagged = structural.includes(id);
-        apply(addOpening(lvl.id, newDoor(lvl, id, o)).command);
-      } else if (o.op === 'remove_opening') {
-        const op = openingId ? lvl.openings[openingId] : undefined;
-        if (!op || !openingId) {
-          throw new Refused(`there’s no door or window “${o.opening ?? ''}” on the plan.`);
-        }
-        if (op.kind === 'window') throw new Refused(WINDOWS_STAY);
-        if (mainDoors.has(openingId)) throw new Refused('the main door stays.');
-        changeable(op.wallId, o.opening);
-        flagged = structural.includes(op.wallId);
-        apply(deleteOpening(lvl.id, openingId));
-      } else if (o.op === 'add_wall') {
-        const [a, b] = newWallEnds(lvl, o);
-        apply(drawWall(lvl, { point: a }, { point: b }, { thickness: NEW_WALL.thickness }).command);
+        const moved = fixed.some(({ id, span }) => !sameSpan(span, openingSpanOnPlan(lvl, id)));
+        if (moved) throw new Refused('it would move a window or the main door.');
+        for (const id of touched) if (!structural.includes(id)) structural.push(id);
+        const text = touched.length ? `${what} (structural)` : what;
+        applied.push({ i, note: { text, ...about(o) } });
+      } catch (e) {
+        lvl = was;
+        const why = e instanceof Refused ? e.message : 'the plan’s own commands refused it.';
+        refused.push({ i, note: { text: `${what}: ${why}`, ...about(o) } });
       }
-      applied.push({
-        text: flagged ? `${what} (structural)` : what,
-        ...(wallId ? { wallId } : {}),
-        ...(openingId ? { openingId } : {}),
-      });
-    } catch (e) {
-      const why = e instanceof Refused ? e.message : 'the plan’s own commands refused it.';
-      refused.push({
-        text: `${what}: ${why}`,
-        ...(wallId ? { wallId } : {}),
-        ...(openingId ? { openingId } : {}),
-      });
-    }
-  }
+    });
+    return { lvl, applied, refused, structural };
+  };
 
-  let level = canonicalIds(start, lvl, seed);
-  // Belt and braces: whatever slipped past the locks, the shelter never changes.
-  const was = renovationBreaches(before, start).shelter;
-  const now = renovationBreaches(before, level).shelter;
-  if ([...now].some((id) => !was.has(id))) {
-    for (const a of applied)
-      refused.push({ ...a, text: `${a.text}: it would change the shelter.` });
-    applied.length = 0;
-    structural.length = 0;
-    level = start;
+  // No room may be cut off from the main door. An op that does (a door closed up, a wall that
+  // leaves part of a room with no way in) is left out, unless a later op opens a way again.
+  const shut = new Set(unreachableRooms(start));
+  const cut = (l: Level) => unreachableRooms(l).filter((id) => !shut.has(id));
+  const skip = new Set<number>();
+  const cutBy = new Map<number, string[]>();
+  let r = run(skip);
+  for (let guard = 0; guard < ops.length && cut(r.lvl).length; guard++) {
+    const lvl = r.lvl;
+    const rooms = cut(lvl).map((id) => lvl.rooms[id]?.name ?? 'a room');
+    const order = r.applied.map((a) => a.i).reverse();
+    const one = order.find((i) => !cut(run(new Set([...skip, i])).lvl).length);
+    const drop = one ?? order[0];
+    if (drop === undefined) break;
+    skip.add(drop);
+    cutBy.set(drop, rooms);
+    r = run(skip);
   }
+  const refused = [
+    ...r.refused,
+    ...[...cutBy].map(([i, rooms]) => ({
+      i,
+      note: {
+        text: `${described[i]}: it would leave ${[...new Set(rooms)].join(' and ')} with no way in.`,
+        ...about(ops[i] as DesignOp),
+      },
+    })),
+  ]
+    .sort((p, q) => p.i - q.i)
+    .map((x) => x.note);
+  const applied = r.applied.map((a) => a.note);
+  const structural = [...r.structural];
+
+  const level = canonicalIds(start, r.lvl, seed);
+  // Belt and braces: whatever slipped past the locks, the shelter never changes, and nor does
+  // a structural wall unless the brief allows it.
+  const was = renovationBreaches(before, start);
+  const now = renovationBreaches(before, level);
+  const shelter = [...now.shelter].some((id) => !was.shelter.has(id));
+  const newStructural = [...now.structural].filter((id) => !was.structural.has(id));
+  if (shelter || (walls !== 'structural' && newStructural.length)) {
+    const why = shelter ? 'it would change the shelter' : 'it would change a structural wall';
+    for (const a of applied) refused.push({ ...a, text: `${a.text}: ${why}.` });
+    return { level: start, refused, applied: [], structural: [] };
+  }
+  for (const id of newStructural) if (!structural.includes(id)) structural.push(id);
   return { level, refused, applied, structural };
+}
+
+/** Where an opening is on the plan: its two ends, along its wall. */
+export function openingSpanOnPlan(level: Level, id: string): [Vec2, Vec2] | null {
+  const o = level.openings[id];
+  const w = o && level.walls[o.wallId];
+  const a = w && level.vertices[w.a];
+  const b = w && level.vertices[w.b];
+  if (!o || !a || !b) return null;
+  const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const d = { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
+  const c = { x: a.x + (b.x - a.x) * o.t, y: a.y + (b.y - a.y) * o.t };
+  const h = o.width / 2;
+  return [
+    { x: c.x - d.x * h, y: c.y - d.y * h },
+    { x: c.x + d.x * h, y: c.y + d.y * h },
+  ];
+}
+
+function sameSpan(p: [Vec2, Vec2] | null, q: [Vec2, Vec2] | null): boolean {
+  if (!p || !q) return p === q;
+  const near = (a: Vec2, b: Vec2) => Math.hypot(a.x - b.x, a.y - b.y) < 0.001;
+  return (near(p[0], q[0]) && near(p[1], q[1])) || (near(p[0], q[1]) && near(p[1], q[0]));
+}
+
+/**
+ * Rooms of `level` with no way in from the main door (through its doors, passages and room
+ * boundaries), leaving out the shelter, ledges and outdoor rooms. Empty without a main door.
+ */
+export function unreachableRooms(level: Level): string[] {
+  const geom = planGeometry(level);
+  const main = entranceDoor(level, geom);
+  if (!main) return [];
+  const graph = doorGraph(level, geom);
+  const door = graph.doors.find((d) => d.o.id === main);
+  const inside = door?.sides.find((s) => s !== null);
+  if (!inside) return [];
+  const reached = doorSearch(graph, inside);
+  return Object.values(level.rooms)
+    .filter((r) => roomKind(r.name) !== 'none' && !reached.has(r.id))
+    .map((r) => r.id)
+    .sort();
 }
 
 /** An op in words, by the rooms either side of its wall. */
@@ -237,7 +354,7 @@ function newDoor(level: Level, wallId: string, o: DesignOp): Omit<Opening, 'id'>
  * wall it meets (within 0.15 m). It mustn't cross a wall, nor run through the shelter or a
  * bathroom.
  */
-function newWallEnds(level: Level, o: DesignOp): [Vec2, Vec2] {
+function newWallEnds(level: Level, o: DesignOp): { ends: [Vec2, Vec2]; onto: string[] } {
   if (!o.a || !o.b) throw new Refused('it has no ends.');
   let a = { ...o.a };
   let b = { ...o.b };
@@ -264,16 +381,34 @@ function newWallEnds(level: Level, o: DesignOp): [Vec2, Vec2] {
     // Along the new wall's own line, to where it meets a wall.
     const far = { x: end.x + d.x * NEW_WALL.snap, y: end.y + d.y * NEW_WALL.snap };
     const near = { x: end.x - d.x * NEW_WALL.snap, y: end.y - d.y * NEW_WALL.snap };
-    let best: { at: Vec2; dist: number } | null = null;
-    for (const { p, q } of walls) {
-      const at = segmentIntersection(near, far, p, q)?.point;
-      if (!at) continue;
-      const dist = Math.hypot(at.x - end.x, at.y - end.y);
-      if (!best || dist < best.dist) best = { at, dist };
+    let best: { at: Vec2; dist: number; wallId: string; u: number } | null = null;
+    for (const { w, p, q } of walls) {
+      const x = segmentIntersection(near, far, p, q);
+      if (!x) continue;
+      const dist = Math.hypot(x.point.x - end.x, x.point.y - end.y);
+      const u = x.u * Math.hypot(q.x - p.x, q.y - p.y);
+      if (!best || dist < best.dist) best = { at: x.point, dist, wallId: w.id, u };
     }
     if (!best) throw new Refused('its ends must meet existing walls.');
-    return best.at;
+    // Never onto a door or window (nor just beside one): the wall would split it.
+    const hit = best;
+    const wall = level.walls[hit.wallId];
+    const p = wall && level.vertices[wall.a];
+    const q = wall && level.vertices[wall.b];
+    const wlen = p && q ? Math.hypot(q.x - p.x, q.y - p.y) : 0;
+    for (const op of Object.values(level.openings)) {
+      if (op.wallId !== hit.wallId) continue;
+      const c = op.t * wlen;
+      if (hit.u > c - op.width / 2 - OPENING_CLEAR && hit.u < c + op.width / 2 + OPENING_CLEAR) {
+        throw new Refused(
+          `its end would land on a ${op.kind === 'window' ? 'window' : 'doorway'}.`,
+        );
+      }
+    }
+    onto.push(hit.wallId);
+    return hit.at;
   };
+  const onto: string[] = [];
   const sa = snap(a, b);
   const sb = snap(b, a);
   const len = Math.hypot(sb.x - sa.x, sb.y - sa.y);
@@ -292,7 +427,7 @@ function newWallEnds(level: Level, o: DesignOp): [Vec2, Vec2] {
     if (SHELTER_ROOM.test(name)) throw new Refused('it would stand in the household shelter.');
     if (WET.test(name)) throw new Refused('it would stand in a bathroom (wet area).');
   }
-  return [sa, sb];
+  return { ends: [sa, sb], onto };
 }
 
 /**

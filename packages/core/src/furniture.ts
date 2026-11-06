@@ -99,6 +99,11 @@ export interface FurnitureKind {
   source?: string;
   /** A piece of the person's own added by its size: the shape it is (a bed, a sofa). */
   shape?: FurnitureShape;
+  /**
+   * How it's delivered, if not in one piece: a bed comes as its mattress and its frame in
+   * flat panels (`deliveryParts`).
+   */
+  comesFlat?: 'bed';
   parts: FurniturePart[];
 }
 
@@ -152,6 +157,7 @@ function bed(id: string, name: string, w: number): FurnitureKind {
     category: 'Bedroom',
     size: { w, d, h },
     againstWall: true,
+    comesFlat: 'bed',
     parts: [
       box(-w / 2, w / 2, -d / 2, d / 2, 0, 0.3, 'wood'),
       box(-w / 2 + 0.03, w / 2 - 0.03, -d / 2 + 0.08, d / 2 - 0.03, 0.3, 0.52, 'fabric-light'),

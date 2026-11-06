@@ -57,12 +57,18 @@ export const PRICES: Record<string, Price> = {
   },
 };
 
-/** A model's price: by its exact id, then the longest listed id it starts with. */
+/** What may follow a listed id in a dated snapshot of it: -20261101, -2025-08-07, -001. */
+const SNAPSHOT = /^-(\d{8}|\d{4}-\d{2}-\d{2}|\d{3})$/;
+
+/**
+ * A model's price: by its exact id, then by a listed id it is a dated snapshot of (so
+ * gpt-5-2025-08-07 is gpt-5, but gpt-5-pro is not).
+ */
 export function priceOf(model: string, table: Record<string, Price> = PRICES): Price | null {
   const id = model.trim().toLowerCase();
   if (table[id]) return table[id] ?? null;
   const prefix = Object.keys(table)
-    .filter((k) => id.startsWith(k))
+    .filter((k) => id.startsWith(k) && SNAPSHOT.test(id.slice(k.length)))
     .sort((a, b) => b.length - a.length)[0];
   return prefix ? (table[prefix] ?? null) : null;
 }

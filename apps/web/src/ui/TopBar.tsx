@@ -18,6 +18,7 @@ import { PlansDialog } from './PlansDialog';
 import { ShareMenu } from './ShareMenu';
 import { Segmented } from './fields';
 import { Mark, icons } from './icons';
+import { useShownView } from './oneView';
 
 function syncText(s: SyncStatus, local: boolean): { text: string; tone: 'neutral' | 'negative' } {
   switch (s.kind) {
@@ -291,6 +292,9 @@ export function TopBar() {
   const { undo, redo } = useStore.getState();
   const viewMode = useEditor((s) => s.viewMode);
   const setViewMode = useEditor((s) => s.setViewMode);
+  const shown = useShownView();
+  // A tooltip needs a pointer that hovers; on touch it only gets in the way.
+  const canHover = window.matchMedia?.('(hover: hover)').matches ?? true;
   const viewer = useStore((s) => s.role === 'viewer');
   const status = syncText(sync, local);
 
@@ -354,10 +358,12 @@ export function TopBar() {
         <button
           type="button"
           className="btn view-toggle"
-          title={viewMode === '3d' ? 'Plan only (1)' : '3D only (3)'}
-          onClick={() => setViewMode(viewMode === '3d' ? 'plan' : '3d')}
+          aria-label={shown === '3d' ? 'Switch to Plan' : 'Switch to 3D'}
+          title={canHover ? (shown === '3d' ? 'Plan only (1)' : '3D only (3)') : undefined}
+          onClick={() => setViewMode(shown === '3d' ? 'plan' : '3d')}
         >
-          {viewMode === '3d' ? 'Plan' : '3D'}
+          {shown === '3d' ? icons.floorPlan : icons.cube}
+          <span>{shown === '3d' ? 'Plan' : '3D'}</span>
         </button>
       </div>
     </header>

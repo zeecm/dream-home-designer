@@ -36,7 +36,7 @@ export interface UsageOpts {
  * estimate from characters when they carry none (a step stopped or failed early).
  */
 export function usageOf(provider: Provider, events: unknown[], opts: UsageOpts): Usage {
-  const counts = read(provider, events);
+  const counts = read(provider, events, opts.outputChars ?? 0);
   const model = counts?.model ?? opts.model;
   const price = priceOf(model, opts.prices ?? PRICES);
   const c = counts ?? {
@@ -55,7 +55,7 @@ export function usageOf(provider: Provider, events: unknown[], opts: UsageOpts):
     cacheWrite: c.cacheWrite,
     output: c.output,
     reasoning: c.reasoning,
-    estimated: !counts,
+    estimated: !counts || !!counts.estimated,
     usd: price ? usdOf(c, price) : null,
     ms: opts.ms,
   };
@@ -63,12 +63,15 @@ export function usageOf(provider: Provider, events: unknown[], opts: UsageOpts):
 
 type Counts = Pick<Usage, 'input' | 'cachedInput' | 'cacheWrite' | 'output' | 'reasoning'> & {
   model?: string;
+  /** Part of it was counted from characters. */
+  estimated?: boolean;
 };
 
-function read(provider: Provider, events: unknown[]): Counts | null {
+function read(provider: Provider, events: unknown[], outputChars: number): Counts | null {
   if (provider === 'anthropic') {
     // message_start carries the prompt's counts; each message_delta the output so far.
     let found = false;
+    let ended = false;
     let model: string | undefined;
     const c: Counts = { input: 0, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: null };
     for (const e of events) {
@@ -77,13 +80,21 @@ function read(provider: Provider, events: unknown[]): Counts | null {
       const u = obj(msg?.usage) ?? obj(ev?.usage);
       if (!u) continue;
       found = true;
+      if (ev?.type === 'message_delta') ended = true;
       model = str(msg?.model) ?? model;
       c.input = num(u.input_tokens) ?? c.input;
       c.cachedInput = num(u.cache_read_input_tokens) ?? c.cachedInput;
       c.cacheWrite = num(u.cache_creation_input_tokens) ?? c.cacheWrite;
       c.output = num(u.output_tokens) ?? c.output;
     }
-    return found ? { ...c, ...(model ? { model } : {}) } : null;
+    if (!found) return null;
+    // Stopped before its final message_delta: message_start's output count is a few tokens,
+    // so the streamed answer's characters count instead.
+    if (!ended) {
+      c.output = Math.max(c.output, tokensOf(outputChars));
+      c.estimated = true;
+    }
+    return { ...c, ...(model ? { model } : {}) };
   }
   if (provider === 'openai') {
     // The last chunk (choices: []) carries the usage, with stream_options.include_usage.

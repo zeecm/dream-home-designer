@@ -13,8 +13,15 @@ import {
   useSavedProviders,
 } from './credentials';
 import { SpendSettings } from './designer/SpendSettings';
-import { type ModelLists, checkPictureModel, curated, listModels, recommended } from './models';
-import { AiError, askForJson } from './providers';
+import {
+  type ModelLists,
+  checkPictureModel,
+  curated,
+  listModels,
+  modelName,
+  recommended,
+} from './models';
+import { AiError, askForJson, inSettings } from './providers';
 
 /** A 1 × 1 white PNG: enough for a model to answer a test. */
 const DOT =
@@ -53,7 +60,7 @@ function choices(
   // A saved model this key no longer lists stays, until changed.
   if (choice && !ids.includes(choice) && choice === saved) {
     return {
-      options: [{ id: choice, label: label(choice, choice, 'saved') }, ...options],
+      options: [{ id: choice, label: label(choice, modelName(choice), 'saved') }, ...options],
       value: choice,
     };
   }
@@ -204,17 +211,22 @@ export function AiSettingsDialog({
       lines.push(`Plans and layouts (${s.model}): it works.`);
     } catch (e) {
       lines.push(
-        `Plans and layouts (${s.model}): ${e instanceof AiError ? e.message : 'the test failed.'}`,
+        `Plans and layouts (${s.model}): ${e instanceof AiError ? inSettings(e) : 'the test failed.'}`,
       );
     }
     if (s.imageModel && !run.signal.aborted) {
       // No picture is made: the key and the model are checked, which costs nothing.
       try {
         await checkPictureModel(s, s.imageModel, run.signal);
-        lines.push(`Pictures (${s.imageModel}): the key can use it.`);
+        lines.push(
+          s.provider === 'openai'
+            ? // Only looked up: OpenAI asks some organisations to verify before making pictures.
+              `Pictures (${s.imageModel}): the picture model exists; your organisation may still need verifying to use it.`
+            : `Pictures (${s.imageModel}): the key can use it.`,
+        );
       } catch (e) {
         lines.push(
-          `Pictures (${s.imageModel}): ${e instanceof AiError ? e.message : 'the test failed.'}`,
+          `Pictures (${s.imageModel}): ${e instanceof AiError ? inSettings(e) : 'the test failed.'}`,
         );
       }
     }
@@ -373,7 +385,7 @@ export function AiSettingsDialog({
           />
         </div>
         <footer className="dialog-foot">
-          <p className="field-hint ai-status" aria-live="polite">
+          <p className="field-hint ai-status foot-status" aria-live="polite">
             {status.map((line) => (
               <span key={line}>{line}</span>
             ))}

@@ -2,7 +2,7 @@ import { furnitureKind, itemSize } from '../furniture';
 import { planGeometry } from '../plan';
 import { roomArea, roomShapes } from '../rooms';
 import type { Level } from '../schema';
-import { type AliasMap, aliasOf } from './aliases';
+import { type AliasMap, aliasOf, resolveAlias } from './aliases';
 import { categoriesFor } from './catalogue';
 import { type ContextInput, designContext } from './describe';
 import { OUTPUT } from './prices';
@@ -253,7 +253,7 @@ export function roomStep(
     })
     .sort((p, q) => (p.id < q.id ? -1 : 1));
   const intent = opts.concept?.rooms
-    .filter((r) => r.room && space.rooms.includes(aliases[r.room.toUpperCase()] ?? ''))
+    .filter((r) => space.rooms.includes(resolveAlias(aliases, r.room) ?? ''))
     .map((r) => `${r.name} (${r.use}): ${r.intent}`)
     .join('; ');
   const tail = `

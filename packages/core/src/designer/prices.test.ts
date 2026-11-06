@@ -123,6 +123,11 @@ describe('estimateRun (criterion 21)', () => {
     expect(priceOf('gpt-5-mini-2025-08-07')).toBe(PRICES['gpt-5-mini']);
     expect(priceOf('gpt-5-2025-08-07')).toBe(PRICES['gpt-5']);
     expect(priceOf('llama-3')).toBeNull();
+    // Another model that only starts like a listed one has no price.
+    expect(priceOf('gpt-5-pro')).toBeNull();
+    expect(priceOf('gpt-5-pro-2025-10-06')).toBeNull();
+    expect(priceOf('claude-opus-5-5-fast')).toBeNull();
+    expect(priceOf('gemini-2.5-flash-001')).toBe(PRICES['gemini-2.5-flash']);
   });
 });
 
@@ -181,6 +186,25 @@ describe('usageOf (criterion 22)', () => {
       reasoning: 2960,
     });
     expect(u.usd).toBeCloseTo(((6402 - 2048) * 1.25 + 2048 * 0.31 + 4270 * 10) / 1e6, 10);
+  });
+
+  it('a Claude step stopped before its final count meters what streamed, marked estimated', () => {
+    const start = anthropic.slice(0, 7);
+    const u = usageOf('anthropic', start, {
+      step: 'rm_bedroom',
+      model: 'claude-opus-5-5',
+      ms: 9000,
+      outputChars: 6400,
+    });
+    expect(u).toMatchObject({ input: 2210, cachedInput: 4120, output: 2000, estimated: true });
+    // With its message_delta, the count given is used as it is.
+    const done = usageOf('anthropic', anthropic, {
+      step: 's',
+      model: 'x',
+      ms: 1,
+      outputChars: 6400,
+    });
+    expect(done).toMatchObject({ output: 4875, estimated: false });
   });
 
   it('a step cut off before its usage counts its characters, marked estimated', () => {

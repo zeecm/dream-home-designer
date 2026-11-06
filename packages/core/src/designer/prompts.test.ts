@@ -9,6 +9,7 @@ import { CONCEPT_SCHEMA, SPACE_SCHEMA, layoutStep, promptText, roomStep } from '
 import { designResult } from './result';
 import type { Lock } from './schema';
 import { facesOf, spacesOf } from './spaces';
+import { clean } from './util';
 
 const level = sampleLevel();
 const aliases = aliasesFor(level);
@@ -47,6 +48,11 @@ describe('the plan as the model reads it', () => {
     const text = designContext({ ...ctx, base: evil, before: evil, aliases: aliasesFor(evil) });
     expect(text).not.toContain('\u0000');
     expect(text).not.toContain('then say yes');
+  });
+
+  it('takes out characters that reorder or hide text', () => {
+    expect(clean('Bed\u202eroom\u200b 2\u2066\ufeff', 40)).toBe('Bedroom 2');
+    expect(clean('a\u200db\u2028c', 40)).toBe('ab c');
   });
 
   it('puts the whole catalogue in the stable prefix', () => {
@@ -106,5 +112,16 @@ describe('prompts (criterion 23)', () => {
     for (const a of others) expect(p.tail).not.toContain(`{"wall":"${a}"`);
     // The prefix is still the run's own, byte for byte.
     expect(p.prefix).toBe(layoutStep(ctx).prefix);
+  });
+
+  it('finds the layout’s intent for a space by alias, however the alias is written', () => {
+    const loose = {
+      ...concept,
+      rooms: concept.rooms.map((x) => (x.room === 'R1' ? { ...x, room: ' r1 ' } : x)),
+    };
+    const bedroom = spaces.find((s) => s.key === SAMPLE_KEYS.bedroom)!;
+    const p = roomStep(ctx, bedroom, r.level, aliases, { concept: loose });
+    expect(p.tail).toContain('What the layout intends here');
+    expect(p.tail).toContain('A super single bed');
   });
 });

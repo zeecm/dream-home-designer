@@ -643,7 +643,16 @@ characters, shown as text, with keys and tokens redacted: sk-…, sk_live_…, A
 ya29.…, Bearer …, and long mixed-case or hex runs; lower-case model names stay): "Gemini
 turned the request down (400): …". Gemini's 400 "API key not valid" counts as a refused key.
 `input_fidelity: high` goes only to gpt-image-1 (`HIGH_FIDELITY`). A held Enter that closes
-the render dialog doesn't reopen it from the button focus returns to. The e2e AI specs abort
+the render dialog doesn't reopen it from the button focus returns to. Only a 401 or the
+provider's own "invalid key" is a key error; other 403s read "{Provider} refused the request
+(403): …" (OpenAI's organisation verification, say), and OpenAI's Test says the picture model
+only exists (verification may still be needed). Models show by name (the provider's, else
+`MODEL_NAMES` or one made from an OpenAI id; a shared name gets "preview" or the id). The
+render dialog keeps the model line and the Look select in its sticky foot, beside Render. In
+the walk, the camera says "Render" (named "Photo-real render") and answers a second finger
+while a thumb holds a stick (its own pointerup: browsers make no click of it); on phones on
+their side (320 to 500 px tall) the map and the camera sit along the top beside the time,
+clear of the sticks (`walk-render.spec.ts` checks 844 × 390, 750 × 342 and 568 × 320). The e2e AI specs abort
 any provider request a test doesn't mock (`ai-models.spec.ts`).
 
 **AI: suggested layouts (stage 2, 5 Nov):** "Suggest layouts with AI" in the plan's
@@ -1428,14 +1437,19 @@ upright through a 2.00 m high door into a 1.40 m deep car." (criterion 2's 2.1 m
 first in `doors` (`openingId: 'lift'`) and in `worst`, and returns `lift`; `worstDoor` is
 exported; `DoorOnTheWay.tilted` marks a door passed only on the diagonal carry ("(tilted on its
 diagonal)" after the narrowest door, else "Tilted on its diagonal through …", and ", tilted"
-on the plan label). `rigidNote(assetId)` adds "A mattress bends and a frame usually comes
-flat; ask the shop." to a too-big bed. `updateModel` takes `diagonal: number | null` (null
+on the plan label). A bed (catalogue `comesFlat: 'bed'`, or added by size as a bed) is checked
+as its delivery parts (`deliveryParts`): the mattress w × d × 0.3 (folds in half along its
+length, unless wider than 1.7 m: a king), a headboard panel w × 0.1 × h and side rails
+d × 0.1 × 0.3; it fits when every part does (`DoorOnTheWay.parts`, `Delivery.parts`,
+`liftFitParts`), and `partsNote(r)` says why ("Comes flat: the mattress (folded in half) and
+frame panels each fit." / "Comes flat, but the mattress (too wide to fold) doesn’t fit; ask the
+shop."). Freestanding wardrobes stay rigid; built-ins aren't checked. `updateModel` takes `diagonal: number | null` (null
 removes it); `restoreVersion` copies the site with `structuredClone`. Web: the wording is in
 `delivery/words.ts` (unit-tested). "Getting it in" has a `role="status"` block: the verdict and
 one line under it (`liftStatus`: "Lift: not checked.", "No lift on the way in.", how it goes in,
-or, when the lift fails, "Ask the shop whether it comes apart…"), so a change is always read out
-and the controls below move less. A too-big bed (`rigidNote`) shows the mattress note first and
-"Checked as a rigid box, …" in muted text instead of a red verdict. Then [Add diagonal depth]
+or, when the lift fails, "Ask the shop whether it comes apart…"; a bed: "Lift: each part fits."),
+so a change is always read out and the controls below move less. A bed shows its `partsNote`
+first (`data-testid="parts-note"`), then the verdict as for any piece. Then [Add diagonal depth]
 for an own sofa too wide for a door, unmeasured or saved out of range (scrolls to and focuses
 the field, `behavior: auto` under reduced motion), From, and the Lift select with its hint (a
 preset's numbers; on a view link the select is disabled but shown in `--text` on `--raised`,

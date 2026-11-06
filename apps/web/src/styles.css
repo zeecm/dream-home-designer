@@ -196,8 +196,11 @@ select {
   flex: none;
   white-space: nowrap;
 }
-.brand:hover {
-  background: var(--active);
+/* Hover styles only where a pointer hovers: on touch, a tapped button would stay grey. */
+@media (hover: hover) {
+  .brand:hover {
+    background: var(--active);
+  }
 }
 .brand svg:last-child {
   color: var(--muted);
@@ -220,6 +223,21 @@ select {
 /* The phone's one view button; elsewhere the view switch shows all three. */
 .topbar .view-toggle {
   display: none;
+}
+/* Every phone, upright or on its side (ONE_VIEW_QUERY in oneView.ts): one view at a time, so
+   one button to the other view, its icon beside its label. */
+@media (max-width: 720px), (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  .topbar-right > .segmented {
+    display: none;
+  }
+  .topbar .view-toggle {
+    display: inline-flex;
+    gap: 4px;
+    padding: 0 8px;
+  }
+  .view-toggle svg {
+    flex: none;
+  }
 }
 /* A tablet's top bar: the mark alone names the product, so the plan's name has the room. */
 @media (max-width: 900px) {
@@ -284,9 +302,11 @@ select {
   cursor: pointer;
   flex: none;
 }
-.icon-btn:hover:not(:disabled) {
-  background: var(--active);
-  color: var(--text);
+@media (hover: hover) {
+  .icon-btn:hover:not(:disabled) {
+    background: var(--active);
+    color: var(--text);
+  }
 }
 .icon-btn:disabled {
   color: var(--control);
@@ -306,17 +326,21 @@ select {
   cursor: pointer;
   font-weight: 500;
 }
-.btn:hover {
-  background: var(--raised);
+@media (hover: hover) {
+  .btn:hover {
+    background: var(--raised);
+  }
 }
 .btn-primary {
   background: var(--text);
   border-color: var(--text);
   color: var(--surface);
 }
-.btn-primary:hover {
-  background: var(--text);
-  opacity: 0.9;
+@media (hover: hover) {
+  .btn-primary:hover {
+    background: var(--text);
+    opacity: 0.9;
+  }
 }
 .link-btn {
   padding: 0;
@@ -692,8 +716,10 @@ select {
   text-align: left;
   cursor: pointer;
 }
-.tool:hover {
-  background: var(--raised);
+@media (hover: hover) {
+  .tool:hover {
+    background: var(--raised);
+  }
 }
 .tool[aria-pressed="true"] {
   background: var(--active);
@@ -924,6 +950,10 @@ select {
   flex: none;
   max-width: 60%;
   text-align: right;
+}
+/* 16 px from the actions above: the one that throws work away stands apart. */
+.reno-discard {
+  margin-top: 8px;
 }
 .reno-changes {
   display: grid;
@@ -2087,10 +2117,11 @@ h3.field-label {
     text-overflow: ellipsis;
     padding: 0 6px;
   }
-  /* Every control a 40 px target; the name takes what is left. */
+  /* Every control a 40 px target; the name takes what is left, never under 48 px. */
   .project-name {
     font-size: var(--fs-body);
     height: 40px;
+    min-width: 48px;
     max-width: none;
     padding: 0 4px;
   }
@@ -2111,19 +2142,9 @@ h3.field-label {
   .topbar-right {
     gap: 4px;
   }
-  /* Two views side by side make no sense at phone width, and Plan and 3D side by side leave
-     the name no room: one button goes to the other view. */
-  .topbar-right > .segmented {
-    display: none;
-  }
-  .topbar .view-toggle {
-    display: inline-flex;
-    width: 48px;
-    padding: 0;
-  }
   .topbar {
     gap: 4px;
-    padding: 0 6px;
+    padding: 0 4px;
   }
   .topbar .btn,
   .topbar .icon-btn {
@@ -2131,6 +2152,10 @@ h3.field-label {
   }
   .topbar .icon-btn {
     width: 40px;
+  }
+  /* Undo and Redo: one pair, no gap (each still 40 px). */
+  .topbar .icon-btn[aria-label="Undo"] {
+    margin-right: -4px;
   }
   .sample-banner {
     flex-wrap: wrap;
@@ -2439,13 +2464,6 @@ h3.field-label {
     min-height: 34px;
     height: 34px;
   }
-  .topbar-right > .segmented button {
-    padding: 0 10px;
-  }
-  /* Two views side by side are too cramped this short. */
-  .topbar-right > .segmented button:nth-child(2) {
-    display: none;
-  }
   .project-name {
     font-size: var(--fs-body);
     max-width: 26vw;
@@ -2567,12 +2585,13 @@ h3.field-label {
     width: 140px;
     padding: 4px 10px;
   }
-  /* Top left, under the time: the right side has Leave walk and Footsteps, the bottom the
-     sticks. */
+  /* Along the top, beside the time: the right side has Leave walk, Footsteps and the camera,
+     the bottom the sticks. (Under the time it met the walk stick on a short screen, such as
+     Safari's 342 px.) */
   .minimap {
-    left: 8px;
+    left: 156px;
     right: auto;
-    top: 104px;
+    top: 8px;
     bottom: auto;
     transform: scale(0.56);
     transform-origin: top left;
@@ -2748,7 +2767,7 @@ h3.field-label {
   color: var(--muted);
   font-size: var(--fs-small);
 }
-/* A phone on its side: a smaller picture, so the key line or the look shows under it. */
+/* A phone on its side: a smaller picture, between the head and the foot. */
 @media (max-height: 500px) {
   .render-pictures img {
     max-height: 28vh;
@@ -2757,20 +2776,54 @@ h3.field-label {
     height: 28vh;
   }
 }
+/* The foot: the model line, then the look beside the buttons (wrapping on a narrow screen). */
+.render-actions {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.render-look {
+  display: flex;
+  flex: 1 1 240px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.render-look .input {
+  flex: 1;
+  min-width: 0;
+}
+/* A long provider message scrolls in its own few lines, never pushing the actions away. */
+.foot-status {
+  max-height: 72px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+.foot-status:empty {
+  display: none;
+}
+/* A phone on its side: two lines, so the form above keeps its room. */
+@media (max-height: 500px) {
+  .foot-status {
+    max-height: 40px;
+  }
+}
 
 /* While walking: under Footsteps. */
 .viewport-render-walk {
   top: 108px;
 }
-/* Touch screens: a camera icon at a fingertip's size, clear of the sticks; the mini-map
-   under Footsteps steps down below it. */
+/* Touch screens: a camera and "Render" (a paid picture, not a screenshot) at a fingertip's
+   size, clear of the sticks; the mini-map under Footsteps steps down below it. */
 .viewport-render-icon {
-  width: 44px;
-  min-width: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: 44px;
-  padding: 0;
+  min-width: 44px;
+  padding: 0 12px;
 }
 .viewport-render-icon svg {
+  flex: none;
   width: 20px;
   height: 20px;
 }
@@ -2779,11 +2832,21 @@ h3.field-label {
     top: 160px;
   }
 }
-/* A phone on its side keeps the map top left, under the time. */
+/* A phone on its side (320 to 500 px tall): the map and the render button along the top,
+   beside the time, so the right column (Leave walk, Footsteps) ends well above the sticks. */
 @media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
   .viewport-render-walk ~ .minimap {
-    top: 104px;
+    top: 8px;
   }
+  .viewport-render-walk {
+    top: 8px;
+    right: auto;
+    left: 258px;
+  }
+}
+/* Its own finger's tap, at once, even with a thumb on a stick. */
+.viewport-render-walk {
+  touch-action: manipulation;
 }
 
 .layouts-dialog {
@@ -3752,6 +3815,13 @@ span.comment-pin {
   /* A view link has nothing to undo. */
   .topbar-viewer .icon-btn[aria-label="Undo"],
   .topbar-viewer .icon-btn[aria-label="Redo"] {
+    display: none;
+  }
+}
+/* The first iPhone SE (320 px): the owner's controls leave the name under 48 px, too little
+   to read a word of, so it gives way; from 352 px it shows. */
+@media (max-width: 351px) {
+  .topbar:not(.topbar-viewer) .project-name {
     display: none;
   }
 }

@@ -110,42 +110,42 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
             <div className="render-wait">Taking a picture of the view…</div>
           )}
         </div>
-        <div className="ai-form">
-          {ai ? (
-            <>
-              <label className="field">
-                <span className="field-label">Look</span>
-                <select
-                  className="input"
-                  value={style}
-                  onChange={(e) => setStyle(e.target.value as RenderStyle)}
-                >
-                  {(Object.keys(RENDER_STYLES) as RenderStyle[]).map((s) => (
-                    <option key={s} value={s}>
-                      {STYLE_NAMES[s]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p className="field-hint">
-                With {PROVIDERS[ai.provider].name} ({ai.model}), on your key: a few cents a picture.
-              </p>
-            </>
-          ) : (
-            <p className="field-hint">
-              Renders need an OpenAI or Gemini key (Claude doesn’t make pictures).{' '}
-              <button type="button" className="link-btn" onClick={() => setSettings(true)}>
-                Add a key
-              </button>
-            </p>
-          )}
-        </div>
       </div>
+      {/* The look and the model in the foot, always in sight: however short the screen, and
+          however far the picture has scrolled, it shows which model (and cost) a render uses. */}
       <footer className="dialog-foot">
-        <p className="field-hint" aria-live="polite">
+        {ai ? (
+          <p className="field-hint render-model">
+            With {PROVIDERS[ai.provider].name} ({ai.model}), on your key: a few cents a picture.
+          </p>
+        ) : (
+          <p className="field-hint">
+            Renders need an OpenAI or Gemini key (Claude doesn’t make pictures).{' '}
+            <button type="button" className="link-btn" onClick={() => setSettings(true)}>
+              Add a key
+            </button>
+          </p>
+        )}
+        <p className="field-hint foot-status" aria-live="polite">
           {status}
         </p>
-        <div className="button-row">
+        <div className="button-row render-actions">
+          {ai && (
+            <label className="render-look">
+              <span className="field-label">Look</span>
+              <select
+                className="input"
+                value={style}
+                onChange={(e) => setStyle(e.target.value as RenderStyle)}
+              >
+                {(Object.keys(RENDER_STYLES) as RenderStyle[]).map((s) => (
+                  <option key={s} value={s}>
+                    {STYLE_NAMES[s]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {busy ? (
             <button type="button" className="btn" onClick={() => busy.abort()}>
               Cancel

@@ -87,10 +87,9 @@ test('the model selects fill from the key’s own model list', async ({ page }) 
   // Typing on keeps the list shown until the new key's comes: no jump back to the usual ones.
   await dialog.getByLabel('API key').press('End');
   await dialog.getByLabel('API key').pressSequentially('x');
-  expect(await optionTexts(page, 'Model for plans and layouts')).toEqual([
-    'Gemini 3 Pro (recommended)',
-    'Gemini 2.5 Pro',
-    'Gemini 2.5 Flash',
+  expect(await optionTexts(page, 'Model for pictures (photo-real renders)')).toEqual([
+    'Nano Banana (recommended, cheaper)',
+    'Nano Banana Pro (about 3× the price)',
   ]);
   await expect.poll(() => asked.length).toBe(2);
   expect(asked[1]?.key).toBe(`${KEY}x`);
@@ -106,14 +105,14 @@ test('when the models can’t be listed, the usual ones are offered', async ({ p
   await dialog.getByLabel('API key').fill(KEY);
   await expect(dialog).toContainText('Couldn’t list the models on this key');
   expect(await optionTexts(page, 'Model for plans and layouts')).toEqual([
-    'gemini-3-pro (recommended)',
-    'gemini-2.5-pro',
-    'gemini-2.5-flash',
+    'Gemini 3 Pro (recommended)',
+    'Gemini 2.5 Pro',
+    'Gemini 2.5 Flash',
   ]);
   expect(await optionTexts(page, 'Model for pictures (photo-real renders)')).toEqual([
-    'gemini-2.5-flash-image (recommended, cheaper)',
-    'gemini-3-pro-image (about 3× the price)',
-    'gemini-3.1-flash-image',
+    'Gemini 2.5 Flash Image (recommended, cheaper)',
+    'Gemini 3 Pro Image (about 3× the price)',
+    'Gemini 3.1 Flash Image',
   ]);
   // A refused key says so.
   await page.route('https://api.openai.com/v1/models', (route) =>
@@ -174,6 +173,11 @@ test('the picture model chosen is the one renders use, and a refusal shows the p
   );
   await expect(render).not.toContainText(KEY);
   expect(rendered).toEqual([`${GEMINI}/models/gemini-3-pro-image:generateContent`]);
+  // With the message shown, the model in use and the look are still in full view.
+  await expect(render.getByText('With Gemini (Google) (gemini-3-pro-image)')).toBeInViewport({
+    ratio: 1,
+  });
+  await expect(render.getByLabel('Look')).toBeInViewport({ ratio: 1 });
 });
 
 test('saving a key again never changes its picture model by itself', async ({ page }) => {
@@ -210,7 +214,7 @@ test('saving a key again never changes its picture model by itself', async ({ pa
   await dialog.getByLabel('Provider').selectOption('openai');
   await expect(dialog).toContainText('Couldn’t list the models on this key');
   await expect(pictures).toHaveValue('gpt-image-1-mini');
-  await expect(pictures.locator('option').first()).toHaveText('gpt-image-1-mini (saved, cheaper)');
+  await expect(pictures.locator('option').first()).toHaveText('GPT Image 1 mini (saved, cheaper)');
   await dialog.getByRole('button', { name: 'Save' }).click();
   expect((await stored()).keys.openai.imageModel).toBe('gpt-image-1-mini');
 });

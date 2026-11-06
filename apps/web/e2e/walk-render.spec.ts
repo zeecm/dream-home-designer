@@ -1,4 +1,4 @@
-import { type Locator, type Page, devices, expect, test } from '@playwright/test';
+import { type CDPSession, type Locator, type Page, devices, expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
 
 // A phone (the iPhone's screen, touch and pixel ratio, in the Chromium the suite runs). No AI
@@ -27,6 +27,7 @@ async function finger(page: Page, at: Point) {
     touchPoints: [{ ...at, id: 0 }],
   });
   return {
+    cdp,
     async moveTo(p: Point) {
       await cdp.send('Input.dispatchTouchEvent', {
         type: 'touchMove',
@@ -39,6 +40,25 @@ async function finger(page: Page, at: Point) {
   };
 }
 
+/**
+ * A tap by a second finger at `at` while the first (id 0) stays down at `held`. The browser
+ * makes no click of it: the button has to answer the finger itself.
+ */
+async function secondFingerTap(cdp: CDPSession, held: Point, at: Point) {
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [
+      { ...held, id: 0 },
+      { ...at, id: 1 },
+    ],
+  });
+  // The second lifts (a touchEnd lists the points lifted); the first stays where it is.
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchEnd',
+    touchPoints: [{ ...at, id: 1 }],
+  });
+}
+
 test('on a phone: a photo-real render from the spot walked to, the walk standing still while its dialog is open', async ({
   page,
 }) => {
@@ -47,7 +67,7 @@ test('on a phone: a photo-real render from the spot walked to, the walk standing
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
   await waitSaved(page);
-  await page.getByRole('button', { name: /^3D$/ }).tap();
+  await page.getByRole('button', { name: 'Switch to 3D' }).tap();
   await page.getByRole('button', { name: 'Walk through' }).tap();
   await expect(page.getByRole('button', { name: 'Leave walk' })).toBeVisible();
 
@@ -90,8 +110,9 @@ test('on a phone: a photo-real render from the spot walked to, the walk standing
   const start = await pose();
   await expect.poll(pose, { timeout: 10_000 }).not.toBe(start);
 
-  // ...until the render opens: then the walk stands still, the stick let go.
-  await render.evaluate((b: HTMLButtonElement) => b.click());
+  // ...until a second finger taps the camera: the render opens, the walk stands still, the
+  // stick let go.
+  await secondFingerTap(thumb.cdp, { x: walkStick.x, y: walkStick.y - 40 }, centre(r));
   const dialog = page.getByRole('dialog', { name: 'Photo-real render' });
   await expect(dialog).toBeVisible();
   const held = await pose();
@@ -122,3 +143,72 @@ test('on a phone: a photo-real render from the spot walked to, the walk standing
   await again.lift();
   expect(errors).toEqual([]);
 });
+
+const apart = (a: { x: number; y: number; width: number; height: number }, b: typeof a) =>
+  a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y;
+
+// Phones on their side: an iPhone 13 (844 × 390), its Safari with the bars (750 × 342) and an
+// iPhone SE (568 × 320).
+for (const [width, height] of [
+  [844, 390],
+  [750, 342],
+  [568, 320],
+] as const)
+  test.describe(`on a phone on its side, ${width} × ${height}`, () => {
+    test.use({ viewport: { width, height } });
+
+    test('the walk’s map, sticks, time and buttons keep clear of each other', async ({ page }) => {
+      await page.goto('/');
+      await waitSaved(page);
+      await page.getByRole('button', { name: /^3D$/ }).tap();
+      await page.getByRole('button', { name: 'Walk through' }).tap();
+      await expect(page.getByRole('button', { name: 'Leave walk' })).toBeVisible();
+      const parts = [
+        page.locator('svg.minimap'),
+        page.getByTestId('walk-stick'),
+        page.getByTestId('look-stick'),
+        page.locator('.sun-control'),
+        page.getByRole('button', { name: 'Leave walk' }),
+        page.getByRole('button', { name: /^Footsteps/ }),
+        page.getByRole('button', { name: 'Photo-real render' }),
+      ];
+      const boxes = [];
+      for (const p of parts) {
+        await expect(p).toBeInViewport({ ratio: 1 });
+        boxes.push(await box(p));
+      }
+      for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) {
+          expect(apart(boxes[i] as Box, boxes[j] as Box), `${parts[i]} and ${parts[j]}`).toBe(true);
+        }
+      }
+      // A paid picture, not a screenshot: the camera says "Render".
+      await expect(page.getByRole('button', { name: 'Photo-real render' })).toHaveText('Render');
+    });
+
+    test('the render dialog keeps its look and its picture model in sight', async ({ page }) => {
+      await page.addInitScript(() => {
+        window.sessionStorage.setItem(
+          'dhd-ai',
+          JSON.stringify({
+            active: 'gemini',
+            keys: {
+              gemini: { key: 'AIza-x', model: 'gemini-3-pro', imageModel: 'gemini-3-pro-image' },
+            },
+          }),
+        );
+      });
+      await page.goto('/');
+      await waitSaved(page);
+      await page.getByRole('button', { name: /^3D$/ }).tap();
+      await page.getByRole('button', { name: 'Photo-real render' }).tap();
+      const dialog = page.getByRole('dialog', { name: 'Photo-real render' });
+      await expect(dialog.getByText('With Gemini (Google) (gemini-3-pro-image)')).toBeInViewport({
+        ratio: 1,
+      });
+      await expect(dialog.getByLabel('Look')).toBeInViewport({ ratio: 1 });
+      await expect(dialog.getByRole('button', { name: 'Render' })).toBeInViewport({ ratio: 1 });
+    });
+  });
+
+type Box = { x: number; y: number; width: number; height: number };

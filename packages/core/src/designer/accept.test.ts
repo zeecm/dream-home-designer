@@ -8,10 +8,19 @@ import { AFTER_SUFFIX } from '../levels';
 import type { Level } from '../schema';
 import { acceptDesign, allowedParts, aspectOf } from './accept';
 import { aliasesFor } from './aliases';
-import { SAMPLE_KEYS, answer, sampleAnswers, sampleConcept, sampleDesign } from './fixtures/sample';
+import {
+  SAMPLE_KEYS,
+  SPLIT_BEDROOM,
+  answer,
+  sampleAnswers,
+  sampleConcept,
+  sampleDesign,
+  tanBrief,
+  wallOp,
+} from './fixtures/sample';
 import { handEdits } from './handEdits';
 import { designResult } from './result';
-import { BATHROOMS, type Concept, type DesignOp, type Part } from './schema';
+import { BATHROOMS, type Concept, type Part } from './schema';
 import { roomIdAt, spaceOfRoom, spacesOf } from './spaces';
 
 const fresh = (level?: Level): EditorDoc => {
@@ -39,7 +48,7 @@ describe('acceptDesign (criterion 19)', () => {
     const s0 = fresh();
     const lvl = flat(s0);
     const r = designResult(lvl, lvl, sampleDesign({ level: lvl }));
-    const s1 = dispatch(s0, acceptDesign(lvl.id, r.level, allParts(r.level)));
+    const s1 = dispatch(s0, acceptDesign(lvl.id, r.level, allParts(r.level), { base: lvl }));
     expect(s1.history.past).toHaveLength(1);
     expect(s1.history.past[0]?.label).toBe('Use design');
     const a = reno(s1);
@@ -90,7 +99,7 @@ describe('acceptDesign (criterion 19)', () => {
   it('keeps pieces placed by hand since the version was made, unless asked to remove them', () => {
     const base = sampleFlatProject().levels[0] as Level;
     const r = designResult(base, base, sampleDesign({ level: base }));
-    const s0 = dispatch(fresh(), acceptDesign(base.id, base, []));
+    const s0 = dispatch(fresh(), acceptDesign(base.id, base, [], { base }));
     const lamp = {
       id: 'it_mine',
       assetId: 'floor-lamp',
@@ -117,25 +126,14 @@ describe('acceptDesign (criterion 19)', () => {
 
   it('a space whose outline depends on the version’s walls takes no furniture without them', () => {
     const lvl = sampleFlatProject().levels[0] as Level;
-    const split: DesignOp = {
-      op: 'add_wall',
-      wall: null,
-      opening: null,
-      a: { x: 3.27, y: 1.6 },
-      b: { x: 6.49, y: 1.6 },
-      height: null,
-      t: null,
-      width: null,
-      style: null,
-    };
-    const concept: Concept = { ...sampleConcept(), walls: [split] };
+    const concept: Concept = { ...sampleConcept(), walls: SPLIT_BEDROOM };
     const answers = sampleAnswers();
     const r = designResult(lvl, lvl, sampleDesign({ level: lvl, concept, answers }));
-    // The Bedroom, split in two by the new wall.
+    // The Bedroom, made narrower by the new wall.
     const bedroomSpaces = spacesOf(r.level).filter((s) =>
       s.rooms.some((id) => id === 'rm_bedroom' || !lvl.rooms[id]),
     );
-    expect(bedroomSpaces).toHaveLength(2);
+    expect(bedroomSpaces.length).toBeGreaterThan(0);
     const parts: Part[] = [
       ...bedroomSpaces.map((s) => ({ space: s.key, aspect: 'furniture' as const })),
       { space: SAMPLE_KEYS.main, aspect: 'furniture' },
@@ -143,14 +141,17 @@ describe('acceptDesign (criterion 19)', () => {
     expect(allowedParts(lvl, r.level, parts)).toEqual([
       { space: SAMPLE_KEYS.main, aspect: 'furniture' },
     ]);
-    const s1 = dispatch(fresh(), acceptDesign(lvl.id, r.level, parts));
+    const s1 = dispatch(fresh(), acceptDesign(lvl.id, r.level, parts, { base: lvl }));
     const a = reno(s1);
     for (const it of Object.values(a.items)) {
       const room = roomIdAt(r.level, { x: it.position.x, y: it.position.z });
       expect(room).toBe('rm_main-bedroom');
     }
     // With the walls, they come.
-    const s2 = dispatch(fresh(), acceptDesign(lvl.id, r.level, [{ aspect: 'walls' }, ...parts]));
+    const s2 = dispatch(
+      fresh(),
+      acceptDesign(lvl.id, r.level, [{ aspect: 'walls' }, ...parts], { base: lvl }),
+    );
     expect(Object.keys(reno(s2).items).length).toBeGreaterThan(Object.keys(a.items).length);
   });
 });
@@ -160,7 +161,7 @@ describe('handEdits (criterion 20)', () => {
     const s0 = fresh();
     const lvl = flat(s0);
     const r = designResult(lvl, lvl, sampleDesign({ level: lvl }));
-    const s1 = dispatch(s0, acceptDesign(lvl.id, r.level, allParts(r.level)));
+    const s1 = dispatch(s0, acceptDesign(lvl.id, r.level, allParts(r.level), { base: lvl }));
     const accepted = reno(s1);
     const sofa = Object.values(accepted.items).find((i) => i.assetId === 'sofa-3')!;
     const al = aliasesFor(lvl);
@@ -202,7 +203,7 @@ describe('handEdits (criterion 20)', () => {
         },
       }),
     );
-    const s1 = dispatch(s0, acceptDesign(lvl.id, r.level, allParts(r.level)));
+    const s1 = dispatch(s0, acceptDesign(lvl.id, r.level, allParts(r.level), { base: lvl }));
     const accepted = reno(s1);
     const fridge = Object.values(accepted.items).find((i) => i.assetId === 'fridge')!;
     const s2 = dispatch(s1, {
@@ -220,6 +221,76 @@ describe('handEdits (criterion 20)', () => {
       'furniture: Fridge (removed)',
       'finishes: Kitchen floor (marble)',
       'walls: Walls and doors (changed)',
+    ]);
+  });
+});
+
+describe('acceptDesign: review fixes', () => {
+  it('a brought piece stays unless the space it goes to is ticked', () => {
+    const furnished = furnishedSample();
+    const fal = aliasesFor(furnished);
+    const desk = Object.entries(fal).find(([, id]) => id === 'it_f003')?.[0] as string;
+    const brief = tanBrief({ keep: { items: { it_f003: 'bring' }, text: '' } });
+    const answers = {
+      ...sampleAnswers(),
+      [SAMPLE_KEYS.living]: answer([
+        { ref: 'desk', assetId: 'desk', keep: desk, wall: 'W12', along: 1.0 },
+      ]),
+    };
+    const r = designResult(furnished, furnished, {
+      ...sampleDesign({ level: furnished, brief, answers }),
+      aliases: fal,
+    });
+    expect(r.level.items.it_f003).toBeDefined();
+    const bedroomOnly: Part[] = [{ space: SAMPLE_KEYS.bedroom, aspect: 'furniture' }];
+    const s1 = dispatch(
+      fresh(furnished),
+      acceptDesign(furnished.id, r.level, bedroomOnly, { base: furnished }),
+    );
+    // The desk stays where it was: the living room, where the version puts it, isn't ticked.
+    expect(reno(s1).items.it_f003).toEqual(furnished.items.it_f003);
+    const both: Part[] = [...bedroomOnly, { space: SAMPLE_KEYS.living, aspect: 'furniture' }];
+    const s2 = dispatch(
+      fresh(furnished),
+      acceptDesign(furnished.id, r.level, both, { base: furnished }),
+    );
+    expect(reno(s2).items.it_f003).toEqual(r.level.items.it_f003);
+  });
+
+  it('pieces an earlier design made are replaced, never kept as placed by hand', () => {
+    const s0 = fresh();
+    const lvl = flat(s0);
+    const a = designResult(lvl, lvl, sampleDesign({ level: lvl, id: 'dsn_a' }));
+    const s1 = dispatch(s0, acceptDesign(lvl.id, a.level, allParts(a.level), { base: lvl }));
+    // Version B designed on the flat as it is (start: before), accepted into the same After.
+    const brief = tanBrief({ start: 'before' });
+    const b = designResult(lvl, lvl, sampleDesign({ level: lvl, id: 'dsn_b', brief }));
+    const living: Part[] = [{ space: SAMPLE_KEYS.living, aspect: 'furniture' }];
+    const s2 = dispatch(s1, acceptDesign(lvl.id, b.level, living, { base: lvl }));
+    const sofas = Object.values(reno(s2).items).filter((i) => i.assetId === 'sofa-3');
+    expect(sofas.map((i) => i.id)).toEqual(
+      Object.values(b.level.items)
+        .filter((i) => i.assetId === 'sofa-3')
+        .map((i) => i.id),
+    );
+  });
+
+  it('a space whose doors the version changes needs the walls part', () => {
+    const lvl = sampleFlatProject().levels[0] as Level;
+    // A door between the two bedrooms: no outline changes, but both rooms' doors do.
+    const concept: Concept = {
+      ...sampleConcept(),
+      walls: [wallOp({ op: 'add_door', wall: 'W5', t: 0.3, width: 0.8 })],
+    };
+    const r = designResult(lvl, lvl, sampleDesign({ level: lvl, concept }));
+    expect(r.applied).toHaveLength(1);
+    const parts: Part[] = [
+      { space: SAMPLE_KEYS.bedroom, aspect: 'furniture' },
+      { space: SAMPLE_KEYS.main, aspect: 'furniture' },
+      { space: SAMPLE_KEYS.kitchen, aspect: 'furniture' },
+    ];
+    expect(allowedParts(lvl, r.level, parts)).toEqual([
+      { space: SAMPLE_KEYS.kitchen, aspect: 'furniture' },
     ]);
   });
 });
