@@ -668,6 +668,28 @@ test('on a phone: the plan stays under a fast finger, coasts after a swipe, and 
       type,
       touchPoints: pts.map((p, id) => ({ ...p, id })),
     });
+  type Pt = { x: number; y: number };
+  /**
+   * A swipe: a move every `every` ms, then the lift a frame after the last. Each event is
+   * stamped with the finger's time and sent no sooner: a busy run sends them late, and
+   * timed by when they were sent they'd be a slow drag that stopped before lifting.
+   */
+  const swipe = async (start: Pt, to: (i: number) => Pt, n: number, every = 16) => {
+    const t0 = Date.now();
+    const at = async (ms: number) => {
+      await page.waitForTimeout(Math.max(0, t0 + ms - Date.now()));
+      return (t0 + ms) / 1000;
+    };
+    const stamped = async (type: 'touchStart' | 'touchMove' | 'touchEnd', pts: Pt[], ms: number) =>
+      cdp.send('Input.dispatchTouchEvent', {
+        type,
+        touchPoints: pts.map((p, id) => ({ ...p, id })),
+        timestamp: await at(ms),
+      });
+    await stamped('touchStart', [start], 0);
+    for (let i = 1; i <= n; i++) await stamped('touchMove', [to(i)], i * every);
+    await stamped('touchEnd', [], n * every + 16);
+  };
 
   // A fast drag, every move sent at once (faster than the page redraws): mid-drag, the plan
   // has moved exactly as far as the finger.
@@ -685,12 +707,7 @@ test('on a phone: the plan stays under a fast finger, coasts after a swipe, and 
   // (Leftwards: the plan is already well right of centre, and a coast stops before the
   // plan's middle leaves the screen.)
   const x1 = await x();
-  await send('touchStart', [from]);
-  for (let i = 1; i <= 6; i++) {
-    await send('touchMove', [{ x: from.x - i * 12, y: from.y }]);
-    await page.waitForTimeout(8);
-  }
-  await send('touchEnd', []);
+  await swipe(from, (i) => ({ x: from.x - i * 12, y: from.y }), 6);
   await expect.poll(x).toBeLessThan(x1 - 72 - 20);
   await page.waitForTimeout(1500);
   const settled = await x();
@@ -738,12 +755,7 @@ test('on a phone: the plan stays under a fast finger, coasts after a swipe, and 
   expect(before - (await x())).toBeGreaterThan(30);
 
   // A swipe, then a tap while the plan coasts: the tap only stops it (selects nothing).
-  await send('touchStart', [from]);
-  for (let i = 1; i <= 6; i++) {
-    await send('touchMove', [{ x: from.x + i * 14, y: from.y }]);
-    await page.waitForTimeout(8);
-  }
-  await send('touchEnd', []);
+  await swipe(from, (i) => ({ x: from.x + i * 14, y: from.y }), 6);
   await page.waitForTimeout(60);
   await send('touchStart', [from]);
   await send('touchEnd', []);

@@ -473,7 +473,11 @@ export function useSelectTool(ctx: ToolContext): ToolController {
           : { kind: 'rotate', id: handle.id, start: p.screen, moved: false, key };
         return true;
       }
-      const roomId = onRoomHandle(ctx, p);
+      // The second press of a double-click on a room renames it, even where the first press,
+      // selecting the room, put its move handle under the pointer (a small room's middle).
+      const onHandle = onRoomHandle(ctx, p);
+      const renaming = p.clicks === 2 && p.hit?.kind === 'room' && p.hit.id === onHandle;
+      const roomId = renaming ? null : onHandle;
       const handleAtStart = roomId && roomHandleAt(ctx.level, ctx.geom, ctx.view.zoom, roomId);
       if (roomId && handleAtStart) {
         const joined = roomJoined(ctx.level, roomId);

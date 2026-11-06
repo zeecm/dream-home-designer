@@ -11,7 +11,7 @@ import {
   wallStatus,
 } from '@dhd/core';
 import type { Vec2 } from '@dhd/core';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { TraceDraftLayer } from '../ai/DraftLayer';
 import { type PixelBox, inkBounds } from '../assets';
 import { ClearanceAnnouncement, ClearanceLayer } from '../clearance/clearance';
@@ -49,21 +49,41 @@ import {
 } from './tools';
 import { type Size, fitBounds, gridStep, panBy, screenToWorld, zoomAt } from './view';
 
+/**
+ * An element's size, kept up to date by a ResizeObserver. Its reports come a frame or more
+ * after a layout change, and on a busy machine seconds after, so `measure` reads the size
+ * now and returns whether it differed.
+ */
 function useElementSize<T extends Element>() {
   const ref = useRef<T>(null);
   const [size, setSize] = useState<Size>({ width: 0, height: 0 });
-  useEffect(() => {
+  const update = useCallback((width: number, height: number) => {
+    const next = { width: Math.round(width), height: Math.round(height) };
+    setSize((s) => (s.width === next.width && s.height === next.height ? s : next));
+  }, []);
+  const measure = useCallback(() => {
+    const el = ref.current;
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    const changed = Math.round(r.width) !== size.width || Math.round(r.height) !== size.height;
+    if (changed) update(r.width, r.height);
+    return changed;
+  }, [size, update]);
+  // Measured before the first paint, so a plan that mounts (switching before and after) is
+  // never drawn at size 0, offset by half the pane, until the observer reports.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once, on mount
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const r = el.getBoundingClientRect();
+    update(r.width, r.height);
     const ro = new ResizeObserver(([entry]) => {
-      if (!entry) return;
-      const { width, height } = entry.contentRect;
-      setSize({ width: Math.round(width), height: Math.round(height) });
+      if (entry) update(entry.contentRect.width, entry.contentRect.height);
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  return [ref, size] as const;
+  return [ref, size, measure] as const;
 }
 
 const isTyping = (t: EventTarget | null) =>
@@ -217,7 +237,7 @@ if (typeof window !== 'undefined') {
 const KEEP = 48;
 
 export function PlanCanvas() {
-  const [wrapRef, size] = useElementSize<HTMLDivElement>();
+  const [wrapRef, size, measureSize] = useElementSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
   const project = useProject();
   const level = useLevel();
@@ -282,6 +302,10 @@ export function PlanCanvas() {
     const prev = lastFit.current;
     const resizedOnly = prev.ink === ink && prev.image === image.status;
     if (!fitRequested && resizedOnly && prev.at > 0 && Date.now() - prev.at > 1000) return;
+    // Fit to the pane as it is now. A view switch (Split to Plan) resizes it in the commit that
+    // asks for the fit, before the observer has said so: a fit to the old size would stick
+    // once its report came over a second later. Measured, this runs again with the new size.
+    if (measureSize()) return;
     let b = levelBounds(level);
     if (!b && underlay && image.status === 'ready') {
       // Frame the drawing, not the whole page around it.
@@ -360,14 +384,15 @@ export function PlanCanvas() {
   const touches = useRef(new Map<number, Vec2>());
   /**
    * A finger pan let go while moving carries on and slows to a stop, as a map does: its speed
-   * (screen px per ms, smoothed over the last moves) and when it last moved.
+   * (screen px per ms, smoothed over the last moves) and when it last moved. Timed by the
+   * events' time stamps (when the finger moved), not by when a busy page got to them: a page
+   * still drawing the last move handles the next ones, and the lift, late and back to back.
    */
   const fling = useRef<{ vx: number; vy: number; at: number; dist: number } | null>(null);
   const flingFrame = useRef<number | undefined>(undefined);
-  const trackFling = (dx: number, dy: number) => {
+  const trackFling = (dx: number, dy: number, now: number) => {
     // A lift where the last move ended says nothing about the speed.
     if (dx === 0 && dy === 0) return;
-    const now = performance.now();
     const f = fling.current;
     const dt = f ? Math.max(1, now - f.at) : 16;
     const k = f ? 0.7 : 1;
@@ -383,12 +408,12 @@ export function PlanCanvas() {
     flingFrame.current = undefined;
     fling.current = null;
   };
-  const startFling = () => {
+  const startFling = (liftedAt: number) => {
     const f = fling.current;
     fling.current = null;
     // Only a finger that really panned (not what's left of a pinch, lifting a frame after
     // the other) and is still moving as it lifts (not one that stopped, then lifted).
-    if (!f || f.dist < 40 || performance.now() - f.at > 60 || Math.hypot(f.vx, f.vy) < 0.25) {
+    if (!f || f.dist < 40 || liftedAt - f.at > 60 || Math.hypot(f.vx, f.vy) < 0.25) {
       return;
     }
     // No faster than a brisk flick (2.5 px/ms coasts about 800 px).
@@ -586,7 +611,7 @@ export function PlanCanvas() {
       const dy = p.screen.y - pan.current.y;
       setView(panBy(liveView(), dx, dy), true);
       pan.current = p.screen;
-      trackFling(dx, dy);
+      trackFling(dx, dy, e.timeStamp);
       return;
     }
     // Placing a point (drawing, or dragging a corner), the finger hides it: magnify it.
@@ -610,7 +635,7 @@ export function PlanCanvas() {
         gesture.current = null;
         touch.current = { start: pointer(e), moved: true, claimed: false };
         pan.current = rest;
-        fling.current = { vx: 0, vy: 0, at: performance.now(), dist: 0 };
+        fling.current = { vx: 0, vy: 0, at: e.timeStamp, dist: 0 };
       }
       return;
     }
@@ -618,7 +643,7 @@ export function PlanCanvas() {
     touch.current = null;
     if (pan.current) {
       pan.current = null;
-      startFling();
+      startFling(e.timeStamp);
       return;
     }
     if (!t || !ctx) return;
@@ -661,8 +686,10 @@ export function PlanCanvas() {
     else if (ctx) active.touchCancel?.();
   };
 
-  // Pointer events don't reliably carry a click count, so detect double-clicks here.
-  const lastDown = useRef({ t: 0, x: 0, y: 0 });
+  // Pointer events don't reliably carry a click count, so detect double-clicks here, timed by
+  // when the presses happened: the first press's redraw (the details panel opening) can hold
+  // the second one up past the interval though the button was pressed twice in quick time.
+  const lastDown = useRef({ t: Number.NEGATIVE_INFINITY, x: 0, y: 0 });
   const onPointerDown = (e: React.PointerEvent) => {
     stoppedCoast.current = flingFrame.current !== undefined;
     stopFling();
@@ -673,13 +700,15 @@ export function PlanCanvas() {
       onTouchDown(e);
       return;
     }
-    const now = performance.now();
+    const now = e.timeStamp;
     const prev = lastDown.current;
     const double =
       e.button === 0 &&
       now - prev.t < 350 &&
       Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < 6;
-    lastDown.current = double ? { t: 0, x: 0, y: 0 } : { t: now, x: e.clientX, y: e.clientY };
+    lastDown.current = double
+      ? { t: Number.NEGATIVE_INFINITY, x: 0, y: 0 }
+      : { t: now, x: e.clientX, y: e.clientY };
     const p = pointer(e, double ? 2 : 1);
     // A click on a suggested point leaves it out or brings it back, and does nothing else.
     const ghost = e.button === 0 && !space.current ? ghostKeyOf(e.target) : null;
