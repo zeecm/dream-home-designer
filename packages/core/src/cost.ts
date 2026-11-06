@@ -5,6 +5,7 @@ import type { DoorStyle } from './plan';
 import { type RenovationChange, renovationChanges, wallBefore } from './renovation';
 import { roomArea, roomShape } from './rooms';
 import type { Item, Level } from './schema';
+import { SHELTER_ROOM } from './structural';
 
 /**
  * A rough renovation estimate from typical Singapore prices (2025–2026): what the
@@ -118,6 +119,10 @@ export const footRun = (width: number) => Math.max(1, Math.round(width / 0.3048)
 const to10 = (v: number) => Math.round(v / 10) * 10;
 const to100 = (v: number) => Math.round(v / 100) * 100;
 
+/** Rooms not painted (outdoors), and rooms tiled to the ceiling (painted overhead only). */
+const OUTDOOR = /ledge|balcony|outside|yard|planter/i;
+const TILED = /bath|\bwc\b|toilet|shower|kitchen/i;
+
 /** A floor finish's kind for pricing, from its id. */
 function floorKind(id: string): FloorKind | null {
   if (id.startsWith('wood')) return 'timber';
@@ -129,8 +134,10 @@ function floorKind(id: string): FloorKind | null {
   return null;
 }
 
-const placeOf = (c: { rooms: string[]; outside: boolean }) =>
-  [...c.rooms, ...(c.outside ? ['outside'] : [])].join(' / ') || 'Flat';
+const placeOf = (c: { rooms: string[]; outside: boolean }) => {
+  const rooms = [...new Set(c.rooms)].join(' / ');
+  return c.outside ? (rooms ? `${rooms}, outside wall` : 'Outside wall') : rooms || 'Flat';
+};
 
 function line(
   group: CostGroup,
@@ -201,15 +208,31 @@ export function costEstimate(before: Level, after: Level | undefined, rates: Rat
   const shown = after ?? before;
   if (after) {
     const changes = renovationChanges(before, after);
-    for (const c of changes) lines.push(...changeLines(c, before, after, rates));
-    if (rates.debrisOn && lines.some((l) => l.label.startsWith('Hack'))) {
+    // A wall cut down to a half wall is hacked above; what's left isn't built anew.
+    const hacked = changes.filter((c) => c.kind === 'hack');
+    const cutDown = (c: RenovationChange) =>
+      c.kind === 'build' &&
+      (c.what === 'half' || c.what === 'half-glass') &&
+      hacked.some(
+        (h) =>
+          h.kind === 'hack' && placeOf(h) === placeOf(c) && Math.abs(h.length - c.length) < 0.05,
+      );
+    for (const c of changes) {
+      const priced = changeLines(c, before, after, rates);
+      lines.push(...(cutDown(c) ? priced.filter((l) => l.label !== 'Half wall') : priced));
+    }
+    if (rates.debrisOn && lines.some((l) => /^(Hack|Cut|Widen)/.test(l.label))) {
       lines.push(line('Building', 'Debris disposal', 'Flat', 1, 'lot', rates.debris));
     }
   }
 
   // Repainting every room: walls (perimeter × ceiling) and ceiling.
   if (rates.painting) {
-    for (const room of Object.values(shown.rooms)) {
+    const rooms = Object.values(shown.rooms).sort((a, b) => a.name.localeCompare(b.name));
+    for (const room of rooms) {
+      // Not outdoors, nor the shelter (its walls stay as built); tiled rooms: the ceiling.
+      if (OUTDOOR.test(room.name) || SHELTER_ROOM.test(room.name)) continue;
+      const tiled = TILED.test(room.name);
       const outer = roomShape(shown, room).outer;
       let perimeter = 0;
       for (let i = 0; i < outer.length; i++) {
@@ -218,17 +241,16 @@ export function costEstimate(before: Level, after: Level | undefined, rates: Rat
         if (a && b) perimeter += Math.hypot(b.x - a.x, b.y - a.y);
       }
       const height = room.ceilingHeight ?? shown.ceilingHeight;
-      const area = Math.round((perimeter * height + roomArea(shown, room)) * 10) / 10;
-      if (area > 0)
-        lines.push(
-          line('Painting', 'Repaint walls and ceiling', room.name, area, 'm²', rates.paint),
-        );
+      const walls = tiled ? 0 : perimeter * height;
+      const area = Math.round((walls + roomArea(shown, room)) * 10) / 10;
+      const what = tiled ? 'Repaint ceiling' : 'Repaint walls and ceiling';
+      if (area > 0) lines.push(line('Painting', what, room.name, area, 'm²', rates.paint));
     }
   }
 
   // Built-ins: new or resized in the renovation; with none, all of them. A carpenter
   // measures a run, not its modules: widths add up per room and kind, then round to feet.
-  const runs = new Map<string, { kind: Carpentry; where: string; width: number }>();
+  const runs = new Map<string, { kind: Carpentry; label: string; where: string; width: number }>();
   for (const it of Object.values(shown.items)) {
     const c = carpentryOf(it);
     if (!c) continue;
@@ -238,16 +260,19 @@ export function costEstimate(before: Level, after: Level | undefined, rates: Rat
         continue;
     }
     const where = roomOfItem(shown, it);
-    const k = `${where}|${c}`;
-    const run = runs.get(k) ?? { kind: c, where, width: 0 };
+    // Kitchen modules make one run; other pieces go by their own name.
+    const label =
+      c === 'base' || c === 'wall'
+        ? CARPENTRY_NAMES[c]
+        : (furnitureKind(it.assetId)?.name ?? CARPENTRY_NAMES[c]);
+    const k = `${where}|${c}|${label}`;
+    const run = runs.get(k) ?? { kind: c, label, where, width: 0 };
     run.width += itemSize(it).w;
     runs.set(k, run);
   }
-  for (const { kind, where, width } of runs.values()) {
+  for (const { kind, label, where, width } of runs.values()) {
     const feet = footRun(width);
-    lines.push(
-      line('Carpentry', CARPENTRY_NAMES[kind], where, feet, 'ft run', rates.carpentry[kind]),
-    );
+    lines.push(line('Carpentry', label, where, feet, 'ft run', rates.carpentry[kind]));
     if (kind === 'base')
       lines.push(line('Carpentry', 'Countertop', where, feet, 'ft run', rates.countertop));
   }

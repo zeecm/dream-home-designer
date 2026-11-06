@@ -142,9 +142,11 @@ const GROUPS: CostGroup[] = [
 ];
 
 const qtyText = (l: CostLine) =>
-  l.unit === 'each' || l.unit === 'lot'
-    ? `${l.qty}`
-    : `${l.unit === 'ft run' ? l.qty : l.qty.toFixed(l.unit === 'm' ? 2 : 1)} ${l.unit}`;
+  l.unit === 'lot'
+    ? ''
+    : l.unit === 'each'
+      ? `${l.qty}`
+      : `${l.unit === 'ft run' ? l.qty : l.qty.toFixed(l.unit === 'm' ? 2 : 1)} ${l.unit}`;
 
 /** The estimate as plain text: lines, total and disclaimer (for Copy and Print). */
 export function estimateText(est: CostEstimate, name: string): string {
@@ -283,7 +285,8 @@ function RateRow({ row }: { row: (typeof RATE_ROWS)[number] }) {
   const [tries, setTries] = useState(0);
   const num = (t: string) => (t.trim() === '' ? Number.NaN : Number(t.replace(/[,\s$]/g, '')));
   const commit = (low: number, high: number) => {
-    if (!Number.isFinite(low) || !Number.isFinite(high) || low < 0 || high < 0) {
+    const ok = (n: number) => Number.isFinite(n) && n >= 0 && n <= 1_000_000;
+    if (!ok(low) || !ok(high)) {
       setTries((n) => n + 1);
       return;
     }
@@ -292,7 +295,10 @@ function RateRow({ row }: { row: (typeof RATE_ROWS)[number] }) {
   return (
     <div className="rate-row">
       <span className="rate-label">
-        {row.label} <span className="muted">per {row.unit}</span>
+        {row.label}{' '}
+        <span className="muted">
+          {row.unit === 'each' ? 'each' : row.unit === 'lot' ? 'per job' : `per ${row.unit}`}
+        </span>
       </span>
       <input
         className="input"
@@ -301,6 +307,7 @@ function RateRow({ row }: { row: (typeof RATE_ROWS)[number] }) {
         defaultValue={v.low}
         key={`l${v.low}-${tries}`}
         onBlur={(e) => commit(num(e.target.value), v.high)}
+        onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
       />
       <input
         className="input"
@@ -309,6 +316,7 @@ function RateRow({ row }: { row: (typeof RATE_ROWS)[number] }) {
         defaultValue={v.high}
         key={`h${v.high}-${tries}`}
         onBlur={(e) => commit(v.low, num(e.target.value))}
+        onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
       />
     </div>
   );
@@ -415,6 +423,11 @@ export function EstimateDialog({ onClose }: { onClose: () => void }) {
             {toggle('painting', 'Repaint every room')}
             {toggle('debrisOn', 'Debris disposal when hacking')}
             {toggle('contingency', 'Add 10% contingency')}
+          </div>
+          <div className="rate-row rate-head" aria-hidden="true">
+            <span />
+            <span>Low</span>
+            <span>High</span>
           </div>
           {RATE_ROWS.map((row) => (
             <RateRow key={row.label} row={row} />

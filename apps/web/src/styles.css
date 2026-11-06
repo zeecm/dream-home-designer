@@ -2878,3 +2878,12 @@ h3.field-label {
     grid-column: 1 / -1;
   }
 }
+.rate-head {
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+@media (max-width: 560px) {
+  .rate-head span:first-child {
+    display: none;
+  }
+}

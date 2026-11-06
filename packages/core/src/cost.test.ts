@@ -93,7 +93,9 @@ describe('cost estimate', () => {
       updateWall(A(base), partition(reno(base)), { height: 1, glassAbove: true }),
     );
     const labels = costEstimate(flat(half), reno(half), R).lines.map((l) => l.label);
-    expect(labels).toContain('Half wall');
+    // Cut down from the wall that was there: hacked above and glazed, not built anew.
+    expect(labels).toContain('Hack wall');
+    expect(labels).not.toContain('Half wall');
     expect(labels).toContain('Fixed glass above');
   });
 
@@ -117,7 +119,7 @@ describe('cost estimate', () => {
     };
     const lvl = { ...flat(s0), items };
     const est = costEstimate(lvl, undefined, R);
-    const wl = est.lines.find((l) => l.label === 'Wardrobe');
+    const wl = est.lines.find((l) => l.label === 'Built-in wardrobe');
     expect(wl).toMatchObject({ qty: 6, unit: 'ft run', low: 1200, high: 2100 });
     const top = est.lines.find((l) => l.label === 'Countertop');
     expect(top?.qty).toBe(8);
@@ -132,7 +134,7 @@ describe('cost estimate', () => {
       ...after,
       items: { ...items, w: { ...items.w, scale: { ...items.w.scale, x: 2.4 / 1.8 } } },
     };
-    const priced = costEstimate(lvl, wider, R).lines.find((l) => l.label === 'Wardrobe');
+    const priced = costEstimate(lvl, wider, R).lines.find((l) => l.label === 'Built-in wardrobe');
     expect(priced?.qty).toBe(8);
   });
 
