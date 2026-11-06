@@ -18,11 +18,11 @@ import {
   tanBrief,
   wallOp,
 } from './fixtures/sample';
-import { handEdits, heldAspects, wallsHeld } from './handEdits';
+import { bathroomsHeld, handEdits, heldAspects, wallsHeld } from './handEdits';
 import { roomStep } from './prompts';
 import { designResult } from './result';
 import { BATHROOMS, type Concept, type Part } from './schema';
-import { roomIdAt, spaceOfRoom, spacesOf } from './spaces';
+import { roomIdAt, roomsBeside, spaceOfRoom, spacesOf } from './spaces';
 
 const fresh = (level?: Level): EditorDoc => {
   const doc = sampleFlatProject();
@@ -318,6 +318,29 @@ describe('hand-edit locks in the next version (D9, criterion 36)', () => {
     expect(p.tail).toMatch(
       new RegExp(`"id":"${alias}","kind":"sofa-3","size":\\[[^\\]]*\\],"keep":"in-place"`),
     );
+  });
+
+  it('a bathroom repainted and refloored by hand: locked as the bathrooms’, and kept', () => {
+    const { lvl, now } = handEdited();
+    const bath = Object.values(now.rooms).find((r) => /bath/i.test(r.name))!;
+    const wallId = Object.keys(now.walls).find((id) => roomsBeside(now, id).includes(bath.id))!;
+    const side = roomsBeside(now, wallId)[0] === bath.id ? 'materialLeft' : 'materialRight';
+    const edited = structuredClone(now);
+    edited.walls[wallId]![side] = 'paint-blush';
+    edited.rooms[bath.id]!.floorMaterial = 'marble';
+    const locks = handEdits(now, edited);
+    expect(locks.map((l) => [l.space, l.aspect, l.label])).toEqual([
+      [BATHROOMS, 'finishes', `${bath.name} wall (repainted)`],
+      [BATHROOMS, 'finishes', `${bath.name} floor (marble)`],
+    ]);
+    expect(bathroomsHeld(locks)).toBe(true);
+    const kept = designResult(edited, lvl, next(lvl, locks));
+    expect(kept.level.walls[wallId]?.[side]).toBe('paint-blush');
+    expect(kept.level.rooms[bath.id]?.floorMaterial).toBe('marble');
+    // Without the locks, the concept's bathroom finishes apply again.
+    const plain = designResult(edited, lvl, next(lvl, []));
+    expect(plain.level.walls[wallId]?.[side]).not.toBe('paint-blush');
+    expect(plain.level.rooms[bath.id]?.floorMaterial).not.toBe('marble');
   });
 
   it('walls changed by hand: the version applies none of its wall changes', () => {

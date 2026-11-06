@@ -20,7 +20,7 @@ export {
   dependsOnWalls,
   mergeDesign,
 } from './accept';
-export { handEdits, heldAspects, lockCovers, wallsHeld } from './handEdits';
+export { bathroomsHeld, handEdits, heldAspects, lockCovers, wallsHeld } from './handEdits';
 export {
   type Hit,
   type PlaceOutcome,

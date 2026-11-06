@@ -15,7 +15,7 @@ import { walkwayReport } from '../walkway';
 import { aspectOf } from './accept';
 import { type AliasMap, resolveAlias } from './aliases';
 import { fixedSize, priorityOf, resolveAsset } from './catalogue';
-import { heldAspects, wallsHeld } from './handEdits';
+import { bathroomsHeld, heldAspects, wallsHeld } from './handEdits';
 import { WET } from './locks';
 import { type Want, addToIndex, nameOf, placePiece, spaceIndex } from './place';
 import type { Concept, DesignInput, DesignItem, RoomUse, SpaceDesign, SpaceStatus } from './schema';
@@ -263,7 +263,8 @@ function work(
     floorRoom(id, r.floor);
     paintRoom(id, r.paint);
   }
-  for (const b of concept?.bathrooms ?? []) {
+  // Bathrooms' paint and floors, unless the person changed them by hand since accepting.
+  for (const b of bathroomsHeld(locks) ? [] : (concept?.bathrooms ?? [])) {
     const id = resolveAlias(aliases, b.room);
     const room = id ? lvl.rooms[id] : undefined;
     if (!id || !room || !WET.test(room.name)) continue;
