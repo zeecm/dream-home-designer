@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { type ClearanceIssue, clearanceIssues, doorSweep } from './clearance';
+import {
+  type ClearanceIssue,
+  chairsOf,
+  clearanceIssues,
+  clearanceZones,
+  doorSweep,
+  issueItem,
+} from './clearance';
 import { addOpening, drawWall } from './commands';
 import { blankProject } from './factory';
 import { furnitureKind, newItem, placeFurniture } from './furniture';
 import { type EditorDoc, dispatch, emptyHistory } from './history';
-import { planGeometry } from './plan';
+import { doorSwing, planGeometry } from './plan';
 import type { Level, Opening, Vec2 } from './schema';
 
 /** A 4 m square room, walls 100 mm thick on centre lines at 0 and 4. */
@@ -308,5 +315,151 @@ describe('clearance checks', () => {
     const ms = (performance.now() - t0) / 5;
     console.log(`clearance: ${ms.toFixed(2)} ms`);
     expect(ms).toBeLessThan(20);
+  });
+
+  it('13. a dining chair needs 0.75 m from the table to pull it out', () => {
+    const base = level(room());
+    const back = (xs: ClearanceIssue[]) => xs.filter((x) => x.kind === 'zone' && x.side === 'back');
+    // A dining table 1.00 m from the top wall's face (y 0.05), a chair between, facing it.
+    const roomy = withItems(base, [
+      ['dining-4', { x: 2, y: 0.05 + 1.0 + 0.4 }],
+      ['dining-chair', { x: 2, y: 1.05 - 0.15 }],
+    ]);
+    expect(back(clearanceIssues(roomy))).toHaveLength(0);
+    // At 0.55 m: short, 0.55 here.
+    const tight = withItems(base, [
+      ['dining-4', { x: 2, y: 0.05 + 0.55 + 0.4 }],
+      ['dining-chair', { x: 2, y: 0.6 - 0.15 }],
+    ]);
+    const z = back(clearanceIssues(tight));
+    expect(z).toHaveLength(1);
+    const i = z[0];
+    if (i?.kind !== 'zone') throw new Error('no zone');
+    expect(i.need).toBeCloseTo(0.75, 5);
+    expect(i.what).toBe('Pulling out the chair needs');
+    expect(Math.abs(i.have - 0.55)).toBeLessThanOrEqual(0.005);
+    // Its table's chairs, and the zone drawn while it's handled.
+    const tableId = Object.values(tight.items).find((t) => t.assetId === 'dining-4')?.id ?? '';
+    const chair = Object.values(tight.items).find((t) => t.assetId === 'dining-chair');
+    if (!chair) throw new Error('no chair');
+    expect(chairsOf(tight, tableId)).toEqual([chair.id]);
+    expect(clearanceZones(chair, tight)[0]?.side).toBe('back');
+    // Turned 30°: the same room behind it.
+    const turned = withItems(base, [
+      ['dining-4', { x: 2, y: 0.05 + 0.55 + 0.4 }],
+      ['dining-chair', { x: 2, y: 0.6 - 0.15 }, Math.PI / 6],
+    ]);
+    const t = back(clearanceIssues(turned))[0];
+    expect(t?.kind === 'zone' && Math.abs(t.have - 0.55)).toBeLessThanOrEqual(0.005);
+    // A chair 0.50 m from any table isn't one of its chairs.
+    const apart = withItems(base, [
+      ['dining-4', { x: 2, y: 2 }],
+      ['dining-chair', { x: 2, y: 2 - 0.4 - 0.5 - 0.25 }],
+    ]);
+    expect(back(clearanceIssues(apart))).toHaveLength(0);
+    // Back to back with another table's chair 0.60 m behind: short.
+    const pair = withItems(base, [
+      ['dining-4', { x: 2, y: 1.2 }],
+      ['dining-chair', { x: 2, y: 1.75 }, Math.PI],
+      ['dining-chair', { x: 2, y: 2.45 }],
+      ['dining-4', { x: 2, y: 3.0 }],
+    ]);
+    const bb = back(clearanceIssues(pair));
+    expect(bb.length).toBeGreaterThan(0);
+    for (const x of bb)
+      expect(x.kind === 'zone' && Math.abs(x.have - 0.6)).toBeLessThanOrEqual(0.005);
+  });
+
+  /** A swing door in the room's top or left wall, `at` from the top-left corner, hinged away from it. */
+  function cornerDoor(s: EditorDoc, which: 'top' | 'left', at: number, style?: Opening['style']) {
+    const l = level(s);
+    const wall = Object.values(l.walls).find((w) => {
+      const a = l.vertices[w.a];
+      const b = l.vertices[w.b];
+      if (!a || !b) return false;
+      return which === 'top' ? a.y === 0 && b.y === 0 : a.x === 0 && b.x === 0;
+    });
+    if (!wall) throw new Error('no wall');
+    const a = l.vertices[wall.a] as Vec2;
+    const b = l.vertices[wall.b] as Vec2;
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    // Distance from the corner (0, 0) along the wall to the door's centre.
+    const fromA = Math.hypot(a.x, a.y) < 1e-9;
+    const t = fromA ? at / len : 1 - at / len;
+    const geom = planGeometry(l);
+    const f = geom.frames[wall.id];
+    if (!f) throw new Error('no frame');
+    // The swing into the room, hinged at the jamb farther from the corner.
+    const swings: Opening['swing'][] = ['leftIn', 'rightIn', 'leftOut', 'rightOut'];
+    const pick = swings.find((sw) => {
+      const o = {
+        id: 'x',
+        wallId: wall.id,
+        kind: 'door',
+        t,
+        width: 0.8,
+        height: 2.1,
+        sill: 0,
+        swing: sw,
+      } as Opening;
+      const d = doorSwing(f, o);
+      const inside = d.leafEnd.x > 0.05 && d.leafEnd.y > 0.05;
+      return inside && Math.hypot(d.hinge.x, d.hinge.y) > at;
+    });
+    const r = addOpening(l.id, {
+      wallId: wall.id,
+      kind: 'door',
+      t,
+      width: 0.8,
+      height: 2.1,
+      sill: 0,
+      swing: pick ?? 'leftIn',
+      ...(style ? { style } : {}),
+      ...(style === 'sliding' ? { panels: 2 } : {}),
+    });
+    return { s: dispatch(s, r.command), id: r.openingId };
+  }
+
+  it('14. doors at a corner whose leaves meet: one issue each; apart, sliding or double: none', () => {
+    const doors = (xs: ClearanceIssue[]) => xs.filter((x) => x.kind === 'doors');
+    let a = cornerDoor(room(), 'top', 0.55);
+    let b = cornerDoor(a.s, 'left', 0.55);
+    const clash = doors(clearanceIssues(level(b.s)));
+    expect(clash).toHaveLength(2);
+    expect(new Set(clash.map((x) => (x.kind === 'doors' ? x.openingId : '')))).toEqual(
+      new Set([a.id, b.id]),
+    );
+    // A door clash is about two doors, not a piece.
+    expect(clash.every((x) => issueItem(x) === null)).toBe(true);
+    // Each 0.3 m further from the corner (0.6 apart): clear.
+    a = cornerDoor(room(), 'top', 0.85);
+    b = cornerDoor(a.s, 'left', 0.85);
+    expect(doors(clearanceIssues(level(b.s)))).toHaveLength(0);
+    // Two two-panel sliding doors side by side on one wall: none.
+    a = cornerDoor(room(), 'top', 1.0, 'sliding');
+    b = cornerDoor(a.s, 'top', 2.4, 'sliding');
+    expect(doors(clearanceIssues(level(b.s)))).toHaveLength(0);
+    // A double door's own two leaves: none.
+    a = cornerDoor(room(), 'top', 2.0, 'double');
+    expect(doors(clearanceIssues(level(a.s)))).toHaveLength(0);
+  });
+
+  it('15. a door hitting a wardrobe’s doors: 0.30 m off its swing yes, 0.50 no, a bookshelf no', () => {
+    // A swing door in the left wall at y 2, its leaf reaching 0.85 m into the room.
+    const d = cornerDoor(room(), 'left', 2.0);
+    const lvl = level(d.s);
+    const sweep = doorSweep(lvl, d.id).flat();
+    const reach = Math.max(...sweep.map((p) => p.x));
+    expect(reach).toBeCloseTo(0.87, 1);
+    const front = (gap: number, kind = 'wardrobe') =>
+      clearanceIssues(withItems(lvl, [[kind, { x: reach + gap + 0.3, y: 2 }, Math.PI / 2]])).filter(
+        (x) => x.kind === 'door-front' || x.kind === 'door',
+      );
+    const hit = front(0.3);
+    expect(hit).toHaveLength(1);
+    expect(hit[0]?.kind).toBe('door-front');
+    expect(hit[0]?.kind === 'door-front' && hit[0].openingId).toBe(d.id);
+    expect(front(0.5)).toHaveLength(0);
+    expect(front(0.3, 'bookshelf')).toHaveLength(0);
   });
 });

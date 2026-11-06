@@ -469,6 +469,34 @@ function roomLabels(level: Level, geom: PlanGeometry, zoom: number): RoomLabel[]
 /** Labels are fitted to zoom in steps of about 9%, so a wheel zoom doesn't re-place them. */
 const labelZoom = (zoom: number) => 2 ** (Math.round(Math.log2(zoom) * 8) / 8);
 
+const labelCache = new WeakMap<Level, Map<number, RoomLabel[]>>();
+
+/**
+ * Where the room names sit at this zoom, as RoomLabels draws them (kept per level and zoom
+ * step): centre and half size in metres, for other labels to keep clear of.
+ */
+export function roomLabelBoxes(
+  level: Level,
+  geom: PlanGeometry,
+  zoom: number,
+): { at: Vec2; half: Vec2 }[] {
+  return labelsAt(level, geom, labelZoom(zoom));
+}
+
+function labelsAt(level: Level, geom: PlanGeometry, step: number): RoomLabel[] {
+  let cache = labelCache.get(level);
+  if (!cache) {
+    cache = new Map();
+    labelCache.set(level, cache);
+  }
+  let out = cache.get(step);
+  if (!out) {
+    out = roomLabels(level, geom, step);
+    cache.set(step, out);
+  }
+  return out;
+}
+
 /** Half the room move handle's size on screen (px), with room to spare around it. */
 const MOVE_HANDLE_HALF = 16;
 
@@ -533,7 +561,7 @@ export function roomHandleAt(
 export const RoomLabels = memo(function RoomLabels({ level, geom, view, size }: ScreenProps) {
   // Placement depends on zoom, not on panning, so a pan reuses it.
   const zoomStep = labelZoom(view.zoom);
-  const labels = useMemo(() => roomLabels(level, geom, zoomStep), [level, geom, zoomStep]);
+  const labels = useMemo(() => labelsAt(level, geom, zoomStep), [level, geom, zoomStep]);
   return (
     <g className="room-labels" pointerEvents="none">
       {labels.map((l) => {

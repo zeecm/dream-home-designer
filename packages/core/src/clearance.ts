@@ -1,12 +1,31 @@
+import { doorClashes, doorFrontIssues } from './clearance-doors';
+import {
+  type Side,
+  convexHull,
+  dot,
+  growRect,
+  nearestOnEdge,
+  overlapDepth,
+  polygonGap,
+  roomOff,
+  shorten,
+  sideOf,
+  zoneOf,
+} from './convex';
 import { footprintPolygon, wallFootprints } from './footprints';
-import { furnitureKind, furnitureLayer, itemFootprint } from './furniture';
+import { furnitureKind, furnitureLayer, itemFootprint, itemSize } from './furniture';
+import { pointInPolygon } from './geometry';
 import { DOOR_LEAF_THICKNESS, doorLeaves, planGeometry } from './plan';
 import { type Item, type Level, type Vec2, isBoundary } from './schema';
 
+export { overlapDepth } from './convex';
+
 /**
  * Clearances: room in front of a piece to use it (open a wardrobe, pull out a drawer, sit
- * at a desk), beside a bed to get in, a door's swing kept clear, pieces not overlapping or
- * pushed into walls. Advice only: nothing here blocks an edit. Metres.
+ * at a desk or a dining table), beside a bed to get in, a door's swing kept clear, doors not
+ * hitting each other or a piece's own doors, pieces not overlapping or pushed into walls.
+ * Walkways through the flat are in walkway.ts. Advice only: nothing here blocks an edit.
+ * Metres.
  */
 export interface ClearanceRule {
   /** Which side needs room: in front (+y), each long side, or one long side at least. */
@@ -39,11 +58,32 @@ export const CLEARANCE_RULES: Record<string, ClearanceRule> = {
   'bed-super-single': { side: 'either-side', need: 0.6, what: 'Getting into bed needs' },
 };
 
+/** Dining tables a chair is pulled out from, and the chairs (Neufert: 750 mm to stand up). */
+export const DINING_TABLES = new Set([
+  'dining-4',
+  'dining-6',
+  'wooden-table',
+  'pedestal-table-round',
+]);
+export const DINING_CHAIRS = new Set(['dining-chair', 'dining-chair-upholstered', 'plastic-chair']);
+export const PULL_BACK = 0.75;
+const PULL_WHAT = 'Pulling out the chair needs';
+/** A chair this close to a table (or tucked under it) is one of its chairs. */
+const CHAIR_REACH = 0.3;
+
+/** Where a walkway goes: a room, or one long side of a bed. */
+export interface WalkwayTo {
+  roomId?: string;
+  bedId?: string;
+  side?: 'left' | 'right';
+}
+
 export type ClearanceIssue =
   | {
       kind: 'zone';
       itemId: string;
-      side: 'front' | 'left' | 'right';
+      /** Off the front, a long side (beds), or behind a dining chair (pulling it out). */
+      side: 'front' | 'left' | 'right' | 'back';
       what: string;
       need: number;
       /** The room there is: to the nearest wall or piece in the way. */
@@ -53,7 +93,31 @@ export type ClearanceIssue =
     }
   | { kind: 'door'; itemId: string; openingId: string; sweep: Vec2[][] }
   | { kind: 'overlap'; itemId: string; otherId: string; depth: number }
-  | { kind: 'wall'; itemId: string; depth: number };
+  | { kind: 'wall'; itemId: string; depth: number }
+  | {
+      /** A piece narrowing (or closing) the way from the main door to rooms or bed sides. */
+      kind: 'walkway';
+      itemId: string;
+      route: 'circulation' | 'bed';
+      /** Every room or bed side beyond the pinch. */
+      to: WalkwayTo[];
+      need: number;
+      /** The narrowest clear width on the widest way; 0 when the way is closed. */
+      have: number;
+      /** The need is the flat's own width there (narrower than the rule's). */
+      capped: boolean;
+      /** Across the narrowest point, from one obstacle to the other. */
+      pinch: [Vec2, Vec2];
+      /** From the start through the pinch to the target, at most 60 points. */
+      path: Vec2[];
+    }
+  /** Two doors whose leaves hit each other when both are open (one issue per door). */
+  | { kind: 'doors'; openingId: string; otherId: string; sweep: Vec2[][] }
+  /** A door whose leaves hit a piece's hinged front (its reach, `zone`). */
+  | { kind: 'door-front'; itemId: string; openingId: string; zone: Vec2[]; sweep: Vec2[][] };
+
+/** The piece an issue is about; null for a door clash (it's about two doors). */
+export const issueItem = (i: ClearanceIssue): string | null => ('itemId' in i ? i.itemId : null);
 
 /** Pieces that sit under a table or desk, and the tables and desks they sit under. */
 const SEAT = /dining-chair|stool|plastic-chair/;
@@ -66,182 +130,83 @@ const isKitchen = (id: string) =>
 const HEAD_END = 0.55;
 
 /** Pieces that stand on the floor and get in the way (not rugs, people or lamps above). */
-function blocks(item: Item): boolean {
+export function blocks(item: Item): boolean {
   const kind = furnitureKind(item.assetId);
   if (!kind || kind.walkThrough || kind.category === 'People') return false;
   return furnitureLayer(kind) === 'floor';
 }
 
-// --- convex polygon helpers -------------------------------------------------------------
-
-interface Box {
-  x0: number;
-  y0: number;
-  x1: number;
-  y1: number;
-}
-const boxes = new WeakMap<readonly Vec2[], Box>();
-/** A polygon's bounding box (kept per polygon). */
-function box(poly: readonly Vec2[]): Box {
-  let b = boxes.get(poly);
-  if (!b) {
-    b = {
-      x0: Number.POSITIVE_INFINITY,
-      y0: Number.POSITIVE_INFINITY,
-      x1: Number.NEGATIVE_INFINITY,
-      y1: Number.NEGATIVE_INFINITY,
-    };
-    for (const p of poly) {
-      b.x0 = Math.min(b.x0, p.x);
-      b.y0 = Math.min(b.y0, p.y);
-      b.x1 = Math.max(b.x1, p.x);
-      b.y1 = Math.max(b.y1, p.y);
-    }
-    boxes.set(poly, b);
-  }
-  return b;
-}
-/** Whether two polygons' boxes meet (a quick no before the exact test). */
-const near = (p: readonly Vec2[], q: readonly Vec2[], pad = 0) => {
-  const a = box(p);
-  const b = box(q);
-  return a.x0 <= b.x1 + pad && b.x0 <= a.x1 + pad && a.y0 <= b.y1 + pad && b.y0 <= a.y1 + pad;
-};
-
-const dot = (a: Vec2, b: Vec2) => a.x * b.x + a.y * b.y;
-
-function axes(poly: readonly Vec2[]): Vec2[] {
-  const out: Vec2[] = [];
-  for (let i = 0; i < poly.length; i++) {
-    const p = poly[i] as Vec2;
-    const q = poly[(i + 1) % poly.length] as Vec2;
-    const len = Math.hypot(q.x - p.x, q.y - p.y);
-    if (len > 1e-9) out.push({ x: -(q.y - p.y) / len, y: (q.x - p.x) / len });
-  }
-  return out;
+/** A side of a piece as the rule sees it: a bed's long side from the foot to the bedside table. */
+function ruleSide(fp: Vec2[], side: 'front' | 'left' | 'right'): Side {
+  const s = sideOf(fp, side);
+  return side !== 'front' && s.width > HEAD_END + 0.3 ? shorten(s, s.width - HEAD_END) : s;
 }
 
-/** How far two convex polygons overlap (the least push to part them); 0 when apart. */
-export function overlapDepth(p: readonly Vec2[], q: readonly Vec2[]): number {
-  if (!near(p, q)) return 0;
-  let least = Number.POSITIVE_INFINITY;
-  for (const n of [...axes(p), ...axes(q)]) {
-    let p0 = Number.POSITIVE_INFINITY;
-    let p1 = Number.NEGATIVE_INFINITY;
-    let q0 = Number.POSITIVE_INFINITY;
-    let q1 = Number.NEGATIVE_INFINITY;
-    for (const v of p) {
-      const d = dot(v, n);
-      p0 = Math.min(p0, d);
-      p1 = Math.max(p1, d);
-    }
-    for (const v of q) {
-      const d = dot(v, n);
-      q0 = Math.min(q0, d);
-      q1 = Math.max(q1, d);
-    }
-    const o = Math.min(p1, q1) - Math.max(p0, q0);
-    if (o <= 0) return 0;
-    least = Math.min(least, o);
-  }
-  return Number.isFinite(least) ? least : 0;
-}
-
-/** `poly` clipped to the half-plane where `f(v) >= 0` (f linear). */
-function clipHalf(poly: Vec2[], f: (v: Vec2) => number): Vec2[] {
-  const out: Vec2[] = [];
-  for (let i = 0; i < poly.length; i++) {
-    const a = poly[i] as Vec2;
-    const b = poly[(i + 1) % poly.length] as Vec2;
-    const fa = f(a);
-    const fb = f(b);
-    if (fa >= 0) out.push(a);
-    if (fa >= 0 !== fb >= 0) {
-      const t = fa / (fa - fb);
-      out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+/** The dining table a chair belongs to: the nearest within reach, or none. */
+function tableOf(chair: Item, level: Level): Item | undefined {
+  if (!DINING_CHAIRS.has(chair.assetId)) return undefined;
+  const fp = itemFootprint(chair);
+  let best: Item | undefined;
+  let bestD = CHAIR_REACH;
+  for (const t of Object.values(level.items)) {
+    if (!DINING_TABLES.has(t.assetId)) continue;
+    const d = polygonGap(fp, itemFootprint(t)).d;
+    if (d <= bestD) {
+      best = t;
+      bestD = d;
     }
   }
-  return out;
+  return best;
 }
 
-function convexHull(points: Vec2[]): Vec2[] {
-  const pts = [...points].sort((a, b) => a.x - b.x || a.y - b.y);
-  if (pts.length < 3) return pts;
-  const cross = (o: Vec2, a: Vec2, b: Vec2) =>
-    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
-  const lower: Vec2[] = [];
-  for (const p of pts) {
-    while (
-      lower.length >= 2 &&
-      cross(lower[lower.length - 2] as Vec2, lower[lower.length - 1] as Vec2, p) <= 0
-    )
-      lower.pop();
-    lower.push(p);
+/** The chairs of a dining table (for its details and to draw their zones with it). */
+export function chairsOf(level: Level, tableId: string): string[] {
+  return Object.values(level.items)
+    .filter((c) => tableOf(c, level)?.id === tableId)
+    .map((c) => c.id);
+}
+
+/**
+ * The side a chair is pulled out over: from the table's edge nearest the chair, through the
+ * chair's centre (so a chair turned a little still works), as wide as the chair.
+ */
+function pullSide(chair: Item, table: Item): Side {
+  const c = { x: chair.position.x, y: chair.position.z };
+  const tfp = itemFootprint(table);
+  const e = nearestOnEdge(c, tfp);
+  let n = { x: c.x - e.at.x, y: c.y - e.at.y };
+  const len = Math.hypot(n.x, n.y);
+  if (pointInPolygon(c, tfp) || len < 1e-6) {
+    // Tucked right under: straight out from that edge.
+    const p = tfp[e.edge] as Vec2;
+    const q = tfp[(e.edge + 1) % tfp.length] as Vec2;
+    const el = Math.hypot(q.x - p.x, q.y - p.y) || 1;
+    n = { x: (q.y - p.y) / el, y: -(q.x - p.x) / el };
+    const t = { x: table.position.x, y: table.position.z };
+    if (dot(n, { x: e.at.x - t.x, y: e.at.y - t.y }) < 0) n = { x: -n.x, y: -n.y };
+  } else {
+    n = { x: n.x / len, y: n.y / len };
   }
-  const upper: Vec2[] = [];
-  for (const p of [...pts].reverse()) {
-    while (
-      upper.length >= 2 &&
-      cross(upper[upper.length - 2] as Vec2, upper[upper.length - 1] as Vec2, p) <= 0
-    )
-      upper.pop();
-    upper.push(p);
-  }
-  return [...lower.slice(0, -1), ...upper.slice(0, -1)];
+  const half = itemSize(chair).w / 2;
+  const across = { x: -n.y, y: n.x };
+  return {
+    a: { x: e.at.x - across.x * half, y: e.at.y - across.y * half },
+    b: { x: e.at.x + across.x * half, y: e.at.y + across.y * half },
+    n,
+    width: half * 2,
+  };
 }
 
-// --- the checks -------------------------------------------------------------------------
-
-/** One side of a piece: its two corners (left to right, looking out) and outward normal. */
-interface Side {
-  a: Vec2;
-  b: Vec2;
-  n: Vec2;
-  width: number;
-}
-
-/** Footprint corners: back-left, back-right, front-right, front-left (itemFootprint). */
-function sideOf(fp: Vec2[], side: 'front' | 'left' | 'right'): Side {
-  const [bl, br, fr, fl] = fp as [Vec2, Vec2, Vec2, Vec2];
-  const [a, b, inner] =
-    // Each long side from the foot (front) to the head (back).
-    side === 'front' ? [fr, fl, br] : side === 'left' ? [fl, bl, fr] : [fr, br, fl];
-  const width = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-  // Outward: away from the opposite side.
-  const d = { x: (b.x - a.x) / width, y: (b.y - a.y) / width };
-  let n = { x: -d.y, y: d.x };
-  if (dot({ x: inner.x - a.x, y: inner.y - a.y }, n) > 0) n = { x: -n.x, y: -n.y };
-  return { a, b, n, width };
-}
-
-/** The area `need` deep off a side. */
-function zoneOf(s: Side, need: number): Vec2[] {
-  const off = (p: Vec2) => ({ x: p.x + s.n.x * need, y: p.y + s.n.y * need });
-  return [s.a, s.b, off(s.b), off(s.a)];
-}
-
-/** The room off a side, up to `need`: how far the nearest obstacle is, in the side's width. */
-function roomOff(s: Side, need: number, obstacles: Vec2[][]): number {
-  const d = { x: (s.b.x - s.a.x) / s.width, y: (s.b.y - s.a.y) / s.width };
-  const u = (p: Vec2) => (p.x - s.a.x) * d.x + (p.y - s.a.y) * d.y;
-  const v = (p: Vec2) => (p.x - s.a.x) * s.n.x + (p.y - s.a.y) * s.n.y;
-  // A wall or piece only touching the side's ends (a corner) isn't in front of it.
-  const e = 0.01;
-  let have = need;
-  const zone = zoneOf(s, need);
-  for (const poly of obstacles) {
-    if (!near(zone, poly)) continue;
-    let c = clipHalf(poly, (p) => u(p) - e);
-    c = clipHalf(c, (p) => s.width - e - u(p));
-    c = clipHalf(c, (p) => v(p) + 0.005);
-    c = clipHalf(c, (p) => need - v(p));
-    for (const p of c) have = Math.min(have, Math.max(0, v(p)));
-  }
-  return have;
-}
-
-/** The areas a piece needs kept clear by its rule (full depth), to show while it's handled. */
-export function clearanceZones(item: Item): { side: 'front' | 'left' | 'right'; zone: Vec2[] }[] {
+/**
+ * The areas a piece needs kept clear by its rule (full depth), to show while it's handled.
+ * A dining chair's is behind it, from its table; `level` finds the table.
+ */
+export function clearanceZones(
+  item: Item,
+  level?: Level,
+): { side: 'front' | 'left' | 'right' | 'back'; zone: Vec2[] }[] {
+  const table = level && tableOf(item, level);
+  if (table) return [{ side: 'back', zone: zoneOf(pullSide(item, table), PULL_BACK) }];
   const rule = CLEARANCE_RULES[item.assetId];
   if (!rule) return [];
   const fp = itemFootprint(item);
@@ -279,15 +244,44 @@ export function doorSweep(
 }
 
 /**
- * Every clearance problem on a level: short room in front of (or beside) a piece, a door
- * whose swing a piece is in, pieces overlapping, a piece pushed into a wall. Pieces that don't
- * stand on the floor (lamps, wall cabinets, ceiling lights), rugs and people are left out.
+ * A bed's long sides that walkways check: those with room to get in (a side slice 1 finds
+ * short isn't checked again), and of a single bed only the better one. Each with the area
+ * beside it, from the foot to the bedside table.
+ */
+export function bedSides(level: Level, item: Item): { side: 'left' | 'right'; zone: Vec2[] }[] {
+  const rule = CLEARANCE_RULES[item.assetId];
+  if (!rule || rule.side === 'front' || !blocks(item)) return [];
+  const fp = itemFootprint(item);
+  const { walls } = fixedParts(level);
+  const others = Object.values(level.items)
+    .filter((o) => o.id !== item.id && blocks(o))
+    .map((o) => itemFootprint(o));
+  const obstacles = [...walls, ...others];
+  const sides = (['left', 'right'] as const).map((side) => {
+    const s = ruleSide(fp, side);
+    return { side, have: roomOff(s, rule.need, obstacles), zone: zoneOf(s, rule.need) };
+  });
+  const ok = sides.filter((s) => s.have >= rule.need - 0.005);
+  if (rule.side === 'sides') return ok.map(({ side, zone }) => ({ side, zone }));
+  const best = ok.reduce<(typeof ok)[number] | null>(
+    (p, q) => (!p || q.have > p.have ? q : p),
+    null,
+  );
+  return best ? [{ side: best.side, zone: best.zone }] : [];
+}
+
+/**
+ * Every clearance problem on a level that is quick to find (cheap enough for every frame of
+ * a drag): short room in front of (or beside) a piece or behind a dining chair, a door whose
+ * swing a piece is in, doors hitting each other or a piece's doors, pieces overlapping, a
+ * piece pushed into a wall. Pieces that don't stand on the floor (lamps, wall cabinets,
+ * ceiling lights), rugs and people are left out. Walkways: `walkwayReport`.
  */
 export function clearanceIssues(level: Level): ClearanceIssue[] {
   const out: ClearanceIssue[] = [];
   const items = Object.values(level.items).filter(blocks);
   const fps = new Map(items.map((it) => [it.id, itemFootprint(it)]));
-  const { walls, solid, sweeps } = fixedParts(level);
+  const { walls, solid, sweeps, clashes } = fixedParts(level);
 
   // Kitchen cabinets joined into one run (straight, L or U): one counter, not in each
   // other's way. Runs apart (a galley's two sides) still are.
@@ -309,6 +303,7 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
       }
     }
   }
+  const tables = items.filter((it) => DINING_TABLES.has(it.assetId));
 
   for (const it of items) {
     const fp = fps.get(it.id) as Vec2[];
@@ -330,9 +325,7 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
       // (a U's arms): an L's other leg or the next cabinet along is one counter.
       const obstacles = [...walls, ...others];
       const check = (side: 'front' | 'left' | 'right') => {
-        let s = sideOf(fp, side);
-        // Beside a bed, what counts is the room from the foot to the bedside table.
-        if (side !== 'front' && s.width > HEAD_END + 0.3) s = shorten(s, s.width - HEAD_END);
+        const s = ruleSide(fp, side);
         return { side, have: roomOff(s, rule.need, obstacles), zone: zoneOf(s, rule.need) };
       };
       const sides = rule.side === 'front' ? [check('front')] : [check('left'), check('right')];
@@ -357,20 +350,51 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
         });
       }
     }
+    // A dining chair: room behind it to pull it out and sit, from its table's edge. In the
+    // way: solid walls and pieces on the floor, not this chair nor its table (a chair of
+    // another table behind it is).
+    if (DINING_CHAIRS.has(it.assetId) && tables.length) {
+      const table = tableOf(it, level);
+      if (table && fps.has(table.id)) {
+        const s = pullSide(it, table);
+        const obstacles = [
+          ...solid,
+          ...items
+            .filter((o) => o.id !== it.id && o.id !== table.id)
+            .map((o) => fps.get(o.id) as Vec2[]),
+        ];
+        const have = roomOff(s, PULL_BACK, obstacles);
+        if (have < PULL_BACK - 0.005) {
+          out.push({
+            kind: 'zone',
+            itemId: it.id,
+            side: 'back',
+            what: PULL_WHAT,
+            need: PULL_BACK,
+            have,
+            zone: zoneOf(s, PULL_BACK),
+          });
+        }
+      }
+    }
     // Pushed into a wall (more than a centimetre).
     const into = Math.max(0, ...solid.map((w) => overlapDepth(fp, w)));
     if (into > 0.01) out.push({ kind: 'wall', itemId: it.id, depth: into });
   }
 
   // A door's swing with a piece in it.
+  const inSwing = new Set<string>();
   for (const [openingId, sweep] of sweeps) {
     for (const it of items) {
       const fp = fps.get(it.id) as Vec2[];
       if (sweep.some((s) => overlapDepth(fp, s) > 0.005)) {
         out.push({ kind: 'door', itemId: it.id, openingId, sweep });
+        inSwing.add(`${it.id}|${openingId}`);
       }
     }
   }
+  // A door hitting a piece's own doors (a wardrobe's, the fridge's), and doors each other.
+  out.push(...doorFrontIssues(items, fps, sweeps, inSwing), ...clashes);
 
   // Pieces overlapping (a chair tucked under a table or desk is meant to).
   for (let i = 0; i < items.length; i++) {
@@ -392,29 +416,12 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
   return out;
 }
 
-/** A piece's footprint (back-left, back-right, front-right, front-left) grown by `by` all round. */
-function growRect(fp: Vec2[], by: number): Vec2[] {
-  const [bl, br, fr, fl] = fp as [Vec2, Vec2, Vec2, Vec2];
-  const unit = (p: Vec2, q: Vec2) => {
-    const len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
-    return { x: ((q.x - p.x) / len) * by, y: ((q.y - p.y) / len) * by };
-  };
-  const ex = unit(bl, br);
-  const ey = unit(bl, fl);
-  const at = (p: Vec2, sx: number, sy: number) => ({
-    x: p.x + ex.x * sx + ey.x * sy,
-    y: p.y + ex.y * sx + ey.y * sy,
-  });
-  return [at(bl, -1, -1), at(br, 1, -1), at(fr, 1, 1), at(fl, -1, 1)];
-}
-
-/** A side cut to its first `width` (from its start). */
-function shorten(s: Side, width: number): Side {
-  const k = width / s.width;
-  return { ...s, b: { x: s.a.x + (s.b.x - s.a.x) * k, y: s.a.y + (s.b.y - s.a.y) * k }, width };
-}
-
-type Fixed = { walls: Vec2[][]; solid: Vec2[][]; sweeps: [string, Vec2[][]][] };
+type Fixed = {
+  walls: Vec2[][];
+  solid: Vec2[][];
+  sweeps: [string, Vec2[][]][];
+  clashes: Extract<ClearanceIssue, { kind: 'doors' }>[];
+};
 // Walls and doors don't change while furniture moves: kept by the walls, corners and openings
 // (Immer keeps those objects while only items change).
 const fixedCache = new WeakMap<object, { vertices: object; openings: object; fixed: Fixed }>();
@@ -444,7 +451,8 @@ function fixedParts(level: Level): Fixed {
     .filter((o) => o.kind === 'door')
     .map((o): [string, Vec2[][]] => [o.id, doorSweep(level, o.id, geom.frames)])
     .filter(([, sw]) => sw.length > 0);
-  const fixed = { walls, solid, sweeps };
+  // Door against door depends only on walls and doors.
+  const fixed = { walls, solid, sweeps, clashes: doorClashes(sweeps) };
   if (Object.isFrozen(level.walls)) {
     fixedCache.set(level.walls, { vertices: level.vertices, openings: level.openings, fixed });
   }

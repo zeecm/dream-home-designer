@@ -29,3 +29,5 @@ export * from './cost';
 export * from './delivery';
 export * from './dimensions';
 export * from './electrical';
+export * from './clearance-doors';
+export * from './walkway';

@@ -161,6 +161,15 @@ export function mainDoors(level: Level, geom = planGeometry(level)): string[] {
 }
 
 /**
+ * The flat's way in: the main door, if a door leads outside at all (an upper floor of a
+ * house, or a plan whose outside wall isn't drawn, has none).
+ */
+export function entranceDoor(level: Level, geom = planGeometry(level)): string | null {
+  const first = mainDoors(level, geom)[0];
+  return first && outsideOpenings(level, geom).has(first) ? first : null;
+}
+
+/**
  * The way in for a piece on `level`, from the main door `from` (default: the widest door to
  * the outside): the doors on the route, each judged, and the worst of them.
  */

@@ -54,7 +54,8 @@ export const useFrom = create<{
   },
 }));
 
-const isOwn = (level: Level, itemId: string) => {
+/** A piece of the person's own (made by size): its way in is always shown. */
+export const wayIsOwn = (level: Level, itemId: string) => {
   const a = level.items[itemId]?.assetId ?? '';
   return !furnitureKind(a)?.model && a.startsWith('mdl_');
 };
@@ -153,7 +154,7 @@ export function deliveryText(level: Level, r: Delivery): string {
 export function GettingItIn({ level, id }: { level: Level; id: string }) {
   const projectId = useProject().id;
   const item = level.items[id];
-  const own = isOwn(level, id);
+  const own = wayIsOwn(level, id);
   const shown = useWayShown((s) => s.ids.has(id));
   const toggle = useWayShown((s) => s.toggle);
   const r = useDelivery(level, id);
@@ -219,7 +220,7 @@ export const DeliveryLayer = memo(function DeliveryLayer({
   const selection = useEditor((s) => s.selection);
   const id = selection?.kind === 'item' ? selection.id : undefined;
   const asked = useWayShown((s) => (id ? s.ids.has(id) : false));
-  const show = !!id && (asked || isOwn(level, id));
+  const show = !!id && (asked || wayIsOwn(level, id));
   const r = useDelivery(level, show ? id : undefined);
   const item = id ? level.items[id] : undefined;
   if (!r || !('doors' in r) || !item) return null;

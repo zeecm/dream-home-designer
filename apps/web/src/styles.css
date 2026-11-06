@@ -18,6 +18,8 @@
   --accent: #1b6c80;
   --accent-soft: rgba(27, 108, 128, 0.1);
   --negative: #c4242a;
+  /* Clearance problems drawn on the plan (zones, sweeps, walkway pinches). */
+  --clearance: #d92d20;
   --pill-neutral-bg: #ebedee;
   --pill-neutral-ink: #353736;
   --pill-negative-bg: #ffedea;
@@ -74,6 +76,7 @@
     --accent: #4fb3c9;
     --accent-soft: rgba(79, 179, 201, 0.16);
     --negative: #e5566f;
+    --clearance: #ff6b5e;
     --pill-neutral-bg: #222222;
     --pill-neutral-ink: #d4d4d4;
     --pill-negative-bg: #2c1a20;
@@ -2602,6 +2605,12 @@ h3.field-label {
 .warning-text {
   color: #9a3412;
 }
+@media (prefers-color-scheme: dark) {
+  /* #9a3412 is 2.6:1 on the dark surface; the warning pill's ink passes AA. */
+  :root:not([data-theme="light"]) .warning-text {
+    color: var(--pill-warning-ink);
+  }
+}
 
 /* Under Compare (or in its place): a photo-real render of the view. */
 .viewport-render {
@@ -2787,15 +2796,42 @@ h3.field-label {
 
 /* Clearance checks over the plan: red where room is short, faint where it's fine. */
 .clearance-short {
-  fill: color-mix(in srgb, #d92d20 16%, transparent);
-  stroke: #d92d20;
+  fill: color-mix(in srgb, var(--clearance) 16%, transparent);
+  stroke: var(--clearance);
   stroke-width: 1px;
   stroke-dasharray: 4 3;
 }
 .clearance-clash {
-  fill: color-mix(in srgb, #d92d20 22%, transparent);
-  stroke: #d92d20;
+  fill: color-mix(in srgb, var(--clearance) 22%, transparent);
+  stroke: var(--clearance);
   stroke-width: 1.5px;
+}
+/* A walkway's narrowest point: a bar across the gap, a tick on each obstacle. */
+.clearance-pinch line {
+  stroke: var(--clearance);
+  stroke-width: 2px;
+  stroke-linecap: round;
+}
+/* A shortfall, "0.62 / 0.90 m": a chip like a dimension's, in red. */
+.clearance-chip rect {
+  fill: var(--surface);
+  stroke: var(--clearance);
+  stroke-width: 1px;
+}
+.clearance-chip text {
+  fill: var(--negative);
+  font-weight: 600;
+}
+/* The selected piece's narrowed way: faint and dotted, unlike the accent way in. */
+.clearance-route polyline {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.5px;
+  stroke-dasharray: 2 4;
+  stroke-linecap: round;
+}
+.clearance-route circle {
+  fill: var(--muted);
 }
 .clearance-fine {
   fill: color-mix(in srgb, var(--muted) 10%, transparent);
@@ -2809,8 +2845,10 @@ h3.field-label {
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .clearance-short {
-    fill: color-mix(in srgb, #ff6b5e 26%, transparent);
-    stroke: #ff6b5e;
+    fill: color-mix(in srgb, var(--clearance) 26%, transparent);
+  }
+  :root:not([data-theme="light"]) .clearance-clash {
+    fill: color-mix(in srgb, var(--clearance) 30%, transparent);
   }
   :root:not([data-theme="light"]) .clearance-fine {
     fill: color-mix(in srgb, var(--muted) 18%, transparent);
