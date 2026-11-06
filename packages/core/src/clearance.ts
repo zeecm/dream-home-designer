@@ -16,6 +16,7 @@ import { footprintPolygon, wallFootprints } from './footprints';
 import { furnitureKind, furnitureLayer, itemFootprint, itemSize } from './furniture';
 import { pointInPolygon } from './geometry';
 import { DOOR_LEAF_THICKNESS, doorLeaves, planGeometry } from './plan';
+import { roomShapes } from './rooms';
 import { type Item, type Level, type Vec2, isBoundary } from './schema';
 
 export { overlapDepth } from './convex';
@@ -394,7 +395,16 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
     }
   }
   // A door hitting a piece's own doors (a wardrobe's, the fridge's), and doors each other.
-  out.push(...doorFrontIssues(items, fps, sweeps, inSwing), ...clashes);
+  // Rooms looked up only when a front and a swing meet (it's a drag's every frame).
+  let shapes: ReturnType<typeof roomShapes> | null = null;
+  const roomAt = (p: Vec2) => {
+    shapes ??= roomShapes(level);
+    for (const [id, sh] of shapes) {
+      if (pointInPolygon(p, sh.outer) && !sh.holes.some((h) => pointInPolygon(p, h))) return id;
+    }
+    return null;
+  };
+  out.push(...doorFrontIssues(items, fps, sweeps, inSwing, roomAt), ...clashes);
 
   // Pieces overlapping (a chair tucked under a table or desk is meant to).
   for (let i = 0; i < items.length; i++) {

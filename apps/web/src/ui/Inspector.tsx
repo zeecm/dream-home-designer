@@ -439,11 +439,16 @@ function DoorClearances({ level, id }: { level: Level; id: string }) {
   const on = useClearanceOn((s) => s.on);
   const issues = useClearanceIssues();
   const h = useId();
-  if (!on) return null;
-  const lines = doorIssueLines(level, id, issues);
+  const ref = useRef<HTMLElement>(null);
+  const lines = on ? doorIssueLines(level, id, issues) : [];
+  const shown = lines.length > 0;
+  // A clash that appears (Flip swing, further down a phone's sheet) is brought into view.
+  useEffect(() => {
+    if (shown) ref.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [shown]);
   if (!lines.length) return null;
   return (
-    <section className="stack" aria-labelledby={h}>
+    <section ref={ref} className="stack" aria-labelledby={h}>
       <h3 id={h} className="section-title">
         Clearances
       </h3>
@@ -490,8 +495,34 @@ function ClearanceSummary() {
     if (!centre) return;
     useClearanceOn.setState({ shown: stop.id });
     const ed = useEditor.getState();
-    // Into view, at the zoom it was.
-    if (ed.view) ed.setView({ ...ed.view, cx: centre.x, cy: centre.y }, true);
+    // Into view, at the zoom it was; a door's clash zoomed in to fill about a third of the plan.
+    if (ed.view) {
+      let zoom = ed.view.zoom;
+      if (stop.kind === 'opening') {
+        const pts = issues.flatMap((i) =>
+          (i.kind === 'doors' && (i.openingId === stop.id || i.otherId === stop.id)) ||
+          (i.kind === 'door-front' && i.openingId === stop.id)
+            ? [...i.sweep.flat(), ...(i.kind === 'door-front' ? i.zone : [])]
+            : [],
+        );
+        const plan = document.querySelector('svg.plan-svg')?.getBoundingClientRect();
+        if (pts.length && plan) {
+          const xs = pts.map((p) => p.x);
+          const ys = pts.map((p) => p.y);
+          const span = Math.max(
+            Math.max(...xs) - Math.min(...xs),
+            Math.max(...ys) - Math.min(...ys),
+            0.5,
+          );
+          centre = {
+            x: (Math.max(...xs) + Math.min(...xs)) / 2,
+            y: (Math.max(...ys) + Math.min(...ys)) / 2,
+          };
+          zoom = Math.max(zoom, Math.min(400, Math.min(plan.width, plan.height) / 3 / span));
+        }
+      }
+      ed.setView({ ...ed.view, cx: centre.x, cy: centre.y, zoom }, true);
+    }
     ed.select(stop);
   };
   const what = [

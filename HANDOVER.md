@@ -1158,6 +1158,15 @@ fixed. `--clearance` token; `.warning-text` and `.clearance-clash` dark colours.
 `clearance-walkways.spec.ts` (desktop and a 390 px phone by finger). Not yet (slice 3):
 editable numbers, Fix it, sliding fronts, a saved main door, zones cut at walls; the
 contractor sheet has no walkway pinches by design.
+QA fixes (6 Nov): a closed way's bar spans the doorway a piece fills (else the bare way's
+cross-section just before the piece); a pinch's bar is as long as its label; chips avoid the
+selected piece's corner and turn handles (spots further out and beside the zone's corners) and
+a pinch chip matching a zone chip close by is dropped; a door hit by a piece's front counts and
+is visited by Show next, which zooms a door's clash to a third of the plan; a front only hits a
+door's swing in its own room; the walkway line looks for the main door on the other levels of
+the version shown; issues and the walkway line list rooms worst first (a room before its
+en-suite); bed sides name their room when there are several beds; door names and plan geometry
+are cached by walls/openings/rooms. Drag p95 on 21 pieces: 16.7 ms on, 16.8 off.
 
 **Carpentry and cost estimate (5 Nov, spec `docs/specs/carpentry-cost.md`, slice 1):** five
 built-ins in the catalogue's Built-in category (wardrobe and shoe cabinet 2.6 m high, TV

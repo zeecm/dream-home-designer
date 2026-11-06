@@ -165,11 +165,12 @@ test.describe('desktop', () => {
     expect(seen.slice(n - 2, n)).toEqual(['Door', 'Door']);
     expect(seen.slice(0, n - 2)).not.toContain('Door');
     expect(seen[n]).toBe(seen[0]);
-    // The door's Clearances, first in its details.
-    await page.keyboard.press('Escape');
-    await page.locator('[data-hit="opening:op_door_bath-wc-2_living-and-dining"]').first().click({
-      force: true,
-    });
+    // The door's Clearances, first in its details (Show next on to the first door).
+    for (let i = 0; i < n - 2; i++) {
+      await page.keyboard.press('Escape');
+      await count.locator('..').getByRole('button', { name: 'Show next' }).click();
+    }
+    await expect(page.locator('.inspector h2').first()).toHaveText('Door');
     await expect(clearances(page)).toContainText(/Hits the .+ door when both are open\./);
     await page.keyboard.press('Escape');
 
@@ -220,6 +221,72 @@ test.describe('desktop', () => {
     await bar.getByRole('button', { name: 'After' }).click();
     await expect(walkwayLine(page)).toHaveText(/^Walkways: tight to /);
     await expect(page.locator('.clearance-pinch')).toHaveCount(1);
+  });
+
+  test('a wardrobe filling the Bath/WC 2 doorway: drawn shut across the doorway', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    await place(page, /^Wardrobe/, 3.6, 3.95);
+    await page.keyboard.press('Escape');
+    await expect(walkwayLine(page)).toContainText('Bath/WC 2 (closed)');
+    // A bar along the bathroom's doorway (x 3.29..4.19 in the wall at y 4.32), not across
+    // the corridor's open floor.
+    const bars = await page
+      .locator('.clearance-pinch > line:first-child')
+      .evaluateAll((ls) =>
+        ls.map((l) => ['x1', 'y1', 'x2', 'y2'].map((k) => Number(l.getAttribute(k)))),
+      );
+    const across = bars.filter(
+      ([x1, y1, x2, y2]) =>
+        Math.abs((y1 as number) - 4.32) < 0.05 &&
+        Math.abs((y2 as number) - 4.32) < 0.05 &&
+        Math.abs(Math.min(x1 as number, x2 as number) - 3.29) < 0.05 &&
+        Math.abs(Math.max(x1 as number, x2 as number) - 4.19) < 0.05,
+    );
+    expect(across).toHaveLength(1);
+  });
+
+  test('an After with its main door deleted asks for the main door', async ({ page }) => {
+    await page.goto('/');
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    await page.getByRole('button', { name: 'Plan a renovation' }).click();
+    await page
+      .locator('[data-hit="opening:op_door_living-and-dining_outside-3"]')
+      .first()
+      .click({ force: true });
+    await page.getByRole('button', { name: 'Delete door' }).click();
+    await page.keyboard.press('Escape');
+    await expect(walkwayLine(page)).toHaveText('Add the main door to check walkways.');
+    // The Before still has it.
+    await page.locator('.reno-bar').getByRole('button', { name: 'Before' }).click();
+    await expect(walkwayLine(page)).toHaveText(OK_LINE);
+  });
+
+  test('a door that hits a fridge’s door is counted and visited by Show next', async ({ page }) => {
+    await page.goto('/');
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    // In the bedroom, facing its door 0.5 m short of the door's swing: the fridge door
+    // (0.70 m) reaches into it.
+    await place(page, /^Fridge/, 4.1, 1.3);
+    await page.keyboard.press('Escape');
+    const count = page.getByTestId('clearance-count');
+    await expect(count).toHaveText('1 piece and 1 door are short of room or in the way.');
+    const next = count.locator('..').getByRole('button', { name: 'Show next' });
+    const heading = page.locator('.inspector h2').first();
+    await next.click();
+    await expect(heading).toHaveText('Fridge');
+    await expect(clearances(page)).toContainText(
+      /Its door hit the Bedroom door when both are open\./,
+    );
+    await page.keyboard.press('Escape');
+    await next.click();
+    await expect(heading).toHaveText('Door');
+    await expect(clearances(page)).toContainText('Hits the fridge door when both are open.');
   });
 });
 
