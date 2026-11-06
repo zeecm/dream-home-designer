@@ -28,6 +28,17 @@ const reading = {
   printedArea: null,
 };
 
+/** No request reaches a real provider: anything not mocked in a test is refused. */
+test.beforeEach(async ({ page }) => {
+  for (const host of [
+    'https://api.openai.com/**',
+    'https://api.anthropic.com/**',
+    'https://generativelanguage.googleapis.com/**',
+  ]) {
+    await page.route(host, (route) => route.abort('blockedbyclient'));
+  }
+});
+
 test('trace walls with an AI model: key kept in the browser, a draft to accept, one undo step', async ({
   page,
 }) => {
@@ -37,7 +48,8 @@ test('trace walls with an AI model: key kept in the browser, a draft to accept, 
   });
   let calls = 0;
   await page.route('https://api.openai.com/**', async (route) => {
-    calls++;
+    // The settings list the key's models first: the plan is read once.
+    if (route.request().method() === 'POST') calls++;
     const auth = route.request().headers().authorization;
     if (auth !== `Bearer ${KEY}`) return route.fulfill({ status: 401, body: '{}' });
     await route.fulfill({

@@ -6,15 +6,47 @@ import {
   type Provider,
   forgetAi,
   keyFor,
+  makesPictures,
   saveAi,
   useAi,
   useSavedProviders,
 } from './credentials';
+import { type ModelLists, checkPictureModel, curated, listModels, recommended } from './models';
 import { AiError, askForJson } from './providers';
 
 /** A 1 × 1 white PNG: enough for a model to answer a test. */
 const DOT =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=';
+
+/** How long typing pauses before the key's models are looked up. */
+const LIST_AFTER = 600;
+
+/** The models to offer for one job, and the one selected. */
+function choices(
+  p: Provider,
+  kind: keyof ModelLists,
+  lists: ModelLists,
+  /** What the person picked here, if anything. */
+  picked: string,
+  /** What was saved with the key, if anything. */
+  saved: string | undefined,
+): { options: { id: string; label: string }[]; value: string } {
+  const listed = lists[kind];
+  const ids = listed.map((o) => o.id);
+  const best = recommended(p, kind, ids);
+  // The recommended one first, then the rest best first.
+  const ordered = [...listed.filter((o) => o.id === best), ...listed.filter((o) => o.id !== best)];
+  const options = ordered.map((o) => ({
+    id: o.id,
+    label: o.id === best ? `${o.name} (recommended)` : o.name,
+  }));
+  const choice = picked || saved;
+  // A saved model this key no longer lists stays, until changed.
+  if (choice && !ids.includes(choice) && choice === saved) {
+    return { options: [{ id: choice, label: `${choice} (saved)` }, ...options], value: choice };
+  }
+  return { options, value: choice && ids.includes(choice) ? choice : (best ?? '') };
+}
 
 /** Which AI model to use, with the person's own key, kept in this browser. */
 export function AiSettingsDialog({
@@ -29,34 +61,84 @@ export function AiSettingsDialog({
   const active = useAi();
   const savedKeys = useSavedProviders();
   const first = initial ?? active?.provider ?? 'anthropic';
-  const saved = keyFor(first);
   const [provider, setProvider] = useState<Provider>(first);
+  const saved = keyFor(provider);
   const [key, setKey] = useState(saved?.key ?? '');
-  const [model, setModel] = useState(saved?.model ?? PROVIDERS[first].model);
+  // What the person picked here; until then the saved model, or the recommended one.
+  const [model, setModel] = useState('');
+  const [imageModel, setImageModel] = useState('');
   const [remember, setRemember] = useState(saved?.remember ?? false);
   // Whether this key reads plans and suggests layouts (Claude reading, OpenAI drawing, say).
   const [readsPlans, setReadsPlans] = useState(!active || active.provider === first);
-  const [status, setStatus] = useState('');
+  const [lists, setLists] = useState<ModelLists>(() => curated(first));
+  const [listHint, setListHint] = useState('');
+  const [status, setStatus] = useState<string[]>([]);
   const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     const d = ref.current;
     if (d && !d.open) d.showModal();
   }, []);
+
+  // The models on this key, from the provider, once typing pauses; the usual ones until
+  // then, or if they can't be listed.
+  useEffect(() => {
+    setLists(curated(provider));
+    const k = key.trim();
+    if (!k) {
+      setListHint('');
+      return;
+    }
+    const ctrl = new AbortController();
+    const wait = setTimeout(() => {
+      setListHint('Looking up the models on this key…');
+      listModels(provider, k, ctrl.signal)
+        .then((found) => {
+          if (ctrl.signal.aborted) return;
+          const usable = found.text.length > 0 && (!makesPictures(provider) || found.image.length);
+          setLists(usable ? found : curated(provider));
+          setListHint(
+            usable ? '' : 'This key lists no models for these jobs: the usual ones are shown.',
+          );
+        })
+        .catch((e: unknown) => {
+          if (ctrl.signal.aborted) return;
+          setLists(curated(provider));
+          setListHint(
+            e instanceof AiError && e.kind === 'key'
+              ? 'The key was refused, so the usual models are shown. Check the key.'
+              : 'Couldn’t list the models on this key, so the usual ones are shown.',
+          );
+        });
+    }, LIST_AFTER);
+    return () => {
+      clearTimeout(wait);
+      ctrl.abort();
+    };
+  }, [provider, key]);
+
+  const text = choices(provider, 'text', lists, model, saved?.model);
+  const pictures = makesPictures(provider)
+    ? choices(provider, 'image', lists, imageModel, saved?.imageModel)
+    : null;
+
   const close = () => ref.current?.close();
   const settings = (): AiSettings => ({
     provider,
     key: key.trim(),
-    model: model.trim(),
+    model: text.value,
+    ...(pictures?.value ? { imageModel: pictures.value } : {}),
     remember,
   });
 
   const test = async () => {
     setTesting(true);
-    setStatus('Testing…');
+    setStatus(['Testing…']);
+    const s = settings();
+    const lines: string[] = [];
     try {
       await askForJson(
-        settings(),
+        s,
         'Reply with {"ok": true}.',
         { data: DOT, mediaType: 'image/png' },
         {
@@ -66,10 +148,24 @@ export function AiSettingsDialog({
           additionalProperties: false,
         },
       );
-      setStatus('It works.');
+      lines.push(`Plans and layouts (${s.model}): it works.`);
     } catch (e) {
-      setStatus(e instanceof AiError ? e.message : 'The test failed.');
+      lines.push(
+        `Plans and layouts (${s.model}): ${e instanceof AiError ? e.message : 'the test failed.'}`,
+      );
     }
+    if (s.imageModel) {
+      // No picture is made: the key and the model are checked, which costs nothing.
+      try {
+        await checkPictureModel(s, s.imageModel);
+        lines.push(`Pictures (${s.imageModel}): the key can use it.`);
+      } catch (e) {
+        lines.push(
+          `Pictures (${s.imageModel}): ${e instanceof AiError ? e.message : 'the test failed.'}`,
+        );
+      }
+    }
+    setStatus(lines);
     setTesting(false);
   };
 
@@ -114,10 +210,11 @@ export function AiSettingsDialog({
                   const k = keyFor(p);
                   setProvider(p);
                   setKey(k?.key ?? '');
-                  setModel(k?.model ?? PROVIDERS[p].model);
+                  setModel('');
+                  setImageModel('');
                   setRemember(k?.remember ?? false);
                   setReadsPlans(!active || active.provider === p);
-                  setStatus('');
+                  setStatus([]);
                 }}
               >
                 {(Object.keys(PROVIDERS) as Provider[]).map((p) => (
@@ -141,19 +238,51 @@ export function AiSettingsDialog({
                 value={key}
                 onChange={(e) => {
                   setKey(e.target.value);
-                  setStatus('');
+                  setStatus([]);
                 }}
               />
             </label>
             <label className="field">
-              <span className="field-label">Model</span>
-              <input
+              <span className="field-label">Model for plans and layouts</span>
+              <select
                 className="input"
-                spellCheck={false}
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-              />
+                value={text.value}
+                onChange={(e) => {
+                  setModel(e.target.value);
+                  setStatus([]);
+                }}
+              >
+                {text.options.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
             </label>
+            {pictures && (
+              <label className="field">
+                <span className="field-label">Model for pictures (photo-real renders)</span>
+                <select
+                  className="input"
+                  value={pictures.value}
+                  onChange={(e) => {
+                    setImageModel(e.target.value);
+                    setStatus([]);
+                  }}
+                >
+                  {pictures.options.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {listHint && (
+              <p className="field-hint" aria-live="polite">
+                {listHint}
+              </p>
+            )}
             <label className="check-row">
               <input
                 type="checkbox"
@@ -184,15 +313,13 @@ export function AiSettingsDialog({
           </div>
         </div>
         <footer className="dialog-foot">
-          <p className="field-hint" aria-live="polite">
-            {status}
+          <p className="field-hint ai-status" aria-live="polite">
+            {status.map((line) => (
+              <span key={line}>{line}</span>
+            ))}
           </p>
           <div className="button-row">
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={!key.trim() || !model.trim()}
-            >
+            <button type="submit" className="btn btn-primary" disabled={!key.trim() || !text.value}>
               Save
             </button>
             <button type="button" className="btn" onClick={test} disabled={!key.trim() || testing}>
@@ -205,7 +332,7 @@ export function AiSettingsDialog({
                 onClick={() => {
                   forgetAi(provider);
                   setKey('');
-                  setStatus('Key forgotten in this browser.');
+                  setStatus(['Key forgotten in this browser.']);
                 }}
               >
                 Forget key

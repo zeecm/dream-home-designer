@@ -1,4 +1,4 @@
-import type { AiSettings } from './credentials';
+import { type AiSettings, PROVIDERS, type Provider } from './credentials';
 
 /** An image for a model: base64 (no data: prefix) and its type. */
 export interface ModelImage {
@@ -99,28 +99,16 @@ export async function askForJson(
     if (timeout.aborted || e instanceof QuietError) {
       throw new AiError('timeout', 'The model took too long to answer. Try again.');
     }
-    throw toAiError(e);
+    throw toAiError(e, ai);
   }
 }
 
-function toAiError(e: unknown): AiError {
-  const status =
-    e instanceof HttpError
-      ? e.status
-      : typeof (e as { status?: unknown })?.status === 'number'
-        ? (e as { status: number }).status
-        : undefined;
-  if (status === 401 || status === 403) {
-    return new AiError('key', 'The key was refused. Check it in AI settings.');
-  }
-  if (status === 429) {
-    return new AiError('quota', 'The key’s limit or quota is used up for now. Try again later.');
-  }
-  if (status === 400 || status === 404) {
-    return new AiError(
-      'unreadable',
-      `The provider turned the request down (${status}). Check the model name in AI settings.`,
-    );
+function toAiError(e: unknown, ai: AiSettings): AiError {
+  if (e instanceof HttpError) return failure(ai.provider, e.status, e.body, ai.key);
+  // The Anthropic SDK's errors: the status, and the response's JSON as `error`.
+  const status = (e as { status?: unknown })?.status;
+  if (typeof status === 'number') {
+    return failure(ai.provider, status, (e as { error?: unknown }).error, ai.key);
   }
   return new AiError(
     'network',
@@ -128,9 +116,101 @@ function toAiError(e: unknown): AiError {
   );
 }
 
-class HttpError extends Error {
-  constructor(readonly status: number) {
+/** A non-OK response, with the body the provider sent (its JSON, or its text). */
+export class HttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: unknown,
+  ) {
     super(`HTTP ${status}`);
+  }
+}
+
+/** The longest provider message shown. */
+const MESSAGE_MAX = 200;
+
+/**
+ * `text` on one line, without anything that looks like an API key: `key` itself, and the
+ * shapes of Anthropic's, OpenAI's and Google's keys.
+ */
+export function redact(text: string, key?: string): string {
+  let out = text;
+  const k = key?.trim();
+  if (k && k.length >= 6) out = out.split(k).join('[key]');
+  return out
+    .replace(/\bsk-[A-Za-z0-9_*-]{6,}/g, '[key]')
+    .replace(/\bAIza[0-9A-Za-z_-]{10,}/g, '[key]')
+    .replace(/\b(Bearer|key=)\s*[A-Za-z0-9._~+/=-]{12,}/gi, '$1 [key]')
+    .replace(/[\p{Cc}\s]+/gu, ' ')
+    .trim();
+}
+
+/**
+ * What a provider said about a failed request: `error.message` in Anthropic's, OpenAI's and
+ * Gemini's error bodies (Gemini sometimes sends a list of one), without the key, and cut to
+ * about 200 characters. Null when it said nothing readable.
+ */
+export function providerMessage(body: unknown, key?: string): string | null {
+  const first: unknown = Array.isArray(body) ? body[0] : body;
+  let text: unknown = (first as { error?: { message?: unknown } } | null)?.error?.message;
+  if (typeof text !== 'string' && typeof first === 'string') {
+    // Not JSON: plain text, unless it is a page of HTML.
+    text = /<[a-z!]/i.test(first) ? null : first;
+  }
+  if (typeof text !== 'string') return null;
+  const clean = redact(text, key);
+  if (!clean) return null;
+  return clean.length > MESSAGE_MAX ? `${clean.slice(0, MESSAGE_MAX - 1).trimEnd()}…` : clean;
+}
+
+/** Whether Google said the key itself is wrong (it answers 400 for a bad key). */
+function badGoogleKey(body: unknown): boolean {
+  const first = (Array.isArray(body) ? body[0] : body) as {
+    error?: { message?: unknown; details?: { reason?: unknown }[] };
+  } | null;
+  const message = first?.error?.message;
+  return (
+    (typeof message === 'string' && /API key not valid/i.test(message)) ||
+    !!first?.error?.details?.some((d) => d?.reason === 'API_KEY_INVALID')
+  );
+}
+
+/** A failed response from `provider`, in words a person can act on, with what it said. */
+export function failure(provider: Provider, status: number, body: unknown, key?: string): AiError {
+  const said = providerMessage(body, key);
+  const name = PROVIDERS[provider].short;
+  const tail = said ? `: ${said}` : '.';
+  if (status === 401 || (status === 400 && provider === 'gemini' && badGoogleKey(body))) {
+    return new AiError('key', 'The key was refused. Check it in AI settings.');
+  }
+  if (status === 403) {
+    // Often not the key as such: a model or a region the account can't use.
+    return new AiError('key', `${name} refused the key (403)${tail} Check it in AI settings.`);
+  }
+  if (status === 429) {
+    return new AiError(
+      'quota',
+      said
+        ? `The key’s limit or quota is used up for now (429)${tail}`
+        : 'The key’s limit or quota is used up for now. Try again later.',
+    );
+  }
+  if (status >= 400 && status < 500) {
+    return new AiError('unreadable', `${name} turned the request down (${status})${tail}`);
+  }
+  return new AiError(
+    'network',
+    `${name} couldn’t answer just now (${status})${said ? tail : '. Try again in a moment.'}`,
+  );
+}
+
+/** The body of a failed response: its JSON, or its text. */
+export async function errorBody(res: Response): Promise<unknown> {
+  const text = await res.text().catch(() => '');
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
   }
 }
 
@@ -219,7 +299,7 @@ async function post(
     body: JSON.stringify(body),
     signal,
   });
-  if (!res.ok) throw new HttpError(res.status);
+  if (!res.ok) throw new HttpError(res.status, await errorBody(res));
   return res.json() as Promise<unknown>;
 }
 

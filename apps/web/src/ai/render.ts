@@ -1,5 +1,5 @@
 import type { AiSettings } from './credentials';
-import { AiError, anySignal, timeoutSignal } from './providers';
+import { AiError, anySignal, errorBody, failure, timeoutSignal } from './providers';
 
 /** Looks of a render to choose from. */
 export const RENDER_STYLES = {
@@ -102,18 +102,8 @@ export async function renderPhoto(
         'Renders need an OpenAI or Gemini key (Claude doesn’t make pictures).',
       );
     }
-    if (res.status === 401 || res.status === 403) {
-      throw new AiError('key', 'The key was refused. Check it in AI settings.');
-    }
-    if (res.status === 429) {
-      throw new AiError('quota', 'The key’s limit or quota is used up for now. Try again later.');
-    }
-    if (!res.ok) {
-      throw new AiError(
-        'unreadable',
-        `The provider turned the request down (${res.status}). Try again, or another look.`,
-      );
-    }
+    // What the provider said, so the person (and we) can see why.
+    if (!res.ok) throw failure(ai.provider, res.status, await errorBody(res), ai.key);
     body = (await res.json()) as typeof body;
   } catch (e) {
     if (e instanceof AiError) throw e;
