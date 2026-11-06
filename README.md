@@ -54,12 +54,12 @@ for any plan.
   [spec](docs/specs/carpentry-cost.md)
 - Your own furniture by its measured size, and whether it gets in: every door from the main
   door, turning included, drawn on the plan. [spec](docs/specs/my-furniture.md)
+- A dimensioned plan for contractors: to scale on A4 or A3, chain dimensions, door and window
+  widths, room sizes, the hacking plan and change list; print or save as PDF.
+  [spec](docs/specs/dimensioned-export.md)
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
-- Dimensioned plan export for contractors: a scaled PDF with chain dimensions, door and
-  window widths, title block, hacking legend and change list.
-  [spec](docs/specs/dimensioned-export.md)
 
 ### Planned
 1. Clearance checks, slice 2: walkways from the main door, dining chairs, labels on the plan.
