@@ -196,8 +196,11 @@ select {
   flex: none;
   white-space: nowrap;
 }
-.brand:hover {
-  background: var(--active);
+/* Hover styles only where a pointer hovers: on touch, a tapped button would stay grey. */
+@media (hover: hover) {
+  .brand:hover {
+    background: var(--active);
+  }
 }
 .brand svg:last-child {
   color: var(--muted);
@@ -220,6 +223,21 @@ select {
 /* The phone's one view button; elsewhere the view switch shows all three. */
 .topbar .view-toggle {
   display: none;
+}
+/* Every phone, upright or on its side (ONE_VIEW_QUERY in oneView.ts): one view at a time, so
+   one button to the other view, its icon beside its label. */
+@media (max-width: 720px), (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  .topbar-right > .segmented {
+    display: none;
+  }
+  .topbar .view-toggle {
+    display: inline-flex;
+    gap: 4px;
+    padding: 0 8px;
+  }
+  .view-toggle svg {
+    flex: none;
+  }
 }
 /* A tablet's top bar: the mark alone names the product, so the plan's name has the room. */
 @media (max-width: 900px) {
@@ -284,9 +302,11 @@ select {
   cursor: pointer;
   flex: none;
 }
-.icon-btn:hover:not(:disabled) {
-  background: var(--active);
-  color: var(--text);
+@media (hover: hover) {
+  .icon-btn:hover:not(:disabled) {
+    background: var(--active);
+    color: var(--text);
+  }
 }
 .icon-btn:disabled {
   color: var(--control);
@@ -306,17 +326,21 @@ select {
   cursor: pointer;
   font-weight: 500;
 }
-.btn:hover {
-  background: var(--raised);
+@media (hover: hover) {
+  .btn:hover {
+    background: var(--raised);
+  }
 }
 .btn-primary {
   background: var(--text);
   border-color: var(--text);
   color: var(--surface);
 }
-.btn-primary:hover {
-  background: var(--text);
-  opacity: 0.9;
+@media (hover: hover) {
+  .btn-primary:hover {
+    background: var(--text);
+    opacity: 0.9;
+  }
 }
 .link-btn {
   padding: 0;
@@ -692,8 +716,10 @@ select {
   text-align: left;
   cursor: pointer;
 }
-.tool:hover {
-  background: var(--raised);
+@media (hover: hover) {
+  .tool:hover {
+    background: var(--raised);
+  }
 }
 .tool[aria-pressed="true"] {
   background: var(--active);
@@ -924,6 +950,10 @@ select {
   flex: none;
   max-width: 60%;
   text-align: right;
+}
+/* 16 px from the actions above: the one that throws work away stands apart. */
+.reno-discard {
+  margin-top: 8px;
 }
 .reno-changes {
   display: grid;
@@ -2087,10 +2117,11 @@ h3.field-label {
     text-overflow: ellipsis;
     padding: 0 6px;
   }
-  /* Every control a 40 px target; the name takes what is left. */
+  /* Every control a 40 px target; the name takes what is left, never under 48 px. */
   .project-name {
     font-size: var(--fs-body);
     height: 40px;
+    min-width: 48px;
     max-width: none;
     padding: 0 4px;
   }
@@ -2111,19 +2142,9 @@ h3.field-label {
   .topbar-right {
     gap: 4px;
   }
-  /* Two views side by side make no sense at phone width, and Plan and 3D side by side leave
-     the name no room: one button goes to the other view. */
-  .topbar-right > .segmented {
-    display: none;
-  }
-  .topbar .view-toggle {
-    display: inline-flex;
-    width: 48px;
-    padding: 0;
-  }
   .topbar {
     gap: 4px;
-    padding: 0 6px;
+    padding: 0 4px;
   }
   .topbar .btn,
   .topbar .icon-btn {
@@ -2131,6 +2152,10 @@ h3.field-label {
   }
   .topbar .icon-btn {
     width: 40px;
+  }
+  /* Undo and Redo: one pair, no gap (each still 40 px). */
+  .topbar .icon-btn[aria-label="Undo"] {
+    margin-right: -4px;
   }
   .sample-banner {
     flex-wrap: wrap;
@@ -2438,13 +2463,6 @@ h3.field-label {
   .topbar-right > .segmented button {
     min-height: 34px;
     height: 34px;
-  }
-  .topbar-right > .segmented button {
-    padding: 0 10px;
-  }
-  /* Two views side by side are too cramped this short. */
-  .topbar-right > .segmented button:nth-child(2) {
-    display: none;
   }
   .project-name {
     font-size: var(--fs-body);
@@ -3752,6 +3770,13 @@ span.comment-pin {
   /* A view link has nothing to undo. */
   .topbar-viewer .icon-btn[aria-label="Undo"],
   .topbar-viewer .icon-btn[aria-label="Redo"] {
+    display: none;
+  }
+}
+/* The first iPhone SE (320 px): the owner's controls leave the name under 48 px, too little
+   to read a word of, so it gives way; from 352 px it shows. */
+@media (max-width: 351px) {
+  .topbar:not(.topbar-viewer) .project-name {
     display: none;
   }
 }

@@ -452,7 +452,7 @@ export function RenovationSection() {
       {/* The destructive action goes last (Undo still brings the renovation back). */}
       <button
         type="button"
-        className="btn btn-block btn-danger"
+        className="btn btn-block btn-danger reno-discard"
         onClick={() => {
           dispatch(endRenovation('before'));
           setVariant('before');

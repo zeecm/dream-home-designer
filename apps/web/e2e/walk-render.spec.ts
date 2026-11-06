@@ -47,7 +47,7 @@ test('on a phone: a photo-real render from the spot walked to, the walk standing
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
   await waitSaved(page);
-  await page.getByRole('button', { name: /^3D$/ }).tap();
+  await page.getByRole('button', { name: 'Show 3D view' }).tap();
   await page.getByRole('button', { name: 'Walk through' }).tap();
   await expect(page.getByRole('button', { name: 'Leave walk' })).toBeVisible();
 
