@@ -50,6 +50,16 @@ const line = (a: { x: number; y: number }, b: { x: number; y: number }, n = 10) 
     { x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n },
   ]);
 
+/**
+ * A drag that comes to rest before the finger lifts, as on a corner. Lifted still moving, it
+ * is a flick, and Chromium drops the click of a tap within about 200 ms of one (the tap is
+ * taken as stopping the fling): a button tapped next would do nothing.
+ */
+const settled = (frames: { x: number; y: number }[][]) => [
+  ...frames,
+  ...Array.from({ length: 6 }, () => frames[frames.length - 1] ?? []),
+];
+
 test('on a phone: the menu opens, walls and rooms draw by finger, pinch never draws', async ({
   page,
 }) => {
@@ -69,7 +79,7 @@ test('on a phone: the menu opens, walls and rooms draw by finger, pinch never dr
 
   // Drag corner to corner: one wall. Then an exact length from the drawing bar, and Done.
   r = await planBox(page); // bars above the plan change height as you go
-  await touches(page, line(at(0.2, 0.45), at(0.6, 0.45)));
+  await touches(page, settled(line(at(0.2, 0.45), at(0.6, 0.45))));
   await expect(walls).toHaveText('1');
   await page.getByLabel('Next wall length').fill('2000');
   // Tap once the bar has caught up with the typing (a slow run renders late).
@@ -131,7 +141,7 @@ test('on a phone: Set scale ends can be dragged to adjust them before typing the
   await touches(page, line(at(0.2, 0.5), at(0.5, 0.5)));
   await expect(page.getByLabel('Set scale 2/2', { exact: false })).toBeVisible();
   r = await planBox(page); // bars above the plan change height as you go
-  await touches(page, line(at(0.5, 0.5), at(0.7, 0.55)));
+  await touches(page, settled(line(at(0.5, 0.5), at(0.7, 0.55))));
   const end = await page
     .locator('g.measure line')
     .evaluate((l) => [Number(l.getAttribute('x2')), Number(l.getAttribute('y2'))]);
