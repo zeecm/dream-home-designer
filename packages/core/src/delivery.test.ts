@@ -4,17 +4,19 @@ import {
   LIFT_PRESETS,
   clearWidth,
   deliveryCheck,
+  deliveryParts,
   diagonalFits,
   diagonalRange,
+  doorGraph,
   liftFit,
   mainDoors,
+  partsNote,
   rectFits,
-  rigidNote,
   turnLimit,
 } from './delivery';
 import { blankProject } from './factory';
 import { sampleFlatProject } from './fixtures/sampleFlat';
-import { customKind, newItem, setProjectModels, updateModel } from './furniture';
+import { customKind, furnitureKind, newItem, setProjectModels, updateModel } from './furniture';
 import { type EditorDoc, dispatch, emptyHistory, undo } from './history';
 import { loadErrorText, loadProject, migrate } from './migrate';
 import {
@@ -66,6 +68,26 @@ function withPiece(
   };
   const it = newItem('it_sofa', customKind(m), at, 0);
   return { level: { ...level, items: { [it.id]: it } }, id: it.id };
+}
+
+/** The middle of a room: its corners' average. */
+function roomMiddle(level: Level, room: string) {
+  const r = level.rooms[room];
+  if (!r) throw new Error(`no ${room}`);
+  const pts = r.loop.map((v) => level.vertices[v]).filter((v) => !!v) as { x: number; y: number }[];
+  return {
+    x: pts.reduce((t, q) => t + q.x, 0) / pts.length,
+    y: pts.reduce((t, q) => t + q.y, 0) / pts.length,
+  };
+}
+
+/** The sample flat with a catalogue piece in a room. */
+function withKind(assetId: string, room: string, level0?: Level): { level: Level; id: string } {
+  const level = level0 ?? (sampleFlatProject('prj_t').levels[0] as Level);
+  const kind = furnitureKind(assetId);
+  if (!kind) throw new Error(`no ${assetId}`);
+  const it = newItem('it_piece', kind, roomMiddle(level, room), 0);
+  return { level: { ...level, items: { ...level.items, [it.id]: it } }, id: it.id };
 }
 
 describe('the way in', () => {
@@ -289,21 +311,28 @@ describe('the lift (slice-2s B1)', () => {
     });
   });
 
-  it('a bed bends a little: the catalogue’s and one by size get a note; a sofa doesn’t', () => {
-    expect(rigidNote('bed-queen')).toMatch(/^A mattress bends/);
-    const m: CustomModel = {
-      id: 'mdl_bed',
-      name: 'Our bed',
-      category: 'Bedroom',
-      size: { w: 1.6, d: 2.0, h: 1.0 },
-      shape: 'bed',
+  it('a custom sofa (or box) is still one rigid box: no parts, no note', () => {
+    const big = withPiece({ w: 2.1, d: 1.0, h: 0.95 }, 'rm_bedroom');
+    const r = deliveryCheck(big.level, big.id, { lift: typical });
+    expect(r.status).toBe('too-big');
+    expect('parts' in r && r.parts).toBeFalsy();
+    if (!('doors' in r)) throw new Error(r.status);
+    expect(r.doors.every((d) => !d.parts)).toBe(true);
+    expect(r.doors.find((d) => d.openingId === 'op_door_bedroom_living-and-dining-3')?.need).toBe(
+      0.95,
+    );
+    expect(partsNote(r)).toBeNull();
+    const box: CustomModel = {
+      id: 'mdl_box',
+      name: 'Crate',
+      category: 'Storage',
+      size: { w: 1.52, d: 2.0, h: 1.0 },
+      shape: 'box',
     };
-    setProjectModels({ [m.id]: m });
-    expect(rigidNote('mdl_bed')).toMatch(/ask the shop\.$/);
-    expect(rigidNote('sofa-3')).toBeNull();
+    expect(deliveryParts(customKind(box), box.size)).toBeNull();
+    expect(deliveryParts(furnitureKind('sofa-3'), { w: 2.1, d: 0.9, h: 0.85 })).toBeNull();
     setProjectModels(undefined);
   });
-
   it('8: schema 10: a v9 document parses with no lift; limits; the door within the car', () => {
     const doc = { ...sampleFlatProject('prj_t'), schemaVersion: 9 };
     const p = parseProject(migrate(doc));
@@ -415,5 +444,159 @@ describe('a diagonal you can edit (slice-2s B2)', () => {
     const q = deliveryCheck(small.level, small.id);
     if (!('doors' in q)) throw new Error(q.status);
     expect(q.doors.some((d) => d.tilted)).toBe(false);
+  });
+});
+
+describe('a bed comes flat: its mattress and frame panels', () => {
+  const BEDROOM_DOOR = 'op_door_bedroom_living-and-dining-3';
+  const { typical, older } = LIFT_PRESETS;
+
+  it('its parts: the mattress (a king’s doesn’t fold), the headboard and the side rails', () => {
+    expect(deliveryParts(furnitureKind('bed-queen'), { w: 1.52, d: 2.0, h: 1.0 })).toEqual([
+      { part: 'mattress', size: { w: 1.52, d: 2.0, h: 0.3 }, folds: true },
+      { part: 'headboard', size: { w: 1.52, d: 0.1, h: 1.0 }, folds: false },
+      { part: 'rails', size: { w: 2.0, d: 0.1, h: 0.3 }, folds: false },
+    ]);
+    expect(deliveryParts(furnitureKind('bed-king'), { w: 1.83, d: 2.0, h: 1.0 })?.[0]?.folds).toBe(
+      false,
+    );
+    // One by size is a bed too; an uploaded model isn't.
+    const own: CustomModel = {
+      id: 'mdl_bed',
+      name: 'Our bed',
+      category: 'Bedroom',
+      size: { w: 1.6, d: 2.0, h: 0.4 },
+      shape: 'bed',
+    };
+    expect(deliveryParts(customKind(own), own.size)?.map((p) => p.size.h)).toEqual([0.3, 0.4, 0.3]);
+    const glb: CustomModel = { ...own, shape: undefined, hash: 'a'.repeat(64) };
+    expect(deliveryParts(customKind(glb), glb.size)).toBeNull();
+  });
+
+  it('single, queen and king through the 0.86 m bedroom door, and the Typical and Older lifts', () => {
+    // Was: every bed too big for a 0.9 m door (the 1.0 m headboard and 0.92 m width as one box).
+    for (const id of ['bed-single', 'bed-super-single', 'bed-queen', 'bed-king']) {
+      const { level, id: item } = withKind(id, 'rm_bedroom');
+      const r = deliveryCheck(level, item);
+      expect(r.status, id).toBe('fits');
+      if (!('doors' in r)) throw new Error(r.status);
+      const door = r.doors.find((d) => d.openingId === BEDROOM_DOOR);
+      expect(door?.clear).toBeCloseTo(0.86);
+      expect(door?.parts?.every((p) => p.fit === 'fits')).toBe(true);
+      expect(partsNote(r)).toBe('Comes flat: the mattress and frame panels each fit.');
+    }
+    const at = (id: string, lift: Lift) => {
+      const { level, id: item } = withKind(id, 'rm_bedroom');
+      return deliveryCheck(level, item, { lift });
+    };
+    // A single goes in either lift flat.
+    for (const lift of [typical, older]) {
+      const r = at('bed-single', lift);
+      expect(r.status).toBe('fits');
+      expect(partsNote(r)).toBe('Comes flat: the mattress and frame panels each fit.');
+    }
+    // A queen's mattress goes in folded in half.
+    for (const lift of [typical, older]) {
+      const r = at('bed-queen', lift);
+      expect(r.status).toBe('fits');
+      if (!('parts' in r)) throw new Error(r.status);
+      expect(r.parts).toEqual([
+        { part: 'mattress', fit: 'fits', folded: true },
+        { part: 'headboard', fit: 'fits' },
+        { part: 'rails', fit: 'fits' },
+      ]);
+      expect(r.doors[0]?.openingId).toBe('lift');
+      expect(partsNote(r)).toBe(
+        'Comes flat: the mattress (folded in half) and frame panels each fit.',
+      );
+    }
+    // A king's mattress doesn't fold: too big for either lift; its frame panels go in.
+    for (const lift of [typical, older]) {
+      const r = at('bed-king', lift);
+      expect(r.status).toBe('too-big');
+      if (!('parts' in r)) throw new Error(r.status);
+      expect(r.lift?.fit).toBe('too-big');
+      expect(r.parts?.map((p) => p.fit)).toEqual(['too-big', 'fits', 'fits']);
+      expect(partsNote(r)).toBe(
+        'Comes flat, but the mattress (too wide to fold) doesn’t fit; ask the shop.',
+      );
+    }
+    // The stretcher lift takes a king's mattress on its side.
+    expect(at('bed-king', LIFT_PRESETS.large).status).toBe('fits');
+  });
+
+  it('a mattress turns from a narrow corridor folded in half; a rigid box of the bed doesn’t', () => {
+    // A 2.4 m ceiling, and a built-in wardrobe across the corridor 0.6 m from the bedroom door.
+    const base = { ...(sampleFlatProject('prj_t').levels[0] as Level), ceilingHeight: 2.4 };
+    const door = doorGraph(base).doors.find((d) => d.o.id === BEDROOM_DOOR);
+    if (!door) throw new Error('no bedroom door');
+    const side = door.sides[0] === 'rm_bedroom' ? -1 : 1;
+    const n = { x: door.n.x * side, y: door.n.y * side };
+    const off = door.half + 0.6 + 0.3;
+    const wardrobe = furnitureKind('built-in-wardrobe');
+    if (!wardrobe) throw new Error('no built-in wardrobe');
+    const built = newItem(
+      'it_built',
+      wardrobe,
+      { x: door.centre.x + n.x * off, y: door.centre.y + n.y * off },
+      Math.atan2(-n.x, n.y),
+      2.4,
+    );
+    const level = { ...base, items: { [built.id]: built } };
+
+    const queen = withKind('bed-queen', 'rm_bedroom', level);
+    const r = deliveryCheck(queen.level, queen.id);
+    expect(['fits', 'tight']).toContain(r.status);
+    if (!('doors' in r)) throw new Error(r.status);
+    const through = r.doors.find((d) => d.openingId === BEDROOM_DOOR);
+    expect(through?.parts?.[0]).toMatchObject({ part: 'mattress', folded: true });
+    expect(partsNote(r)).toBe(
+      'Comes flat: the mattress (folded in half) and frame panels each fit.',
+    );
+
+    // A king's doesn't fold: it can't turn there.
+    const king = withKind('bed-king', 'rm_bedroom', level);
+    const k = deliveryCheck(king.level, king.id);
+    expect(k.status).toBe('too-big');
+    if (!('doors' in k)) throw new Error(k.status);
+    const kd = k.doors.find((d) => d.openingId === BEDROOM_DOOR);
+    expect(kd?.turn?.space).toBeCloseTo(0.6, 2);
+    expect(partsNote(k)).toBe(
+      'Comes flat, but the mattress (too wide to fold) doesn’t fit; ask the shop.',
+    );
+
+    // The bed's size as one rigid box (added by size, shape box): too big, as before.
+    const m: CustomModel = {
+      id: 'mdl_crate',
+      name: 'Crate',
+      category: 'Storage',
+      size: { w: 1.52, d: 2.0, h: 1.0 },
+      shape: 'box',
+    };
+    setProjectModels({ [m.id]: m });
+    const it = newItem('it_crate', customKind(m), roomMiddle(level, 'rm_bedroom'), 0);
+    const c = deliveryCheck({ ...level, items: { ...level.items, [it.id]: it } }, it.id);
+    expect(c.status).toBe('too-big');
+    expect(partsNote(c)).toBeNull();
+    setProjectModels(undefined);
+  });
+
+  it('a bed of your own by size comes flat too', () => {
+    const m: CustomModel = {
+      id: 'mdl_bed',
+      name: 'Queen mattress',
+      category: 'Bedroom',
+      size: { w: 1.52, d: 1.9, h: 0.3 },
+      shape: 'bed',
+    };
+    setProjectModels({ [m.id]: m });
+    const level = sampleFlatProject('prj_t').levels[0] as Level;
+    const it = newItem('it_bed', customKind(m), roomMiddle(level, 'rm_living-and-dining'), 0);
+    const r = deliveryCheck({ ...level, items: { [it.id]: it } }, it.id, { lift: typical });
+    expect(r.status).toBe('fits');
+    expect(partsNote(r)).toBe(
+      'Comes flat: the mattress (folded in half) and frame panels each fit.',
+    );
+    setProjectModels(undefined);
   });
 });

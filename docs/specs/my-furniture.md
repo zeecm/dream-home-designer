@@ -36,6 +36,15 @@ once depth and height are typed. Save starts placing it.
 - **Result:** fits (≥ 20 mm spare), tight, too big; swing or double passing at full width:
   "fits with the door off its hinges". Uses `itemSize`.
 - Floor pieces only (not built-ins, people, rugs). An optional lift door is checked first.
+- **Beds come flat** (fix, 6 Nov 2026): a catalogue bed, or one added by size as a bed, is
+  checked as its delivery parts, each rigid: the mattress w × d × min(h, 0.3), which may fold in
+  half along its length (w × d/2 × twice as thick) for doors, turns and lifts unless it is
+  wider than 1.7 m (a king is too stiff to fold); a headboard panel w × 0.1 × h; side rails
+  d × 0.1 × min(h, 0.3). It fits when every part fits. Above the verdict: "Comes flat: the
+  mattress and frame panels each fit." (or "the mattress (folded in half) and …"), or "Comes
+  flat, but the mattress (too wide to fold) doesn’t fit; ask the shop."; the lift line "Lift:
+  each part fits.". Other pieces (a freestanding wardrobe, an own sofa or box, an uploaded
+  model) stay one rigid box.
 
 ## How it shows (desktop and phone sheet)
 Inspector "Getting it in":

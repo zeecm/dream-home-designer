@@ -1437,14 +1437,19 @@ upright through a 2.00 m high door into a 1.40 m deep car." (criterion 2's 2.1 m
 first in `doors` (`openingId: 'lift'`) and in `worst`, and returns `lift`; `worstDoor` is
 exported; `DoorOnTheWay.tilted` marks a door passed only on the diagonal carry ("(tilted on its
 diagonal)" after the narrowest door, else "Tilted on its diagonal through …", and ", tilted"
-on the plan label). `rigidNote(assetId)` adds "A mattress bends and a frame usually comes
-flat; ask the shop." to a too-big bed. `updateModel` takes `diagonal: number | null` (null
+on the plan label). A bed (catalogue `comesFlat: 'bed'`, or added by size as a bed) is checked
+as its delivery parts (`deliveryParts`): the mattress w × d × 0.3 (folds in half along its
+length, unless wider than 1.7 m: a king), a headboard panel w × 0.1 × h and side rails
+d × 0.1 × 0.3; it fits when every part does (`DoorOnTheWay.parts`, `Delivery.parts`,
+`liftFitParts`), and `partsNote(r)` says why ("Comes flat: the mattress (folded in half) and
+frame panels each fit." / "Comes flat, but the mattress (too wide to fold) doesn’t fit; ask the
+shop."). Freestanding wardrobes stay rigid; built-ins aren't checked. `updateModel` takes `diagonal: number | null` (null
 removes it); `restoreVersion` copies the site with `structuredClone`. Web: the wording is in
 `delivery/words.ts` (unit-tested). "Getting it in" has a `role="status"` block: the verdict and
 one line under it (`liftStatus`: "Lift: not checked.", "No lift on the way in.", how it goes in,
-or, when the lift fails, "Ask the shop whether it comes apart…"), so a change is always read out
-and the controls below move less. A too-big bed (`rigidNote`) shows the mattress note first and
-"Checked as a rigid box, …" in muted text instead of a red verdict. Then [Add diagonal depth]
+or, when the lift fails, "Ask the shop whether it comes apart…"; a bed: "Lift: each part fits."),
+so a change is always read out and the controls below move less. A bed shows its `partsNote`
+first (`data-testid="parts-note"`), then the verdict as for any piece. Then [Add diagonal depth]
 for an own sofa too wide for a door, unmeasured or saved out of range (scrolls to and focuses
 the field, `behavior: auto` under reduced motion), From, and the Lift select with its hint (a
 preset's numbers; on a view link the select is disabled but shown in `--text` on `--raised`,
