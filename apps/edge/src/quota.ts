@@ -8,8 +8,8 @@
 /** Plans one visitor may start in a day: far more than a person trying ideas needs. */
 export const DAILY_CREATES = 40;
 
-/** Comment writes (posts, replies, resolves, deletes) one visitor may make in a day. */
-export const DAILY_COMMENTS = 100;
+/** Comments and replies one visitor (one address, maybe a whole household) may post a day. */
+export const DAILY_COMMENTS = 300;
 
 /** What a daily cap counts. */
 export type DailyKind = 'create' | 'comment';

@@ -2,6 +2,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -258,6 +259,10 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request) {
 	if !s.allow(w, r, id, func(r Role) bool { return r == RoleOwner || r == RoleOpen }) {
 		return
 	}
+	// Holding the comments' lock: a comment write can't read "none yet" before the delete
+	// and write them back after it.
+	unlock := s.commentLocks.lock(id)
+	defer unlock()
 	if err := s.store.Delete(r.Context(), id); err != nil {
 		s.fail(w, err)
 		return
@@ -282,6 +287,9 @@ func (s *Server) readDoc(w http.ResponseWriter, r *http.Request) ([]byte, projec
 func (s *Server) fail(w http.ResponseWriter, err error) {
 	var conflict *store.ConflictError
 	switch {
+	case errors.Is(err, context.Canceled):
+		// The caller went away: nothing to answer, and nothing went wrong here.
+		w.WriteHeader(499)
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, store.ErrNoImage):
 		writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, store.ErrExists):

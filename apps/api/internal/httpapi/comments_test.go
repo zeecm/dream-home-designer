@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -109,7 +110,7 @@ func TestCommentsGetAndPost(t *testing.T) {
 
 	// A view link posts a thread.
 	res, body = do(t, "POST", url, threadBody("t_1", "m_1", "Open kitchen, the wok smell?"), viewer(keyMum))
-	if res.StatusCode != http.StatusCreated || res.Header.Get("ETag") != `"1"` {
+	if res.StatusCode != http.StatusCreated || ver(res) != "1" {
 		t.Fatalf("post: %d %v", res.StatusCode, body)
 	}
 	m := messages(threads(body)[0])[0]
@@ -131,7 +132,7 @@ func TestCommentsGetAndPost(t *testing.T) {
 
 	// An identical retry gives 200 and one thread; the same id with other content 409.
 	res, body = do(t, "POST", url, threadBody("t_1", "m_1", "Open kitchen, the wok smell?"), viewer(keyMum))
-	if res.StatusCode != 200 || len(threads(body)) != 1 || res.Header.Get("ETag") != `"1"` {
+	if res.StatusCode != 200 || len(threads(body)) != 1 || ver(res) != "1" {
 		t.Fatalf("retry: %d %v", res.StatusCode, body)
 	}
 	if res, body := do(t, "POST", url, threadBody("t_1", "m_1", "Different"), viewer(keyMum)); res.StatusCode != http.StatusConflict || body["code"] != "id_taken" {
@@ -284,7 +285,7 @@ func TestCommentSetting(t *testing.T) {
 		t.Fatalf("bad setting: %d", res.StatusCode)
 	}
 	res, body := do(t, "PATCH", url, []byte(`{"setting":"edit"}`), asOwner())
-	if res.StatusCode != 200 || body["setting"] != "edit" || res.Header.Get("ETag") != `"1"` {
+	if res.StatusCode != 200 || body["setting"] != "edit" || ver(res) != "1" {
 		t.Fatalf("set edit: %d %v", res.StatusCode, body)
 	}
 	if res, body := do(t, "POST", url, threadBody("t_v", "m_v", "x"), viewer(keyMum)); res.StatusCode != http.StatusForbidden || body["code"] != "comments_edit_only" {
@@ -313,9 +314,13 @@ func TestCommentsNotModified(t *testing.T) {
 	ts := newTestServer(t)
 	newProject(t, ts, "prj_n")
 	url := ts.URL + "/projects/prj_n/comments"
-	do(t, "POST", url, threadBody("t_1", "m_1", "x"), viewer(keyMum))
+	posted, _ := do(t, "POST", url, threadBody("t_1", "m_1", "x"), viewer(keyMum))
+	tag := posted.Header.Get("ETag")
+	if !regexp.MustCompile(`^"[0-9a-f]{12}\.1"$`).MatchString(tag) {
+		t.Fatalf("ETag %q is not \"<epoch>.<version>\"", tag)
+	}
 
-	for _, inm := range []string{`"1"`, `W/"1"`, `"0", "1"`, `*`} {
+	for _, inm := range []string{tag, "W/" + tag, `"0", ` + tag, `*`} {
 		req, _ := http.NewRequest("GET", url, nil)
 		req.Header.Set("If-None-Match", inm)
 		res, err := http.DefaultClient.Do(req)
@@ -324,7 +329,7 @@ func TestCommentsNotModified(t *testing.T) {
 		}
 		b, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusNotModified || len(b) != 0 || res.Header.Get("ETag") != `"1"` || res.Header.Get("X-Role") != "viewer" {
+		if res.StatusCode != http.StatusNotModified || len(b) != 0 || res.Header.Get("ETag") != tag || res.Header.Get("X-Role") != "viewer" {
 			t.Fatalf("If-None-Match %s: %d %q %v", inm, res.StatusCode, b, res.Header)
 		}
 	}
@@ -333,9 +338,54 @@ func TestCommentsNotModified(t *testing.T) {
 	}
 	// The owner's setting is in the document, so a change shows to pollers.
 	do(t, "PATCH", url, []byte(`{"setting":"off"}`), asOwner())
-	if res, body := do(t, "GET", url, nil, map[string]string{"If-None-Match": `"1"`}); res.StatusCode != 200 || body["setting"] != "off" {
+	if res, body := do(t, "GET", url, nil, map[string]string{"If-None-Match": tag}); res.StatusCode != 200 || body["setting"] != "off" {
 		t.Fatalf("after a setting change: %d %v", res.StatusCode, body)
 	}
+}
+
+// A project deleted and made again restarts its comments at version 0: their epoch keeps
+// the old tags from matching the new comments.
+func TestCommentEpochsSurviveRecreate(t *testing.T) {
+	ts := newTestServer(t)
+	newProject(t, ts, "prj_e")
+	url := ts.URL + "/projects/prj_e/comments"
+	first, body := do(t, "POST", url, threadBody("t_1", "m_1", "old"), viewer(keyMum))
+	oldTag, oldEpoch := first.Header.Get("ETag"), body["epoch"]
+	if oldEpoch == nil || oldEpoch == "" {
+		t.Fatalf("no epoch in the view: %v", body)
+	}
+	do(t, "DELETE", ts.URL+"/projects/prj_e", nil, nil)
+	newProject(t, ts, "prj_e")
+	again, body := do(t, "POST", url, threadBody("t_2", "m_2", "new"), viewer(keyMum))
+	if ver(again) != "1" || again.Header.Get("ETag") == oldTag || body["epoch"] == oldEpoch {
+		t.Fatalf("recreated: %s (was %s), epoch %v", again.Header.Get("ETag"), oldTag, body["epoch"])
+	}
+	if res, _ := do(t, "GET", url, nil, map[string]string{"If-None-Match": oldTag}); res.StatusCode != 200 {
+		t.Fatalf("the old tag matched the new comments: %d", res.StatusCode)
+	}
+}
+
+func TestCommentWritesNeedJSON(t *testing.T) {
+	ts := newTestServer(t)
+	newProject(t, ts, "prj_j")
+	h := viewer(keyMum)
+	h["Content-Type"] = "application/x-www-form-urlencoded"
+	if res, _ := do(t, "POST", ts.URL+"/projects/prj_j/comments", threadBody("t_1", "m_1", "x"), h); res.StatusCode != http.StatusUnsupportedMediaType {
+		t.Fatalf("form post: %d", res.StatusCode)
+	}
+	h["Content-Type"] = "application/json; charset=utf-8"
+	if res, _ := do(t, "POST", ts.URL+"/projects/prj_j/comments", threadBody("t_1", "m_1", "x"), h); res.StatusCode != http.StatusCreated {
+		t.Fatalf("JSON with a charset: %d", res.StatusCode)
+	}
+}
+
+// ver is the version in a comments ETag ("<epoch>.<version>", or "0").
+func ver(res *http.Response) string {
+	tag := strings.Trim(res.Header.Get("ETag"), `"`)
+	if i := strings.LastIndexByte(tag, '.'); i >= 0 {
+		return tag[i+1:]
+	}
+	return tag
 }
 
 func TestCommentsAndTheProjectLifecycle(t *testing.T) {
@@ -351,7 +401,7 @@ func TestCommentsAndTheProjectLifecycle(t *testing.T) {
 	if res, _ := do(t, "PUT", ts.URL+"/projects/prj_d", doc("prj_d", "Saved", 1), map[string]string{"If-Match": `"1"`}); res.StatusCode != 200 {
 		t.Fatalf("save: %d", res.StatusCode)
 	}
-	if res, _ := do(t, "GET", url, nil, nil); res.Header.Get("ETag") != `"1"` {
+	if res, _ := do(t, "GET", url, nil, nil); ver(res) != "1" {
 		t.Fatalf("comments version after a save: %s", res.Header.Get("ETag"))
 	}
 
@@ -434,7 +484,7 @@ func TestConcurrentCommentsAllLand(t *testing.T) {
 		}
 	}
 	res, body := do(t, "GET", tsA.URL+"/projects/prj_race/comments", nil, nil)
-	if res.Header.Get("ETag") != `"20"` || len(threads(body)) != n {
+	if ver(res) != "20" || len(threads(body)) != n {
 		t.Fatalf("after %d posts: %s, %d threads", n, res.Header.Get("ETag"), len(threads(body)))
 	}
 	if a.commentLocks.size() != 0 || b.commentLocks.size() != 0 {

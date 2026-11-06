@@ -30,8 +30,8 @@ type CommentStore interface {
 	// missing.
 	GetComments(ctx context.Context, id string) (CommentsRec, error)
 	// PutComments stores doc as version prev.Version+1 if the comments are still prev;
-	// otherwise ErrCommentsChanged. It doesn't check the project exists (the caller has
-	// just read the comments with GetComments, which does).
+	// otherwise ErrCommentsChanged. A project deleted since prev was read gives
+	// ErrNotFound (or ErrCommentsChanged, and then ErrNotFound on the next read).
 	PutComments(ctx context.Context, id string, prev CommentsRec, doc []byte) error
 	// DeleteComments removes them (no error if there are none).
 	DeleteComments(ctx context.Context, id string) error
@@ -170,6 +170,11 @@ func (s *R2) PutComments(ctx context.Context, id string, prev CommentsRec, doc [
 		metaVersion:    {strconv.Itoa(prev.Version + 1)},
 	}
 	if prev.tag == "" {
+		// The first write: the project may have gone since the read (a later write is
+		// safe, as a project's delete takes its comments and so fails the If-Match).
+		if _, err := s.head(ctx, id); err != nil {
+			return err
+		}
 		h.Set("If-None-Match", "*")
 	} else {
 		h.Set("If-Match", prev.tag)

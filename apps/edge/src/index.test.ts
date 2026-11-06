@@ -50,7 +50,7 @@ function env(over: Record<string, unknown> = {}): WorkerEnv {
   return {
     WRITE_LIMIT: limiter(1000),
     CREATE_LIMIT: limiter(1000),
-    COMMENT_LIMIT: limiter(10),
+    COMMENT_LIMIT: limiter(30),
     API: {},
     ...over,
   } as unknown as WorkerEnv;
@@ -69,20 +69,21 @@ afterEach(() => {
 });
 
 describe('comment writes at the edge', () => {
-  it('allows 10 comment writes a minute per address, then 429 with the copy; GETs never count', async () => {
+  it('allows 30 comment writes a minute per address, then 429 with the copy; GETs never count', async () => {
     const e = env();
     const paths = [
       '/api/projects/prj_a/comments',
       '/api/projects/prj_a/comments/t_1/replies',
       '/api/projects/prj_a/comments/t_1',
     ];
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 30; i++) {
       const method = ['POST', 'PATCH', 'DELETE'][i % 3] ?? 'POST';
       const res = await worker.fetch(req(method, paths[i % 3] ?? ''), e);
       expect(res.status).toBe(200);
     }
     const res = await worker.fetch(req('POST', '/api/projects/prj_a/comments'), e);
     expect(res.status).toBe(429);
+    expect(res.headers.get('Retry-After')).toBe('60');
     expect(await res.json()).toMatchObject({
       error: "You're commenting very fast. Wait a minute and try again.",
     });
@@ -97,10 +98,14 @@ describe('comment writes at the edge', () => {
     expect(forwarded).toContain('PUT /projects/prj_a');
   });
 
-  it('caps a visitor at 100 comment writes a day', async () => {
-    const e = env({ COMMENT_LIMIT: limiter(1000), DB: fakeD1(), KEYS_SECRET: 's' });
-    for (let i = 0; i < 100; i++) {
+  it('caps a visitor at 300 comment posts a day; resolves and deletes do not count', async () => {
+    const e = env({ COMMENT_LIMIT: limiter(10_000), DB: fakeD1(), KEYS_SECRET: 's' });
+    for (let i = 0; i < 300; i++) {
       expect((await worker.fetch(req('POST', '/api/projects/prj_a/comments'), e)).status).toBe(200);
+    }
+    for (const method of ['PATCH', 'DELETE']) {
+      const res = await worker.fetch(req(method, '/api/projects/prj_a/comments/t_1'), e);
+      expect(res.status).toBe(200);
     }
     const res = await worker.fetch(req('POST', '/api/projects/prj_a/comments'), e);
     expect(res.status).toBe(429);
@@ -114,6 +119,13 @@ describe('comment writes at the edge', () => {
     const e = env({ DB: fakeD1(true) });
     expect((await worker.fetch(req('POST', '/api/projects/prj_a/comments'), e)).status).toBe(200);
     expect(logged.mock.calls.map((c) => c[0])).toContain('quotaUnavailable');
+  });
+
+  it('lets comments through, and logs it, when the rate-limit binding is missing', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const e = env({ COMMENT_LIMIT: undefined });
+    expect((await worker.fetch(req('POST', '/api/projects/prj_a/comments'), e)).status).toBe(200);
+    expect(logged.mock.calls.map((c) => c[0])).toContain('commentLimitUnbound');
   });
 
   it('accepts the comment event', () => {

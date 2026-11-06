@@ -10,6 +10,8 @@ package comments
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +19,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -62,9 +65,30 @@ func ValidID(id string) bool { return idPattern.MatchString(id) }
 
 // Doc is the stored comments document of one project.
 type Doc struct {
-	Version int      `json:"version"`
+	Version int `json:"version"`
+	// Epoch is random, set on the document's first write. A project deleted and made again
+	// with the same id starts its comments at version 0 again; the epoch keeps their ETags
+	// apart ("<epoch>.<version>").
+	Epoch   string   `json:"epoch,omitempty"`
 	Setting string   `json:"setting"`
 	Threads []Thread `json:"threads"`
+}
+
+// ETag is the document's entity tag: "0" before any comment, then "<epoch>.<version>".
+func (d Doc) ETag() string {
+	if d.Epoch == "" {
+		return `"` + strconv.Itoa(d.Version) + `"`
+	}
+	return `"` + d.Epoch + "." + strconv.Itoa(d.Version) + `"`
+}
+
+// NewEpoch returns a random epoch for a document's first write.
+func NewEpoch() string {
+	b := make([]byte, 6)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(b)
 }
 
 type Thread struct {
@@ -130,14 +154,18 @@ func Decode(b []byte) (Doc, error) {
 	return d, nil
 }
 
-// Encode returns the stored form, or comments_full once it is over MaxDocBytes.
+// Encode returns the stored form, or comments_too_big once it is over MaxDocBytes. HTML is
+// not escaped: the web renders text as text, and "<" as < would take 6 bytes of it.
 func Encode(d Doc) ([]byte, error) {
-	b, err := json.Marshal(d)
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(d); err != nil {
 		return nil, err
 	}
+	b := bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
 	if len(b) > MaxDocBytes {
-		return nil, errFull
+		return nil, errTooBig
 	}
 	return b, nil
 }
@@ -183,6 +211,7 @@ var (
 	errTaken     = &Error{http.StatusConflict, "id_taken", "That id is already used by another comment."}
 	errThread    = &Error{http.StatusConflict, "thread_full", fmt.Sprintf("This thread has %d replies. Start a new comment.", MaxThreadMessages)}
 	errFull      = &Error{http.StatusConflict, "comments_full", fmt.Sprintf("This plan has %d comments, the most it can hold. The owner can delete resolved ones.", MaxMessages)}
+	errTooBig    = &Error{http.StatusConflict, "comments_too_big", "This plan's comments have reached their size limit. The owner can delete resolved ones."}
 )
 
 // AsError returns err as an *Error when it is one.
@@ -490,11 +519,7 @@ func (a *Anchor) validate() error {
 	if !coord(a.At.X, MaxCoord) || !coord(a.At.Y, MaxCoord) {
 		return invalid("anchor.at must be within ±%g m", MaxCoord)
 	}
-	label, err := cleanLine(a.Label, MaxLabel, "anchor.label")
-	if err != nil {
-		return err
-	}
-	a.Label = label
+	a.Label = cleanLabel(a.Label)
 	if a.Target == nil {
 		return nil
 	}
@@ -536,10 +561,33 @@ func coord(v, limit float64) bool {
 
 func cleanName(s string) (string, error) { return cleanLine(s, MaxName, "name") }
 
+// cleanLabel tidies a label the app made (not typed: it may hold a room name with a
+// hidden character, or run long): control and format characters go (the joiner stays),
+// it is cut to MaxLabel runes, and an empty one names a plain spot.
+func cleanLabel(s string) string {
+	var b strings.Builder
+	n := 0
+	for _, r := range strings.TrimSpace(s) {
+		if r == utf8.RuneError || r == ' ' || r == ' ' ||
+			(r != '‍' && (unicode.Is(unicode.Cc, r) || unicode.Is(unicode.Cf, r))) {
+			continue
+		}
+		if n == MaxLabel {
+			break
+		}
+		b.WriteRune(r)
+		n++
+	}
+	if out := strings.TrimSpace(b.String()); out != "" {
+		return out
+	}
+	return "Spot on the plan"
+}
+
 // cleanLine is a single line of 1–max runes.
 func cleanLine(s string, max int, field string) (string, error) {
 	s = strings.TrimSpace(s)
-	if strings.ContainsAny(s, "\r\n") {
+	if strings.ContainsAny(s, "\r\n  ") {
 		return "", invalid("%s must be one line", field)
 	}
 	if err := checkRunes(s, field); err != nil {
@@ -555,6 +603,7 @@ func cleanLine(s string, max int, field string) (string, error) {
 func cleanText(s string) (string, error) {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
+	s = strings.NewReplacer(" ", "\n", " ", "\n").Replace(s)
 	s = strings.TrimSpace(s)
 	if err := checkRunes(s, "text"); err != nil {
 		return "", err
@@ -567,18 +616,23 @@ func cleanText(s string) (string, error) {
 
 // checkRunes refuses invalid UTF-8, control characters other than \n, and format
 // characters (bidi overrides could make a name read as someone else's), except the
-// zero-width joiner and tag characters emoji sequences are made of.
+// zero-width joiner and the tag characters of a subdivision flag (only straight after the
+// black flag, U+1F3F4, as in 🏴󠁧󠁢󠁳󠁣󠁴󠁿).
 func checkRunes(s, field string) error {
 	if !utf8.ValidString(s) {
 		return invalid("%s is not valid UTF-8", field)
 	}
+	inFlag := false
 	for _, r := range s {
+		tag := r >= 0xe0020 && r <= 0xe007f
 		switch {
-		case r == '\n':
-		case r == '‍', r >= 0xe0020 && r <= 0xe007f:
-		case unicode.Is(unicode.Cc, r), unicode.Is(unicode.Cf, r):
+		case r == '\n', r == '‍':
+		case tag && inFlag:
+		case tag, unicode.Is(unicode.Cc, r), unicode.Is(unicode.Cf, r):
 			return invalid("%s has a control character (U+%04X)", field, r)
 		}
+		// A flag's tags run until the cancel tag (U+E007F) closes them.
+		inFlag = r == 0x1f3f4 || (inFlag && tag && r != 0xe007f)
 	}
 	return nil
 }
@@ -590,6 +644,7 @@ func checkRunes(s, field string) error {
 // X-Role header and the setting, so a 304 can't carry stale rights.
 type View struct {
 	Version int          `json:"version"`
+	Epoch   string       `json:"epoch,omitempty"`
 	Setting string       `json:"setting"`
 	Threads []ViewThread `json:"threads"`
 }
@@ -613,7 +668,7 @@ type ViewMessage struct {
 // ViewFor returns d as the caller with authHash sees it.
 func ViewFor(d Doc, authHash string) View {
 	a := Actor{AuthHash: authHash}
-	v := View{Version: d.Version, Setting: d.Setting, Threads: make([]ViewThread, 0, len(d.Threads))}
+	v := View{Version: d.Version, Epoch: d.Epoch, Setting: d.Setting, Threads: make([]ViewThread, 0, len(d.Threads))}
 	for _, t := range d.Threads {
 		vt := ViewThread{ID: t.ID, Anchor: t.Anchor, Resolved: t.Resolved, Messages: make([]ViewMessage, 0, len(t.Messages))}
 		for _, m := range t.Messages {

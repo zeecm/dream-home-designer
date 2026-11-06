@@ -267,6 +267,10 @@ func runContract(t *testing.T, newStore func(t *testing.T) Store) {
 		if _, err := cs.GetComments(ctx, "prj_k"); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("comments of a deleted project: %v", err)
 		}
+		// A write that read before the delete can't bring them back.
+		if err := cs.PutComments(ctx, "prj_k", CommentsRec{}, []byte(`{"n":"late"}`)); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("write after delete: %v", err)
+		}
 		if err := s.Create(ctx, Record{ID: "prj_k", Name: "K", Doc: []byte(`{}`)}); err != nil {
 			t.Fatal(err)
 		}

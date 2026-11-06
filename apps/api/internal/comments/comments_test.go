@@ -47,7 +47,14 @@ func TestValidation(t *testing.T) {
 		{"empty name", func(o *AddThread) { o.Name = "  " }, false},
 		{"name on two lines", func(o *AddThread) { o.Name = "a\nb" }, false},
 		{"invalid UTF-8", func(o *AddThread) { o.Text = "\xff" }, false},
-		{"81-rune label", func(o *AddThread) { o.Anchor.Label = strings.Repeat("l", 81) }, false},
+		{"81-rune label (cut, not refused)", func(o *AddThread) { o.Anchor.Label = strings.Repeat("l", 81) }, true},
+		{"label with a hidden mark", func(o *AddThread) { o.Anchor.Label = "Kitchen‏" }, true},
+		{"line separator in name", func(o *AddThread) { o.Name = "Mum Dad" }, false},
+		{"Scotland's flag", func(o *AddThread) {
+			o.Name = "Ewan \U0001F3F4\U000E0067\U000E0062\U000E0073\U000E0063\U000E0074\U000E007F"
+		}, true},
+		{"tag characters on their own", func(o *AddThread) { o.Name = "Ewan \U000E0067\U000E0062" }, false},
+		{"tags after a closed flag", func(o *AddThread) { o.Name = "\U0001F3F4\U000E0067\U000E007F\U000E0067" }, false},
 		{"bad variant", func(o *AddThread) { o.Anchor.Variant = "x" }, false},
 		{"NaN", func(o *AddThread) { o.Anchor.At.X = math.NaN() }, false},
 		{"infinity", func(o *AddThread) { o.Anchor.At.Y = math.Inf(1) }, false},
@@ -84,6 +91,32 @@ func TestValidation(t *testing.T) {
 	o.Text = "  one\r\ntwo  "
 	if err := o.Validate(); err != nil || o.Text != "one\ntwo" {
 		t.Fatalf("normalised text %q %v", o.Text, err)
+	}
+}
+
+func TestLabelsAreTidiedNotRefused(t *testing.T) {
+	for in, want := range map[string]string{
+		strings.Repeat("厨", 90): strings.Repeat("厨", MaxLabel),
+		"Kitchen‏":              "Kitchen",
+		" ​ ":                   "Spot on the plan",
+		"Mum 👩‍👧 room":          "Mum 👩‍👧 room",
+	} {
+		o := validThread()
+		o.Anchor.Label = in
+		if err := o.Validate(); err != nil || o.Anchor.Label != want {
+			t.Errorf("label %q: got %q, %v", in, o.Anchor.Label, err)
+		}
+	}
+}
+
+func TestEncodeKeepsHTMLCharacters(t *testing.T) {
+	d, _ := Decode(nil)
+	th := validThread()
+	th.Text = "<b> & </b>"
+	_, _ = th.Apply(&d, mum, t0)
+	b, _ := Encode(d)
+	if !strings.Contains(string(b), `"<b> & </b>"`) {
+		t.Fatalf("escaped: %s", b)
 	}
 }
 
@@ -283,7 +316,7 @@ func TestLimits(t *testing.T) {
 			d.Threads[i].Messages[j].Text = strings.Repeat("𠀀", MaxText)
 		}
 	}
-	if _, err := Encode(d); code(err) != "comments_full" {
+	if _, err := Encode(d); code(err) != "comments_too_big" {
 		t.Fatalf("over 1 MB: %v", err)
 	}
 }
@@ -311,7 +344,7 @@ func TestViewHidesAuthorHashes(t *testing.T) {
 // testdata/comments.json is the view a client gets, shared with the zod schema in
 // packages/core (its test parses this file). Regenerate with go test -run Fixture -update.
 func TestFixture(t *testing.T) {
-	d := Doc{Version: 7, Setting: SettingAll, Threads: []Thread{}}
+	d := Doc{Version: 7, Epoch: "5e1f0a2b3c4d", Setting: SettingAll, Threads: []Thread{}}
 	yes := true
 	ops := []struct {
 		op Op

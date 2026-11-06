@@ -6,9 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"math/rand/v2"
+	"mime"
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -99,11 +99,11 @@ func authorHash(id, key string) string {
 }
 
 // commentHeaders: the response depends on the caller's link key and author key.
-func commentHeaders(w http.ResponseWriter, role Role, version int) {
+func commentHeaders(w http.ResponseWriter, role Role, doc comments.Doc) {
 	w.Header().Set("X-Role", string(role))
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("Vary", "Authorization, X-Comment-Author")
-	w.Header().Set("ETag", etag(version))
+	w.Header().Set("ETag", doc.ETag())
 }
 
 func (s *Server) getComments(w http.ResponseWriter, r *http.Request) {
@@ -121,17 +121,17 @@ func (s *Server) getComments(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	commentHeaders(w, role, rec.Version)
-	if noneMatch(r.Header.Get("If-None-Match"), rec.Version) {
-		w.WriteHeader(http.StatusNotModified)
-		return
-	}
 	doc, err := comments.Decode(rec.Doc)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	doc.Version = rec.Version
+	commentHeaders(w, role, doc)
+	if noneMatch(r.Header.Get("If-None-Match"), doc.ETag()) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 	hash := ""
 	if key := r.Header.Get("X-Comment-Author"); authorPattern.MatchString(key) {
 		hash = authorHash(id, key)
@@ -139,16 +139,15 @@ func (s *Server) getComments(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, comments.ViewFor(doc, hash))
 }
 
-// noneMatch reports whether an If-None-Match header names version: a list, weak tags
-// and * are all allowed.
-func noneMatch(h string, version int) bool {
+// noneMatch reports whether an If-None-Match header names tag: a list, weak tags and *
+// are all allowed.
+func noneMatch(h, tag string) bool {
 	for _, part := range strings.Split(h, ",") {
 		part = strings.TrimSpace(part)
 		if part == "*" {
 			return true
 		}
-		part = strings.Trim(strings.TrimPrefix(part, "W/"), `"`)
-		if v, err := strconv.Atoi(part); err == nil && v == version {
+		if part != "" && strings.TrimPrefix(part, "W/") == tag {
 			return true
 		}
 	}
@@ -178,6 +177,11 @@ func (s *Server) commentWrite(w http.ResponseWriter, r *http.Request, created in
 	if !ok {
 		return
 	}
+	// A JSON content type and the author header: a cross-site form can send neither.
+	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
+		writeCode(w, http.StatusUnsupportedMediaType, "invalid", "send Content-Type: application/json")
+		return
+	}
 	key := r.Header.Get("X-Comment-Author")
 	if !authorPattern.MatchString(key) {
 		writeCode(w, http.StatusBadRequest, "invalid", "X-Comment-Author must be 32 base64url characters")
@@ -197,6 +201,10 @@ func (s *Server) commentWrite(w http.ResponseWriter, r *http.Request, created in
 
 	unlock := s.commentLocks.lock(id)
 	defer unlock()
+	// The caller may have gone while it waited for the lock.
+	if r.Context().Err() != nil {
+		return
+	}
 	for attempt := 0; attempt < commentAttempts; attempt++ {
 		if attempt > 0 {
 			select {
@@ -222,11 +230,14 @@ func (s *Server) commentWrite(w http.ResponseWriter, r *http.Request, created in
 			return
 		}
 		if !changed {
-			commentHeaders(w, role, rec.Version)
+			commentHeaders(w, role, doc)
 			writeJSON(w, http.StatusOK, comments.ViewFor(doc, actor.AuthHash))
 			return
 		}
 		doc.Version = rec.Version + 1
+		if doc.Epoch == "" {
+			doc.Epoch = comments.NewEpoch()
+		}
 		b, err := comments.Encode(doc)
 		if err != nil {
 			s.commentFail(w, err)
@@ -240,7 +251,7 @@ func (s *Server) commentWrite(w http.ResponseWriter, r *http.Request, created in
 			s.fail(w, err)
 			return
 		}
-		commentHeaders(w, role, doc.Version)
+		commentHeaders(w, role, doc)
 		writeJSON(w, created, comments.ViewFor(doc, actor.AuthHash))
 		return
 	}
@@ -326,6 +337,8 @@ func (s *Server) commentFail(w http.ResponseWriter, err error) {
 // failed half way, or a comment write racing the delete).
 func (s *Server) clearComments(ctx context.Context, id string) {
 	if cs, ok := s.store.(store.CommentStore); ok {
+		// Not while a comment write is between its read and its write.
+		defer s.commentLocks.lock(id)()
 		if err := cs.DeleteComments(ctx, id); err != nil {
 			s.log.Error("clear leftover comments", "id", id, "err", err)
 		}
