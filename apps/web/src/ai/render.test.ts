@@ -1,6 +1,6 @@
-import type { SceneFacts } from '@dhd/core';
+import { MAX_SHEET, type SceneFacts } from '@dhd/core';
 import { describe, expect, it } from 'vitest';
-import { HIGH_FIDELITY, MAX_SHEET, renderPrompt } from './render';
+import { HIGH_FIDELITY, renderPrompt } from './render';
 
 describe('OpenAI render options', () => {
   it('asks for high input fidelity only of models known to take it', () => {
@@ -53,13 +53,13 @@ describe('the render prompt', () => {
     const p = renderPrompt('scandi', bedroom);
     expect(p).toContain('Turn it into a photorealistic interior photograph');
     expect(p).toContain('Scandinavian');
-    expect(p).toContain('This is Bedroom 2, 3.0 m × 2.8 m (8.4 m²), ceiling 2.6 m.');
+    expect(p).toContain('This is "Bedroom 2", 3.0 m × 2.8 m (8.4 m²), ceiling 2.6 m.');
     expect(p).toContain('1.6 m above the floor');
     expect(p).toContain('60° field of view');
     expect(p).toContain(
-      'The only furniture in view: Single bed 1.0 × 2.0 × 0.5 m (against the left wall), Wardrobe 1.2 × 0.6 × 2.1 m (against the right wall).',
+      'The only furniture in view: "Single bed" 1.0 × 2.0 × 0.5 m (against the left wall), "Wardrobe" 1.2 × 0.6 × 2.1 m (against the right wall).',
     );
-    expect(p).toContain('Keep the room exactly this size; it is small.');
+    expect(p).toContain('Keep the room exactly the size given here; it is small.');
     expect(p).toContain('leave empty floor empty');
     // A new look changes the finishes, so they aren't listed.
     expect(p).not.toContain('Sage');
@@ -80,6 +80,13 @@ describe('the render prompt', () => {
     }));
     const p = renderPrompt('as', { ...bedroom, items, moreItems: 40 });
     expect(p.length).toBeLessThan(renderPrompt('as').length + MAX_SHEET + 40);
+    expect(p).toContain('Do not add, remove, enlarge or move furniture; leave empty floor empty.');
+  });
+
+  it('lets plants and décor go only where there is already a surface', () => {
+    expect(renderPrompt('scandi', bedroom)).toContain(
+      'Plants and décor may go only on surfaces already there',
+    );
   });
 
   it('without the facts, is the plain prompt', () => {

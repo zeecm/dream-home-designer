@@ -1,4 +1,10 @@
-import { OVERHEAD_HEIGHT, type SceneFacts, eyeLevelCamera, sceneFacts } from '@dhd/core';
+import {
+  OVERHEAD_HEIGHT,
+  type SceneCamera,
+  type SceneFacts,
+  eyeLevelCamera,
+  sceneFacts,
+} from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../editor';
 import { capture3dFrom, capture3dView, download, fileStem } from '../exports';
@@ -40,7 +46,10 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
   // The view as it is, and (from high up) from eye height in its room.
   const [shots, setShots] = useState<{ here: Shot; eye?: Shot & { room: string } } | null>(null);
   const [from, setFrom] = useState<'here' | 'eye'>('here');
-  const [photo, setPhoto] = useState<{ blob: Blob; url: string } | null>(null);
+  // A render, with which picture it was made from.
+  const [photo, setPhoto] = useState<{ blob: Blob; url: string; from: 'here' | 'eye' } | null>(
+    null,
+  );
   const [style, setStyle] = useState<RenderStyle>('as');
   const [busy, setBusy] = useState<AbortController | null>(null);
   const [status, setStatus] = useState('');
@@ -62,24 +71,32 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
       return { blob, url, facts };
     };
     void (async () => {
+      let here: Shot;
+      let camera: SceneCamera;
       try {
-        const { blob, camera } = await capture3dView();
+        const view = await capture3dView();
         if (!live) return; // closed before the picture was ready
-        const facts = level ? sceneFacts(level, camera) : undefined;
-        const here = shot(blob, facts);
-        // A walk is at eye height already.
-        const eye = !walking && level && facts?.view !== 'eye' && eyeLevelCamera(level, camera);
-        if (!eye || !level) {
-          setShots({ here });
-          return;
-        }
+        camera = view.camera;
+        here = shot(view.blob, level ? sceneFacts(level, camera) : undefined);
+        setShots({ here });
+      } catch {
+        if (live) setStatus('Couldn’t take a picture of the 3D view.');
+        return;
+      }
+      // A walk is at eye height already.
+      if (walking || !level || here.facts?.view === 'eye') return;
+      try {
+        const eye = eyeLevelCamera(level, camera);
+        if (!eye) return;
         const room = level.rooms[eye.roomId]?.name ?? 'the room';
         const eyeBlob = await capture3dFrom(eye.camera);
         if (!live) return;
         setShots({ here, eye: { ...shot(eyeBlob, sceneFacts(level, eye.camera)), room } });
         setFrom('eye');
       } catch {
-        if (live) setStatus('Couldn’t take a picture of the 3D view.');
+        // This view is still there to render from.
+        if (live)
+          setStatus('Couldn’t take the eye-height picture, so the render will use this view.');
       }
     })();
     return () => {
@@ -98,7 +115,11 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
     setStatus('Rendering… this can take a minute or two.');
     try {
       const blob = await renderPhoto(ai, view.blob, style, ctrl.signal, view.facts);
-      setPhoto({ blob, url: URL.createObjectURL(blob) });
+      setPhoto({
+        blob,
+        url: URL.createObjectURL(blob),
+        from: view === shots?.eye ? 'eye' : 'here',
+      });
       setShowView(false);
       setStatus('');
     } catch (e) {
@@ -135,6 +156,7 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
               <button
                 type="button"
                 aria-pressed={from === 'eye'}
+                disabled={!!busy}
                 onClick={() => {
                   setFrom('eye');
                   setShowView(true);
@@ -145,6 +167,7 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
               <button
                 type="button"
                 aria-pressed={from === 'here'}
+                disabled={!!busy}
                 onClick={() => {
                   setFrom('here');
                   setShowView(true);
@@ -171,7 +194,15 @@ export function RenderDialog({ onClose }: { onClose: () => void }) {
               <button type="button" aria-pressed={!showView} onClick={() => setShowView(false)}>
                 Render
               </button>
-              <button type="button" aria-pressed={showView} onClick={() => setShowView(true)}>
+              <button
+                type="button"
+                aria-pressed={showView}
+                onClick={() => {
+                  // The picture the render was made from.
+                  setShowView(true);
+                  setFrom(photo.from);
+                }}
+              >
                 3D view
               </button>
             </fieldset>

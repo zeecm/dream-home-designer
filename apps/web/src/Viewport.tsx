@@ -428,6 +428,10 @@ function CompareDivider({
   );
 }
 
+/** The walk's sky light, and its even light under the ceilings, for `light` daylight (0 to 1). */
+const WALK_SKY = (light: number) => 0.05 + 2.15 * light;
+const WALK_EVEN = (light: number) => 0.02 + 0.33 * light;
+
 /** The level's meshes as drawn (a renovation's two versions, while comparing). */
 const LEVEL_GROUPS = new Set(['level', 'level-compared']);
 
@@ -435,8 +439,19 @@ const LEVEL_GROUPS = new Set(['level', 'level-compared']);
  * Lets the downloads draw this view on demand and reach the level's meshes, and the render
  * draw it from another camera (at eye height) without the view on screen changing.
  */
-function Capture({ level, ceilings }: { level: Level | undefined; ceilings: boolean }) {
+function Capture({
+  level,
+  ceilings,
+  daylight,
+}: {
+  level: Level | undefined;
+  ceilings: boolean;
+  /** How much daylight there is (0 to 1), to light an eye-height view as the walk is lit. */
+  daylight: number;
+}) {
   const { gl, scene, camera, controls } = useThree();
+  const day = useRef(daylight);
+  day.current = daylight;
   const shown = useRef(level);
   shown.current = level;
   const hasCeilings = useRef(ceilings);
@@ -478,6 +493,7 @@ function Capture({ level, ceilings }: { level: Level | undefined; ceilings: bool
         const lvl = shown.current;
         const hidden: THREE.Object3D[] = [];
         const flat: THREE.Material[] = [];
+        const undo: (() => void)[] = [];
         let indoors: LevelMeshes | null = null;
         if (lvl && !hasCeilings.current) {
           indoors = new LevelMeshes(materials, { ceilings: true, models });
@@ -499,6 +515,26 @@ function Capture({ level, ceilings }: { level: Level | undefined; ceilings: bool
             }
           }
           scene.add(indoors.group);
+          // Lit as the walk is: no sun shadows (the ceilings would shade every floor), the
+          // walk's sky light, and its even light under the ceilings.
+          const light = day.current;
+          scene.traverse((o) => {
+            if (o instanceof THREE.DirectionalLight && o.castShadow) {
+              o.castShadow = false;
+              undo.push(() => {
+                o.castShadow = true;
+              });
+            } else if (o instanceof THREE.HemisphereLight) {
+              const was = o.intensity;
+              o.intensity = WALK_SKY(light);
+              undo.push(() => {
+                o.intensity = was;
+              });
+            }
+          });
+          const even = new THREE.AmbientLight(0xffffff, WALK_EVEN(light));
+          scene.add(even);
+          undo.push(() => scene.remove(even));
         }
         try {
           gl.render(scene, cam);
@@ -511,6 +547,7 @@ function Capture({ level, ceilings }: { level: Level | undefined; ceilings: bool
           }
           for (const m of flat) m.dispose();
           for (const o of hidden) o.visible = true;
+          for (const u of undo) u();
           gl.render(scene, camera);
         }
       },
@@ -619,11 +656,11 @@ export function Viewport() {
             sky,
             dark ? '#3a3d40' : '#dfe3e6',
             // Indoors at night only the lamps should really light a room.
-            walking ? 0.05 + 2.15 * light : 0.3 + 1.2 * light,
+            walking ? WALK_SKY(light) : 0.3 + 1.2 * light,
           ]}
         />
         {/* Under the ceilings the sun can't reach; even light keeps rooms readable. */}
-        {walking && <ambientLight intensity={0.02 + 0.33 * light} />}
+        {walking && <ambientLight intensity={WALK_EVEN(light)} />}
         <primitive object={sunTarget} position={[frame.x, 0, frame.z]} />
         <directionalLight
           castShadow={!walking && sun.altitude > 0}
@@ -651,7 +688,7 @@ export function Viewport() {
         ) : (
           level && <Lamps level={level} />
         )}
-        <Capture level={level} ceilings={walking} />
+        <Capture level={level} ceilings={walking} daylight={light} />
         <mesh rotation-x={-Math.PI / 2} position={[frame.x, -0.01, frame.z]} receiveShadow>
           <planeGeometry args={[200, 200]} />
           <meshStandardMaterial color={dark ? '#1a1c1e' : '#eef1f3'} />

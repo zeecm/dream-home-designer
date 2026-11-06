@@ -13,9 +13,15 @@ const PNG =
 /** Answers Gemini's picture requests with a tiny PNG, keeping each prompt sent. */
 async function mockGemini(page: Page) {
   const prompts: string[] = [];
+  // Never a real provider: anything not mocked is turned away.
+  for (const host of ['https://api.openai.com/**', 'https://api.anthropic.com/**']) {
+    await page.route(host, (route) => route.abort());
+  }
   await page.route('https://generativelanguage.googleapis.com/**', async (route) => {
     const body = route.request().postDataJSON();
     prompts.push(body.contents[0].parts[1].text);
+    // A moment's work, as a model takes, so the dialog can be seen busy.
+    await new Promise((r) => setTimeout(r, 600));
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -81,15 +87,18 @@ test('from the orbit view, a render starts from eye height and tells the model t
   await expect(dialog.locator('.dialog-foot .render-model')).toBeVisible();
 
   await dialog.getByRole('button', { name: 'Render' }).click();
+  // Where to render from can't change under a render in progress.
+  await expect(eye).toBeDisabled();
+  await expect(here).toBeDisabled();
   await expect(dialog.getByRole('img', { name: 'The render' })).toBeVisible();
   expect(prompts).toHaveLength(1);
   const atEye = prompts[0] ?? '';
   // The style and fidelity asks are kept.
   expect(atEye).toContain('Turn it into a photorealistic interior photograph');
-  expect(atEye).toContain('This is Living and dining, ');
+  expect(atEye).toContain('This is "Living and dining", ');
   expect(atEye).toContain('(21.0 m²), ceiling 2.6 m.');
   expect(atEye).toContain('1.6 m above the floor, at eye height');
-  expect(atEye).toContain('3-seat sofa 2.1 × 0.9 × 0.8 m');
+  expect(atEye).toContain('"3-seat sofa" 2.1 × 0.9 × 0.8 m');
   // The fridge is behind the kitchen's walls: not in the picture, so not in the list.
   expect(atEye).not.toContain('Fridge');
   expect(atEye).toContain('Do not add, remove, enlarge or move furniture');
@@ -104,7 +113,7 @@ test('from the orbit view, a render starts from eye height and tells the model t
   const overhead = prompts[1] ?? '';
   expect(overhead).toContain('cut-away view');
   expect(overhead).toContain('look bigger than they are');
-  expect(overhead).toContain('Living and dining, ');
+  expect(overhead).toContain('"Living and dining", ');
   expect(overhead).toContain('3-seat sofa');
   expect(overhead).toContain('Fridge');
 });

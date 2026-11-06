@@ -12,18 +12,16 @@ export const RENDER_STYLES = {
 } as const;
 export type RenderStyle = keyof typeof RENDER_STYLES;
 
-/** The scene sheet's most: about 25 pieces of furniture with their sizes fit well inside. */
-export const MAX_SHEET = 4000;
-
 /**
  * What to ask the image model: the picture made photographic, and (given the facts of the
  * view) a short sheet of what is really there, so a view from high up isn't read as a big
  * room and filled with furniture that wouldn't fit.
  */
 export function renderPrompt(style: RenderStyle, facts?: SceneFacts): string {
-  const base = `This is a simple 3D model render of a room in a home. Turn it into a photorealistic interior photograph, as a professional architectural photographer would take it. Keep the same camera position and angle, the same room shape, walls, doors, windows and openings, and the same furniture in the same places, sizes and orientations. Add realistic materials, textures, soft shadows and natural light through the windows. ${RENDER_STYLES[style]} Do not add or remove walls, windows, doors or furniture. No people, no text.`;
+  const base = `This is a simple 3D model render of a room in a home. Turn it into a photorealistic interior photograph, as a professional architectural photographer would take it. Keep the same camera position and angle, the same room shape, walls, doors, windows and openings, and the same furniture in the same places, sizes and orientations. Add realistic materials, textures, soft shadows and natural light through the windows. ${RENDER_STYLES[style]} Do not add or remove walls, windows, doors or furniture. Plants and décor may go only on surfaces already there (a shelf, a table), never on empty floor. No people, no text.`;
   if (!facts) return base;
-  const sheet = sceneSheet(facts, { finishes: style === 'as' }).slice(0, MAX_SHEET);
+  // The sheet fits its own length (pieces dropped and counted), its instruction first.
+  const sheet = sceneSheet(facts, { finishes: style === 'as' });
   return `${base}\n\nThe true scene, measured: ${sheet}`;
 }
 

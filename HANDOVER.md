@@ -629,16 +629,22 @@ It gives the camera's height and field of view, and whether it is at eye height,
 (above 2.2 m) or outside every room. Furniture is listed only when its box is in the frustum
 and, below the wall tops, something of it is in plain sight past the walls, up to 25
 pieces, largest first, with sizes and where it stands ("against the left wall, by the
-window"). Finishes are listed only for the "As designed" look. The sheet ends: keep the size,
-don't add, remove, enlarge or move furniture, leave empty floor empty. From an orbit or
+window"). Finishes are listed only for the "As designed" look. The sheet starts with the
+instruction (keep the size, don't add, remove, enlarge or move furniture, leave empty floor
+empty), so the length cap (`MAX_SHEET`, 3000) can only drop pieces ("and N more"), never it.
+Room and piece names (uploaded models' too) are cleaned (`clean`, 40 characters: no newlines
+or direction overrides) and quoted as labels. From an orbit or
 outside view the dialog offers "From eye height in <room>" (the default) or "From this view
 (overhead: rooms may look larger)" with a warning; the walk skips the choice.
 `eyeLevelCamera` stands a person 1.6 m up in that room (or its open-plan space), facing the
 view's direction across the floor (turned up to 60° if the view ahead is under 2.5 m),
-backed towards the wall behind but a step clear of walls, door leaves and furniture, 70°
-across, tilted down 8°. `Capture.renderFrom` in `Viewport.tsx` draws it with the same
-renderer and a temporary copy of the level with ceilings, reads the canvas, and redraws the view
-before the browser shows a frame, so the screen doesn't move. `e2e/render-scale.spec.ts`.
+backed towards the wall behind but a step clear of walls, door leaves and furniture, and
+not facing a tall piece (over 1.2 m) closer than 1.5 m, 70° across, tilted down 8°.
+`Capture.renderFrom` in `Viewport.tsx` draws it with the same renderer and a temporary copy
+of the level with ceilings (in their paint, unlit), lit as the walk is (no sun shadows, the
+walk's sky and even light), reads the canvas, and puts the view's lights back and redraws it
+before the browser shows a frame, so the screen doesn't move. If the eye-height picture
+fails, "this view" stays, with a note. `e2e/render-scale.spec.ts`.
 
 **AI model pickers (6 Nov, owner reports: Gemini 400 with gemini-3-pro-image; type-in model
 names):** the AI assistant has two selects, "Model for plans and layouts" and, for OpenAI and
