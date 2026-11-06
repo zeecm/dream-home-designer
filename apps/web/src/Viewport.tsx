@@ -26,6 +26,7 @@ import { useEditor } from './editor';
 import { registerScene3d } from './exports';
 import { configureLoader, fetchUploaded } from './models';
 import { useLevel, useProject, useStore } from './store';
+import { icons } from './ui/icons';
 import { Joystick } from './walk/Joystick';
 import { MiniMap } from './walk/MiniMap';
 import { WalkControls, type WalkPose } from './walk/WalkControls';
@@ -575,6 +576,7 @@ export function Viewport() {
             stick={stick}
             lookStick={lookStick}
             pose={pose}
+            paused={rendering}
             initial={() => loadWalkPose(projectId, level)}
             onLeave={(p) => saveWalkPose(projectId, p)}
           />
@@ -601,24 +603,32 @@ export function Viewport() {
             Leave walk
           </button>
           <SoundToggle />
-          {!coarsePointer() && !viewer && (
+          {!viewer && (
+            // On touch screens a camera icon, clear of the sticks and the mini-map (under
+            // Footsteps; the map moves down for it). The view to render is the one walked to.
             <button
               type="button"
-              className="btn viewport-render viewport-render-walk"
+              className={`btn viewport-render viewport-render-walk${coarsePointer() ? ' viewport-render-icon' : ''}`}
+              // The icon's name, and a tooltip for it.
+              aria-label={coarsePointer() ? 'Photo-real render' : undefined}
+              title={coarsePointer() ? 'Photo-real render' : undefined}
               onClick={() => {
                 // The mouse back from the walk, to use the dialog.
                 if (document.pointerLockElement) document.exitPointerLock();
+                // Let go of the sticks: the walk stands still while the dialog is open.
+                stick.current = { x: 0, y: 0 };
+                lookStick.current = { x: 0, y: 0 };
                 setRendering(true);
               }}
             >
-              Photo-real render
+              {coarsePointer() ? icons.camera : 'Photo-real render'}
             </button>
           )}
           {level && <MiniMap level={level} pose={pose} />}
           {coarsePointer() && (
             <>
-              <Joystick stick={stick} />
-              <Joystick stick={lookStick} look />
+              <Joystick stick={stick} disabled={rendering} />
+              <Joystick stick={lookStick} look disabled={rendering} />
             </>
           )}
           <p className="viewport-hint">

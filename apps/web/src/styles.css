@@ -2748,10 +2748,42 @@ h3.field-label {
   color: var(--muted);
   font-size: var(--fs-small);
 }
+/* A phone on its side: a smaller picture, so the key line or the look shows under it. */
+@media (max-height: 500px) {
+  .render-pictures img {
+    max-height: 28vh;
+  }
+  .render-wait {
+    height: 28vh;
+  }
+}
 
-/* While walking (mouse and keyboard): under Footsteps. */
+/* While walking: under Footsteps. */
 .viewport-render-walk {
   top: 108px;
+}
+/* Touch screens: a camera icon at a fingertip's size, clear of the sticks; the mini-map
+   under Footsteps steps down below it. */
+.viewport-render-icon {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  padding: 0;
+}
+.viewport-render-icon svg {
+  width: 20px;
+  height: 20px;
+}
+@media (pointer: coarse) {
+  .viewport-render-walk ~ .minimap {
+    top: 160px;
+  }
+}
+/* A phone on its side keeps the map top left, under the time. */
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  .viewport-render-walk ~ .minimap {
+    top: 104px;
+  }
 }
 
 .layouts-dialog {
@@ -2862,6 +2894,7 @@ h3.field-label {
 @media (pointer: coarse) {
   .dialog .btn,
   .dialog .icon-btn,
+  .dialog .segmented button,
   .trace-bar .btn {
     height: auto;
     min-height: 44px;

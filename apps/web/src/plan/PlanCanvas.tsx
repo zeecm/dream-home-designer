@@ -323,7 +323,10 @@ export function PlanCanvas() {
     }
     setView(fitBounds(b, size));
     lastFit.current = { at: Date.now(), ink, image: image.status };
-    fitDone();
+    // Only a fit that was asked for answers the request. This run may be a refit (the plan
+    // image measured) left over from a commit before a view switch asked for one: clearing
+    // that request here would leave the plan fitted to the old pane.
+    if (fitRequested) fitDone();
   }, [fitRequested, viewAdjusted, size, image.status, ink, setView, fitDone]);
 
   // When the pane resizes (a phone's details panel folding or opening), the plan stays put
