@@ -97,7 +97,8 @@ function carries(w: number, d: number, h: number, diagonal?: number): Carry[] {
   return out;
 }
 
-interface Door {
+/** A door or passage in the door graph: where it is, and the rooms either side. */
+export interface RouteDoor {
   o: Opening;
   centre: Vec2;
   n: Vec2;
@@ -106,23 +107,128 @@ interface Door {
   sides: [string | null, string | null];
 }
 
-function doorsOf(level: Level, geom: PlanGeometry): Door[] {
+/** The way through a flat: its doors and passages, and rooms open to each other. */
+export interface DoorGraph {
+  doors: RouteDoor[];
+  /** Rooms joined across a room boundary (no door), both ways. */
+  free: Map<string, Set<string>>;
+}
+
+/** The room at a point (not in a hole), by id. */
+function roomIdAt(level: Level, p: Vec2): string | null {
   const shapes = roomShapes(level);
-  const roomAt = (p: Vec2) =>
+  return (
     Object.values(level.rooms).find((r) => {
       const s = shapes.get(r.id);
       return !!s && pointInPolygon(p, s.outer) && !s.holes.some((h) => pointInPolygon(p, h));
-    })?.id ?? null;
-  return geom.openings
+    })?.id ?? null
+  );
+}
+
+/** A flat's doors and passages with the rooms either side, and its room boundaries. */
+export function doorGraph(level: Level, geom: PlanGeometry = planGeometry(level)): DoorGraph {
+  const doors = geom.openings
     .filter((g) => g.kind !== 'window')
-    .map((g) => {
+    .map((g): RouteDoor => {
       const f = g.frame;
       const u = (g.span[0] + g.span[1]) / 2;
       const centre = framePoint(f, u, 0);
       const off = f.half + 0.1;
       const at = (k: number) => ({ x: centre.x + f.n.x * off * k, y: centre.y + f.n.y * off * k });
-      return { o: g.opening, centre, n: f.n, half: f.half, sides: [roomAt(at(1)), roomAt(at(-1))] };
+      return {
+        o: g.opening,
+        centre,
+        n: f.n,
+        half: f.half,
+        sides: [roomIdAt(level, at(1)), roomIdAt(level, at(-1))],
+      };
     });
+  const shapes = roomShapes(level);
+  const free = new Map<string, Set<string>>();
+  const link = (a: string, b: string) => {
+    if (!free.has(a)) free.set(a, new Set());
+    free.get(a)?.add(b);
+  };
+  // By id, so the way found doesn't depend on the order the walls were stored in.
+  const walls = Object.values(level.walls).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  for (const wall of walls) {
+    if (!isBoundary(wall)) continue;
+    const f = geom.frames[wall.id];
+    if (!f) continue;
+    const mid = framePoint(f, f.length / 2, 0);
+    const at = (k: number) => ({ x: mid.x + f.n.x * 0.1 * k, y: mid.y + f.n.y * 0.1 * k });
+    const room = (q: Vec2) =>
+      Object.values(level.rooms).find((r) => {
+        const s = shapes.get(r.id);
+        return !!s && pointInPolygon(q, s.outer);
+      })?.id;
+    const a = room(at(1));
+    const b = room(at(-1));
+    if (a && b && a !== b) {
+      link(a, b);
+      link(b, a);
+    }
+  }
+  return { doors, free };
+}
+
+/** How a room was reached: from `room`, through `door` (null: across a room boundary). */
+export type RouteStep = { room: string; door: RouteDoor | null } | null;
+
+/**
+ * Fewest doors from `start` (a room id) to every room, or to `target` (it stops there):
+ * across a room boundary costs no door. `pass` says whether a door may be gone through from
+ * one room into another; `skip` is a door never used (the one the way began at). Each room
+ * reached maps to the step it was reached by (null for `start`).
+ */
+export function doorSearch(
+  graph: DoorGraph,
+  start: string,
+  opts: {
+    target?: string;
+    skip?: RouteDoor;
+    pass?: (door: RouteDoor, from: string, into: string) => boolean;
+  } = {},
+): Map<string, RouteStep> {
+  const prev = new Map<string, RouteStep>();
+  prev.set(start, null);
+  const queue = [start];
+  while (queue.length) {
+    const room = queue.shift() as string;
+    if (room === opts.target) break;
+    // Across a room boundary costs no door: to the front of the queue.
+    for (const nb of graph.free.get(room) ?? []) {
+      if (prev.has(nb)) continue;
+      prev.set(nb, { room, door: null });
+      queue.unshift(nb);
+    }
+    for (const door of graph.doors) {
+      if (door === opts.skip) continue;
+      const [pa, pb] = door.sides;
+      const other = pa === room ? pb : pb === room ? pa : undefined;
+      if (!other || prev.has(other)) continue;
+      if (opts.pass && !opts.pass(door, room, other)) continue;
+      prev.set(other, { room, door });
+      queue.push(other);
+    }
+  }
+  return prev;
+}
+
+/** The doors on the way to `room` found by doorSearch, in order (null if it wasn't reached). */
+export function routeTo(
+  prev: Map<string, RouteStep>,
+  room: string,
+): { door: RouteDoor; into: string }[] | null {
+  if (!prev.has(room)) return null;
+  const route: { door: RouteDoor; into: string }[] = [];
+  for (let at = room; ; ) {
+    const step = prev.get(at);
+    if (!step) break;
+    if (step.door) route.unshift({ door: step.door, into: at });
+    at = step.room;
+  }
+  return route;
 }
 
 /** How far a ray from `p` along `dir` runs before meeting a wall (capped). */
@@ -181,7 +287,8 @@ export function deliveryCheck(
   const item = level.items[itemId];
   if (!item) return { status: 'no-room' };
   const geom = planGeometry(level);
-  const doors = doorsOf(level, geom);
+  const graph = doorGraph(level, geom);
+  const doors = graph.doors;
   const shapes = roomShapes(level);
   const p = { x: item.position.x, y: item.position.z };
   const target = Object.values(level.rooms).find((r) => {
@@ -214,7 +321,7 @@ export function deliveryCheck(
   ];
 
   /** One door, entered from the side `k` (+1: from +n into -n). */
-  const judge = (door: Door, k: number, into: string | null): DoorOnTheWay => {
+  const judge = (door: RouteDoor, k: number, into: string | null): DoorOnTheWay => {
     const clear = clearWidth(door.o);
     const height = door.o.height;
     // The space to turn in, on each side.
@@ -275,31 +382,6 @@ export function deliveryCheck(
     return { openingId: door.o.id, into, clear, height, centre, fit: 'too-big', need };
   };
 
-  // Rooms joined by doors and passages, and across room boundaries freely.
-  const free = new Map<string, Set<string>>();
-  const link = (a: string, b: string) => {
-    if (!free.has(a)) free.set(a, new Set());
-    free.get(a)?.add(b);
-  };
-  for (const wall of Object.values(level.walls)) {
-    if (!isBoundary(wall)) continue;
-    const f = geom.frames[wall.id];
-    if (!f) continue;
-    const mid = framePoint(f, f.length / 2, 0);
-    const at = (k: number) => ({ x: mid.x + f.n.x * 0.1 * k, y: mid.y + f.n.y * 0.1 * k });
-    const room = (q: Vec2) =>
-      Object.values(level.rooms).find((r) => {
-        const s = shapes.get(r.id);
-        return !!s && pointInPolygon(q, s.outer);
-      })?.id;
-    const a = room(at(1));
-    const b = room(at(-1));
-    if (a && b && a !== b) {
-      link(a, b);
-      link(b, a);
-    }
-  }
-
   // The first door is the main door, from outside (or from whichever side is outside).
   const startInto = start.sides[0] ?? start.sides[1];
   if (!startInto) return { status: 'unreachable', from };
@@ -309,38 +391,19 @@ export function deliveryCheck(
   /** Fewest doors from the main door's room to the target, using doors `ok` lets through. */
   const search = (ok: (j: DoorOnTheWay) => boolean): DoorOnTheWay[] | null => {
     if (!ok(first)) return null;
-    const prev = new Map<string, { room: string; door: DoorOnTheWay | null } | null>();
-    prev.set(startInto, null);
-    const queue = [startInto];
-    while (queue.length) {
-      const room = queue.shift() as string;
-      if (room === target) break;
-      // Across a room boundary costs no door: to the front of the queue.
-      for (const nb of free.get(room) ?? []) {
-        if (prev.has(nb)) continue;
-        prev.set(nb, { room, door: null });
-        queue.unshift(nb);
-      }
-      for (const door of doors) {
-        if (door === start) continue;
-        const [pa, pb] = door.sides;
-        const other = pa === room ? pb : pb === room ? pa : undefined;
-        if (!other || prev.has(other)) continue;
-        const j = judge(door, pa === room ? 1 : -1, other);
-        if (!ok(j)) continue;
-        prev.set(other, { room, door: j });
-        queue.push(other);
-      }
-    }
-    if (!prev.has(target)) return null;
-    const route: DoorOnTheWay[] = [];
-    for (let at: string = target; ; ) {
-      const step = prev.get(at);
-      if (!step) break;
-      if (step.door) route.unshift(step.door);
-      at = step.room;
-    }
-    return [first, ...route];
+    const judged = new Map<RouteDoor, DoorOnTheWay>();
+    const prev = doorSearch(graph, startInto, {
+      target,
+      skip: start,
+      pass: (door, from, into) => {
+        const j = judge(door, door.sides[0] === from ? 1 : -1, into);
+        judged.set(door, j);
+        return ok(j);
+      },
+    });
+    const route = routeTo(prev, target);
+    if (!route) return null;
+    return [first, ...route.map((r) => judged.get(r.door) as DoorOnTheWay)];
   };
   const route = search((j) => j.fit !== 'too-big') ?? search(() => true);
   if (!route) return { status: 'unreachable', from };

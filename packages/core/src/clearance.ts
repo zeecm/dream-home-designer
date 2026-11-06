@@ -130,6 +130,38 @@ const isKitchen = (id: string) =>
 /** How much of a bed's side is the head end, where a bedside table goes. */
 const HEAD_END = 0.55;
 
+/**
+ * Pieces joined into runs: each touching (within 2 cm of) the next, as kitchen cabinets make
+ * one counter, straight, L or U. The run a piece is in, by a piece of it (the same for all).
+ */
+export function touchingRuns(
+  items: readonly Item[],
+  fps: ReadonlyMap<string, Vec2[]> = new Map(items.map((it) => [it.id, itemFootprint(it)])),
+): (id: string) => string {
+  const run = new Map<string, string>();
+  const find = (id: string): string => {
+    const up = run.get(id) ?? id;
+    if (up === id) return id;
+    const root = find(up);
+    run.set(id, root);
+    return root;
+  };
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      const a = items[i] as Item;
+      const b = items[j] as Item;
+      const fa = fps.get(a.id) ?? itemFootprint(a);
+      const fb = fps.get(b.id) ?? itemFootprint(b);
+      if (overlapDepth(growRect(fa, 0.02), fb) > 0) {
+        const ra = find(a.id);
+        const rb = find(b.id);
+        if (ra !== rb) run.set(ra, rb);
+      }
+    }
+  }
+  return find;
+}
+
 /** Pieces that stand on the floor and get in the way (not rugs, people or lamps above). */
 export function blocks(item: Item): boolean {
   const kind = furnitureKind(item.assetId);
@@ -286,24 +318,10 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
 
   // Kitchen cabinets joined into one run (straight, L or U): one counter, not in each
   // other's way. Runs apart (a galley's two sides) still are.
-  const run = new Map<string, string>();
-  const find = (id: string): string => {
-    const up = run.get(id) ?? id;
-    if (up === id) return id;
-    const root = find(up);
-    run.set(id, root);
-    return root;
-  };
-  const kitchen = items.filter((it) => isKitchen(it.assetId));
-  for (let i = 0; i < kitchen.length; i++) {
-    for (let j = i + 1; j < kitchen.length; j++) {
-      const a = kitchen[i] as Item;
-      const b = kitchen[j] as Item;
-      if (overlapDepth(growRect(fps.get(a.id) as Vec2[], 0.02), fps.get(b.id) as Vec2[]) > 0) {
-        run.set(find(a.id), find(b.id));
-      }
-    }
-  }
+  const find = touchingRuns(
+    items.filter((it) => isKitchen(it.assetId)),
+    fps,
+  );
   const tables = items.filter((it) => DINING_TABLES.has(it.assetId));
 
   for (const it of items) {

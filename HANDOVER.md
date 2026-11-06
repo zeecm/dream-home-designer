@@ -1313,3 +1313,50 @@ grouping), the composer and thread as a popover or, on phones, a sheet above the
 comment" in the share menu, `?c=<thread>` links, and the "Comments on the plan" switch in the
 plan details. e2e `comments.spec.ts`. Cut from slice 1 (tech lead): grouping pins, "Comment on
 this" in the Inspector, the hover chip, and the Worker answering 304s itself.
+
+**Suggested electrical points (6 Nov, slice 2s PR 1, spec `docs/specs/slice-2s.md` A; no
+schema change):** core `suggest.ts`: `roomKind(name)` (none, bathroom, kitchen, bedroom,
+living, study, other; reuses `SHELTER_ROOM`, `WET_ROOM`, `LEDGE_ROOM`), `suggestPoints(level,
+{statusOf})` → `{points, notes, rooms}` (cached per frozen level), `suggestionCost` (the sum of
+`elecNew`; it matches `electricalLines` with the points minus without, to the $10 rounding of
+each line) and `addPoints(levelId, points, label)` (ids and `ElecPoint.parse` outside the
+recipe; a missing wall throws, so the batch is all or nothing; one undo step). A `Suggestion`
+has a stable `key` (room, rule and what it hangs on: `rm_x:bedside:it_y:L`), `rule`, `point`,
+`why` (the tooltip) and `where` ("Bedside, left"). Placement order: switches (bathrooms first,
+theirs outside), furniture sockets (bed, desk, fridge, counter, hood, cooker, TV wall), aircon,
+desk-or-dresser, lights and the compressor; rooms, items and doors sorted by id so the result
+doesn't depend on record order. Every wall point goes through `clearAlong`, which now takes
+`extra` (the batch) and `blocked` stretches (open door leaves via `doorSweep`, tall pieces and
+built-ins), with a 0.3 m movement limit (a switch first tries 50 mm, then the other side, then
+0.3 m). "Already there" is checked at the intended spot first: same face, within 0.4 m along
+and 0.3 m in height (sockets of either kind count for each other), a light or fan in the room,
+an aircon or water heater in the room, any compressor. Choices beyond the spec: an aircon
+prefers a wall with 2 m of room in front of it (not across a corridor) and never sits over a
+door; a TV wall with no console or sofa prefers a 2.4 m wall, then a non-structural one. The
+door you enter by comes from `doorGraph`/`doorSearch`/`routeTo` (pulled out of `delivery.ts`);
+kitchen runs from `touchingRuns` (pulled out of `clearance.ts`, base cabinets only, split per
+face); `latchEnd(opening)` from `clearAlong`. Custom pieces carry their `shape` (bed, sofa).
+Tests: `suggest.test.ts` (criteria 1–17, shuffled records, the renovation case; a furnished
+sample in `fixtures/furnishedSample.ts`). Web `electrical/suggest.tsx`: [Suggest points] in the
+Electrical tool's options and the plan details (disabled with "Draw rooms first.", not in view
+links). The panel replaces the plan details (a selection still shows its own): rows by room in
+plan order with Add N, count and cost at the viewer's rates, a summary, a "Show points" tick
+list (the keyboard path), notes; a sticky foot with the total, Add all and Close; Esc closes
+and focus goes back to the button; a polite live region counts the points. Ghosts
+(`SuggestLayer`, `data-export="skip"`) use the `--suggest` and `--suggest-soft` tokens (full
+strength, a dashed ring; left out: a grey ring with ×); a click or tap toggles one (routed
+first in `PlanCanvas`) and the status line says what and why. Hovering a row outlines its room
+and fades the rest; tapping its name fits the room. Suggestions are worked out again 150 ms
+after an edit (the panel and plan share one run; a drag costs one run after it ends); Add
+uses a fresh run, so it never sends a point on a deleted wall, and if that differs from what
+is shown it shows it instead and waits for another click. An Add the store refuses (no edit
+right, the renovation guard) neither rings nor closes. Counter sockets are counted per run
+(only the shortfall is suggested, and "already there" is checked again where each lands); a
+point with no clear spot is dropped with a note (`noRoomFor`). Toasts
+"Added 6 points to Main bedroom." / "Added 23 points." with Undo (`toastFor`). Added points
+ring in `--suggest` for 600 ms (none with reduced motion). Phone: the sheet is half the
+screen, the plan refits the walls above it, buttons 44 px. In a renovation, points go in After
+only: on Before the panel says so and offers "Switch to After". e2e
+`electrical-suggest.spec.ts` covers criteria 18–24 on a desktop and a 390 px phone. Not yet:
+ghosts show no warnings (an aircon will say "No compressor" once added); a bed or other
+selection hides the panel until it is let go.

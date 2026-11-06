@@ -31,6 +31,7 @@ import { LengthField, Segmented, SelectField } from '../ui/fields';
 import { icons } from '../ui/icons';
 import { formatLength } from '../units';
 import { ElecGlyph, GLYPH_DEPTH } from './glyph';
+import { SuggestButton } from './suggest';
 
 const KEY = 'dhd-electrical';
 
@@ -261,6 +262,7 @@ export function KindPalette({ idPrefix }: { idPrefix: string }) {
   const h = `${idPrefix}elec-kinds`;
   return (
     <section className="tool-options elec-kinds" aria-labelledby={h}>
+      <SuggestButton />
       <h3 id={h} className="panel-heading">
         Point to place
       </h3>
@@ -293,6 +295,7 @@ export function ElectricalSummary({ level }: { level: Level }) {
         </label>
         {n > 0 && <span className="muted num">{n === 1 ? '1 point' : `${n} points`}</span>}
       </div>
+      <SuggestButton small />
       {on && warnings.size > 0 && (
         <p className="field-hint warning-text">
           {warnings.size === 1 ? '1 point needs' : `${warnings.size} points need`} a look: select
