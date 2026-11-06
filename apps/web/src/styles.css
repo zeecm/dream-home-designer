@@ -2887,3 +2887,33 @@ h3.field-label {
     display: none;
   }
 }
+
+/* The way in: dashed from the main door, door by door, to the piece. */
+.way-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2px;
+  stroke-dasharray: 6 4;
+}
+.way circle {
+  stroke: var(--surface);
+  stroke-width: 1.5px;
+}
+.way text {
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+  font-weight: 600;
+}
+.way-fits circle,
+.way-fits text {
+  fill: var(--accent);
+}
+.way-tight circle,
+.way-tight text {
+  fill: #b45309;
+}
+.way-bad circle,
+.way-bad text {
+  fill: #d92d20;
+}

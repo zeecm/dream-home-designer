@@ -76,7 +76,10 @@ export interface FurnitureKind {
   elevation?: number;
   /** Things you walk over or under (a rug, a wall cabinet) don't block a walk. */
   walkThrough?: boolean;
+  /** A sofa's diagonal depth (back top to front bottom), for tilting it through a door. */
+  diagonal?: number;
   /** Placed back to a wall when dropped near one. */
+
   againstWall?: boolean;
   /** Hangs from the ceiling: placed with its top at the ceiling, not on the floor. */
   ceiling?: boolean;
@@ -519,16 +522,76 @@ export const customModelFile = (hash: string) => `sha256:${hash}`;
 /** An uploaded model's catalogue entry, with a stand-in box of its size. */
 export function customKind(m: CustomModel): FurnitureKind {
   const { w, d, h } = m.size;
+  const category = (
+    CATEGORIES.includes(m.category as FurnitureCategory) ? m.category : 'Decor'
+  ) as FurnitureCategory;
+  if (m.hash) {
+    return {
+      id: m.id,
+      name: m.name,
+      category,
+      size: m.size,
+      model: customModelFile(m.hash),
+      parts: [box(-w / 2, w / 2, -d / 2, d / 2, 0, h, 'placeholder')],
+    };
+  }
   return {
     id: m.id,
     name: m.name,
-    category: (CATEGORIES.includes(m.category as FurnitureCategory)
-      ? m.category
-      : 'Decor') as FurnitureCategory,
+    category,
     size: m.size,
-    model: customModelFile(m.hash),
-    parts: [box(-w / 2, w / 2, -d / 2, d / 2, 0, h, 'placeholder')],
+    againstWall: m.shape === 'sofa' || m.shape === 'bed' || m.shape === 'cabinet',
+    ...(m.diagonal ? { diagonal: m.diagonal } : {}),
+    parts: shapeParts(m.shape ?? 'box', w, d, h, m.material ?? 'fabric'),
   };
+}
+
+/** A piece by its size, drawn as its shape from boxes (front +y, back -y). */
+export function shapeParts(
+  shape: NonNullable<CustomModel['shape']>,
+  w: number,
+  d: number,
+  h: number,
+  m: FurnitureMaterial,
+): FurniturePart[] {
+  const arm = Math.min(0.2, w / 6);
+  switch (shape) {
+    case 'sofa': {
+      const seat = Math.min(0.45, h * 0.5);
+      const back = Math.min(0.25, d / 3);
+      return [
+        box(-w / 2, w / 2, -d / 2, d / 2, 0.05, seat, m),
+        box(-w / 2, w / 2, -d / 2, -d / 2 + back, seat, h, m),
+        box(-w / 2, -w / 2 + arm, -d / 2, d / 2, seat, Math.min(h, seat + 0.2), m),
+        box(w / 2 - arm, w / 2, -d / 2, d / 2, seat, Math.min(h, seat + 0.2), m),
+      ];
+    }
+    case 'bed': {
+      const base = Math.min(0.35, h * 0.4);
+      return [
+        box(-w / 2, w / 2, -d / 2, d / 2, 0, base, m),
+        box(
+          -w / 2 + 0.03,
+          w / 2 - 0.03,
+          -d / 2 + 0.08,
+          d / 2 - 0.03,
+          base,
+          Math.min(h, base + 0.22),
+          'fabric-light',
+        ),
+        box(-w / 2, w / 2, -d / 2, -d / 2 + 0.08, 0, h, m),
+      ];
+    }
+    case 'table':
+      return [box(-w / 2, w / 2, -d / 2, d / 2, h - 0.04, h, m), ...legs(w, d, h - 0.04, 0.05, m)];
+    case 'cabinet':
+      return [
+        box(-w / 2, w / 2, -d / 2, d / 2, 0.05, h, m),
+        box(-w / 2 + 0.02, w / 2 - 0.02, -d / 2 + 0.02, d / 2 - 0.05, 0, 0.05, 'charcoal'),
+      ];
+    default:
+      return [box(-w / 2, w / 2, -d / 2, d / 2, 0, h, m)];
+  }
 }
 
 /**

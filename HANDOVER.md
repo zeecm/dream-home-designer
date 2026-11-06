@@ -1124,3 +1124,19 @@ rates with toggles and Reset, Copy as text, Print in a window of its own), and t
 line in its details. Not yet: built-ins sized to the level's ceiling when placed, the
 estimate per level for multi-level projects (it prices the first), slice 2.
 
+**My furniture and the way in (6 Nov, spec `docs/specs/my-furniture.md`, slice 1, schema 8):**
+`CustomModel.hash` is optional, with `shape` (sofa, bed, table, cabinet, box), `material` and
+`diagonal`; exactly one of hash and shape (zod refine). Go `SchemaVersion` 8; migration 7→8
+a no-op. `customKind` draws a shape from boxes (`shapeParts`) and carries `diagonal`; model
+sync and project copy skip hash-less entries. Core `delivery.ts`: `clearWidth` by door style,
+`turnLimit` (the moving-sofa corner limit), `mainDoors` (doors to the outside, widest first),
+`deliveryCheck(level, itemId, {from, lift})` → the route from the main door room to room
+(through doors and passages, freely across boundaries; fewest doors among routes that pass,
+else fewest), each door judged fits / tight (<20 mm spare) / hinges (passes only with a
+swing door off) / too big (the width it needs, or the turn it can't make in the space in
+front), and the worst. Web `delivery/delivery.tsx`: Add by size (catalogue "Your furniture"),
+"Getting it in" in a piece's details (own pieces always, others via Show the way; a From
+picker when there are several main doors, remembered per browser), and the route on the
+plan with each door's clear width (`data-export="skip"`). Not yet: the lift in the UI,
+corridor widths, furniture in the way.
+

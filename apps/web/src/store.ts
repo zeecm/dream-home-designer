@@ -505,9 +505,11 @@ export const useStore = create<State>((set, get) => {
       const backend = get().backend;
       await Promise.all(
         Object.values(doc.models ?? {}).map(async (m) => {
-          const key = customModelFile(m.hash);
+          if (!m.hash) return; // a piece by size: nothing to fetch
+          const hash = m.hash;
+          const key = customModelFile(hash);
           if (await getAsset(key).catch(() => undefined)) return;
-          const blob = await backend?.getModel?.(doc.id, m.hash).catch(() => undefined);
+          const blob = await backend?.getModel?.(doc.id, hash).catch(() => undefined);
           if (blob) await putAsset(key, blob).catch(() => {});
         }),
       );

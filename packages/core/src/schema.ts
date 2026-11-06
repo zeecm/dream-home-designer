@@ -194,19 +194,35 @@ export type Renovation = z.infer<typeof Renovation>;
  * and named by its SHA-256). It joins the catalogue while the project is open; items made
  * from it have `assetId` = its id.
  */
-export const CustomModel = z.object({
+/** A piece of the person's own furniture added by its size: drawn as this simple shape. */
+export const FurnitureShape = z.enum(['sofa', 'bed', 'table', 'cabinet', 'box']);
+export type FurnitureShape = z.infer<typeof FurnitureShape>;
+
+const CustomModelBase = z.object({
   id: z.string(),
   name: z.string().min(1).max(80),
-  /** Hex SHA-256 of the GLB. */
-  hash: z.string().regex(/^[0-9a-f]{64}$/),
+  /** Hex SHA-256 of the GLB, for an uploaded model. */
+  hash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
+  /** For a piece added by its size (no model): its shape, colour and, for a sofa, its
+   * diagonal depth (back top to front bottom, for tilting it through a door). */
+  shape: FurnitureShape.optional(),
+  material: z.enum(['fabric', 'fabric-light', 'wood', 'wood-dark', 'white', 'charcoal']).optional(),
+  diagonal: z.number().positive().optional(),
   /** A catalogue category name (FurnitureCategory). */
   category: z.string(),
   /** Its size in metres at scale 1: width (x), depth and height, as measured on upload. */
   size: z.object({ w: z.number().positive(), d: z.number().positive(), h: z.number().positive() }),
 });
+/** The person's own furniture: an uploaded model (a hash) or a piece by size (a shape). */
+export const CustomModel = CustomModelBase.refine((m) => !!m.hash !== !!m.shape, {
+  message: 'a model has either a file (hash) or a shape',
+});
 export type CustomModel = z.infer<typeof CustomModel>;
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 export const Project = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
