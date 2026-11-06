@@ -46,6 +46,7 @@ paper-up, dark on white in any theme.
   `wallStatuses`, `renovationDiff`, via `renderToStaticMarkup`; not the screen layers.
 
 ## Slice 2 (out of scope)
+Slice 2s adds notch depths: [slice-2s.md](slice-2s.md#c1-notch-depths-on-the-contractor-sheet-pr-3).
 All levels, door and window schedule, QR share link, electrical plan, DXF.
 
 ## Acceptance criteria

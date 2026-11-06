@@ -47,6 +47,7 @@ tight amber, too big red. Drawn for a selected My furniture piece, others via [S
 hidden while moving; not in PNG, 3D or walk. Runs on the version shown; never blocks.
 
 ## Out of scope (slice 2)
+Slice 2s builds the lift and an editable diagonal: [slice-2s.md](slice-2s.md#b1-the-lift-pr-2-schema-10).
 Corridor widths along the route, lift car, stairs, legs off, furniture in the way, a saved
 main door (shared with clearance slice 2), the route in 3D.
 
