@@ -60,18 +60,19 @@ for any plan.
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
+- Electrical and lighting plan, slice 1: sockets, switches, lights, data points and aircon with
+  its trunking, at their heights; counted into the estimate, drawn on the contractor sheet.
+  [spec](docs/specs/electrical.md)
 
 ### Planned
-1. Electrical and lighting plan: sockets, switches, lights, data points and aircon with its
-   trunking, at their heights; counted into the estimate, drawn on the contractor sheet.
-2. Clearance checks, slice 2: walkways from the main door, dining chairs, labels on the plan.
-3. Comments on the plan: pins anyone with the share link can leave and resolve, for family
+1. Clearance checks, slice 2: walkways from the main door, dining chairs, labels on the plan.
+2. Comments on the plan: pins anyone with the share link can leave and resolve, for family
    decisions.
-4. Slice 2s: the lift and a diagonal you can edit for your own furniture, notch depths on the
-   contractor sheet, carpentry priced on every level.
-5. Ageing parents check: wheelchair turning space, step-free routes, 850 mm doors, grab bars
+3. Slice 2s: the lift and a diagonal you can edit for your own furniture, notch depths on the
+   contractor sheet, carpentry priced on every level, suggested electrical points per room.
+4. Ageing parents check: wheelchair turning space, step-free routes, 850 mm doors, grab bars
    in the bathroom (HDB EASE items).
-6. Storage meter: wardrobe and cabinet space against the household, room by room.
+5. Storage meter: wardrobe and cabinet space against the household, room by room.
 7. A wall seen straight on (elevation): carpentry, windows, sockets and switches at height.
 
 More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
