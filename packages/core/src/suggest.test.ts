@@ -160,7 +160,8 @@ describe('suggestPoints: a bedroom', () => {
     expect(points.map((p) => p.rule).sort()).toEqual(['aircon', 'dresser', 'light', 'switch']);
     const light = ofRule(points, 'light')[0]?.point;
     expect(light?.at?.x).toBeCloseTo(2, 2);
-    expect(light?.at?.y).toBeCloseTo(1.5, 2);
+    // Up from the label point, so the room's name stays readable.
+    expect(light?.at?.y).toBeCloseTo(1.5 - 0.55, 2);
     // The switch: 1.05 m, in the room, on the latch side, its plate 150 mm off the opening.
     const sw = ofRule(points, 'switch')[0]?.point as NewPoint;
     expect(sw.kind).toBe('switch');
@@ -225,6 +226,37 @@ describe('suggestPoints: a bedroom', () => {
     expect(desk[0]?.point.wall?.height).toBe(0.9);
     expect(Math.abs(along(l, desk[0]?.point as NewPoint).at.x - 2)).toBeLessThan(0.005);
     expect(ofRule(points, 'dresser')).toHaveLength(0);
+  });
+
+  it('places a bedside socket on the next wall record of a straight wall drawn in two', () => {
+    // The top wall drawn as two records, meeting at x = 2.
+    const segs: Seg[] = [
+      [0, 0, 2, 0],
+      [2, 0, 4, 0],
+      [4, 0, 4, 3],
+      [4, 3, 0, 3],
+      [0, 3, 0, 0],
+    ];
+    let s = plan(segs, [['Bedroom', { x: 2, y: 1.5 }]]);
+    s = door(s, [4, 3], [0, 3], 0.5);
+    // Its head on the right-hand record; its left socket falls on the left-hand one.
+    const l = withItems(flat(s), [['bed-queen', { x: 2.1, y: 1.05 }]]);
+    const out = suggestPoints(l);
+    const xs = ofRule(out.points, 'bedside')
+      .map((b) => along(l, b.point).at.x)
+      .sort((a, b) => a - b);
+    expect(xs).toHaveLength(2);
+    expect(Math.abs((xs[0] as number) - (2.1 - 0.76 - 0.25))).toBeLessThan(0.005);
+    expect(Math.abs((xs[1] as number) - (2.1 + 0.76 + 0.25))).toBeLessThan(0.005);
+    expect(out.notes.map((n) => n.text).join(' ')).not.toContain('No clear wall');
+    // Added, they're there: nothing again.
+    const again = suggestPoints(
+      withPoints(
+        l,
+        out.points.map((p) => p.point),
+      ),
+    );
+    expect(again.points).toEqual([]);
   });
 
   it('two beds side by side closer than 0.4 m share a socket', () => {
@@ -448,7 +480,8 @@ describe('suggestPoints: bathrooms, shelters and ledges', () => {
   it('notes a room with a plain name', () => {
     const l = flat(plan(box(4, 3), [['Room 3', { x: 2, y: 1.5 }]]));
     const out = suggestPoints(l);
-    expect(out.notes.map((x) => x.text)).toEqual([SUGGEST_NOTES.name]);
+    expect(out.notes.map((x) => x.text)).toContain(SUGGEST_NOTES.name);
+    expect(out.notes.map((x) => x.text)).toContain(SUGGEST_NOTES.door);
     expect(out.points.map((p) => p.rule)).toEqual(['light']);
   });
 });
@@ -466,6 +499,26 @@ describe('suggestPoints: the sample flat', () => {
     // By the main door.
     const main = Object.values(l.openings).find((o) => o.width === 1 && o.kind === 'door');
     expect(sw?.point.wall?.wallId).toBe(main?.wallId);
+  });
+
+  it('puts the main bedroom’s switch round the corner past its latch, never by the hinge', () => {
+    const l = sampleFlatProject().levels[0] as Level;
+    const mbr = roomId(l, 'Main bedroom');
+    const sw = suggestPoints(l).points.find((p) => p.roomId === mbr && p.rule === 'switch');
+    expect(sw).toBeDefined();
+    const p = sw?.point as NewPoint;
+    expect(pointRoom(l, { ...p, id: 'x' })).toBe('Main bedroom');
+    // The door (on the wall at x 2.95, latch at its foot, by the corner at y 4.32) has no room
+    // on its latch side: the switch goes on the wall at the foot, just round the corner.
+    const o = Object.values(l.openings).find(
+      (x) => x.id.includes('main-bedroom') && x.kind === 'door' && x.wallId.includes('living'),
+    );
+    expect(o).toBeDefined();
+    expect(p.wall?.wallId).not.toBe(o?.wallId);
+    const at = along(l, p).at;
+    expect(at.y).toBeGreaterThan(4.2);
+    expect(at.x).toBeGreaterThan(2.6);
+    expect(at.x).toBeLessThan(2.9);
   });
 
   it('suggests nothing already there, and nothing once everything is added', () => {

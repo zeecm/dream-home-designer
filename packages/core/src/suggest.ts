@@ -1,7 +1,8 @@
 import { DINING_TABLES, doorSweep, touchingRuns } from './clearance';
-import { clipHalf, roomOff, sideOf } from './convex';
+import { clipHalf, nearestOnEdge, roomOff, sideOf } from './convex';
 import type { Rate, Rates } from './cost';
 import {
+  type DoorGraph,
   type RouteDoor,
   type RouteStep,
   clearWidth,
@@ -128,7 +129,13 @@ export const SUGGEST_NOTES = {
   name: 'Name the room (Bedroom, Kitchen…) for more than a light and a switch.',
   switch: 'No wall for a switch by this door.',
   hob: 'Add a hob cabinet for hood and cooker points.',
+  door: 'No door to put a switch by.',
+  trunking: 'Once added, run the aircon’s trunking to the compressor (Run trunking).',
 } as const;
+
+/** What a room's suggested points on structural walls are, for a muted note. */
+export const structuralNote = (what: string[]) =>
+  `${what.join(', ')} ${what.length === 1 ? 'is' : 'are'} on a structural wall: ask your contractor.`;
 
 /** A point that had no clear spot (a window, a door or another point in the way). */
 export const noRoomFor = (what: string) =>
@@ -194,6 +201,13 @@ const COUNTER_HEIGHT = 1.15;
 const HOOD_HEIGHT = 2.1;
 const COOKER_HEIGHT = 0.6;
 const HEATER_HEIGHT = 2.0;
+
+/** A room's light sits this far up from its label point, clear of the name. */
+const LIGHT_OFF_LABEL = 0.55;
+/** And this far from its walls. */
+const LIGHT_WALL_CLEAR = 0.3;
+/** The adjacent wall's switch: its plate edge this far round the corner past the latch jamb. */
+const CORNER_OFF = 0.1;
 
 const TV_PIECES = new Set(['tv-console', 'built-in-tv-console', 'tv-console-slatted', 'tv']);
 const DESKS = new Set(['desk', 'metal-desk']);
@@ -306,11 +320,12 @@ class Suggester {
   private byId = new Map<string, RoomInfo>();
   private faces = new Map<string, Face>();
   private solid: Vec2[][];
-  private sweeps: Vec2[][];
+  private sweeps: { id: string; poly: Vec2[] }[];
   private existing: ElecPoint[];
   private batch: ElecPoint[] = [];
   private out: (Suggestion & { stage: Stage; n: number })[] = [];
   private notes: SuggestNote[] = [];
+  private graph: DoorGraph | null = null;
   private shapes: ReturnType<typeof roomShapes>;
 
   constructor(
@@ -327,7 +342,7 @@ class Suggester {
       ...this.geom.footprints.hubs.map((h) => h.polygon),
     ];
     this.sweeps = sortById(Object.values(level.openings).filter((o) => o.kind === 'door')).flatMap(
-      (o) => doorSweep(level, o.id, this.geom.frames),
+      (o) => doorSweep(level, o.id, this.geom.frames).map((poly) => ({ id: o.id, poly })),
     );
     const items = sortById(Object.values(level.items));
     this.rooms = sortById(Object.values(level.rooms)).flatMap((r) => {
@@ -453,12 +468,15 @@ class Suggester {
     kind: ElecKind,
     height: number,
     more: Item[] = [],
+    /** A door whose own leaf doesn't count (a switch round the corner from its latch). */
+    besides?: string,
   ): [number, number][] {
     const [bottom] = span(kind, height);
     const out: [number, number][] = [];
     if (bottom < 2.0) {
       for (const sw of this.sweeps) {
-        const s = this.onFace(face, sw, BEHIND);
+        if (sw.id === besides) continue;
+        const s = this.onFace(face, sw.poly, BEHIND);
         if (s) out.push(s);
       }
     }
@@ -517,6 +535,81 @@ class Suggester {
     return best;
   }
 
+  /** A point on a face, `u` along its wall. */
+  private at(face: Face, u: number): Vec2 {
+    return framePoint(face.f, u, face.k);
+  }
+
+  /** A stretch of one face as another face (on the same line) measures it. */
+  private toFace(from: Face, to: Face, [a, b]: readonly [number, number]): [number, number] {
+    const ua = this.u(to, this.at(from, a));
+    const ub = this.u(to, this.at(from, b));
+    return [Math.min(ua, ub), Math.max(ua, ub)];
+  }
+
+  private lines = new Map<Face, Face[]>();
+
+  /**
+   * The faces of a room on the same straight line as `face`, facing the same way, `face`
+   * first: walls drawn as several records in a row are one wall to put a point on.
+   */
+  private line(face: Face): Face[] {
+    const hit = this.lines.get(face);
+    if (hit) return hit;
+    const room = this.byId.get(face.roomId);
+    const rest = (room?.faces ?? [])
+      .filter(
+        (g) =>
+          g !== face &&
+          g.n.x * face.n.x + g.n.y * face.n.y > 0.999 &&
+          Math.abs(this.v(face, this.at(g, (g.lo + g.hi) / 2))) < 0.005,
+      )
+      .sort((a, b) => (a.key < b.key ? -1 : 1));
+    const out = [face, ...rest];
+    this.lines.set(face, out);
+    return out;
+  }
+
+  /** The face that stands for its line (the first by key). */
+  private head(face: Face): Face {
+    return [...this.line(face)].sort((a, b) => (a.key < b.key ? -1 : 1))[0] as Face;
+  }
+
+  /** The clear stretches of a face's whole line, measured on `face`, joined where they meet. */
+  private runStretches(
+    face: Face,
+    kind: ElecKind,
+    height: number,
+    blocked: (g: Face) => [number, number][],
+  ): [number, number][] {
+    const all = this.line(face)
+      .flatMap((g) =>
+        this.stretches(g, kind, height, blocked(g)).map((s) => this.toFace(g, face, s)),
+      )
+      .sort((a, b) => a[0] - b[0]);
+    const out: [number, number][] = [];
+    for (const s of all) {
+      const last = out.at(-1);
+      if (last && s[0] <= last[1] + 0.01) last[1] = Math.max(last[1], s[1]);
+      else out.push([s[0], s[1]]);
+    }
+    return out;
+  }
+
+  /** The longest clear stretch of a face's line (ties: the first). */
+  private longestRun(
+    face: Face,
+    kind: ElecKind,
+    height: number,
+    blocked: (g: Face) => [number, number][] = (g) => this.blockedOn(g, kind, height),
+  ): [number, number] | null {
+    let best: [number, number] | null = null;
+    for (const s of this.runStretches(face, kind, height, blocked)) {
+      if (!best || s[1] - s[0] > best[1] - best[0] + 1e-9) best = s;
+    }
+    return best;
+  }
+
   /** The doors and passages on a face's wall, as stretches to keep off. */
   private doorways(face: Face): [number, number][] {
     return Object.values(this.level.openings)
@@ -548,22 +641,37 @@ class Suggester {
 
   // ---------------------------------------------------------------- adding
 
-  /** Whether a point like this one is on this face near here already (or suggested). */
+  private positions = new Map<ElecPoint, ReturnType<typeof pointPosition>>();
+
+  /** Where a point is (kept: points don't change while suggesting). */
+  private posOf(p: ElecPoint) {
+    if (!this.positions.has(p)) this.positions.set(p, pointPosition(this.level, p));
+    return this.positions.get(p) ?? null;
+  }
+
+  /** Where along `face` a wall point is, if it is on the face's line, facing the same way. */
+  private alongOf(face: Face, q: ElecPoint): number | null {
+    if (!q.wall) return null;
+    const pos = this.posOf(q);
+    if (!pos?.normal || pos.normal.x * face.n.x + pos.normal.y * face.n.y < 0.999) return null;
+    if (Math.abs(this.v(face, pos.at)) > 0.01) return null;
+    return this.u(face, pos.at);
+  }
+
+  /** Whether a point like this one is on this face's line near here already (or suggested). */
   private there(kind: ElecKind, face: Face, along: number, height: number): boolean {
     return [...this.existing, ...this.batch].some((q) => {
-      if (!q.wall || q.wall.wallId !== face.wallId || q.wall.side !== face.side) return false;
-      if (isSocket(kind) ? !isSocket(q.kind) : q.kind !== kind) return false;
-      const qa = q.wall.t * face.f.length;
-      return (
-        Math.abs(qa - along) <= THERE_ALONG + 1e-9 &&
-        Math.abs(q.wall.height - height) <= THERE_HEIGHT + 1e-9
-      );
+      if (!q.wall || (isSocket(kind) ? !isSocket(q.kind) : q.kind !== kind)) return false;
+      if (Math.abs(q.wall.height - height) > THERE_HEIGHT + 1e-9) return false;
+      const qa = this.alongOf(face, q);
+      return qa !== null && Math.abs(qa - along) <= THERE_ALONG + 1e-9;
     });
   }
 
   /**
    * A wall point as near `along` on `face` as it can go (no further than `limit`), clear of
-   * openings, the other points and what `blocked` keeps it off; null where there's no room.
+   * openings, the other points and what `blocked` keeps it off on each face; on the face, or
+   * on the next wall record of its line (a wall drawn in pieces). Null where there's no room.
    */
   private onWall(
     kind: ElecKind,
@@ -571,25 +679,34 @@ class Suggester {
     along: number,
     height: number,
     limit: number,
-    blocked: [number, number][] = this.blockedOn(face, kind, height),
+    blocked: (g: Face) => [number, number][] = (g) => this.blockedOn(g, kind, height),
   ): NewPoint | null {
     if (face.shelter) return null;
-    const u = clearAlong(
-      this.level,
-      this.geom,
-      kind,
-      { wallId: face.wallId, along, side: face.side },
-      height,
-      undefined,
-      { extra: this.batch, blocked },
-    );
-    if (u === null || Math.abs(u - along) > limit + 1e-9) return null;
-    // Still facing this room (a long wall may run past it).
-    const at = framePoint(face.f, u, face.k);
-    if (this.roomAt({ x: at.x + face.n.x * 0.05, y: at.y + face.n.y * 0.05 }) !== face.roomId)
-      return null;
-    const t = Math.min(1, Math.max(0, u / face.f.length));
-    return { kind, wall: { wallId: face.wallId, t, side: face.side, height } };
+    const want = this.at(face, along);
+    let best: { p: NewPoint; d: number } | null = null;
+    for (const g of this.line(face)) {
+      if (g.shelter) continue;
+      const a = this.u(g, want);
+      if (a < g.lo - limit - 0.2 || a > g.hi + limit + 0.2) continue;
+      const u = clearAlong(
+        this.level,
+        this.geom,
+        kind,
+        { wallId: g.wallId, along: a, side: g.side },
+        height,
+        undefined,
+        { extra: this.batch, blocked: blocked(g) },
+      );
+      if (u === null) continue;
+      const d = Math.abs(u - a);
+      if (d > limit + 1e-9 || (best && d >= best.d - 1e-9)) continue;
+      // Still facing this room (a long wall may run past it).
+      const at = this.at(g, u);
+      if (this.roomAt({ x: at.x + g.n.x * 0.05, y: at.y + g.n.y * 0.05 }) !== g.roomId) continue;
+      const t = Math.min(1, Math.max(0, u / g.f.length));
+      best = { p: { kind, wall: { wallId: g.wallId, t, side: g.side, height } }, d };
+    }
+    return best?.p ?? null;
   }
 
   private add(
@@ -667,7 +784,33 @@ class Suggester {
         this.note(r.id, SUGGEST_NOTES.name);
     }
     if (aircon) this.compressor();
+    for (const r of live) {
+      const e = entries.get(r.id);
+      if (!e?.door && !e?.openTo) this.note(r.id, SUGGEST_NOTES.door);
+    }
+    this.roomNotes();
     return this.finish();
+  }
+
+  /** Each room's points on structural walls, and the trunking an aircon unit still needs. */
+  private roomNotes() {
+    const faces = [...this.faces.values()];
+    const byRoom = new Map<string, Set<string>>();
+    for (const s of this.out) {
+      const w = s.point.wall;
+      if (!w) continue;
+      const face = faces.find((f) => f.wallId === w.wallId && f.side === w.side);
+      if (!face?.structural) continue;
+      const set = byRoom.get(s.roomId) ?? new Set<string>();
+      const name = RULE_NAMES[s.rule][0];
+      set.add(name.charAt(0).toUpperCase() + name.slice(1));
+      byRoom.set(s.roomId, set);
+    }
+    for (const [roomId, what] of byRoom) {
+      const names = [...what].map((n, i) => (i === 0 ? n : n.toLowerCase()));
+      this.note(roomId, structuralNote(names));
+    }
+    for (const s of this.out) if (s.rule === 'aircon') this.note(s.roomId, SUGGEST_NOTES.trunking);
   }
 
   /** Plan order: by label point, top to bottom then left to right, to the half metre. */
@@ -722,11 +865,24 @@ class Suggester {
       out.unshift({
         rule: 'light',
         key: 'light',
-        at: { ...r.label },
+        at: this.lightSpot(r),
         why: WHY.light,
         where: 'Ceiling',
       });
     return out;
+  }
+
+  /**
+   * Where a room's ceiling light goes: up from its label point (so the room's name stays
+   * readable), else down, kept off the walls; at the label point in a room too small.
+   */
+  private lightSpot(r: RoomInfo): Vec2 {
+    for (const dy of [-LIGHT_OFF_LABEL, LIGHT_OFF_LABEL]) {
+      const p = { x: r.label.x, y: r.label.y + dy };
+      if (!pointInPolygon(p, r.outer) || r.holes.some((h) => pointInPolygon(p, h))) continue;
+      if (nearestOnEdge(p, r.outer).d >= LIGHT_WALL_CLEAR) return p;
+    }
+    return { ...r.label };
   }
 
   /**
@@ -736,6 +892,7 @@ class Suggester {
    */
   private entryDoors(): Map<string, { door: RouteDoor | null; openTo?: string }> {
     const graph = doorGraph(this.level, this.geom);
+    this.graph = graph;
     graph.doors.sort((a, b) => (a.o.id < b.o.id ? -1 : a.o.id > b.o.id ? 1 : 0));
     const main = entranceDoor(this.level, this.geom);
     const start = graph.doors.find((d) => d.o.id === main);
@@ -805,13 +962,14 @@ class Suggester {
     const u0 = c - o.width / 2;
     const u1 = c + o.width / 2;
     const w = ELEC_KINDS.switch.plate.w;
-    // Already a switch by this door, on this side.
+    // Already a switch by this door, on this side (round the corner too).
     // (Beside a bathroom's switch just suggested, a room's own goes too.)
+    const mid = this.at(face, c);
     const near = [...this.existing, ...(bath ? this.batch : [])].some((q) => {
-      if (q.kind !== 'switch' || q.wall?.wallId !== face.wallId || q.wall.side !== face.side)
-        return false;
-      const qa = q.wall.t * face.f.length;
-      return qa >= u0 - 0.6 - w / 2 && qa <= u1 + 0.6 + w / 2;
+      if (q.kind !== 'switch' || !q.wall) return false;
+      const pos = this.posOf(q);
+      if (!pos || this.roomOfPoint(q) !== sideRoom) return false;
+      return Math.hypot(pos.at.x - mid.x, pos.at.y - mid.y) <= o.width / 2 + 0.6 + w;
     });
     if (near) return;
     let ends: (0 | 1)[];
@@ -828,17 +986,35 @@ class Suggester {
     }
     const why = bath ? WHY.bathSwitch : WHY.switch;
     const where = bath ? 'Outside the door' : 'By the door';
-    // 150 mm off the latch side, else the other; with no room for that either side, as near
-    // as it goes on the latch side (a door close to a corner).
-    const tries = [
-      ...ends.map((end) => ({ end, limit: SWITCH_NUDGE })),
-      ...ends.map((end) => ({ end, limit: NUDGE })),
-    ];
-    for (const { end, limit } of tries) {
+    // 150 mm off the latch side; a door with no latch (a passage) either side. Never behind
+    // a door on its hinge side: with no room by the latch, round the corner past it.
+    type Try = {
+      face: Face;
+      along: number;
+      dir: number;
+      limit: number;
+      blocked?: (g: Face) => [number, number][];
+    };
+    const tries: Try[] = [];
+    const sides = latch !== undefined ? [latch] : ends;
+    for (const end of sides) {
       const dir = end === 1 ? 1 : -1;
       const edge = end === 1 ? u1 : u0;
-      const along = edge + dir * (SWITCH_OFF + w / 2);
-      const first = this.onWall('switch', face, along, SWITCH_HEIGHT, limit);
+      tries.push({ face, along: edge + dir * (SWITCH_OFF + w / 2), dir, limit: SWITCH_NUDGE });
+    }
+    if (latch !== undefined) {
+      const corner = this.roundCorner(face, latch === 1 ? 1 : -1);
+      // Its own leaf swings away from the latch: it doesn't count there.
+      const blocked = (g: Face) => this.blockedOn(g, 'switch', SWITCH_HEIGHT, [], o.id);
+      if (corner) tries.push({ ...corner, limit: SWITCH_NUDGE, blocked });
+    }
+    for (const end of sides) {
+      const dir = end === 1 ? 1 : -1;
+      const edge = end === 1 ? u1 : u0;
+      tries.push({ face, along: edge + dir * (SWITCH_OFF + w / 2), dir, limit: NUDGE });
+    }
+    for (const { face: at, along, dir, limit, blocked } of tries) {
+      const first = this.onWall('switch', at, along, SWITCH_HEIGHT, limit, blocked);
       if (!first) continue;
       this.add(
         0,
@@ -852,7 +1028,7 @@ class Suggester {
       if (gangs > 3) {
         const second = this.onWall(
           'switch',
-          face,
+          at,
           along + dir * (w + JAMB_CLEAR),
           SWITCH_HEIGHT,
           NUDGE,
@@ -873,6 +1049,30 @@ class Suggester {
     this.note(r.id, SUGGEST_NOTES.switch);
   }
 
+  /**
+   * The wall round the inside corner at one end (`dir` +1: towards b) of a face's line: where
+   * a switch goes just past the corner, and which way along that wall is away from it.
+   */
+  private roundCorner(face: Face, dir: number): { face: Face; along: number; dir: number } | null {
+    const ends = this.line(face).flatMap((g) => this.toFace(g, face, [g.lo, g.hi]));
+    const cu = dir > 0 ? Math.max(...ends) : Math.min(...ends);
+    const c = this.at(face, cu);
+    const room = this.byId.get(face.roomId);
+    const w = ELEC_KINDS.switch.plate.w;
+    for (const g of room?.faces ?? []) {
+      if (g.shelter || Math.abs(g.n.x * face.n.x + g.n.y * face.n.y) > 0.5) continue;
+      for (const [end, away] of [
+        [g.lo, 1],
+        [g.hi, -1],
+      ] as const) {
+        const p = this.at(g, end);
+        if (Math.hypot(p.x - c.x, p.y - c.y) > 0.03) continue;
+        return { face: g, along: end + away * (CORNER_OFF + w / 2), dir: away };
+      }
+    }
+    return null;
+  }
+
   /** Bedside sockets for each bed whose head is against a wall; the faces of bed heads. */
   private bedside(r: RoomInfo): Set<string> {
     const heads = new Set<string>();
@@ -882,7 +1082,7 @@ class Suggester {
         this.note(r.id, SUGGEST_NOTES.bed);
         continue;
       }
-      heads.add(bf.face.key);
+      for (const g of this.line(bf.face)) heads.add(g.key);
       const fp = itemFootprint(bed);
       const [bl, br] = fp as [Vec2, Vec2];
       for (const side of ['left', 'right'] as const) {
@@ -892,9 +1092,9 @@ class Suggester {
         const along = corner + Math.sign(corner - bf.uc) * BEDSIDE_OUT;
         if (this.there('socket-double', bf.face, along, BEDSIDE_HEIGHT)) continue;
         // Never nudged in behind the bed's own head.
-        const blocked: [number, number][] = [
-          ...this.blockedOn(bf.face, 'socket-double', BEDSIDE_HEIGHT),
-          [bf.u0, bf.u1],
+        const blocked = (g: Face): [number, number][] => [
+          ...this.blockedOn(g, 'socket-double', BEDSIDE_HEIGHT),
+          this.toFace(bf.face, g, [bf.u0, bf.u1]),
         ];
         const p = this.onWall('socket-double', bf.face, along, BEDSIDE_HEIGHT, NUDGE, blocked);
         if (!p) {
@@ -936,19 +1136,19 @@ class Suggester {
       const k = furnitureKind(it.assetId);
       return !!k?.carpentry || it.assetId === 'wardrobe';
     });
+    const blocked = (g: Face) => this.blockedOn(g, 'socket-double', LOW, behind);
     const options = r.faces
-      .filter((f) => !f.shelter && !heads.has(f.key))
+      .filter((f) => !f.shelter && !heads.has(f.key) && this.head(f) === f)
       .flatMap((face) => {
-        const blocked = this.blockedOn(face, 'socket-double', LOW, behind);
-        const s = this.longest(face, 'socket-double', LOW, blocked);
-        return s ? [{ face, s, blocked }] : [];
+        const s = this.longestRun(face, 'socket-double', LOW, blocked);
+        return s ? [{ face, s }] : [];
       })
       .sort(
         (a, b) =>
           Number(a.face.structural) - Number(b.face.structural) ||
           b.s[1] - b.s[0] - (a.s[1] - a.s[0]),
       );
-    for (const { face, s, blocked } of options) {
+    for (const { face, s } of options) {
       const along = (s[0] + s[1]) / 2;
       if (this.there('socket-double', face, along, LOW)) return;
       const p = this.onWall('socket-double', face, along, LOW, NUDGE, blocked);
@@ -966,10 +1166,30 @@ class Suggester {
       const bf = this.backFace(r, fr);
       if (!bf) continue;
       if (this.there('socket-single', bf.face, bf.uc, LOW)) continue;
-      const p = this.onWall('socket-single', bf.face, bf.uc, LOW, NUDGE, []);
+      const p = this.onWall('socket-single', bf.face, bf.uc, LOW, NUDGE, () => []);
       if (p) this.add(1, r.id, 'fridge', `fridge:${fr.id}`, p, WHY.fridge, 'Behind the fridge');
       else this.note(r.id, noRoomFor('fridge socket'));
     }
+  }
+
+  /** Whether a room has a base cabinet standing in it. */
+  private hasCounter(roomId: string): boolean {
+    return !!this.byId.get(roomId)?.items.some((it) => {
+      const k = furnitureKind(it.assetId);
+      return k?.carpentry === 'base' && furnitureLayer(k) === 'floor';
+    });
+  }
+
+  /** The kitchens a room opens onto, through a door or passage or across a room boundary. */
+  private joined(roomId: string): string[] {
+    const g = this.graph;
+    if (!g) return [];
+    const ids = new Set<string>(g.free.get(roomId) ?? []);
+    for (const d of g.doors) {
+      if (!d.sides.includes(roomId)) continue;
+      for (const s of d.sides) if (s && s !== roomId) ids.add(s);
+    }
+    return [...ids].filter((id) => this.byId.get(id)?.kind === 'kitchen');
   }
 
   /** Kitchen counters: sockets about every 1.2 m clear of the sink and hob; hood and hob points. */
@@ -984,13 +1204,17 @@ class Suggester {
     for (const it of base) {
       const bf = this.backFace(r, it);
       if (!bf) continue;
-      const key = `${find(it.id)}|${bf.face.key}`;
-      const run = runs.get(key) ?? { face: bf.face, items: [] };
-      run.items.push({ it, u0: bf.u0, u1: bf.u1 });
+      const head = this.head(bf.face);
+      const key = `${find(it.id)}|${head.key}`;
+      const run = runs.get(key) ?? { face: head, items: [] };
+      const [u0, u1] = this.toFace(bf.face, head, [bf.u0, bf.u1]);
+      run.items.push({ it, u0, u1 });
       runs.set(key, run);
     }
     if (runs.size === 0) {
-      this.note(r.id, SUGGEST_NOTES.counter);
+      // Not where a kitchen joined to this one (a dry kitchen beside the wet) has the counter.
+      if (!this.joined(r.id).some((id) => this.hasCounter(id)))
+        this.note(r.id, SUGGEST_NOTES.counter);
       return;
     }
     let hobs = 0;
@@ -1017,9 +1241,9 @@ class Suggester {
       // Sockets over this run already (at counter height, either kind): only the shortfall.
       const have = this.existing.filter((q) => {
         if (!q.wall || !isSocket(q.kind)) return false;
-        if (q.wall.wallId !== face.wallId || q.wall.side !== face.side) return false;
-        const qa = q.wall.t * face.f.length;
+        const qa = this.alongOf(face, q);
         return (
+          qa !== null &&
           qa >= lo - 1e-9 &&
           qa <= hi + 1e-9 &&
           Math.abs(q.wall.height - COUNTER_HEIGHT) <= THERE_HEIGHT + 1e-9
@@ -1034,8 +1258,8 @@ class Suggester {
           .sort((a, b) => Math.abs(a - nominal) - Math.abs(b - nominal));
         for (const along of spots) {
           if (this.there('socket-double', face, along, COUNTER_HEIGHT)) continue;
-          const p = this.onWall('socket-double', face, along, COUNTER_HEIGHT, len, []);
-          const u = p?.wall ? p.wall.t * face.f.length : null;
+          const p = this.onWall('socket-double', face, along, COUNTER_HEIGHT, len, () => []);
+          const u = p ? this.alongOf(face, { ...p, id: 'probe' } as ElecPoint) : null;
           // Where it lands: still clear of the sink and hob, and not by another socket.
           if (!p || u === null || !ok(u) || this.there('socket-double', face, u, COUNTER_HEIGHT))
             continue;
@@ -1044,6 +1268,8 @@ class Suggester {
           break;
         }
       }
+      // A window or the sink and hob left no room for some of them.
+      if (short > 0) this.note(r.id, noRoomFor(`counter socket${short === 1 ? '' : 's'}`));
       for (const { it, u0, u1 } of items) {
         if (it.assetId !== 'kitchen-hob') continue;
         hobs++;
@@ -1051,12 +1277,12 @@ class Suggester {
         const ceiling = this.level.rooms[r.id]?.ceilingHeight ?? this.level.ceilingHeight;
         const hood = Math.min(HOOD_HEIGHT, Math.round((ceiling - 0.15) * 1000) / 1000);
         if (!this.there('socket-single', face, c, hood)) {
-          const p = this.onWall('socket-single', face, c, hood, NUDGE, []);
+          const p = this.onWall('socket-single', face, c, hood, NUDGE, () => []);
           if (p) this.add(1, r.id, 'hood', `hood:${it.id}`, p, WHY.hood, 'Hood');
           else this.note(r.id, noRoomFor('hood socket'));
         }
         if (!this.there('cooker', face, c, COOKER_HEIGHT)) {
-          const p = this.onWall('cooker', face, c, COOKER_HEIGHT, NUDGE, []);
+          const p = this.onWall('cooker', face, c, COOKER_HEIGHT, NUDGE, () => []);
           if (p) this.add(1, r.id, 'cooker', `cooker:${it.id}`, p, WHY.cooker, 'Under the hob');
           else this.note(r.id, noRoomFor('cooker point'));
         }
@@ -1122,12 +1348,7 @@ class Suggester {
         return null;
       }
       anchor = face.key;
-      const s = this.longest(
-        face,
-        'socket-double',
-        LOW,
-        this.blockedOn(face, 'socket-double', LOW),
-      );
+      const s = this.longestRun(face, 'socket-double', LOW);
       centre = s ? (s[0] + s[1]) / 2 : (face.lo + face.hi) / 2;
     }
     const at = face;
@@ -1166,27 +1387,31 @@ class Suggester {
       }
     }
     const ledge = this.rooms.find((x) => LEDGE_ROOM.test(x.name));
+    // Not over a door, where it blows on whoever comes in.
+    const blocked = (g: Face) => [...this.blockedOn(g, 'aircon', h), ...this.doorways(g)];
+    const tvFace = tv ? this.faces.get(tv) : undefined;
+    const tvHead = tvFace ? this.head(tvFace) : undefined;
     const options = r.faces
-      .filter((f) => !f.shelter && f.key !== tv)
+      .filter((f) => !f.shelter && this.head(f) === f && f !== tvHead)
       .flatMap((face) => {
-        // Not over a door, where it blows on whoever comes in.
-        const blocked = [...this.blockedOn(face, 'aircon', h), ...this.doorways(face)];
-        const s = this.longest(face, 'aircon', h, blocked);
+        const s = this.longestRun(face, 'aircon', h, blocked);
         if (!s || s[1] - s[0] < AIRCON_CLEAR - 1e-9) return [];
-        const mid = framePoint(face.f, (s[0] + s[1]) / 2, face.k);
+        const mid = this.at(face, (s[0] + s[1]) / 2);
         const d = ledge ? Math.hypot(mid.x - ledge.label.x, mid.y - ledge.label.y) : 0;
         // Into the room, not across a corridor.
         const shallow = this.ray(mid, face.n, r) < AIRCON_THROW;
-        return [{ face, s, blocked, d, shallow }];
+        // Prefer a wall that isn't structural, where its whole line isn't.
+        const structural = this.line(face).some((g) => g.structural);
+        return [{ face, s, d, shallow, structural }];
       })
       .sort(
         (a, b) =>
           Number(a.shallow) - Number(b.shallow) ||
-          Number(a.face.structural) - Number(b.face.structural) ||
+          Number(a.structural) - Number(b.structural) ||
           a.d - b.d ||
           b.s[1] - b.s[0] - (a.s[1] - a.s[0]),
       );
-    for (const { face, s, blocked } of options) {
+    for (const { face, s } of options) {
       const p = this.onWall('aircon', face, (s[0] + s[1]) / 2, h, NUDGE, blocked);
       if (p) {
         const why = ledge ? WHY.airconLedge : WHY.aircon;
@@ -1210,18 +1435,19 @@ class Suggester {
   private waterHeater(r: RoomInfo, door: RouteDoor | null) {
     if (this.inRoom(r.id, ['water-heater']).length) return;
     const from = door?.centre ?? r.label;
+    // A wall's whole line: a wall drawn in pieces is one wall to choose.
     const options = r.faces
-      .filter((f) => !f.shelter)
+      .filter((f) => !f.shelter && this.head(f) === f)
       .map((face) => {
-        const mid = framePoint(face.f, (face.lo + face.hi) / 2, face.k);
+        const ends = this.line(face).flatMap((g) => this.toFace(g, face, [g.lo, g.hi]));
+        const mid = this.at(face, (Math.min(...ends) + Math.max(...ends)) / 2);
         return { face, d: Math.hypot(mid.x - from.x, mid.y - from.y) };
       })
       .sort((a, b) => b.d - a.d);
     for (const { face } of options) {
-      const blocked = this.blockedOn(face, 'water-heater', HEATER_HEIGHT);
-      const s = this.longest(face, 'water-heater', HEATER_HEIGHT, blocked);
+      const s = this.longestRun(face, 'water-heater', HEATER_HEIGHT);
       if (!s) continue;
-      const p = this.onWall('water-heater', face, (s[0] + s[1]) / 2, HEATER_HEIGHT, NUDGE, blocked);
+      const p = this.onWall('water-heater', face, (s[0] + s[1]) / 2, HEATER_HEIGHT, NUDGE);
       if (p) {
         this.add(1, r.id, 'water-heater', 'water-heater', p, WHY.heater, 'Over the shower');
         return;

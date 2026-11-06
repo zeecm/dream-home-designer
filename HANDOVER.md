@@ -1352,7 +1352,16 @@ uses a fresh run, so it never sends a point on a deleted wall, and if that diffe
 is shown it shows it instead and waits for another click. An Add the store refuses (no edit
 right, the renovation guard) neither rings nor closes. Counter sockets are counted per run
 (only the shortfall is suggested, and "already there" is checked again where each lands); a
-point with no clear spot is dropped with a note (`noRoomFor`). Toasts
+point with no clear spot is dropped with a note (`noRoomFor`). After QA: a wall drawn as several collinear records is one wall for
+placement (`line`, `runStretches`; `there` compares by position); a switch never goes on a
+door's hinge side (with no room by the latch, round the inside corner past it, the door's own
+leaf ignored there); the room light sits 0.55 m up from the label point and plan labels step
+aside for wall points too; rows note points on structural walls and the trunking an aircon
+still needs, a room with no door, and a counter short of sockets; the Dry kitchen's counter
+note is skipped when a joined kitchen has the counter. Web: the status line sits in the sticky
+foot; a room's row leaves after Add (back on undo); "no charge" for the compressor; Click or
+Tap by pointer; focus starts at the panel heading; ghosts shrink to at most 0.2 m zoomed out;
+a one-line intro on phones. Toasts
 "Added 6 points to Main bedroom." / "Added 23 points." with Undo (`toastFor`). Added points
 ring in `--suggest` for 600 ms (none with reduced motion). Phone: the sheet is half the
 screen, the plan refits the walls above it, buttons 44 px. In a renovation, points go in After

@@ -3848,6 +3848,7 @@ span.comment-pin {
   color: var(--suggest);
 }
 .suggest-status {
+  grid-column: 1 / -1;
   margin: 0;
   font-size: var(--fs-small);
   line-height: 16px;
@@ -3961,11 +3962,16 @@ span.comment-pin {
   .inspector-suggest .inspector-toggle {
     display: none;
   }
-  .inspector-suggest .suggest-intro {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+  /* One short line on a phone: the rows get the room. */
+  .inspector-suggest .suggest-intro-more {
+    display: none;
+  }
+  .inspector-suggest .suggest {
+    gap: 8px;
+  }
+  .inspector-suggest .suggest-foot {
+    gap: 6px;
+    padding-top: 8px;
   }
   .inspector-suggest .suggest-foot {
     grid-template-columns: 2fr 1fr;
@@ -3981,16 +3987,19 @@ span.comment-pin {
     top: calc(-1 * var(--pad));
     z-index: 1;
     margin: calc(-1 * var(--pad)) calc(-1 * var(--pad)) 0;
-    padding: var(--pad) var(--pad) 4px;
+    padding: 4px var(--pad) 0;
     background: var(--surface);
   }
 }
-/* A phone on its side: the column is too short for a fixed foot; it scrolls with the rows. */
+/* A phone on its side: a compact foot (its buttons side by side), no intro or fold toggle. */
 @media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
   .inspector-suggest .suggest-foot {
-    position: static;
-    margin-top: 0;
     grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    padding-top: 8px;
+  }
+  .inspector-suggest .inspector-toggle {
+    display: none;
   }
   .inspector-suggest .suggest-total {
     grid-column: 1 / -1;
@@ -3998,4 +4007,11 @@ span.comment-pin {
   .inspector-suggest .suggest-intro {
     display: none;
   }
+}
+.suggest-head .panel-title:focus {
+  outline: none;
+}
+.suggest-head .panel-title:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

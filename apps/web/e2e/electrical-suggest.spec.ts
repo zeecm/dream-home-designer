@@ -65,11 +65,12 @@ test.describe('desktop', () => {
     await page.getByLabel('Electrical', { exact: true }).uncheck();
     await page.getByRole('button', { name: 'Suggest points' }).click();
     await expect(ghosts(page).first()).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Suggested points' })).toBeVisible();
+    // Focus starts at the panel.
+    await expect(page.getByRole('heading', { name: 'Suggested points' })).toBeFocused();
     const rows = page.getByTestId('suggest-row');
     expect(await rows.count()).toBeGreaterThan(4);
     for (const meta of await page.getByTestId('suggest-meta').all()) {
-      await expect(meta).toHaveText(/^\d+ points? · about \$[\d,]+/);
+      await expect(meta).toHaveText(/^\d+ points? · (about \$[\d,]+|no charge)/);
     }
     await expect(page.getByTestId('suggest-total')).toHaveText(/points in \d+ rooms · about \$/);
     await expect(realPoints(page)).toHaveCount(0);
@@ -90,7 +91,11 @@ test.describe('desktop', () => {
     await expect(ghost(page, LIGHT)).toHaveAttribute('data-left-out', 'true');
     await expect(ghost(page, LIGHT).locator('.sg-x')).toHaveCount(1);
     expect(await count(r)).toBe(n - 1);
-    await expect(page.getByTestId('suggest-status')).toContainText('Left out: light, Main bedroom');
+    await expect(page.getByTestId('suggest-status')).toContainText(
+      'Left out: light, Main bedroom. Click again',
+    );
+    // Above the foot, in view however long the list.
+    await expect(page.getByTestId('suggest-status')).toBeInViewport();
     await page.mouse.click(at.x, at.y);
     await expect(ghost(page, LIGHT)).not.toHaveAttribute('data-left-out', 'true');
     expect(await count(r)).toBe(n);
@@ -124,6 +129,21 @@ test.describe('desktop', () => {
     // One undo takes them all back.
     await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
     await expect(realPoints(page)).toHaveCount(0);
+    await expect(row(page, 'rm_main-bedroom')).toBeVisible();
+  });
+
+  test('a room added with a point left out leaves the list; undo brings it back', async ({
+    page,
+  }) => {
+    await page.getByRole('button', { name: 'Suggest points' }).click();
+    const r = row(page, 'rm_main-bedroom');
+    const at = await ringCentre(page, LIGHT);
+    await page.mouse.click(at.x, at.y);
+    const n = await count(r);
+    await r.getByRole('button', { name: `Add ${n}` }).click();
+    await expect(r).toHaveCount(0);
+    await expect(ghost(page, LIGHT)).toHaveCount(0);
+    await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
     await expect(row(page, 'rm_main-bedroom')).toBeVisible();
   });
 
@@ -292,7 +312,9 @@ test.describe('phone', () => {
     const at = await ringCentre(page, key);
     await page.touchscreen.tap(at.x, at.y);
     await expect(ghost(page, key)).toHaveAttribute('data-left-out', 'true');
+    await expect(page.getByTestId('suggest-status')).toContainText('Tap again');
     await expect(page.getByTestId('suggest-status')).toContainText('Ceiling light.');
+    await expect(page.getByTestId('suggest-status')).toBeInViewport();
   });
 
   test('a room added by finger: one step, its toast, and its row gone', async ({ page }) => {
