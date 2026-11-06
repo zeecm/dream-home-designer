@@ -78,12 +78,16 @@ for any plan.
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
 
 ### Planned
-1. Slice 2s, the rest: notch depths on the contractor sheet and the estimate on every level.
+1. AI interior designer: a whole renovation proposed for the flat (walls HDB allows, room
+   uses, furniture, carpentry, paint), checked like your own edits, then changed room by room
+   or by aspect with feedback and locks; a cost estimate before every run.
+   [spec](docs/specs/ai-interior-designer.md)
+2. Slice 2s, the rest: notch depths on the contractor sheet and the estimate on every level.
    (The lift check and a diagonal you can edit are done.)
-2. Ageing parents check: wheelchair turning space, step-free routes, 850 mm doors, grab bars
+3. Ageing parents check: wheelchair turning space, step-free routes, 850 mm doors, grab bars
    in the bathroom (HDB EASE items).
-3. Storage meter: wardrobe and cabinet space against the household, room by room.
-4. A wall seen straight on (elevation): carpentry, windows, sockets and switches at height.
+4. Storage meter: wardrobe and cabinet space against the household, room by room.
+5. A wall seen straight on (elevation): carpentry, windows, sockets and switches at height.
 
 More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
 
