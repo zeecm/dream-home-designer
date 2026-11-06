@@ -3,6 +3,7 @@ import {
   type ClearanceIssue,
   DINING_CHAIRS,
   DINING_TABLES,
+  type Item,
   type Level,
   type PlanGeometry,
   type Vec2,
@@ -18,6 +19,7 @@ import {
   planGeometry,
   pointInPolygon,
   roomShapes,
+  variantLevels,
 } from '@dhd/core';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
@@ -101,15 +103,36 @@ export function useClearanceIssues(): ClearanceIssue[] {
 const name = (level: Level, itemId: string) =>
   furnitureKind(level.items[itemId]?.assetId ?? '')?.name ?? 'piece';
 
-const geoms = new WeakMap<Level, PlanGeometry>();
-const geomOf = (level: Level) => {
-  let g = geoms.get(level);
-  if (!g) {
-    g = planGeometry(level);
-    geoms.set(level, g);
+/** Kept by the walls, corners, openings and rooms: a drag of furniture changes none of them. */
+interface Fixed {
+  vertices: object;
+  openings: object;
+  rooms: object;
+  geom: PlanGeometry;
+  names: Map<string, string>;
+}
+const fixedCache = new WeakMap<object, Fixed>();
+function fixedOf(level: Level): Fixed {
+  const hit = fixedCache.get(level.walls);
+  if (
+    hit &&
+    hit.vertices === level.vertices &&
+    hit.openings === level.openings &&
+    hit.rooms === level.rooms
+  ) {
+    return hit;
   }
-  return g;
-};
+  const f: Fixed = {
+    vertices: level.vertices,
+    openings: level.openings,
+    rooms: level.rooms,
+    geom: planGeometry(level),
+    names: new Map(),
+  };
+  fixedCache.set(level.walls, f);
+  return f;
+}
+const geomOf = (level: Level) => fixedOf(level).geom;
 
 /** The room at a point, if any. */
 function roomAt(level: Level, p: Vec2) {
@@ -126,6 +149,17 @@ function roomAt(level: Level, p: Vec2) {
  * room its leaves sweep.
  */
 function doorName(level: Level, sweep: Vec2[][], openingId?: string): string {
+  if (!openingId) return doorNameOf(level, sweep);
+  const names = fixedOf(level).names;
+  let n = names.get(openingId);
+  if (n === undefined) {
+    n = doorNameOf(level, sweep, openingId);
+    names.set(openingId, n);
+  }
+  return n;
+}
+
+function doorNameOf(level: Level, sweep: Vec2[][], openingId?: string): string {
   const o = openingId ? geomOf(level).openings.find((g) => g.opening.id === openingId) : undefined;
   if (o) {
     const f = o.frame;
@@ -173,7 +207,15 @@ const listed = (xs: string[]) =>
 /** Where a walkway goes, in words: a room's name, or "the bed's left side". */
 function placeName(level: Level, to: WalkwayTo): string {
   if (to.roomId) return level.rooms[to.roomId]?.name ?? 'a room';
-  return `the bed’s ${to.side ?? 'left'} side`;
+  const side = `the bed’s ${to.side ?? 'left'} side`;
+  const beds = Object.values(level.items).filter((it) => {
+    const rule = CLEARANCE_RULES[it.assetId];
+    return !!rule && rule.side !== 'front';
+  });
+  const bed = to.bedId ? level.items[to.bedId] : undefined;
+  if (beds.length < 2 || !bed) return side;
+  const room = roomAt(level, { x: bed.position.x, y: bed.position.z });
+  return room ? `${side} in ${room.name}` : side;
 }
 
 /** What a piece's hinged front is called, for a door that hits it. */
@@ -303,11 +345,10 @@ export function itemsWithIssues(all: ClearanceIssue[]): string[] {
 
 /** The doors that hit another door, in a steady order (Show next goes to them after pieces). */
 export function doorsWithIssues(all: ClearanceIssue[]): string[] {
-  return [
-    ...new Set(
-      all.filter((i) => i.kind === 'doors').map((i) => (i.kind === 'doors' ? i.openingId : '')),
-    ),
-  ].sort();
+  const ids = all.flatMap((i) =>
+    i.kind === 'doors' || i.kind === 'door-front' ? [i.openingId] : [],
+  );
+  return [...new Set(ids)].sort();
 }
 
 /** The plan details' walkway line, and whether it is a warning. */
@@ -323,15 +364,15 @@ export function walkwayLine(
     }
     return { text: 'Add the main door to check walkways.', warn: false };
   }
-  const short = report.routes.filter((r) => !r.ok);
+  const short = report.routes
+    .filter((r) => !r.ok)
+    .sort((p, q) => p.have - q.have || q.need - p.need);
   if (!short.length) {
     return { text: 'Walkways: room to walk from the main door to every room.', warn: false };
   }
   const parts: string[] = [];
   for (const r of short) {
-    const where = r.to.roomId
-      ? (level.rooms[r.to.roomId]?.name ?? 'a room')
-      : `the bed’s ${r.to.side ?? 'left'} side`;
+    const where = placeName(level, r.to);
     const part = `${where} (${r.have <= 0 ? 'closed' : formatLength(r.have).replace(' ', '\u00a0')})`;
     if (!parts.includes(part)) parts.push(part);
   }
@@ -392,10 +433,12 @@ interface LabelSpec {
   key: string;
   text: string;
   /**
-   * Where it may go, best first: a point and the unit direction from it to the label (its
-   * near edge 10 px out).
+   * Where it may go, best first: a point and the unit direction from it to the label, its
+   * near edge `gap` px out (10 unless given).
    */
-  spots: { at: Vec2; n: Vec2 }[];
+  spots: { at: Vec2; n: Vec2; gap?: number }[];
+  have: number;
+  need: number;
 }
 
 const shortLabel = (have: number, need: number) =>
@@ -406,14 +449,21 @@ function zoneLabel(key: string, zone: Vec2[], have: number, need: number): Label
   const [a, , b2, a2] = zone as [Vec2, Vec2, Vec2, Vec2];
   if (!a || !a2 || !b2) return null;
   const len = Math.hypot(a2.x - a.x, a2.y - a.y) || 1;
+  const n = { x: (a2.x - a.x) / len, y: (a2.y - a.y) / len };
+  const wl = Math.hypot(b2.x - a2.x, b2.y - a2.y) || 1;
+  const d = { x: (b2.x - a2.x) / wl, y: (b2.y - a2.y) / wl };
+  const mid = { x: (a2.x + b2.x) / 2, y: (a2.y + b2.y) / 2 };
   return {
     key,
     text: shortLabel(have, need),
+    have,
+    need,
+    // Off the far edge; further out, past a turn handle; else beside either far corner.
     spots: [
-      {
-        at: { x: (a2.x + b2.x) / 2, y: (a2.y + b2.y) / 2 },
-        n: { x: (a2.x - a.x) / len, y: (a2.y - a.y) / len },
-      },
+      { at: mid, n },
+      { at: mid, n, gap: 34 },
+      { at: b2, n: d },
+      { at: a2, n: { x: -d.x, y: -d.y } },
     ],
   };
 }
@@ -432,11 +482,15 @@ function pinchLabel(key: string, pinch: [Vec2, Vec2], have: number, need: number
   return {
     key,
     text: shortLabel(have, need),
+    have,
+    need,
     spots: [
       { at: mid, n },
       { at: mid, n: { x: -n.x, y: -n.y } },
       { at: q, n: d },
       { at: p, n: { x: -d.x, y: -d.y } },
+      { at: mid, n, gap: 30 },
+      { at: mid, n: { x: -n.x, y: -n.y }, gap: 30 },
     ],
   };
 }
@@ -462,12 +516,14 @@ function placeLabels(
   zoom: number,
   visible: { x0: number; y0: number; x1: number; y1: number },
   avoid: { at: Vec2; half: Vec2 }[],
+  handles: { at: Vec2; half: Vec2 }[],
 ) {
   const px = 1 / zoom;
   const out: PlacedLabel[] = [];
-  // Room names: kept clear of where a spot allows it, else covered as little as can be.
-  const covers = (b: PlacedLabel) =>
-    avoid.reduce((t, a) => {
+  // The selected piece's handles, then room names: kept clear of where a spot allows it, else
+  // covered as little as can be (a handle over the text worst).
+  const covers = (b: PlacedLabel, boxes: { at: Vec2; half: Vec2 }[]) =>
+    boxes.reduce((t, a) => {
       const ox = Math.min(b.x + b.w, a.at.x + a.half.x) - Math.max(b.x, a.at.x - a.half.x);
       const oy = Math.min(b.y + b.h, a.at.y + a.half.y) - Math.max(b.y, a.at.y - a.half.y);
       return t + (ox > 0 && oy > 0 ? ox * oy : 0);
@@ -481,8 +537,8 @@ function placeLabels(
   for (const s of specs) {
     const w = (textWidth(s.text) + 8) * px;
     const h = 16 * px;
-    const gap = 10 * px;
-    const place = ({ at, n }: { at: Vec2; n: Vec2 }): PlacedLabel => {
+    const place = ({ at, n, gap: g }: { at: Vec2; n: Vec2; gap?: number }): PlacedLabel => {
+      const gap = (g ?? 10) * px;
       // Anchored as the wall tags are: by its near side, centred across.
       const x =
         Math.abs(n.x) > 0.7 ? (n.x > 0 ? at.x + gap : at.x - gap - w) : at.x + n.x * gap - w / 2;
@@ -493,12 +549,32 @@ function placeLabels(
     let best: { b: PlacedLabel; c: number } | null = null;
     for (const b of s.spots.map(place)) {
       if (!fits(b)) continue;
-      const c = covers(b);
+      const c = 100 * covers(b, handles) + covers(b, avoid);
       if (!best || c < best.c) best = { b, c };
       if (c === 0) break;
     }
     if (best) out.push(best.b);
   }
+  return out;
+}
+
+/**
+ * Where a selected piece's handles are drawn (plan units at this zoom): a box round each
+ * corner handle, the turn handle 30 px in front and its stem (as plan/tools.tsx draws them).
+ */
+function handleBoxes(it: Item, zoom: number): { at: Vec2; half: Vec2 }[] {
+  const px = 1 / zoom;
+  const box = (at: Vec2, h: number) => ({ at, half: { x: h * px, y: h * px } });
+  const fp = itemFootprint(it);
+  const out = fp.map((c) => box(c, 9));
+  const [, , fr, fl] = fp as [Vec2, Vec2, Vec2, Vec2];
+  const mid = { x: (fr.x + fl.x) / 2, y: (fr.y + fl.y) / 2 };
+  const c = { x: it.position.x, y: it.position.z };
+  const len = Math.hypot(mid.x - c.x, mid.y - c.y) || 1;
+  const u = { x: (mid.x - c.x) / len, y: (mid.y - c.y) / len };
+  const ahead = (t: number) => ({ x: mid.x + u.x * t * px, y: mid.y + u.y * t * px });
+  out.push(box(ahead(30), 11));
+  for (const t of [6, 14, 22]) out.push(box(ahead(t), 4));
   return out;
 }
 
@@ -586,7 +662,19 @@ export const ClearanceLayer = memo(function ClearanceLayer({
         Number(ownPinch(q.key)) - Number(ownPinch(p.key)) ||
         q.i.need - q.i.have - (p.i.need - p.i.have),
     );
-    for (const { key, i } of sorted) out.push(pinchLabel(`p-${key}`, i.pinch, i.have, i.need));
+    for (const { key, i } of sorted) {
+      const mid = { x: (i.pinch[0].x + i.pinch[1].x) / 2, y: (i.pinch[0].y + i.pinch[1].y) / 2 };
+      // The same shortfall as a zone label close by (a wardrobe's front and the way past it):
+      // one chip says it.
+      const twin = out.some(
+        (z) =>
+          z.key.startsWith('z-') &&
+          Math.abs(z.have - i.have) <= 0.02 &&
+          Math.abs(z.need - i.need) < 1e-6 &&
+          Math.hypot((z.spots[0]?.at.x ?? 0) - mid.x, (z.spots[0]?.at.y ?? 0) - mid.y) < 1.5,
+      );
+      if (!twin) out.push(pinchLabel(`p-${key}`, i.pinch, i.have, i.need));
+    }
     return out;
   }, [issues, mine, pinches]);
   const visible = {
@@ -596,7 +684,8 @@ export const ClearanceLayer = memo(function ClearanceLayer({
     y1: view.cy + size.height / 2 / view.zoom,
   };
   const names = roomLabelBoxes(level, geom, view.zoom);
-  const labels = placeLabels(specs, view.zoom, visible, names);
+  const handles = selected ? handleBoxes(selected, view.zoom) : [];
+  const labels = placeLabels(specs, view.zoom, visible, names, handles);
   // The selected piece's narrowed way, unless its way in (Show the way) is drawn.
   const route = useMemo(() => {
     if (!selected) return null;
@@ -696,8 +785,10 @@ export function ClearanceAnnouncement({
 /** The other levels of the project, as shown (for the upper-floor walkway line). */
 export function useOtherLevels(level: Level | undefined): Level[] {
   const project = useProject();
+  const variant = useEditor((s) => s.variant);
   return useMemo(
-    () => (project?.levels ?? []).filter((l) => !level || l.id !== level.id),
-    [project, level],
+    () =>
+      project ? variantLevels(project, variant).filter((l) => !level || l.id !== level.id) : [],
+    [project, variant, level],
   );
 }

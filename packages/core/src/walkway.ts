@@ -414,7 +414,24 @@ function across(
     return { have: dA + out, a, b: { x: p.x + ux * out, y: p.y + uy * out }, by: [A] };
   }
   if (!best) return null;
-  return { have: dA + best.d, a, b: best.at, by: [A, best.i] };
+  const have = dA + best.d;
+  return { have, ...barOf(a, best.at, have), by: [A, best.i] };
+}
+
+/**
+ * The bar drawn across a pinch: from one obstacle towards the other, as long as the width
+ * reported (the two distances from the narrow point; the obstacles' nearest points can lie a
+ * little closer when they aren't straight across from each other).
+ */
+function barOf(a: Vec2, b: Vec2, have: number): { a: Vec2; b: Vec2 } {
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  if (len < 1e-9 || len >= have - 1e-6) return { a, b };
+  const ext = (have - len) / 2;
+  const u = { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
+  return {
+    a: { x: a.x - u.x * ext, y: a.y - u.y * ext },
+    b: { x: b.x + u.x * ext, y: b.y + u.y * ext },
+  };
 }
 
 interface Measure {
@@ -633,6 +650,30 @@ export function walkwayReport(level: Level): WalkwayReport {
     return [...out];
   };
 
+  /**
+   * Where a closed way is drawn shut: across the doorway a piece fills (its span on the wall's
+   * centre line), else across the bare way just before the first piece standing in it.
+   */
+  const closedBar = (bareWay: number[]): [Vec2, Vec2] => {
+    const blocked = (k: number) => !!solid[k] && (owner[k] as number) >= nBare;
+    const hit = bareWay.findIndex(blocked);
+    if (hit < 0) {
+      const p = cellCentre(g, bareWay[bareWay.length - 1] as number);
+      return [p, p];
+    }
+    for (let i = hit; i < bareWay.length && blocked(bareWay[i] as number); i++) {
+      const t = throatOf[bareWay[i] as number] as number;
+      const th = t >= 0 ? throats[t] : undefined;
+      if (th) {
+        const at = (u: number) => ({ x: th.f.a.x + th.f.d.x * u, y: th.f.a.y + th.f.d.y * u });
+        return [at(th.u0), at(th.u1)];
+      }
+    }
+    const p = cellCentre(g, bareWay[Math.max(0, hit - 1)] as number);
+    const r = across(p, bareObs, bareRaster);
+    return r ? [r.a, r.b] : [p, p];
+  };
+
   const routes: WalkwayRoute[] = [];
   const pinchOf = new Map<WalkwayRoute, Measure>();
 
@@ -657,9 +698,6 @@ export function walkwayReport(level: Level): WalkwayReport {
         }
       }
       const blamed = standing.size ? [...standing] : narrowing(bareWay, need);
-      const hit = bareWay.findIndex((k) => solid[k] && (owner[k] as number) >= nBare);
-      const p = cellCentre(g, bareWay[Math.max(0, hit)] as number);
-      const r = across(p, bareObs, bareRaster);
       routes.push({
         route: kind,
         to,
@@ -667,7 +705,7 @@ export function walkwayReport(level: Level): WalkwayReport {
         capped,
         have: 0,
         ok: false,
-        pinch: r ? [r.a, r.b] : [p, p],
+        pinch: closedBar(bareWay),
         path: polyline(g, bareWay),
         blamed,
       });
@@ -827,7 +865,7 @@ export function walkwayReport(level: Level): WalkwayReport {
         kind: 'walkway',
         itemId,
         route: r0.route,
-        to: grp.routes.map((r) => r.to),
+        to: [...grp.routes].sort((p, q) => p.have - q.have || q.need - p.need).map((r) => r.to),
         need: r0.need,
         have: r0.have,
         capped: r0.capped,
