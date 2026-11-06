@@ -67,30 +67,47 @@ export function runView(level: Level, view: View, size: Size, from: Vec2): View 
   const min = { x: Math.min(from.x, to.x) - pad, y: Math.min(from.y, to.y) - pad };
   const max = { x: Math.max(from.x, to.x) + pad, y: Math.max(from.y, to.y) + pad };
   const area = { width: size.width, height: Math.max(1, size.height - BAR_H) };
-  // On a phone, the unit's room and the ledge fill the plan below the bar, zoomed in if need
-  // be, so a fingertip covers centimetres, not metres.
-  const phone = size.width < 600;
-  if (phone) {
-    for (const [, shape] of roomShapes(level)) {
-      if (!shape.outer.length) continue;
-      if (!pointInPolygon(from, shape.outer) && !pointInPolygon(to, shape.outer)) continue;
-      for (const p of shape.outer) {
-        min.x = Math.min(min.x, p.x - 0.3);
-        min.y = Math.min(min.y, p.y - 0.3);
-        max.x = Math.max(max.x, p.x + 0.3);
-        max.y = Math.max(max.y, p.y + 0.3);
-      }
-    }
-  }
+  // On a phone, the unit's room and the ledge fill the strip of plan below the bar, zoomed
+  // in so a fingertip covers centimetres, not metres.
+  if (size.width < 600) return phoneRunView(level, size, from, to);
   const seen = (p: Vec2) => {
     const s = worldToScreen(view, size, p);
     return s.x >= 16 && s.x <= size.width - 16 && s.y >= BAR_H + 8 && s.y <= size.height - 16;
   };
-  const fit = fitBounds({ min, max }, area, phone ? 12 : 24);
-  if (!phone && seen(min) && seen(max)) return view;
-  const zoom = phone ? fit.zoom : Math.min(fit.zoom, view.zoom);
+  if (seen(min) && seen(max)) return view;
+  const fit = fitBounds({ min, max }, area, 24);
+  const zoom = Math.min(fit.zoom, view.zoom);
   // Centred in the plan below the bar.
   return { zoom, cx: fit.cx, cy: fit.cy - BAR_H / 2 / zoom };
+}
+
+/**
+ * A phone's view for running trunking: the unit's room and the ledge (`to`'s room) fitted to
+ * the strip of plan below the bar, so they fill it (zoomed in as far as that allows: about
+ * 120 px a metre for rooms beside the ledge, less for a pair a flat apart).
+ */
+export function phoneRunView(level: Level, size: Size, from: Vec2, to: Vec2): View {
+  const strip = { width: size.width, height: Math.max(1, size.height - BAR_H) };
+  const pad = 0.3;
+  const boxOf = (p: Vec2) => {
+    const shape = [...roomShapes(level).values()].find(
+      (s) => s.outer.length > 2 && pointInPolygon(p, s.outer),
+    );
+    const pts = shape?.outer ?? [p];
+    return {
+      min: { x: Math.min(...pts.map((q) => q.x)) - pad, y: Math.min(...pts.map((q) => q.y)) - pad },
+      max: { x: Math.max(...pts.map((q) => q.x)) + pad, y: Math.max(...pts.map((q) => q.y)) + pad },
+    };
+  };
+  const room = boxOf(from);
+  const ledge = boxOf(to);
+  const both = {
+    min: { x: Math.min(room.min.x, ledge.min.x), y: Math.min(room.min.y, ledge.min.y) },
+    max: { x: Math.max(room.max.x, ledge.max.x), y: Math.max(room.max.y, ledge.max.y) },
+  };
+  const fit = fitBounds(both, strip, 8);
+  // The strip's middle is BAR_H / 2 below the canvas's.
+  return { zoom: fit.zoom, cx: fit.cx, cy: fit.cy - BAR_H / 2 / fit.zoom };
 }
 
 /** How near (plan metres, or screen px zoomed out) a tap must be to a wall face or compressor. */
@@ -117,8 +134,16 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
   const ctxRef = useRef(ctx);
   ctxRef.current = ctx;
   const runId = trunking?.id;
+  // And again as the plan settles to its size (the details sheet folds as a run starts), for
+  // a moment after: not once the person has the plan where they want it.
+  const began = useRef(0);
+  const { width, height } = ctx.size;
   useEffect(() => {
-    if (!runId) return;
+    if (runId) began.current = performance.now();
+  }, [runId]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on a run starting, or a new size
+  useEffect(() => {
+    if (!runId || performance.now() - began.current > 1500) return;
     const c = ctxRef.current;
     const level = currentLevel() ?? c.level;
     const ac = level.points[runId];
@@ -126,7 +151,7 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
     if (!at || c.size.width <= 0) return;
     const next = runView(level, c.view, c.size, at);
     if (next !== c.view) useEditor.getState().setView(next, true);
-  }, [runId]);
+  }, [runId, width, height]);
   // A pinch or a pan that left the run's last bend under the bar: brought back below it once
   // the plan settles.
   const view = ctx.view;

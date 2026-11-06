@@ -1514,5 +1514,12 @@ a route joins other units' trunking (`sharedLegs`, 0.25 a metre, holes free) and
 running over a door head (+0.6); "No inside route…" clears on success or another selection;
 on phones a run starts zoomed to the unit's room and the ledge; a new compressor sits at the
 ledge's far side towards the unit, and room labels keep clear of it (two circles along it; the
-name alone if the name and area don't fit).
+name alone if the name and area don't fit). Round 3: jogs (`hasJog`, `removeJogs`) are taken
+out by `followRuns` after a wall moves, by `wallRoute`, and by Straighten, which counts any
+jog under 15 cm as not straight; where the first leg can't move, the jog becomes a short stub
+out from the unit and the run goes straight on (a leg a jog's width off a face still counts as
+hugging it). Off a face costs ×4 a metre and a door head 3.5, so a route goes round a doorway
+when that's within about 1.5× as long or it can share a trunk (it does, down the main
+bedroom's left wall). On a phone a run starts with the unit's room and the ledge filling the
+strip below the bar, refitted as the sheet folds (`phoneRunView`).
 
