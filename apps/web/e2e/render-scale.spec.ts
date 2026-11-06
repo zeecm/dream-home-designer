@@ -94,14 +94,17 @@ test('from the orbit view, a render starts from eye height and tells the model t
   expect(prompts).toHaveLength(1);
   const atEye = prompts[0] ?? '';
   // The style and fidelity asks are kept.
-  expect(atEye).toContain('Turn it into a photorealistic interior photograph');
+  expect(atEye).toContain('Edit this image. It is an exact 3D model of a real home');
   expect(atEye).toContain('This is "Living and dining", ');
   expect(atEye).toContain('(21.0 m²), ceiling 2.6 m.');
   expect(atEye).toContain('1.6 m above the floor, at eye height');
   expect(atEye).toContain('"3-seat sofa" 2.1 × 0.9 × 0.8 m');
   // The fridge is behind the kitchen's walls: not in the picture, so not in the list.
   expect(atEye).not.toContain('Fridge');
-  expect(atEye).toContain('Do not add, remove, enlarge or move furniture');
+  expect(atEye).toContain(
+    'Do not add, remove, enlarge or move furniture, doors, windows or openings',
+  );
+  expect(atEye).toContain('Doors, windows and openings in view');
 
   // From the view itself: honest about it, and the list follows the picture.
   await here.click();
