@@ -207,6 +207,26 @@ class MeasurePass extends THREE.ShaderMaterial {
   }
 }
 
+/**
+ * Gives the tracer's shader a cap on each sample's light (`sampleClamp`), before it is averaged
+ * in: a path that by chance reaches something very bright (the sun's patch on a floor, seen
+ * through two bounces) makes one bright speck otherwise. Patched into the library's shader
+ * source, which is pinned (0.0.23); if it isn't as expected, nothing is changed.
+ */
+function clampSamples(material: THREE.ShaderMaterial): THREE.IUniform | null {
+  const src = material.fragmentShader;
+  const main = 'void main() {';
+  const end = 'gl_FragColor.a *= opacity;';
+  if (src.split(main).length !== 2 || src.split(end).length !== 2) return null;
+  const uniform: THREE.IUniform = { value: 1e30 };
+  material.uniforms.sampleClamp = uniform;
+  material.fragmentShader = src
+    .replace(main, `uniform float sampleClamp;\n${main}`)
+    .replace(end, `gl_FragColor.rgb = min(gl_FragColor.rgb, vec3(sampleClamp));\n${end}`);
+  material.needsUpdate = true;
+  return uniform;
+}
+
 /** A material's uniform, by name (each pass declares the ones it sets). */
 const u = (m: THREE.ShaderMaterial, name: string) => m.uniforms[name] as THREE.IUniform;
 
@@ -247,6 +267,17 @@ export class PathTracerEngine implements ExactEngine {
   };
 
   private opts: ExactEngineOptions;
+  /** The tracer's sample clamp (null if its shader couldn't take one). */
+  private clamping: THREE.IUniform | null;
+
+  /** No sample is brighter than this (cd/m²): rare bright paths (fireflies) are cut down. */
+  get clamp(): number {
+    return (this.clamping?.value as number | undefined) ?? Number.POSITIVE_INFINITY;
+  }
+
+  set clamp(v: number) {
+    if (this.clamping) this.clamping.value = v > 0 ? v : 1e30;
+  }
 
   constructor(opts: ExactEngineOptions) {
     this.opts = opts;
@@ -279,6 +310,7 @@ export class PathTracerEngine implements ExactEngine {
       throw e;
     }
     this.inner = this.tracer as unknown as Internals;
+    this.clamping = clampSamples(this.inner._pathTracer.material);
     // Smooths the bright sparks a glossy bounce off a lit surface can leave.
     this.tracer.filterGlossyFactor = 0.5;
     this.tracer.multipleImportanceSampling = true;

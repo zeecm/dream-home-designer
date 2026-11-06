@@ -63,6 +63,8 @@ export interface ExactEngine {
    * GPU without stalling it (0 if the context is lost).
    */
   luminance(): Promise<number>;
+  /** No single sample brighter than this (cd/m²), cutting runaway paths (fireflies). */
+  clamp: number;
   /** Multiplies the scene's light before tone mapping (AgX), applied at display. */
   exposure: number;
   /** Draws the picture shown again (after an exposure change, say) without a new sample. */

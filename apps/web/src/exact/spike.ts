@@ -5,17 +5,31 @@
  * `w`, `h` (picture px), `samples`, `hour`, `room` (living, main or a room id), `tiles`,
  * `adapt=0` (fixed tiles), `glass=0` (panes left out), `view=orbit`, `ceil=0`, `models=0`,
  * `probe=auto|<window id>` (the sun patch through a window against the shade beside it),
- * `scene=plane` (`sun=1`: the ground alone), `sync=1` (wait for the GPU every step).
+ * `scene=plane` (`sun=1`: the ground alone), `sync=1` (wait for the GPU every step);
+ * `portals=1`, `plain=1` (no furniture or lamps), `pose=x,y,yaw[,across]`, `clamp=<n>|auto`,
+ * and to weigh the portals' light: `nosun=1`, `mis=0` (no light sampling), `gk=<k>` (the
+ * ground's portals × k), `glow=0`, `darkground=1`. Logs black pixels, specks and luminance at
+ * 32 and 64 samples and the last (`stats at`).
  */
 import {
   DEFAULT_SITE,
   type Level,
   type SceneCamera,
   dayOfYear,
+  daylightReach,
   eyeLevelCamera,
   lampsAuto,
+  roomIdAt,
+  sampleFlatProject,
 } from '@dhd/core';
-import { ModelLibrary, buildExactScene, exactCamera, exactDaylight } from '@dhd/render';
+import {
+  EXACT_EXTRAS,
+  ModelLibrary,
+  buildExactScene,
+  exactCamera,
+  exactDaylight,
+  sampleClamp,
+} from '@dhd/render';
 // The test fixture of a furnished flat, straight from core's source (a dev page only).
 import {
   furnishedSample,
@@ -35,6 +49,70 @@ const ROOM = q.get('room') ?? 'living';
 const GLASS = q.get('glass') !== '0';
 const MODELS = q.get('models') !== '0';
 const ORBIT = q.get('view') === 'orbit';
+/** `portals=1`: lights in the sky's openings (as the app does from inside), the sky lighting none. */
+const PORTALS = q.get('portals') === '1';
+/** `plain=1`: the sample flat as visitors get it (no furniture or lamps). */
+const PLAIN = q.get('plain') === '1';
+/** `pose=x,y,yaw[,across]`: the walk's camera there (110° across by default). */
+const POSE = q.get('pose');
+/** `clamp=<cd/m²>|auto`: no sample brighter than this (`auto`: as the app sets it). */
+const CLAMP = q.get('clamp') ?? '';
+
+/** Black (no light at all), dark (under 5% of the median) and firefly (over 4× its 5 × 5
+ * neighbourhood's median) pixel shares, and the mean, of the traced (raw) picture. */
+function stats(px: Float32Array, w: number, h: number) {
+  const lum = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    lum[i] =
+      0.2126 * (px[i * 4] ?? 0) + 0.7152 * (px[i * 4 + 1] ?? 0) + 0.0722 * (px[i * 4 + 2] ?? 0);
+  }
+  const sorted = Float32Array.from(lum).sort();
+  const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
+  let black = 0;
+  let dark = 0;
+  let fire = 0;
+  let sum = 0;
+  const nb: number[] = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const l = lum[y * w + x] ?? 0;
+      sum += l;
+      if (l <= 0) black++;
+      if (l < 0.05 * median) dark++;
+      nb.length = 0;
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const xx = x + dx;
+          const yy = y + dy;
+          if ((dx || dy) && xx >= 0 && yy >= 0 && xx < w && yy < h) nb.push(lum[yy * w + xx] ?? 0);
+        }
+      }
+      nb.sort((a, b) => a - b);
+      const local = nb[Math.floor(nb.length / 2)] ?? 0;
+      if (l > 4 * local && l > 0.05 * median) fire++;
+    }
+  }
+  const n = w * h;
+  return {
+    black: (100 * black) / n,
+    dark: (100 * dark) / n,
+    fireflies: (100 * fire) / n,
+    mean: sum / n,
+    // The room alone: the mean of pixels within 5x the median (not the view out, nor specks).
+    room: (() => {
+      let t = 0;
+      let k = 0;
+      for (const l of lum) {
+        if (l <= 5 * median) {
+          t += l;
+          k++;
+        }
+      }
+      return k ? t / k : 0;
+    })(),
+    median,
+  };
+}
 
 const log = (s: string) => {
   const el = document.getElementById('log');
@@ -43,6 +121,7 @@ const log = (s: string) => {
 };
 
 function level(): Level {
+  if (PLAIN) return sampleFlatProject().levels[0] as Level;
   // Lamps to light the night: a ceiling light in each main room, a floor lamp, a pendant.
   return withPieces(
     furnishedSample(),
@@ -89,6 +168,19 @@ async function main() {
     ? { roomId: null, camera: above }
     : eyeLevelCamera(l, above);
   if (!eye) throw new Error('no eye camera');
+  if (POSE) {
+    const [x = 0, y = 0, yaw = 0, across = 110] = POSE.split(',').map(Number);
+    const half = (across * Math.PI) / 360;
+    eye = {
+      roomId: roomIdAt(l, { x, y }),
+      camera: {
+        position: { x, y: 1.6, z: y },
+        target: { x: x + Math.cos(yaw), y: 1.6, z: y + Math.sin(yaw) },
+        fov: 2 * Math.atan(Math.tan(half) / (W / H)),
+        aspect: W / H,
+      },
+    };
+  }
   // `probe=<window id>`: where the sun through that window lands on the floor, looked at from
   // across the room, with a patch beside it in shade to compare.
   const probeId = q.get('probe');
@@ -146,14 +238,39 @@ async function main() {
     lap(`models (${files.filter((f) => models.has(f)).length}/${files.length})`);
   }
   const day = dayOfYear(new Date());
-  const daylight = exactDaylight(DEFAULT_SITE, day, HOUR);
+  const lit = exactDaylight(DEFAULT_SITE, day, HOUR);
+  // `nosun=1`: the sky alone (to check the sky's light against a reference that finds it only
+  // by chance, `mis=0`, which is unbiased whatever the sky sampling does).
+  const daylight = q.get('nosun') === '1' ? { ...lit, sun: null } : lit;
   const lamps = lampsAuto(l, eye.roomId, daylight.light);
+  const ceilings = !ORBIT && q.get('ceil') !== '0';
   const built = buildExactScene(l, {
-    ceilings: !ORBIT && q.get('ceil') !== '0',
+    ceilings,
     models,
     daylight,
     lamps,
+    portals: PORTALS && ceilings ? (eye.roomId ? daylightReach(l, eye.roomId) : true) : false,
   });
+  log(`portals: ${built.portals.map((p) => p.name).join(' ')}`);
+  // `glow=0`: with portals, the ground gives off none of the sky's light (to compare).
+  if (q.get('glow') === '0' && built.portals.length) {
+    const g = built.scene.getObjectByName(EXACT_EXTRAS.ground) as unknown as {
+      material: { emissiveIntensity: number };
+    };
+    g.material.emissiveIntensity = 0;
+  }
+  // `gk=<k>`: the ground's portals at k times their light (to weigh the ground's share).
+  const gk = q.get('gk');
+  if (gk !== null) {
+    for (const p of built.portals) if (p.name.endsWith(':ground')) p.intensity *= Number(gk);
+  }
+  // `darkground=1`: the ground reflects nothing (to weigh its share of a room's light).
+  if (q.get('darkground') === '1') {
+    const g = built.scene.getObjectByName(EXACT_EXTRAS.ground) as unknown as {
+      material: { color: { setRGB(r: number, g: number, b: number): void } };
+    };
+    g.material.color.setRGB(0, 0, 0);
+  }
   if (!GLASS) {
     built.scene.traverse((o) => {
       if (o.name.startsWith('glass:')) o.visible = false;
@@ -200,6 +317,12 @@ async function main() {
   engine.canvas.style.width = `${Math.min(W, 960)}px`;
   document.getElementById('out')?.append(engine.canvas);
   const tStart = performance.now();
+  if (q.get('mis') === '0') {
+    (
+      engine as unknown as { tracer: { multipleImportanceSampling: boolean } }
+    ).tracer.multipleImportanceSampling = false;
+  }
+  if (CLAMP) engine.clamp = CLAMP === 'auto' ? sampleClamp(daylight) : Number(CLAMP);
   await engine.start(built.scene, camera);
   const prepared = performance.now();
   log(`prepare (BVH, textures, compile): ${(prepared - tStart).toFixed(0)} ms`);
@@ -208,6 +331,9 @@ async function main() {
   let firstFull = 0;
   let exposed8 = false;
   let tAt32 = 0;
+  const measured = new Set<number>();
+  const allStats: unknown[] = [];
+  (window as unknown as { stats: unknown[] }).stats = allStats;
   const loop = () =>
     new Promise<void>((resolve) => {
       const frame = async () => {
@@ -241,6 +367,22 @@ async function main() {
           );
         }
         if (!tAt32 && engine.samples >= 32) tAt32 = performance.now();
+        const whole = Math.floor(engine.samples);
+        if ((whole === 32 || whole === 64 || whole === TARGET) && !measured.has(whole)) {
+          measured.add(whole);
+          const inner = engine as unknown as {
+            renderer: { readRenderTargetPixels: (...a: unknown[]) => void };
+            inner: { _pathTracer: { target: { width: number; height: number } } };
+          };
+          const t = inner.inner._pathTracer.target;
+          const px = new Float32Array(t.width * t.height * 4);
+          inner.renderer.readRenderTargetPixels(t, 0, 0, t.width, t.height, px);
+          const st = stats(px, t.width, t.height);
+          allStats.push({ samples: whole, ...st });
+          log(
+            `stats at ${whole}: black ${st.black.toFixed(1)}%, dark ${st.dark.toFixed(1)}%, fireflies ${st.fireflies.toFixed(2)}%, mean ${st.mean.toFixed(1)}, room ${st.room.toFixed(1)}, median ${st.median.toFixed(1)} cd/m²`,
+          );
+        }
         if (engine.samples >= TARGET) resolve();
         else requestAnimationFrame(frame);
       };

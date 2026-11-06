@@ -2,12 +2,19 @@ import {
   type Level,
   type SceneCamera,
   dayOfYear,
+  daylightReach,
   furnitureKind,
   lampsAuto,
   roomIdAt,
   siteOf,
 } from '@dhd/core';
-import { type ExactScene, buildExactScene, exactCamera, exactDaylight } from '@dhd/render';
+import {
+  type ExactScene,
+  buildExactScene,
+  exactCamera,
+  exactDaylight,
+  sampleClamp,
+} from '@dhd/render';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useEditor } from '../editor';
 import { download, fileStem, shownDoors, view3dAspect } from '../exports';
@@ -254,7 +261,11 @@ export function ExactPanel({
           daylight,
           lamps: lampsAuto(level, room, daylight.light),
           doors: shownDoors(),
+          // From inside, the sky lights the rooms through lights in their openings (aimed at
+          // every sample): those of the camera's room and the rooms it opens onto.
+          portals: shown.ceilings ? (room ? daylightReach(level, room) : true) : false,
         });
+        engine.clamp = sampleClamp(daylight);
         await engine.start(
           built.scene,
           exactCamera({ ...cam, aspect: px.width / px.height }),

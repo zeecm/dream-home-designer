@@ -10,6 +10,16 @@ export {
   isSpotLamp,
   lampLights,
   lampShades,
+  PORTAL,
+  PORTAL_TILT,
+  portalLights,
+  portalRadiance,
+  skyOnGround,
+  GROUND_REACHES,
+  groundRadiance,
+  GLASS_PASSES,
+  sampleClamp,
+  skyRadiance,
   skyTexture,
 } from './exactScene';
 export { LevelMeshes, type LevelMeshOptions, type UpdateStats } from './levelMeshes';
