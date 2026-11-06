@@ -260,6 +260,47 @@ test.describe('desktop', () => {
     await expect(diagonal(page)).toHaveValue('');
     await expect(way(page)).toContainText('Measured its diagonal depth?');
   });
+
+  test('a diagonal saved out of range is called out until it is re-entered', async ({ page }) => {
+    await addSofa(page, 'My sofa', ['2.1', '1.0', '0.95']);
+    await placeIn(page, 'rm_bedroom', 'My sofa');
+    await waitSaved(page);
+    // As saved before the range was corrected: wider than the sofa is deep or high.
+    const id = new URL(page.url()).searchParams.get('p');
+    // This browser's owner key for the plan (see src/keys.ts).
+    const owner = await page.evaluate(
+      (p) =>
+        (JSON.parse(localStorage.getItem(`dhd:keys:${p}`) ?? '{}') as { owner?: string }).owner,
+      id,
+    );
+    const auth = { Authorization: `Bearer ${owner}` };
+    const got = await page.request.get(`/api/projects/${id}`, { headers: auth });
+    const doc = await got.json();
+    for (const m of Object.values(doc.models as Record<string, { diagonal?: number }>)) {
+      m.diagonal = 1.2;
+    }
+    const put = await page.request.put(`/api/projects/${id}`, {
+      data: doc,
+      headers: { ...auth, 'If-Match': got.headers().etag ?? '' },
+    });
+    expect(put.ok()).toBe(true);
+    await page.reload();
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    await page.locator('[data-hit^="item:"]').click({ force: true });
+    await expect(diagonal(page)).toHaveValue('1.20 m');
+    await expect(diagonal(page)).toHaveAttribute('aria-invalid', 'true');
+    await expect(diagonal(page)).toHaveAccessibleDescription(
+      /^Between 0\.69 and 0\.95\sm for this sofa\.$/,
+    );
+    // It gets no one through a door: the way to measure it again is still offered.
+    await expect(way(page).getByRole('button', { name: 'Add diagonal depth' })).toBeVisible();
+    await diagonal(page).fill('0.80');
+    await diagonal(page).press('Enter');
+    await expect(diagonal(page)).toHaveAttribute('aria-invalid', 'false');
+    await expect(diagonal(page)).toHaveAccessibleDescription(/For this sofa: 0\.69–0\.95\sm\./);
+    await expect(way(page).getByRole('button', { name: 'Add diagonal depth' })).toHaveCount(0);
+  });
 });
 
 /** Whether anything on the page or in the sheet scrolls sideways. */

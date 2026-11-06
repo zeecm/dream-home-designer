@@ -42,6 +42,8 @@ interface LengthFieldProps {
   revertInvalid?: boolean;
   /** A reason to refuse a readable value (checked before min and max), or null. */
   validate?: (value: number) => string | null;
+  /** What's wrong with the value as saved (shown as an error until it is changed). */
+  problem?: string | null;
   /** The input's id, to reach it from elsewhere. */
   id?: string;
   /** The phone keyboard's Enter key. */
@@ -105,6 +107,7 @@ export function LengthField({
   unit,
   revertInvalid,
   validate,
+  problem,
   id,
   enterKeyHint,
   onCommit,
@@ -172,16 +175,16 @@ export function LengthField({
   );
 
   return (
-    <Field label={label} hint={error ?? hint} id={id}>
+    <Field label={label} hint={error ?? problem ?? hint} id={id}>
       {(inputId, describedBy) => (
         <input
           id={inputId}
-          className={`input num${error ? ' invalid' : ''}`}
+          className={`input num${error || problem ? ' invalid' : ''}`}
           inputMode="decimal"
           enterKeyHint={enterKeyHint}
           value={edit.draft}
           placeholder={placeholder}
-          aria-invalid={!!error}
+          aria-invalid={!!(error || problem)}
           aria-describedby={describedBy}
           onChange={(e) => edit.type(e.target.value)}
           onBlur={() => commit()}

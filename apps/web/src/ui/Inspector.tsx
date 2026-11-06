@@ -1088,6 +1088,7 @@ function OwnModel({ id, size }: { id: string; size: { w: number; d: number; h: n
   const uses = modelUses(project, id);
   const m = model.size;
   const range = diagonalRange(m.d, m.h);
+  const outOfRange = `Between ${range.min.toFixed(2)} and ${range.max.toFixed(2)}\u00a0m for this sofa.`;
   const span = (r: { min: number; max: number }) =>
     `${r.min.toFixed(2)}\u2013${r.max.toFixed(2)}\u00a0m`;
   // Measured on the sofa as added; this piece has been made bigger or smaller since.
@@ -1115,10 +1116,12 @@ function OwnModel({ id, size }: { id: string; size: { w: number; d: number; h: n
           allowEmpty
           enterKeyHint="done"
           hint={`Lay a straight stick from the top of the back to the front of the seat. Measure from the bottom back corner straight to the stick. For this sofa: ${span(range)}. Leave empty if not measured.${scaled ? ` Measured on the sofa at ${m.w.toFixed(2)} × ${m.d.toFixed(2)} × ${formatLength(m.h)}; scaled with this piece.` : ''}`}
-          validate={(v) =>
-            diagonalFits(v, m.d, m.h)
-              ? null
-              : `Between ${range.min.toFixed(2)} and ${range.max.toFixed(2)}\u00a0m for this sofa.`
+          validate={(v) => (diagonalFits(v, m.d, m.h) ? null : outOfRange)}
+          // Saved before the range was right (or edited by hand): said until it's re-entered.
+          problem={
+            model.diagonal !== undefined && !diagonalFits(model.diagonal, m.d, m.h)
+              ? outOfRange
+              : null
           }
           onCommit={(v) => dispatch(updateModel(id, { diagonal: v ?? null }))}
         />

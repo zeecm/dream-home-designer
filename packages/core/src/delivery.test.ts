@@ -189,6 +189,31 @@ describe('the lift (slice-2s B1)', () => {
     expect(Math.abs(short.spare - 0.1)).toBeLessThanOrEqual(0.005);
   });
 
+  it('an older lift is too shallow to stand the 2.1 m sofa up at all: no length to quote', () => {
+    // Tipped on its diagonal it is 1.38 m thick; the car is 1.25 m deep.
+    expect(turnLimit(2.0, 1.25, Math.hypot(1.0, 0.95))).toBe(0);
+    const r = fit(2.1, 1.0, 0.95, older, 0.8);
+    expect(r).toMatchObject({ fit: 'too-big', fails: 'car' });
+    expect(r.standUp).toBeUndefined();
+  });
+
+  it('tilted across the depth, a piece is stood up in the car’s width, not its depth', () => {
+    const wide: Lift = {
+      preset: 'measured',
+      door: { width: 0.9, height: 2.6 },
+      car: { width: 3.0, depth: 0.8, height: 3.0 },
+    };
+    // 3.1 m leans in the 3.0 × 3.0 plane across the car; turned up in its depth (0.8 m) it
+    // would stop at 2.77 m, but it turns in its width.
+    expect(turnLimit(2.6, 0.8, 0.75)).toBeLessThan(3.1);
+    expect(fit(0.75, 0.75, 3.1, wide)).toMatchObject({ fit: 'tight', how: 'tilted' });
+  });
+
+  it('the presets are frozen: shared, never changed by a caller', () => {
+    expect(Object.isFrozen(LIFT_PRESETS)).toBe(true);
+    expect(Object.isFrozen(typical.door)).toBe(true);
+  });
+
   it('3: a 2.0 m sofa: too wide for an older lift’s door; on end in a typical one', () => {
     const o = fit(2.0, 0.9, 0.85, older);
     expect(o).toMatchObject({ fit: 'too-big', fails: 'door' });

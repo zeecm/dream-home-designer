@@ -160,16 +160,19 @@ export function GettingItIn({ level, id }: { level: Level; id: string }) {
     !viewer &&
     own &&
     model?.shape === 'sofa' &&
-    !model.diagonal &&
+    // Not measured, or saved out of range (the field says so).
+    (!model.diagonal || !diagonalFits(model.diagonal, model.size.d, model.size.h)) &&
     'doors' in r &&
     r.doors.some((d) => d.fit === 'too-big' && d.need !== undefined);
   return (
-    <section className="stack" aria-label="Getting it in">
+    <section className="stack way-panel" aria-label="Getting it in">
       <h3 className="section-title">Getting it in</h3>
       {own || shown ? (
         <>
-          {/* A status: a change of lift (or of the piece) is read out. */}
-          <output className="way-verdict">
+          {/* A status: a change of lift (or of the piece) is read out. Not <output>: it
+              takes no paragraphs, and some screen readers don't treat it as live. */}
+          {/* biome-ignore lint/a11y/useSemanticElements: see above */}
+          <div className="way-verdict" role="status">
             <p className={`note${bad ? ' warning-text' : ''}`} data-testid="way-verdict">
               {deliveryText(level, r, lift)}
             </p>
@@ -178,7 +181,7 @@ export function GettingItIn({ level, id }: { level: Level; id: string }) {
                 {line}
               </p>
             )}
-          </output>
+          </div>
           {fit?.fit === 'too-big' && (
             <p className="field-hint">
               {lift?.preset === 'measured'
