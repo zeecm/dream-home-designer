@@ -4,13 +4,19 @@ import { AiError, anySignal, errorBody, failure, timeoutSignal } from './provide
 
 /** Looks of a render to choose from. */
 export const RENDER_STYLES = {
-  as: 'Keep the materials and colours exactly as they are.',
-  warm: 'Warm, modern Singapore home: light oak, warm white walls, soft afternoon light.',
-  scandi: 'Scandinavian: pale wood, white walls, linen, plants, bright daylight.',
-  luxe: 'Modern luxe: marble, walnut, brass details, evening light with warm lamps on.',
-  industrial: 'Industrial: concrete, black metal, dark wood, warm pendant lights.',
+  as: 'Keep every material and colour as it is.',
+  warm: 'Finishes: light oak on wooden surfaces and floors, warm white walls; soft warm afternoon daylight.',
+  scandi:
+    'Finishes: pale wood, white walls, light linen on any upholstery already there; bright daylight.',
+  luxe: 'Finishes: marble, walnut and brushed brass on the surfaces and furniture already there; warm evening light.',
+  industrial:
+    'Finishes: concrete, black metal and dark wood on the surfaces and furniture already there; warm light.',
 } as const;
 export type RenderStyle = keyof typeof RENDER_STYLES;
+
+/** Said again at the end, where a model weighs it most: the same picture, only real. */
+const LAST_WORD =
+  'The result must match the image line for line: only the materials and the light change. Nothing added, removed or moved.';
 
 /**
  * What to ask the image model: the picture made photographic, and (given the facts of the
@@ -18,11 +24,12 @@ export type RenderStyle = keyof typeof RENDER_STYLES;
  * room and filled with furniture that wouldn't fit.
  */
 export function renderPrompt(style: RenderStyle, facts?: SceneFacts): string {
-  const base = `This is a simple 3D model render of a room in a home. Turn it into a photorealistic interior photograph, as a professional architectural photographer would take it. Keep the same camera position and angle, the same room shape, walls, doors, windows and openings, and the same furniture in the same places, sizes and orientations. Add realistic materials, textures, soft shadows and natural light through the windows. ${RENDER_STYLES[style]} Do not add or remove walls, windows, doors or furniture. Plants and décor may go only on surfaces already there (a shelf, a table), never on empty floor. No people, no text.`;
-  if (!facts) return base;
-  // The sheet fits its own length (pieces dropped and counted), its instruction first.
+  const base = `Edit this image. It is an exact 3D model of a real home, drawn to scale: not a sketch to interpret or improve. Make it look like a real photograph of this exact room by changing only how the surfaces look (realistic materials and textures) and the light (natural daylight through the windows, soft shadows, light bouncing off the walls). ${RENDER_STYLES[style]} Every edge must stay where it is: the same camera, framing and perspective; the same walls, corners, ceiling and floor; the same doors, windows and openings, the same sizes and in the same places; the same furniture, in the same places, sizes and orientations. Add nothing: no furniture, rugs, lamps, curtains, pictures, plants, décor, people or text. Remove nothing. Never add a door, doorway, arch, opening, niche or window: a plain wall stays a plain wall, and empty floor stays empty.`;
+  if (!facts) return `${base}\n\n${LAST_WORD}`;
+  // The sheet fits its own length (pieces and openings dropped and counted), its
+  // instruction first.
   const sheet = sceneSheet(facts, { finishes: style === 'as' });
-  return `${base}\n\nThe true scene, measured: ${sheet}`;
+  return `${base}\n\nThe true scene, measured: ${sheet}\n\n${LAST_WORD}`;
 }
 
 const TIMEOUT = 240_000;
