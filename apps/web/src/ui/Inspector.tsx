@@ -192,6 +192,20 @@ export function Inspector() {
   }, [directionToken]);
   // The Comment tool keeps it folded: on a phone the plan is what you comment on.
   const open = userOpen ?? (!!selection || (tool !== 'select' && tool !== 'comment'));
+  // A tap low on the plan selects as the finger lifts, and the panel opens under it; the
+  // click the browser then sends for that tap lands on the toggle now there, and would fold
+  // the panel at once. So the toggle takes a click only if its press began on it (or it had
+  // no press: Enter or Space).
+  const toggle = useRef<HTMLButtonElement>(null);
+  const press = useRef({ onToggle: false, at: Number.NEGATIVE_INFINITY });
+  useEffect(() => {
+    const down = (e: PointerEvent) => {
+      const onToggle = !!toggle.current && toggle.current.contains(e.target as Node);
+      press.current = { onToggle, at: e.timeStamp };
+    };
+    window.addEventListener('pointerdown', down, { capture: true });
+    return () => window.removeEventListener('pointerdown', down, { capture: true });
+  }, []);
   // biome-ignore lint/correctness/useExhaustiveDependencies: after a reveal, once open
   useEffect(() => {
     if (!open || !reveal.current) return;
@@ -224,10 +238,16 @@ export function Inspector() {
       aria-label="Details"
     >
       <button
+        ref={toggle}
         type="button"
         className="inspector-toggle"
         aria-expanded={open}
-        onClick={() => setUserOpen(!open)}
+        onClick={(e) => {
+          const p = press.current;
+          // The end of a tap that went down elsewhere (a second at most ago).
+          if (e.detail > 0 && !p.onToggle && e.timeStamp - p.at < 1000) return;
+          setUserOpen(!open);
+        }}
       >
         {open ? 'Hide details' : 'Show plan details'}
       </button>
