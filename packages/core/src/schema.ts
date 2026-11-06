@@ -254,10 +254,11 @@ const CustomModelBase = z.object({
     .string()
     .regex(/^[0-9a-f]{64}$/)
     .optional(),
-  /** For a piece added by its size (no model): its shape, colour and, for a sofa, its
-   * diagonal depth (back top to front bottom, for tilting it through a door). */
+  /** For a piece added by its size (no model): its shape and colour. */
   shape: FurnitureShape.optional(),
   material: z.enum(['fabric', 'fabric-light', 'wood', 'wood-dark', 'white', 'charcoal']).optional(),
+  /** A sofa's diagonal depth, for tilting it through a door. Width across when tipped on its
+   * back (back top to front bottom); at most the shorter of depth and height. */
   diagonal: z.number().positive().optional(),
   /** A catalogue category name (FurnitureCategory). */
   category: z.string(),

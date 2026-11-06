@@ -17,7 +17,10 @@ Spec by the project-manager agent, 6 Nov 2026. Slice 1, effort M−. Schema 8, a
 ## Adding one
 Catalogue "Your furniture": [Add by size], [Upload a model]. Form: name, shape chips, width,
 depth, height (0.05–6 m), colour swatches; sofa: optional "Diagonal depth" with a how-to
-sketch. Save starts placing it.
+sketch. The diagonal is its width across when tipped on its back (back top to front bottom), so
+core `diagonalRange(d, h)` allows d·h / √(d² + h²) up to min(d, h), ± 5 mm; otherwise "Between
+0.69 and 0.95 m for this sofa." under the field, which is focused. The hint shows the range
+once depth and height are typed. Save starts placing it.
 
 ## The way in (core `deliveryCheck(level, itemId, opts)`)
 - **From:** doors in `outsideOpenings`, widest first; several: a "From" picker; none: every
@@ -67,6 +70,7 @@ E2e (desktop, and 390 px phone by finger):
 9. Add by size "My sofa" 2.1 × 1.0 × 0.95: placed; survives reload and a share link.
 10. In the Bedroom: criterion 5's message; that door red on the plan.
 11. Moved to the living room: "Fits through every door"; route redrawn on release.
-12. Diagonal 0.80: the Bedroom passes; Undo restores the message.
+12. Added with diagonal 0.80: the Bedroom passes. A diagonal of 1.5 is refused under its field
+    ("Between 0.69 and 0.95 m for this sofa."). Editing it later is slice 2s B2.
 13. Remove "My sofa": its pieces go in one undo step; no upload attempted.
 14. Plan PNG has no route; [Show the way] on a catalogue sofa stays clear of the phone sheet.

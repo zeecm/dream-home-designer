@@ -263,6 +263,11 @@ Site.lift?: Lift | null      // absent: not set yet; null: no lift (ground floor
     if p > a, q ≤ b and ((a + b)/(p + q))² + ((a − b)/(p − q))² ≥ 2 (Carver 1956; p = q > a
     never fits).
   - Spare: the smallest slack of the best orientation.
+  - **Standing it up.** A pose taller than the lift door comes in lying along its carry and is
+    stood up in the car, turning in the plane of the door: the carry's `l` (which becomes the
+    height) must be ≤ `turnLimit(door height, car depth B, carry v)`. A 2.1 m sofa on a 0.80 m
+    diagonal is 1.38 m thick that way, and turnLimit(2.0, 1.4, 1.38) = 1.92 < 2.1, so it
+    clears a typical lift door but can't be stood up in the car.
 - **Fit.**
   - tight: under 20 mm spare, at the door or in the car;
   - too big: the door or the car fails;
@@ -317,7 +322,10 @@ Core:
    - 1.6 × 0.2 in 1.2 × 1.2: false;
    - 1.0 × 0.95 in 1.1 × 1.4: true;
    - 1.3 × 1.3 in 2.0 × 1.2: false.
-2. Typical lift, sofa 2.1 × 1.0 × 0.95: too big, fails `door`, need 0.95. With diagonal 0.80: fits, `how` on end, spare 0.15 ± 0.005.
+2. Typical lift, sofa 2.1 × 1.0 × 0.95: too big, fails `door`, need 0.95. With diagonal 0.80:
+   still too big, fails `car` (it clears the door tilted but can't be stood up: 2.1 > 1.92).
+   A 1.8 × 1.0 × 0.95 sofa: too big at the door without its diagonal; with 0.80: fits, `how` on
+   end, spare 0.10 ± 0.005 (the door: 0.90 − 0.80).
 3. Sofa 2.0 × 0.9 × 0.85: older lift: too big at the door, need 0.85. Typical lift: fits on end.
 4. Sofa 2.4 × 0.95 × 0.9, typical lift: too big, fails `car`.
 5. Box 0.6 × 0.6 × 2.4: typical lift: too big (car). Large lift: fits, tilted.
@@ -328,7 +336,9 @@ Core:
 E2e (desktop, and a 390 px phone by finger):
 
 9. "My sofa" 2.1 × 1.0 × 0.95 in the living room, Typical HDB lift: "Too big for the lift door: 0.90 m wide; it needs 0.95 m on its side."
-10. Set its diagonal to 0.80 (B2): "Lift: fits stood on end."
+10. Set its diagonal to 0.80 (B2): it now clears the door but can't be stood up in the car:
+    "Doesn't fit in the lift (1.10 × 1.40 m, 2.30 m high), even on end or tilted." (the stand-up
+    rule under **Car**). A 1.8 × 1.0 × 0.95 "Short sofa" with diagonal 0.80: "Lift: fits stood on end."
 11. Reload: Typical is still chosen. A view link shows the same Lift line, with the select disabled.
 12. My measurements with car height 2.00: "Doesn't fit in the lift (1.10 × 1.40 m, 2.00 m high), even on end or tilted."
 13. Undo goes back to Typical.
@@ -348,8 +358,11 @@ later, or after a "too big" verdict, has no way to add it.
 - Inspector "Your model" for a piece added by size with shape sofa: a "Diagonal depth"
   length field (placeholder "Not measured") with the Add form's hint.
 - Empty plus Enter removes the diagonal.
-- Valid range: from the shorter of the model's depth and height up to their diagonal.
-  Otherwise: "Between 0.95 and 1.38 m for this depth and height." (the numbers come from the model).
+- Valid range: core `diagonalRange(d, h)`, from d·h / √(d² + h²) up to the shorter of the
+  model's depth and height, with 5 mm either side (`diagonalFits`). The diagonal is the sofa's
+  width across when tipped on its back, so it is never more than its depth or height.
+  Otherwise: "Between 0.69 and 0.95 m for this sofa." (the numbers come from the model; these
+  are for 1.0 × 0.95).
 - When the piece is resized away from the model's size (by more than 5 mm), add: "Measured on the
   sofa at 2.10 × 1.00 × 0.95 m; scaled with this piece."
 
