@@ -10,7 +10,8 @@ import {
   downloadProjectFile,
   printPlan,
 } from '../exports';
-import { type SyncStatus, useProject, useStore } from '../store';
+import { ContractorDialog } from '../print/ContractorDialog';
+import { type SyncStatus, useLevel, useProject, useStore } from '../store';
 import { HistoryDialog } from './HistoryDialog';
 import { PlansDialog } from './PlansDialog';
 import { ShareMenu } from './ShareMenu';
@@ -74,6 +75,9 @@ function ProjectMenu() {
   const [managing, setManaging] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [history, setHistory] = useState(false);
+  const [contractor, setContractor] = useState(false);
+  // A plan for contractors needs walls to measure.
+  const hasWalls = Object.values(useLevel()?.walls ?? {}).some((w) => w.kind !== 'boundary');
   // Past versions live on the server, and a view-only link doesn't see them.
   const canHistory = useStore((s) => !!s.backend?.versions && s.role !== 'viewer');
   const fileInput = useRef<HTMLInputElement>(null);
@@ -151,6 +155,14 @@ function ProjectMenu() {
           <button type="button" onClick={run(() => save(printPlan))}>
             Print the plan, or save it as PDF
           </button>
+          <button
+            type="button"
+            disabled={!hasWalls}
+            title={hasWalls ? undefined : 'Draw some walls first'}
+            onClick={run(() => setContractor(true))}
+          >
+            Plan for contractors (PDF)
+          </button>
           <button type="button" onClick={run(() => save(download3dImage))}>
             3D view as a picture (PNG)
           </button>
@@ -191,6 +203,7 @@ function ProjectMenu() {
       {managing && <PlansDialog onClose={() => setManaging(false)} />}
       {aiOpen && <AiSettingsDialog onClose={() => setAiOpen(false)} />}
       {history && <HistoryDialog onClose={() => setHistory(false)} />}
+      {contractor && <ContractorDialog onClose={() => setContractor(false)} />}
     </div>
   );
 }

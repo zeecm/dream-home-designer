@@ -1,0 +1,220 @@
+import { type Page, expect, test } from '@playwright/test';
+import { newBlankPlan, waitSaved } from './helpers';
+
+const WALL = '[data-hit="wall:w_bedroom_living-and-dining"]';
+
+// The print dialog is stubbed in every frame (the sheet prints from a frame of its own): it
+// counts, on the top window, how often it was asked for.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    window.print = () => {
+      const top = window.top as unknown as { __printed?: number };
+      top.__printed = (top.__printed ?? 0) + 1;
+    };
+  });
+});
+
+const sheet = (page: Page) => page.frameLocator('iframe[data-print="contractor"]');
+const printed = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __printed?: number }).__printed ?? 0);
+
+async function openDialog(page: Page) {
+  await page.getByRole('button', { name: 'Projects' }).click();
+  await page.getByRole('button', { name: 'Plan for contractors (PDF)' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Plan for contractors' });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+async function printSheet(page: Page) {
+  const before = await printed(page);
+  const dialog = await openDialog(page);
+  await dialog.getByRole('button', { name: 'Print or save as PDF' }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(() => printed(page)).toBe(before + 1);
+  await expect(sheet(page).locator('svg.contractor-page').first()).toBeAttached();
+}
+
+test('8: a blank plan has nothing to measure: the item is disabled', async ({ page }) => {
+  await newBlankPlan(page);
+  await page.getByRole('button', { name: 'Projects' }).click();
+  await expect(page.getByRole('button', { name: 'Plan for contractors (PDF)' })).toBeDisabled();
+});
+
+test('9, 10, 13: the sample on A4 at 1:100, with every room, door tags and the view kept', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+
+  // Rooms and areas from the plan details; door widths from each door's details.
+  const rooms = await page.locator('.room-list li').evaluateAll((lis) =>
+    lis.map((li) => ({
+      name: li.querySelector('.room-list-name')?.textContent ?? '',
+      area: li.querySelector('.num')?.textContent ?? '',
+    })),
+  );
+  expect(rooms.length).toBeGreaterThanOrEqual(8);
+  const doorIds = await page
+    .locator('.openings [data-hit^="opening:op_door"]')
+    .evaluateAll((gs) => gs.map((g) => (g.getAttribute('data-hit') ?? '').slice(8)));
+  expect(doorIds.length).toBeGreaterThanOrEqual(4);
+  const widths: Record<string, string> = {};
+  for (const id of doorIds) {
+    await page.locator(`[data-hit="opening:${id}"]`).first().click({ force: true });
+    const value = await page.getByRole('textbox', { name: 'Width' }).inputValue();
+    widths[id] = String(Math.round(Number.parseFloat(value) * 1000));
+  }
+  await page.keyboard.press('Escape');
+
+  const undo = page.getByRole('button', { name: 'Undo' });
+  const undoBefore = await undo.isDisabled();
+  const version = await page.getByTestId('sync').getAttribute('data-version');
+
+  const dialog = await openDialog(page);
+  await expect(dialog.getByRole('button', { name: 'A4, 1:100' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(dialog.getByRole('button', { name: 'A3, 1:50' })).toBeVisible();
+  // No renovation: no version to choose. Furniture is off.
+  await expect(dialog.getByText('Version')).toHaveCount(0);
+  await expect(dialog.getByLabel('Include furniture')).not.toBeChecked();
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  await printSheet(page);
+
+  const s = sheet(page);
+  const page1 = s.locator('svg.contractor-page').first();
+  await expect(s.locator('svg.contractor-page')).toHaveCount(1);
+  await expect(page1.locator('.sheet-name')).toHaveText('3-room HDB (sample)');
+  const today = await page.evaluate(() =>
+    new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
+  );
+  await expect(page1.locator('.sheet-date')).toHaveText(today);
+  await expect(page1.locator('.sheet-caveat')).toContainText(
+    'For discussion, not for construction',
+  );
+  await expect(page1.locator('.sheet-scale')).toHaveText('1:100 at A4');
+  await expect(page1.locator('.scale-bar')).toHaveAttribute('data-metres', '5');
+  await expect(page1.locator('.scale-bar')).toHaveAttribute('data-mm', '50');
+  await expect(page1.locator('.north-arrow')).toHaveAttribute('data-degrees', '0');
+  // Four overalls, one a side, each a single figure in millimetres.
+  const overalls = page1.locator('.dim-chain[data-tier="2"]');
+  await expect(overalls).toHaveCount(4);
+  for (const side of ['top', 'right', 'bottom', 'left']) {
+    const o = page1.locator(`.dim-chain[data-tier="2"][data-side="${side}"] .dim-text`);
+    await expect(o).toHaveCount(1);
+    await expect(o).toHaveText(/^\d{4,5}$/);
+  }
+  await expect(page1.locator('.dim-chain[data-tier="2"][data-side="top"] .dim-text')).toHaveText(
+    '10280',
+  );
+
+  // 10: every room's name and area, and each door's tag at its width.
+  const labels = await page1.locator('.room').evaluateAll((gs) =>
+    gs.map((g) => ({
+      name: g.querySelector('.room-name')?.textContent ?? '',
+      area: (g.querySelector('.room-area')?.textContent ?? '').split(' · ')[0],
+    })),
+  );
+  expect(labels.sort((a, b) => a.name.localeCompare(b.name))).toEqual(
+    rooms.sort((a, b) => a.name.localeCompare(b.name)),
+  );
+  await expect(page1.locator('.room-area').first()).toContainText('sq ft');
+  for (const [id, w] of Object.entries(widths)) {
+    await expect(page1.locator(`.opening-tag[data-opening="${id}"]`)).toHaveText(`D ${w}`);
+  }
+  // No renovation: no hacking in the key.
+  await expect(page1.locator('.legend-key[data-key="hacked"]')).toHaveCount(0);
+  await expect(page1.locator('.legend-key[data-key="structural"]')).toHaveCount(1);
+
+  // 13: the view, the selection and the history are as they were; nothing was saved.
+  await expect(page.getByRole('button', { name: 'Plan', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  expect(await undo.isDisabled()).toBe(undoBefore);
+  await expect(page.getByTestId('sync')).toHaveAttribute('data-version', version ?? '');
+  await expect(page.locator('.inspector')).toContainText('Rooms');
+  expect(errors).toEqual([]);
+});
+
+test('11: a renovation: the hacking key on page 1, page 2 matches the copied list', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await page.getByRole('button', { name: 'Plan a renovation' }).click();
+  await page.locator(WALL).first().click({ force: true });
+  await page.keyboard.press('Delete');
+  await page.keyboard.press('Escape');
+  await expect(page.locator(WALL)).toHaveCount(0);
+
+  const list = page.locator('.reno-changes');
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await list.getByRole('button', { name: 'Copy list' }).click();
+  await expect(list.getByRole('button', { name: 'Copied' })).toBeVisible();
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+
+  const dialog = await openDialog(page);
+  await expect(dialog.getByRole('button', { name: 'After' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  await printSheet(page);
+  const s = sheet(page);
+  const pages = s.locator('svg.contractor-page');
+  await expect(pages).toHaveCount(2);
+  const p1 = pages.nth(0);
+  await expect(p1.locator('.sheet-version')).toHaveText('After the renovation');
+  await expect(p1.locator('.legend-key[data-key="hacked"]')).toHaveCount(1);
+  await expect(p1.locator('.reno-hacked polygon')).toHaveCount(1);
+  await expect(p1.locator('.sheet-page')).toHaveText('Page 1 of 2');
+  const p2 = pages.nth(1);
+  await expect(p2.locator('.sheet-page')).toHaveText('Page 2 of 2');
+  const lines = await p2.locator('.change-line').allTextContents();
+  expect(lines).toEqual(copied.split('\n').filter((l) => l.length > 0));
+  expect(lines.join('\n')).toContain('Hack');
+  await expect(p2.locator('.notes-lines line').first()).toBeAttached();
+  // No prices on the sheet: the estimate is the owner's.
+  expect((await p2.textContent()) ?? '').not.toMatch(/\$|S\$/);
+
+  // As it is now: one page, nothing hacked.
+  const again = await openDialog(page);
+  await again.getByRole('button', { name: 'As it is now' }).click();
+  await again.getByRole('button', { name: 'Print or save as PDF' }).click();
+  await expect(again).toBeHidden();
+  await expect(s.locator('svg.contractor-page')).toHaveCount(1);
+  await expect(s.locator('.sheet-version')).toHaveText('As it is now');
+  await expect(s.locator('.legend-key[data-key="hacked"]')).toHaveCount(0);
+});
+
+test('12: in the dark theme the sheet is dark on white, with no plan image or handles', async ({
+  page,
+}) => {
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await expect(page.locator('image.underlay')).toHaveCount(1);
+  await printSheet(page);
+  const s = sheet(page);
+  const svg = s.locator('svg.contractor-page').first();
+  await expect(svg.locator('image')).toHaveCount(0);
+  await expect(svg.locator('.vertices, [data-hit], [data-export]')).toHaveCount(0);
+  const colours = await svg.evaluate((el) => {
+    const bg = getComputedStyle(el.querySelector(':scope > rect') as Element).fill;
+    const texts = [...el.querySelectorAll('text')].map((t) => getComputedStyle(t).fill);
+    return { bg, texts: [...new Set(texts)] };
+  });
+  expect(colours.bg).toBe('rgb(255, 255, 255)');
+  for (const c of colours.texts) {
+    const [r, g, b] = (c.match(/\d+/g) ?? []).map(Number);
+    expect((r ?? 255) + (g ?? 255) + (b ?? 255), c).toBeLessThan(330);
+  }
+});
