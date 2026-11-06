@@ -67,6 +67,7 @@ import { CarpentryLine, CostSummary } from '../cost/estimate';
 import { GettingItIn } from '../delivery/delivery';
 import { useEditor } from '../editor';
 import { ElectricalSummary, PointInspector } from '../electrical/electrical';
+import { SuggestPanel, useSuggest } from '../electrical/suggest';
 import { roomsBeside } from '../plan/keyboard';
 import { OPENING_PRESETS, ROOM_NAMES } from '../presets';
 import { currentLevel, useLevel, useProject, useStore } from '../store';
@@ -164,6 +165,7 @@ export function Inspector() {
   const selection = useEditor((s) => s.selection);
   const tool = useEditor((s) => s.tool);
   const viewer = useStore((s) => s.role === 'viewer');
+  const suggesting = useSuggest((s) => s.open);
   // On a phone the panel folds to one row when there's nothing to edit, so the plan gets
   // the screen; it opens for a selection or a drawing tool, or by hand.
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
@@ -189,7 +191,8 @@ export function Inspector() {
     reveal.current = directionToken;
     setUserOpen(true);
   }, [directionToken]);
-  const open = userOpen ?? (!!selection || tool !== 'select');
+  // Suggested points keep it open: the sheet is the list of them.
+  const open = (suggesting && !viewer) || (userOpen ?? (!!selection || tool !== 'select'));
   // biome-ignore lint/correctness/useExhaustiveDependencies: after a reveal, once open
   useEffect(() => {
     if (!open || !reveal.current) return;
@@ -201,7 +204,9 @@ export function Inspector() {
     });
   }, [open, directionToken]);
   if (!level) return null;
-  let body = <PlanSummary level={level} />;
+  // Suggested points take the plan details' place (a selection still shows its own).
+  const suggestShown = suggesting && !viewer;
+  let body = suggestShown ? <SuggestPanel /> : <PlanSummary level={level} />;
   if (selection?.kind === 'wall' && level.walls[selection.id]) {
     body = <WallInspector key={key} level={level} id={selection.id} />;
   } else if (selection?.kind === 'vertex' && level.vertices[selection.id]) {
@@ -218,7 +223,7 @@ export function Inspector() {
   return (
     <aside
       ref={panel}
-      className={`panel inspector${open ? '' : ' inspector-folded'}`}
+      className={`panel inspector${open ? '' : ' inspector-folded'}${suggestShown && !selection ? ' inspector-suggest' : ''}`}
       aria-label="Details"
     >
       <button
@@ -230,12 +235,12 @@ export function Inspector() {
         {open ? 'Hide details' : 'Show plan details'}
       </button>
       {/* With something selected (a piece just placed), its details come first. */}
-      {!selection && <ToolPanel />}
+      {!selection && !suggestShown && <ToolPanel />}
       {/* A view-only link shows the details but can't change them. */}
       <fieldset className="inspector-body" disabled={viewer}>
         {body}
       </fieldset>
-      {selection && <ToolPanel />}
+      {selection && !suggestShown && <ToolPanel />}
     </aside>
   );
 }

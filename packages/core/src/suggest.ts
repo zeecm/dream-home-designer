@@ -628,7 +628,10 @@ class Suggester {
     const entries = this.entryDoors();
     // Switches first, then sockets tied to furniture, aircon units, the desk-or-dresser
     // socket, and lights and the compressor last: the stiffest get first pick.
-    for (const r of live) this.switchesFor(r, entries, lights);
+    // A bathroom's switch must go outside its door: it picks first.
+    const baths = live.filter((r) => r.kind === 'bathroom');
+    for (const r of [...baths, ...live.filter((r) => r.kind !== 'bathroom')])
+      this.switchesFor(r, entries, lights);
     const bedHeads = new Map<string, Set<string>>();
     const tvWalls = new Map<string, string>();
     for (const r of live) {
@@ -799,7 +802,8 @@ class Suggester {
     const u1 = c + o.width / 2;
     const w = ELEC_KINDS.switch.plate.w;
     // Already a switch by this door, on this side.
-    const near = [...this.existing, ...this.batch].some((q) => {
+    // (Beside a bathroom's switch just suggested, a room's own goes too.)
+    const near = [...this.existing, ...(bath ? this.batch : [])].some((q) => {
       if (q.kind !== 'switch' || q.wall?.wallId !== face.wallId || q.wall.side !== face.side)
         return false;
       const qa = q.wall.t * face.f.length;

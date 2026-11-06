@@ -204,6 +204,12 @@ function toastFor(label: string): string | null {
   if (label === 'Discard the renovation') return 'Renovation discarded';
   if (label === 'Make the renovation the plan') return 'The renovation is now the plan';
   if (label === 'Restore an earlier version') return 'Earlier version restored';
+  // Suggested points added (one step): "Added 6 points to Main bedroom."
+  const added = /^Add (\d+) (?:suggested )?points?(?: to (.+))?$/.exec(label);
+  if (added) {
+    const n = Number(added[1]);
+    return `Added ${n} ${n === 1 ? 'point' : 'points'}${added[2] ? ` to ${added[2]}` : ''}.`;
+  }
   if (!label.startsWith('Delete ')) return null;
   const what = label.slice('Delete '.length);
   return `${what[0]?.toUpperCase()}${what.slice(1)} deleted`;

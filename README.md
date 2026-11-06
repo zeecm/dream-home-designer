@@ -71,8 +71,10 @@ for any plan.
 ### Planned
 1. Comments on the plan: pins anyone with the share link can leave and resolve, for family
    decisions.
-2. Slice 2s: the lift and a diagonal you can edit for your own furniture, notch depths on the
-   contractor sheet, carpentry priced on every level, suggested electrical points per room.
+2. Slice 2s: suggested electrical points per room are done (one button, the usual points for
+   each room placed by your furniture, priced before you add them); the lift and a diagonal you
+   can edit for your own furniture, notch depths on the contractor sheet and carpentry priced
+   on every level remain.
 3. Ageing parents check: wheelchair turning space, step-free routes, 850 mm doors, grab bars
    in the bathroom (HDB EASE items).
 4. Storage meter: wardrobe and cabinet space against the household, room by room.
