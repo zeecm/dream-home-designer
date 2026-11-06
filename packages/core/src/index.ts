@@ -25,3 +25,4 @@ export * from './trace';
 export * from './layouts';
 export * from './structural';
 export * from './clearance';
+export * from './cost';

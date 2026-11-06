@@ -225,6 +225,7 @@ describe('renovationChanges', () => {
       rooms: ['Bedroom 2', 'Living'],
       outside: false,
       kind: 'opening',
+      id: 'op_bed2',
       change: 'changed',
       opening: 'door',
       width: 1.2,
@@ -237,6 +238,7 @@ describe('renovationChanges', () => {
       rooms: ['Bedroom 3'],
       outside: true,
       kind: 'opening',
+      id: 'op_win_bed3',
       change: 'removed',
       opening: 'window',
       width: 1.4,
@@ -259,6 +261,7 @@ describe('renovationChanges', () => {
       rooms: ['Kitchen'],
       outside: false,
       kind: 'floor',
+      roomId: 'rm_kitchen',
       from: finish('tile-grey')?.name,
       to: finish('wood-oak')?.name,
     });

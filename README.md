@@ -49,15 +49,17 @@ for any plan.
 - Clearance checks: room to open wardrobes, drawers, fridge and cabinets, to sit at a desk
   and get into bed; door swings, overlaps and pieces in walls, shown in red as you arrange.
   [spec](docs/specs/clearance-checks.md)
+- Built-in carpentry (wardrobes, shoe cabinet, TV console, kitchen runs) and a renovation cost
+  estimate from typical Singapore prices, with your own rates, Copy and Print.
+  [spec](docs/specs/carpentry-cost.md)
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
 
 ### Planned
-1. Carpentry builder and a renovation cost estimate.
-2. "My furniture" and a delivery-path fit check.
-3. Clearance checks, slice 2: walkways from the main door, dining chairs, labels on the plan.
-4. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
+1. "My furniture" and a delivery-path fit check.
+2. Clearance checks, slice 2: walkways from the main door, dining chairs, labels on the plan.
+3. Dimensioned plan export for contractors. More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
 
 ## What it does
 

@@ -586,6 +586,8 @@ export type RenovationChange = ChangePlace & {
       }
     | {
         kind: 'opening';
+        /** The opening: in the renovation, or (closed up) in the flat as it is. */
+        id: string;
         /** 'with-wall': it went with the wall it was in, hacked. */
         change: 'added' | 'removed' | 'with-wall' | 'changed';
         opening: OpeningKind;
@@ -607,7 +609,12 @@ export type RenovationChange = ChangePlace & {
         sill?: number;
         moved?: boolean;
       }
-    | { kind: 'floor'; from: string; to: string }
+    | {
+        kind: 'floor';
+        from: string;
+        to: string /** The room, in the renovation. */;
+        roomId: string;
+      }
     | { kind: 'area'; before: number; after: number }
     | { kind: 'rename'; from: string }
     | { kind: 'room'; change: 'added' | 'removed'; area: number }
@@ -692,7 +699,7 @@ const guardOf = (s: WallStatus | undefined): Guard | undefined =>
   s === 'shelter' ? 'shelter' : s ? 'structural' : undefined;
 
 /** The wall of the flat as it is that an opening of the renovation is cut into, if any. */
-function wallBefore(before: Level, after: Level, openingId: string): string | undefined {
+export function wallBefore(before: Level, after: Level, openingId: string): string | undefined {
   const at = openingAt(after, openingId);
   return at ? wallThrough(before, at.c, at.d)?.id : undefined;
 }
@@ -865,6 +872,7 @@ export function renovationChanges(
     const base = {
       ...place,
       kind: 'opening' as const,
+      id,
       opening: kindOf(o.kind),
       width: o.width,
       ...guard(wallBefore(before, after, id)),
@@ -902,6 +910,7 @@ export function renovationChanges(
     out.push({
       ...placeOf(inAfter, besideOpening(after, o.id)),
       kind: 'opening',
+      id: o.id,
       opening: 'door',
       width: o.width,
       ...guard(wallBefore(before, after, o.id)),
@@ -921,6 +930,7 @@ export function renovationChanges(
     out.push({
       ...placeOf(inBefore, besideOpening(before, id)),
       kind: 'opening',
+      id,
       change: at && !wallRunsThrough(after, at.c, at.d) ? 'with-wall' : 'removed',
       opening: kindOf(o.kind),
       width: o.width,
@@ -940,6 +950,7 @@ export function renovationChanges(
       out.push({
         ...place,
         kind: 'floor',
+        roomId: r.id,
         from: name(was.floorMaterial),
         to: name(r.floorMaterial),
       });
