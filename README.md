@@ -68,13 +68,17 @@ for any plan.
   family decisions; the owner chooses who can comment. [spec](docs/specs/plan-comments.md)
 - Suggested electrical points: one button gives the usual points for each room, placed by your
   furniture and priced before you add them. [spec](docs/specs/slice-2s.md)
+- The lift on the way in: pick your block's lift (typical HDB, older, stretcher, your own
+  measurements or none) and see whether a piece goes in as it stands, on its back, on end or
+  tilted; a sofa's diagonal depth can be added or changed later.
+  [spec](docs/specs/slice-2s.md#b1-the-lift-pr-2-schema-10)
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
 
 ### Planned
-1. Slice 2s, the rest: the lift and a diagonal you can edit for your own furniture, notch
-   depths on the contractor sheet, carpentry priced on every level.
+1. Slice 2s, the rest: notch depths on the contractor sheet and the estimate on every level.
+   (The lift check and a diagonal you can edit are done.)
 2. Ageing parents check: wheelchair turning space, step-free routes, 850 mm doors, grab bars
    in the bathroom (HDB EASE items).
 3. Storage meter: wardrobe and cabinet space against the household, room by room.

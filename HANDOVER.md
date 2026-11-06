@@ -1369,3 +1369,54 @@ only: on Before the panel says so and offers "Switch to After". e2e
 `electrical-suggest.spec.ts` covers criteria 18–24 on a desktop and a 390 px phone. Not yet:
 ghosts show no warnings (an aircon will say "No compressor" once added); a bed or other
 selection hides the panel until it is let go.
+
+**The lift check and an editable sofa diagonal (6 Nov, slice 2s PR 2, spec
+`docs/specs/slice-2s.md` B1 and B2; schema 10):** `Site.lift` is a `Lift` (`preset` typical,
+older, large or measured; `door` width and height; `car` width across the door, depth and
+height; the door no wider or taller than the car), `null` for no lift, absent for not checked.
+Migration 9 to 10 is a no-op; Go `SchemaVersion` 10 (the server test uses the constant), and
+`hdb4room.json` is regenerated. **Deploy the API before merging.** Core: `LIFT_PRESETS`;
+`setLift(lift | null | undefined)` ("Set lift", makes `site` from `DEFAULT_SITE`, undefined
+deletes the key); `rectFits` (Carver 1956; the internal `rectFit` also gives the slack, 0 at an
+angle); `liftFit(size, diagonal, lift)` → `{fit, how, fails, need, spare, tilted, standUp}`:
+the door's cross-section first (no turn: the lobby is open), then the poses as it stands, on its
+back, on end, and tilted (only an angled fit in the B × H or A × H plane counts as tilted, so it
+reads tight, spare 0). A pose taller than the door must come in lying along its carry and be
+stood up: the carry's length ≤ `turnLimit(door height, room, carry v)`, where room is the car's
+depth (or, for a tilt across the depth, its width). When a pose fits the car but can't be stood
+up, `standUp` gives its length, the limit, the door height and that side (only when the limit
+is above 0: a car shallower than the piece is thick just "doesn't fit"), and the verdict names
+what the family measured: "Too long to stand up in the lift: at 2.10 m long, it can’t be turned
+upright through a 2.00 m high door into a 1.40 m deep car." (criterion 2's 2.1 m sofa on a
+0.80 m diagonal). `deliveryCheck(level, id, {from, lift})` puts the lift
+first in `doors` (`openingId: 'lift'`) and in `worst`, and returns `lift`; `worstDoor` is
+exported; `DoorOnTheWay.tilted` marks a door passed only on the diagonal carry ("(tilted on its
+diagonal)" after the narrowest door, else "Tilted on its diagonal through …", and ", tilted"
+on the plan label). `rigidNote(assetId)` adds "A mattress bends and a frame usually comes
+flat; ask the shop." to a too-big bed. `updateModel` takes `diagonal: number | null` (null
+removes it); `restoreVersion` copies the site with `structuredClone`. Web: the wording is in
+`delivery/words.ts` (unit-tested). "Getting it in" has a `role="status"` block: the verdict and
+one line under it (`liftStatus`: "Lift: not checked.", "No lift on the way in.", how it goes in,
+or, when the lift fails, "Ask the shop whether it comes apart…"), so a change is always read out
+and the controls below move less. A too-big bed (`rigidNote`) shows the mattress note first and
+"Checked as a rigid box, …" in muted text instead of a red verdict. Then [Add diagonal depth]
+for an own sofa too wide for a door, unmeasured or saved out of range (scrolls to and focuses
+the field, `behavior: auto` under reduced motion), From, and the Lift select with its hint (a
+preset's numbers; on a view link the select is disabled but shown in `--text` on `--raised`,
+with "Set by whoever can edit the plan."). A lift change scrolls the verdict back into view
+(`block: 'nearest'`; on a phone's short sheet it's above the select). "My measurements…" saves
+`preset: 'measured'` from the last lift in one step and shows five `LengthField`s (two to a
+row, `enterkeyhint="done"`) whose `validate` prop gives each its own range ("Between 0.5 and
+2.0 m.") or "The door can’t be wider/taller than the car.". `LengthField` now keeps focus and
+selects the text when Enter is refused (every length field), and takes a `problem` for a saved
+value that's wrong (a diagonal saved out of range shows its range error until re-entered).
+`useDelivery` re-checks when the lift or the project's models change. Inspector "Your model"
+for a sofa by size: "Diagonal depth" (placeholder "Not measured", range from `diagonalRange`,
+empty plus Enter removes it, "Measured on the sofa at … scaled with this piece." once the piece
+is resized). `.way-panel .btn-small` is at least 44 px on phones. Add by size and the item's
+width and depth now go down to 0.01 m (an 18 mm panel). An import that fails shows
+`loadErrorText` (core): "That file’s lift sizes aren’t valid (the door is wider or taller than
+the car).", or the first invalid part, not zod's JSON. e2e `lift.spec.ts` covers B1 9–15 and
+B2 3–5 on a desktop and a 390 px phone, plus the mattress, the 18 mm panel and a saved
+out-of-range diagonal; criterion 16 (production accepts a
+v10 save) is for the deploy. Not done: the lift has no place on the plan.

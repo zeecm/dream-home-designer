@@ -879,8 +879,12 @@ export function addModel(model: CustomModel): Command {
 /** Renames an uploaded model or moves it to another category. */
 export function updateModel(
   id: string,
-  patch: Partial<Pick<CustomModel, 'name' | 'category'>>,
+  patch: Partial<Pick<CustomModel, 'name' | 'category'>> & {
+    /** A sofa's diagonal depth; null takes it away (not measured). */
+    diagonal?: number | null;
+  },
 ): Command {
+  if (patch.diagonal != null && !(patch.diagonal > 0)) throw new Error('diagonal must be positive');
   return {
     label: 'Edit model',
     recipe: (d) => {
@@ -891,6 +895,8 @@ export function updateModel(
         if (name) m.name = name;
       }
       if (patch.category !== undefined) m.category = patch.category;
+      if (patch.diagonal === null) delete m.diagonal;
+      else if (patch.diagonal !== undefined) m.diagonal = patch.diagonal;
     },
   };
 }

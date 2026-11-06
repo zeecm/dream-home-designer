@@ -2,7 +2,7 @@ import { furnitureKind, furnitureLayer, itemFootprint, itemSize } from './furnit
 import { pointInPolygon } from './geometry';
 import { type PlanGeometry, doorStyle, framePoint, planGeometry } from './plan';
 import { roomShapes } from './rooms';
-import type { Level, Opening, Vec2 } from './schema';
+import type { Level, Lift, LiftPreset, Opening, Vec2 } from './schema';
 import { isBoundary } from './schema';
 import { outsideOpenings } from './walk';
 
@@ -25,6 +25,8 @@ export interface DoorOnTheWay {
   /** What it fails on: the width the piece needs on its narrowest carry, or the turn. */
   need?: number;
   turn?: { space: number };
+  /** It gets through only tilted on its diagonal (a sofa whose diagonal depth is known). */
+  tilted?: boolean;
   centre: Vec2;
 }
 
@@ -32,7 +34,15 @@ export type Delivery =
   | { status: 'no-room' }
   | { status: 'no-door' }
   | { status: 'unreachable'; from: string }
-  | { status: Fit; from: string; doors: DoorOnTheWay[]; worst: DoorOnTheWay | null };
+  | {
+      status: Fit;
+      from: string;
+      /** The way in, in order: the lift door first (openingId 'lift') when a lift is given. */
+      doors: DoorOnTheWay[];
+      worst: DoorOnTheWay | null;
+      /** How it goes in the lift, when a lift is given. */
+      lift?: LiftFit;
+    };
 
 /** Room for the hand: under this to spare is tight. */
 const SPARE = 0.02;
@@ -95,10 +105,17 @@ export function diagonalFits(diagonal: number, d: number, h: number): boolean {
   return diagonal >= r.min - DIAGONAL_TOLERANCE && diagonal <= r.max + DIAGONAL_TOLERANCE;
 }
 
+/**
+ * One way to carry a piece through a door: `l` along the way, `t` across the door, `v` up.
+ * `along` is which of the piece's width, depth and height (0, 1, 2) is `l`; `diagonal` marks
+ * a sofa tilted on its diagonal.
+ */
 interface Carry {
   l: number;
   t: number;
   v: number;
+  along: number;
+  diagonal?: true;
 }
 
 /** Every way to carry a piece w × d × h through a door (and a sofa on its diagonal). */
@@ -109,11 +126,210 @@ function carries(w: number, d: number, h: number, diagonal?: number): Carry[] {
     for (let j = 0; j < 3; j++) {
       if (j === i) continue;
       const k = 3 - i - j;
-      out.push({ l: dims[i] as number, t: dims[j] as number, v: dims[k] as number });
+      out.push({ l: dims[i] as number, t: dims[j] as number, v: dims[k] as number, along: i });
     }
   }
-  if (diagonal) out.push({ l: w, t: diagonal, v: Math.hypot(d, h) });
+  if (diagonal) out.push({ l: w, t: diagonal, v: Math.hypot(d, h), along: 0, diagonal: true });
   return out;
+}
+
+/** What a piece needs across a door it can't pass: its narrowest carry under the door's height. */
+function needAcross(ways: Carry[], height: number, w: number, d: number, h: number): number {
+  const upright = ways.filter((c) => c.v <= height);
+  return upright.length ? Math.min(...upright.map((c) => c.t)) : Math.min(w, d, h);
+}
+
+/** Within this, a length fits (floating point, not a measurement). */
+const EPS = 1e-9;
+
+/**
+ * Whether a p × q rectangle fits in an a × b one, turned at an angle if need be (Carver 1956):
+ * square if p ≤ a and q ≤ b; otherwise, with p > a and q ≤ b, at an angle when
+ * ((a + b)/(p + q))² + ((a − b)/(p − q))² ≥ 2. Either order of each pair.
+ */
+export function rectFits(p: number, q: number, a: number, b: number): boolean {
+  return rectFit(p, q, a, b) !== null;
+}
+
+/** As rectFits: the smallest slack of the best square fit, 0 at an angle, null if it doesn't. */
+function rectFit(p0: number, q0: number, a0: number, b0: number): number | null {
+  const [p, q] = p0 >= q0 ? [p0, q0] : [q0, p0];
+  const [a, b] = a0 >= b0 ? [a0, b0] : [b0, a0];
+  if (p <= a + EPS && q <= b + EPS) {
+    const square = Math.min(a - p, b - q);
+    return p <= b + EPS ? Math.max(square, Math.min(b - p, a - q)) : square;
+  }
+  if (q > b + EPS || p - q < EPS) return null;
+  const k = ((a + b) / (p + q)) ** 2 + ((a - b) / (p - q)) ** 2;
+  return k >= 2 - EPS ? 0 : null;
+}
+
+/** The typical lifts to choose from (spec: docs/specs/slice-2s.md, B1). Frozen: shared. */
+export const LIFT_PRESETS: Readonly<Record<Exclude<LiftPreset, 'measured'>, Readonly<Lift>>> =
+  deepFreeze({
+    // ISO 4190-1's 8-person (630 kg) car; BCA's 900 mm minimum clear lift door.
+    typical: {
+      preset: 'typical',
+      door: { width: 0.9, height: 2.0 },
+      car: { width: 1.1, depth: 1.4, height: 2.3 },
+    },
+    // ISO 4190-1's 6-person (450 kg) car.
+    older: {
+      preset: 'older',
+      door: { width: 0.8, height: 2.0 },
+      car: { width: 1.0, depth: 1.25, height: 2.2 },
+    },
+    // ISO 4190-1's 1000 kg bed or stretcher car.
+    large: {
+      preset: 'large',
+      door: { width: 0.9, height: 2.1 },
+      car: { width: 1.1, depth: 2.1, height: 2.3 },
+    },
+  });
+
+function deepFreeze<T extends object>(o: T): T {
+  for (const v of Object.values(o)) if (v && typeof v === 'object') deepFreeze(v);
+  return Object.freeze(o);
+}
+
+/** How a piece stands in the lift car: as it stands, on its back, on end, or tilted. */
+export type LiftPose = 'upright' | 'back' | 'end' | 'tilted';
+
+export interface LiftFit {
+  fit: 'fits' | 'tight' | 'too-big';
+  /** How it goes in (when it does). */
+  how?: LiftPose;
+  /** What stops it: the lift door, or the car. */
+  fails?: 'door' | 'car';
+  /** At the door: the width it needs on its narrowest carry. */
+  need?: number;
+  /** The smallest slack, at the door or in the car (negative at a door it doesn't pass). */
+  spare: number;
+  /** It gets through the lift door only tilted on its diagonal. */
+  tilted?: boolean;
+  /**
+   * In the car it would fit only stood up, and it's too long to stand up as it comes in
+   * through the door: its length, the longest the door and the car allow, and what limits
+   * that: the door's height and the car's side it turns in (its depth, or its width when
+   * tilted across).
+   */
+  standUp?: { need: number; allows: number; door: number; room: number; side: 'depth' | 'width' };
+}
+
+/**
+ * Whether a piece w × d × h (and a sofa's diagonal) goes in a lift, rigid: through the door's
+ * cross-section (no turn: the lobby is open), then standing in the car one of four ways. A
+ * pose taller than the door comes in lying along its carry and is stood up in the car,
+ * turning in the plane of the door, so its length must be within `turnLimit` of the door's
+ * height, the car's depth and the carry's thickness.
+ */
+export function liftFit(
+  size: { w: number; d: number; h: number },
+  diagonal: number | undefined,
+  lift: Lift,
+): LiftFit {
+  const { w, d, h } = size;
+  const dims = [w, d, h];
+  const { width: dw, height: dh } = lift.door;
+  const { width: cw, depth: cd, height: ch } = lift.car;
+  const ways = carries(w, d, h, diagonal);
+  const through = ways.filter((c) => c.t <= dw + EPS && c.v <= dh + EPS);
+  if (!through.length) {
+    const need = needAcross(ways, dh, w, d, h);
+    return { fit: 'too-big', fails: 'door', need, spare: dw - need };
+  }
+
+  // The poses that fit the car alone: which dimension is up, the car's slack, and the room
+  // to stand it up in (the car's side in the plane it turns in).
+  const poses: {
+    how: LiftPose;
+    up: number;
+    tall: boolean;
+    spare: number;
+    room: number;
+    side: 'depth' | 'width';
+  }[] = [];
+  const standing: [LiftPose, number][] = [
+    ['upright', 2],
+    ['back', 1],
+    ['end', 0],
+  ];
+  for (const [how, up] of standing) {
+    const z = dims[up] as number;
+    const [p, q] = dims.filter((_, i) => i !== up) as [number, number];
+    const floor = z <= ch + EPS ? rectFit(p, q, cw, cd) : null;
+    if (floor !== null) {
+      // Stood up in the plane of the door: the car's depth to turn in.
+      poses.push({
+        how,
+        up,
+        tall: z > dh + EPS,
+        spare: Math.min(ch - z, floor),
+        room: cd,
+        side: 'depth',
+      });
+    }
+  }
+  // Tilted: one dimension across the car, the other two at an angle in the plane it leaves.
+  for (let c = 0; c < 3; c++) {
+    const across = dims[c] as number;
+    const rest = [0, 1, 2].filter((i) => i !== c) as [number, number];
+    const [ip, iq] =
+      (dims[rest[0]] as number) >= (dims[rest[1]] as number) ? rest : [rest[1], rest[0]];
+    const p = dims[ip] as number;
+    const q = dims[iq] as number;
+    for (const [a, b, side] of [
+      [cw, cd, 'depth'],
+      [cd, cw, 'width'],
+    ] as const) {
+      // Square in that plane is one of the standing poses; only an angle adds a way.
+      if (across <= a + EPS && p > Math.max(b, ch) + EPS && rectFit(p, q, b, ch) !== null) {
+        // It leans in the plane of the car's other side, and is stood up in that plane.
+        poses.push({ how: 'tilted', up: ip, tall: true, spare: 0, room: b, side });
+        break;
+      }
+    }
+  }
+
+  // Through the door into each pose; a tall one is stood up as it comes in.
+  const passed: { how: LiftPose; spare: number; tilted: boolean }[] = [];
+  let standUp: LiftFit['standUp'];
+  for (const pose of poses) {
+    let ok = through;
+    if (pose.tall) {
+      const lying = through.filter((c) => c.along === pose.up);
+      ok = lying.filter((c) => c.l <= turnLimit(dh, pose.room, c.v) + EPS);
+      if (!ok.length && lying.length) {
+        const allows = Math.max(...lying.map((c) => turnLimit(dh, pose.room, c.v)));
+        // Thicker than the car is deep, it can't be turned at all: no length to quote, and
+        // "doesn't fit in the lift" says it better.
+        if (allows > EPS && (!standUp || allows > standUp.allows)) {
+          standUp = {
+            need: dims[pose.up] as number,
+            allows,
+            door: dh,
+            room: pose.room,
+            side: pose.side,
+          };
+        }
+      }
+    }
+    if (!ok.length) continue;
+    const door = Math.max(...ok.map((c) => dw - c.t));
+    passed.push({
+      how: pose.how,
+      spare: Math.min(door, pose.spare),
+      tilted: ok.every((c) => c.diagonal),
+    });
+  }
+  const best = passed.find((p) => p.spare >= SPARE) ?? passed[0];
+  if (!best) return { fit: 'too-big', fails: 'car', spare: 0, ...(standUp ? { standUp } : {}) };
+  return {
+    fit: best.spare >= SPARE ? 'fits' : 'tight',
+    how: best.how,
+    spare: best.spare,
+    ...(best.tilted ? { tilted: true } : {}),
+  };
 }
 
 /** A door or passage in the door graph: where it is, and the rooms either side. */
@@ -301,7 +517,7 @@ export function entranceDoor(level: Level, geom = planGeometry(level)): string |
 export function deliveryCheck(
   level: Level,
   itemId: string,
-  opts: { from?: string; lift?: { width: number; height: number } } = {},
+  opts: { from?: string; lift?: Lift } = {},
 ): Delivery {
   const item = level.items[itemId];
   if (!item) return { status: 'no-room' };
@@ -378,6 +594,7 @@ export function deliveryCheck(
         height,
         centre,
         fit: spare >= SPARE ? 'fits' : 'tight',
+        ...(passing.every((c) => c.diagonal) ? { tilted: true } : {}),
       };
     }
     const style = door.o.kind === 'door' ? doorStyle(door.o) : null;
@@ -385,8 +602,7 @@ export function deliveryCheck(
       return { openingId: door.o.id, into, clear, height, centre, fit: 'hinges' };
     }
     // What it fails on: the narrowest carry that fits the height, else the turn.
-    const upright = ways.filter((c) => c.v <= height);
-    const need = upright.length ? Math.min(...upright.map((c) => c.t)) : Math.min(w, d, h);
+    const need = needAcross(ways, height, w, d, h);
     if (need <= clear) {
       return {
         openingId: door.o.id,
@@ -427,29 +643,34 @@ export function deliveryCheck(
   const route = search((j) => j.fit !== 'too-big') ?? search(() => true);
   if (!route) return { status: 'unreachable', from };
 
-  // A lift door first, if given.
-  if (opts.lift) {
-    const { width, height } = opts.lift;
-    const fits = ways.some((c) => c.t <= width && c.v <= height);
+  // The lift first, if given: its door, and its car.
+  const lift = opts.lift ? liftFit({ w, d, h }, diagonal, opts.lift) : undefined;
+  if (opts.lift && lift) {
     route.unshift({
       openingId: 'lift',
       into: null,
-      clear: width,
-      height,
+      clear: opts.lift.door.width,
+      height: opts.lift.door.height,
       centre: first.centre,
-      fit: fits ? 'fits' : 'too-big',
-      ...(fits ? {} : { need: Math.min(...ways.map((c) => c.t)) }),
+      fit: lift.fit,
+      ...(lift.need !== undefined ? { need: lift.need } : {}),
+      ...(lift.tilted ? { tilted: true } : {}),
     });
   }
+  const worst = worstDoor(route);
+  return { status: worst?.fit ?? 'fits', from, doors: route, worst, ...(lift ? { lift } : {}) };
+}
+
+/** The worst door on a way in: the worst fit, then the narrowest (null for none). */
+export function worstDoor(doors: DoorOnTheWay[]): DoorOnTheWay | null {
   const order: Fit[] = ['fits', 'tight', 'hinges', 'too-big'];
-  const worst = route.reduce<DoorOnTheWay | null>(
+  return doors.reduce<DoorOnTheWay | null>(
     (p, q) =>
       !p || order.indexOf(q.fit) > order.indexOf(p.fit) || (q.fit === p.fit && q.clear < p.clear)
         ? q
         : p,
     null,
   );
-  return { status: worst?.fit ?? 'fits', from, doors: route, worst };
 }
 
 /** Pieces whose way in is worth checking: on the floor, not built in, not people or rugs. */
@@ -457,4 +678,13 @@ export function deliverable(assetId: string): boolean {
   const kind = furnitureKind(assetId);
   if (!kind || kind.carpentry || kind.walkThrough || kind.category === 'People') return false;
   return furnitureLayer(kind) === 'floor';
+}
+
+/**
+ * The check treats every piece as rigid. A bed isn't quite: said beside a "too big" for one.
+ */
+export function rigidNote(assetId: string): string | null {
+  return assetId.startsWith('bed-') || furnitureKind(assetId)?.shape === 'bed'
+    ? 'A mattress bends and a frame usually comes flat; ask the shop.'
+    : null;
 }

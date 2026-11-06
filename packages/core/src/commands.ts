@@ -10,6 +10,7 @@ import { syncRooms } from './rooms';
 import {
   DEFAULT_SITE,
   type Level,
+  Lift,
   Opening,
   type Project,
   Room,
@@ -45,7 +46,8 @@ export function restoreVersion(from: Project): Command {
       d.levels = structuredClone(from.levels);
       d.renovation = from.renovation && structuredClone(from.renovation);
       d.underlay = from.underlay && structuredClone(from.underlay);
-      d.site = from.site && { ...from.site };
+      // A deep copy: the site holds the lift, and a shared object would tie the two versions.
+      d.site = from.site && structuredClone(from.site);
       // Its uploaded models too, so its pieces have theirs (the files stay on the server).
       d.models = from.models && structuredClone(from.models);
     },
@@ -64,6 +66,25 @@ export function setSite(patch: Partial<Site>): Command {
       const next = { ...(d.site ?? DEFAULT_SITE), ...patch };
       next.north = ((next.north % turn) + turn) % turn;
       d.site = next;
+    },
+  };
+}
+
+/**
+ * Sets the block's lift for the way in: a lift, null for none (a ground floor or a house), or
+ * undefined for not checked. Makes the site from DEFAULT_SITE when the project has none.
+ */
+export function setLift(lift: Lift | null | undefined): Command {
+  const next = lift ? Lift.parse(lift) : lift;
+  return {
+    label: 'Set lift',
+    recipe: (d) => {
+      if (next === undefined) {
+        if (d.site) delete d.site.lift;
+        return;
+      }
+      if (!d.site) d.site = { ...DEFAULT_SITE };
+      d.site.lift = next && structuredClone(next);
     },
   };
 }

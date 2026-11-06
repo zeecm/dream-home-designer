@@ -16,6 +16,7 @@ import {
   customModelFile,
   emptyHistory,
   furnitureKind,
+  loadErrorText,
   loadProject,
   newId,
   renovationGuard,
@@ -506,7 +507,7 @@ export const useStore = create<State>((set, get) => {
       try {
         project = loadProject(JSON.parse(text)).project;
       } catch (e) {
-        set({ notice: errorMessage('That file isn’t a Dream Home project', e) });
+        set({ notice: loadErrorText(e) });
         return;
       }
       await createFrom({ ...project, id: newId('prj'), version: 0 });

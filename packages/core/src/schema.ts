@@ -212,6 +212,30 @@ export const Underlay = z.object({
 });
 export type Underlay = z.infer<typeof Underlay>;
 
+/** Which lift a block has: one of a few typical ones, or what someone measured. */
+export const LiftPreset = z.enum(['typical', 'older', 'large', 'measured']);
+export type LiftPreset = z.infer<typeof LiftPreset>;
+
+/**
+ * The block's lift, for the way in: its door's clear width and height, and its car's width
+ * (across the door), depth (from the door to the back wall) and height, in metres. A preset
+ * stores its numbers too, so a later change to a preset never changes a saved answer.
+ */
+export const Lift = z
+  .object({
+    preset: LiftPreset,
+    door: z.object({ width: z.number().min(0.5).max(2), height: z.number().min(1.8).max(2.6) }),
+    car: z.object({
+      width: z.number().min(0.8).max(3),
+      depth: z.number().min(0.8).max(3),
+      height: z.number().min(1.9).max(3),
+    }),
+  })
+  .refine((l) => l.door.width <= l.car.width && l.door.height <= l.car.height, {
+    message: 'the lift door is no wider and no taller than its car',
+  });
+export type Lift = z.infer<typeof Lift>;
+
 /**
  * Where the home stands, for the sun. `north` is the bearing of north from the plan's up
  * direction, in radians clockwise: 0 when north is up the plan, π/2 when it points to the
@@ -223,6 +247,8 @@ export const Site = z.object({
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
   utcOffset: z.number().min(-12).max(14),
+  /** The block's lift. Null: no lift (a ground floor or a house); absent: not checked yet. */
+  lift: Lift.nullable().optional(),
 });
 export type Site = z.infer<typeof Site>;
 
@@ -271,7 +297,7 @@ export const CustomModel = CustomModelBase.refine((m) => !!m.hash !== !!m.shape,
 });
 export type CustomModel = z.infer<typeof CustomModel>;
 
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 export const Project = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
