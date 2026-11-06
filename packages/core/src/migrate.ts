@@ -1,3 +1,4 @@
+import { ZodError } from 'zod';
 import { AFTER_SUFFIX } from './levels';
 import { type Level, type Project, SCHEMA_VERSION, parseProject } from './schema';
 import { repairLevel } from './topology';
@@ -86,4 +87,32 @@ export function loadProject(input: unknown): { project: Project; fixes: string[]
     project: fixes.length ? { ...project, levels, ...(renovation ? { renovation } : {}) } : project,
     fixes,
   };
+}
+
+/**
+ * Why a file couldn't be opened, in a sentence for a person (not zod's JSON): a newer
+ * version, not JSON at all, lift sizes that can't be, or the first part that isn't valid.
+ */
+export function loadErrorText(e: unknown): string {
+  if (e instanceof NewerSchemaError) return e.message;
+  if (e instanceof SyntaxError) return 'That file isn’t a Dream Home project (it isn’t JSON).';
+  if (e instanceof ZodError) {
+    const lift = e.issues.find((i) => i.path[0] === 'site' && i.path[1] === 'lift');
+    if (lift) {
+      const field = lift.path.slice(2).join(' ');
+      const why =
+        lift.code === 'custom'
+          ? 'the door is wider or taller than the car'
+          : lift.code === 'too_small'
+            ? `${field} under ${Number(lift.minimum).toFixed(2)} m`
+            : lift.code === 'too_big'
+              ? `${field} over ${Number(lift.maximum).toFixed(2)} m`
+              : `${field || 'the lift'}: ${lift.message.toLowerCase()}`;
+      return `That file’s lift sizes aren’t valid (${why}).`;
+    }
+    const first = e.issues[0];
+    const where = first?.path.length ? `${first.path.join(' › ')}: ` : '';
+    return `That file isn’t a Dream Home project, or it is damaged (${where}${first?.message.toLowerCase() ?? 'not valid'}).`;
+  }
+  return `That file isn’t a Dream Home project: ${(e as Error)?.message ?? String(e)}`;
 }

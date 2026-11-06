@@ -16,8 +16,16 @@ import { blankProject } from './factory';
 import { sampleFlatProject } from './fixtures/sampleFlat';
 import { customKind, newItem, setProjectModels, updateModel } from './furniture';
 import { type EditorDoc, dispatch, emptyHistory, undo } from './history';
-import { migrate } from './migrate';
-import { CustomModel, type Level, Lift, type Opening, Project, parseProject } from './schema';
+import { loadErrorText, loadProject, migrate } from './migrate';
+import {
+  CustomModel,
+  DEFAULT_SITE,
+  type Level,
+  Lift,
+  type Opening,
+  Project,
+  parseProject,
+} from './schema';
 
 const door = (width: number, extra: Partial<Opening> = {}): Opening => ({
   id: 'o',
@@ -181,12 +189,38 @@ describe('the lift (slice-2s B1)', () => {
     // Tipped on its diagonal it is 1.38 m thick: the door and the car's depth stand up 1.92 m.
     expect(tilted.standUp?.need).toBeCloseTo(2.1);
     expect(tilted.standUp?.allows).toBeCloseTo(1.92, 2);
+    expect(tilted.standUp).toMatchObject({ door: 2.0, room: 1.4, side: 'depth' });
     expect(turnLimit(2.0, 1.4, Math.hypot(1.0, 0.95))).toBeCloseTo(1.92, 2);
     // A 1.8 m sofa: too wide at the door without its diagonal; with it, on end.
     expect(fit(1.8, 1.0, 0.95, typical)).toMatchObject({ fit: 'too-big', fails: 'door' });
     const short = fit(1.8, 1.0, 0.95, typical, 0.8);
     expect(short).toMatchObject({ fit: 'fits', how: 'end', tilted: true });
     expect(Math.abs(short.spare - 0.1)).toBeLessThanOrEqual(0.005);
+  });
+
+  it('an older lift is too shallow to stand the 2.1 m sofa up at all: no length to quote', () => {
+    // Tipped on its diagonal it is 1.38 m thick; the car is 1.25 m deep.
+    expect(turnLimit(2.0, 1.25, Math.hypot(1.0, 0.95))).toBe(0);
+    const r = fit(2.1, 1.0, 0.95, older, 0.8);
+    expect(r).toMatchObject({ fit: 'too-big', fails: 'car' });
+    expect(r.standUp).toBeUndefined();
+  });
+
+  it('tilted across the depth, a piece is stood up in the car’s width, not its depth', () => {
+    const wide: Lift = {
+      preset: 'measured',
+      door: { width: 0.9, height: 2.6 },
+      car: { width: 3.0, depth: 0.8, height: 3.0 },
+    };
+    // 3.1 m leans in the 3.0 × 3.0 plane across the car; turned up in its depth (0.8 m) it
+    // would stop at 2.77 m, but it turns in its width.
+    expect(turnLimit(2.6, 0.8, 0.75)).toBeLessThan(3.1);
+    expect(fit(0.75, 0.75, 3.1, wide)).toMatchObject({ fit: 'tight', how: 'tilted' });
+  });
+
+  it('the presets are frozen: shared, never changed by a caller', () => {
+    expect(Object.isFrozen(LIFT_PRESETS)).toBe(true);
+    expect(Object.isFrozen(typical.door)).toBe(true);
   });
 
   it('3: a 2.0 m sofa: too wide for an older lift’s door; on end in a typical one', () => {
@@ -284,6 +318,35 @@ describe('the lift (slice-2s B1)', () => {
     ).toBe(false);
     expect(bad((l) => l).success).toBe(true);
     for (const l of Object.values(LIFT_PRESETS)) expect(Lift.safeParse(l).success).toBe(true);
+  });
+
+  it('a file with impossible lift sizes says so in words, not zod’s JSON', () => {
+    const why = (lift: unknown) => {
+      const doc = { ...sampleFlatProject('prj_t'), site: { ...DEFAULT_SITE, lift } };
+      try {
+        loadProject(JSON.parse(JSON.stringify(doc)));
+      } catch (e) {
+        return loadErrorText(e);
+      }
+      return 'loaded';
+    };
+    expect(why({ ...typical, door: { width: 1.2, height: 2.0 } })).toBe(
+      'That file’s lift sizes aren’t valid (the door is wider or taller than the car).',
+    );
+    expect(why({ ...typical, car: { ...typical.car, width: 0.5 } })).toMatch(
+      /^That file’s lift sizes aren’t valid \(car width under 0\.80 m/,
+    );
+    expect(why(null)).toBe('loaded');
+    expect(loadErrorText(new SyntaxError('x'))).toBe(
+      'That file isn’t a Dream Home project (it isn’t JSON).',
+    );
+    let other = '';
+    try {
+      loadProject({ ...sampleFlatProject('prj_t'), name: '' });
+    } catch (e) {
+      other = loadErrorText(e);
+    }
+    expect(other).toMatch(/^That file isn’t a Dream Home project, or it is damaged \(name: /);
   });
 
   it('8: setLift is one undo step, including the site it made; null is no lift, undefined unset', () => {

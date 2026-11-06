@@ -212,12 +212,6 @@ export const Underlay = z.object({
 });
 export type Underlay = z.infer<typeof Underlay>;
 
-/**
- * Where the home stands, for the sun. `north` is the bearing of north from the plan's up
- * direction, in radians clockwise: 0 when north is up the plan, π/2 when it points to the
- * plan's right. `latitude` and `longitude` are in degrees (+ north, + east), and
- * `utcOffset` is the clock's hours ahead of UTC, so times of day read as on a wall clock.
- */
 /** Which lift a block has: one of a few typical ones, or what someone measured. */
 export const LiftPreset = z.enum(['typical', 'older', 'large', 'measured']);
 export type LiftPreset = z.infer<typeof LiftPreset>;
@@ -242,6 +236,12 @@ export const Lift = z
   });
 export type Lift = z.infer<typeof Lift>;
 
+/**
+ * Where the home stands, for the sun. `north` is the bearing of north from the plan's up
+ * direction, in radians clockwise: 0 when north is up the plan, π/2 when it points to the
+ * plan's right. `latitude` and `longitude` are in degrees (+ north, + east), and
+ * `utcOffset` is the clock's hours ahead of UTC, so times of day read as on a wall clock.
+ */
 export const Site = z.object({
   north: z.number(),
   latitude: z.number().min(-90).max(90),

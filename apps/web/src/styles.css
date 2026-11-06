@@ -4076,9 +4076,9 @@ span.comment-pin {
   opacity: 1;
 }
 
-/* A small button is still a finger's width tall on a phone. */
+/* In "Getting it in", a small button is still a finger's width tall on a phone. */
 @media (max-width: 720px), (pointer: coarse) {
-  .btn-small {
+  .way-panel .btn-small {
     height: auto;
     min-height: 44px;
   }

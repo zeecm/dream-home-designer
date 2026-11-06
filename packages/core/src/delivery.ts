@@ -164,27 +164,33 @@ function rectFit(p0: number, q0: number, a0: number, b0: number): number | null 
   return k >= 2 - EPS ? 0 : null;
 }
 
-/** The typical lifts to choose from (spec: docs/specs/slice-2s.md, B1). */
-export const LIFT_PRESETS: Record<Exclude<LiftPreset, 'measured'>, Lift> = {
-  // ISO 4190-1's 8-person (630 kg) car; BCA's 900 mm minimum clear lift door.
-  typical: {
-    preset: 'typical',
-    door: { width: 0.9, height: 2.0 },
-    car: { width: 1.1, depth: 1.4, height: 2.3 },
-  },
-  // ISO 4190-1's 6-person (450 kg) car.
-  older: {
-    preset: 'older',
-    door: { width: 0.8, height: 2.0 },
-    car: { width: 1.0, depth: 1.25, height: 2.2 },
-  },
-  // ISO 4190-1's 1000 kg bed or stretcher car.
-  large: {
-    preset: 'large',
-    door: { width: 0.9, height: 2.1 },
-    car: { width: 1.1, depth: 2.1, height: 2.3 },
-  },
-};
+/** The typical lifts to choose from (spec: docs/specs/slice-2s.md, B1). Frozen: shared. */
+export const LIFT_PRESETS: Readonly<Record<Exclude<LiftPreset, 'measured'>, Readonly<Lift>>> =
+  deepFreeze({
+    // ISO 4190-1's 8-person (630 kg) car; BCA's 900 mm minimum clear lift door.
+    typical: {
+      preset: 'typical',
+      door: { width: 0.9, height: 2.0 },
+      car: { width: 1.1, depth: 1.4, height: 2.3 },
+    },
+    // ISO 4190-1's 6-person (450 kg) car.
+    older: {
+      preset: 'older',
+      door: { width: 0.8, height: 2.0 },
+      car: { width: 1.0, depth: 1.25, height: 2.2 },
+    },
+    // ISO 4190-1's 1000 kg bed or stretcher car.
+    large: {
+      preset: 'large',
+      door: { width: 0.9, height: 2.1 },
+      car: { width: 1.1, depth: 2.1, height: 2.3 },
+    },
+  });
+
+function deepFreeze<T extends object>(o: T): T {
+  for (const v of Object.values(o)) if (v && typeof v === 'object') deepFreeze(v);
+  return Object.freeze(o);
+}
 
 /** How a piece stands in the lift car: as it stands, on its back, on end, or tilted. */
 export type LiftPose = 'upright' | 'back' | 'end' | 'tilted';
@@ -203,9 +209,11 @@ export interface LiftFit {
   tilted?: boolean;
   /**
    * In the car it would fit only stood up, and it's too long to stand up as it comes in
-   * through the door: its length, and the longest the door and the car's depth allow.
+   * through the door: its length, the longest the door and the car allow, and what limits
+   * that: the door's height and the car's side it turns in (its depth, or its width when
+   * tilted across).
    */
-  standUp?: { need: number; allows: number };
+  standUp?: { need: number; allows: number; door: number; room: number; side: 'depth' | 'width' };
 }
 
 /**
@@ -231,8 +239,16 @@ export function liftFit(
     return { fit: 'too-big', fails: 'door', need, spare: dw - need };
   }
 
-  // The poses that fit the car alone: which dimension is up, and the car's slack.
-  const poses: { how: LiftPose; up: number; tall: boolean; spare: number }[] = [];
+  // The poses that fit the car alone: which dimension is up, the car's slack, and the room
+  // to stand it up in (the car's side in the plane it turns in).
+  const poses: {
+    how: LiftPose;
+    up: number;
+    tall: boolean;
+    spare: number;
+    room: number;
+    side: 'depth' | 'width';
+  }[] = [];
   const standing: [LiftPose, number][] = [
     ['upright', 2],
     ['back', 1],
@@ -242,7 +258,17 @@ export function liftFit(
     const z = dims[up] as number;
     const [p, q] = dims.filter((_, i) => i !== up) as [number, number];
     const floor = z <= ch + EPS ? rectFit(p, q, cw, cd) : null;
-    if (floor !== null) poses.push({ how, up, tall: z > dh + EPS, spare: Math.min(ch - z, floor) });
+    if (floor !== null) {
+      // Stood up in the plane of the door: the car's depth to turn in.
+      poses.push({
+        how,
+        up,
+        tall: z > dh + EPS,
+        spare: Math.min(ch - z, floor),
+        room: cd,
+        side: 'depth',
+      });
+    }
   }
   // Tilted: one dimension across the car, the other two at an angle in the plane it leaves.
   for (let c = 0; c < 3; c++) {
@@ -252,13 +278,14 @@ export function liftFit(
       (dims[rest[0]] as number) >= (dims[rest[1]] as number) ? rest : [rest[1], rest[0]];
     const p = dims[ip] as number;
     const q = dims[iq] as number;
-    for (const [a, b] of [
-      [cw, cd],
-      [cd, cw],
+    for (const [a, b, side] of [
+      [cw, cd, 'depth'],
+      [cd, cw, 'width'],
     ] as const) {
       // Square in that plane is one of the standing poses; only an angle adds a way.
       if (across <= a + EPS && p > Math.max(b, ch) + EPS && rectFit(p, q, b, ch) !== null) {
-        poses.push({ how: 'tilted', up: ip, tall: true, spare: 0 });
+        // It leans in the plane of the car's other side, and is stood up in that plane.
+        poses.push({ how: 'tilted', up: ip, tall: true, spare: 0, room: b, side });
         break;
       }
     }
@@ -271,11 +298,19 @@ export function liftFit(
     let ok = through;
     if (pose.tall) {
       const lying = through.filter((c) => c.along === pose.up);
-      ok = lying.filter((c) => c.l <= turnLimit(dh, cd, c.v) + EPS);
+      ok = lying.filter((c) => c.l <= turnLimit(dh, pose.room, c.v) + EPS);
       if (!ok.length && lying.length) {
-        const allows = Math.max(...lying.map((c) => turnLimit(dh, cd, c.v)));
-        if (!standUp || allows > standUp.allows) {
-          standUp = { need: dims[pose.up] as number, allows };
+        const allows = Math.max(...lying.map((c) => turnLimit(dh, pose.room, c.v)));
+        // Thicker than the car is deep, it can't be turned at all: no length to quote, and
+        // "doesn't fit in the lift" says it better.
+        if (allows > EPS && (!standUp || allows > standUp.allows)) {
+          standUp = {
+            need: dims[pose.up] as number,
+            allows,
+            door: dh,
+            room: pose.room,
+            side: pose.side,
+          };
         }
       }
     }

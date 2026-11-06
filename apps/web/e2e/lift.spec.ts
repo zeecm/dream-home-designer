@@ -14,7 +14,9 @@ const diagonal = (page: Page) => page.getByLabel('Diagonal depth', { exact: true
 
 const TOO_WIDE = /^Too big for the lift door: 0\.90\sm wide; it needs 0\.95\sm on its side\.$/;
 const STAND_UP =
-  /^Too long to stand up through the lift door \(needs 2\.10\sm, the door allows 1\.92\sm\)\.$/;
+  /^Too long to stand up in the lift: at 2\.10\sm long, it can’t be turned upright through a 2\.00\sm high door into a 1\.40\sm deep car\.$/;
+const ASK_SHOP =
+  'Ask the shop whether it comes apart, or measure your lift: these sizes are typical.';
 
 /** Taps on a phone, clicks on a desktop. */
 const press = (l: Locator, finger: boolean) => (finger ? l.tap() : l.click());
@@ -73,19 +75,18 @@ test.describe('desktop', () => {
     // Not checked yet: the doors' verdict, and a question about the lift.
     await expect(verdict(page)).toHaveText(/^(Just f|F)its through every door on the way in/);
     await expect(liftSelect(page)).toHaveValue('unset');
+    await expect(liftLine(page)).toHaveText('Lift: not checked.');
     await expect(way(page).getByTestId('lift-hint')).toHaveText(
       /^Which lift does your block have\? Most HDB lift doors are 0\.8–0\.9\sm wide\.$/,
     );
 
     // 9: a typical lift: too wide for its door, said in the status that's read out.
     await liftSelect(page).selectOption({ label: 'Typical HDB lift' });
-    await expect(way(page).getByRole('status')).toContainText(TOO_WIDE);
+    await expect(way(page).getByRole('status')).toContainText('Too big for the lift door');
     await expect(verdict(page)).toHaveText(TOO_WIDE);
     await expect(verdict(page)).toHaveClass(/warning-text/);
-    await expect(liftLine(page)).toHaveCount(0);
-    await expect(way(page)).toContainText(
-      'Ask the shop whether it comes apart, or measure your lift: these sizes are typical.',
-    );
+    // Under it, in the status line's place (so nothing below jumps), what to ask.
+    await expect(liftLine(page)).toHaveText(ASK_SHOP);
     await expect(way(page).getByTestId('lift-hint')).toHaveText(
       /^Door 0\.90 × 2\.00\sm · car 1\.10 wide × 1\.40 deep × 2\.30\sm high\. Same lift for every piece in this plan\.$/,
     );
@@ -116,8 +117,7 @@ test.describe('desktop', () => {
     await expect(verdict(page)).toHaveText(
       /^Doesn’t fit in the lift \(1\.10 × 1\.40\sm, 2\.00\sm high\), even on end or tilted\.$/,
     );
-    await expect(way(page)).toContainText('Ask the shop whether it comes apart.');
-    await expect(way(page)).not.toContainText('these sizes are typical');
+    await expect(liftLine(page)).toHaveText('Ask the shop whether it comes apart.');
 
     // Each field gives its own range, and a door wider than the car is refused: nothing saved.
     const carWidth = fields.getByLabel('Car width');
@@ -130,7 +130,15 @@ test.describe('desktop', () => {
     await doorWidth.fill('1.2');
     await doorWidth.press('Enter');
     await expect(doorWidth).toHaveAccessibleDescription('The door can’t be wider than the car.');
+    // Refused on Enter: still in the field, its text selected to type again.
+    await expect(doorWidth).toBeFocused();
+    expect(
+      await doorWidth.evaluate(
+        (el: HTMLInputElement) => (el.selectionEnd ?? 0) - (el.selectionStart ?? 0),
+      ),
+    ).toBe(3);
     await doorWidth.press('Escape');
+    await expect(page.getByRole('heading', { name: 'My sofa' })).toBeVisible();
     await expect(doorWidth).toHaveValue('0.90 m');
     await expect(verdict(page)).toContainText('2.00');
 
@@ -149,9 +157,11 @@ test.describe('desktop', () => {
     await expect(way(page).getByRole('status')).toContainText('Lift: fits stood on end.');
     await expect(verdict(page)).toHaveText(/^(Just f|F)its through every door on the way in/);
 
-    // 14: no lift: no Lift line, and a hint saying why.
+    // 14: no lift: no "Lift:" line, but the status says so (a change is read out), and a
+    // hint says why.
     await liftSelect(page).selectOption({ label: 'No lift' });
-    await expect(liftLine(page)).toHaveCount(0);
+    await expect(liftLine(page)).toHaveText('No lift on the way in.');
+    await expect(way(page).getByRole('status')).not.toContainText('Lift:');
     await expect(way(page).getByTestId('lift-hint')).toHaveText(
       'Ground floor or a house: the way in starts at the main door.',
     );
@@ -260,6 +270,84 @@ test.describe('desktop', () => {
     await expect(diagonal(page)).toHaveValue('');
     await expect(way(page)).toContainText('Measured its diagonal depth?');
   });
+
+  test('a mattress too stiff for the lift: its note first, the verdict softened, no alarm', async ({
+    page,
+  }) => {
+    await page.getByRole('button', { name: /^Furniture/ }).click();
+    await page.getByRole('button', { name: /^Add by size/ }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add your furniture' });
+    await dialog.getByLabel('Name').fill('Queen mattress');
+    await dialog.getByRole('button', { name: 'Bed' }).click();
+    await dialog.getByLabel('Width').fill('1.52');
+    await dialog.getByLabel('Depth', { exact: true }).fill('1.90');
+    await dialog.getByLabel('Height').fill('0.30');
+    await dialog.getByRole('button', { name: 'Add and place it' }).click();
+    await placeIn(page, 'rm_living-and-dining', 'Queen mattress', false, 0.7);
+    await liftSelect(page).selectOption({ label: 'Typical HDB lift' });
+    const status = way(page).getByRole('status');
+    await expect(status.locator('p').first()).toHaveText(
+      'A mattress bends and a frame usually comes flat; ask the shop.',
+    );
+    await expect(verdict(page)).toHaveText(/^Checked as a rigid box, doesn’t fit in the lift /);
+    await expect(verdict(page)).not.toHaveClass(/warning-text/);
+    await expect(way(page)).not.toContainText('comes apart');
+    await expect(way(page).getByText(/ask the shop/)).toHaveCount(1);
+  });
+
+  test('a panel 18 mm thick can be added by size', async ({ page }) => {
+    await page.getByRole('button', { name: /^Furniture/ }).click();
+    await page.getByRole('button', { name: /^Add by size/ }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add your furniture' });
+    await dialog.getByLabel('Name').fill('Wardrobe panel');
+    await dialog.getByRole('button', { name: 'Box' }).click();
+    await dialog.getByLabel('Width').fill('600');
+    await dialog.getByLabel('Depth', { exact: true }).fill('18 mm');
+    await dialog.getByLabel('Height').fill('2100');
+    await dialog.getByRole('button', { name: 'Add and place it' }).click();
+    await expect(dialog).toHaveCount(0);
+  });
+
+  test('a diagonal saved out of range is called out until it is re-entered', async ({ page }) => {
+    await addSofa(page, 'My sofa', ['2.1', '1.0', '0.95']);
+    await placeIn(page, 'rm_bedroom', 'My sofa');
+    await waitSaved(page);
+    // As saved before the range was corrected: wider than the sofa is deep or high.
+    const id = new URL(page.url()).searchParams.get('p');
+    // This browser's owner key for the plan (see src/keys.ts).
+    const owner = await page.evaluate(
+      (p) =>
+        (JSON.parse(localStorage.getItem(`dhd:keys:${p}`) ?? '{}') as { owner?: string }).owner,
+      id,
+    );
+    const auth = { Authorization: `Bearer ${owner}` };
+    const got = await page.request.get(`/api/projects/${id}`, { headers: auth });
+    const doc = await got.json();
+    for (const m of Object.values(doc.models as Record<string, { diagonal?: number }>)) {
+      m.diagonal = 1.2;
+    }
+    const put = await page.request.put(`/api/projects/${id}`, {
+      data: doc,
+      headers: { ...auth, 'If-Match': got.headers().etag ?? '' },
+    });
+    expect(put.ok()).toBe(true);
+    await page.reload();
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    await page.locator('[data-hit^="item:"]').click({ force: true });
+    await expect(diagonal(page)).toHaveValue('1.20 m');
+    await expect(diagonal(page)).toHaveAttribute('aria-invalid', 'true');
+    await expect(diagonal(page)).toHaveAccessibleDescription(
+      /^Between 0\.69 and 0\.95\sm for this sofa\.$/,
+    );
+    // It gets no one through a door: the way to measure it again is still offered.
+    await expect(way(page).getByRole('button', { name: 'Add diagonal depth' })).toBeVisible();
+    await diagonal(page).fill('0.80');
+    await diagonal(page).press('Enter');
+    await expect(diagonal(page)).toHaveAttribute('aria-invalid', 'false');
+    await expect(diagonal(page)).toHaveAccessibleDescription(/For this sofa: 0\.69–0\.95\sm\./);
+    await expect(way(page).getByRole('button', { name: 'Add diagonal depth' })).toHaveCount(0);
+  });
 });
 
 /** Whether anything on the page or in the sheet scrolls sideways. */
@@ -288,8 +376,11 @@ test.describe('phone', () => {
     await placeIn(page, 'rm_living-and-dining', 'My sofa', true, 0.8, 0.3);
     // The verdict comes first: in the sheet's first view.
     await expect(verdict(page)).toBeInViewport();
+    // Scrolled down to the lift: once chosen, the sheet brings the answer back into view.
+    await liftSelect(page).scrollIntoViewIfNeeded();
     await liftSelect(page).selectOption({ label: 'Typical HDB lift' });
     await expect(verdict(page)).toHaveText(TOO_WIDE);
+    await expect(verdict(page)).toBeInViewport({ ratio: 1 });
     expect(await overflows(page)).toBe(false);
     const ask = way(page).getByRole('button', { name: 'Add diagonal depth' });
     const box = await ask.boundingBox();
@@ -314,9 +405,15 @@ test.describe('phone', () => {
       const b = await f.boundingBox();
       expect(b?.height ?? 0, name).toBeGreaterThanOrEqual(44);
     }
-    const dw = await fields.getByLabel('Door width').boundingBox();
-    const dh = await fields.getByLabel('Door height').boundingBox();
-    expect(Math.abs((dw?.y ?? 0) - (dh?.y ?? 1))).toBeLessThan(2);
+    // Two to a row (read together: the sheet may still be scrolling to the verdict).
+    const rows = await fields.evaluate((f) =>
+      ['Door width', 'Door height'].map(
+        (n) =>
+          [...f.querySelectorAll('label')].find((l) => l.textContent === n)?.getBoundingClientRect()
+            .y,
+      ),
+    );
+    expect(Math.abs((rows[0] ?? 0) - (rows[1] ?? 1))).toBeLessThan(2);
     expect(await overflows(page)).toBe(false);
     const carHeight = fields.getByLabel('Car height');
     await carHeight.tap();
@@ -325,6 +422,7 @@ test.describe('phone', () => {
     await expect(verdict(page)).toHaveText(
       /^Doesn’t fit in the lift \(1\.10 × 1\.40\sm, 2\.00\sm high\)/,
     );
+    await expect(verdict(page)).toBeInViewport({ ratio: 1 });
     expect(await overflows(page)).toBe(false);
   });
 });
