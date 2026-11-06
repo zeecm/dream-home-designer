@@ -158,7 +158,7 @@ function RunView({ run, live }: { run: Running; live: boolean }) {
             {st.status === 'failed' && st.error && <span className="step-error">{st.error}</span>}
           </li>
         ))}
-        <li className={`step-row step-row-${s.phase === 'done' ? 'done' : 'waiting'}`}>
+        <li className={`step-row step-row-${s.phase === 'done' ? 'local' : 'waiting'}`}>
           <Glyph
             status={s.phase === 'done' ? 'local' : s.phase === 'running' ? 'waiting' : 'skipped'}
           />

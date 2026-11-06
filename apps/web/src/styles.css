@@ -5060,6 +5060,7 @@ span.comment-pin {
 @media (pointer: coarse) {
   .designer-tab,
   .chip,
+  .designer-bar .btn,
   .designer-actions .btn,
   .designer-foot .btn,
   .designer-entry .btn,

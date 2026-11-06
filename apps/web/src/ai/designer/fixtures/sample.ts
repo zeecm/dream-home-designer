@@ -1,8 +1,18 @@
-import concept from '../../../../../../packages/core/src/designer/fixtures/concept.json';
-import bedroom from '../../../../../../packages/core/src/designer/fixtures/room-bedroom.json';
-import kitchen from '../../../../../../packages/core/src/designer/fixtures/room-kitchen.json';
-import living from '../../../../../../packages/core/src/designer/fixtures/room-living.json';
-import mainBedroom from '../../../../../../packages/core/src/designer/fixtures/room-main-bedroom.json';
+import concept from '../../../../../../packages/core/src/designer/fixtures/concept.json' with {
+  type: 'json',
+};
+import bedroom from '../../../../../../packages/core/src/designer/fixtures/room-bedroom.json' with {
+  type: 'json',
+};
+import kitchen from '../../../../../../packages/core/src/designer/fixtures/room-kitchen.json' with {
+  type: 'json',
+};
+import living from '../../../../../../packages/core/src/designer/fixtures/room-living.json' with {
+  type: 'json',
+};
+import mainBedroom from '../../../../../../packages/core/src/designer/fixtures/room-main-bedroom.json' with {
+  type: 'json',
+};
 
 /**
  * The sample flat's mocked answers (the core's fixtures), and which one a request asks for,
