@@ -3,6 +3,7 @@ import {
   type Vec2,
   dayOfYear,
   daylight,
+  finish,
   itemLights,
   levelBounds,
   siteOf,
@@ -476,11 +477,21 @@ function Capture({ level, ceilings }: { level: Level | undefined; ceilings: bool
         // The orbit view leaves the ceilings off to see in; inside a room they belong on.
         const lvl = shown.current;
         const hidden: THREE.Object3D[] = [];
+        const flat: THREE.Material[] = [];
         let indoors: LevelMeshes | null = null;
         if (lvl && !hasCeilings.current) {
           indoors = new LevelMeshes(materials, { ceilings: true, models });
           indoors.update(lvl);
           indoors.group.name = 'level-eye';
+          // No light reaches a ceiling from below, so it would draw dark grey and steer the
+          // image model to a dark, moody room: its paint, light and matte, unlit instead.
+          indoors.group.traverse((o) => {
+            const id = o.name.startsWith('ceiling:') ? o.name.slice(8) : null;
+            if (!id || !(o instanceof THREE.Mesh)) return;
+            const paint = finish(lvl.rooms[id]?.ceilingMaterial ?? '')?.color ?? '#f2f0ec';
+            o.material = new THREE.MeshBasicMaterial({ color: paint });
+            flat.push(o.material);
+          });
           for (const o of scene.children) {
             if (LEVEL_GROUPS.has(o.name) && o.visible) {
               o.visible = false;
@@ -498,6 +509,7 @@ function Capture({ level, ceilings }: { level: Level | undefined; ceilings: bool
             scene.remove(indoors.group);
             indoors.dispose();
           }
+          for (const m of flat) m.dispose();
           for (const o of hidden) o.visible = true;
           gl.render(scene, camera);
         }
