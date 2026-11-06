@@ -1056,7 +1056,12 @@ pnpm --filter @dhd/edge run deploy:preview   # previews: dhd-api-preview
   the lift (the plan and the walk now play the lift's position as a last move); and the orbit
   controls left `touch-action: auto` on the 3D canvas, so a phone cancelled sideways swipes
   in walk mode (the owner's "can't look around without moving"). Swipe-to-look turns half a
-  circle per screen width on touch.
+  circle per screen width on touch. Three more (6 Nov), all from timing a busy page: the plan
+  timed double-clicks and flings by when its handlers ran, not by the events' `timeStamp`
+  (a slow redraw after the first press made a double-click two clicks; a late lift lost the
+  coast); a remounted plan (Before/After) drew one frame at size 0 until its ResizeObserver
+  reported, and a requested fit used the old size; a double-click on a small room landed on the
+  move handle its first click showed. The swipe e2e stamps its touches with the finger's times.
 - **Wall tool snapping:** a point landing inside a door or window moves to the nearer jamb
   (`jambSnap` in `snap.ts`), so an angle-snapped wall drawn to a doorway slants by up to half
   the door's width. The alternative, ending the wall straight but short of the doorway and

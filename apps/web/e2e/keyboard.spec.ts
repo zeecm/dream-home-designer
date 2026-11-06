@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { waitSaved } from './helpers';
+import { centre, waitSaved } from './helpers';
 
 test('the plan works from the keyboard: Tab selects, Enter renames, arrows nudge', async ({
   page,
@@ -39,6 +39,12 @@ test('the plan works from the keyboard: Tab selects, Enter renames, arrows nudge
   await expect(name).toBeFocused();
   await page.keyboard.type('Guest room');
   await page.keyboard.press('Enter');
+  await expect(name).toHaveValue('Guest room');
+  // On the room's move handle too: in a small room the first click puts it under the pointer.
+  const handle = await centre(page, '.move-handle');
+  await page.mouse.dblclick(handle.x, handle.y);
+  await expect(name).toBeFocused();
+  await page.keyboard.press('Escape');
   await expect(name).toHaveValue('Guest room');
 
   // A selected corner shows its walls' lengths, and Shift+Arrow moves it 10 cm.
