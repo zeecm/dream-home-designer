@@ -81,7 +81,7 @@ describe('the render prompt', () => {
       'The only furniture in view, 2 pieces and nothing else: "Single bed" 1.0 × 2.0 × 0.5 m (against the left wall), "Wardrobe" 1.2 × 0.6 × 2.1 m (against the right wall).',
     );
     expect(p).toContain('Keep the room exactly the size given here; it is small.');
-    expect(p).toContain('leave plain walls plain and empty floor empty');
+    expect(p).toContain('leave solid walls solid and empty floor empty');
     // A new look changes the finishes, so they aren't listed.
     expect(p).not.toContain('Sage');
     expect(renderPrompt('as', bedroom)).toContain('walls Sage; floor Oak');
@@ -102,7 +102,7 @@ describe('the render prompt', () => {
     const p = renderPrompt('as', { ...bedroom, items, moreItems: 40 });
     expect(p.length).toBeLessThan(renderPrompt('as').length + MAX_SHEET + 40);
     expect(p).toContain(
-      'Do not add, remove, enlarge or move furniture, doors, windows or openings; leave plain walls plain and empty floor empty.',
+      'Do not add, remove, enlarge or move furniture, doors, windows or openings; leave solid walls solid and empty floor empty.',
     );
   });
 
@@ -113,6 +113,18 @@ describe('the render prompt', () => {
       // No look asks for things that aren't there.
       expect(RENDER_STYLES[style]).not.toMatch(/plants|lamps on|pendant|décor/i);
     }
+  });
+
+  it('with no window in view, asks for indoor light, not daylight through windows', () => {
+    const shut = renderPrompt('warm', { ...bedroom, openings: [] });
+    expect(shut).not.toContain('through the windows');
+    expect(shut).toContain('soft, even indoor light');
+    expect(renderPrompt('warm', bedroom)).not.toContain('through the windows');
+    const lit = renderPrompt('warm', {
+      ...bedroom,
+      openings: [{ ...(bedroom.openings[0] as SceneFacts['openings'][number]), kind: 'window' }],
+    });
+    expect(lit).toContain('natural daylight through the windows');
   });
 
   it('says an empty room stays empty', () => {

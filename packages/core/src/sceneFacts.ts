@@ -110,9 +110,10 @@ export interface SceneFacts {
 export const OVERHEAD_HEIGHT = 2.2;
 export const MAX_SCENE_ITEMS = 25;
 export const MAX_SCENE_OPENINGS = 12;
-/** Points across an opening's width tested for sight, and how many must be in sight. */
-const PROBES = 7;
-const MIN_PROBES_SEEN = 2;
+/** Points across an opening's width tested for sight, at least. */
+const MIN_PROBES = 7;
+/** How much of an opening's width must be in sight (metres; less for a narrow one). */
+const MIN_SEEN = 0.25;
 const NEAR = 0.05;
 const MAX_ROOMS = 6;
 
@@ -180,15 +181,16 @@ export function boxInFrustum(f: CameraFrame, corners: readonly V3[]): boolean {
   return planes.every((plane) => ds.some((d) => plane(d) >= 0));
 }
 
-function segmentsCross(a: Vec2, b: Vec2, s: Segment): boolean {
+/** Where segment a→b crosses `s`, as a fraction of the way from a, or null. */
+function crossAt(a: Vec2, b: Vec2, s: Segment): number | null {
   const d1 = { x: b.x - a.x, y: b.y - a.y };
   const d2 = { x: s.b.x - s.a.x, y: s.b.y - s.a.y };
   const den = d1.x * d2.y - d1.y * d2.x;
-  if (Math.abs(den) < 1e-12) return false;
+  if (Math.abs(den) < 1e-12) return null;
   const w = { x: s.a.x - a.x, y: s.a.y - a.y };
   const t = (w.x * d2.y - w.y * d2.x) / den;
   const u = (w.x * d1.y - w.y * d1.x) / den;
-  return t > 1e-6 && t < 1 - 1e-6 && u >= 0 && u <= 1;
+  return t > 1e-6 && t < 1 - 1e-6 && u >= 0 && u <= 1 ? t : null;
 }
 
 function segmentDistance(p: Vec2, s: Segment): number {
@@ -207,19 +209,42 @@ const ringSegments = (ring: readonly Vec2[], out: Segment[]) => {
   });
 };
 
-/** What blocks sight in plan from below the wall tops: solid walls, hubs and windows. */
-function sightBlockers(level: Level, eyeHeight: number): Segment[] {
+/** An edge in plan that blocks sight from `bottom` to `top` metres above the floor. */
+type Blocker = Segment & { bottom: number; top: number };
+
+/**
+ * What blocks sight: solid walls up to their tops (a half wall only low down), the wall
+ * over a doorway (from its head up), hubs and windows up to the ceiling. Glass is seen
+ * through.
+ */
+function sightBlockers(level: Level): Blocker[] {
   const geom = planGeometry(level);
-  const out: Segment[] = [];
+  const out: Blocker[] = [];
+  const add = (ring: readonly Vec2[], bottom: number, top: number) => {
+    if (top - bottom < 1e-6) return;
+    const segs: Segment[] = [];
+    ringSegments(ring, segs);
+    for (const sg of segs) out.push({ ...sg, bottom, top });
+  };
+  const topOf = (wallId: string) => {
+    const w = level.walls[wallId];
+    return w?.height ?? level.ceilingHeight;
+  };
   for (const p of geom.pieces) {
     const w = level.walls[p.wallId];
-    if (!w || isGlass(w) || (w.height ?? level.ceilingHeight) <= eyeHeight) continue;
-    ringSegments(p.polygon, out);
+    if (!w || isGlass(w)) continue;
+    add(p.polygon, 0, topOf(p.wallId));
   }
-  for (const h of geom.footprints.hubs) ringSegments(h.polygon, out);
-  // Below a sill and above a window's head the wall is solid; through the glass is the
-  // outside or another room's wall. Treat a window as wall.
-  for (const o of geom.openings) if (o.kind === 'window') ringSegments(o.polygon, out);
+  for (const h of geom.footprints.hubs) add(h.polygon, 0, level.ceilingHeight);
+  for (const o of geom.openings) {
+    const w = level.walls[o.wallId];
+    if (!w || isGlass(w)) continue;
+    // Below a sill and above a window's head the wall is solid; through the glass is the
+    // outside or another room's wall. Treat a window as wall.
+    if (o.kind === 'window') add(o.polygon, 0, level.ceilingHeight);
+    // Over a door or a doorway, the wall above its head.
+    else add(o.polygon, o.opening.sill + o.opening.height, topOf(o.wallId));
+  }
   return out;
 }
 
@@ -253,6 +278,10 @@ function extents(poly: readonly Vec2[], right: Vec2): { width: number; depth: nu
   return across ? { width: eu, depth: ev } : { width: ev, depth: eu };
 }
 
+/** A room's name as a model is told it: a room with none is still a room, not the outside. */
+const roomName = (level: Level, id: string) =>
+  clean(level.rooms[id]?.name ?? '', NAME_MAX) || 'Unnamed room';
+
 function roomFact(level: Level, id: string, right: Vec2): SceneRoomFact | null {
   const room = level.rooms[id];
   const shape = roomShapes(level).get(id);
@@ -268,7 +297,7 @@ function roomFact(level: Level, id: string, right: Vec2): SceneRoomFact | null {
   }
   return {
     id,
-    name: clean(room.name, NAME_MAX),
+    name: roomName(level, id),
     width,
     depth,
     area: roomArea(level, room),
@@ -377,7 +406,7 @@ function doorName(o: Opening): string {
     bifold: 'bi-fold door',
     folding: 'folding partition',
   }[o.style ?? 'swing'];
-  return o.glazed ? `${o.glazed === 'clear' ? 'glass' : o.glazed} ${how}` : how;
+  return o.glazed ? `${o.glazed === 'clear' ? 'glass' : `${o.glazed}-glass`} ${how}` : how;
 }
 
 /**
@@ -388,11 +417,12 @@ function doorName(o: Opening): string {
 function openingsInSight(
   level: Level,
   f: CameraFrame,
-  seen: (p: Vec2) => boolean,
+  seen: (p: Vec2, h: number) => boolean,
 ): SceneOpeningFact[] {
   const geom = planGeometry(level);
   const at = { x: f.eye.x, y: f.eye.z };
-  const name = (id: string | null) => (id ? clean(level.rooms[id]?.name ?? '', NAME_MAX) : null);
+  // A room with no name is no help to a model: as if there were none.
+  const name = (id: string | null) => (id ? roomName(level, id) : null);
   const out: (SceneOpeningFact & { dist: number })[] = [];
   const consider = (
     id: string,
@@ -419,16 +449,20 @@ function openingsInSight(
     const side = (at.x - mid.x) * fr.n.x + (at.y - mid.y) * fr.n.y >= 0 ? 1 : -1;
     const off = fr.half + 0.05;
     const yMid = y0 + height / 2;
+    // Probes at most a quarter of a metre apart, so a long glass wall counts once a short
+    // stretch of it shows, as a door does.
+    const len = u1 - u0;
+    const n = Math.max(MIN_PROBES, Math.ceil(len / 0.25));
     const xs: number[] = [];
-    for (let i = 0; i < PROBES; i++) {
-      const c = framePoint(fr, u0 + ((u1 - u0) * (i + 0.5)) / PROBES, 0);
+    for (let i = 0; i < n; i++) {
+      const c = framePoint(fr, u0 + (len * (i + 0.5)) / n, 0);
       const p = { x: c.x + fr.n.x * off * side, y: c.y + fr.n.y * off * side };
       const p3 = { x: c.x, y: yMid, z: c.y };
-      if (!inFrustum(f, p3) || !seen(p)) continue;
+      if (!inFrustum(f, p3) || !seen(p, sill + height / 2)) continue;
       const d = sub3(p3, f.eye);
       xs.push(dot3(d, f.right) / (dot3(d, f.forward) * f.tanX));
     }
-    if (xs.length < MIN_PROBES_SEEN) return;
+    if (xs.length * (len / n) < Math.min(MIN_SEEN, 0.3 * len) - 1e-9) return;
     const beside = (k: number) =>
       roomIdAt(level, {
         x: mid.x + fr.n.x * (fr.half + 0.3) * k,
@@ -442,15 +476,19 @@ function openingsInSight(
         : x > 0.33
           ? 'at the right of the picture'
           : 'in the middle of the picture';
+    const near = name(beside(side));
+    const far = name(beside(-side));
     out.push({
       id,
       ...fact,
+      // Glass with no room beyond is an outside wall, not a partition.
+      ...(fact.kind === 'glass' && !far ? { name: 'glass wall' } : {}),
       width: u1 - u0,
       height,
       sill,
       where,
-      near: name(beside(side)),
-      far: name(beside(-side)),
+      near,
+      far,
       dist: Math.hypot(mid.x - at.x, mid.y - at.y),
     });
   };
@@ -538,11 +576,17 @@ export function sceneFacts(level: Level, c: SceneCamera): SceneFacts {
   const at = { x: c.position.x, y: c.position.z };
   const cameraRoomId = roomIdAt(level, at);
   const view: SceneView = !cameraRoomId ? 'outside' : height > OVERHEAD_HEIGHT ? 'overhead' : 'eye';
-  // Below the wall tops, walls hide what's behind them; from above, the view sees over them.
-  const ceiling = (cameraRoomId && level.rooms[cameraRoomId]?.ceilingHeight) || level.ceilingHeight;
-  const occludes = height < ceiling;
-  const blockers = occludes ? sightBlockers(level, height) : [];
-  const seen = (p: Vec2) => !occludes || !blockers.some((s) => segmentsCross(at, p, s));
+  // Whether a point `h` metres above the floor at plan point `p` is in plain sight: the line
+  // from the eye to it passes every wall it crosses above that wall's top. From above, a
+  // wall still hides what is close behind it, and a half wall only what is low down.
+  const blockers = sightBlockers(level);
+  const seen = (p: Vec2, h: number) =>
+    !blockers.some((s) => {
+      const t = crossAt(at, p, s);
+      if (t === null) return false;
+      const y = height + (h - height) * t;
+      return y < s.top - 1e-6 && y > s.bottom + 1e-6;
+    });
 
   // How much of each room's floor is in sight.
   const shapes = roomShapes(level);
@@ -551,7 +595,7 @@ export function sceneFacts(level: Level, c: SceneCamera): SceneFacts {
     const pts = floorSamples(s.outer, s.holes);
     if (!pts.length) continue;
     const vis = pts.filter(
-      (p) => inFrustum(f, { x: p.x, y: level.elevation, z: p.y }) && seen(p),
+      (p) => inFrustum(f, { x: p.x, y: level.elevation, z: p.y }) && seen(p, 0),
     ).length;
     const room = level.rooms[id];
     if (vis && room) share.set(id, (vis / pts.length) * roomArea(level, room));
@@ -600,7 +644,9 @@ export function sceneFacts(level: Level, c: SceneCamera): SceneFacts {
       { x: centre.x, y: centre.z },
       ...fp.map((p) => ({ x: p.x + (centre.x - p.x) * 0.15, y: p.y + (centre.z - p.y) * 0.15 })),
     ];
-    if (!probes.some(seen)) continue;
+    // Its top counts: a piece standing above a half wall shows over it.
+    const top = item.position.y + size.h;
+    if (!probes.some((p) => seen(p, top))) continue;
     const roomId = roomIdAt(level, { x: centre.x, y: centre.z });
     listed.push({
       id: item.id,
@@ -831,7 +877,7 @@ export function sceneSheet(
         ? '; it is small'
         : '';
   const head = [
-    `Keep ${many ? 'every room' : 'the room'} exactly the size given here${small}. Do not add, remove, enlarge or move furniture, doors, windows or openings; leave plain walls plain and empty floor empty. Everything must stay at true scale. Names in quotes are only labels.`,
+    `Keep ${many ? 'every room' : 'the room'} exactly the size given here${small}. Do not add, remove, enlarge or move furniture, doors, windows or openings; leave solid walls solid and empty floor empty. Everything must stay at true scale. Names in quotes are only labels.`,
   ];
   const across = Math.round(facts.fovAcross);
   const h = fmt(facts.height);
@@ -886,7 +932,7 @@ export function sceneSheet(
 }
 
 const OTHERWISE_SOLID =
-  'Every other wall in view is solid and plain: no other doors, doorways, arches, openings, niches or windows.';
+  'Every other wall in view is solid, with no other doors, doorways, arches, openings, niches or windows.';
 
 /**
  * "a sliding door 1.6 m wide, at the left of the picture, into "Bedroom"", or a window's size
@@ -901,6 +947,7 @@ function openingWords(o: SceneOpeningFact, view: SceneView): string {
         ? `${fmt(o.width)} m long and ${fmt(o.height)} m high`
         : `${fmt(o.width)} m wide`;
   const place = o.where;
+  const into = o.kind === 'door' || o.kind === 'passage' ? 'into' : 'to';
   const rooms =
     o.kind === 'window'
       ? view === 'eye' || !o.near
@@ -908,12 +955,12 @@ function openingWords(o: SceneOpeningFact, view: SceneView): string {
         : `in ${sheetName(o.near)}`
       : view === 'eye'
         ? o.far
-          ? `${o.kind === 'door' || o.kind === 'passage' ? 'into' : 'to'} ${sheetName(o.far)}`
-          : ''
+          ? `${into} ${sheetName(o.far)}`
+          : 'to the outside'
         : o.near && o.far
           ? `between ${sheetName(o.near)} and ${sheetName(o.far)}`
           : o.near || o.far
-            ? `in ${sheetName((o.near ?? o.far) as string)}`
+            ? `between ${sheetName((o.near ?? o.far) as string)} and the outside`
             : '';
   return [`${article} ${o.name} ${size}`, place, rooms].filter(Boolean).join(', ');
 }
@@ -922,7 +969,7 @@ function openingWords(o: SceneOpeningFact, view: SceneView): string {
 function openingsLine(facts: SceneFacts, m: number): string {
   const total = facts.openings.length + facts.moreOpenings;
   if (!total) {
-    return 'There are no doors, windows or openings in view: every wall in view is solid and plain, with no doorways, arches, openings, niches or windows.';
+    return 'There are no doors, windows or openings in view: every wall in view is solid, with no doorways, arches, openings, niches or windows.';
   }
   const listed = facts.openings.slice(0, m).map((o) => openingWords(o, facts.view));
   const rest = total - listed.length;

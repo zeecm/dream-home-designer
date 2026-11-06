@@ -631,7 +631,7 @@ and, below the wall tops, something of it is in plain sight past the walls, up t
 pieces, largest first, with sizes and where it stands ("against the left wall, by the
 window"). Finishes are listed only for the "As designed" look. The sheet starts with the
 instruction (keep the size, don't add, remove, enlarge or move furniture, leave empty floor
-empty), so the length cap (`MAX_SHEET`, 3000) can only drop pieces ("and N more"), never it.
+empty), so the length cap (`MAX_SHEET`, 4500) can only drop pieces, then doors and windows ("and N more"), never it.
 Room and piece names (uploaded models' too) are cleaned (`clean`, 40 characters: no newlines
 or direction overrides) and quoted as labels. From an orbit or
 outside view the dialog offers "From eye height in <room>" (the default) or "From this view

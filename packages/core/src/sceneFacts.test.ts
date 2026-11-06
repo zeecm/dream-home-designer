@@ -184,7 +184,7 @@ describe('scene facts', () => {
   });
 
   const KEEP =
-    'Do not add, remove, enlarge or move furniture, doors, windows or openings; leave plain walls plain and empty floor empty.';
+    'Do not add, remove, enlarge or move furniture, doors, windows or openings; leave solid walls solid and empty floor empty.';
 
   it('fits its length by dropping pieces, never the instruction to keep true scale', () => {
     const long = 'A very long name for a piece someone added themselves '.repeat(4);
@@ -278,7 +278,7 @@ describe('scene facts', () => {
     expect(sheet).toContain(
       'Doors, windows and openings in view, 1 and no others: a door 0.9 m wide, at the left of the picture, into "Living".',
     );
-    expect(sheet).toContain('Every other wall in view is solid and plain');
+    expect(sheet).toContain('Every other wall in view is solid, with no other');
     expect(sheet).toContain('There is no furniture in view: keep it unfurnished');
 
     // The wall to the master bedroom made glass: it is listed, and the master bedroom's door
@@ -318,7 +318,7 @@ describe('scene facts', () => {
     });
     expect(f.openings).toEqual([]);
     expect(sceneSheet(f)).toContain(
-      'There are no doors, windows or openings in view: every wall in view is solid and plain',
+      'There are no doors, windows or openings in view: every wall in view is solid',
     );
   });
 
@@ -336,6 +336,70 @@ describe('scene facts', () => {
     expect(sheet).toContain(
       'an open doorway (no door) 1.6 m wide, in the middle of the picture, between',
     );
+  });
+
+  it('from outside or just above the walls, leaves out doors and windows a nearer wall hides', () => {
+    const level = hdb4RoomLevel();
+    // 3 m up outside the front: the bedrooms' doors and windows are behind the front walls.
+    const outside = sceneFacts(level, {
+      position: { x: 5.5, y: 3, z: -6 },
+      target: { x: 5.5, y: 1.5, z: 4 },
+      fov: deg(50),
+      aspect: 1.5,
+    });
+    expect(outside.view).toBe('outside');
+    const ids = outside.openings.map((o) => o.id);
+    for (const hidden of ['op_bed2', 'op_bed3', 'op_master', 'op_win_bed2', 'op_win_bed3']) {
+      expect(ids).not.toContain(hidden);
+    }
+    expect(ids).toContain('op_win_kitchen');
+    // Just over the ceiling from the living room: Bedroom 2's window is behind its wall.
+    const over = sceneFacts(level, {
+      position: { x: 2, y: 2.8, z: 0.5 },
+      target: { x: 6, y: 2, z: 7 },
+      fov: deg(50),
+      aspect: 1.5,
+    });
+    expect(over.openings.map((o) => o.id)).not.toContain('op_win_bed2');
+  });
+
+  it('lists a long glass wall once a short stretch of it is in sight, and says it is outside', () => {
+    const base = hdb4RoomLevel();
+    const front = base.walls.w_front_r as NonNullable<(typeof base.walls)['w_front_r']>;
+    const openings = Object.fromEntries(
+      Object.entries(base.openings).filter(([, o]) => o.wallId !== 'w_front_r'),
+    );
+    const level = {
+      ...base,
+      openings,
+      walls: { ...base.walls, w_front_r: { ...front, build: 'glass' as const } },
+    };
+    const f = sceneFacts(level, {
+      position: { x: 6, y: 1.6, z: 3.5 },
+      target: { x: 11, y: 1.5, z: 3 },
+      fov: deg(50),
+      aspect: 1.5,
+    });
+    const pane = f.openings.find((o) => o.id === 'w_front_r');
+    expect(pane).toMatchObject({ kind: 'glass', name: 'glass wall', far: null });
+    expect(sceneSheet(f)).toContain('a glass wall ');
+    expect(sceneSheet(f)).toContain(', to the outside');
+  });
+
+  it('a room with no name is called an unnamed room, not quoted empty or taken for outside', () => {
+    const base = hdb4RoomLevel();
+    const living = base.rooms.rm_living as NonNullable<(typeof base.rooms)['rm_living']>;
+    const level = { ...base, rooms: { ...base.rooms, rm_living: { ...living, name: '' } } };
+    const f = sceneFacts(level, {
+      position: { x: 5.25, y: 9, z: 4 },
+      target: { x: 5.25, y: 0, z: 3.95 },
+      fov: deg(60),
+      aspect: 1.5,
+    });
+    const sheet = sceneSheet(f);
+    expect(sheet).not.toContain('""');
+    // Still a room (not the outside), by a placeholder.
+    expect(sheet).toContain('between "Unnamed room" and "Bedroom 2"');
   });
 
   it('doesn’t face straight into a tall piece', () => {

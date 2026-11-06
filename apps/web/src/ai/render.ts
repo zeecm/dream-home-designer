@@ -5,7 +5,7 @@ import { AiError, anySignal, errorBody, failure, timeoutSignal } from './provide
 /** Looks of a render to choose from. */
 export const RENDER_STYLES = {
   as: 'Keep every material and colour as it is.',
-  warm: 'Finishes: light oak on wooden surfaces and floors, warm white walls; soft warm afternoon daylight.',
+  warm: 'Finishes: light oak on wooden surfaces and floors, warm white walls; soft, warm afternoon light.',
   scandi:
     'Finishes: pale wood, white walls, light linen on any upholstery already there; bright daylight.',
   luxe: 'Finishes: marble, walnut and brushed brass on the surfaces and furniture already there; warm evening light.',
@@ -24,7 +24,12 @@ const LAST_WORD =
  * room and filled with furniture that wouldn't fit.
  */
 export function renderPrompt(style: RenderStyle, facts?: SceneFacts): string {
-  const base = `Edit this image. It is an exact 3D model of a real home, drawn to scale: not a sketch to interpret or improve. Make it look like a real photograph of this exact room by changing only how the surfaces look (realistic materials and textures) and the light (natural daylight through the windows, soft shadows, light bouncing off the walls). ${RENDER_STYLES[style]} Every edge must stay where it is: the same camera, framing and perspective; the same walls, corners, ceiling and floor; the same doors, windows and openings, the same sizes and in the same places; the same furniture, in the same places, sizes and orientations. Add nothing: no furniture, rugs, lamps, curtains, pictures, plants, décor, people or text. Remove nothing. Never add a door, doorway, arch, opening, niche or window: a plain wall stays a plain wall, and empty floor stays empty.`;
+  // Daylight "through the windows" with none in sight has a model add one to explain it.
+  const glazed = facts?.openings.some((o) => o.kind === 'window' || o.kind === 'glass') ?? true;
+  const light = glazed
+    ? 'natural daylight through the windows'
+    : 'soft, even indoor light, as there is no window in view';
+  const base = `Edit this image. It is an exact 3D model of a real home, drawn to scale: not a sketch to interpret or improve. Make it look like a real photograph of this exact room by changing only how the surfaces look (realistic materials and textures) and the light (${light}, soft shadows, light bouncing off the walls). ${RENDER_STYLES[style]} Every edge must stay where it is: the same camera, framing and perspective; the same walls, corners, ceiling and floor; the same doors, windows and openings, the same sizes and in the same places; the same furniture, in the same places, sizes and orientations. Add nothing: no furniture, rugs, lamps, curtains, pictures, plants, décor, people or text. Remove nothing. Never add a door, doorway, arch, opening, niche or window: a solid wall stays solid, and empty floor stays empty.`;
   if (!facts) return `${base}\n\n${LAST_WORD}`;
   // The sheet fits its own length (pieces and openings dropped and counted), its
   // instruction first.
