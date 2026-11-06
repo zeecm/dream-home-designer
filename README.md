@@ -52,11 +52,11 @@ for any plan.
 - Built-in carpentry (wardrobes, shoe cabinet, TV console, kitchen runs) and a renovation cost
   estimate from typical Singapore prices, with your own rates, Copy and Print.
   [spec](docs/specs/carpentry-cost.md)
+- Your own furniture by its measured size, and whether it gets in: every door from the main
+  door, turning included, drawn on the plan. [spec](docs/specs/my-furniture.md)
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
-- "My furniture" by measured size and a check that it gets in from the main door.
-  [spec](docs/specs/my-furniture.md)
 
 ### Planned
 1. Clearance checks, slice 2: walkways from the main door, dining chairs, labels on the plan.
