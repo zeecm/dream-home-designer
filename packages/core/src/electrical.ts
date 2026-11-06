@@ -313,7 +313,7 @@ export function placePoint(
   level: Level,
   kind: ElecKind,
   p: Vec2,
-  opts: { geom?: PlanGeometry; tolerance?: number; height?: number; exclude?: string } = {},
+  opts: { geom?: PlanGeometry; tolerance?: number; height?: number } = {},
 ): (NonNullable<ElecPoint['wall']> & { at: Vec2 }) | null {
   const geom = opts.geom ?? planGeometry(level);
   const tol = opts.tolerance ?? 0.3;

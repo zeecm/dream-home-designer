@@ -1182,3 +1182,42 @@ focuses Projects; pages are wrapped in clipping `.sheet-paper` boxes. Dialog: th
 hacked walls (`print/extent.ts`), A3 by default when only A3 is to scale, `role="alert"`,
 focus back to Projects; the sheet always has a Version line. Not yet: a notch's depth (faces
 hidden in a notch get no chain).
+
+**Electrical and lighting plan (6 Nov, spec `docs/specs/electrical.md`, slice 1, schema 9):**
+`Level.points` (`ElecPoint`, default `{}`; migration 8→9 a no-op; Go `SchemaVersion` 9, fixture
+regenerated; **the production API must be deployed before this merges**). A point is on a wall
+(`wall: {wallId, t, side, height}`, on that face; an aircon unit's height is its top) or on the
+plan (`at`: ceiling lights and fans, a compressor), never both (zod refine); switches have
+`gang` 1–3, an aircon unit `route` bends and `compressorId`. Core `electrical.ts`: `ELEC_KINDS`
+(names, place, plate size), `pointPosition`, `defaultHeight` (sockets 300, 1150 over a kitchen
+base run, switches 1050, data/TV 300, aircon top 200 under the ceiling, water heater 2000,
+cooker 600, doorbell 1200), `clearAlong`/`placePoint` (nearest face within 0.3 m, between the
+inside corners, never across a door or passage, under a window only below its sill, else beside
+the nearer jamb with the plate 50 mm clear: the spec's "jamb + 50 mm" read as the plate's edge),
+`trunkingPath`/`trunkingLength`, `pointWarnings` (socket in a bath/WC, shelter wall, structural
+or likely-structural wall judged on Before, aircon with no compressor), `pointCounts`,
+`electricalChanges` (by id: new, moved over 50 mm or onto another face, removed; a changed kind
+or a point on a hacked wall is removed and new), and `addPoint`/`updatePoint`/`deletePoint`.
+Points follow their wall in `splitWallAt`, `mergeVertex`, `deleteWall` (one undo), a wall made a
+boundary, `repairLevel`, `applyLevel`, `shiftWall` (`keepFromFarEnds`) and `moveRoom` (ceiling
+points carried with the room); `carriedToRenovation` carries them; a traced plan replacing the
+walls drops the wall points. Cost: `elecNew`/`elecMove` per kind, `elecRemove`, `trunking` per m;
+group "Electrical" ("13A double socket, new · Bedroom · 2"); without a renovation every point is
+new and the dialog says to start one; the compressor comes with the aircon. Render: a white
+plate 8 mm proud (146 mm for doubles), slots or rockers on it, the aircon unit, compressor and
+trunking as boxes; no ceiling points, not walked into. Web (`electrical/`): Electrical tool (E)
+with a kind palette (a sideways row on phones), a ghost on the face, the magnifier on phones;
+an aircon unit starts "Run the trunking" (a bar at the foot of the plan: taps are bends, a tap on
+a compressor ends it, "New compressor here", Undo bend, Done); in Select (and the tool) points
+drag along their wall or to another face, keeping a height moved off the usual, and the selected
+unit's bends drag. `ElectricalLayer` draws the symbols in metres (radius 9 px, at least 70 mm),
+"h1150" off the usual height, a red "!" with the warnings as its title; switched by "Electrical"
+in the plan details (`dhd-electrical`, on with the tool, in the PNG when on). Room labels step
+aside for ceiling points. Inspector: kind, height in mm (`LengthField unit="mm"`), gang, room,
+warnings, trunking length, Run trunking. Contractor dialog: "Electrical plan" (on when there are
+points) adds a page (walls faded, room names, points in ink; After: new teal, moved teal with the
+old spot faint, removed red; trunking dashed with its length; key with heights and counts; "Work
+by a Licensed Electrical Worker.") and a schedule page (room, point, qty, height, change), the
+schedule on its own page rather than squeezed into the title column. e2e `electrical.spec.ts`
+covers criteria 11–18. Not yet: slice 2; a kind changed in the Inspector isn't re-checked
+against openings; the plan doesn't colour After's new or moved points.

@@ -5,6 +5,7 @@ import {
   addPoint,
   deletePoint,
   placePoint,
+  pointPosition,
   pointRoom,
   trunkingLength,
   trunkingPath,
@@ -262,25 +263,10 @@ export function useElectricalTool(ctx: ToolContext): ToolController {
         );
       }
       const g = ghost && spot(ghost, false);
-      if (!g) return null;
-      const pos = g.wall
-        ? placePoint(level, kind, gridSnap(ghost, 0.01, false), {
-            geom: ctx.geom,
-            tolerance: reach(ctx),
-          })
-        : null;
-      const at = pos?.at ?? g.at;
-      if (!at) return null;
-      const c = worldToScreen(view, size, at);
-      const w = g.wall && level.walls[g.wall.wallId];
-      const a = w && level.vertices[w.a];
-      const b = w && level.vertices[w.b];
-      let normal: Vec2 | undefined;
-      if (a && b && g.wall) {
-        const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-        const n = { x: -(b.y - a.y) / len, y: (b.x - a.x) / len };
-        normal = g.wall.side === 'left' ? n : { x: -n.x, y: -n.y };
-      }
+      const pos = g && pointPosition(level, g);
+      if (!pos) return null;
+      const c = worldToScreen(view, size, pos.at);
+      const normal = pos.normal;
       const r = glyphRadius(view.zoom) * view.zoom;
       return (
         <g className="elec-ghost" pointerEvents="none" transform={`translate(${c.x} ${c.y})`}>
