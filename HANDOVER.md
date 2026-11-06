@@ -1110,6 +1110,50 @@ in a piece's details. Not yet (spec): labels in the plan, live zones for the pie
 placed (before it's dropped), zones cut at walls, the drop announcement, walkways and the
 rest of slice 2.
 
+**Clearance checks, slice 2 (6 Nov, spec `docs/specs/clearance-checks.md#slice-2`; design
+notes from the tech lead and UX bind where they refine it):** no schema change. Core
+`walkway.ts`: `walkwayReport(level)` → `{status ('ok' | 'no-main-door' | 'issues'), start,
+routes (every room and bed side checked: need, capped, have, ok, pinch, path, blamed),
+issues, grid}` and `walkwayStatus`. The rooms are rastered (`grid.ts`) at 50 mm, coarser past
+300k cells; obstacles are wall pieces and hubs (half and glass walls too), windows, room holes,
+outside the rooms and floor pieces (`blocks`), filled by cell centre plus every cell an edge
+crosses so thin glass stays closed. An exact distance transform (Felzenszwalb, keeping each
+cell's nearest obstacle) gives each cell a width (2 × distance); doorways and passages get a
+throat (span × wall + 0.45 m each side) whose cells take the widest free stretch across the
+doorway left by furniture, else wide. A bucketed (10 mm) maximin search from the main door's
+throat (`entranceDoor` in `delivery.ts`: the first `mainDoors` only if it leads outside) finds
+each room's widest way; where the raster comes within 0.10 m of the need, the narrow stretch is
+measured exactly (nearest polygon, then the nearest on the far side; their sum). The need is
+0.90 m, 0.60 m to a room only reached through a room with a bed (an en-suite) and to bed sides
+(`bedSides`: the slice 1 zones with room, a single bed's better side, from the bedroom's doors);
+never more than the flat's own widest way to that target less 0.02 (cached per target with
+the bare raster, keyed by walls, corners, openings and rooms). Blamed: the pieces either side
+of the pinch, or those narrowing or standing in the bare way (wall-to-wall pinch, closed way);
+one issue per piece and pinch, `to` listing every room and bed side beyond it. About 15–20 ms
+on the sample with 40 pieces. `clearance.ts`: dining chairs (`DINING_TABLES`/`DINING_CHAIRS`,
+`chairsOf`, a chair within 0.30 m of a table) need 0.75 m from the table edge through the
+chair's centre (`side: 'back'`); `clearance-doors.ts`: `doorClashes` (sweeps overlapping
+> 20 mm, cached with the walls) and `doorFrontIssues` (`REACH` of hinged fronts, the fridge's
+its width; skipped where slice 1 already has the piece in that swing); `issueItem` (a `doors`
+issue has no piece); polygon helpers moved to `convex.ts`. Web `clearance/walkways.ts`: a
+store outside React runs the report on a 100 ms trailing timer while a pointer is down (250 ms
+if a run takes over 30 ms), at once on release or any other edit, and counts releases for the
+announcement. `clearance.tsx`: `useClearanceIssues` merges per-frame issues with the last
+report; `ClearanceLayer` (now given geom, view and size) draws pinch bars with end ticks, chips
+("0.62 / 0.90 m", 11 px at any zoom, placed in order selected piece's zones, its pinches,
+then others by shortfall; skipped if they would cover another or leave the view; room names
+avoided by trying each side and beyond the bar's ends), the selected piece's narrowed way
+dotted (hidden while Show the way is drawn), a table's chairs' zones with it, clashing sweeps
+and hit fronts. Inspector lines worst first; a door's Clearances section; "Add chairs to check
+the room to sit."; doors named by the smaller room they join. Plan details: "N pieces and M
+doors are short of room or in the way" (the UX wording, not the spec's "N clearance problems";
+Show next goes through pieces, then doors) and the walkway line. The live region adds ". "
+and the first problem after a drop, 500 ms after a nudge, or "No clearance problems." when
+fixed. `--clearance` token; `.warning-text` and `.clearance-clash` dark colours. E2e
+`clearance-walkways.spec.ts` (desktop and a 390 px phone by finger). Not yet (slice 3):
+editable numbers, Fix it, sliding fronts, a saved main door, zones cut at walls; the
+contractor sheet has no walkway pinches by design.
+
 **Carpentry and cost estimate (5 Nov, spec `docs/specs/carpentry-cost.md`, slice 1):** five
 built-ins in the catalogue's Built-in category (wardrobe and shoe cabinet 2.6 m high, TV
 console, kitchen base and wall runs), `carpentry` on their kinds and on the kitchen cabinets.

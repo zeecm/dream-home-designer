@@ -57,6 +57,10 @@ for any plan.
 - A dimensioned plan for contractors: to scale on A4 or A3, chain dimensions, door and window
   widths, room sizes, the hacking plan and change list; print or save as PDF.
   [spec](docs/specs/dimensioned-export.md)
+- Clearance checks, slice 2: walkways from the main door to every room and bed side, their
+  narrowest point drawn and measured; room to pull out dining chairs; door clashes (doors that
+  hit each other or a wardrobe's or fridge's doors); shortfall labels on the plan, and the
+  first problem read out on a drop. [spec](docs/specs/clearance-checks.md#slice-2)
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
@@ -65,7 +69,6 @@ for any plan.
   [spec](docs/specs/electrical.md)
 
 ### Planned
-1. Clearance checks, slice 2: walkways from the main door, dining chairs, labels on the plan.
 2. Comments on the plan: pins anyone with the share link can leave and resolve, for family
    decisions.
 3. Slice 2s: the lift and a diagonal you can edit for your own furniture, notch depths on the
