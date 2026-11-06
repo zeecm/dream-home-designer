@@ -113,6 +113,43 @@ function RunView({ run, live }: { run: Running; live: boolean }) {
       : s.phase === 'paused'
         ? 'Paused at your limit for this tab.'
         : null;
+  const steps = (
+    <ol className="designer-steps">
+      <li className="step-row">
+        <Glyph status="local" />
+        <span className="step-label">Reading your plan</span>
+      </li>
+      {s.steps.map((st) => (
+        <li key={st.key} className={`step-row step-row-${st.status}`}>
+          <Glyph status={st.status} />
+          <span className="step-label">
+            {st.label}
+            {st.wait && (
+              <span className="step-note">
+                {' '}
+                Waiting {st.wait.seconds} s ({st.wait.attempt} of 2)
+              </span>
+            )}
+          </span>
+          <span className="step-tokens num">
+            {st.tokens ? `${st.estimated ? '~' : ''}${tokens(st.tokens)}` : ''}
+          </span>
+          {st.status === 'running' && st.thinking && (
+            <span className="step-thinking" aria-hidden="true">
+              {st.thinking}
+            </span>
+          )}
+          {st.status === 'failed' && st.error && <span className="step-error">{st.error}</span>}
+        </li>
+      ))}
+      <li className={`step-row step-row-${s.phase === 'done' ? 'local' : 'waiting'}`}>
+        <Glyph
+          status={s.phase === 'done' ? 'local' : s.phase === 'running' ? 'waiting' : 'skipped'}
+        />
+        <span className="step-label">Checking clearances, walkways, delivery and cost</span>
+      </li>
+    </ol>
+  );
   return (
     <section className="designer-run" aria-label="This run">
       <div className="designer-meter">
@@ -130,41 +167,17 @@ function RunView({ run, live }: { run: Running; live: boolean }) {
         </div>
       </div>
       {phaseLine && <p className="designer-phase">{phaseLine}</p>}
-      <ol className="designer-steps">
-        <li className="step-row">
-          <Glyph status="local" />
-          <span className="step-label">Reading your plan</span>
-        </li>
-        {s.steps.map((st) => (
-          <li key={st.key} className={`step-row step-row-${st.status}`}>
-            <Glyph status={st.status} />
-            <span className="step-label">
-              {st.label}
-              {st.wait && (
-                <span className="step-note">
-                  {' '}
-                  Waiting {st.wait.seconds} s ({st.wait.attempt} of 2)
-                </span>
-              )}
-            </span>
-            <span className="step-tokens num">
-              {st.tokens ? `${st.estimated ? '~' : ''}${tokens(st.tokens)}` : ''}
-            </span>
-            {st.status === 'running' && st.thinking && (
-              <span className="step-thinking" aria-hidden="true">
-                {st.thinking}
-              </span>
-            )}
-            {st.status === 'failed' && st.error && <span className="step-error">{st.error}</span>}
-          </li>
-        ))}
-        <li className={`step-row step-row-${s.phase === 'done' ? 'local' : 'waiting'}`}>
-          <Glyph
-            status={s.phase === 'done' ? 'local' : s.phase === 'running' ? 'waiting' : 'skipped'}
-          />
-          <span className="step-label">Checking clearances, walkways, delivery and cost</span>
-        </li>
-      </ol>
+      {live ? (
+        steps
+      ) : (
+        // Once the run has ended its steps fold away: the versions get the room.
+        <details className="designer-steps-fold">
+          <summary>
+            Steps ({done} of {requests} done)
+          </summary>
+          {steps}
+        </details>
+      )}
       {!live && s.phase === 'done' && (
         <p className="designer-outcome">
           Done in {duration((s.endedAt ?? Date.now()) - s.startedAt)} · {tokens(totals.tokens)}{' '}

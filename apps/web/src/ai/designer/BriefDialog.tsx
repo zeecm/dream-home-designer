@@ -447,7 +447,10 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
                     ))}
                   </span>
                   <span className="style-name">
-                    {s === 'designer' ? 'Let the designer choose' : STYLE_NAMES[s]}
+                    {s === 'designer' ? 'Let the designer choose' : STYLE_NAMES[s].split(' (')[0]}
+                    {s === 'heritage' && (
+                      <span className="style-note">Rosewood and Peranakan accents</span>
+                    )}
                   </span>
                 </label>
               ))}

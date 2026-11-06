@@ -4394,6 +4394,20 @@ span.comment-pin {
 .style-swatches i:last-child {
   border-radius: 0 4px 4px 0;
 }
+.style-note {
+  display: block;
+  font-weight: 400;
+  font-size: var(--fs-small);
+  line-height: 16px;
+  color: var(--muted);
+}
+.designer-steps-fold summary {
+  cursor: pointer;
+  font-weight: 500;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
 .style-name {
   font-weight: 500;
   font-size: var(--fs-hint);
@@ -4785,7 +4799,16 @@ span.comment-pin {
 .designer-card,
 .designer-change {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+  min-width: 0;
+}
+.designer-body > * {
+  min-width: 0;
+}
+textarea {
+  font: inherit;
+  color: inherit;
 }
 .designer-card h3,
 .designer-change h3 {
