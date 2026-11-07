@@ -10,7 +10,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { describe, expect, it } from 'vitest';
 import { numberFor } from '../storage';
 import { dayMark } from './days';
-import { memoryTalkStore, openTalk } from './talkStore';
+import { Unreadable, Unsaved, openTalk } from './talkStore';
 
 const level = sampleFlatProject('prj_a').levels[0] as Level;
 const AT = '2026-11-07T10:00:00.000Z';
@@ -124,19 +124,34 @@ describe('the conversation store (dhd-talk)', () => {
     expect(await s.proposals('prj_b')).toHaveLength(1);
   });
 
-  it('a record from a newer build is left alone, never read as this one', async () => {
-    const idb = new IDBFactory();
-    const s = await openTalk(idb);
-    await s.apply('prj_a', () => ({ ...started(), recordVersion: 9 }) as unknown as Conversation);
-    expect(await s.get('prj_a')).toBeNull();
+  it('a record that wouldn’t read back is never written; nothing is lost', async () => {
+    const s = await openTalk(new IDBFactory());
+    await s.apply('prj_a', () => started());
+    await expect(
+      s.apply('prj_a', (c) => (c ? { ...c, draft: 'x'.repeat(5000) } : c)),
+    ).rejects.toBeInstanceOf(Unsaved);
+    expect((await s.get('prj_a'))?.draft).toBe('');
   });
 
-  it('keeps no key: nothing written holds one', async () => {
-    const s = memoryTalkStore();
+  it('a record this build can’t read is set aside, never overwritten', async () => {
+    const idb = new IDBFactory();
+    const s = await openTalk(idb);
     await s.apply('prj_a', () => started());
-    await s.applyProposal('prj_a', 'prop1', () => proposal('prop1'));
-    const text = JSON.stringify([await s.get('prj_a'), await s.proposals('prj_a')]);
-    expect(text).not.toMatch(/sk-|api[_-]?key|AIza/i);
+    // A newer build's record, as it would be stored.
+    await new Promise<void>((resolve, reject) => {
+      const req = idb.open('dhd-talk', 1);
+      req.onsuccess = () => {
+        const tx = req.result.transaction('conversations', 'readwrite');
+        tx.objectStore('conversations').put({ ...started(), recordVersion: 9 });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      };
+    });
+    expect(await s.get('prj_a')).toBeNull();
+    await expect(s.apply('prj_a', () => started())).rejects.toBeInstanceOf(Unreadable);
+    expect(await s.setAside('prj_a')).toBe(true);
+    expect(await s.setAside('prj_a')).toBe(false);
+    expect((await s.apply('prj_a', () => started()))?.id).toBe('conv1');
   });
 });
 

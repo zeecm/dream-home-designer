@@ -11,7 +11,7 @@ import {
 import { create } from 'zustand';
 import { useStore } from '../../../store';
 import type { RunState } from '../run';
-import { getBrief, putBrief, useDesigner } from '../state';
+import { getBrief, loadDesigns, putBrief, useDesigner } from '../state';
 import { onOtherTab, talkStore } from './talkStore';
 
 /**
@@ -134,6 +134,11 @@ function keepBrief(projectId: string, b: DesignBrief) {
   void putBrief(projectId, b);
 }
 
+const UNSAVED =
+  'Couldn’t save the conversation in this browser; it’s kept until you close the tab.';
+export const SET_ASIDE =
+  'The conversation kept for this plan couldn’t be read, so it was set aside and a new one started.';
+
 /** Applies an action to the conversation as stored (one transaction), and mirrors it. */
 export async function act(action: TalkAction): Promise<Conversation | null> {
   const projectId = doc().id;
@@ -146,10 +151,11 @@ export async function act(action: TalkAction): Promise<Conversation | null> {
       return next === c ? null : next;
     });
   } catch {
-    useTalk.setState({
-      note: 'Couldn’t save the conversation in this browser; it’s kept until you close the tab.',
-    });
-    return useTalk.getState().conv;
+    // Kept in this tab: the change shows, and the note says it isn't saved.
+    const mine = useTalk.getState().conv;
+    const next = mine || action.type === 'start' ? talk(mine as Conversation, action) : null;
+    useTalk.setState({ note: UNSAVED, ...(next ? { conv: next, projectId } : {}) });
+    return next;
   }
   if (doc().id === projectId && out) {
     useTalk.setState({ conv: out, projectId });
@@ -165,7 +171,13 @@ export async function actProposal(
 ): Promise<Proposal | null> {
   const projectId = doc().id;
   const s = await talkStore();
-  const p = await s.applyProposal(projectId, id, fn);
+  let p: Proposal | null;
+  try {
+    p = await s.applyProposal(projectId, id, fn);
+  } catch {
+    p = fn(useTalk.getState().proposals.find((x) => x.id === id) ?? null);
+    useTalk.setState({ note: UNSAVED });
+  }
   if (p && doc().id === projectId) {
     useTalk.setState((st) => {
       const has = st.proposals.some((x) => x.id === p.id);
@@ -191,6 +203,10 @@ export async function ensureConversation(): Promise<Conversation | null> {
   const level = talkLevel();
   if (!before || !level) return null;
   const s = await talkStore();
+  // One this build can't read is kept aside (never overwritten), and the log says so.
+  const aside = await s.setAside(project.id).catch(() => false);
+  // The plan's versions first: the next number follows them.
+  await loadDesigns(project.id);
   const form = await getBrief(project.id);
   const brief: DesignBrief = {
     ...(form ?? defaultBrief()),
@@ -200,7 +216,7 @@ export async function ensureConversation(): Promise<Conversation | null> {
   const beforeFp = await s.putLevel(project.id, before);
   const after = project.renovation?.levels[0];
   const afterFp = after ? await s.putLevel(project.id, after) : null;
-  return act({
+  const started = await act({
     type: 'start',
     id: newId('conv'),
     at: nowIso(),
@@ -213,6 +229,13 @@ export async function ensureConversation(): Promise<Conversation | null> {
     level,
     form: form ? { at: nowIso() } : null,
     ids: [newId('turn'), newId('turn')],
+  });
+  if (!aside) return started;
+  return act({
+    type: 'event',
+    id: newId('turn'),
+    at: nowIso(),
+    event: { type: 'note', text: SET_ASIDE },
   });
 }
 

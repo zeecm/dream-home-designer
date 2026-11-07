@@ -17,13 +17,13 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
   const [text, setText] = useState(conv?.draft ?? '');
   const area = useRef<HTMLTextAreaElement>(null);
   const saved = conv?.draft ?? '';
-  // The stored draft wins when it changes underneath (a proposal took it, another tab).
+  // The stored draft wins when it changes underneath (another tab), unless this composer is
+  // being written in: what is typed here is never replaced.
   const last = useRef(saved);
   useEffect(() => {
-    if (saved !== last.current) {
-      last.current = saved;
-      setText(saved);
-    }
+    if (saved === last.current) return;
+    last.current = saved;
+    if (document.activeElement !== area.current) setText(saved);
   }, [saved]);
   // Emptied when what was typed went with a design.
   const cleared = useTalk((s) => s.cleared);

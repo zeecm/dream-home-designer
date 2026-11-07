@@ -126,6 +126,11 @@ export interface RunOptions {
   overLimit?: () => boolean;
   /** The limit was reached: true to finish the design, false to stop here. */
   confirmOver?: () => Promise<boolean>;
+  /**
+   * After "finish", go on only while `overLimit` says so, and ask again the next time it is
+   * reached (a new figure set meanwhile); without it the rest of the run goes on past it.
+   */
+  askAgain?: boolean;
 }
 
 /** How long a step may go without a single event. */
@@ -333,8 +338,10 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       update();
       asking = (o.confirmOver?.() ?? Promise.resolve(false)).then((go) => {
         state.phase = 'running';
-        if (go) allowOver = true;
-        else stopping = true;
+        if (go && !o.askAgain) allowOver = true;
+        if (!go) stopping = true;
+        // Asked once for this figure; the next one is asked afresh.
+        if (go && o.askAgain) asking = null;
         update();
         return go;
       });

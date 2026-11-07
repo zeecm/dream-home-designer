@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Concept, DesignBrief, Lock, SpaceDesign, SpaceStatus, Usage } from '../schema';
+import { clean } from '../util';
 
 /**
  * The conversation with the designer (spec docs/specs/ai-designer-v2.md, slice 2): what was
@@ -18,6 +19,27 @@ export const DECISION_CHARS = 160;
 /** The composer's limit, and when its counter shows. */
 export const DRAFT_CHARS = 2000;
 
+/**
+ * How long each text of a record may be. Every text is cut to these where it is made (`cut`),
+ * so one long answer or room name never makes a record unreadable.
+ */
+export const TALK_LIMITS = {
+  label: 80,
+  words: 400,
+  note: 400,
+  person: DRAFT_CHARS + 200,
+  designer: 2000,
+  line: 300,
+  after: 400,
+  lead: 300,
+  name: 60,
+  row: 300,
+  left: 80,
+} as const;
+
+/** A text cut to `max` (control characters out, an ellipsis where it was cut). */
+export const cut = (s: string, max: number) => clean(s, max);
+
 /** The app's own first-meeting questions (UX §8.3), each a fact What I know holds. */
 export const QUESTION_KEYS = [
   'who',
@@ -35,7 +57,7 @@ export type QuestionKey = z.infer<typeof QuestionKey>;
 
 /** What a proposal is about: the whole flat, or some spaces (by key), in words. */
 export const ScopeRef = z.object({
-  label: z.string().max(80),
+  label: z.string().max(TALK_LIMITS.label),
   /** Space keys; empty with `all`. */
   spaces: z.array(z.string()).max(30),
   all: z.boolean(),
@@ -64,16 +86,16 @@ export const TalkEvent = z.discriminatedUnion('type', [
     changes: z.array(z.string()),
     /** How many changes the option had in all, and the names of those left out. */
     total: z.number().int().min(0),
-    left: z.array(z.string().max(80)).max(20),
+    left: z.array(z.string().max(TALK_LIMITS.left)).max(20),
     /** Undone since (the line then offers Redo). */
     undone: z.boolean().default(false),
   }),
   z.object({ type: z.literal('stopped'), usd: z.number().min(0).nullable() }),
-  z.object({ type: z.literal('note'), text: z.string().max(400) }),
+  z.object({ type: z.literal('note'), text: z.string().max(TALK_LIMITS.note) }),
   z.object({
     type: z.literal('fact'),
     key: QuestionKey,
-    text: z.string().max(400),
+    text: z.string().max(TALK_LIMITS.note),
   }),
 ]);
 export type TalkEvent = z.infer<typeof TalkEvent>;
@@ -82,7 +104,7 @@ const base = { id: z.string(), at: z.string() };
 
 export const Turn = z.discriminatedUnion('kind', [
   /** What the person said or chose, in words. */
-  z.object({ ...base, kind: z.literal('person'), text: z.string().max(DRAFT_CHARS + 200) }),
+  z.object({ ...base, kind: z.literal('person'), text: z.string().max(TALK_LIMITS.person) }),
   /**
    * The designer's words. In this slice every one is the app's own (the greeting, the
    * assumptions), so `lines` are its bullets; a model's reply comes with the talk call.
@@ -90,23 +112,23 @@ export const Turn = z.discriminatedUnion('kind', [
   z.object({
     ...base,
     kind: z.literal('designer'),
-    text: z.string().max(2000),
-    lines: z.array(z.string().max(300)).max(12).default([]),
+    text: z.string().max(TALK_LIMITS.designer),
+    lines: z.array(z.string().max(TALK_LIMITS.line)).max(12).default([]),
     /** The last line, after the bullets ("These are in What I know about you…"). */
-    after: z.string().max(400).default(''),
+    after: z.string().max(TALK_LIMITS.after).default(''),
   }),
   /** One message of the app's own questions, 1–3 of them, each answered or skipped on its own. */
   z.object({
     ...base,
     kind: z.literal('app-question'),
-    lead: z.string().max(300).nullable(),
+    lead: z.string().max(TALK_LIMITS.lead).nullable(),
     keys: z.array(QuestionKey).min(1).max(3),
     /** Each question once answered (its answer in words), skipped, or assumed by Just design it. */
     done: z
       .record(
         z.object({
           state: z.enum(['answered', 'skipped', 'assumed']),
-          words: z.string().max(400),
+          words: z.string().max(TALK_LIMITS.words),
         }),
       )
       .default({}),
@@ -127,6 +149,17 @@ export const Turn = z.discriminatedUnion('kind', [
       .object({ typical: z.number().min(0), high: z.number().min(0), fix: z.number().min(0) })
       .nullable(),
     state: z.enum(['open', 'go', 'cheaper', 'not-now', 'expired']),
+    /** The answer's id: only the call that answered it starts the run (two tabs). */
+    answerId: z.string().nullable().default(null),
+    /** A stopped proposal's missing rooms ("Design Kitchen too"), rather than a new one. */
+    finish: z
+      .object({
+        proposalId: z.string(),
+        letter: z.string().max(1),
+        rooms: z.array(z.string()).max(30),
+      })
+      .nullable()
+      .default(null),
   }),
   z.object({ ...base, kind: z.literal('proposal'), proposalId: z.string() }),
   z.object({ ...base, kind: z.literal('event'), event: TalkEvent }),
@@ -167,7 +200,7 @@ export type Conversation = z.infer<typeof Conversation>;
 /** One option (A, B, C) of a proposal: a version as the runner builds it, not yet a version. */
 export const ProposalOption = z.object({
   letter: z.enum(['A', 'B', 'C']),
-  name: z.string().max(60),
+  name: z.string().max(TALK_LIMITS.name),
   /** The id its pieces are seeded with, and its version's id once accepted. */
   designId: z.string(),
   brief: DesignBrief,
@@ -199,9 +232,9 @@ export const ProposalOption = z.object({
     .array(
       z.object({
         id: z.string(),
-        text: z.string().max(300),
+        text: z.string().max(TALK_LIMITS.row),
         group: z.string(),
-        groupName: z.string().max(80),
+        groupName: z.string().max(TALK_LIMITS.label),
         event: z.string(),
         out: z.boolean().default(false),
       }),

@@ -3,12 +3,18 @@ import {
   type Design,
   type HistoryEntry,
   type Level,
+  type ResultCheck,
+  TALK_LIMITS,
   type TurnOf,
   acceptChanges,
   allowedChanges,
+  cut,
   levelFingerprint,
+  mergeChanges,
   partsOf,
+  subsetReport,
 } from '@dhd/core';
+import { useRates } from '../../../cost/estimate';
 import { useEditor } from '../../../editor';
 import { useStore } from '../../../store';
 import { loadDesigns, useDesigner } from '../state';
@@ -40,7 +46,36 @@ export function lineState(eventId: string): 'undo' | 'redo' | null {
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** Accepts the ticked changes of a card; the id of the app line it added, or null. */
+/**
+ * What accepting the ticked changes would leave failing, worked out now on the plan as it is
+ * (never from a check still pending): the hard checks those changes cause together, less the
+ * ones accepted anyway (`waived`), and whether any is an HDB rule (never accepted).
+ */
+export function precheckAccept(
+  card: CardModel,
+  ticked: string[],
+  waived: readonly string[],
+): { failing: ResultCheck[]; hdb: boolean } {
+  const project = useStore.getState().editor.doc;
+  const b = nowOf(project);
+  const r = cardResult(project, card);
+  if (!b || !r) return { failing: [], hdb: false };
+  const changes = cardChanges(project, card, r);
+  const merged = mergeChanges(b.now, r.level, changes, ticked);
+  const rep = subsetReport(b.now, b.before, r, merged, card.input.brief, {
+    rates: useRates.getState().rates,
+    waived: [...card.waivers.map((w) => w.key), ...waived],
+    renovation: !!project.renovation,
+  });
+  return { failing: rep.failing, hdb: rep.failing.some((c) => !c.waivable) };
+}
+
+/**
+ * Accepts the ticked changes of a card; the id of the app line it added, or null. `waive` are
+ * the checks the person accepted anyway: only those the accepted changes cause are kept (a
+ * waiver never outlives its tick). It refuses when the changes would fail a check not
+ * waived, or an HDB rule at all.
+ */
 export async function acceptCard(
   card: CardModel,
   ticked: string[],
@@ -54,10 +89,20 @@ export async function acceptCard(
   const ok = allowedChanges(changes, ticked);
   if (!ok.length) return null;
   const ids = ok.map((c) => c.id);
+  // The waivers the accepted changes need: their own checks, or what they fail together.
+  const pre = precheckAccept(card, ids, []);
+  const needed = new Set([...ok.flatMap((c) => c.checks), ...pre.failing.map((c) => c.key)]);
+  const waiving = waive.filter(
+    (w, i, all) => needed.has(w.key) && all.findIndex((x) => x.key === w.key) === i,
+  );
+  const unwaived = pre.failing.filter((c) => !waiving.some((w) => w.key === c.key));
+  if (pre.hdb || unwaived.length) return null;
   const prior = structuredClone(b.now);
-  // The plan's history waits while a version is previewed: back to the plan first.
+  // The plan's history waits while a version is previewed: back to the plan first. Edits go to
+  // the renovation, so its guards (the household shelter) apply to the accept.
   useEditor.getState().setPreview(null);
   useDesigner.setState({ previewing: false });
+  useEditor.getState().setVariant('after');
   const was = useStore.getState().editor;
   const label = `Use design V${card.n}`;
   useStore.getState().dispatch(acceptChanges(b.before.id, r.level, changes, ids, { label }));
@@ -75,24 +120,23 @@ export async function acceptCard(
   }
   const step = now.history.past.at(-1);
   if (step) steps.set(eventId, step.patches);
-  useEditor.getState().setVariant('after');
   useStore.setState({ toast: null });
   const after = now.doc.renovation?.levels[0];
   const at = nowIso();
-  const waivers = [...card.waivers, ...waive.map((w) => ({ ...w, at }))].filter(
+  const waivers = [...card.waivers, ...waiving.map((w) => ({ ...w, at }))].filter(
     (w, i, all) => all.findIndex((x) => x.key === w.key) === i,
   );
   const rows = ok.map((c) => ({
     id: c.id,
-    text: c.text,
+    text: cut(c.text, TALK_LIMITS.row),
     group: c.group,
-    groupName: c.groupName,
+    groupName: cut(c.groupName, TALK_LIMITS.label),
     event: eventId,
     out: false,
   }));
   const left = changes.filter((c) => !ids.includes(c.id));
   const total = card.accepted.filter((a) => !a.out).length + changes.length;
-  if (after) await keepVersion(card, changes, ids, after, prior, waivers);
+  const n = (after ? await keepVersion(card, changes, ids, after, prior, waivers) : null) ?? card.n;
   if (card.proposal && card.option) {
     const letter = card.option.letter;
     await actProposal(card.proposal.id, (p) =>
@@ -114,14 +158,14 @@ export async function acceptCard(
         : p,
     );
   }
-  for (const w of waive) {
+  for (const w of waiving) {
     await act({
       type: 'decisionAdd',
       id: newId('dec'),
       at,
       kind: 'waiver',
-      text: `Waived: ${w.text}`.slice(0, 160),
-      from: `V${card.n}`,
+      text: cut(`Waived: ${w.text}`, 160),
+      from: `V${n}`,
     });
   }
   await act({
@@ -129,13 +173,13 @@ export async function acceptCard(
     id: eventId,
     at,
     proposalId: card.proposal?.id ?? card.design?.id ?? card.key,
-    n: card.n,
+    n,
     letter: card.option?.letter ?? 'A',
     changes: ids,
     total,
-    left: left.map((c) => c.name).slice(0, 20),
+    left: left.map((c) => cut(c.name, TALK_LIMITS.left)).slice(0, 20),
   });
-  say(`Accepted ${plural(ids.length, 'change')} from V${card.n}. Undo is available.`);
+  say(`Accepted ${plural(ids.length, 'change')} from V${n}. Undo is available.`);
   return eventId;
 }
 
@@ -147,8 +191,9 @@ async function keepVersion(
   after: Level,
   prior: Level,
   waivers: Design['waivers'],
-) {
+): Promise<number | null> {
   const s = await designStore();
+  let n: number | null = null;
   const projectId = useStore.getState().editor.doc.id;
   const parts = partsOf(changes, ids);
   const accepted = {
@@ -160,12 +205,14 @@ async function keepVersion(
     prior,
   };
   if (card.design) {
+    n = card.design.n;
     await s.put({ ...card.design, waivers, accepted });
   } else if (card.proposal && card.option) {
     const o = card.option;
     const mine = await s.list(projectId);
     const had = mine.find((d) => d.id === o.designId);
     if (had) {
+      n = had.n;
       await s.put({ ...had, waivers, accepted });
     } else {
       const base =
@@ -176,7 +223,7 @@ async function keepVersion(
           id: o.designId,
           projectId,
           levelId: useStore.getState().editor.doc.levels[0]?.id ?? '',
-          name: o.concept?.name ?? card.label,
+          name: cut(o.concept?.name ?? card.label, 80),
           parent: null,
           createdAt: card.at,
           base: { variant: o.base.variant, fingerprint: levelFingerprint(base) },
@@ -207,6 +254,8 @@ async function keepVersion(
         },
         card.n,
       );
+      // The number it took (another tab may have taken this one meanwhile).
+      n = made.design.n;
       if (made.pruned) {
         await act({
           type: 'event',
@@ -221,6 +270,7 @@ async function keepVersion(
     }
   }
   await loadDesigns(projectId);
+  return n;
 }
 
 /** Marks a line's rows out of (or back in) the renovation, on its proposal. */
@@ -255,16 +305,20 @@ export function redoLine(eventId: string) {
   useStore.getState().redo();
 }
 
-// The toolbar's Undo and Redo (and Ctrl+Z) move a line's accept too: the line follows.
+// The toolbar's Undo and Redo (and Ctrl+Z) move a line's accept too: the line follows. A
+// change that arrives while the lines are being brought up to date runs the sync again.
 let syncing = false;
-useStore.subscribe((s, prev) => {
-  if (s.editor.history === prev.editor.history || syncing) return;
-  const conv = useTalk.getState().conv;
-  if (!conv) return;
+let dirty = false;
+async function syncLines() {
+  if (syncing) {
+    dirty = true;
+    return;
+  }
   syncing = true;
-  void (async () => {
-    try {
-      for (const t of conv.turns) {
+  try {
+    do {
+      dirty = false;
+      for (const t of useTalk.getState().conv?.turns ?? []) {
         if (t.kind !== 'event' || t.event.type !== 'accepted') continue;
         const st = lineState(t.id);
         if (st === 'redo' && !t.event.undone) {
@@ -277,8 +331,11 @@ useStore.subscribe((s, prev) => {
           say(`Redone: the changes from V${t.event.n} are back in your renovation.`);
         }
       }
-    } finally {
-      syncing = false;
-    }
-  })();
+    } while (dirty);
+  } finally {
+    syncing = false;
+  }
+}
+useStore.subscribe((st, prev) => {
+  if (st.editor.history !== prev.editor.history) void syncLines();
 });

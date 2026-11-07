@@ -1,7 +1,7 @@
 import {
-  type Conversation,
+  Conversation,
   Level,
-  type Proposal,
+  Proposal,
   conversationFromRecord,
   levelFingerprint,
   proposalFromRecord,
@@ -43,6 +43,22 @@ export interface TalkStore {
   putLevel(projectId: string, level: Level): Promise<string>;
   getLevel(projectId: string, fp: string): Promise<Level | null>;
   removeProject(projectId: string): Promise<void>;
+  /**
+   * A conversation this build can't read is moved aside (kept in `bad`, never overwritten);
+   * true when there was one.
+   */
+  setAside(projectId: string): Promise<boolean>;
+}
+
+/** A write the records' own schema refuses: nothing is written. */
+export class Unsaved extends Error {}
+/** The stored conversation can't be read: set it aside before starting another. */
+export class Unreadable extends Error {}
+
+/** Checked against the schema before it is written: a record that wouldn't read back never is. */
+function checked<T>(schema: { safeParse: (v: unknown) => { success: boolean } }, v: T): T {
+  if (!schema.safeParse(v).success) throw new Unsaved('the record doesn’t fit its schema');
+  return v;
 }
 
 const bump = (c: Conversation, was: Conversation | null): Conversation => ({
@@ -85,7 +101,7 @@ export function memoryTalkStore(): TalkStore {
       const was = convs.get(projectId) ?? null;
       const next = fn(was ? structuredClone(was) : null);
       if (!next) return was;
-      const out = bump(next, was);
+      const out = checked(Conversation, bump(next, was));
       convs.set(projectId, structuredClone(out));
       return out;
     },
@@ -99,7 +115,7 @@ export function memoryTalkStore(): TalkStore {
       const was = props.get(k(projectId, id)) ?? null;
       const next = fn(was ? structuredClone(was) : null);
       if (!next) return was;
-      props.set(k(projectId, id), structuredClone(next));
+      props.set(k(projectId, id), structuredClone(checked(Proposal, next)));
       return next;
     },
     async putLevel(projectId, level) {
@@ -115,6 +131,9 @@ export function memoryTalkStore(): TalkStore {
       convs.delete(projectId);
       for (const [key, p] of props) if (p.projectId === projectId) props.delete(key);
       for (const key of levels.keys()) if (key.startsWith(`${projectId}\u0000`)) levels.delete(key);
+    },
+    async setAside() {
+      return false;
     },
   };
 }
@@ -144,19 +163,23 @@ function idbTalkStore(db: IDBDatabase): TalkStore {
       const ended = finished(tx);
       const raw = await done(store.get(projectId));
       const was = conversationFromRecord(raw);
-      if (raw && !was) {
-        // A record this build can't read is set aside, not overwritten.
-        db.transaction('bad', 'readwrite').objectStore('bad').put({ projectId, raw });
-      }
-      const next = fn(was);
-      let out = was;
-      if (next) {
-        out = bump(next, was);
-        store.put(structuredClone(out));
+      let next: Conversation | null = null;
+      let failed: unknown = null;
+      try {
+        // A record this build can't read is never overwritten: it is set aside first.
+        if (raw && !was) throw new Unreadable('the conversation can’t be read');
+        const made = fn(was);
+        if (made) {
+          next = checked(Conversation, bump(made, was));
+          store.put(structuredClone(next));
+        }
+      } catch (e) {
+        failed = e;
       }
       await ended;
-      if (next && out) ping(projectId, out.rev);
-      return out;
+      if (failed) throw failed;
+      if (next) ping(projectId, next.rev);
+      return next ?? was;
     },
     async proposals(projectId) {
       const tx = db.transaction('proposals', 'readonly');
@@ -171,9 +194,16 @@ function idbTalkStore(db: IDBDatabase): TalkStore {
       const store = tx.objectStore('proposals');
       const ended = finished(tx);
       const was = proposalFromRecord(await done(store.get([projectId, id])));
-      const next = fn(was);
-      if (next) store.put(structuredClone(next));
+      let next: Proposal | null = null;
+      let failed: unknown = null;
+      try {
+        next = fn(was);
+        if (next) store.put(structuredClone(checked(Proposal, next)));
+      } catch (e) {
+        failed = e;
+      }
       await ended;
+      if (failed) throw failed;
       if (next) ping(projectId, -1);
       return next ?? was;
     },
@@ -205,6 +235,18 @@ function idbTalkStore(db: IDBDatabase): TalkStore {
         levels.delete(key);
       }
       await finished(tx);
+    },
+    async setAside(projectId) {
+      const tx = db.transaction(['conversations', 'bad'], 'readwrite');
+      const ended = finished(tx);
+      const raw = await done(tx.objectStore('conversations').get(projectId));
+      const bad = !!raw && !conversationFromRecord(raw);
+      if (bad) {
+        tx.objectStore('bad').put({ projectId, raw, at: new Date().toISOString() });
+        tx.objectStore('conversations').delete(projectId);
+      }
+      await ended;
+      return bad;
     },
   };
 }

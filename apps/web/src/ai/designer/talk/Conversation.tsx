@@ -16,6 +16,7 @@ import { Decisions, WhatIKnow } from './Views';
 import { lineState, undoLine } from './accept';
 import { cardChanges, cardResult, optionCard } from './cards';
 import { stopTalkRun } from './propose';
+import { timed, useSettledProject } from './settle';
 import { act, ensureConversation, newId, nowIso, talkLevel, useTalk } from './useTalk';
 import { useProposalView } from './view';
 
@@ -49,19 +50,34 @@ type Size = 'peek' | 'half' | 'full';
 
 /** "On the table: V4 · Passes all checks [Accept…]" (UX §5.2). */
 function OnTheTable() {
-  const project = useProject();
+  // The plan once edits pause (off the drag path).
+  const project = useSettledProject();
   // The history moves under the bar's Undo.
   useStore((s) => s.editor.history);
-  const conv = useTalk((s) => s.conv);
+  const lastId = useTalk((s) => {
+    const turns = s.conv?.turns ?? [];
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const t = turns[i];
+      if (t?.kind === 'proposal') return t.proposalId;
+    }
+    return null;
+  });
+  const proposal = useTalk((s) => s.proposals.find((x) => x.id === lastId));
   const proposals = useTalk((s) => s.proposals);
   const shown = useTalk((s) => s.shown);
   const last = useMemo(() => {
-    const t = [...(conv?.turns ?? [])].reverse().find((x) => x.kind === 'proposal');
-    const p = t?.kind === 'proposal' ? proposals.find((x) => x.id === t.proposalId) : undefined;
-    const o = p?.options[0];
-    return p && o ? optionCard(p, o) : null;
-  }, [conv, proposals]);
-  const r = useMemo(() => (last ? cardResult(project, last) : null), [project, last]);
+    const o = proposal?.options[0];
+    return proposal && o ? optionCard(proposal, o) : null;
+  }, [proposal]);
+  const r = useMemo(() => (last ? timed(() => cardResult(project, last)) : null), [project, last]);
+  const remaining = useMemo(
+    () => (last && r ? timed(() => cardChanges(project, last, r)).length : 0),
+    [project, last, r],
+  );
+  const open = useMemo(
+    () => (r && last ? failingChecks(r, { waivers: last.waivers }).open.length : 0),
+    [r, last],
+  );
   if (!last || !r) return null;
   const go = (accept: boolean) => {
     const el = document.querySelector(`[data-card="${CSS.escape(last.key)}"]`);
@@ -71,9 +87,7 @@ function OnTheTable() {
   const other = shown && shown !== last.key ? shown : null;
   const otherN = other ? proposals.find((p) => other.startsWith(`${p.id}:`))?.n : null;
   const accepted = last.accepted.filter((a) => !a.out);
-  const open = failingChecks(r, { waivers: last.waivers }).open.length;
-  const allIn =
-    last.status !== 'running' && accepted.length > 0 && cardChanges(project, last, r).length === 0;
+  const allIn = last.status !== 'running' && accepted.length > 0 && remaining === 0;
   const line = accepted.at(-1)?.event;
   const undo = line && lineState(line) === 'undo' ? line : null;
   const verdict =

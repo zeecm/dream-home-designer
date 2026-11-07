@@ -3,6 +3,7 @@ import {
   type EditorDoc,
   type Level,
   type Part,
+  acceptDesign,
   designResult,
   dispatch,
   emptyHistory,
@@ -19,12 +20,9 @@ import {
   sampleDesign,
 } from '../../../../../packages/core/src/designer/fixtures/sample';
 import {
-  acceptCommand,
   acceptedNow,
   changeFrom,
   changePlan,
-  heldHead,
-  heldRows,
   lastAccepted,
   onPlanNow,
   resultFor,
@@ -79,12 +77,15 @@ function accept(
       ? []
       : spacesOf(r.level).flatMap((x) => all.map((aspect) => ({ space: x.key, aspect }) as Part))),
   ];
-  const made = acceptCommand(d, o.designs ?? [d], s.doc, parts, {});
-  if (!made) throw new Error('nothing to accept');
-  const next = dispatch(s, made.command);
+  // As slice 1 accepted a version: placed on After as it is now, keeping hand edits.
+  const v = onPlanNow(d, o.designs ?? [d], s.doc);
+  const placed = resultFor(s.doc, { ...v, base: { ...v.base, variant: 'after' } }, {});
+  if (!placed) throw new Error('nothing to accept');
+  const prior = structuredClone(s.doc.renovation?.levels[0] ?? before);
+  const next = dispatch(s, acceptDesign(before.id, placed.level, parts, { base: d.baseLevel }));
   return {
     s: next,
-    d: { ...d, accepted: { at, parts, level: afterOf(next), prior: made.prior } },
+    d: { ...d, accepted: { at, parts, level: afterOf(next), prior } },
   };
 }
 
@@ -344,48 +345,6 @@ describe('hand edits a version already decided on, and what an accept itself did
       updateWall(after.id, wallId, { height: after.walls[wallId]?.height }),
     );
     expect(wallsStillIn(two.d, afterOf(s2))).toBe(null);
-  });
-
-  it('a held row says what it keeps, "none" when a room has no such pieces left', () => {
-    const { doc } = acceptedThenMoved();
-    const after = doc.renovation?.levels[0] as Level;
-    const spaces = spacesOf(after);
-    const lock = (space: string) =>
-      ({ space, aspect: 'furniture', by: 'hand-edit', label: 'Bar stool (removed)' }) as const;
-    expect(heldHead(lock(SAMPLE_KEYS.living), spaces, after)).toMatch(
-      /^Living and dining furniture, all \d+ pieces, as now$/,
-    );
-    const empty = { ...after, items: {} };
-    expect(heldHead(lock(SAMPLE_KEYS.kitchen), spaces, empty)).toBe(
-      'Kitchen furniture, none, as now',
-    );
-  });
-});
-
-describe('heldRows: one row per space and part', () => {
-  it('two pieces moved in one room are one row, unlocked together', () => {
-    const living = SAMPLE_KEYS.living;
-    const lock = (space: string, aspect: 'furniture' | 'finishes' | 'walls', label: string) =>
-      ({ space, aspect, by: 'hand-edit', label }) as const;
-    const rows = heldRows([
-      lock(living, 'furniture', '3-seat sofa (moved)'),
-      lock(SAMPLE_KEYS.bedroom, 'finishes', 'Mdm Lim’s room wall (repainted)'),
-      lock(living, 'furniture', 'Armchair (moved)'),
-      lock('*', 'walls', 'Walls and doors (changed)'),
-    ]);
-    expect(rows.map((r) => r.text)).toEqual([
-      '3-seat sofa (moved), Armchair (moved)',
-      'Mdm Lim’s room wall (repainted)',
-      'Walls and doors (changed)',
-    ]);
-    expect(rows[0]?.locks).toHaveLength(2);
-    // With what each row holds said first (a lock keeps the whole part).
-    const said = heldRows(rows[0]?.locks ?? [], (l) =>
-      l.aspect === 'furniture' ? 'Living and dining furniture, all 15 pieces as now' : '',
-    );
-    expect(said.map((r) => r.text)).toEqual([
-      'Living and dining furniture, all 15 pieces as now: 3-seat sofa (moved), Armchair (moved)',
-    ]);
   });
 });
 

@@ -1,10 +1,13 @@
 import {
   type Conversation,
+  FIX_PER_RUN,
   type Level,
   type QuestionKey,
   type ScopeRef,
+  TALK_LIMITS,
   type Turn,
   type TurnOf,
+  cut,
   meetingOver,
   questionText,
   roomArea,
@@ -24,7 +27,8 @@ import { ProposalCard } from './ProposalCard';
 import { lineState, redoLine, undoLine } from './accept';
 import { type CardModel, designCard, optionCard } from './cards';
 import { dayMark } from './days';
-import { answerCost, pressScope, scopePrice } from './propose';
+import { answerCost, cardRequest, pressPrice, pressScope, scopePrice } from './propose';
+import { timed, useSettledProject } from './settle';
 import { act, newId, nowIso, talkLevel, useTalk } from './useTalk';
 
 /**
@@ -159,27 +163,32 @@ function Questions({ t, latest }: { t: TurnOf<'app-question'>; latest: boolean }
 
 /** The priced scope buttons: the whole flat, then each space (UX §8.4). */
 function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
-  const project = useProject();
+  // Off the drag path: worked out once edits pause.
+  const project = useSettledProject();
   const conv = useTalk((s) => s.conv) as Conversation;
   const ai = useAi();
   const busy = useDesigner((s) => s.starting || !!s.run);
   const { prices } = useSpend();
-  const level = talkLevel();
+  const level = project.renovation?.levels[0] ?? project.levels[0];
   const scopes = useMemo<ScopeRef[]>(
     () =>
       level
         ? [
             { label: 'The whole flat', spaces: [], all: true },
-            ...spacesOf(level).map((s) => ({ label: s.name, spaces: [s.key], all: false })),
+            ...spacesOf(level).map((s) => ({
+              label: cut(s.name, TALK_LIMITS.label),
+              spaces: [s.key],
+              all: false,
+            })),
           ]
         : [],
     [level],
   );
-  // Prices without the person's words (they add little), worked out once per plan and brief.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: on the plan, the brief and the prices
+  // Prices without the person's words (they add little), once per plan, brief and prices.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on what the prices read
   const priced = useMemo(
-    () => (latest && ai ? scopes.map((s) => ({ s, est: scopePrice(s, '') })) : []),
-    [latest, ai, scopes, conv.brief, project, prices],
+    () => (latest && ai ? timed(() => scopes.map((s) => ({ s, est: scopePrice(s) }))) : []),
+    [latest, ai, scopes, conv.brief, prices],
   );
   const conflict = level ? sleepingConflict(conv.brief, level) : null;
   const cant = ai && designerCannotUse(ai);
@@ -237,7 +246,9 @@ function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
 function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
   const ai = useAi();
   const busy = useDesigner((s) => s.starting || !!s.run);
-  const level = talkLevel();
+  const project = useSettledProject();
+  const { prices } = useSpend();
+  const level = project.renovation?.levels[0] ?? project.levels[0];
   const first = useMemo<ScopeRef | null>(() => {
     if (!t.scope.all || !level) return null;
     // The largest space first (the living room, as a rule): the one most worth starting with.
@@ -246,8 +257,27 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
     )[0];
     return s ? { label: s.name, spaces: [s.key], all: false } : null;
   }, [t.scope.all, level]);
-  const cheaper = first ? scopePrice(first, t.words) : null;
-  const est = scopePrice(t.scope, t.words);
+  const open = t.state === 'open';
+  // The price as it is now: the card's figure follows it, so the sentence and the cost check
+  // below always say the same (and Go ahead binds what they say).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on what the prices read
+  const est = useMemo(
+    () => (open ? timed(() => pressPrice(cardRequest(t))) : null),
+    [open, t.scope, t.words, t.finish, project, prices, ai],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on what the prices read
+  const cheaper = useMemo(
+    () => (open && first ? timed(() => pressPrice(cardRequest(t, first))) : null),
+    [open, first, t.words, project, prices, ai],
+  );
+  useEffect(() => {
+    const u = est?.usd;
+    if (!open || !u) return;
+    const now = { typical: u.typical, high: u.high, fix: u.fix };
+    if (JSON.stringify(now) !== JSON.stringify(t.estimate)) {
+      void act({ type: 'costRefresh', turnId: t.id, estimate: now });
+    }
+  }, [open, est, t.estimate, t.id]);
   const cap = capUsd();
   const what = t.scope.all ? 'Designing the whole flat' : `Designing ${t.scope.label}`;
   if (t.state !== 'open') {
@@ -285,7 +315,10 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
         <p className="talk-text">
           {what} takes about {usd(t.estimate.typical)} (at most{' '}
           {usd(t.estimate.high + t.estimate.fix)}
-          {t.estimate.fix > 0 ? ', up to 3 fix-ups included' : ''}). Go ahead?
+          {t.estimate.fix > 0
+            ? `, up to ${est?.fixes ?? FIX_PER_RUN} fix-up${(est?.fixes ?? FIX_PER_RUN) === 1 ? '' : 's'} included`
+            : ''}
+          ). Go ahead?
         </p>
       )}
       {ai && est && t.reason !== 'ask-threshold' ? (

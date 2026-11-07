@@ -49,7 +49,6 @@ export {
   type AcceptOptions,
   acceptDesign,
   allowedParts,
-  isDesignedId,
   aspectOf,
   dependsOnWalls,
   mergeDesign,

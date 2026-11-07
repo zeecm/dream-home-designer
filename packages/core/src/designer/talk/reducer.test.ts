@@ -350,3 +350,127 @@ describe('the reducer', () => {
     expect(conversationFromRecord({ ...b, recordVersion: 9 })).toBeNull();
   });
 });
+
+describe('long texts (B1): every text is cut where it is made', () => {
+  it('a 1000-character answer and a 120-character room name still read back', () => {
+    const long = 'Mdm Koh’s quiet room by the window '.repeat(4).slice(0, 120);
+    const base = level();
+    const lvl: Level = {
+      ...base,
+      rooms: Object.fromEntries(
+        Object.entries(base.rooms).map(([id, r]) => [
+          id,
+          id === 'rm_bedroom' ? { ...r, name: long } : r,
+        ]),
+      ),
+    };
+    let c = talk({} as Conversation, {
+      type: 'start',
+      id: 'conv1',
+      at: AT,
+      projectId: 'p1',
+      levelId: 'lvl',
+      brief: defaultBrief(),
+      beforeFp: 'fp0',
+      afterFp: null,
+      nextN: 1,
+      level: lvl,
+      form: null,
+      ids: [id(), id()],
+    });
+    const step = (key: QuestionKey, brief: DesignBrief) =>
+      talk(c, { type: 'answer', turnId: question(c).id, key, brief, at: AT, id: id(), level: lvl });
+    c = step('who', ongs(c.brief));
+    c = step('sleeping', {
+      ...c.brief,
+      sleeping: { rm_bedroom: ['adult-1', 'adult-2', 'child-1', 'elder-1'] },
+    });
+    c = step('mobility', c.brief);
+    c = step('cooking', c.brief);
+    c = step('wfh', c.brief);
+    c = step('budget', c.brief);
+    c = step('walls', c.brief);
+    const essay = 'We keep the piano. '.repeat(60).slice(0, 1000);
+    c = step('style', { ...c.brief, household: { ...c.brief.household, text: essay } });
+    c = talk(c, {
+      type: 'ask',
+      at: AT,
+      ids: [id(), id()],
+      scope: { label: long, spaces: ['rm_bedroom'], all: false },
+      words: 'x'.repeat(5000),
+      reason: 'ask-cost-check',
+      estimate: null,
+    });
+    c = talk(c, {
+      type: 'accepted',
+      id: id(),
+      at: AT,
+      proposalId: 'p',
+      n: 1,
+      letter: 'A',
+      changes: [],
+      total: 3,
+      left: [`the ${long}`],
+    });
+    c = talk(c, {
+      type: 'event',
+      id: id(),
+      at: AT,
+      event: { type: 'note', text: long.repeat(10) },
+    });
+    const back = conversationFromRecord(JSON.parse(JSON.stringify(c)));
+    expect(back).not.toBeNull();
+    expect(back).toEqual(c);
+    const card = c.turns.find((x) => x.kind === 'cost-ask') as TurnOf<'cost-ask'>;
+    expect(card.scope.label.length).toBeLessThanOrEqual(80);
+    expect(card.scope.label.endsWith('…')).toBe(true);
+  });
+
+  it('start on a conversation there is already leaves it as it is', () => {
+    const c = start();
+    expect(
+      talk(c, {
+        type: 'start',
+        id: 'conv2',
+        at: AT,
+        projectId: 'p1',
+        levelId: 'lvl',
+        brief: defaultBrief(),
+        beforeFp: 'fp0',
+        afterFp: null,
+        nextN: 9,
+        level: level(),
+        form: null,
+        ids: [id(), id()],
+      }),
+    ).toBe(c);
+  });
+
+  it('a cost card records who answered it; its figure can be refreshed only while open', () => {
+    let c = talk(start(), { type: 'justDesign', at: AT, ids: [id(), id()], level: level() });
+    c = talk(c, {
+      type: 'ask',
+      at: AT,
+      ids: [id(), 'card'],
+      scope: { label: 'Kitchen', spaces: ['rm_kitchen'], all: false },
+      words: '',
+      reason: 'ask-cost-check',
+      estimate: { typical: 0.1, high: 0.3, fix: 0.2 },
+    });
+    const est = { typical: 0.12, high: 0.4, fix: 0.2 };
+    c = talk(c, { type: 'costRefresh', turnId: 'card', estimate: est });
+    expect((c.turns.find((x) => x.id === 'card') as TurnOf<'cost-ask'>).estimate).toEqual(est);
+    c = talk(c, { type: 'costAnswer', turnId: 'card', answer: 'go', at: AT, id: 'tab-a' });
+    const after = talk(c, {
+      type: 'costAnswer',
+      turnId: 'card',
+      answer: 'go',
+      at: AT,
+      id: 'tab-b',
+    });
+    expect((after.turns.find((x) => x.id === 'card') as TurnOf<'cost-ask'>).answerId).toBe('tab-a');
+    expect(
+      talk(c, { type: 'costRefresh', turnId: 'card', estimate: { typical: 1, high: 2, fix: 0 } }),
+    ).toBe(c);
+  });
+});

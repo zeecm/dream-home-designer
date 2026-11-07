@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { acceptChanges, putPlanBack } from '../../commands';
 import { furnishedSample } from '../../fixtures/furnishedSample';
 import { sampleFlatProject } from '../../fixtures/sampleFlat';
-import { type EditorDoc, dispatch, emptyHistory, undo } from '../../history';
+import { type EditorDoc, dispatch, emptyHistory, redo, undo } from '../../history';
 import type { Level } from '../../schema';
 import { acceptDesign, mergeDesign } from '../accept';
 import {
@@ -15,7 +14,15 @@ import {
 import { designResult } from '../result';
 import { BATHROOMS, type Concept, type Part } from '../schema';
 import { spacesOf } from '../spaces';
-import { changeSet, defaultTicks, mergeChanges, partsOf, subsetReport } from './changes';
+import {
+  acceptChanges,
+  changeSet,
+  defaultTicks,
+  mergeChanges,
+  partsOf,
+  putPlanBack,
+  subsetReport,
+} from './changes';
 
 const fresh = (level?: Level): EditorDoc => {
   const doc = sampleFlatProject();
@@ -157,6 +164,24 @@ describe('mergeChanges and acceptChanges (criterion 23)', () => {
     const back = undo(s1);
     expect(back.doc).toEqual(s0.doc);
     expect(back.doc.renovation).toBeUndefined();
+  });
+
+  it('Redo after Undo gives the accepted document back exactly', () => {
+    const s0 = fresh();
+    const lvl = flat(s0);
+    const design = sampleDesign({ level: lvl });
+    const r = designResult(lvl, lvl, design);
+    const cs = changeSet(lvl, r, design);
+    const s1 = dispatch(
+      s0,
+      acceptChanges(
+        lvl.id,
+        r.level,
+        cs,
+        cs.slice(0, 4).map((c) => c.id),
+      ),
+    );
+    expect(redo(undo(s1)).doc).toEqual(s1.doc);
   });
 
   it('any subset, then Undo, gives the document back (with and without a renovation)', () => {

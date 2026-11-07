@@ -78,12 +78,6 @@ export function resultFor(
   return designResult(b.base, b.before, d, opts);
 }
 
-/** Whether the plan the version would go on has changed since it was made. */
-export function planChanged(doc: Project, d: Design): boolean {
-  const b = baseOf(doc, d.base.variant);
-  return !!b && levelFingerprint(b.base) !== d.base.fingerprint;
-}
-
 /** The room requests a plan makes on the level as it is (no layout step run). */
 export function roomPrompts(
   ctx: ContextInput,
@@ -140,19 +134,6 @@ export function estimateFor(
   prices: Record<string, Price>,
 ): RunEstimate {
   return estimateRun(prompts, { provider: ai.provider, model: ai.model, quality, prices });
-}
-
-/** The cost check comes first: a run that may cost US$0.50, the tab's first, or one past the limit. */
-export function needsCostCheck(
-  est: RunEstimate,
-  spend: { usd: number; runs: number },
-  cap: number | null,
-): boolean {
-  if (spend.runs === 0) return true;
-  if (!est.usd) return true;
-  if (est.usd.high >= 0.5) return true;
-  // The limit against the most it may cost, fix rounds included.
-  return cap !== null && spend.usd + est.usd.high + (est.usd.fix ?? 0) > cap;
 }
 
 /** Over this many input tokens in one step, a run is refused. */
@@ -246,53 +227,6 @@ export function wallsInAfter(v: Design, designs: Design[], after: Level | undefi
   return [v, ...designs].some((d) => wallsText(d) === mine && wallsStillIn(d, after) === true);
 }
 
-/**
- * A "Kept as you changed them" row: one per space and part, its locks unlocked together. A
- * lock holds the whole part (all the room's furniture, say), so the row says what is held
- * (`head`, e.g. "Living and dining furniture, all 15 pieces as they are now") and then why.
- */
-export interface HeldRow {
-  key: string;
-  locks: Lock[];
-  text: string;
-}
-export function heldRows(locks: Lock[], head: (l: Lock) => string = () => ''): HeldRow[] {
-  const rows = new Map<string, HeldRow>();
-  for (const l of locks) {
-    const key = `${l.space}|${l.aspect}`;
-    const row = rows.get(key) ?? { key, locks: [], text: '' };
-    row.locks.push(l);
-    const why = row.locks.map((x) => x.label).join(', ');
-    const what = head(l);
-    row.text = what ? `${what}: ${why}` : why;
-    rows.set(key, row);
-  }
-  return [...rows.values()];
-}
-
-/**
- * What a held row keeps, in words: "Living and dining furniture, all 13 pieces, as now"
- * (counted in After, `after`), "Kitchen furniture, none, as now", "Bedroom paint and floors".
- */
-export function heldHead(
-  l: Lock,
-  spaces: { name: string; rooms: string[] }[],
-  after: Level | undefined,
-): string {
-  if (l.space === '*') return '';
-  if (l.space === BATHROOMS) return 'Bathrooms’ paint and floors';
-  const s = spaces.find((x) => lockCovers(l, x.rooms));
-  const name = s?.name ?? 'A room';
-  const what = ASPECT_NAMES[l.aspect].toLowerCase();
-  if (l.aspect !== 'furniture' && l.aspect !== 'built-ins') return `${name} ${what}`;
-  const n = Object.values(after?.items ?? {}).filter((it) => {
-    const room = after && roomIdAt(after, { x: it.position.x, y: it.position.z });
-    return aspectOf(it) === l.aspect && !!room && !!s?.rooms.includes(room);
-  }).length;
-  const pieces = n === 0 ? 'none' : n === 1 ? 'its 1 piece' : `all ${n} pieces`;
-  return `${name} ${what}, ${pieces}, as now`;
-}
-
 /** The version accepted last that is still in the renovation, if any. */
 export function lastAccepted(designs: Design[], after: Level | undefined): Design | null {
   return (
@@ -345,33 +279,6 @@ function heldFor(v: Design, accepted: Design, after: Level): Lock[] {
   const key = (l: Lock) => `${l.space}|${l.aspect}|${l.label}`;
   const seen = new Set(own.map(key));
   return [...own, ...since.filter((l) => !seen.has(key(l)))];
-}
-
-/**
- * Accepting `d`'s ticked parts as the app does: worked out on After as it is now (or the
- * flat, with no renovation), keeping what was changed by hand since the last accept; with
- * the plan as it was before (`prior`), to record what the accept itself changed.
- */
-export function acceptCommand(
-  d: Design,
-  designs: Design[],
-  doc: Project,
-  parts: Part[],
-  result: DesignOptions,
-  opts: { removeHandPlaced?: boolean; label?: string } = {},
-): { command: Command; prior: Level } | null {
-  const before = doc.levels[0];
-  const v = onPlanNow(d, designs, doc);
-  const r = resultFor(doc, { ...v, base: { ...v.base, variant: 'after' } }, result);
-  if (!r || !before) return null;
-  return {
-    command: acceptDesign(before.id, r.level, parts, {
-      base: d.baseLevel,
-      ...(opts.removeHandPlaced ? { removeHandPlaced: true } : {}),
-      ...(opts.label ? { label: opts.label } : {}),
-    }),
-    prior: structuredClone(doc.renovation?.levels[0] ?? before),
-  };
 }
 
 /**

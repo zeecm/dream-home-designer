@@ -206,7 +206,7 @@ export function designResult(
   if (hit) return hit;
   const out = freeze(work(baseLevel, beforeLevel, design, opts), true);
   memo.set(key, out);
-  if (memo.size > 8) memo.delete(memo.keys().next().value as string);
+  if (memo.size > 16) memo.delete(memo.keys().next().value as string);
   return out;
 }
 

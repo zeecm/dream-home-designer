@@ -12,18 +12,19 @@ import {
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useRates } from '../../../cost/estimate';
 import { useEditor } from '../../../editor';
-import { useProject, useStore } from '../../../store';
+import { useStore } from '../../../store';
 import { useAi } from '../../credentials';
 import { CaseDialog } from '../CaseDialog';
 import { failingChecks } from '../parts';
-import { tokens, usd } from '../spend';
+import { tokens, usd, useSpend } from '../spend';
 import { openCompare, useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
 import { keepTogether } from '../words';
 import { Mark } from './Mark';
-import { acceptCard } from './accept';
+import { acceptCard, precheckAccept } from './accept';
 import { type CardModel, cardChanges, cardResult, nowOf, planMoved } from './cards';
-import { finishOption, finishPrice, pressScope, scopePrice, stopTalkRun } from './propose';
+import { finishPrice, finishRooms, pressScope, scopePrice, stopTalkRun } from './propose';
+import { timed, useSettledProject } from './settle';
 import { type LiveRun, actProposal, useTalk } from './useTalk';
 import { EMPTY_VIEW, useProposalView } from './view';
 
@@ -111,11 +112,11 @@ function useSubset(
   ticked: string[],
   waive: string[],
 ) {
-  const project = useProject();
+  const project = useSettledProject();
   const rates = useRates((s) => s.rates);
   const b = useMemo(() => nowOf(project), [project]);
   const merged = useMemo(
-    () => (b && r ? mergeChanges(b.now, r.level, changes, ticked) : null),
+    () => (b && r ? timed(() => mergeChanges(b.now, r.level, changes, ticked)) : null),
     [b, r, changes, ticked],
   );
   const [report, setReport] = useState<SubsetReport | null>(null);
@@ -125,11 +126,13 @@ function useSubset(
     const t = setTimeout(
       () =>
         setReport(
-          subsetReport(b.now, b.before, r, merged, card.input.brief, {
-            rates,
-            waived: [...card.waivers.map((w) => w.key), ...waive],
-            renovation: !!project.renovation,
-          }),
+          timed(() =>
+            subsetReport(b.now, b.before, r, merged, card.input.brief, {
+              rates,
+              waived: [...card.waivers.map((w) => w.key), ...waive],
+              renovation: !!project.renovation,
+            }),
+          ),
         ),
       report ? 150 : 0,
     );
@@ -145,8 +148,13 @@ interface Props {
   live: LiveRun | null;
 }
 
+/** What a folded card last said of itself (its checks need the plan worked out again). */
+const verdicts = new Map<string, string>();
+
 export const ProposalCard = memo(function ProposalCard({ card, newest, live }: Props) {
-  const project = useProject();
+  // The plan once edits pause: a drag never works a card out again frame by frame.
+  const project = useSettledProject();
+  const { prices } = useSpend();
   const ai = useAi();
   const shown = useTalk((s) => s.shown === card.key);
   const openRow = useTalk((s) => (s.open?.card === card.key ? s.open.change : null));
@@ -156,14 +164,21 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
   // A version to compare: this card's, once accepted (or an earlier design's).
   const versionId = card.design?.id ?? card.option?.version ?? null;
   const comparable = useDesigner((s) => !!versionId && s.designs.some((d) => d.id === versionId));
-  const draft = useTalk((s) => s.conv?.draft ?? '');
   const running = card.status === 'running';
   const [expanded, setExpanded] = useState(newest);
   useEffect(() => {
     if (newest) setExpanded(true);
   }, [newest]);
-  const r = useMemo(() => cardResult(project, card), [project, card]);
-  const changes = useMemo(() => (r ? cardChanges(project, card, r) : []), [project, card, r]);
+  // Worked out only while it is open or on the plan; folded, it shows what it said last.
+  const active = expanded || shown;
+  const r = useMemo(
+    () => (active ? timed(() => cardResult(project, card)) : null),
+    [active, project, card],
+  );
+  const changes = useMemo(
+    () => (r ? timed(() => cardChanges(project, card, r)) : []),
+    [project, card, r],
+  );
   const ids = useMemo(() => new Set(changes.map((c) => c.id)), [changes]);
   const [ticks, setTicks] = useState<string[] | null>(card.ticks);
   useEffect(() => setTicks(card.ticks), [card.ticks]);
@@ -173,6 +188,8 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
   );
   const [waive, setWaive] = useState<{ key: string; text: string }[]>([]);
   const [confirm, setConfirm] = useState<string | null>(null);
+  /** Accept selected found problems the ticked changes cause together: asked, or refused. */
+  const [asking, setAsking] = useState<{ checks: ResultCheck[]; hdb: boolean } | null>(null);
   const [wrong, setWrong] = useState(false);
   const [more, setMore] = useState(false);
   const { merged, report } = useSubset(
@@ -186,6 +203,14 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
   const accepted = card.accepted.filter((a) => !a.out);
   const allIn = !running && changes.length === 0 && accepted.length > 0;
   const acceptBtn = useRef<HTMLButtonElement>(null);
+  // Another idea's price: once per plan (settled), scope and prices; never per keystroke.
+  const scope = card.proposal?.scope;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on what the price reads
+  const another = useMemo(
+    () =>
+      !running && scope && ai && !designerCannotUse(ai) ? timed(() => scopePrice(scope)) : null,
+    [running, scope, ai, project, prices],
+  );
   const rowsRef = useRef<HTMLDivElement>(null);
 
   const setTicked = (next: string[]) => {
@@ -267,8 +292,49 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
     });
   }, [shown, changes, card.key, card.n]);
 
+  const accepted0 = card.accepted.filter((a) => !a.out).length;
+  if (!expanded && !r) {
+    // Folded and not on the plan: what it said last (nothing is worked out for it).
+    return (
+      <article className="talk-card talk-card-folded" aria-labelledby={`card-${card.key}`}>
+        <button
+          type="button"
+          className="talk-card-fold"
+          id={`card-${card.key}`}
+          aria-expanded={false}
+          onClick={() => setExpanded(true)}
+        >
+          <span>
+            V{card.n} · {card.label}
+            {verdicts.get(card.key) ? ` · ${verdicts.get(card.key)}` : ''}
+            {accepted0 && !verdicts.has(card.key) ? ` · Accepted ${accepted0}` : ''}
+          </span>
+          <span className="talk-fold-show" aria-hidden="true">
+            Show ›
+          </span>
+        </button>
+      </article>
+    );
+  }
   if (!r) return null;
   const fails = failingChecks(r, { waivers: card.waivers });
+  // Failing checks no row answers for (a missing bed, a piece no change moves).
+  const unrowed = (report?.failing ?? []).filter(
+    (c) =>
+      !c.itemId ||
+      !changes.some(
+        (x) => x.items.target.includes(c.itemId ?? '') || x.items.now.includes(c.itemId ?? ''),
+      ),
+  );
+  const accept = async (w: { key: string; text: string }[]) => {
+    const line = await acceptCard(card, ticked, w);
+    setWaive([]);
+    if (line) {
+      requestAnimationFrame(() =>
+        document.querySelector<HTMLButtonElement>(`[data-undo-line="${line}"]`)?.focus(),
+      );
+    }
+  };
   const fixed = Object.values(card.input.spaces).reduce((t, s) => t + (s.fixed ?? 0), 0);
   const missing = r.spaces.filter((s) => !['done', 'copied', 'locked'].includes(s.status));
   const groups = [...new Set([...changes.map((c) => c.group), ...accepted.map((a) => a.group)])];
@@ -294,8 +360,6 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
       .filter(Boolean)
       .join(' ');
   const cantDesign = !ai || !!designerCannotUse(ai);
-  const another =
-    !running && card.proposal && !cantDesign ? scopePrice(card.proposal.scope, draft) : null;
   const head = (
     <div className="talk-card-head">
       <h3 className="talk-card-title" id={`card-${card.key}`}>
@@ -316,10 +380,12 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
     </div>
   );
 
+  // What the folded line will say.
+  const acc = accepted.length
+    ? ` · Accepted ${accepted.length} of ${accepted.length + changes.length}`
+    : '';
+  verdicts.set(card.key, `${allIn ? 'In your renovation' : verdict}${acc}`);
   if (!expanded) {
-    const acc = accepted.length
-      ? ` · Accepted ${accepted.length} of ${accepted.length + changes.length}`
-      : '';
     return (
       <article className="talk-card talk-card-folded" aria-labelledby={`card-${card.key}`}>
         <button
@@ -388,7 +454,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
               : `This design has used what it was priced at (${usd(live.approved ?? 0)}).`}{' '}
             It has used {usd(live.state.usage.reduce((t, u) => t + (u.usd ?? 0), 0))} so far
             {live.remaining !== null
-              ? `; finishing it takes about ${usd(live.remaining)} more.`
+              ? `; finishing it may take up to ${usd(live.remaining)} more.`
               : '.'}
           </p>
           <div className="button-row">
@@ -425,7 +491,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
                   disabled={busy || cantDesign}
                   onClick={() =>
                     card.proposal &&
-                    void finishOption(card.proposal, card.option?.letter ?? 'A', [s.key])
+                    void finishRooms(card.proposal, card.option?.letter ?? 'A', [s.key])
                   }
                 >
                   Design {s.name} too{est?.usd ? ` · about ${usd(est.usd.typical)}` : ''}
@@ -653,15 +719,13 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
                   </ul>
                 </details>
               )}
-              {report?.failing.some((c) => !c.itemId) && (
+              {unrowed.length > 0 && (
                 <ul className="talk-room-fails">
-                  {report.failing
-                    .filter((c) => !c.itemId)
-                    .map((c) => (
-                      <li key={c.key} className="negative">
-                        {keepTogether(c.text)}
-                      </li>
-                    ))}
+                  {unrowed.map((c) => (
+                    <li key={c.key} className="negative">
+                      {keepTogether(c.text)}
+                    </li>
+                  ))}
                 </ul>
               )}
             </dd>
@@ -691,18 +755,59 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
             data-accept-selected=""
             disabled={running || tickedN === 0}
             aria-describedby={`acc-${card.key}`}
-            onClick={async () => {
-              const line = await acceptCard(card, ticked, waive);
-              setWaive([]);
-              if (line) {
-                requestAnimationFrame(() =>
-                  document.querySelector<HTMLButtonElement>(`[data-undo-line="${line}"]`)?.focus(),
-                );
+            onClick={() => {
+              // Worked out now, never from a check still pending: what the ticked changes fail
+              // together is asked about first, and an HDB rule refused.
+              const pre = precheckAccept(
+                card,
+                ticked,
+                waive.map((w) => w.key),
+              );
+              if (pre.failing.length) {
+                setAsking({ checks: pre.failing, hdb: pre.hdb });
+                return;
               }
+              void accept(waive);
             }}
           >
             Accept selected ({tickedN})
           </button>
+          {asking && (
+            <div className="talk-confirm notice-warning" role="alert">
+              {asking.hdb ? (
+                <p>
+                  HDB rule: these changes together can’t be accepted.{' '}
+                  {asking.checks
+                    .filter((c) => !c.waivable)
+                    .map((c) => c.text)
+                    .join('; ')}
+                </p>
+              ) : (
+                <p>
+                  Accept anyway? {plural(asking.checks.length, 'problem')}:{' '}
+                  {asking.checks.map((c) => c.text).join('; ')}
+                </p>
+              )}
+              <div className="button-row">
+                {!asking.hdb && (
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    onClick={() => {
+                      const more = asking.checks.map((c) => ({ key: c.key, text: c.text }));
+                      setAsking(null);
+                      void accept([...waive, ...more]);
+                    }}
+                  >
+                    Accept anyway
+                  </button>
+                )}
+                <button type="button" className="btn btn-small" onClick={() => setAsking(null)}>
+                  {asking.hdb ? 'Back' : 'Keep it out'}
+                </button>
+              </div>
+            </div>
+          )}
           <span id={`acc-${card.key}`} className="field-hint">
             {running
               ? 'Accept waits for the checks'

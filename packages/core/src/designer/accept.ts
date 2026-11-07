@@ -38,7 +38,7 @@ export const aspectOf = (it: Item): Aspect =>
   furnitureKind(it.assetId)?.carpentry ? 'built-ins' : 'furniture';
 
 /** A piece a design made: its id is seeded (`it_d` and seven characters), never random. */
-export const isDesignedId = (id: string) => /^it_d[0-9a-z]{7}$/.test(id);
+const isDesignedId = (id: string) => /^it_d[0-9a-z]{7}$/.test(id);
 
 /** A room's doors, windows and openings, by where they are: kind, width and both ends. */
 function openingsOf(level: Level, roomId: string): string[] {

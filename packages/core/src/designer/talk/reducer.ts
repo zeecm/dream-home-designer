@@ -14,6 +14,7 @@ import {
   DECISION_CHARS,
   DRAFT_CHARS,
   type Decision,
+  TALK_LIMITS as L,
   MAX_DECISIONS,
   MAX_TURNS,
   type QuestionKey,
@@ -22,6 +23,7 @@ import {
   type TalkEvent,
   type Turn,
   type TurnOf,
+  cut,
 } from './schema';
 
 /**
@@ -73,7 +75,10 @@ export type TalkAction =
       words: string;
       reason: TurnOf<'cost-ask'>['reason'];
       estimate: TurnOf<'cost-ask'>['estimate'];
+      finish?: TurnOf<'cost-ask'>['finish'];
     }
+  /** The figure on an open cost card, worked out again (the plan or the prices moved). */
+  | { type: 'costRefresh'; turnId: string; estimate: TurnOf<'cost-ask'>['estimate'] }
   | {
       type: 'costAnswer';
       turnId: string;
@@ -141,11 +146,14 @@ export function newConversation(a: Extract<TalkAction, { type: 'start' }>): Conv
     kind: 'designer',
     id: a.ids[0],
     at: a.at,
-    text: greetingText(a.level),
+    text: cut(greetingText(a.level), L.designer),
     lines: [],
-    after: a.form
-      ? `I’ve kept what you told me in the form on ${date}: ${formSummary(a.brief)}. Change any of it in What I know about you.`
-      : GREETING_NEXT,
+    after: cut(
+      a.form
+        ? `I’ve kept what you told me in the form on ${date}: ${formSummary(a.brief)}. Change any of it in What I know about you.`
+        : GREETING_NEXT,
+      L.after,
+    ),
   };
   return { ...conv, turns: [greet, ...after(conv, a.level, a.ids[1], a.at)] };
 }
@@ -188,7 +196,8 @@ function after(conv: Conversation, level: Level, id: string, at: string): Turn[]
   const asked = [...done].filter((k) => !known.has(k)).length;
   const next = nextQuestions(done, conv.brief, level, asked);
   if (next) {
-    return [{ kind: 'app-question', id, at, lead: next.lead, keys: next.keys, done: {} }];
+    const lead = next.lead ? cut(next.lead, L.lead) : null;
+    return [{ kind: 'app-question', id, at, lead, keys: next.keys, done: {} }];
   }
   return [{ kind: 'scope', id, at, next: false }];
 }
@@ -221,7 +230,10 @@ function settle(
 ): Conversation {
   const t = findTurn(conv, turnId, 'app-question');
   if (!t || !t.keys.includes(key) || t.done[key]) return conv;
-  const turn: TurnOf<'app-question'> = { ...t, done: { ...t.done, [key]: done } };
+  const turn: TurnOf<'app-question'> = {
+    ...t,
+    done: { ...t.done, [key]: { ...done, words: cut(done.words, L.words) } },
+  };
   const assumed =
     done.state === 'skipped'
       ? [...new Set([...conv.assumed, key])]
@@ -234,7 +246,8 @@ function settle(
 export function talk(conv: Conversation, a: TalkAction): Conversation {
   switch (a.type) {
     case 'start':
-      return newConversation(a);
+      // A conversation there already is stays (two tabs opening the panel at once).
+      return conv?.id ? conv : newConversation(a);
     case 'answer':
       return settle(
         conv,
@@ -273,7 +286,7 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
         id: a.ids[0],
         at: a.at,
         text: made.lines.length ? 'Fine, I’ll start. I’ve assumed:' : 'Fine, I’ll start.',
-        lines: made.lines,
+        lines: made.lines.slice(0, 12).map((l) => cut(l, L.line)),
         after: made.lines.length ? 'These are in What I know about you; tap any to change it.' : '',
       };
       return push(
@@ -293,7 +306,12 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
         if (t.kind !== 'app-question' || t.keys.every((k) => t.done[k])) return t;
         const d = { ...t.done };
         for (const k of t.keys) {
-          if (!d[k]) d[k] = { state: 'answered' as const, words: factText(k, a.brief, a.level) };
+          if (!d[k]) {
+            d[k] = {
+              state: 'answered' as const,
+              words: cut(factText(k, a.brief, a.level), L.words),
+            };
+          }
         }
         return { ...t, done: d };
       });
@@ -316,7 +334,11 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
         kind: 'event',
         id: a.id,
         at: a.at,
-        event: { type: 'fact', key: a.key, text: `You changed: ${label(a.key)} ${was} → ${now}.` },
+        event: {
+          type: 'fact',
+          key: a.key,
+          text: cut(`You changed: ${label(a.key)} ${was} → ${now}.`, L.note),
+        },
       });
     }
     case 'setBrief':
@@ -333,11 +355,13 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
           kind: 'cost-ask',
           id: a.ids[1],
           at: a.at,
-          scope: a.scope,
-          words: a.words,
+          scope: scopeCut(a.scope),
+          words: cut(a.words, DRAFT_CHARS),
           reason: a.reason,
           estimate: a.estimate,
           state: 'open',
+          answerId: null,
+          finish: a.finish ?? null,
         },
       );
     case 'costAnswer': {
@@ -346,10 +370,17 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
       const next = replaceTurn(conv, {
         ...t,
         state: a.answer === 'go' ? 'go' : a.answer === 'cheaper' ? 'cheaper' : 'not-now',
+        answerId: a.id,
       });
       return a.answer === 'not-now'
         ? push(next, { kind: 'person', id: a.id, at: a.at, text: 'Not now' })
         : next;
+    }
+    case 'costRefresh': {
+      const t = findTurn(conv, a.turnId, 'cost-ask');
+      if (!t || t.state !== 'open') return conv;
+      if (JSON.stringify(t.estimate) === JSON.stringify(a.estimate)) return conv;
+      return replaceTurn(conv, { ...t, estimate: a.estimate });
     }
     case 'propose': {
       if (conv.turns.some((t) => t.kind === 'proposal' && t.proposalId === a.proposalId))
@@ -383,7 +414,7 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
           letter: a.letter,
           changes: a.changes,
           total: a.total,
-          left: a.left,
+          left: a.left.slice(0, 20).map((x) => cut(x, L.left)),
           undone: false,
         },
       });
@@ -396,7 +427,7 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
       return replaceTurn(conv, { ...t, event: { ...t.event, undone } });
     }
     case 'event':
-      return push(conv, { kind: 'event', id: a.id, at: a.at, event: a.event });
+      return push(conv, { kind: 'event', id: a.id, at: a.at, event: eventCut(a.event) });
     case 'decisionAdd': {
       const text = a.text.trim().slice(0, DECISION_CHARS);
       if (!text) return conv;
@@ -451,4 +482,18 @@ const label = (k: QuestionKey) =>
 
 /** The person's turn for a scope button: their words, or what they asked for. */
 const personText = (scope: ScopeRef, words: string) =>
-  words.trim() ? words.trim() : `Design ${scope.all ? 'the whole flat' : scope.label}`;
+  cut(words.trim() ? words : `Design ${scope.all ? 'the whole flat' : scope.label}`, L.person);
+
+/** A scope as kept: its label cut. */
+export const scopeCut = (s: ScopeRef): ScopeRef => ({
+  ...s,
+  label: cut(s.label, L.label),
+  spaces: s.spaces.slice(0, 30),
+});
+
+const eventCut = (e: TalkEvent): TalkEvent =>
+  e.type === 'note' || e.type === 'fact'
+    ? { ...e, text: cut(e.text, L.note) }
+    : e.type === 'accepted'
+      ? { ...e, left: e.left.slice(0, 20).map((x) => cut(x, L.left)) }
+      : e;
