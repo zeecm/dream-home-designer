@@ -255,10 +255,17 @@ Decided 7 Nov 2026 (tech-lead and UX review), as the hard line and the softer ad
 | Hinged wardrobe | 0.60 m in front | |
 | Way past a bed to its usable side (P3) | 0.50 m | 0.60 m |
 
-Dining zone and lounge zone keep 0.90 m between them, measured from the dining group (the table
-and its chairs) to the sofa, armchairs, coffee table and TV console (decided 7 Nov 2026): the
-solver keeps it wherever any clear pose off the ways through the flat does, and only where none
-does is it advice ("Leave 0.90 m … 0.03 m now"); a TV stands on its console; an
+Dining zone and lounge zone (owner's decision, 7 Nov 2026), measured from the dining group (the
+table and its chairs) to the sofa, armchairs, coffee table and TV console: **0.60 m is hard**
+("Not enough room to walk between the dining table, 4 seats and the 3-seat sofa: 0.60 m needed,
+0.03 m left."), **0.90 m is advised**. The solver keeps 0.90 m wherever a clear pose off the ways
+through the flat does, else 0.60 m. Where even 0.60 m can't be kept, it right-sizes as a
+designer would, keeping the designer's intent, and says each swap in a line ("Swapped the 3-seat
+sofa for a 2-seat to keep 0.60 m to the dining table."): a round table for four (or a wall-side
+table with a bench, for a household of two); for a table for six, an extendable table ("it fits
+4, and 6 with the table pulled out"); a 2-seat sofa where armchairs still seat the household;
+then both. Only if nothing fits does the check fail, so it goes to a fix round or "can't be
+met"; never a silent 3 cm. A TV stands on its console; an
 armchair faces the TV or the sofa's front; chairs go evenly round a table; a desk gets a desk
 chair.
 
