@@ -80,6 +80,7 @@ export const MODEL_KINDS: ModelKind[] = [
     id: 'tv-console-slatted',
     name: 'TV console, slatted',
     category: 'Living',
+    storage: 'volume',
     againstWall: true,
     model: 'tv-console-slatted.f553625caa.glb',
     size: {
@@ -191,6 +192,7 @@ export const MODEL_KINDS: ModelKind[] = [
     id: 'shelf-with-drawers',
     name: 'Shelf with drawers',
     category: 'Storage',
+    storage: 'volume',
     againstWall: true,
     model: 'shelf-with-drawers.f49d1db87b.glb',
     size: {
@@ -204,6 +206,7 @@ export const MODEL_KINDS: ModelKind[] = [
     id: 'cube-bookcase',
     name: 'Cube bookcase',
     category: 'Storage',
+    storage: 'volume',
     againstWall: true,
     model: 'cube-bookcase.4da1a596b4.glb',
     size: {
@@ -217,6 +220,7 @@ export const MODEL_KINDS: ModelKind[] = [
     id: 'steel-shelves',
     name: 'Steel-frame shelves',
     category: 'Storage',
+    storage: 'volume',
     againstWall: true,
     model: 'steel-shelves.8a6c9b023b.glb',
     size: {
@@ -423,6 +427,7 @@ export const MODEL_KINDS: ModelKind[] = [
     id: 'chinese-cabinet',
     name: 'Chinese display cabinet',
     category: 'Storage',
+    storage: 'volume',
     againstWall: true,
     model: 'chinese-cabinet.a7e4dfbeef.glb',
     size: {
@@ -508,6 +513,7 @@ export const MODEL_KINDS: ModelKind[] = [
     id: 'chest-of-drawers',
     name: 'Chest of drawers',
     category: 'Bedroom',
+    storage: 'folded',
     againstWall: true,
     model: 'chest-of-drawers.4eea5d6fff.glb',
     size: {
@@ -521,6 +527,7 @@ export const MODEL_KINDS: ModelKind[] = [
     id: 'steel-shelves-narrow',
     name: 'Steel-frame shelves, narrow',
     category: 'Storage',
+    storage: 'volume',
     againstWall: true,
     model: 'steel-shelves-narrow.8ede07c433.glb',
     size: {

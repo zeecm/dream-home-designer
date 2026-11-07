@@ -1,0 +1,84 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`the report > 16. the furnished sample, Typical, from the beds (reviewed); same level twice, same report 1`] = `
+{
+  "cabinets": "2.80",
+  "clothes": {
+    "have": "1.20",
+    "status": "short",
+    "target": 3,
+  },
+  "kitchen": {
+    "have": "4.80",
+    "status": "short",
+    "target": 12,
+  },
+  "kitchenRoom": "Kitchen",
+  "other": {
+    "have": "3.70",
+    "status": "short",
+    "target": 8,
+  },
+  "people": {
+    "adults": 3,
+    "children": 0,
+  },
+  "rooms": [
+    {
+      "clothes": "0.00 / 1.00 none",
+      "fromBeds": true,
+      "name": "Bedroom",
+      "people": "1+0",
+      "pieces": [],
+      "store": null,
+    },
+    {
+      "clothes": "1.20 / 2.00 short",
+      "fromBeds": true,
+      "name": "Main bedroom",
+      "people": "2+0",
+      "pieces": [
+        "wardrobe",
+      ],
+      "store": null,
+    },
+    {
+      "clothes": null,
+      "fromBeds": true,
+      "name": "Kitchen",
+      "people": "0+0",
+      "pieces": [
+        "kitchen-base",
+        "kitchen-sink",
+        "kitchen-base",
+        "kitchen-hob",
+      ],
+      "store": null,
+    },
+    {
+      "clothes": null,
+      "fromBeds": true,
+      "name": "Living and dining",
+      "people": "0+0",
+      "pieces": [
+        "tv-console",
+      ],
+      "store": null,
+    },
+    {
+      "clothes": null,
+      "fromBeds": true,
+      "name": "Household shelter",
+      "people": "0+0",
+      "pieces": [],
+      "store": "shelter 3.39",
+    },
+  ],
+  "shoes": {
+    "gap": 28,
+    "have": 0,
+    "status": "none",
+    "target": 28,
+  },
+}
+`;

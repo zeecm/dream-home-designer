@@ -43,3 +43,4 @@ export * from './portals';
 export * from './ageing';
 export * from './ageing-zones';
 export * from './ease';
+export * from './storage';
