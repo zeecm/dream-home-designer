@@ -20,7 +20,9 @@ describe('cost of the renovation (criterion 18)', () => {
     expect(r.cost).toEqual(costEstimate(level, r.level, TYPICAL_RATES));
     const elec = electricalLines(level, r.level, TYPICAL_RATES);
     expect(elec.length).toBeGreaterThan(0);
-    for (const l of elec) expect(r.cost.lines).toContainEqual(l);
+    for (const l of elec) {
+      expect(r.cost.lines).toContainEqual({ ...l, levelId: level.id, levelName: level.name });
+    }
     expect(r.points.length).toBeGreaterThan(0);
     expect(Object.keys(r.level.points).length).toBe(r.points.length);
     expect(r.budget).toBe('within');
