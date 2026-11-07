@@ -92,8 +92,26 @@ export interface DimensionOptions {
   include?: Vec2[];
 }
 
+/**
+ * A notch's depth: a recess the flat wraps round (an air-con ledge's slot, say), whose
+ * flanks face each other and can't be seen from outside, so no outside chain measures them.
+ */
+export interface NotchDim {
+  /** The inner end (at the notch's back) and the mouth, on the line the depth is drawn on. */
+  a: Vec2;
+  b: Vec2;
+  /** The clear width across the notch, face to face (the narrowest, where it tapers). */
+  gap: number;
+  /** Which notch: the two dimensions of one notch (one along each flank) share it. */
+  notch: number;
+  /** Where each flank measured turns at the mouth: an extension line runs from it to `b`. */
+  corners: Vec2[];
+}
+
 export interface PlanDimensions {
   chains: DimensionChain[];
+  /** Notches' depths, measured along their flanks. */
+  notches: NotchDim[];
   spans: RoomSpan[];
   tags: OpeningTag[];
   /** Where each room's label goes (the point its spans run through). */
@@ -208,16 +226,25 @@ function lookOf(out: Vec2): { side: ChainSide | null; dir: Vec2 } {
   return side ? { side, dir: SIDE_NORMAL[side] } : { side: null, dir: out };
 }
 
+/** How a point of a face looks out: not at all, seen from outside, or hidden in a notch. */
+type Look = 'no' | 'seen' | 'hidden';
+
 /**
- * The stretches of each wall's faces that look outside and can be seen from there: the flat
- * (a room or a wall) just behind the other face (measured where that face runs, so a
- * corner's mitre still counts), free space just in front, and nothing of the flat further
- * out the way it looks (so a face in a notch, hidden behind another part of the flat, isn't
- * dimensioned from outside). Found by sampling every 2 cm, each change refined to a fraction
- * of a millimetre.
+ * The stretches of each wall's faces that look outside: the flat (a room or a wall) just
+ * behind the other face (measured where that face runs, so a corner's mitre still counts)
+ * and free space just in front. `seen` are those that can be seen from outside, with nothing
+ * of the flat further out the way they look (a face in a notch, hidden behind another part
+ * of the flat, isn't dimensioned from outside). `facing` are the whole runs that look out,
+ * seen or not, with how much of each is hidden. Found by sampling every 2 cm, each change
+ * refined to a fraction of a millimetre.
  */
-function outsideStretches(geom: PlanGeometry, polys: Polys, segs: Seg[]): Stretch[] {
+function outsideStretches(
+  geom: PlanGeometry,
+  polys: Polys,
+  segs: Seg[],
+): { seen: Stretch[]; facing: Facing[] } {
   const out: Stretch[] = [];
+  const facing: Facing[] = [];
   const lines = boundarySegs(geom);
   /** Within `d` of a boundary line: a room closed by it is just there, past a wall's end. */
   const byBoundary = (p: Vec2, d: number) =>
@@ -230,53 +257,80 @@ function outsideStretches(geom: PlanGeometry, polys: Polys, segs: Seg[]): Stretc
       const [s0, s1] = face;
       if (s1 - s0 < 0.05) continue;
       const { dir } = lookOf({ x: f.n.x * side, y: f.n.y * side });
-      const looksOut = (u: number) => {
+      const look = (u: number): Look => {
         const p = framePoint(f, u, side);
         const front = { x: p.x + f.n.x * side * PROBE, y: p.y + f.n.y * side * PROBE };
         const ub = Math.min(Math.max(u, back[0] + 0.01), back[1] - 0.01);
         const q = framePoint(f, ub, -side);
         const behind = { x: q.x - f.n.x * side * PROBE, y: q.y - f.n.y * side * PROBE };
-        return (
+        const outward =
           free(front, polys) &&
           // A face beside a room closed by a boundary (a terrace past the walls) is inside
           // that room, as far as the wall's half thickness goes past the room's line.
           !byBoundary(front, f.half) &&
-          !free(behind, polys) &&
-          rayHit(front, dir, segs) === Number.POSITIVE_INFINITY
-        );
+          !free(behind, polys);
+        if (!outward) return 'no';
+        return rayHit(front, dir, segs) === Number.POSITIVE_INFINITY ? 'seen' : 'hidden';
       };
       const n = Math.max(2, Math.ceil((s1 - s0) / 0.02));
       const at = (i: number) => s0 + ((s1 - s0) * i) / n;
-      const edge = (from: number, to: number, startsOut: boolean) => {
-        let lo = from;
-        let hi = to;
-        for (let k = 0; k < 14; k++) {
-          const m = (lo + hi) / 2;
-          if (looksOut(m) === startsOut) lo = m;
-          else hi = m;
-        }
-        return (lo + hi) / 2;
-      };
-      let start: number | null = null;
-      let prev = looksOut(at(0));
-      if (prev) start = s0;
-      for (let i = 1; i <= n; i++) {
-        const cur = looksOut(at(i));
-        if (cur !== prev) {
-          const e = edge(at(i - 1), at(i), prev);
-          if (cur) start = e;
-          else if (start !== null) {
-            if (e - start > 0.05) out.push({ frame: f, side, u0: start, u1: e });
-            start = null;
+      const looks = Array.from({ length: n + 1 }, (_, i) => look(at(i)));
+      /** The runs where `pred` holds, each end refined between the samples either side. */
+      const runs = (pred: (l: Look) => boolean): [number, number][] => {
+        const found: [number, number][] = [];
+        const edge = (from: number, to: number, startsIn: boolean) => {
+          let lo = from;
+          let hi = to;
+          for (let k = 0; k < 14; k++) {
+            const m = (lo + hi) / 2;
+            if (pred(look(m)) === startsIn) lo = m;
+            else hi = m;
           }
+          return (lo + hi) / 2;
+        };
+        let start: number | null = null;
+        let prev = pred(looks[0] as Look);
+        if (prev) start = s0;
+        for (let i = 1; i <= n; i++) {
+          const cur = pred(looks[i] as Look);
+          if (cur !== prev) {
+            const e = edge(at(i - 1), at(i), prev);
+            if (cur) start = e;
+            else if (start !== null) {
+              if (e - start > 0.05) found.push([start, e]);
+              start = null;
+            }
+          }
+          prev = cur;
         }
-        prev = cur;
+        if (start !== null && s1 - start > 0.05) found.push([start, s1]);
+        return found;
+      };
+      const seen = runs((l) => l === 'seen');
+      for (const [u0, u1] of seen) out.push({ frame: f, side, u0, u1 });
+      for (const [u0, u1] of runs((l) => l !== 'no')) {
+        // Its hidden part: from the first gap between seen parts to the last.
+        const inside = seen.filter(([p, q]) => p >= u0 - 1e-9 && q <= u1 + 1e-9);
+        const gaps: [number, number][] = [];
+        let from = u0;
+        for (const [p, q] of inside) {
+          gaps.push([from, p]);
+          from = q;
+        }
+        gaps.push([from, u1]);
+        const hid = gaps.filter(([p, q]) => q - p > 0.05);
+        const first = hid[0];
+        const last = hid[hid.length - 1];
+        const hidden: [number, number] | null = first && last ? [first[0], last[1]] : null;
+        facing.push({ frame: f, side, u0, u1, hidden });
       }
-      if (start !== null && s1 - start > 0.05) out.push({ frame: f, side, u0: start, u1: s1 });
     }
   }
-  return out;
+  return { seen: out, facing };
 }
+
+/** A run of face that looks out, and the part of it hidden from outside (or null), as `u`. */
+type Facing = Stretch & { hidden: [number, number] | null };
 
 type Seg = [Vec2, Vec2];
 
@@ -352,6 +406,11 @@ export function planExtent(geom: PlanGeometry, include: readonly Vec2[] = []): B
 
 /** Where a ray from p first meets a segment, as a distance along it, or Infinity. */
 function rayHit(p: Vec2, d: Vec2, segs: readonly Seg[]): number {
+  return rayHitPoint(p, d, segs).t;
+}
+
+/** Where a ray from p first meets a segment: the distance along it and the point (or Infinity, null). */
+function rayHitPoint(p: Vec2, d: Vec2, segs: readonly Seg[]): { t: number; at: Vec2 | null } {
   let best = Number.POSITIVE_INFINITY;
   for (const [a, b] of segs) {
     const e = { x: b.x - a.x, y: b.y - a.y };
@@ -362,7 +421,208 @@ function rayHit(p: Vec2, d: Vec2, segs: readonly Seg[]): number {
     const s = (w.x * d.y - w.y * d.x) / den;
     if (t > 1e-6 && s >= -1e-9 && s <= 1 + 1e-9 && t < best) best = t;
   }
-  return best;
+  return {
+    t: best,
+    at: Number.isFinite(best) ? { x: p.x + d.x * best, y: p.y + d.y * best } : null,
+  };
+}
+
+/** Notch flanks shorter than this get no depth. */
+const MIN_NOTCH = 0.1;
+/** A flank's hit on another lies on its face within this. */
+const ON_FACE = 0.001;
+/** How far past a flank's end the probe for the mouth goes. */
+const PAST_END = 0.02;
+
+/**
+ * A flank: a run of face that looks out, from a to b (in a fixed turn from `out`, so two
+ * runs in line go the same way), and its hidden part as distances from a.
+ */
+interface Flank {
+  a: Vec2;
+  b: Vec2;
+  out: Vec2;
+  hidden: [number, number];
+}
+
+const sub = (p: Vec2, q: Vec2): Vec2 => ({ x: p.x - q.x, y: p.y - q.y });
+const dot = (p: Vec2, q: Vec2) => p.x * q.x + p.y * q.y;
+const offset = (p: Vec2, d: Vec2, k: number): Vec2 => ({ x: p.x + d.x * k, y: p.y + d.y * k });
+const dist = (p: Vec2, q: Vec2) => Math.hypot(q.x - p.x, q.y - p.y);
+const unit = (p: Vec2): Vec2 => {
+  const l = Math.hypot(p.x, p.y) || 1;
+  return { x: p.x / l, y: p.y / l };
+};
+
+/**
+ * The runs of face that look out with a part hidden, as flanks; runs in line end to end on
+ * two walls (where a wall meets the flank from behind) are one.
+ */
+function flanksOf(facing: Facing[], polys: Polys): Flank[] {
+  const list = facing.flatMap((s): Flank[] => {
+    if (!s.hidden) return [];
+    const out = { x: s.frame.n.x * s.side, y: s.frame.n.y * s.side };
+    const p = framePoint(s.frame, s.u0, s.side);
+    const q = framePoint(s.frame, s.u1, s.side);
+    const [h0, h1] = s.hidden;
+    const len = s.u1 - s.u0;
+    return dot(sub(q, p), { x: out.y, y: -out.x }) >= 0
+      ? [{ a: p, b: q, out, hidden: [h0 - s.u0, h1 - s.u0] }]
+      : [{ a: q, b: p, out, hidden: [len - (h1 - s.u0), len - (h0 - s.u0)] }];
+  });
+  // Every run that looks out, to join a flank to the run in line with it.
+  const all = facing.map((s) => {
+    const p = framePoint(s.frame, s.u0, s.side);
+    const q = framePoint(s.frame, s.u1, s.side);
+    return { p, q, out: { x: s.frame.n.x * s.side, y: s.frame.n.y * s.side } };
+  });
+  const cos = Math.cos(AXIS_TOLERANCE);
+  /** Where the face goes on from `end` along `t`: a run in line just past it, through a joint. */
+  const next = (end: Vec2, t: Vec2, out: Vec2) => {
+    for (const r of all) {
+      if (dot(r.out, out) < cos - 1e-12) continue;
+      for (const [s, e] of [
+        [r.p, r.q],
+        [r.q, r.p],
+      ] as const) {
+        const along = dot(sub(s, end), t);
+        if (Math.abs(dot(sub(s, end), out)) > MERGE || along < -MERGE || along > 0.4) continue;
+        if (dot(sub(e, s), t) <= 0) continue;
+        // The face goes on between them: free in front, the flat behind.
+        const mid = { x: (end.x + s.x) / 2, y: (end.y + s.y) / 2 };
+        if (!free(offset(mid, out, PROBE), polys) || free(offset(mid, out, -PROBE), polys))
+          continue;
+        return e;
+      }
+    }
+    return null;
+  };
+  // Each flank carried on, both ways, along runs in line (seen ones, too: it turns there).
+  for (const f of list) {
+    const t = unit(sub(f.b, f.a));
+    for (let k = 0, e = next(f.b, t, f.out); e && k < 8; k++, e = next(f.b, t, f.out)) f.b = e;
+    const back = { x: -t.x, y: -t.y };
+    for (let k = 0, e = next(f.a, back, f.out); e && k < 8; k++, e = next(f.a, back, f.out)) {
+      const grow = dist(f.a, e);
+      f.a = e;
+      f.hidden = [f.hidden[0] + grow, f.hidden[1] + grow];
+    }
+  }
+  // A flank found twice (hidden on two of its walls): the hidden parts together.
+  const kept: Flank[] = [];
+  for (const f of list) {
+    const same = kept.find((g) => dist(g.a, f.a) < MERGE && dist(g.b, f.b) < MERGE);
+    if (!same) kept.push(f);
+    else
+      same.hidden = [Math.min(same.hidden[0], f.hidden[0]), Math.max(same.hidden[1], f.hidden[1])];
+  }
+  return kept;
+}
+
+/**
+ * Notches' depths. A flank is a run of face that looks out with a part of it hidden (its
+ * front ray meets the flat), and its gap the shortest of those rays. It runs on to where the
+ * face turns, unless the face goes on in view for more than the gap (a long outside wall
+ * past the notch, measured on the side chain): then it stops where the face comes into view.
+ * Probed just past each end, a little in front (5 cm, or `gap / 2` if less): free space is
+ * its mouth, the flat its inner end. Neither (a shaft or closed slot) or both (a slot right through) give no depth. Two
+ * flanks face each other when each one's rays land on the other's face; paired by the most
+ * overlap. Facing within 1°, with ends that agree within 5 mm: one depth on the centre line
+ * between them. Otherwise (mouths that differ, or a taper), one along each flank, `gap / 4`
+ * out from its face; a flank on its own, `gap / 2` out. Flanks under 0.10 m are left out.
+ */
+function notchDims(facing: Facing[], polys: Polys, segs: Seg[]): NotchDim[] {
+  /** The rays from a face between distances `from` and `to` along it: hit points and the nearest. */
+  const rays = (f: Flank, from: number, to: number) => {
+    const t = unit(sub(f.b, f.a));
+    const n = Math.max(4, Math.ceil((to - from) / 0.01));
+    const hits: Vec2[] = [];
+    let near = Number.POSITIVE_INFINITY;
+    for (let i = 0; i <= n; i++) {
+      // Just inside the ends: a ray from a corner can graze the wall it turns into.
+      const d = from + 0.005 + ((to - from - 0.01) * i) / n;
+      const h = rayHitPoint(offset(offset(f.a, t, d), f.out, 0.001), f.out, segs);
+      if (!h.at) continue;
+      hits.push(h.at);
+      near = Math.min(near, h.t + 0.001);
+    }
+    return { hits, near, step: (to - from) / n };
+  };
+  const flanks = flanksOf(facing, polys).flatMap((f) => {
+    const len = dist(f.a, f.b);
+    const [h0, h1] = f.hidden;
+    const gap = rays(f, h0, h1).near;
+    if (!Number.isFinite(gap)) return [];
+    const t = unit(sub(f.b, f.a));
+    const d0 = h0 > gap ? h0 : 0;
+    const d1 = len - h1 > gap ? h1 : len;
+    if (d1 - d0 < MIN_NOTCH) return [];
+    const a = offset(f.a, t, d0);
+    const b = offset(f.a, t, d1);
+    // Close in front (a probe out in the middle of a tapered notch could miss its back).
+    const ahead = Math.min(gap / 2, PROBE);
+    const freeAt = (end: Vec2, k: number) => free(offset(offset(end, t, k), f.out, ahead), polys);
+    const freeA = freeAt(a, -PAST_END);
+    const freeB = freeAt(b, PAST_END);
+    if (freeA === freeB) return [];
+    const [inner, mouth] = freeA ? [b, a] : [a, b];
+    const face = { a, b };
+    const { hits, step } = rays(f, d0, d1);
+    return [{ inner, mouth, out: f.out, gap, hits, step, face }];
+  });
+  type F = (typeof flanks)[number];
+  const landsOn = (x: F, y: F) =>
+    x.hits.filter((h) => segDistance(h, y.face.a, y.face.b) <= ON_FACE + 1e-9).length * x.step;
+  const pairs: { x: F; y: F; overlap: number }[] = [];
+  for (let i = 0; i < flanks.length; i++) {
+    for (let j = i + 1; j < flanks.length; j++) {
+      const x = flanks[i] as F;
+      const y = flanks[j] as F;
+      const overlap = Math.min(landsOn(x, y), landsOn(y, x));
+      if (overlap > 0) pairs.push({ x, y, overlap });
+    }
+  }
+  pairs.sort((p, q) => q.overlap - p.overlap);
+  const used = new Set<F>();
+  const dims: NotchDim[] = [];
+  let notch = 0;
+  const along = (x: F, k: number): NotchDim => ({
+    a: offset(x.inner, x.out, x.gap * k),
+    b: offset(x.mouth, x.out, x.gap * k),
+    gap: x.gap,
+    notch,
+    corners: [x.mouth],
+  });
+  for (const { x, y } of pairs) {
+    if (used.has(x) || used.has(y)) continue;
+    used.add(x);
+    used.add(y);
+    const d = unit(sub(x.mouth, x.inner));
+    const len = dist(x.inner, x.mouth);
+    const facingEach = dot(x.out, y.out) < -Math.cos(AXIS_TOLERANCE) + 1e-12;
+    const agree =
+      Math.abs(dot(sub(y.inner, x.inner), d)) < MERGE &&
+      Math.abs(dot(sub(y.mouth, x.inner), d) - len) < MERGE;
+    if (facingEach && agree) {
+      const gap = Math.min(x.gap, y.gap);
+      dims.push({
+        a: offset(x.inner, x.out, gap / 2),
+        b: offset(x.mouth, x.out, gap / 2),
+        gap,
+        notch,
+        corners: [x.mouth, y.mouth],
+      });
+    } else {
+      dims.push(along(x, 1 / 4), along(y, 1 / 4));
+    }
+    notch++;
+  }
+  for (const x of flanks) {
+    if (used.has(x)) continue;
+    dims.push(along(x, 1 / 2));
+    notch++;
+  }
+  return dims;
 }
 
 const edgesOf = (poly: readonly Vec2[]): Seg[] =>
@@ -486,7 +746,8 @@ export function planDimensions(
   });
   const sinTol = Math.sin(AXIS_TOLERANCE);
 
-  for (const s of outsideStretches(geom, polys, solidSegs)) {
+  const stretches = outsideStretches(geom, polys, solidSegs);
+  for (const s of stretches.seen) {
     const f = s.frame;
     const outN = { x: f.n.x * s.side, y: f.n.y * s.side };
     const a = framePoint(f, s.u0, s.side);
@@ -796,7 +1057,8 @@ export function planDimensions(
     }
   }
 
-  return { chains, spans, tags, labels, bounds };
+  const notches = notchDims(stretches.facing, polys, solidSegs);
+  return { chains, notches, spans, tags, labels, bounds };
 }
 
 /**
