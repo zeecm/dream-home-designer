@@ -66,6 +66,12 @@ export interface SolveInput {
   swaps?: boolean;
   /** A swap's solve: stop as soon as the dining group can't keep the way (it will be refused). */
   abortTight?: boolean;
+  /**
+   * A walkway re-solve: stop as soon as it can only end with more pieces left out (`spare`
+   * chairs aside, as applySwap counts them), short of room or turned from what they go with
+   * than the solve it would replace: it will be refused (piecesNoWorse).
+   */
+  noWorseThan?: { dropped: number; soft: number; broken: number; spare?: ReadonlySet<string> };
 }
 
 export interface SolveOutcome {
@@ -82,7 +88,10 @@ export interface SolveOutcome {
   swap?: Swap;
   /** How many swaps were tried (0: none needed, or none could help). */
   swapsTried?: number;
-  /** Stopped early (abortTight): the dining group couldn't keep the way. */
+  /**
+   * Stopped early: the dining group couldn't keep the way (abortTight), or it could only end
+   * worse than `noWorseThan`.
+   */
   aborted?: boolean;
 }
 
@@ -1450,8 +1459,34 @@ function solveOnce(input: SolveInput): SolveOutcome {
     const items = [...placed.values()];
     return tightIn(input, items, fixedCount) || diningOnWay(input, items);
   };
+  /**
+   * Whether the pieces placed so far can only end worse than `noWorseThan`. Once the budget is
+   * spent nothing goes back, so the pieces before `i` stay as they are: what they leave out,
+   * squeeze or turn from what they go with only adds up from here.
+   */
+  const worseAlready = (i: number): boolean => {
+    const bound = input.noWorseThan;
+    if (!bound || tries < budget) return false;
+    let lost = 0;
+    let soft = 0;
+    let broken = 0;
+    for (let j = 0; j < i; j++) {
+      const c = chosen[j];
+      if (!c) {
+        if (!bound.spare?.has((order[j] as Intent).want.ref)) lost++;
+      } else {
+        if (c.soft) soft++;
+        if (!c.related) broken++;
+      }
+    }
+    return lost > bound.dropped || soft > bound.soft || broken > bound.broken;
+  };
   for (let i = 0; i < order.length; i++) {
     if (input.abortTight && i > 0 && i - 1 === lastGroup && doomed()) {
+      aborted = true;
+      break;
+    }
+    if (worseAlready(i)) {
       aborted = true;
       break;
     }
