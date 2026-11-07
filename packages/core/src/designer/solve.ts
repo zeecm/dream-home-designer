@@ -168,7 +168,9 @@ export function solveSpace(input: SolveInput): SolveOutcome {
     out.tries += first.tries;
     if (
       !bad(out.items) &&
-      essentialDrops(out, swap.intents) <= essentialDrops(first, input.intents)
+      [...essentialDrops(out, swap.intents)].every((ref) =>
+        essentialDrops(first, input.intents).has(ref),
+      )
     ) {
       out.repaired.unshift(...swap.notes);
       return out;
@@ -225,13 +227,15 @@ function diningOnWay(input: SolveInput, items: Item[]): boolean {
   });
 }
 
-/** Pieces a room can't do without that a solve left out. */
-function essentialDrops(o: SolveOutcome, intents: Intent[]): number {
+/** Pieces a room can't do without that a solve left out (by ref): a swap may not add one. */
+function essentialDrops(o: SolveOutcome, intents: Intent[]): Set<string> {
   const kinds = new Map(intents.map((t) => [t.want.ref, t.want.kind]));
-  return o.dropped.filter((n) => {
-    const k = n.ref ? kinds.get(n.ref) : undefined;
-    return !!k && ESSENTIAL.has(roleOf(k));
-  }).length;
+  return new Set(
+    o.dropped.flatMap((n) => {
+      const k = n.ref ? kinds.get(n.ref) : undefined;
+      return k && n.ref && ESSENTIAL.has(roleOf(k)) ? [n.ref] : [];
+    }),
+  );
 }
 
 /** The same piece as another kind of the catalogue, at that kind's size. */

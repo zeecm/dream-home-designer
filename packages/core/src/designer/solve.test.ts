@@ -310,6 +310,9 @@ describe('the solver', () => {
         'Swapped the 3-seat sofa for a 2-seat to keep 0.60 m to the dining table.',
       ]);
       expect(byRole(r, 'sofa')[0]?.assetId).toBe('sofa-2');
+      // Nothing the room needs is lost for it: the TV still faces the sofa.
+      expect(byRole(r, 'tv')).toHaveLength(1);
+      expect(r.checks.filter((c) => c.key.startsWith('P2|faces'))).toEqual([]);
       expect(r.checks.filter((c) => c.key.startsWith('P2|apart') && c.hard)).toEqual([]);
     });
 
