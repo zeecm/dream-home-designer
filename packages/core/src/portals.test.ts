@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { roomIdAt, roomsBeside } from './designer/spaces';
 import { hdb4RoomLevel } from './fixtures/hdb4room';
 import { sampleFlatProject } from './fixtures/sampleFlat';
+import { DOOR_LEAF_THICKNESS, planGeometry } from './plan';
 import { daylightReach, groundInSun, revealPasses, skyOpenings } from './portals';
 import type { Level, Wall } from './schema';
 import { DEFAULT_SITE } from './schema';
@@ -50,16 +51,17 @@ describe('openings to the sky', () => {
       expect(o.height).toBe(op?.height);
       expect(o.glazed).toBe(true);
       expect(Math.hypot(o.out.x, o.out.y)).toBeCloseTo(1, 9);
-      // In the hole, a hair on the room's side of the pane (the wall's middle): the outer
-      // half of the hole beyond it, the inner half (sill, jambs and head) lit by it.
-      expect(o.depth, o.id).toBeCloseTo(t / 2 - 0.006, 9);
+      // In the hole, a hair on the room's side of the pane (the wall's middle, 5 mm each
+      // way): the outer half of the hole and that hair beyond it, the rest of the inner half
+      // (sill, jambs and head) lit by it.
+      expect(o.depth, o.id).toBeCloseTo(t / 2 + 0.006, 9);
       const step = (k: number) => ({ x: o.at.x + o.out.x * k, y: o.at.y + o.out.y * k });
       expect(roomIdAt(level, step(-t / 2)), o.id).toBe(o.roomId);
       expect(roomIdAt(level, step(o.depth + 0.05)), o.id).toBeNull();
     }
   });
 
-  it('puts a passage’s at the far end of the hole and a glazed door’s at the near end', () => {
+  it('puts a passage’s at the far end of the hole and a glazed door’s just inside its leaf', () => {
     const win = skyOpenings(level)[0];
     const op = win && level.openings[win.id];
     if (!win || !op) throw new Error('no window');
@@ -73,12 +75,22 @@ describe('openings to the sky', () => {
     };
     const passage = as({ kind: 'passage' } as never);
     expect(passage.s.glazed).toBe(false);
-    expect(passage.s.depth).toBe(0);
+    expect(passage.s.depth).toBeCloseTo(0.001, 9);
     expect(passage.out).toBeCloseTo(t / 2 - 0.001 + 0.006, 6);
-    const door = as({ kind: 'door', glazed: true } as never);
-    expect(door.s.glazed).toBe(true);
-    expect(door.s.depth).toBeCloseTo(t, 9);
-    expect(door.out).toBeCloseTo(-(t / 2 + 0.001) + 0.006, 6);
+    // A glazed door: its shut leaf (4 cm) stands flush with the face it swings to. Swinging
+    // out, it is at the outer face, and the light a hair inside it (the reveal lit); swinging
+    // in, it is at the inner face, and the light a hair inside that (never behind the glass).
+    const f = planGeometry(level).frames[op.wallId];
+    const roomSide = f ? Math.sign(f.n.x * -win.out.x + f.n.y * -win.out.y) : 1;
+    const swings = (inward: boolean) =>
+      roomSide > 0 === inward ? ('leftIn' as const) : ('leftOut' as const);
+    const out = as({ kind: 'door', glazed: true, swing: swings(false) } as never);
+    expect(out.s.glazed).toBe(true);
+    expect(out.s.depth).toBeCloseTo(DOOR_LEAF_THICKNESS + 0.001, 9);
+    expect(out.out).toBeCloseTo(t / 2 - DOOR_LEAF_THICKNESS - 0.001 + 0.006, 6);
+    const inn = as({ kind: 'door', glazed: true, swing: swings(true) } as never);
+    expect(inn.s.depth).toBeCloseTo(t + 0.001, 9);
+    expect(inn.out).toBeCloseTo(-(t / 2 + 0.001) + 0.006, 6);
   });
 
   it('gives a glass wall one light, its openings none of their own', () => {
@@ -92,6 +104,23 @@ describe('openings to the sky', () => {
     expect(wall?.bottom).toBe(0);
     expect(wall?.height).toBe(level.ceilingHeight);
     expect(wall?.depth).toBe(0);
+  });
+
+  it('gives a window in a half wall a light only up to the wall’s top, none above it', () => {
+    const op = Object.values(level.openings).find((o) => o.id === skyOpenings(level)[0]?.id);
+    if (!op) throw new Error('no window');
+    // The wall's top cuts the window: it keeps its part below, the gap over the wall the rest.
+    const cut = withWall(level, op.wallId, { height: op.sill + op.height / 2 });
+    const found = skyOpenings(cut);
+    const win = found.find((o) => o.id === op.id);
+    expect(win?.bottom).toBe(op.sill);
+    expect(win?.height).toBeCloseTo(op.height / 2, 9);
+    const gap = found.find((o) => o.id === op.wallId);
+    expect(gap?.bottom).toBeCloseTo(op.sill + op.height / 2, 9);
+    // Under the window's sill: the window is all above the wall, so only the gap's light.
+    const low = withWall(level, op.wallId, { height: op.sill - 0.1 });
+    expect(skyOpenings(low).filter((o) => o.id === op.id)).toHaveLength(0);
+    expect(skyOpenings(low).filter((o) => o.id === op.wallId)).toHaveLength(1);
   });
 
   it('lets the sky over a half wall to the outside, through glass if it has glass above', () => {

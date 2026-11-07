@@ -374,10 +374,9 @@ describe('portals: the sky’s light through its openings', () => {
       const shines = new THREE.Vector3(0, 0, -1).applyQuaternion(l.quaternion);
       expect(shines.x * -o.out.x + shines.z * -o.out.y).toBeCloseTo(1, 9);
       expect(shines.y).toBeCloseTo(0, 9);
-      // In the wall: the hole beyond it (to the outer face) and before it (to the inner face)
-      // add up to the wall's thickness, both more than nothing.
-      expect(o.depth, o.id).toBeGreaterThan(0);
-      expect(o.depth, o.id).toBeLessThan(t / 2);
+      // In the wall, a hair on the room's side of the pane at its middle: the hole beyond it
+      // (to the outer face) a little more than half the wall.
+      expect(o.depth, o.id).toBeCloseTo(t / 2 + 0.006, 9);
       const step = (k: number) => ({ x: o.at.x + o.out.x * k, y: o.at.y + o.out.y * k });
       expect(roomIdAt(level, step(-t)), o.id).toBe(o.roomId);
       expect(roomIdAt(level, step(o.depth + 0.05)), o.id).toBeNull();
@@ -497,6 +496,17 @@ describe('portals: the sky’s light through its openings', () => {
     const n = lightChoices(lit.scene);
     // The sun, every portal, every lamp; not the sky (it lights nothing here).
     expect(n).toBe(1 + lit.portals.length + lit.lamps.length);
+    // The tracer's rule: a light at no intensity still counts, a hidden one doesn't, the sky
+    // counts whenever it lights at all (checked against the tracer's own code in the app).
+    const off = new THREE.PointLight('#fff', 0);
+    const hidden = new THREE.PointLight('#fff', 5);
+    hidden.visible = false;
+    lit.scene.add(off, hidden);
+    expect(lightChoices(lit.scene)).toBe(n + 1);
+    lit.scene.environmentIntensity = 0.5;
+    expect(lightChoices(lit.scene)).toBe(n + 2);
+    lit.scene.remove(off, hidden);
+    lit.scene.environmentIntensity = 0;
     const sun = noon.sun;
     if (!sun) throw new Error('no sun');
     // The tracer picks one light of n and scales its find by n: a white floor square to the

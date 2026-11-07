@@ -1,5 +1,6 @@
 import {
   type Level,
+  type PlanGeometry,
   type SceneCamera,
   type Site,
   type SkyOpening,
@@ -9,6 +10,7 @@ import {
   groundInSun,
   itemLights,
   levelBounds,
+  planGeometry,
   revealPasses,
   skyOpenings,
   sunDirection,
@@ -186,15 +188,24 @@ export function sampleClamp(daylight: Daylight): number {
 }
 
 /**
- * How many lights the tracer picks among for each sample: its lights, and the sky if it lights
- * the scene (three-gpu-pathtracer 0.0.23: one at random, its find scaled by the count).
+ * How many lights the tracer picks among for each sample, by its own rule (three-gpu-pathtracer
+ * 0.0.23, `getLights` and the shader's `lightsDenom`): every visible rect area, spot, point and
+ * directional light, whatever its intensity, and the sky if it lights the scene. It picks one
+ * at random and scales its find by the count. Give it the scene the tracer is given.
  */
 export function lightChoices(scene: THREE.Scene): number {
   let n = 0;
   scene.traverse((o) => {
-    if ((o as THREE.Light).isLight && (o as THREE.Light).intensity > 0) n++;
+    const l = o as THREE.Object3D & {
+      isRectAreaLight?: boolean;
+      isSpotLight?: boolean;
+      isPointLight?: boolean;
+      isDirectionalLight?: boolean;
+    };
+    if (l.visible && (l.isRectAreaLight || l.isSpotLight || l.isPointLight || l.isDirectionalLight))
+      n++;
   });
-  return Math.max(1, n + (scene.environment && scene.environmentIntensity > 0 ? 1 : 0));
+  return Math.max(1, n + (scene.environment && scene.environmentIntensity !== 0 ? 1 : 0));
 }
 
 /**
@@ -241,12 +252,13 @@ export function portalLight(
   o: SkyOpening,
   daylight: Daylight,
   reaches = GROUND_REACHES,
+  geom?: PlanGeometry,
 ): THREE.Color {
   const ground = skyOnGround(daylight.sky);
   const s = daylight.sun;
   if (s) {
     const dir = { x: s.direction.x, y: s.direction.y, z: s.direction.z };
-    ground.add(sunOnGround(daylight).multiplyScalar(groundInSun(level, o, dir)));
+    ground.add(sunOnGround(daylight).multiplyScalar(groundInSun(level, o, dir, geom)));
   }
   return portalRadiance(daylight.sky)
     .add(ground.multiplyScalar(0.5 * reaches))
@@ -265,9 +277,10 @@ export function portalLight(
  */
 export function portalLights(level: Level, daylight: Daylight, rooms?: ReadonlySet<string>) {
   const out: THREE.RectAreaLight[] = [];
-  for (const o of skyOpenings(level)) {
+  const geom = planGeometry(level);
+  for (const o of skyOpenings(level, geom)) {
     if (rooms && !rooms.has(o.roomId)) continue;
-    const c = portalLight(level, o, daylight);
+    const c = portalLight(level, o, daylight, GROUND_REACHES, geom);
     const peak = Math.max(c.r, c.g, c.b);
     if (!(peak > 0)) continue;
     const at = new THREE.Vector3(o.at.x, level.elevation + o.bottom + o.height / 2, o.at.y);

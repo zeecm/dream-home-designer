@@ -1,6 +1,7 @@
 import { DEFAULT_SITE, type Level, furnitureKind, newItem, sampleFlatProject } from '@dhd/core';
-import { buildExactScene, exactDaylight } from '@dhd/render';
+import { buildExactScene, exactDaylight, lightChoices } from '@dhd/render';
 import * as THREE from 'three';
+import { getLights } from 'three-gpu-pathtracer/src/core/utils/sceneUpdateUtils.js';
 import { describe, expect, it } from 'vitest';
 import { flattenForTracing } from './flatten';
 
@@ -100,5 +101,28 @@ describe('the scene as the tracer takes it', () => {
     const box = new THREE.Box3().setFromBufferAttribute(pos as THREE.BufferAttribute);
     expect(box.min.toArray()).toEqual([-0.5, 4.5, -0.5]);
     expect(box.max.toArray()).toEqual([4.5, 5.5, 0.5]);
+  });
+});
+
+describe('the lights the tracer picks among', () => {
+  it('are counted as the tracer counts them, in the scene it is given', () => {
+    const level = sampleFlatProject().levels[0] as Level;
+    for (const [hour, portals, lamps] of [
+      [12, true, false],
+      [12, false, true],
+      [21, true, true],
+    ] as const) {
+      const daylight = exactDaylight(DEFAULT_SITE, 300, hour);
+      const built = buildExactScene(level, { ceilings: true, daylight, lamps, portals });
+      // A lamp turned down to nothing and a hidden one: the tracer still counts the first.
+      const off = new THREE.PointLight('#fff', 0);
+      const hidden = new THREE.PointLight('#fff', 5);
+      hidden.visible = false;
+      built.scene.add(off, hidden);
+      const flat = flattenForTracing(built.scene);
+      const sky = flat.environment && flat.environmentIntensity !== 0 ? 1 : 0;
+      expect(lightChoices(flat), `${hour} ${portals} ${lamps}`).toBe(getLights(flat).length + sky);
+      built.dispose();
+    }
   });
 });

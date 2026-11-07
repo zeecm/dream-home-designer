@@ -9,7 +9,8 @@
  * `portals=1`, `plain=1` (no furniture or lamps), `flat=hdb4` (the 4-room fixture), `day=`, `pose=x,y,yaw[,across]`, `clamp=<n>|auto`,
  * and to weigh the portals' light: `nosun=1`, `mis=0` (no light sampling), `gk=<k>` (the
  * ground's share reaching in, for GROUND_REACHES), `glow=0`, `darkground=1`. Logs black pixels, specks and luminance at
- * 32 and 64 samples and the last (`stats at`).
+ * 32 and 64 samples and the last (`stats at`), of the picture as shown (specks spread; `raw=1`:
+ * as traced), and `speck=<k>`.
  */
 import {
   DEFAULT_SITE,
@@ -337,6 +338,9 @@ async function main() {
     ).tracer.multipleImportanceSampling = false;
   }
   if (CLAMP) engine.clamp = CLAMP === 'auto' ? sampleClamp(daylight) : Number(CLAMP);
+  // `speck=<k>`: specks spread past k times their neighbours (0: none; default as the app).
+  const speck = q.get('speck');
+  if (speck !== null) (engine as unknown as { speck: number }).speck = Number(speck);
   await engine.start(built.scene, camera);
   const prepared = performance.now();
   log(`prepare (BVH, textures, compile): ${(prepared - tStart).toFixed(0)} ms`);
@@ -387,8 +391,10 @@ async function main() {
           const inner = engine as unknown as {
             renderer: { readRenderTargetPixels: (...a: unknown[]) => void };
             inner: { _pathTracer: { target: { width: number; height: number } } };
+            spread: { width: number; height: number };
           };
-          const t = inner.inner._pathTracer.target;
+          // The traced light as shown (specks spread), or with `raw=1` as traced.
+          const t = q.get('raw') === '1' ? inner.inner._pathTracer.target : inner.spread;
           const px = new Float32Array(t.width * t.height * 4);
           inner.renderer.readRenderTargetPixels(t, 0, 0, t.width, t.height, px);
           const st = stats(px, t.width, t.height);

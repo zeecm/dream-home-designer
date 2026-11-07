@@ -59,6 +59,140 @@ const quadVertex = /* glsl */ `
   }
 `;
 
+/**
+ * A speck is a pixel more than SPECK times as bright as the median of the eight around it: a
+ * path that by chance met something very bright (the sun's patch on a floor, seen off a
+ * wall). Its light is true, found too rarely to average out yet: it is spread softly over the
+ * pixels about it (`SPREAD`) rather than cut, so the picture keeps all its light (the
+ * room as bright as a long render) and no denoiser has to deal with the speck. Set on
+ * measurements (`HANDOVER.md`).
+ */
+export const SPECK = 2.5;
+/** How widely a speck's light is spread: a Gaussian this fraction of the picture's width. */
+export const SPREAD = 1 / 40;
+/** The widest spread, pixels each way (the shader's loop bound). */
+const MAX_SPREAD = 36;
+
+/**
+ * Splits the traced light into what stays (each pixel at most SPECK times its neighbours'
+ * median) and what a speck has beyond that (`part` 1), still linear.
+ */
+class SplitPass extends THREE.ShaderMaterial {
+  constructor() {
+    super({
+      uniforms: { map: { value: null }, part: { value: 0 }, speck: { value: SPECK } },
+      vertexShader: quadVertex,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D map;
+        uniform float part;
+        uniform float speck;
+        vec3 at(ivec2 p) {
+          vec4 c = texelFetch(map, clamp(p, ivec2(0), textureSize(map, 0) - 1), 0);
+          // A tracer without float blending keeps its samples premultiplied.
+          return max(c.a > 0.0 ? c.rgb / max(c.a, 1e-6) : c.rgb, vec3(0.0));
+        }
+        float lum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+        void main() {
+          ivec2 p = ivec2(gl_FragCoord.xy);
+          vec3 c = at(p);
+          // The middle of the eight around it (specks often come in twos and threes).
+          float v[8];
+          int n = 0;
+          for (int y = -1; y <= 1; y++) {
+            for (int x = -1; x <= 1; x++) {
+              if (x != 0 || y != 0) {
+                v[n] = lum(at(p + ivec2(x, y)));
+                n++;
+              }
+            }
+          }
+          for (int i = 0; i < 5; i++) {
+            for (int j = 0; j < 7 - i; j++) {
+              float lo = min(v[j], v[j + 1]);
+              v[j + 1] = max(v[j], v[j + 1]);
+              v[j] = lo;
+            }
+          }
+          float m = 0.5 * (v[3] + v[4]);
+          float cap = speck > 0.0 ? speck * max(m, 1e-4) : 1e30;
+          float l = lum(c);
+          vec3 kept = l > cap ? c * (cap / l) : c;
+          gl_FragColor = vec4(part < 0.5 ? kept : c - kept, 1.0);
+        }
+      `,
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.NoBlending,
+    });
+  }
+}
+
+/**
+ * Each speck's excess spread softly about it, one axis at a time (`dir`): a Gaussian (`sigma`
+ * px) over the pixels like the speck's own surface (by what stays, `kept`: near in brightness
+ * and colour), so a floor's light doesn't spill onto the sofa on it. Each speck's share is
+ * first divided by the weights it hands out (`mode` 0), then gathered (`mode` 1), so no light
+ * is lost or made; the last gather adds what stays (`withKept`).
+ */
+class SpreadPass extends THREE.ShaderMaterial {
+  constructor() {
+    super({
+      uniforms: {
+        kept: { value: null },
+        excess: { value: null },
+        dir: { value: new THREE.Vector2(1, 0) },
+        sigma: { value: 4 },
+        mode: { value: 0 },
+        withKept: { value: 0 },
+      },
+      vertexShader: quadVertex,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D kept;
+        uniform sampler2D excess;
+        uniform vec2 dir;
+        uniform float sigma;
+        uniform float mode;
+        uniform float withKept;
+        // How alike two surfaces look: brightness (in stops) and colour.
+        vec4 look(ivec2 q, ivec2 last) {
+          vec3 c = texelFetch(kept, clamp(q, ivec2(0), last), 0).rgb;
+          float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+          return vec4(c / max(l, 1e-6), log2(max(l, 1e-6)));
+        }
+        float alike(vec4 a, vec4 b) {
+          vec3 dc = a.rgb - b.rgb;
+          // Loose on brightness (a few samples in, the same wall reads a stop either way).
+          float d = 0.1 * (a.w - b.w) * (a.w - b.w) + 2.0 * dot(dc, dc);
+          return exp(-d / (2.0 * 0.6 * 0.6));
+        }
+        void main() {
+          ivec2 p = ivec2(gl_FragCoord.xy);
+          ivec2 last = textureSize(excess, 0) - 1;
+          ivec2 step = ivec2(dir);
+          int r = int(ceil(3.0 * sigma));
+          vec4 here = look(p, last);
+          vec3 e = vec3(0.0);
+          float w = 0.0;
+          for (int i = -${MAX_SPREAD}; i <= ${MAX_SPREAD}; i++) {
+            if (i < -r || i > r) continue;
+            ivec2 q = clamp(p + step * i, ivec2(0), last);
+            float k = exp(-float(i * i) / (2.0 * sigma * sigma)) * alike(here, look(q, last));
+            if (mode > 0.5) e += k * texelFetch(excess, q, 0).rgb;
+            w += k;
+          }
+          vec3 own = texelFetch(excess, p, 0).rgb;
+          vec3 out3 = mode > 0.5 ? e : own / max(w, 1e-6);
+          vec3 base = withKept > 0.5 ? texelFetch(kept, p, 0).rgb : vec3(0.0);
+          gl_FragColor = vec4(base + out3, 1.0);
+        }
+      `,
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.NoBlending,
+    });
+  }
+}
+
 /** The traced light, exposed and tone mapped (AgX) to display light, still linear. */
 class TonePass extends THREE.ShaderMaterial {
   constructor() {
@@ -209,10 +343,11 @@ class MeasurePass extends THREE.ShaderMaterial {
 }
 
 /**
- * Gives the tracer's shader a cap on each sample's light (`sampleClamp`), before it is averaged
- * in: a path that by chance reaches something very bright (the sun's patch on a floor, seen
- * through two bounces) makes one bright speck otherwise. Patched into the library's shader
- * source, which is pinned (0.0.23); if it isn't as expected, nothing is changed.
+ * Gives the tracer's shader a cap on each sample's light (`sampleClamp` times the lights it
+ * picks among, so a true direct sample never trips it), before it is averaged in: only a rare
+ * path the tracer boosts (Russian roulette, a glossy bounce) is cut. Specks of true light found
+ * by chance are spread instead (`SPECK`). Patched into the library's shader source, which is
+ * pinned (0.0.23); if it isn't as expected, nothing is changed.
  */
 function clampSamples(material: THREE.ShaderMaterial): THREE.IUniform | null {
   const src = material.fragmentShader;
@@ -249,6 +384,15 @@ export class PathTracerEngine implements ExactEngine {
   private inner: Internals;
   private display: THREE.WebGLRenderTarget;
   private measureTarget: THREE.WebGLRenderTarget;
+  /** The traced light split (what stays, specks' excess) and spread again: linear, full size. */
+  private keptTarget: THREE.WebGLRenderTarget;
+  private excessTarget: THREE.WebGLRenderTarget;
+  /** The excess on its way through the spread (divided, spread along x, divided again). */
+  private halfTarget: THREE.WebGLRenderTarget;
+  /** The traced light with its specks spread (`SPECK`), as shown (before exposure). */
+  readonly spread: THREE.WebGLRenderTarget;
+  private split = new SplitPass();
+  private spreadPass = new SpreadPass();
   private tone = new TonePass();
   private showPass = new ShowPass();
   private measurePass = new MeasurePass();
@@ -336,6 +480,16 @@ export class PathTracerEngine implements ExactEngine {
       depthBuffer: false,
     };
     this.display = new THREE.WebGLRenderTarget(1, 1, linear);
+    const exact = {
+      type: THREE.FloatType,
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+      depthBuffer: false,
+    };
+    this.keptTarget = new THREE.WebGLRenderTarget(1, 1, exact);
+    this.excessTarget = new THREE.WebGLRenderTarget(1, 1, exact);
+    this.halfTarget = new THREE.WebGLRenderTarget(1, 1, exact);
+    this.spread = new THREE.WebGLRenderTarget(1, 1, exact);
     // Sized as it meters (see luminance()).
     this.measureTarget = new THREE.WebGLRenderTarget(1, 1, {
       type: THREE.FloatType,
@@ -416,8 +570,10 @@ export class PathTracerEngine implements ExactEngine {
     this.metered = false;
     this.snapshot.getContext('2d')?.clearRect(0, 0, this.snapshot.width, this.snapshot.height);
     this.configure(this.opts);
-    this.tracer.setScene(flattenForTracing(scene), camera);
-    this.choices = lightChoices(scene);
+    const traced = flattenForTracing(scene);
+    this.tracer.setScene(traced, camera);
+    // As many lights as the tracer counts, in the scene it was given.
+    this.choices = lightChoices(traced);
     this.applyClamp();
     // Without float blending the tracer averages samples itself, in two targets.
     const alpha = !this.renderer.extensions.has('EXT_float_blend');
@@ -526,9 +682,52 @@ export class PathTracerEngine implements ExactEngine {
     this.draw(full.target, full.samples);
   }
 
+  /** How many times a speck may be as bright as the pixels around it (0: none spread). */
+  get speck(): number {
+    return u(this.split, 'speck').value as number;
+  }
+
+  set speck(v: number) {
+    u(this.split, 'speck').value = v;
+  }
+
   private draw(target: THREE.WebGLRenderTarget, samples = 0) {
     const r = this.renderer;
-    u(this.tone, 'map').value = target.texture;
+    // Specks spread: what stays and what a speck has beyond it, then the two together.
+    for (const t of [this.keptTarget, this.excessTarget, this.halfTarget, this.spread]) {
+      if (t.width !== target.width || t.height !== target.height) {
+        t.setSize(target.width, target.height);
+      }
+    }
+    u(this.split, 'map').value = target.texture;
+    this.quad.material = this.split;
+    for (const [part, out] of [
+      [0, this.keptTarget],
+      [1, this.excessTarget],
+    ] as const) {
+      u(this.split, 'part').value = part;
+      r.setRenderTarget(out);
+      this.quad.render(r);
+    }
+    const sp = this.spreadPass;
+    u(sp, 'kept').value = this.keptTarget.texture;
+    u(sp, 'sigma').value = Math.min(MAX_SPREAD / 3, Math.max(1, target.width * SPREAD));
+    this.quad.material = sp;
+    // Along x, then y: each divided by what it hands out, then gathered.
+    for (const [axis, mode, from, out] of [
+      [0, 0, this.excessTarget, this.halfTarget],
+      [0, 1, this.halfTarget, this.excessTarget],
+      [1, 0, this.excessTarget, this.halfTarget],
+      [1, 1, this.halfTarget, this.spread],
+    ] as const) {
+      u(sp, 'excess').value = from.texture;
+      (u(sp, 'dir').value as THREE.Vector2).set(axis === 0 ? 1 : 0, axis);
+      u(sp, 'mode').value = mode;
+      u(sp, 'withKept').value = axis === 1 && mode === 1 ? 1 : 0;
+      r.setRenderTarget(out);
+      this.quad.render(r);
+    }
+    u(this.tone, 'map').value = this.spread.texture;
     u(this.tone, 'toneMappingExposure').value = this.exposureValue;
     r.toneMappingExposure = this.exposureValue;
     this.quad.material = this.tone;
@@ -604,6 +803,12 @@ export class PathTracerEngine implements ExactEngine {
     (_quad.material as THREE.Material).dispose();
     this.display.dispose();
     this.measureTarget.dispose();
+    this.keptTarget.dispose();
+    this.excessTarget.dispose();
+    this.halfTarget.dispose();
+    this.spread.dispose();
+    this.split.dispose();
+    this.spreadPass.dispose();
     this.tone.dispose();
     this.showPass.dispose();
     this.measurePass.dispose();

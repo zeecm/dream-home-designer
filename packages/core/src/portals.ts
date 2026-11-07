@@ -1,8 +1,16 @@
 import { roomIdAt, roomsBeside } from './designer/spaces';
-import { type WallFrame, framePoint, planGeometry } from './plan';
+import {
+  DOOR_LEAF_THICKNESS,
+  type PlanGeometry,
+  type WallFrame,
+  doorLeaves,
+  framePoint,
+  planGeometry,
+} from './plan';
 import { openPlan } from './sceneFacts';
 import {
   type Level,
+  type Opening,
   type Vec2,
   type Vec3,
   type Wall,
@@ -35,7 +43,7 @@ export interface SkyOpening {
   out: Vec2;
   along: Vec2;
   width: number;
-  /** Its foot above the floor, and its height, metres. */
+  /** Its foot above the floor, and its height, metres (a half wall's opening: up to its top). */
   bottom: number;
   height: number;
   /** Glazed (a window, a glazed door, glass), or open (a passage, a gap, a boundary). */
@@ -86,11 +94,12 @@ function toRoom(f: WallFrame, u: number, side: number, k: number): Vec2 {
 
 /**
  * Every opening that lets the sky into a room (`SkyOpening`). An opening in a glass wall is
- * part of the wall's (one light, not two).
+ * part of the wall's (one light, not two); one in a half wall only up to the wall's top (the
+ * gap over the wall has the rest).
  */
-export function skyOpenings(level: Level): SkyOpening[] {
-  const geom = planGeometry(level);
+export function skyOpenings(level: Level, geom: PlanGeometry = planGeometry(level)): SkyOpening[] {
   const out: SkyOpening[] = [];
+  const ceiling = level.ceilingHeight;
   const base = (f: WallFrame, s: { roomId: string; side: number }) => ({
     roomId: s.roomId,
     out: { x: -f.n.x * s.side, y: -f.n.y * s.side },
@@ -108,30 +117,30 @@ export function skyOpenings(level: Level): SkyOpening[] {
     const [u0, u1] = o.span;
     const u = (u0 + u1) / 2;
     // A window's pane is at the middle of the wall; a passage has none, so its light goes at
-    // the far end of the hole; a door's leaf may stand anywhere in it, so its light goes in
-    // front of it all.
-    const [at, depth] =
+    // the far end of the hole; a glazed door's goes a hair on the room's side of its leaves,
+    // shut (doors to the outside are shown shut), wherever they stand.
+    const inward =
       op.kind === 'window'
-        ? [toRoom(f, u, s.side, PANE), f.half - PANE]
+        ? PANE
         : op.kind === 'passage'
-          ? [toRoom(f, u, s.side, -f.half + 0.001), 0]
-          : [toRoom(f, u, s.side, f.half + 0.001), 2 * f.half];
+          ? -f.half + 0.001
+          : doorFront(f, op, s.side);
+    const top = isHalfWall(wall, ceiling) ? wallTop(wall, ceiling) : Number.POSITIVE_INFINITY;
     out.push({
       id: op.id,
       ...base(f, s),
-      at,
+      at: toRoom(f, u, s.side, inward),
       width: u1 - u0,
       bottom: op.sill,
-      height: op.height,
+      height: Number.isFinite(top) ? Math.min(op.sill + op.height, top) - op.sill : op.height,
       glazed: op.kind !== 'passage',
-      depth: Math.max(0, depth),
+      depth: Math.max(0, f.half + inward),
     });
   }
   for (const w of Object.values(level.walls)) {
     const f = geom.frames[w.id];
     const s = f ? insideOf(level, w.id) : null;
     if (!s || !f) continue;
-    const ceiling = level.ceilingHeight;
     const gap = (bottom: number, glazed: boolean): SkyOpening => ({
       id: w.id,
       ...base(f, s),
@@ -150,6 +159,19 @@ export function skyOpenings(level: Level): SkyOpening[] {
 }
 
 const wallTop = (w: Wall, ceiling: number) => Math.min(w.height ?? ceiling, ceiling);
+
+/** How far toward the room (`side`) from the wall's middle line a door's shut leaves reach, and a hair. */
+function doorFront(f: WallFrame, op: Opening, side: number): number {
+  let front = Number.NEGATIVE_INFINITY;
+  for (const leaf of doorLeaves(f, op, 0)) {
+    for (const p of [leaf.a, leaf.b]) {
+      const v = ((p.x - f.a.x) * f.n.x + (p.y - f.a.y) * f.n.y) * side;
+      front = Math.max(front, v);
+    }
+  }
+  if (!Number.isFinite(front)) front = f.half;
+  return front + DOOR_LEAF_THICKNESS / 2 + 0.001;
+}
 
 /**
  * The rooms whose daylight a camera in `roomId` sees the effect of: its open-plan space, and on
@@ -196,15 +218,21 @@ const OPEN_ENOUGH = 0.05;
  * How much of the ground an opening looks down on is in the sun (0 to 1): points on the ground
  * outside it, at even steps of how far below the level the view looks, weighted as they light
  * the opening (cos²), across its width, each tested against the walls (as tall as they stand)
- * on the way to the sun. A point inside the house (another wing) counts as shade. `sun` is the
- * direction to the sun (world: x, up, plan y as z).
+ * on the way to the sun (glass walls let it through; openings in walls are taken as solid). A
+ * point inside the house (another wing) counts as shade. `sun` is the direction to the sun
+ * (world: x, up, plan y as z); `geom`, the level's plan geometry, if at hand.
  */
-export function groundInSun(level: Level, o: SkyOpening, sun: Vec3 | null): number {
+export function groundInSun(
+  level: Level,
+  o: SkyOpening,
+  sun: Vec3 | null,
+  geom: PlanGeometry = planGeometry(level),
+): number {
   if (!sun || sun.y <= 0) return 0;
   const flat = Math.hypot(sun.x, sun.z);
-  const geom = planGeometry(level);
+  // Solid walls shade the ground (glass ones let the sun through).
   const walls = Object.values(level.walls)
-    .filter((w) => !isBoundary(w))
+    .filter((w) => !isBoundary(w) && !isGlass(w))
     .map((w) => ({ f: geom.frames[w.id], top: wallTop(w, level.ceilingHeight) }))
     .filter((w): w is { f: WallFrame; top: number } => !!w.f);
   const lit = (p: Vec2): boolean => {
