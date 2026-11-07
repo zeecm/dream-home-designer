@@ -686,6 +686,32 @@ export function narrowingPieces(p: FurnishedPass, cells: number[], need: number)
   return [...out];
 }
 
+/**
+ * Where a closed way is drawn shut: across the doorway a piece fills (its span on the wall's
+ * centre line), else across the bare way just before the first piece standing in it.
+ */
+export function closedBarOf(p: FurnishedPass, bareWay: number[]): [Vec2, Vec2] {
+  const { solid, owner, nBare, bare } = p;
+  const { g, throatOf, throats } = bare;
+  const blocked = (k: number) => !!solid[k] && (owner[k] as number) >= nBare;
+  const hit = bareWay.findIndex(blocked);
+  if (hit < 0) {
+    const q = cellCentre(g, bareWay[bareWay.length - 1] as number);
+    return [q, q];
+  }
+  for (let i = hit; i < bareWay.length && blocked(bareWay[i] as number); i++) {
+    const t = throatOf[bareWay[i] as number] as number;
+    const th = t >= 0 ? throats[t] : undefined;
+    if (th) {
+      const at = (u: number) => ({ x: th.f.a.x + th.f.d.x * u, y: th.f.a.y + th.f.d.y * u });
+      return [at(th.u0), at(th.u1)];
+    }
+  }
+  const q = cellCentre(g, bareWay[Math.max(0, hit - 1)] as number);
+  const r = across(q, p.bareObs, p.bareRaster);
+  return r ? [r.a, r.b] : [q, q];
+}
+
 /** Pieces standing in a bare way (it is closed). */
 export function standingPieces(p: FurnishedPass, cells: number[]): string[] {
   const out = new Set<string>();
@@ -742,29 +768,7 @@ export function walkwayReport(level: Level): WalkwayReport {
   /** Pieces narrowing the bare way (where it's now under the need) or standing in it. */
   const narrowing = (cells: number[], need: number) => narrowingPieces(pass, cells, need);
 
-  /**
-   * Where a closed way is drawn shut: across the doorway a piece fills (its span on the wall's
-   * centre line), else across the bare way just before the first piece standing in it.
-   */
-  const closedBar = (bareWay: number[]): [Vec2, Vec2] => {
-    const blocked = (k: number) => !!solid[k] && (owner[k] as number) >= nBare;
-    const hit = bareWay.findIndex(blocked);
-    if (hit < 0) {
-      const p = cellCentre(g, bareWay[bareWay.length - 1] as number);
-      return [p, p];
-    }
-    for (let i = hit; i < bareWay.length && blocked(bareWay[i] as number); i++) {
-      const t = throatOf[bareWay[i] as number] as number;
-      const th = t >= 0 ? throats[t] : undefined;
-      if (th) {
-        const at = (u: number) => ({ x: th.f.a.x + th.f.d.x * u, y: th.f.a.y + th.f.d.y * u });
-        return [at(th.u0), at(th.u1)];
-      }
-    }
-    const p = cellCentre(g, bareWay[Math.max(0, hit - 1)] as number);
-    const r = across(p, bareObs, bareRaster);
-    return r ? [r.a, r.b] : [p, p];
-  };
+  const closedBar = (bareWay: number[]) => closedBarOf(pass, bareWay);
 
   const routes: WalkwayRoute[] = [];
   const pinchOf = new Map<WalkwayRoute, Measure>();
