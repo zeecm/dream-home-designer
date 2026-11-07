@@ -831,6 +831,8 @@ test.describe('desktop', () => {
     const before = m.calls.length;
     await notice.getByRole('button', { name: 'Finish the design' }).click();
     const check = page.getByRole('dialog', { name: 'Finish the design' });
+    // The cost check, if it comes, comes before the run: wait for one or the other.
+    await expect(check.or(p.getByText(/^Done in /))).toBeVisible({ timeout: 30_000 });
     if (await check.isVisible().catch(() => false)) {
       await check.getByRole('button', { name: /^Finish the design (anyway )?· about/ }).click();
     }
