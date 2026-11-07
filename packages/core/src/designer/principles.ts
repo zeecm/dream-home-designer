@@ -177,7 +177,7 @@ export const RELATIONS: Partial<Record<Role, Relation>> = {
     backs: { gap: 0.05 },
     faces: { focus: ['sofa'], angle: 30, min: 0, max: 6, over: 9, clear: 0 },
   },
-  'tv-console': { backs: { gap: 0.05 } },
+  'tv-console': { backs: { gap: 0.05 }, near: { of: ['tv'], within: 0.3 } },
   bed: { backs: { gap: 0.05 } },
   wardrobe: { backs: { gap: 0.05 } },
   drawers: { backs: { gap: 0.05 } },

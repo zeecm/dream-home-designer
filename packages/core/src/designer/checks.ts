@@ -389,7 +389,8 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
         .filter((q) => near.of.includes(q.role))
         .map((q) => ({ q, d: polygonGap(p.fp, q.fp).d }))
         .sort((a, b) => a.d - b.d)[0];
-      let ok = !!best && best.d <= near.within + 1e-6;
+      // With none of what it goes with in the space, there's nothing to be beside.
+      let ok = !best || best.d <= near.within + 1e-6;
       if (ok && best && near.head) {
         // By its head end: on the back half of the bed.
         const b = best.q.it;

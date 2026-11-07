@@ -248,6 +248,33 @@ describe('P3 and P4: circulation, fit and access (criteria 5, 6, 7)', () => {
   });
 });
 
+describe('bounded (criterion 18)', () => {
+  it('every check on the sample with 40 pieces: under 150 ms (median of 7; three times on CI)', () => {
+    const r = designResult(base, base, sampleDesign({ brief: ongs() }));
+    const extra = withPieces(
+      r.level,
+      Array.from({ length: 40 - Object.keys(r.level.items).length }, (_, i) => [
+        i % 2 ? 'plant' : 'dining-chair',
+        at(7 + (i % 3) * 0.9, 3.6 + Math.floor(i / 3) * 0.6),
+        0,
+      ]) as [string, Vec2, number][],
+      'it_x',
+    );
+    expect(Object.keys(extra.items).length).toBeGreaterThanOrEqual(40);
+    const times: number[] = [];
+    for (let i = 0; i < 7; i++) {
+      // A fresh copy each time, so nothing is remembered from the time before.
+      const lvl = structuredClone(extra);
+      const t0 = performance.now();
+      designChecks(lvl, { brief: ongs() });
+      times.push(performance.now() - t0);
+    }
+    const ms = [...times].sort((a, b) => a - b)[3] as number;
+    console.log(`designChecks: ${ms.toFixed(1)} ms (median of 7)`);
+    expect(ms).toBeLessThan(process.env.PERF ? 150 : 450);
+  });
+});
+
 describe('caused or already in the plan (criterion 9)', () => {
   it('9: a sofa facing the wall in the plan, untouched by a version for the bedroom, is already there', () => {
     const plan = withPieces(base, [['sofa-3', at(8.3, 2.599), PI]], 'it_plan');
