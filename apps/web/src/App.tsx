@@ -6,8 +6,8 @@ import { AgeingSync } from './ageing/ageing';
 import { TraceBar } from './ai/TracePanel';
 import { DesignerCompare } from './ai/designer/Compare';
 import { DesignerBar, DesignerDialogs } from './ai/designer/Entry';
-import { DesignerPanel } from './ai/designer/Panel';
 import { useDesigner } from './ai/designer/state';
+import { TalkPanel } from './ai/designer/talk/Conversation';
 import { mayComment, useCanComment, useComments } from './comments/store';
 import { CommentsLive, CommentsPanel, useCommentsLink } from './comments/ui';
 import { type Tool, type ViewMode, useEditor } from './editor';
@@ -393,7 +393,7 @@ export function App() {
           </div>
           {designerOpen && <DesignerCompare />}
         </main>
-        {commentsOpen ? <CommentsPanel /> : designerOpen ? <DesignerPanel /> : <Inspector />}
+        {commentsOpen ? <CommentsPanel /> : designerOpen ? <TalkPanel /> : <Inspector />}
       </div>
       <CommentsLive />
       {/* The Older person check is on hold (owner): it runs only with its flag. */}

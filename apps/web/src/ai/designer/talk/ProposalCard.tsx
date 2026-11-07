@@ -1,0 +1,844 @@
+import {
+  type Change,
+  type DesignResult,
+  type ResultCheck,
+  type SubsetReport,
+  defaultTicks,
+  mergeChanges,
+  spentOf,
+  subsetReport,
+  usageTotals,
+} from '@dhd/core';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { useRates } from '../../../cost/estimate';
+import { useEditor } from '../../../editor';
+import { useProject, useStore } from '../../../store';
+import { useAi } from '../../credentials';
+import { CaseDialog } from '../CaseDialog';
+import { failingChecks } from '../parts';
+import { tokens, usd } from '../spend';
+import { openCompare, useDesigner } from '../state';
+import { designerCannotUse } from '../stream';
+import { keepTogether } from '../words';
+import { acceptCard } from './accept';
+import { type CardModel, cardChanges, cardResult, nowOf, planMoved } from './cards';
+import { finishOption, finishPrice, pressScope, scopePrice, stopTalkRun } from './propose';
+import { type LiveRun, actProposal, useTalk } from './useTalk';
+import { EMPTY_VIEW, useProposalView } from './view';
+
+/**
+ * A proposal card (UX §6.3): its changes grouped by room, each said in the app's words with
+ * the designer's reason one tap away, ticks per change (failing ones unticked, Accept anyway
+ * to waive, HDB rules never), the checks and the cost of what is ticked, and Accept selected.
+ * While its run goes on, a progress line per room and ghosts on the plan; Accept waits for the
+ * checks.
+ */
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const k = (v: number) => `${Math.round(v / 1000)}k`;
+const sgd = (v: number) => `S$${Math.abs(Math.round(v)).toLocaleString('en-SG')}`;
+
+/** A tri-state checkbox (a group's tick). */
+function GroupTick({
+  checked,
+  mixed,
+  disabled,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  mixed: boolean;
+  disabled: boolean;
+  label: string;
+  onChange: (on: boolean) => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = mixed;
+  }, [mixed]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      className="talk-tick"
+      checked={checked}
+      disabled={disabled}
+      aria-checked={mixed ? 'mixed' : checked}
+      aria-label={label}
+      onChange={(e) => onChange(e.target.checked)}
+    />
+  );
+}
+
+/** The cost of a card's run, as a button opening its details (UX §9.3). */
+export function TurnCost({ usage, fixes = 0 }: { usage: CardModel['usage']; fixes?: number }) {
+  const [open, setOpen] = useState(false);
+  const ai = useAi();
+  if (!usage.length) return null;
+  const s = spentOf(usage);
+  const t = usageTotals(usage);
+  const text =
+    s.usd === null ? `${tokens(s.tokens)} tokens` : `${s.estimated ? '~' : ''}${usd(s.usd)}`;
+  const model = usage[0]?.model ?? ai?.model ?? '';
+  return (
+    <span className="talk-cost">
+      <button
+        type="button"
+        className="link-btn talk-cost-btn num"
+        aria-expanded={open}
+        aria-label={`Cost of this reply: ${text}, details`}
+        onClick={() => setOpen(!open)}
+      >
+        {text}
+      </button>
+      {open && (
+        <span className="talk-cost-pop num" role="note">
+          {plural(usage.length, 'request')} · {tokens(t.tokens - t.cached)} tokens in,{' '}
+          {tokens(t.cached)} from cache · {tokens(usage.reduce((a, u) => a + u.output, 0))} out
+          {fixes ? ` · ${plural(fixes, 'fix round')}` : ''} · {model}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** The plan as the ticked changes would make it, and what that fails and costs (150 ms). */
+function useSubset(
+  card: CardModel,
+  r: DesignResult | null,
+  changes: Change[],
+  ticked: string[],
+  waive: string[],
+) {
+  const project = useProject();
+  const rates = useRates((s) => s.rates);
+  const b = useMemo(() => nowOf(project), [project]);
+  const merged = useMemo(
+    () => (b && r ? mergeChanges(b.now, r.level, changes, ticked) : null),
+    [b, r, changes, ticked],
+  );
+  const [report, setReport] = useState<SubsetReport | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on what is ticked and the plan
+  useEffect(() => {
+    if (!b || !r || !merged) return;
+    const t = setTimeout(
+      () =>
+        setReport(
+          subsetReport(b.now, b.before, r, merged, card.input.brief, {
+            rates,
+            waived: [...card.waivers.map((w) => w.key), ...waive],
+            renovation: !!project.renovation,
+          }),
+        ),
+      report ? 150 : 0,
+    );
+    return () => clearTimeout(t);
+  }, [merged, rates, waive.join('|'), card.waivers]);
+  return { merged, report };
+}
+
+interface Props {
+  card: CardModel;
+  /** The newest card: open; older ones fold to one line. */
+  newest: boolean;
+  live: LiveRun | null;
+}
+
+export const ProposalCard = memo(function ProposalCard({ card, newest, live }: Props) {
+  const project = useProject();
+  const ai = useAi();
+  const shown = useTalk((s) => s.shown === card.key);
+  const openRow = useTalk((s) => (s.open?.card === card.key ? s.open.change : null));
+  const hover = useTalk((s) => (s.hover?.card === card.key ? s.hover.change : null));
+  const planHover = useEditor((s) => (shown && s.hover?.kind === 'item' ? s.hover.id : null));
+  const busy = useDesigner((s) => s.starting || !!s.run);
+  // A version to compare: this card's, once accepted (or an earlier design's).
+  const versionId = card.design?.id ?? card.option?.version ?? null;
+  const comparable = useDesigner((s) => !!versionId && s.designs.some((d) => d.id === versionId));
+  const draft = useTalk((s) => s.conv?.draft ?? '');
+  const running = card.status === 'running';
+  const [expanded, setExpanded] = useState(newest);
+  useEffect(() => {
+    if (newest) setExpanded(true);
+  }, [newest]);
+  const r = useMemo(() => cardResult(project, card), [project, card]);
+  const changes = useMemo(() => (r ? cardChanges(project, card, r) : []), [project, card, r]);
+  const ids = useMemo(() => new Set(changes.map((c) => c.id)), [changes]);
+  const [ticks, setTicks] = useState<string[] | null>(card.ticks);
+  useEffect(() => setTicks(card.ticks), [card.ticks]);
+  const ticked = useMemo(
+    () => (ticks ?? defaultTicks(changes)).filter((id) => ids.has(id)),
+    [ticks, changes, ids],
+  );
+  const [waive, setWaive] = useState<{ key: string; text: string }[]>([]);
+  const [confirm, setConfirm] = useState<string | null>(null);
+  const [wrong, setWrong] = useState(false);
+  const [more, setMore] = useState(false);
+  const { merged, report } = useSubset(
+    card,
+    r,
+    changes,
+    ticked,
+    waive.map((w) => w.key),
+  );
+  const checkText = useMemo(() => new Map((r?.checks ?? []).map((c) => [c.key, c])), [r]);
+  const accepted = card.accepted.filter((a) => !a.out);
+  const allIn = !running && changes.length === 0 && accepted.length > 0;
+  const acceptBtn = useRef<HTMLButtonElement>(null);
+  const rowsRef = useRef<HTMLDivElement>(null);
+
+  const setTicked = (next: string[]) => {
+    setTicks(next);
+    if (card.proposal && card.option) {
+      const letter = card.option.letter;
+      void actProposal(card.proposal.id, (p) =>
+        p
+          ? {
+              ...p,
+              options: p.options.map((o) => (o.letter === letter ? { ...o, ticks: next } : o)),
+            }
+          : p,
+      );
+    }
+  };
+  const toggle = (c: Change, on: boolean) => {
+    if (on && c.checks.length && !waive.some((w) => c.checks.includes(w.key))) {
+      // Accept anyway asks first, listing every problem the tick waives.
+      if (c.waivable) setConfirm(c.id);
+      return;
+    }
+    const set = new Set(ticked);
+    if (on) set.add(c.id);
+    else set.delete(c.id);
+    // The walls going out takes what needs them with them.
+    if (c.id === 'walls' && !on) for (const x of changes) if (x.needsWalls) set.delete(x.id);
+    setTicked([...set]);
+  };
+
+  // On the plan: publish what to draw.
+  const failingItems = useMemo(
+    () => (report?.failing ?? []).flatMap((c) => (c.itemId ? [c.itemId] : [])),
+    [report],
+  );
+  useEffect(() => {
+    if (!shown || !r) return;
+    const b = nowOf(project);
+    useProposalView.setState({
+      card: card.key,
+      label: `V${card.n}`,
+      now: b?.now ?? null,
+      target: r.level,
+      merged: running ? (b?.now ?? null) : merged,
+      changes,
+      ticked,
+      failing: failingItems,
+      ghost: running,
+      rooms: r.spaces
+        .filter((s) => s.storedKey && ['done', 'copied'].includes(s.status))
+        .flatMap((s) => s.rooms),
+    });
+  }, [shown, r, merged, changes, ticked, failingItems, running, card.key, card.n, project]);
+  useEffect(
+    () => () => {
+      if (useProposalView.getState().card === card.key) useProposalView.setState(EMPTY_VIEW);
+    },
+    [card.key],
+  );
+  // A piece tapped on the plan opens its row (slice 2's Why); one that didn't change says so.
+  useEffect(() => {
+    if (!shown) return;
+    return useEditor.subscribe((s, prev) => {
+      const sel = s.selection;
+      if (!s.preview || !sel || sel === prev.selection || sel.kind !== 'item') return;
+      const c = changes.find(
+        (x) => x.items.target.includes(sel.id) || x.items.now.includes(sel.id),
+      );
+      if (c) {
+        useTalk.setState({ open: { card: card.key, change: c.id } });
+        requestAnimationFrame(() =>
+          rowsRef.current
+            ?.querySelector(`[data-change-id="${CSS.escape(c.id)}"]`)
+            ?.scrollIntoView({ block: 'nearest' }),
+        );
+      } else {
+        useStore.setState({ toast: { text: `Not changed in V${card.n}`, at: Date.now() } });
+      }
+    });
+  }, [shown, changes, card.key, card.n]);
+
+  if (!r) return null;
+  const fails = failingChecks(r, { waivers: card.waivers });
+  const fixed = Object.values(card.input.spaces).reduce((t, s) => t + (s.fixed ?? 0), 0);
+  const missing = r.spaces.filter((s) => !['done', 'copied', 'locked'].includes(s.status));
+  const groups = [...new Set([...changes.map((c) => c.group), ...accepted.map((a) => a.group)])];
+  const nameOf = (g: string) =>
+    changes.find((c) => c.group === g)?.groupName ??
+    accepted.find((a) => a.group === g)?.groupName ??
+    g;
+  const failingLine = report
+    ? report.failing.length
+      ? {
+          text: `${report.failing.length} ${report.failing.length === 1 ? 'doesn’t' : 'don’t'} pass`,
+          tone: 'fail',
+        }
+      : report.waived.length
+        ? { text: `${report.waived.length} accepted anyway`, tone: 'waived' }
+        : { text: 'Passes all checks', tone: 'pass' }
+    : null;
+  const verdict = running ? 'Checking…' : (failingLine?.text ?? 'Checking…');
+  const title =
+    card.input.concept?.summary ||
+    Object.values(card.input.spaces)
+      .map((s) => s.design?.summary ?? '')
+      .filter(Boolean)
+      .join(' ');
+  const cantDesign = !ai || !!designerCannotUse(ai);
+  const another =
+    !running && card.proposal && !cantDesign ? scopePrice(card.proposal.scope, draft) : null;
+  const head = (
+    <div className="talk-card-head">
+      <h3 className="talk-card-title" id={`card-${card.key}`}>
+        V{card.n} · {card.label}
+      </h3>
+      <button
+        type="button"
+        className={shown ? 'btn btn-small talk-onplan on' : 'btn btn-small talk-onplan'}
+        aria-pressed={shown}
+        aria-label={`Show V${card.n} on the plan`}
+        onClick={() => {
+          useTalk.setState({ shown: shown ? null : card.key });
+          useDesigner.setState({ previewing: !shown });
+        }}
+      >
+        {shown ? 'On the plan' : 'Show on plan'}
+      </button>
+    </div>
+  );
+
+  if (!expanded) {
+    const acc = accepted.length
+      ? ` · Accepted ${accepted.length} of ${accepted.length + changes.length}`
+      : '';
+    return (
+      <article className="talk-card talk-card-folded" aria-labelledby={`card-${card.key}`}>
+        <button
+          type="button"
+          className="talk-card-fold"
+          id={`card-${card.key}`}
+          aria-expanded={false}
+          onClick={() => setExpanded(true)}
+        >
+          <span>
+            V{card.n} · {card.label} · {allIn ? 'In your renovation' : verdict}
+            {acc}
+          </span>
+          <span className="talk-fold-show" aria-hidden="true">
+            Show ›
+          </span>
+        </button>
+      </article>
+    );
+  }
+
+  const tickedN = ticked.length;
+  const progress = live?.state.steps ?? [];
+  return (
+    <article className="talk-card" aria-labelledby={`card-${card.key}`} data-card={card.key}>
+      {head}
+      {title && <p className="talk-card-summary">{keepTogether(title)}</p>}
+      {card.words.trim() && <p className="talk-card-words">Your words: “{card.words.trim()}”</p>}
+      {planMoved(project, card) && !card.accepted.length && (
+        <p className="field-hint">Made on your plan as it was; checked again on it as it is now.</p>
+      )}
+      {running && (
+        <ol className="talk-progress" aria-label="Progress">
+          {progress.map((st) => (
+            <li key={st.key} className={`talk-progress-${st.status}`}>
+              <span className="talk-progress-mark" aria-hidden="true">
+                {st.status === 'done'
+                  ? '✓'
+                  : st.status === 'failed'
+                    ? '!'
+                    : st.status === 'running'
+                      ? '·'
+                      : ''}
+              </span>
+              {st.label} ·{' '}
+              {st.status === 'done'
+                ? 'Placed and checked'
+                : st.status === 'running'
+                  ? st.wait
+                    ? `${st.wait.net ? 'Connection dropped; trying again' : 'Busy; trying again'} in ${st.wait.seconds} s (${st.wait.attempt} of 2)`
+                    : st.fixing
+                      ? `Checking… fixing ${plural(st.fixing.problems, 'problem')}`
+                      : 'Placing…'
+                  : st.status === 'failed'
+                    ? (st.error ?? 'Didn’t work')
+                    : 'Waiting'}
+            </li>
+          ))}
+        </ol>
+      )}
+      {live?.paused && (
+        <div className="talk-limit notice-warning" role="alert">
+          <p>
+            {live.pausedBy === 'tab'
+              ? 'You’ve reached your limit for this tab.'
+              : `This design has used what it was priced at (${usd(live.approved ?? 0)}).`}{' '}
+            It has used {usd(live.state.usage.reduce((t, u) => t + (u.usd ?? 0), 0))} so far
+            {live.remaining !== null
+              ? `; finishing it takes about ${usd(live.remaining)} more.`
+              : '.'}
+          </p>
+          <div className="button-row">
+            <button type="button" className="btn btn-small" onClick={() => live.paused?.(false)}>
+              Stop here, keep what’s done
+            </button>
+            <button type="button" className="btn btn-small" onClick={() => live.paused?.(true)}>
+              Finish the design
+            </button>
+          </div>
+        </div>
+      )}
+      {card.status === 'failed' && (
+        <p className="talk-card-note negative">
+          {card.note ?? 'The design didn’t work.'} Nothing was designed yet.
+        </p>
+      )}
+      {card.status === 'stopped' && missing.length > 0 && (
+        <div className="talk-stopped">
+          <p>
+            {card.note ? `${card.note} ` : ''}Stopped before {missing.map((s) => s.name).join(', ')}{' '}
+            {missing.length === 1 ? 'was' : 'were'} placed. What’s here is checked.
+          </p>
+          {card.proposal &&
+            missing.map((s) => {
+              const est = card.proposal
+                ? finishPrice(card.proposal, card.option?.letter ?? 'A', [s.key])
+                : null;
+              return (
+                <button
+                  key={s.key}
+                  type="button"
+                  className="link-btn"
+                  disabled={busy || cantDesign}
+                  onClick={() =>
+                    card.proposal &&
+                    void finishOption(card.proposal, card.option?.letter ?? 'A', [s.key])
+                  }
+                >
+                  Design {s.name} too{est?.usd ? ` · about ${usd(est.usd.typical)}` : ''}
+                </button>
+              );
+            })}
+        </div>
+      )}
+      {(changes.length > 0 || accepted.length > 0) && (
+        <div className="talk-changes" ref={rowsRef}>
+          <div className="talk-changes-head">
+            <h4>Changes</h4>
+            <span className="muted num">
+              {allIn
+                ? 'In your renovation'
+                : accepted.length
+                  ? `${accepted.length} of ${accepted.length + changes.length} changes in your renovation`
+                  : `${tickedN} of ${changes.length} ticked`}
+            </span>
+          </div>
+          {groups.map((g) => {
+            const rows = changes.filter((c) => c.group === g);
+            const done = accepted.filter((a) => a.group === g);
+            const on = rows.filter((c) => ticked.includes(c.id)).length;
+            const tickable = rows.filter(
+              (c) => c.waivable && (!c.needsWalls || ticked.includes('walls')),
+            );
+            const gname = nameOf(g);
+            return (
+              <section key={g} className="talk-group" aria-label={gname}>
+                <div className="talk-group-head">
+                  {rows.length > 0 && (
+                    // biome-ignore lint/a11y/noLabelWithoutControl: the checkbox is GroupTick's
+                    <label className="talk-tick-cell">
+                      <GroupTick
+                        checked={on > 0 && on === rows.length}
+                        mixed={on > 0 && on < rows.length}
+                        disabled={running || !tickable.length}
+                        label={`Accept all of ${gname}`}
+                        onChange={(v) => {
+                          const set = new Set(ticked);
+                          for (const c of rows) {
+                            if (!v) set.delete(c.id);
+                            else if (!c.checks.length && (!c.needsWalls || set.has('walls')))
+                              set.add(c.id);
+                          }
+                          setTicked([...set]);
+                        }}
+                      />
+                    </label>
+                  )}
+                  <span className="talk-group-name">
+                    {gname}{' '}
+                    <span className="muted num">
+                      ({on === rows.length ? rows.length : `${on} of ${rows.length}`})
+                    </span>
+                  </span>
+                </div>
+                <ul className="talk-rows">
+                  {rows.map((c) => {
+                    const isOn = ticked.includes(c.id);
+                    const blocked = c.needsWalls && !ticked.includes('walls');
+                    const fail = c.checks
+                      .map((key) => checkText.get(key))
+                      .filter((x): x is ResultCheck => !!x);
+                    const opened = openRow === c.id;
+                    const lit =
+                      hover === c.id ||
+                      (!!planHover && [...c.items.target, ...c.items.now].includes(planHover));
+                    return (
+                      <li
+                        key={c.id}
+                        className={`talk-row${lit ? ' lit' : ''}${fail.length ? ' failing' : ''}`}
+                        data-change-id={c.id}
+                        onMouseEnter={() =>
+                          useTalk.setState({ hover: { card: card.key, change: c.id } })
+                        }
+                        onMouseLeave={() => useTalk.setState({ hover: null })}
+                        onFocus={() =>
+                          useTalk.setState({ hover: { card: card.key, change: c.id } })
+                        }
+                        onBlur={() => useTalk.setState({ hover: null })}
+                      >
+                        {c.waivable ? (
+                          <label className="talk-tick-cell">
+                            <input
+                              type="checkbox"
+                              className="talk-tick"
+                              checked={isOn}
+                              disabled={running || blocked}
+                              aria-label={`Accept: ${c.text}`}
+                              onChange={(e) => toggle(c, e.target.checked)}
+                            />
+                          </label>
+                        ) : (
+                          <span className="talk-tick-cell" aria-hidden="true" />
+                        )}
+                        <div className="talk-row-body">
+                          <button
+                            type="button"
+                            className="talk-row-text"
+                            aria-expanded={opened}
+                            aria-label={`Why: ${c.text}`}
+                            onClick={() =>
+                              useTalk.setState({
+                                open: opened ? null : { card: card.key, change: c.id },
+                              })
+                            }
+                          >
+                            <span>{keepTogether(c.text)}</span>
+                            <span className="talk-row-why" aria-hidden="true">
+                              ›
+                            </span>
+                          </button>
+                          {c.verb === 'walls' && (
+                            <ul className="talk-wall-rows">
+                              {c.rows.map((x) => (
+                                <li key={x}>{keepTogether(x)}</li>
+                              ))}
+                            </ul>
+                          )}
+                          {opened && (
+                            <p className="talk-reason">
+                              {c.why
+                                ? keepTogether(c.why)
+                                : 'The designer gave no reason for this one.'}
+                            </p>
+                          )}
+                          {blocked && (
+                            <p className="talk-row-sub">Needs the walls from V{card.n}</p>
+                          )}
+                          {fail.length > 0 && !c.waivable && (
+                            <p className="talk-row-sub negative">
+                              HDB rule: can’t be accepted. Ask the designer for another way.
+                            </p>
+                          )}
+                          {fail.map((f) => (
+                            <p key={f.key} className="talk-row-sub negative">
+                              {isOn ? 'Accepted anyway: ' : 'Doesn’t pass: '}
+                              {keepTogether(f.text)}
+                            </p>
+                          ))}
+                          {confirm === c.id && (
+                            <div className="talk-confirm notice-warning">
+                              <p>
+                                Accept anyway? {plural(fail.length, 'problem')}:{' '}
+                                {fail.map((f) => f.text).join('; ')}
+                              </p>
+                              <div className="button-row">
+                                <button
+                                  type="button"
+                                  className="btn btn-small"
+                                  onClick={() => {
+                                    setWaive([
+                                      ...waive,
+                                      ...fail.map((f) => ({ key: f.key, text: f.text })),
+                                    ]);
+                                    setTicked([...new Set([...ticked, c.id])]);
+                                    setConfirm(null);
+                                  }}
+                                >
+                                  Accept anyway
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-small"
+                                  onClick={() => setConfirm(null)}
+                                >
+                                  Keep it out
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                  {done.map((a) => (
+                    <li key={a.id} className="talk-row talk-row-in">
+                      <span className="talk-tick-cell talk-in-mark" aria-hidden="true">
+                        ✓
+                      </span>
+                      <div className="talk-row-body">
+                        <span className="talk-row-done">{keepTogether(a.text)}</span>
+                        <span className="visually-hidden">: in your renovation</span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            );
+          })}
+        </div>
+      )}
+      {!running && card.status !== 'failed' && (
+        <dl className="talk-lens">
+          {fixed > 0 && (
+            <div className="talk-lens-line">
+              <dd>✓ Checked and fixed {plural(fixed, 'problem')} before showing you this.</dd>
+            </div>
+          )}
+          <div>
+            <dt>Checks</dt>
+            <dd
+              className={
+                failingLine?.tone === 'fail'
+                  ? 'negative'
+                  : failingLine?.tone === 'waived'
+                    ? 'advise'
+                    : ''
+              }
+            >
+              {failingLine?.tone === 'pass' && <span aria-hidden="true">✓ </span>}
+              {verdict}
+              {fails.already.length > 0 && (
+                <details className="talk-already">
+                  <summary>Already in your plan: {fails.already.length}</summary>
+                  <ul>
+                    {fails.already.map((c) => (
+                      <li key={c.key}>{keepTogether(c.text)}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {report?.failing.some((c) => !c.itemId) && (
+                <ul className="talk-room-fails">
+                  {report.failing
+                    .filter((c) => !c.itemId)
+                    .map((c) => (
+                      <li key={c.key} className="negative">
+                        {keepTogether(c.text)}
+                      </li>
+                    ))}
+                </ul>
+              )}
+            </dd>
+          </div>
+          {report && (
+            <div>
+              <dt>Cost</dt>
+              <dd className={report.budget === 'over' ? 'num negative' : 'num'}>
+                {report.delta >= 0 ? '+' : '−'}
+                {sgd(report.delta)} · about S${k(report.cost.low)}–{k(report.cost.high)} in total
+                {card.input.brief.budget
+                  ? report.budget === 'over'
+                    ? ` · over your S$${k(card.input.brief.budget.high)}`
+                    : ` · within S$${k(card.input.brief.budget.high)}`
+                  : ''}
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
+      {!allIn && card.status !== 'failed' && (
+        <div className="talk-actions">
+          <button
+            ref={acceptBtn}
+            type="button"
+            className="btn btn-primary"
+            data-accept-selected=""
+            disabled={running || tickedN === 0}
+            aria-describedby={`acc-${card.key}`}
+            onClick={async () => {
+              const line = await acceptCard(card, ticked, waive);
+              setWaive([]);
+              if (line) {
+                requestAnimationFrame(() =>
+                  document.querySelector<HTMLButtonElement>(`[data-undo-line="${line}"]`)?.focus(),
+                );
+              }
+            }}
+          >
+            Accept selected ({tickedN})
+          </button>
+          <span id={`acc-${card.key}`} className="field-hint">
+            {running
+              ? 'Accept waits for the checks'
+              : tickedN === 0
+                ? 'Tick the changes you want'
+                : ''}
+          </span>
+          {running && (
+            <button
+              type="button"
+              className="btn btn-small"
+              onClick={stopTalkRun}
+              title="Stop (Esc)"
+            >
+              Stop
+            </button>
+          )}
+        </div>
+      )}
+      {!running && (
+        <div className="talk-card-foot">
+          <span className="talk-card-links">
+            {comparable && versionId && (
+              <button
+                type="button"
+                className="link-btn"
+                data-compare-open=""
+                onClick={() => openCompare(versionId)}
+              >
+                Compare
+              </button>
+            )}
+            <button
+              type="button"
+              className="link-btn"
+              onClick={() => {
+                useTalk.setState({ shown: card.key });
+                useDesigner.setState({ previewing: true });
+                useEditor.getState().setViewMode('3d');
+              }}
+            >
+              Show in 3D
+            </button>
+            <span className="talk-more">
+              <button
+                type="button"
+                className="link-btn"
+                aria-expanded={more}
+                aria-label="More"
+                onClick={() => setMore(!more)}
+              >
+                ⋯
+              </button>
+              {more && (
+                <span className="talk-menu" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMore(false);
+                      setWrong(true);
+                    }}
+                  >
+                    This is wrong
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMore(false);
+                      const text = [
+                        `V${card.n} · ${card.label}`,
+                        ...changes.map((c) => `- ${c.text}`),
+                      ].join('\n');
+                      void navigator.clipboard?.writeText(text).then(
+                        () =>
+                          useStore.setState({
+                            toast: { text: 'Copied the change list.', at: Date.now() },
+                          }),
+                        () => {},
+                      );
+                    }}
+                  >
+                    Copy the change list
+                  </button>
+                </span>
+              )}
+            </span>
+          </span>
+          {card.proposal && another && (
+            <button
+              type="button"
+              className="link-btn"
+              disabled={busy}
+              data-spends=""
+              onClick={() => card.proposal && void pressScope(card.proposal.scope)}
+            >
+              Another idea{another.usd ? ` · about ${usd(another.usd.typical)}` : ''}
+            </button>
+          )}
+          <TurnCost
+            usage={card.usage}
+            fixes={Object.values(card.input.spaces).reduce((t, x) => t + (x.fixes ?? 0), 0)}
+          />
+        </div>
+      )}
+      {wrong && card.design && (
+        <CaseDialog
+          d={card.design}
+          r={r}
+          model={card.usage[0]?.model ?? null}
+          onClose={() => setWrong(false)}
+        />
+      )}
+      {wrong && !card.design && card.proposal && card.option && (
+        <CaseDialog
+          d={{
+            id: card.option.designId,
+            projectId: card.proposal.projectId,
+            levelId: project.levels[0]?.id ?? '',
+            n: card.n,
+            name: card.label,
+            parent: null,
+            createdAt: card.at,
+            base: card.option.base,
+            baseLevel: nowOf(project)?.now ?? r.level,
+            brief: card.option.brief,
+            request: { scope: { kind: 'all' }, feedback: card.words, locks: card.option.locks },
+            aliases: card.option.aliases,
+            concept: card.option.concept,
+            spaces: card.option.spaces,
+            usage: card.option.usage,
+            waivers: card.option.waivers,
+            accepted: null,
+          }}
+          r={r}
+          model={card.usage[0]?.model ?? null}
+          onClose={() => setWrong(false)}
+        />
+      )}
+    </article>
+  );
+});

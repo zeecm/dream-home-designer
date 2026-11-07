@@ -21,8 +21,11 @@ export interface DesignStore {
   /** True when versions last only as long as this tab. */
   memory: boolean;
   list(projectId: string): Promise<Design[]>;
-  /** Stores a new version, numbered one past the plan's highest; how many old ones went. */
-  create(d: Omit<Design, 'n'>): Promise<{ design: Design; pruned: number }>;
+  /**
+   * Stores a new version, numbered one past the plan's highest (or `n`, when it is free); how
+   * many old ones went.
+   */
+  create(d: Omit<Design, 'n'>, n?: number): Promise<{ design: Design; pruned: number }>;
   put(d: Design): Promise<void>;
   /**
    * Puts a deleted version back (Undo). It keeps its number unless another version has taken
@@ -65,6 +68,12 @@ export function toPrune(list: Design[]): Design[] {
 
 const byN = (a: Design, b: Design) => a.n - b.n;
 
+/** The number a new version takes: `want` if no version has it, else one past the highest. */
+export function numberFor(mine: Design[], want?: number): number {
+  if (want && want > 0 && !mine.some((x) => x.n === want)) return want;
+  return Math.max(0, ...mine.map((x) => x.n)) + 1;
+}
+
 export function memoryStore(): DesignStore {
   const designs = new Map<string, Stored>();
   const briefs = new Map<string, DesignBrief>();
@@ -78,9 +87,9 @@ export function memoryStore(): DesignStore {
   return {
     memory: true,
     list,
-    async create(d) {
+    async create(d, want) {
       const mine = await list(d.projectId);
-      const n = Math.max(0, ...mine.map((x) => x.n)) + 1;
+      const n = numberFor(mine, want);
       const design = { ...d, n } as Design;
       designs.set(k(d.projectId, d.id), toRecord(design));
       const gone = toPrune([...mine, design]);
@@ -135,13 +144,13 @@ function idbStore(db: IDBDatabase): DesignStore {
       const tx = db.transaction('designs', 'readonly');
       return (await all(tx.objectStore('designs'), projectId)).sort(byN);
     },
-    async create(d) {
+    async create(d, want) {
       // One transaction: two tabs can't take the same number.
       const tx = db.transaction('designs', 'readwrite');
       const store = tx.objectStore('designs');
       const ended = finished(tx);
       const mine = await all(store, d.projectId);
-      const n = Math.max(0, ...mine.map((x) => x.n)) + 1;
+      const n = numberFor(mine, want);
       const design = { ...d, n } as Design;
       store.put(toRecord(design));
       const gone = toPrune([...mine, design]);
@@ -226,7 +235,11 @@ export function openDesigns(
     };
     req.onsuccess = () => {
       if (settled) req.result.close();
-      else give(idbStore(req.result));
+      else {
+        // A newer build upgrading the database: let it.
+        req.result.onversionchange = () => req.result.close();
+        give(idbStore(req.result));
+      }
     };
     req.onerror = () => give(memoryStore());
     req.onblocked = () => give(memoryStore());

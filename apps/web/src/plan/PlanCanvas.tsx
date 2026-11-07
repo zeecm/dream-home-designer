@@ -35,6 +35,7 @@ import { Compass, describeNorth } from '../ui/Compass';
 import { uploadPlanImage, usePlanImage, useUploadPicker } from '../ui/PlanImage';
 import { RenovationMarks } from '../ui/Renovation';
 import { icons } from '../ui/icons';
+import { ProposalLayer, ProposalLegend } from './ProposalLayer';
 import { useCommentTool } from './commentTool';
 import { useCalibrateTool, useOpeningTool, useRoomTool, useWallTool } from './drawTools';
 import { useElectricalTool } from './electricalTool';
@@ -954,6 +955,7 @@ export function PlanCanvas() {
               interactive={tool === 'select' || tool === 'electrical' || tool === 'comment'}
             />
             <SuggestLayer zoom={v.zoom} size={size} />
+            <ProposalLayer />
             <DesignFocusLayer size={size} />
             <TraceDraftLayer />
             <PlanHighlights
@@ -1100,6 +1102,7 @@ export function PlanCanvas() {
           {icons.plus}
         </button>
       </div>
+      <ProposalLegend />
       <ScaleBar zoom={v.zoom} />
     </div>
   );

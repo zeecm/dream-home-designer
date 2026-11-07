@@ -1,0 +1,555 @@
+import {
+  type Conversation,
+  type Level,
+  type QuestionKey,
+  type ScopeRef,
+  type Turn,
+  type TurnOf,
+  meetingOver,
+  questionText,
+  roomArea,
+  sleepingConflict,
+  spacesOf,
+} from '@dhd/core';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useProject, useStore } from '../../../store';
+import { useAi } from '../../credentials';
+import { CostCheck } from '../CostCheck';
+import { capUsd, usd, useSpend } from '../spend';
+import { useDesigner } from '../state';
+import { designerCannotUse } from '../stream';
+import { FactEditor } from './Facts';
+import { ProposalCard } from './ProposalCard';
+import { lineState, redoLine, undoLine } from './accept';
+import { type CardModel, designCard, optionCard } from './cards';
+import { dayMark } from './days';
+import { answerCost, pressScope, scopePrice } from './propose';
+import { act, newId, nowIso, talkLevel, useTalk } from './useTalk';
+
+/**
+ * The conversation's log (UX §5.3, §6): your turns in a bubble on the right, the designer's
+ * plain text, the app's own questions with their widgets, the scope offer, cost cards,
+ * proposal cards and app lines. Newest at the foot; it stays at the foot only if you were.
+ */
+
+const areaOf = (level: Level, rooms: string[]) =>
+  rooms.reduce((t, id) => {
+    const r = level.rooms[id];
+    return t + (r ? roomArea(level, r) : 0);
+  }, 0);
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+function Person({ t }: { t: TurnOf<'person'> }) {
+  return (
+    <article className="talk-turn talk-you" aria-labelledby={`h-${t.id}`}>
+      <h3 id={`h-${t.id}`} className="visually-hidden">
+        You said
+      </h3>
+      <p className="talk-bubble" title={new Date(t.at).toLocaleString()}>
+        {t.text}
+      </p>
+    </article>
+  );
+}
+
+function Designer({ t, named }: { t: TurnOf<'designer'>; named: boolean }) {
+  return (
+    <article className="talk-turn talk-designer" aria-labelledby={`h-${t.id}`}>
+      <h3 id={`h-${t.id}`} className={named ? 'talk-name' : 'visually-hidden'}>
+        Designer
+        <span className="visually-hidden"> said</span>
+      </h3>
+      <p className="talk-text">{t.text}</p>
+      {t.lines.length > 0 && (
+        <ul className="talk-lines">
+          {t.lines.map((l) => (
+            <li key={l}>{l}</li>
+          ))}
+        </ul>
+      )}
+      {t.after && <p className="talk-text">{t.after}</p>}
+    </article>
+  );
+}
+
+function Questions({ t, latest }: { t: TurnOf<'app-question'>; latest: boolean }) {
+  const conv = useTalk((s) => s.conv) as Conversation;
+  const level = talkLevel();
+  const [focusNext, setFocusNext] = useState(false);
+  if (!level) return null;
+  const open = t.keys.filter((k) => !t.done[k]);
+  const answer = async (key: QuestionKey, brief: Conversation['brief']) => {
+    const more = open.length > 1;
+    await act({ type: 'answer', turnId: t.id, key, brief, at: nowIso(), id: newId('turn'), level });
+    setFocusNext(more);
+    if (!more) {
+      requestAnimationFrame(() => {
+        const next = document.querySelector<HTMLElement>(
+          '.talk-log .talk-question:last-of-type [role="radio"], .talk-log .talk-question:last-of-type button, .talk-composer textarea',
+        );
+        next?.focus({ preventScroll: true });
+      });
+    }
+  };
+  return (
+    <article className="talk-turn talk-designer" aria-labelledby={`h-${t.id}`}>
+      <h3 id={`h-${t.id}`} className="visually-hidden">
+        Designer asked
+      </h3>
+      {t.lead && <p className="talk-text talk-lead">{t.lead}</p>}
+      <div className="talk-question">
+        {t.keys.map((k) => {
+          const done = t.done[k];
+          return (
+            <section key={k} className="talk-q" aria-label={questionText(k, conv.brief)}>
+              <h4 className="talk-q-label">{questionText(k, conv.brief)}</h4>
+              {done ? (
+                <div className="talk-answer">
+                  <p className="talk-bubble">{done.words}</p>
+                  {done.state !== 'assumed' && (
+                    <button
+                      type="button"
+                      className="link-btn"
+                      onClick={() => useTalk.setState({ view: 'know', knowAt: k })}
+                    >
+                      Change
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <FactEditor
+                  k={k}
+                  brief={conv.brief}
+                  level={level}
+                  autoFocus={focusNext && k === open[0]}
+                  onDone={(b) => void answer(k, b)}
+                />
+              )}
+            </section>
+          );
+        })}
+        {open.length > 0 &&
+          latest &&
+          !(t.keys.includes('sleeping') && t.lead && open.includes('sleeping')) && (
+            <div className="talk-q-foot">
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => {
+                  for (const k of open) {
+                    void act({
+                      type: 'skip',
+                      turnId: t.id,
+                      key: k,
+                      at: nowIso(),
+                      id: newId('turn'),
+                      level,
+                    });
+                  }
+                }}
+              >
+                Skip
+              </button>
+            </div>
+          )}
+      </div>
+    </article>
+  );
+}
+
+/** The priced scope buttons: the whole flat, then each space (UX §8.4). */
+function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
+  const project = useProject();
+  const conv = useTalk((s) => s.conv) as Conversation;
+  const ai = useAi();
+  const busy = useDesigner((s) => s.starting || !!s.run);
+  const { prices } = useSpend();
+  const level = talkLevel();
+  const scopes = useMemo<ScopeRef[]>(
+    () =>
+      level
+        ? [
+            { label: 'The whole flat', spaces: [], all: true },
+            ...spacesOf(level).map((s) => ({ label: s.name, spaces: [s.key], all: false })),
+          ]
+        : [],
+    [level],
+  );
+  // Prices without the person's words (they add little), worked out once per plan and brief.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on the plan, the brief and the prices
+  const priced = useMemo(
+    () => (latest && ai ? scopes.map((s) => ({ s, est: scopePrice(s, '') })) : []),
+    [latest, ai, scopes, conv.brief, project, prices],
+  );
+  const conflict = level ? sleepingConflict(conv.brief, level) : null;
+  const cant = ai && designerCannotUse(ai);
+  return (
+    <article className="talk-turn talk-designer" aria-labelledby={`h-${t.id}`}>
+      <h3 id={`h-${t.id}`} className="visually-hidden">
+        Designer asked
+      </h3>
+      <p className="talk-text">{t.next ? 'Where next?' : 'Where shall we start?'}</p>
+      {latest && !ai && (
+        <p className="field-hint">
+          Add your AI key to start designing ·{' '}
+          <button
+            type="button"
+            className="link-btn"
+            onClick={() => useTalk.setState({ settings: 'key' })}
+          >
+            AI settings
+          </button>
+        </p>
+      )}
+      {latest && cant && <p className="field-hint">{cant}</p>}
+      {latest && conflict && <p className="field-hint negative">Answer who sleeps where first.</p>}
+      {latest && ai && !cant && (
+        <ul className="talk-scopes">
+          {priced.map(({ s, est }) => (
+            <li key={s.label}>
+              <button
+                type="button"
+                className="btn talk-scope"
+                data-spends=""
+                disabled={busy || !!conflict || !est}
+                onClick={() => void pressScope(s)}
+              >
+                {s.label}
+                {est?.usd
+                  ? ` · about ${usd(est.usd.typical)}`
+                  : est
+                    ? ` · about ${Math.round(est.tokens.typical).toLocaleString('en-US')} tokens`
+                    : ''}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {latest && ai && !cant && (
+        <p className="talk-text muted">
+          Or tell me what you’d like below; your words go with the room you pick.
+        </p>
+      )}
+    </article>
+  );
+}
+
+function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
+  const ai = useAi();
+  const busy = useDesigner((s) => s.starting || !!s.run);
+  const level = talkLevel();
+  const first = useMemo<ScopeRef | null>(() => {
+    if (!t.scope.all || !level) return null;
+    // The largest space first (the living room, as a rule): the one most worth starting with.
+    const s = [...spacesOf(level)].sort(
+      (p, q) => areaOf(level, q.rooms) - areaOf(level, p.rooms),
+    )[0];
+    return s ? { label: s.name, spaces: [s.key], all: false } : null;
+  }, [t.scope.all, level]);
+  const cheaper = first ? scopePrice(first, t.words) : null;
+  const est = scopePrice(t.scope, t.words);
+  const cap = capUsd();
+  const what = t.scope.all ? 'Designing the whole flat' : `Designing ${t.scope.label}`;
+  if (t.state !== 'open') {
+    return (
+      <article className="talk-turn talk-app" aria-labelledby={`h-${t.id}`}>
+        <h3 id={`h-${t.id}`} className="visually-hidden">
+          App
+        </h3>
+        <p className="talk-app-line">
+          {what}
+          {t.estimate ? ` · about ${usd(t.estimate.typical)}` : ''}:{' '}
+          {t.state === 'go'
+            ? 'went ahead'
+            : t.state === 'cheaper'
+              ? `just ${first?.label ?? 'one room'}`
+              : 'not now'}
+        </p>
+      </article>
+    );
+  }
+  return (
+    <article className="talk-turn talk-app talk-card talk-cost-card" aria-labelledby={`h-${t.id}`}>
+      <h3 id={`h-${t.id}`} className="visually-hidden">
+        App: before spending
+      </h3>
+      {t.reason === 'ask-limit' && cap !== null && (
+        <p className="notice-warning">This would pass your {usd(cap)} limit for this tab.</p>
+      )}
+      {t.estimate && (
+        <p className="talk-text">
+          {what} takes about {usd(t.estimate.typical)} (at most{' '}
+          {usd(t.estimate.high + t.estimate.fix)}
+          {t.estimate.fix > 0 ? ', up to 3 fix-ups included' : ''}). Go ahead?
+        </p>
+      )}
+      {ai && est && t.reason !== 'ask-threshold' ? (
+        <div className="talk-costcheck">
+          <CostCheck
+            ai={ai}
+            est={est}
+            quality={useTalk.getState().conv?.brief.quality ?? 'thorough'}
+            onQuality={(q) => {
+              const c = useTalk.getState().conv;
+              if (c) void act({ type: 'setBrief', brief: { ...c.brief, quality: q } });
+            }}
+            what={
+              t.scope.all
+                ? 'one for the layout and style, then one for each room'
+                : `one for ${t.scope.label}`
+            }
+            action="Go ahead"
+            anyway="Go ahead anyway"
+            backLabel="Not now"
+            onBack={() => void answerCost(t, 'not-now')}
+            onStart={() => void answerCost(t, 'go')}
+            onEditPrices={() => useTalk.setState({ settings: 'prices' })}
+          />
+        </div>
+      ) : (
+        <div className="button-row talk-cost-buttons">
+          <button
+            type="button"
+            className="btn"
+            disabled={busy}
+            data-spends=""
+            onClick={() => void answerCost(t, 'go')}
+          >
+            Go ahead{t.estimate ? ` · about ${usd(t.estimate.typical)}` : ''}
+          </button>
+          <button type="button" className="link-btn" onClick={() => void answerCost(t, 'not-now')}>
+            Not now
+          </button>
+        </div>
+      )}
+      {first && cheaper && (
+        <button
+          type="button"
+          className="btn talk-cheaper"
+          disabled={busy}
+          data-spends=""
+          onClick={() => void answerCost(t, 'cheaper', first)}
+        >
+          Just {first.label}
+          {cheaper.usd ? ` · about ${usd(cheaper.usd.typical)}` : ''}
+        </button>
+      )}
+    </article>
+  );
+}
+
+function Event({ t }: { t: TurnOf<'event'> }) {
+  const e = t.event;
+  // The history moves under the line: its Undo or Redo shows only while it applies.
+  const history = useStore((s) => s.editor.history);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: read again as the history moves
+  const st = useMemo(() => (e.type === 'accepted' ? lineState(t.id) : null), [e, t.id, history]);
+  let text: string;
+  let icon = '✓';
+  if (e.type === 'accepted') {
+    const n = e.changes.length;
+    if (e.undone) {
+      icon = '↶';
+      text = `Undone: the ${plural(n, 'change')} from V${e.n} ${n === 1 ? 'is' : 'are'} out of your renovation.`;
+    } else {
+      text =
+        n >= e.total
+          ? `You accepted ${plural(n, 'change')} from V${e.n}.`
+          : `You accepted ${n} of ${e.total} changes from V${e.n}.${e.left.length ? ` Left out: ${e.left.slice(0, 3).join(', ')}${e.left.length > 3 ? ` and ${e.left.length - 3} more` : ''}.` : ''}`;
+    }
+  } else if (e.type === 'stopped') {
+    icon = '■';
+    text = `Stopped. What’s done is kept.${e.usd ? ` Up to about ${usd(e.usd)} may still be billed.` : ''}`;
+  } else {
+    icon = e.type === 'fact' ? '✎' : '·';
+    text = e.text;
+  }
+  return (
+    <article className="talk-turn talk-app" aria-labelledby={`h-${t.id}`}>
+      <h3 id={`h-${t.id}`} className="visually-hidden">
+        App
+      </h3>
+      <p className="talk-app-line">
+        <span className="talk-app-icon" aria-hidden="true">
+          {icon}
+        </span>
+        <span>{text}</span>
+        {st === 'undo' && (
+          <button
+            type="button"
+            className="link-btn"
+            data-undo-line={t.id}
+            onClick={() => undoLine(t.id)}
+          >
+            Undo
+          </button>
+        )}
+        {st === 'redo' && (
+          <button
+            type="button"
+            className="link-btn"
+            data-redo-line={t.id}
+            onClick={() => redoLine(t.id)}
+          >
+            Redo
+          </button>
+        )}
+      </p>
+    </article>
+  );
+}
+
+/** v1's versions, folded at the top of the log ("Earlier designs (3)"). */
+function Earlier({ cards }: { cards: CardModel[] }) {
+  const [open, setOpen] = useState(false);
+  if (!cards.length) return null;
+  return (
+    <li className="talk-earlier">
+      <button
+        type="button"
+        className="talk-earlier-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        Earlier designs ({cards.length})
+      </button>
+      {open && (
+        <ul className="talk-earlier-list">
+          {cards.map((c) => (
+            <li key={c.key}>
+              <p className="talk-earlier-from muted">
+                From the form,{' '}
+                {new Date(c.at).toLocaleDateString('en-SG', { day: 'numeric', month: 'short' })}
+              </p>
+              <ProposalCard card={c} newest={false} live={null} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+export function Log() {
+  const conv = useTalk((s) => s.conv);
+  const proposals = useTalk((s) => s.proposals);
+  const live = useTalk((s) => s.live);
+  const designs = useDesigner((s) => s.designs);
+  const list = useRef<HTMLDivElement>(null);
+  const pinned = useRef(true);
+  const [behind, setBehind] = useState(false);
+  const earlier = useMemo(() => designs.filter((d) => !d.from).map(designCard), [designs]);
+  const byId = useMemo(() => new Map(proposals.map((p) => [p.id, p])), [proposals]);
+  // One card model per proposal while it is unchanged (cards are memoised on it).
+  const cards = useMemo(
+    () =>
+      new Map(
+        proposals.flatMap((p) => {
+          const o = p.options[0];
+          return o ? [[p.id, optionCard(p, o)] as const] : [];
+        }),
+      ),
+    [proposals],
+  );
+  const newestProposal = useMemo(() => {
+    const ps = (conv?.turns ?? []).filter((t) => t.kind === 'proposal');
+    return ps[ps.length - 1]?.id ?? null;
+  }, [conv]);
+  const turns = conv?.turns ?? [];
+  const lastQuestion = [...turns].reverse().find((t) => t.kind === 'app-question')?.id;
+  const lastScope = [...turns].reverse().find((t) => t.kind === 'scope')?.id;
+  // Opening the panel: at the foot, at once.
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, []);
+  // New turns: follow them only if the log was at its foot.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on a new turn or a run's progress
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (!el) return;
+    if (pinned.current) el.scrollTop = el.scrollHeight;
+    else setBehind(true);
+  }, [turns.length, live?.state.steps.length, proposals]);
+  useEffect(() => {
+    const el = list.current;
+    if (!el) return;
+    const on = () => {
+      pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+      if (pinned.current) setBehind(false);
+    };
+    el.addEventListener('scroll', on, { passive: true });
+    return () => el.removeEventListener('scroll', on);
+  }, []);
+  if (!conv) return <div className="talk-log" />;
+  let lastDay = '';
+  let lastSpeaker = '';
+  return (
+    <div className="talk-log-wrap">
+      <div className="talk-log" ref={list}>
+        <ol className="talk-turns" aria-label="Conversation">
+          <Earlier cards={earlier} />
+          {turns.map((t: Turn) => {
+            const day = dayMark(t.at);
+            const mark = day !== lastDay;
+            lastDay = day;
+            const speaker =
+              t.kind === 'person'
+                ? 'you'
+                : t.kind === 'event' || t.kind === 'cost-ask'
+                  ? 'app'
+                  : 'designer';
+            const named = speaker === 'designer' && lastSpeaker !== 'designer';
+            lastSpeaker = speaker;
+            let body: JSX.Element | null = null;
+            if (t.kind === 'person') body = <Person t={t} />;
+            else if (t.kind === 'designer') body = <Designer t={t} named={named} />;
+            else if (t.kind === 'app-question')
+              body = <Questions t={t} latest={t.id === lastQuestion} />;
+            else if (t.kind === 'scope')
+              body = <Scope t={t} latest={t.id === lastScope && meetingOver(conv)} />;
+            else if (t.kind === 'cost-ask') body = <CostAsk t={t} />;
+            else if (t.kind === 'event') body = <Event t={t} />;
+            else if (t.kind === 'proposal') {
+              const p = byId.get(t.proposalId);
+              const c = cards.get(t.proposalId);
+              body =
+                p && c ? (
+                  <ProposalCard
+                    card={c}
+                    newest={t.id === newestProposal}
+                    live={live && live.proposalId === p.id ? live : null}
+                  />
+                ) : null;
+            }
+            return (
+              <Fragment key={t.id}>
+                {mark && (
+                  <li className="talk-day" aria-hidden={turns.length < 2}>
+                    <h3>{day}</h3>
+                  </li>
+                )}
+                <li className={`talk-li talk-li-${speaker}${named ? ' talk-li-named' : ''}`}>
+                  {body}
+                </li>
+              </Fragment>
+            );
+          })}
+        </ol>
+      </div>
+      {behind && (
+        <button
+          type="button"
+          className="btn btn-small talk-behind"
+          aria-label="Jump to the newest message"
+          onClick={() => {
+            const el = list.current;
+            if (el) el.scrollTop = el.scrollHeight;
+            setBehind(false);
+          }}
+        >
+          New reply ↓
+        </button>
+      )}
+    </div>
+  );
+}

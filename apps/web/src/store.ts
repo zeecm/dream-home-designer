@@ -29,6 +29,7 @@ import type { Patch } from 'immer';
 import { create } from 'zustand';
 import { forgetWithAccount, keepWithAccount } from './account';
 import { designStore } from './ai/designer/storage';
+import { talkStore } from './ai/designer/talk/talkStore';
 import { getAsset, putAsset } from './assets';
 import {
   type Backend,
@@ -511,6 +512,10 @@ export const useStore = create<State>((set, get) => {
         forgetWithAccount(r.id);
         // Its designs go with it: they hold the brief and what each room is for.
         await designStore()
+          .then((s) => s.removeProject(r.id))
+          .catch(() => {});
+        // And its conversation with the designer.
+        await talkStore()
           .then((s) => s.removeProject(r.id))
           .catch(() => {});
       }

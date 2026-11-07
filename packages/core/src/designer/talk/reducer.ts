@@ -62,6 +62,8 @@ export type TalkAction =
   | { type: 'formFilled'; brief: DesignBrief; at: string; ids: [string, string]; level: Level }
   | { type: 'editFact'; key: QuestionKey; brief: DesignBrief; at: string; id: string; level: Level }
   | { type: 'confirmFact'; key: QuestionKey }
+  /** A setting of the brief that is no fact of What I know (Thorough or Quick, say). */
+  | { type: 'setBrief'; brief: DesignBrief }
   | { type: 'draft'; text: string }
   | {
       type: 'ask';
@@ -317,6 +319,8 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
         event: { type: 'fact', key: a.key, text: `You changed: ${label(a.key)} ${was} → ${now}.` },
       });
     }
+    case 'setBrief':
+      return { ...conv, brief: a.brief };
     case 'confirmFact':
       return { ...conv, assumed: conv.assumed.filter((k) => k !== a.key) };
     case 'draft':

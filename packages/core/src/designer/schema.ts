@@ -487,6 +487,10 @@ export const Design = z.object({
    * Never an HDB rule. Absent in versions kept before.
    */
   waivers: z.array(z.object({ key: z.string(), text: z.string(), at: z.string() })).default([]),
+  /** The conversation's proposal it was accepted from (absent: made by v1's form). */
+  from: z
+    .object({ conversationId: z.string(), proposalId: z.string(), letter: z.string().max(1) })
+    .optional(),
   /**
    * After as accepted (`level`), and as it was just before (`prior`: what the accept itself
    * changed is the difference; records from before it was kept have none).

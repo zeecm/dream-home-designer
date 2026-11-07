@@ -191,8 +191,24 @@ export const ProposalOption = z.object({
   status: z.enum(['running', 'checked', 'stopped', 'failed']),
   /** Change ids ticked; null: as the card ticks them first (all that pass). */
   ticks: z.array(z.string()).nullable(),
-  /** Change ids accepted so far (across accepts). */
-  accepted: z.array(z.string()).default([]),
+  /**
+   * Rows accepted so far (across accepts), as they read: once in the plan they are no longer
+   * a change from it. `out`: undone since.
+   */
+  accepted: z
+    .array(
+      z.object({
+        id: z.string(),
+        text: z.string().max(300),
+        group: z.string(),
+        groupName: z.string().max(80),
+        event: z.string(),
+        out: z.boolean().default(false),
+      }),
+    )
+    .default([]),
+  /** Why the run ended early, in the app's words ("Couldn’t reach Claude, even after…"). */
+  note: z.string().max(300).nullable().default(null),
   waivers: z.array(z.object({ key: z.string(), text: z.string(), at: z.string() })).default([]),
   /** The version made by its first accept. */
   version: z.string().nullable().default(null),
