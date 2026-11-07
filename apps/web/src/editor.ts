@@ -1,4 +1,4 @@
-import type { ElecKind, Level, OpeningKind, Variant } from '@dhd/core';
+import type { Bounds, ElecKind, FaceRef, Level, OpeningKind, Variant } from '@dhd/core';
 import { create } from 'zustand';
 import type { View } from './plan/view';
 import { DEFAULT_OPENING_WIDTH } from './presets';
@@ -104,6 +104,16 @@ export interface EditorState {
    */
   preview: DesignPreview | null;
   setPreview: (p: DesignPreview | null) => void;
+  /**
+   * The wall seen straight on, when open: which face (found again after edits), and the view
+   * it was opened from. Never saved, and nothing in the undo history.
+   */
+  elevation: { ref: FaceRef; returnTo: ViewMode } | null;
+  /** Opens the wall view on a face, or moves the open one to it (step, flip, a letter). */
+  openElevation: (ref: FaceRef) => void;
+  closeElevation: () => void;
+  /** What the plan fits to instead of the whole plan (the wall view's room), or null. */
+  fitBox: Bounds | null;
 }
 
 export interface DesignPreview {
@@ -179,8 +189,34 @@ export const useEditor = create<EditorState>((set) => ({
       fitRequested: true,
       viewAdjusted: false,
       walking: null,
+      // Choosing a view (1, 2, 3 or the view switch) leaves the wall view for it.
+      elevation: null,
+      fitBox: null,
     });
   },
+  elevation: null,
+  fitBox: null,
+  openElevation: (ref) =>
+    set((s) => ({
+      elevation: {
+        ref,
+        returnTo: s.elevation?.returnTo ?? s.walking?.returnTo ?? s.viewMode,
+      },
+      // A walk ends: the wall view takes the 3D view's place.
+      ...(s.walking ? { walking: null, viewMode: s.walking.returnTo } : {}),
+    })),
+  closeElevation: () =>
+    set((s) =>
+      s.elevation
+        ? {
+            elevation: null,
+            viewMode: s.elevation.returnTo,
+            fitBox: null,
+            fitRequested: true,
+            viewAdjusted: false,
+          }
+        : {},
+    ),
   walking: null,
   sunHour: 15,
   setSunHour: (sunHour) => set({ sunHour }),
@@ -217,6 +253,8 @@ export const useEditor = create<EditorState>((set) => ({
       hover: null,
       trunking: null,
       preview: null,
+      elevation: null,
+      fitBox: null,
       fitRequested: true,
       viewAdjusted: false,
       ...(s.walking ? { viewMode: s.walking.returnTo, walking: null } : {}),

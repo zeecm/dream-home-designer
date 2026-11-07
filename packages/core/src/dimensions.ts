@@ -1,3 +1,4 @@
+import { MERGE, type Stop, mergeStops, tieredChains } from './chains';
 import type { Bounds } from './geometry';
 import { labelClearance, placeLabel, pointInPolygon, signedArea } from './geometry';
 import {
@@ -123,14 +124,10 @@ export interface PlanDimensions {
   bounds: Bounds | null;
 }
 
-/** Stops closer than this are one. */
-const MERGE = 0.005;
 /** A wall faces a side when its outside face is within this of square to it. */
 const AXIS_TOLERANCE = (1 * Math.PI) / 180;
 /** Room spans shorter than this aren't worth a dimension. */
 const MIN_SPAN = 0.6;
-/** A piece of a chain shorter than this is no figure of its own: it joins its neighbour. */
-const MIN_PIECE = 0.02;
 /** A room this much of its bounding box or less has no one width and depth (an L, say). */
 const RECTISH = 0.95;
 /** How far past a face a point is tested for a room or free space. */
@@ -147,55 +144,6 @@ const SIDE_NORMAL: Record<ChainSide, Vec2> = {
 const SIDES: ChainSide[] = ['top', 'right', 'bottom', 'left'];
 /** The plan coordinate that runs along a side. */
 const along = (side: ChainSide, p: Vec2) => (side === 'top' || side === 'bottom' ? p.x : p.y);
-
-/** A stop along a side, and where its face is across the side. */
-interface Stop {
-  v: number;
-  from: number;
-}
-
-/**
- * Sorted, with stops within MERGE of one already kept dropped (the primary ones win); of two
- * that merge, the one whose face is further out (`out` +1 or -1 across the side) gives the
- * extension line, so it is the shorter.
- */
-function mergeStops(primary: Stop[], extra: Stop[] = [], out = 1): Stop[] {
-  const kept: Stop[] = [];
-  const add = (s: Stop) => {
-    const k = kept.find((q) => Math.abs(q.v - s.v) < MERGE);
-    if (!k) kept.push({ ...s });
-    else if (!Number.isNaN(s.from) && (Number.isNaN(k.from) || s.from * out > k.from * out)) {
-      k.from = s.from;
-    }
-  };
-  for (const s of [...primary].sort((a, b) => a.v - b.v)) add(s);
-  for (const s of [...extra].sort((a, b) => a.v - b.v)) add(s);
-  return kept.sort((a, b) => a.v - b.v);
-}
-
-/**
- * The stops with each piece under MIN_PIECE joined to its neighbour, so the chain still adds
- * up: of the two stops either side of a small piece, an inner one that isn't `fixed` (a stop
- * of the tier outside it) goes. The ends always stay.
- */
-function dropSmall(stops: Stop[], fixed: (s: Stop) => boolean = () => false): Stop[] {
-  const out = [...stops];
-  let i = 1;
-  while (out.length > 2 && i < out.length) {
-    const piece = (out[i] as Stop).v - (out[i - 1] as Stop).v;
-    if (piece >= MIN_PIECE - 1e-9) {
-      i++;
-      continue;
-    }
-    if (i < out.length - 1 && !fixed(out[i] as Stop)) out.splice(i, 1);
-    else if (i - 1 > 0 && !fixed(out[i - 1] as Stop)) out.splice(i - 1, 1);
-    else i++;
-  }
-  return out;
-}
-
-const sameStops = (a: Stop[], b: Stop[]) =>
-  a.length === b.length && a.every((s, i) => Math.abs(s.v - (b[i] as Stop).v) < MERGE);
 
 interface Polys {
   rooms: { outer: Vec2[]; holes: Vec2[][] }[];
@@ -801,22 +749,17 @@ export function planDimensions(
       else merged.push({ ...r });
     }
     const out = side === 'top' || side === 'left' ? -1 : 1;
-    const tier1 = dropSmall(
-      mergeStops(
-        [
-          ...merged.flatMap((r) => [
-            { v: r.from, from: r.at },
-            { v: r.to, from: r.at },
-          ]),
-          ...corners[side],
-        ],
-        [],
-        out,
-      ),
+    const tiers = tieredChains(
+      [
+        ...merged.flatMap((r) => [
+          { v: r.from, from: r.at },
+          { v: r.to, from: r.at },
+        ]),
+        ...corners[side],
+      ],
+      edges[side],
+      out,
     );
-    const isCorner = (x: Stop) => tier1.some((c) => Math.abs(c.v - x.v) < MERGE);
-    const tier0 = dropSmall(mergeStops(tier1, edges[side], out), isCorner);
-    const tier2 = [tier1[0] as Stop, tier1[tier1.length - 1] as Stop];
     const at =
       side === 'top'
         ? bounds.min.y
@@ -825,7 +768,7 @@ export function planDimensions(
           : side === 'left'
             ? bounds.min.x
             : bounds.max.x;
-    const push = (tier: 0 | 1 | 2, st: Stop[]) =>
+    for (const { tier, stops: st } of tiers) {
       chains.push({
         side,
         tier,
@@ -833,9 +776,7 @@ export function planDimensions(
         stops: st.map((x) => x.v),
         from: st.map((x) => (Number.isNaN(x.from) ? at : x.from)),
       });
-    if (!sameStops(tier0, tier1)) push(0, tier0);
-    if (!sameStops(tier1, tier2)) push(1, tier1);
-    push(2, tier2);
+    }
   }
 
   // Door and window tags, on the side away from a door's swing (or into the room, for a
@@ -1064,13 +1005,15 @@ export function planDimensions(
 }
 
 /**
- * A chain's pieces rounded to `step` (0.01 for 10 mm) so they add up to its rounded overall:
- * each stop is rounded from the first, and the pieces are the differences.
+ * A chain's pieces rounded to `step` (0.01 for 10 mm) so they add up to its rounded overall.
+ * Each stop is rounded from the first, so chains that share stops (tier 0 under tier 1) always
+ * agree. Positions are snapped to 1e-6 of a step first: 0.465 is stored as 46.4999… units and
+ * would round down, which made a 900 mm door between stops at 0.465 and 1.365 read 910.
  */
 export function roundChain(stops: readonly number[], step: number): number[] {
   const first = stops[0];
   if (first === undefined) return [];
-  const units = stops.map((s) => Math.round((s - first) / step));
+  const units = stops.map((s) => Math.round(Math.round(((s - first) / step) * 1e6) / 1e6));
   const out: number[] = [];
   for (let i = 1; i < units.length; i++) {
     out.push(Number((((units[i] as number) - (units[i - 1] as number)) * step).toFixed(6)));

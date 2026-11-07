@@ -97,11 +97,14 @@ for any plan.
 - Storage meter, slice 1 built: clothes, shoes, kitchen and everything else against who lives
   here, room by room, with shortfalls priced as built-in carpentry; next storage beds, a pantry
   and a bay seat (1b), and the household saved in the project (2). [spec](docs/specs/storage-meter.md)
+- A wall seen straight on (elevation), slice 1 built: any wall of a room drawn to scale with its
+  finish, openings, the pieces against it and its points, dimensions in mm and notes (a socket
+  behind a wardrobe, a low wall cabinet), stepping round the room, Before and After, saved as a
+  picture; next dragging heights in it (1b) and pages on the contractor sheet (2).
+  [spec](docs/specs/elevation.md)
 
 ### Planned
-1. A wall seen straight on (elevation): carpentry, windows, sockets and switches at height
-   (slice 1 building). [spec](docs/specs/elevation.md)
-2. Exact render, slice 2: quality settings, real textures, AI polish; daylight bounced up off
+1. Exact render, slice 2: quality settings, real textures, AI polish; daylight bounced up off
    the ground outside (rooms facing away from the sun can read up to a quarter too dark), and
    dark dots seen through a far window.
 

@@ -22,6 +22,8 @@ import { DeliveryLayer } from '../delivery/delivery';
 import { type Tool, useEditor } from '../editor';
 import { ElectricalLayer } from '../electrical/electrical';
 import { SuggestLayer, ghostKeyOf, toggleGhost } from '../electrical/suggest';
+import { WallViewMarkers } from '../elevation/PlanMarkers';
+import { ageingEnabled } from '../features';
 import {
   StorageAddBar,
   StorageAnnouncement,
@@ -318,7 +320,8 @@ export function PlanCanvas() {
     // asks for the fit, before the observer has said so: a fit to the old size would stick
     // once its report came over a second later. Measured, this runs again with the new size.
     if (measureSize()) return;
-    let b = levelBounds(level);
+    // The wall view's room, while it is open beside the plan; else the whole plan.
+    let b = useEditor.getState().fitBox ?? levelBounds(level);
     if (!b && underlay && image.status === 'ready') {
       // Frame the drawing, not the whole page around it.
       const box = ink ?? { x0: 0, y0: 0, x1: image.width, y1: image.height };
@@ -339,7 +342,8 @@ export function PlanCanvas() {
       useEditor.getState().fitPadding,
       Math.max(16, Math.min(size.width, size.height) / 8),
     );
-    setView(fitBounds(b, size, pad));
+    // A room beside the wall view is framed close (a room is smaller than a plan).
+    setView(fitBounds(b, size, pad, useEditor.getState().fitBox ? 3 : undefined));
     lastFit.current = { at: Date.now(), ink, image: image.status };
     // Only a fit that was asked for answers the request. This run may be a refit (the plan
     // image measured) left over from a commit before a view switch asked for one: clearing
@@ -940,7 +944,7 @@ export function PlanCanvas() {
             {/* Under the clearance and ageing marks: a safety label wins where both want a spot. */}
             <StorageChips level={level} geom={geom} view={v} size={size} />
             <ClearanceLayer level={level} geom={geom} view={v} size={size} />
-            <AgeingLayer level={level} geom={geom} view={v} size={size} />
+            {ageingEnabled() && <AgeingLayer level={level} geom={geom} view={v} size={size} />}
             <DeliveryLayer level={level} zoom={v.zoom} />
             <ElectricalLayer
               level={level}
@@ -962,6 +966,7 @@ export function PlanCanvas() {
           </g>
           <RoomLabels level={level} geom={geom} view={v} size={size} />
           <WallTags level={level} geom={geom} view={v} size={size} />
+          <WallViewMarkers level={level} view={v} size={size} />
           {selection?.kind === 'wall' && (
             <WallDimension level={level} geom={geom} view={v} size={size} wallId={selection.id} />
           )}
@@ -999,7 +1004,7 @@ export function PlanCanvas() {
       <p className="visually-hidden" aria-live="polite">
         {describe(level, selection)}
         <ClearanceAnnouncement level={level} selection={selection} />
-        <AgeingAnnouncement level={level} selection={selection} />
+        {ageingEnabled() && <AgeingAnnouncement level={level} selection={selection} />}
         <StorageAnnouncement selection={selection} />
       </p>
 

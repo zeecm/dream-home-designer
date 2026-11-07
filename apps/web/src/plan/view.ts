@@ -44,10 +44,15 @@ export function panBy(v: View, dxScreen: number, dyScreen: number): View {
  */
 export const MIN_FIT_SPAN = 6;
 
-export function fitBounds(b: Bounds | null, size: Size, padding = 48): View {
+export function fitBounds(
+  b: Bounds | null,
+  size: Size,
+  padding = 48,
+  minSpan = MIN_FIT_SPAN,
+): View {
   if (!b || size.width <= 0 || size.height <= 0) return { cx: 0, cy: 0, zoom: 50 };
-  const w = Math.max(b.max.x - b.min.x, MIN_FIT_SPAN);
-  const h = Math.max(b.max.y - b.min.y, MIN_FIT_SPAN);
+  const w = Math.max(b.max.x - b.min.x, minSpan);
+  const h = Math.max(b.max.y - b.min.y, minSpan);
   const zoom = clampZoom(Math.min((size.width - 2 * padding) / w, (size.height - 2 * padding) / h));
   return { cx: (b.min.x + b.max.x) / 2, cy: (b.min.y + b.max.y) / 2, zoom };
 }

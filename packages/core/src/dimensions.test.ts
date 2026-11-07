@@ -742,6 +742,68 @@ describe('roundChain', () => {
   it('a single stop has no pieces', () => {
     expect(roundChain([1], 0.01)).toEqual([]);
   });
+  it('a 900 mm door between stops that round apart stays 900; pieces add up', () => {
+    // The living room's wall F: the door from 0.465 to 1.365 (as floating point has it).
+    const p = roundChain([0, 0.465, 0.465 + 0.9, 3.495], 0.01);
+    expect(p[1]).toBe(0.9);
+    const sum = Math.round(p.reduce((s, x) => s + x, 0) * 100);
+    expect(sum).toBe(Math.round((roundChain([0, 3.495], 0.01)[0] as number) * 100));
+  });
+  it('chains that share stops agree: tier-0 pieces add up to the tier-1 piece above them', () => {
+    // 0.503 + 0.503 under 1.006: rounded on their own each chain would read 500 + 500 under 1010.
+    const sum = (xs: number[]) => Math.round(xs.reduce((s, x) => s + x, 0) * 100);
+    const t1 = roundChain([0, 1.006, 2.0], 0.01);
+    const t0 = roundChain([0, 0.503, 1.006, 2.0], 0.01);
+    expect(sum(t0.slice(0, 2))).toBe(sum(t1.slice(0, 1)));
+    let seed = 11;
+    const rnd = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    for (let k = 0; k < 200; k++) {
+      const coarse = [rnd()];
+      for (let i = 0; i < 1 + Math.floor(rnd() * 4); i++)
+        coarse.push((coarse.at(-1) as number) + 0.3 + rnd() * 2);
+      const fine: number[] = [];
+      coarse.forEach((c, i) => {
+        fine.push(c);
+        const next = coarse[i + 1];
+        if (next !== undefined && rnd() < 0.7) fine.push(c + (next - c) * rnd());
+      });
+      const a = roundChain(coarse, 0.01);
+      const b = roundChain(fine, 0.01);
+      let j = 0;
+      a.forEach((piece, i) => {
+        let acc = 0;
+        while (fine[j + 1] !== undefined && (fine[j + 1] as number) <= (coarse[i + 1] as number)) {
+          acc += b[j] as number;
+          j++;
+        }
+        expect(Math.round(acc * 100)).toBe(Math.round(piece * 100));
+      });
+    }
+  });
+  it('the pieces always add up to the overall, rounded alone', () => {
+    let seed = 7;
+    const rnd = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    for (let k = 0; k < 200; k++) {
+      const stops = [rnd() * 2];
+      for (let i = 0; i < 1 + Math.floor(rnd() * 6); i++)
+        stops.push((stops.at(-1) as number) + rnd() * 1.5);
+      const sum = roundChain(stops, 0.01).reduce((s, x) => s + x, 0);
+      const overall = roundChain([stops[0] as number, stops.at(-1) as number], 0.01)[0] as number;
+      expect(Math.round(sum * 100)).toBe(Math.round(overall * 100));
+      // Every piece within 10 mm of its true length.
+      roundChain(stops, 0.01).forEach((x, i) =>
+        expect(Math.abs(x - ((stops[i + 1] as number) - (stops[i] as number)))).toBeLessThan(
+          0.01 + 1e-9,
+        ),
+      );
+    }
+  });
 });
 
 describe('sheetScale', () => {

@@ -1,16 +1,7 @@
 import { DINING_TABLES, doorSweep, touchingRuns } from './clearance';
 import { clipHalf, nearestOnEdge, roomOff, sideOf } from './convex';
 import type { Rate, Rates } from './cost';
-import {
-  type DoorGraph,
-  type RouteDoor,
-  type RouteStep,
-  clearWidth,
-  doorGraph,
-  doorSearch,
-  entranceDoor,
-  routeTo,
-} from './delivery';
+import { type DoorGraph, type RoomEntry, type RouteDoor, roomEntries } from './delivery';
 import {
   ELEC_KINDS,
   JAMB_CLEAR,
@@ -890,42 +881,10 @@ class Suggester {
    * door (with none, the room's widest door). A room reached across a room boundary has
    * none of its own: it is `openTo` the room before it.
    */
-  private entryDoors(): Map<string, { door: RouteDoor | null; openTo?: string }> {
-    const graph = doorGraph(this.level, this.geom);
+  private entryDoors(): Map<string, RoomEntry> {
+    const { graph, entries } = roomEntries(this.level, this.geom);
     this.graph = graph;
-    graph.doors.sort((a, b) => (a.o.id < b.o.id ? -1 : a.o.id > b.o.id ? 1 : 0));
-    const main = entranceDoor(this.level, this.geom);
-    const start = graph.doors.find((d) => d.o.id === main);
-    const startRoom = start ? (start.sides[0] ?? start.sides[1]) : null;
-    const prev: Map<string, RouteStep> =
-      start && startRoom ? doorSearch(graph, startRoom, { skip: start }) : new Map();
-    const out = new Map<string, { door: RouteDoor | null; openTo?: string }>();
-    for (const r of this.rooms) {
-      if (start && r.id === startRoom) {
-        out.set(r.id, { door: start });
-        continue;
-      }
-      const route = routeTo(prev, r.id);
-      if (route) {
-        const last = route.at(-1);
-        if (last && last.into === r.id) {
-          out.set(r.id, { door: last.door });
-          continue;
-        }
-        // Across a boundary: open to the room the way came from.
-        let at = r.id;
-        for (let step = prev.get(at); step && !step.door; step = prev.get(at)) at = step.room;
-        if (at !== r.id) {
-          out.set(r.id, { door: null, openTo: at });
-          continue;
-        }
-      }
-      const own = graph.doors
-        .filter((d) => d.sides.includes(r.id))
-        .sort((a, b) => clearWidth(b.o) - clearWidth(a.o));
-      out.set(r.id, { door: own[0] ?? null });
-    }
-    return out;
+    return entries;
   }
 
   /** A room's switch by the door it's entered by (outside a bathroom's), a gang per light. */
