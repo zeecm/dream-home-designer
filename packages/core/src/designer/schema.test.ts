@@ -146,3 +146,55 @@ describe('a stored version', () => {
     expect(JSON.stringify(back)).not.toMatch(/sk-|api[_-]?key|x-api-key/i);
   });
 });
+
+describe('answers by intent (version 2)', () => {
+  const b = levelBounds(sampleLevel());
+  it('reads v 2 with its relationships, in any case; earlier answers stay without one', () => {
+    const r = parsed(
+      parseSpaceDesign(
+        {
+          v: 2,
+          items: [
+            {
+              ...living.items[0],
+              wall: null,
+              along: null,
+              against: 'Free',
+              faces: 'tv1',
+              near: null,
+              zone: 'LOUNGE',
+            },
+          ],
+          faces: [],
+          notes: [],
+        },
+        b,
+      ),
+    );
+    expect(r.v).toBe(2);
+    expect(r.items[0]).toMatchObject({ against: 'free', faces: 'tv1', zone: 'lounge' });
+    expect(parsed(parseSpaceDesign(living, b)).v).toBeUndefined();
+    // A version kept before still reads as it was.
+    expect(Design.parse(JSON.parse(JSON.stringify(storedVersion()))).n).toBe(1);
+  });
+});
+
+function storedVersion() {
+  const d = sampleDesign();
+  const l = sampleLevel();
+  return {
+    ...d,
+    projectId: 'prj',
+    levelId: l.id,
+    n: 1,
+    name: 'V1',
+    parent: null,
+    createdAt: '2026-11-01T00:00:00Z',
+    base: { variant: 'after', fingerprint: 'x' },
+    baseLevel: l,
+    brief: (({ sleeping: _s, names: _n, ...old }) => old)(defaultBrief()),
+    request: { scope: { kind: 'all' }, feedback: '', locks: [] },
+    usage: [],
+    accepted: null,
+  };
+}

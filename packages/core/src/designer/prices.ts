@@ -97,8 +97,8 @@ export const OUTPUT: Record<
   DesignBrief['quality'],
   Record<StepPrompt['kind'], { typical: number; max: number }>
 > = {
-  thorough: { layout: { typical: 8000, max: 24_000 }, room: { typical: 5000, max: 12_000 } },
-  quick: { layout: { typical: 4000, max: 12_000 }, room: { typical: 2500, max: 6000 } },
+  thorough: { layout: { typical: 8000, max: 24_000 }, room: { typical: 5000, max: 16_000 } },
+  quick: { layout: { typical: 4000, max: 12_000 }, room: { typical: 2500, max: 8000 } },
 };
 
 export interface StepEstimate {

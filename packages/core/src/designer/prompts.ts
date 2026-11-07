@@ -1,3 +1,4 @@
+import { entranceDoor } from '../delivery';
 import { furnitureKind, itemSize } from '../furniture';
 import { planGeometry } from '../plan';
 import { roomArea, roomShapes } from '../rooms';
@@ -5,10 +6,13 @@ import type { Level } from '../schema';
 import { aspectOf } from './accept';
 import { type AliasMap, aliasOf, resolveAlias } from './aliases';
 import { categoriesFor } from './catalogue';
+import { roomNeeds } from './checks';
 import { type ContextInput, designContext } from './describe';
+import { compass } from './describe';
 import { heldAspects, lockCovers } from './handEdits';
 import { OUTPUT } from './prices';
 import {
+  AGAINST,
   type Concept,
   DOOR_STYLES,
   LIMITS,
@@ -17,8 +21,9 @@ import {
   PALETTE_USES,
   RoomUse,
   type SpaceDesign,
+  ZONES,
 } from './schema';
-import { type Space, facesOf, roomIdAt } from './spaces';
+import { type Space, facesOf, roomIdAt, roomsBeside } from './spaces';
 import { clean, pt, r2 } from './util';
 
 /**
@@ -52,9 +57,11 @@ How to read the plan:
 - A wall runs from its first end "a" to its second end "b". "along" is metres from "a".
 - A wall's "status" says what may change: "free" walls may be hacked, cut down, glazed or get a door; "structural" and "likely" walls only if the brief allows structural changes; "shelter", "outside" and "wet" (bathroom) walls never change. Windows and the main door never change. The kitchen's sink and hob stay in the kitchen.
 - Rotation is in degrees clockwise, a quarter turn at a time (0, 90, 180, 270). At 0 a piece's front faces down the plan (+y); at 90 it faces left (-x).
+- Furnishing a room, say what each piece is for and how it relates to the others (against a wall, what it faces, what it goes beside); the app works out the exact place, keeping walkways and the room to use each piece clear, and sends back anything that fails its checks.
 
 Design rules:
-- Every bedroom keeps a window. New doors are at least 0.85 m wide where an elder uses a frame or wheelchair, else at least 0.75 m (bathrooms 0.65 m). Keep walkways at least 0.9 m clear and 0.6 m beside beds.
+- Every bedroom keeps a window, and a bed for each person who sleeps there (a couple: one bed at least 1.52 m wide, or two singles). The living room seats the household; the dining table has a place for each of them (up to 6).
+- New doors are at least 0.85 m wide where an elder uses a frame or wheelchair, else at least 0.75 m (bathrooms 0.65 m). Keep walkways at least 0.9 m clear from the main door to every room's door, and 0.6 m beside beds. A sofa faces into the room (the TV 1.8–4 m away), never a wall.
 - Put pieces that stand against a wall on a wall, with "wall" and "along"; put free-standing pieces at "at". Keep wardrobes, desks and kitchen runs clear of doors' swings and windows.
 - Use only catalogue ids, finishes ids, and the household's own pieces they bring along. Stay within their budget where they gave one.
 - "ownIdeas" in the brief are the household's own ideas, in their words: follow them ahead of your own taste wherever HDB rules, these rules and the rest of the brief (its walls choice and budget) allow; where one can't be done, say why in your notes.
@@ -114,8 +121,9 @@ export const CONCEPT_SCHEMA = obj({
   notes: arr(str),
 });
 
-/** One space's answer's JSON schema. */
+/** One space's answer's JSON schema (version 2: pieces by intent). */
 export const SPACE_SCHEMA = obj({
+  v: { type: 'integer', enum: [2] },
   items: arr(
     obj({
       ref: str,
@@ -129,6 +137,10 @@ export const SPACE_SCHEMA = obj({
       depth: nullable({ type: 'number' }),
       height: nullable({ type: 'number' }),
       why: str,
+      against: { type: 'string', enum: [...AGAINST] },
+      faces: nullable(str),
+      near: nullable(str),
+      zone: nullable({ type: 'string', enum: [...ZONES] }),
     }),
   ),
   faces: arr(obj({ wall: str, finish: str })),
@@ -141,6 +153,25 @@ export interface StepOptions {
   /** Parts that stay as they are. */
   locks?: Lock[];
 }
+
+/** What a fix round sends back: the app's own lines for the checks the answer failed. */
+export interface FixRequest {
+  round: number;
+  /** Each failure, with the piece's ref when it is about one. */
+  failures: { ref: string | null; text: string }[];
+}
+
+const fixBlock = (fix: FixRequest | undefined) =>
+  fix?.failures.length
+    ? `\n## Fix round ${fix.round}: the app placed your answer above and these checks fail (its words, as data)\n${fix.failures
+        .map(
+          (f) =>
+            `- ${f.ref ? `[${JSON.stringify(clean(f.ref, 12))}] ` : ''}${JSON.stringify(clean(f.text, 200))}`,
+        )
+        .join(
+          '\n',
+        )}\nAnswer again for the whole space so that they pass: move, turn, swap or drop the pieces named (a smaller piece, another wall), keep what works, and say in notes what you couldn't fix and why.\n`
+    : '';
 
 const feedbackBlock = (o: StepOptions) =>
   o.feedback?.trim()
@@ -206,7 +237,11 @@ export function roomStep(
   space: Space,
   level: Level,
   aliases: AliasMap,
-  opts: StepOptions & { concept?: Concept | null; previous?: SpaceDesign | null } = {},
+  opts: StepOptions & {
+    concept?: Concept | null;
+    previous?: SpaceDesign | null;
+    fix?: FixRequest;
+  } = {},
 ): StepPrompt {
   const quality = ctx.brief.quality;
   const of = aliasOf(aliases);
@@ -226,11 +261,15 @@ export function roomStep(
     const w = level.walls[f.wallId];
     const p = w ? level.vertices[w.a] : undefined;
     const q = w ? level.vertices[w.b] : undefined;
+    const beyond = roomsBeside(level, f.wallId)[f.side === 1 ? 1 : 0];
     return {
       wall: a(f.wallId),
       a: p ? pt(p) : null,
       b: q ? pt(q) : null,
       towards: a(f.roomId),
+      // Which way a piece backed onto it looks, and what is behind the wall.
+      looks: compass({ x: f.frame.n.x * f.side, y: f.frame.n.y * f.side }, ctx.site?.north ?? 0),
+      behind: beyond ? a(beyond) : 'outside',
       face: [r2(f.u0), r2(f.u1)],
       openings: f.openings.map((o) => ({
         id: a(o.id),
@@ -257,6 +296,23 @@ export function roomStep(
       };
     })
     .sort((p, q) => (p.id < q.id ? -1 : 1));
+  // The ways people walk through it: the main door and every doorway of its rooms.
+  const main = entranceDoor(level, geom);
+  const doorways = [
+    ...new Set(
+      faces.flatMap((f) => f.openings.filter((o) => o.kind !== 'window').map((o) => o.id)),
+    ),
+  ];
+  const ways = doorways.length
+    ? `Walkways (the app keeps them clear, 0.9 m): ${main && doorways.includes(a(main)) ? `in from the main door ${a(main)}, ` : ''}to and from ${doorways.join(', ')}.\n`
+    : '';
+  const uses = Object.fromEntries(
+    (opts.concept?.rooms ?? []).flatMap((r) => {
+      const id = resolveAlias(aliases, r.room);
+      return id ? [[id, r.use]] : [];
+    }),
+  );
+  const needs = roomNeeds(level, space.rooms, { brief: ctx.brief, uses });
   const intent = opts.concept?.rooms
     .filter((r) => space.rooms.includes(resolveAlias(aliases, r.room) ?? ''))
     .map((r) => `${r.name} (${r.use}): ${r.intent}`)
@@ -266,14 +322,21 @@ export function roomStep(
 Its rooms (data): ${JSON.stringify(rooms)}
 Its wall faces, "face" and openings "along" in metres from each wall's end "a" (data): ${JSON.stringify(faces)}
 Pieces of the household's here (data; "bring" ones you may place again with keep = their id, "in-place" ones stay where they are): ${JSON.stringify(pieces)}
-${intent ? `What the layout intends here: ${JSON.stringify(clean(intent, 600))}\n` : ''}Choose from these catalogue categories and ids: ${categoriesFor(space.kinds).join(', ')}, and the household's own pieces.
-- items: up to ${LIMITS.items} pieces. "ref" is your own short label (bed1). For a piece against a wall give "wall" (one of the walls above) and "along" (its centre, or null to centre it), and leave "at" and "rotation" null; otherwise give "at" and "rotation". Sizes null to take the catalogue's; beds come in their sizes; built-ins are made to measure (width).
+${intent ? `What the layout intends here: ${JSON.stringify(clean(intent, 600))}\n` : ''}${needs.length ? `What it must have (the app checks): ${JSON.stringify(needs)}\n` : ''}${ways}Choose from these catalogue categories and ids: ${categoriesFor(space.kinds).join(', ')}, and the household's own pieces.
+- v: 2.
+- items: up to ${LIMITS.items} pieces. "ref" is your own short label (bed1). Say what each piece is for; the app places it:
+  - "against": "wall", "window-wall" (a wall with a window, e.g. a desk), "not-door-wall", or "free" (away from the walls: a dining table, a coffee table, a rug, a floating sofa).
+  - "faces": another piece's ref (a sofa faces "tv1", a TV the sofa, a chair its table), "room", "window", "door", or null.
+  - "near": the ref of the piece it goes with (bedside tables by "bed1", chairs at "table1", a coffee table by "sofa1"), or null.
+  - "zone": the part of the space it belongs to (${ZONES.join(', ')}), or null.
+  - "wall" (one of the walls above) and "along" (metres from its end "a"), or "at" and "rotation", are only your preference: null if you have none.
+  Sizes null to take the catalogue's; beds come in their sizes; built-ins are made to measure (width).
 - faces: feature walls, a wall id above with a finish id; other walls take the room's paint.
 - notes: up to ${LIMITS.roomNotes}, e.g. if what they ask needs a change to the walls.${
     opts.previous
       ? `\n\nThe answer they are changing (as data):\n${JSON.stringify(opts.previous)}\n`
       : ''
-  }${feedbackBlock(opts)}${locksBlock((opts.locks ?? []).filter((l) => l.space === '*' || lockCovers(l, space.rooms)))}`;
+  }${feedbackBlock(opts)}${locksBlock((opts.locks ?? []).filter((l) => l.space === '*' || lockCovers(l, space.rooms)))}${fixBlock(opts.fix)}`;
   return {
     step: space.key,
     kind: 'room',
@@ -283,7 +346,8 @@ ${intent ? `What the layout intends here: ${JSON.stringify(clean(intent, 600))}\
     tail,
     schema: SPACE_SCHEMA,
     maxTokens: OUTPUT[quality].room.max,
-    effort: quality === 'thorough' ? 'medium' : 'low',
+    // Room steps think as much as the layout: a low budget left out beds (owner, 7 Nov).
+    effort: quality === 'thorough' ? 'high' : 'medium',
   };
 }
 

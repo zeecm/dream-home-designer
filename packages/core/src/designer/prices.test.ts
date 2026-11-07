@@ -75,7 +75,7 @@ describe('estimateRun (criterion 21)', () => {
       );
       const stable = Math.ceil((p.system.length + p.prefix.length + p.shared.length) / 3.2);
       const out = i === 0 ? 8000 : 5000;
-      const max = i === 0 ? 24_000 : 12_000;
+      const max = i === 0 ? 24_000 : 16_000;
       high += (input * 4 + max * 20) / 1e6;
       if (i <= 0) typical += (input * 4 + out * 20) / 1e6;
       else if (i === 1) typical += ((input - stable) * 4 + stable * 5 + out * 20) / 1e6;
@@ -90,7 +90,7 @@ describe('estimateRun (criterion 21)', () => {
     expect(est.usd!.high).toBeLessThan(1.9);
     expect(opus.cachedInput).toBe(0.2);
     expect(est.tokens.typical).toBe(est.input + 8000 + 4 * 5000);
-    expect(est.tokens.high).toBe(est.input + 24_000 + 4 * 12_000);
+    expect(est.tokens.high).toBe(est.input + 24_000 + 4 * 16_000);
   });
 
   it('an unknown model gives tokens and no price; quick lowers both figures', () => {

@@ -670,3 +670,74 @@ function bedNeeds(
   }
   return missing.map((p) => ({ who: p.key, text: `${p.name} has no bed in ${roomName}.` }));
 }
+
+/**
+ * What each of `rooms` must have, in words for the model (the same programmes the checks
+ * apply): beds for who sleeps there, seats and a dining place for the household.
+ */
+export function roomNeeds(
+  level: Level,
+  rooms: string[],
+  opts: Pick<CheckOptions, 'brief' | 'uses'>,
+): string[] {
+  const people = peopleOf(opts.brief);
+  const household = people.filter((p) => p.kind !== 'helper').length;
+  const bedrooms = Object.values(level.rooms)
+    .filter((r) => usesOf(level, r.id, opts).some((u) => BEDROOM_USES.has(u as RoomUse)))
+    .map((r) => ({ id: r.id, area: roomArea(level, r) }));
+  const plan = sleepingPlan(opts.brief, bedrooms);
+  const who = (p: Person) =>
+    p.kind === 'adult' ? p.name : `${p.name} (${p.kind}${p.detail ? `, ${p.detail}` : ''})`;
+  const out: string[] = [];
+  const said = new Set<string>();
+  for (const id of rooms) {
+    const r = level.rooms[id];
+    if (!r) continue;
+    for (const use of usesOf(level, id, opts)) {
+      const prog = PROGRAMMES[use];
+      if (prog.must.includes('beds')) {
+        const ps = plan.rooms.get(id) ?? [];
+        const adults = ps.filter((p) => p.kind === 'adult');
+        if (!ps.length) {
+          if (plan.assumed) out.push(`${r.name}: one bed (who sleeps here wasn’t said)`);
+        } else {
+          const couple = adults.length >= 2 ? adults.slice(0, 2) : [];
+          const rest = ps.filter((p) => !couple.includes(p));
+          const parts = [
+            ...(couple.length
+              ? [`${couple.map(who).join(' and ')}: one bed at least 1.52 m wide, or two singles`]
+              : []),
+            ...rest.map((p) =>
+              p.kind === 'child' && p.detail === 'baby'
+                ? `${who(p)}: a cot (or a note)`
+                : `${who(p)}: a bed of their own`,
+            ),
+          ];
+          out.push(
+            `${r.name}${plan.assumed ? ' (assumed)' : ''}: ${parts.join('; ')}; a window; somewhere for clothes`,
+          );
+        }
+      }
+      if (prog.must.includes('seats') && !said.has('seats') && household) {
+        said.add('seats');
+        out.push(
+          `${r.name}: seats for at least ${Math.min(household, 3)}, facing the TV or a feature`,
+        );
+      }
+      if (prog.must.includes('dining') && !said.has('dining') && household) {
+        said.add('dining');
+        out.push(
+          `${r.name}: a dining table with a chair for each of the ${Math.min(household, 6)}`,
+        );
+      }
+      if (prog.must.includes('desks')) {
+        out.push(`${r.name}: ${Math.max(1, opts.brief.lifestyle.wfh)} desk(s) with a chair`);
+      }
+      if (prog.must.includes('shallow')) {
+        out.push(`${r.name}: nothing deeper than ${CIRCULATION.corridorDepth} m (a corridor)`);
+      }
+      if (prog.mustNot.length) out.push(`${r.name}: no ${prog.mustNot.join(', ')}`);
+    }
+  }
+  return out;
+}

@@ -14,6 +14,7 @@ import { roomKind } from '../suggest';
 import { type AliasMap, aliasOf } from './aliases';
 import { catalogueText } from './catalogue';
 import { designLocks } from './locks';
+import { peopleOf } from './principles';
 import { type DesignBrief, STYLE_NAMES } from './schema';
 import { roomIdAt, roomsBeside } from './spaces';
 import { clean, levelFingerprint, pt, r2, stableJson } from './util';
@@ -206,6 +207,15 @@ export function briefData(brief: DesignBrief, aliases: AliasMap) {
       .map(([id, r]) => ({ room: of.get(id) ?? id, use: r.use, wish: t(r.wish, 200) }))
       .sort((p, q) => (p.room < q.room ? -1 : 1)),
     electricalPoints: brief.electrical,
+    people: peopleOf(brief).map((p) => ({
+      id: p.key,
+      name: t(p.name, 40),
+      ...(p.detail ? { detail: p.detail } : {}),
+    })),
+    whoSleepsWhere: Object.entries(brief.sleeping ?? {})
+      .filter(([, ps]) => ps.length)
+      .map(([id, ps]) => ({ room: of.get(id) ?? id, people: ps }))
+      .sort((p, q) => (p.room < q.room ? -1 : 1)),
   };
 }
 

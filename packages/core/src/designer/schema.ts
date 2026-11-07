@@ -139,7 +139,7 @@ export const LIMITS = {
 } as const;
 
 /** Enum fields matched in any case (a model may answer "Remove_Wall" or "SWING"). */
-const ENUM_KEYS = new Set(['op', 'style', 'use']);
+const ENUM_KEYS = new Set(['op', 'style', 'use', 'against', 'zone']);
 
 /** Enum values lower-cased (and trimmed) wherever their key appears. */
 function lowerEnums(raw: unknown): unknown {
@@ -301,6 +301,17 @@ export type ConceptRoom = Concept['rooms'][number];
 
 // ------------------------------------------------------------------------------ a space
 
+/**
+ * Where a piece stands, by intent (answers of version 2): against a wall (any, the one with
+ * a window, or one without a door), or free-standing.
+ */
+export const AGAINST = ['wall', 'window-wall', 'not-door-wall', 'free'] as const;
+/** The part of a room a piece belongs to. */
+export const ZONES = ['sleep', 'lounge', 'dine', 'work', 'entry', 'cook', 'store'] as const;
+export type Zone = (typeof ZONES)[number];
+/** What a piece faces besides another piece of the answer (by its ref). */
+export const FACES = ['room', 'window', 'door'] as const;
+
 const spaceSchemas = (ctx: Ctx) => {
   const Item = z.object({
     ref: text(ctx, LIMITS.ref),
@@ -322,9 +333,21 @@ const spaceSchemas = (ctx: Ctx) => {
     depth: finite.positive().max(10).nullable(),
     height: finite.positive().max(4).nullable(),
     why: text(ctx, LIMITS.why),
+    // Version 2: intent. "wall", "along", "at" and "rotation" are then only preferences.
+    against: z.enum(AGAINST).nullable().optional(),
+    /** Another piece's ref, or 'room', 'window', 'door'. */
+    faces: text(ctx, LIMITS.ref).nullable().optional(),
+    /** Another piece's ref it goes beside (a bedside table by its bed, chairs at a table). */
+    near: text(ctx, LIMITS.ref).nullable().optional(),
+    zone: z.enum(ZONES).nullable().optional(),
   });
   const Face = z.object({ wall: alias(ctx), finish: text(ctx, LIMITS.id) });
   const SpaceDesign = z.object({
+    /** 2: pieces by intent, placed by the solver; absent: by position (the first answers). */
+    v: z
+      .unknown()
+      .transform((x) => (Number(x) === 2 ? (2 as const) : undefined))
+      .optional(),
     items: list(ctx, Item, LIMITS.items, 'pieces'),
     faces: list(ctx, Face, LIMITS.faces, 'wall finishes'),
     notes: list(ctx, text(ctx, LIMITS.note), LIMITS.roomNotes, 'notes'),
