@@ -587,6 +587,7 @@ export function AgeingPanel() {
                       <button
                         type="button"
                         className="ageing-line ageing-choose"
+                        aria-label={`${roomName(level, b.roomId)}: ${b.count ? `${b.count} to look at` : 'nothing to change'}`}
                         onClick={() => set({ bedroomId: b.roomId })}
                       >
                         <span className="ageing-choose-name">{roomName(level, b.roomId)}</span>
