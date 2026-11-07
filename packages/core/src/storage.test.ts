@@ -1,6 +1,6 @@
 import { freeze } from 'immer';
 import { afterEach, describe, expect, it } from 'vitest';
-import { deleteWall, drawWall, updateRoom } from './commands';
+import { deleteWall, drawWall, moveVertex, updateRoom } from './commands';
 import { TYPICAL_RATES } from './cost';
 import { blankProject } from './factory';
 import { furnishedSample, withPieces } from './fixtures/furnishedSample';
@@ -13,6 +13,7 @@ import {
   furnitureKind,
   newItem,
   setProjectModels,
+  updateItem,
 } from './furniture';
 import { type EditorDoc, dispatch, emptyHistory } from './history';
 import { AFTER_SUFFIX } from './levels';
@@ -582,6 +583,63 @@ describe('the household setting', () => {
     });
     const good = { people: {}, others: { adults: 1, children: 2 }, amount: 'lots', shelter: false };
     expect(parseStorageSetting(JSON.stringify(good))).toEqual(good);
+  });
+});
+
+describe('rooms someone sleeps in', () => {
+  it('a study with a bed, stepped down to nobody, keeps its steppers and its card', () => {
+    const s = add(room(3, 3, 'Study'), [['bed-single', { x: 1.5, y: 1.2 }]]);
+    const id = Object.keys(lvl(s).rooms)[0] as string;
+    const beds = storageReport(lvl(s), setting()).rooms[0];
+    expect(beds).toMatchObject({ roomId: id, kind: 'study', sleeps: true, people: { adults: 1 } });
+    const none = storageReport(lvl(s), setting({ people: { [id]: { adults: 0, children: 0 } } }));
+    expect(none.rooms[0]).toMatchObject({ roomId: id, sleeps: true, fromBeds: false });
+    expect(none.rooms[0]?.clothes).toBeUndefined();
+    expect(none.people).toEqual({ adults: 0, children: 0 });
+    // A study with nobody, no bed and no edit: no card.
+    expect(storageReport(lvl(room(3, 3, 'Study')), setting()).rooms).toEqual([]);
+  });
+});
+
+describe('the caches follow every edit (Commands)', () => {
+  /** Two rooms split at x = 2, named Left and Right, and a wardrobe in Left. */
+  function two() {
+    let s = room(4, 3, 'Bedroom', [[2, 0, 2, 3]]);
+    const L = lvl(s);
+    for (const r of Object.values(L.rooms)) {
+      const left = r.loop.some((v) => (L.vertices[v]?.x ?? 9) < 1);
+      s = dispatch(s, updateRoom(L.id, r.id, { name: left ? 'Left bedroom' : 'Right bedroom' }));
+    }
+    return add(s, [['wardrobe', { x: 1.6, y: 1.5 }]]);
+  }
+  const clothesIn = (s: EditorDoc, name: string) =>
+    storageReport(lvl(s), setting()).rooms.find((r) => r.name === name)?.totals.clothes ?? 0;
+
+  it('a piece moved', () => {
+    let s = two();
+    expect(clothesIn(s, 'Left bedroom')).toBeCloseTo(1.2, 9);
+    const it = Object.values(lvl(s).items)[0] as Item;
+    s = dispatch(s, updateItem(lvl(s).id, it.id, { position: { x: 3 } }));
+    expect(clothesIn(s, 'Left bedroom')).toBe(0);
+    expect(clothesIn(s, 'Right bedroom')).toBeCloseTo(1.2, 9);
+  });
+
+  it('a room renamed', () => {
+    let s = two();
+    const left = Object.values(lvl(s).rooms).find((r) => r.name === 'Left bedroom');
+    s = dispatch(s, updateRoom(lvl(s).id, left?.id as string, { name: 'Store' }));
+    const r = storageReport(lvl(s), setting());
+    expect(r.rooms.find((x) => x.name === 'Store')?.store?.volume).toBeCloseTo(6, 9);
+  });
+
+  it('a corner moved', () => {
+    let s = two();
+    const L = lvl(s);
+    for (const v of Object.values(L.vertices).filter((v) => Math.abs(v.x - 2) < 1e-6)) {
+      s = dispatch(s, moveVertex(L.id, v.id, { x: 1.4, y: v.y }));
+    }
+    expect(clothesIn(s, 'Left bedroom')).toBe(0);
+    expect(clothesIn(s, 'Right bedroom')).toBeCloseTo(1.2, 9);
   });
 });
 

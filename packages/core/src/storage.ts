@@ -496,7 +496,13 @@ export function storageReport(
       kind,
       people,
       fromBeds: !edited,
-      sleeps: kind === 'bedroom' || headcount(people) > 0,
+      // A bedroom, a room with a bed (a study with a sofa bed), or one whose people were edited:
+      // stepped down to nobody, it keeps its steppers and its card.
+      sleeps:
+        kind === 'bedroom' ||
+        headcount(beds[id] ?? NOBODY) > 0 ||
+        headcount(people) > 0 ||
+        edited !== undefined,
       pieces: [],
       totals: { clothes: 0, shoes: 0, kitchen: 0, other: 0 },
     });
