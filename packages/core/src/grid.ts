@@ -1,5 +1,5 @@
 import { box } from './convex';
-import { pointInPolygon } from './geometry';
+import { crossingsAt, insideAt } from './geometry';
 import type { Vec2 } from './schema';
 
 /**
@@ -70,12 +70,12 @@ export function fillPolygon(g: Grid, poly: readonly Vec2[], each: (k: number) =>
   const i1 = Math.min(g.nx - 1, Math.floor((b.x1 - g.x0) / g.c));
   const j0 = Math.max(0, Math.floor((b.y0 - g.y0) / g.c));
   const j1 = Math.min(g.ny - 1, Math.floor((b.y1 - g.y0) / g.c));
-  const p = { x: 0, y: 0 };
   for (let j = j0; j <= j1; j++) {
-    p.y = g.y0 + (j + 0.5) * g.c;
+    // A row at a time: where its centre line crosses the edges, as pointInPolygon finds them.
+    const xs = crossingsAt(poly, g.y0 + (j + 0.5) * g.c);
+    if (!xs.length) continue;
     for (let i = i0; i <= i1; i++) {
-      p.x = g.x0 + (i + 0.5) * g.c;
-      if (pointInPolygon(p, poly)) each(j * g.nx + i);
+      if (insideAt(xs, g.x0 + (i + 0.5) * g.c)) each(j * g.nx + i);
     }
   }
   for (let e = 0; e < poly.length; e++) {
@@ -230,6 +230,74 @@ export class Search {
     for (let at = k, guard = 0; at >= 0 && guard < this.b.length; guard++) {
       out.push(at);
       at = this.parent[at] as number;
+    }
+    return out.reverse();
+  }
+}
+
+/** What a way search answers about a cell. */
+export interface WaySearch {
+  reached(k: number): boolean;
+  width(k: number): number;
+  path(k: number): number[];
+}
+
+/**
+ * A search's results for a block of cells only (columns i0..i1, rows j0..j1): enough for a
+ * search kept to one room, at a room's size rather than the whole plan's. The same answers
+ * as the search had, for those cells; none for the others.
+ */
+export class WindowSearch implements WaySearch {
+  private b: Float32Array;
+  private parent: Int32Array;
+  private seen: Uint8Array;
+  private w: number;
+  private limit: number;
+  constructor(
+    private g: Grid,
+    from: Search,
+    private i0: number,
+    i1: number,
+    private j0: number,
+    j1: number,
+  ) {
+    this.w = Math.max(0, i1 - i0 + 1);
+    const h = Math.max(0, j1 - j0 + 1);
+    this.b = new Float32Array(this.w * h);
+    this.parent = new Int32Array(this.w * h);
+    this.seen = new Uint8Array(this.w * h);
+    this.limit = from.b.length;
+    for (let j = 0; j < h; j++) {
+      for (let i = 0; i < this.w; i++) {
+        const k = (j0 + j) * g.nx + i0 + i;
+        if (!from.reached(k)) continue;
+        const at = j * this.w + i;
+        this.seen[at] = 1;
+        this.b[at] = from.b[k] as number;
+        this.parent[at] = from.parent[k] as number;
+      }
+    }
+  }
+  private at(k: number): number {
+    const i = (k % this.g.nx) - this.i0;
+    const j = Math.floor(k / this.g.nx) - this.j0;
+    return i < 0 || j < 0 || i >= this.w || j * this.w >= this.seen.length ? -1 : j * this.w + i;
+  }
+  reached(k: number): boolean {
+    const at = this.at(k);
+    return at >= 0 && this.seen[at] === 1;
+  }
+  width(k: number): number {
+    const at = this.at(k);
+    return at >= 0 && this.seen[at] === 1 ? (this.b[at] as number) : -1;
+  }
+  /** As Search.path: the cells from the start to k. */
+  path(k: number): number[] {
+    const out: number[] = [];
+    for (let at = k, guard = 0; at >= 0 && guard < this.limit; guard++) {
+      out.push(at);
+      const a = this.at(at);
+      at = a >= 0 ? (this.parent[a] as number) : -1;
     }
     return out.reverse();
   }
