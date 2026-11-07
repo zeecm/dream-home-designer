@@ -127,19 +127,23 @@ function segHitsBox(s: Seg, box: Box): boolean {
   );
 }
 
+/** Printed text is kept this much further off than a line (mm), so two figures don't touch. */
+const TEXT_CLEAR = 0.6;
+const grown = (b: Box): Box => ({ ...b, hw: b.hw + TEXT_CLEAR, hh: b.hh + TEXT_CLEAR });
+
 /** How many obstacles a box touches. */
 export function boxHits(box: Box, obs: Obstacles): number {
   const outline = cornersOf(box);
   return (
     (obs.segs ?? []).filter((s) => segHitsBox(s, box)).length +
-    (obs.boxes ?? []).filter((b) => convexOverlap(outline, cornersOf(b))).length +
+    (obs.boxes ?? []).filter((b) => convexOverlap(outline, cornersOf(grown(b)))).length +
     (obs.walls ?? []).filter((w) => w.length >= 3 && convexOverlap(outline, w)).length
   );
 }
 
 /** Whether a segment crosses any printed text. */
 export function segHitsText(s: Seg, obs: Obstacles): boolean {
-  return (obs.boxes ?? []).some((b) => segHitsBox(s, b));
+  return (obs.boxes ?? []).some((b) => segHitsBox(s, grown(b)));
 }
 
 /** A figure's box, with a margin: `w` wide, along `d`. */

@@ -443,15 +443,22 @@ the rules. The changes are marked "(revised)".*
   10 mm at the chains' 2.2 mm size, reading along the line (an upright line reads upwards).
 - A grey 0.1 extension line from the corner where the flank turns at the mouth to just past
   the mouth tick, so the reader sees what the depth runs to.
-- The figure (with its white halo):
-  - gap on paper 5 mm or more: beside the line, on a side with room for it and, of two, the
-    one no chain extension line or chain crosses (in the sample, the ledge side);
-  - 2.8 mm to 5 mm: in a break in the line;
-  - under 2.8 mm: beyond the mouth along the line, moved out until it touches no chain line,
-    extension line or chain figure row.
+- The figure (with its white halo) keeps off everything else page 1 prints: every line, every
+  figure and label (chains, room names and spans, tags, a renovation's lengths) and the walls.
+  The sheet draws page 1 once without the depths and reads that drawing for what to avoid
+  (QA, PR #43). In order:
+  - gap on paper 5 mm or more: beside the line, on a side with room for it (in the sample, the
+    ledge side, away from the chain's extension line), at its middle or moved along it;
+  - else, from 2.8 mm: in a break in the line, at its middle or moved along it;
+  - else beyond the mouth along the line, starting no more than 6 mm past it (further, it
+    reads as another chain's figure);
+  - else read level in the nearest clear spot beside the notch, with a thin ink leader from
+    the depth line to it (a slot of 100 mm at 1:50, say);
+  - with nowhere clear, just past the mouth.
+- A depth line (with its ticks) that would strike through printed text moves across the notch,
+  clear of it, while it stays in the notch (a new back wall's length in After, say).
 - Two dimensions of one notch, parallel within 1° and under 8 mm apart on paper: one short
-  chain on the centre line
-  (back face, nearer mouth, further mouth) with a figure per piece ("1700 | 300"), and an
+  chain on the centre line (back face, nearer mouth, further mouth) with a figure per piece ("1700 | 300"), and an
   extension line from each flank's mouth corner. Nothing is dropped. A tapered pair stays two
   dimensions however close: one chain line can't carry two slanting depths.
 - Each is a `g.dim-notch` with `data-notch` (the group) and `data-depth` (the figures printed,
@@ -551,6 +558,8 @@ today, maisonettes later) is under-priced without saying so.
   quantity splits. A line with neither (contingency) keeps its price on the label's row.
 - With 2 or more levels, debris is placed "Whole home", not "Flat".
 - Copy leaves out a part a line hasn't got (no "Contingency (10%) ·  · $480–790").
+- The " · " separators are text, not drawn by CSS, so a copy or a screen reader keeps them; each
+  layout hides the one it doesn't use.
 - Copy and Print: the lines in the same order with their prefixes, then "By level" with the
   subtotals, before the Total; the unpriced note after it.
 

@@ -92,7 +92,7 @@ describe('notchFigure', () => {
 
   it('M1: both sides crossed all along: the break, then beyond the mouth', () => {
     // Text either side of the line, all along it: the line itself is clear.
-    const walls = [label(47.5, 35, '00000000'), label(52.5, 35, '00000000')].map((b) => ({
+    const walls = [label(46.8, 35, '00000000'), label(53.2, 35, '00000000')].map((b) => ({
       ...b,
       d: { x: 0, y: 1 },
       hw: 12,
