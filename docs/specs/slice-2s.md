@@ -399,50 +399,110 @@ slot between the sample's air-con ledge and kitchen) gets no chain. So the notch
 nowhere on the sheet, and contractors need it for grilles, windows and ledge works. Its
 width and the openings' positions are already on the side chains.
 
-### Behaviour
-**Core.**
-- `planDimensions` returns `notches: NotchDim[]`. A notch dimension is `{ a, b, out, gap }`
-  in metres: a line from the notch's back face to its mouth, the outward normal, and the clear
-  width across the notch.
-- `outsideStretches` keeps the stretches it now drops: they look outside, have the flat
-  behind and free space in front, but are not seen from outside.
-- Each hidden stretch runs from its inner end to where its face comes into view or turns (the mouth).
-- Two hidden stretches that face each other and overlap (each one's front ray hits the
-  other) form one notch:
-  - if their ends agree within 5 mm, one dimension on the centre line between them;
-  - otherwise one dimension along each, inset `gap / 4` from its face.
-- A lone hidden stretch: one dimension inset `gap / 2`.
-- Stretches under 0.10 m are left out.
+*Revised in PR 3 after the tech-lead's design review and the UX design (7 Nov). Where they
+differ from the first draft, the UX design wins on the drawing; the tech-lead's review on
+the rules. The changes are marked "(revised)".*
 
-**Sheet.**
-- The dimension is drawn like an aligned chain (ticks at both ends, the figure in mm to 10 mm).
-  It is `data-notch` with `data-depth` in mm.
-- The figure sits beside the line when the gap on paper is at least 5 mm.
-- Under 5 mm, the line stays and the figure goes just beyond the mouth, outside the outline,
-  with its halo (offset 1.5 mm).
-- Two dimensions in one notch with under 8 mm of gap on paper: only the one on the left or top is drawn.
+### Behaviour
+**Core** (`packages/core/src/dimensions.ts`).
+- `planDimensions` returns `notches: NotchDim[]`. A notch dimension is
+  `{ a, b, gap, notch, corners }` in metres: `a` the inner end (at the notch's back), `b` the
+  mouth, on the line the depth is drawn on; `gap` the clear width across the notch (the
+  narrowest, where it tapers); `notch` a group index (two dimensions of one notch share it);
+  `corners` where each flank measured turns at the mouth, for the extension line. The
+  direction is `b − a`. (revised: no `out`)
+- `outsideStretches` tells each point of a face that looks out as not looking out, seen, or
+  hidden (its front ray meets the flat). The chains use the seen stretches only, as before.
+- **A flank** (revised) is the whole run of face that looks out (seen or hidden) and has a
+  hidden part, carried on to where the face turns, also through a joint where a wall meets it
+  from behind. If the face carries on in view for more than the gap past the hidden part (a
+  long outside wall past the notch, which the side chain measures), the flank stops where it
+  comes into view. That gives the U below two depths (2.00 and 1.70) and the sample one (1.00,
+  not the kitchen's whole 2.8 m west face).
+- **Mouth and inner end** (revised): probed just past each end of the flank, 5 mm in front
+  and a little further (5 cm, or `gap / 2` if less). Free space at both: the mouth. A wall or
+  a room at either: the inner end. (The 5 mm probe keeps a splayed V's back wall; the further
+  one finds a wall just past a closed slot's mouth.)
+  - Neither end free (a shaft, or a slot closed at its mouth): no depth.
+  - Both ends free (a slot right through, between two wings): no depth. **Gap in this spec:**
+    a through-slot's length isn't measured anywhere yet; decide later whether it wants one.
+- **Pairing:** two flanks face each other when each one's front rays land within 1 mm of the
+  other's face (a window in a flank counts as its face). A flank broken by a pier, facing one
+  flank: paired by the largest overlap; anything left is a lone flank.
+- **Dimensions:**
+  - a pair facing within 1° with ends that agree within 5 mm: one dimension on the centre line
+    between them;
+  - otherwise (mouths that differ, or tapered or stepped flanks): one along each flank, inset
+    `gap / 4` from its face, each with its own gap;
+  - a lone flank: one, inset `gap / 2`.
+- Flanks under 0.10 m are left out.
+
+**Sheet** (`apps/web/src/print/contractorSheet.tsx`, placement in the pure
+`apps/web/src/print/notches.ts`). (revised, UX design)
+- Drawn like the outside chains: a 0.15 ink line, 0.22 ticks at both ends, the figure in mm to
+  10 mm at the chains' 2.2 mm size, reading along the line (an upright line reads upwards).
+- A grey 0.1 extension line from the corner where the flank turns at the mouth to just past
+  the mouth tick, so the reader sees what the depth runs to.
+- The figure (with its white halo) keeps off everything else page 1 prints: every line, every
+  figure and label (chains, room names and spans, tags, a renovation's lengths) and the walls.
+  The sheet draws page 1 once without the depths and reads that drawing for what to avoid
+  (QA, PR #43). In order:
+  - gap on paper 5 mm or more: beside the line, on a side with room for it (in the sample, the
+    ledge side, away from the chain's extension line), at its middle or moved along it;
+  - else, from 2.8 mm: in a break in the line, at its middle or moved along it;
+  - else beyond the mouth along the line, starting no more than 6 mm past it (further, it
+    reads as another chain's figure);
+  - else read level in the nearest clear spot beside the notch, with a thin ink leader from
+    the depth line to it (a slot of 100 mm at 1:50, say);
+  - with nowhere clear, just past the mouth.
+- A depth line (with its ticks) that would strike through printed text moves across the notch,
+  clear of it, while it stays in the notch (a new back wall's length in After, say).
+- Two dimensions of one notch, parallel within 1° and under 8 mm apart on paper: one short
+  chain on the centre line (back face, nearer mouth, further mouth) with a figure per piece ("1700 | 300"), and an
+  extension line from each flank's mouth corner. Nothing is dropped. A tapered pair stays two
+  dimensions however close: one chain line can't carry two slanting depths.
+- Each is a `g.dim-notch` with `data-notch` (the group) and `data-depth` (the figures printed,
+  space-separated). Not `.dim-chain`: the e2e suite counts `.dim-chain[data-tier="2"]` as the
+  four overalls.
+- Page 1 only, never on the electrical page. The word "notch" appears nowhere on the sheet.
 
 **Dialog.** Unchanged.
 
 ### Edge cases
-- A notch with a window in a flank: the window's edges stay on the side chain (tier 0, as now). The depth is unchanged.
-- A slanted notch: the line follows the flank.
-- After: hacked walls don't make notches; new walls do.
-- A courtyard closed on all sides is a room or a hole, so it is not a notch.
+- A notch with a window in a flank: the depth is unchanged and the window keeps its tag. No
+  side chain changes (today such a window is on no side chain; notch chains with opening stops
+  are out of scope). (revised)
+- A slanted notch: the line follows the flanks.
+- Tapered or stepped flanks: a dimension along each flank (above). A stepped flank or one
+  broken by a pier is two flanks: the far flank pairs with the one it overlaps most; a piece
+  shut in at both ends has none; one left over is on its own (`gap / 2`).
+- A splayed V: a dimension along each flank.
+- After: hacked walls don't make notches; new walls do (the sheet measures the shown level).
+- A courtyard closed on all sides is a room or a hole, so it is not a notch; the end probe
+  guarantees it even if one weren't.
 
 ### Out of scope
-Notch chains with opening stops, notches in rooms' insides, DXF.
+Notch chains with opening stops, notches in rooms' insides, a through-slot's length, DXF.
 
 ### Acceptance criteria
 1. U fixture (notch x 2–4, y 2–4, open to the bottom, 100 mm walls):
    - one notch dimension, 2.00 m long (y 2.05 → 4.05), on x = 3.00, gap 1.90;
    - the side chains are unchanged (the existing test still passes).
-2. The same U with a 0.6 m window centred on the left flank: depth still 2.00. The window's edges are on the left side chain.
-3. A U whose flanks' mouths differ by 0.3 m: two notch dimensions.
+2. The same U with a 0.6 m window centred on the left flank: depth 2.00; the window keeps its
+   tag; no side chain changes. (revised)
+3. A U whose right arm is 0.3 m shorter: two notch dimensions in one group, 2.00 and 1.70,
+   each `gap / 4` from its flank. (revised: flanks are whole runs)
 4. A 4 × 3 box and an L: no notches.
-5. Sample flat: one notch, between the air-con ledge and the kitchen. Depth 0.999 ± 0.002 (prints "1000"), gap 0.647 ± 0.002.
-6. Sheet (web Vitest): a gap of 6.5 mm puts the figure beside the line; 3.2 mm puts it beyond the mouth.
-7. E2e: sample, A4 (1:100): page 1 has one `[data-notch]` with `data-depth="1000"`, inside the outline's bounds.
+5. Sample flat: one notch, between the air-con ledge and the kitchen. Depth 0.999 ± 0.002
+   (prints "1000"), gap 0.647 ± 0.002.
+6. Sheet (web Vitest, `notchFigure`): a gap of 6.5 mm puts the figure beside the line; 3.2 mm
+   in a break; under 2.8 mm beyond the mouth. Two depths under 8 mm apart make one chain.
+   (revised)
+7. E2e: sample, A4 (1:100): page 1 has one `.dim-notch` with `data-depth="1000"`, inside the
+   outline's bounds, and still four tier-2 chains.
+8. Core: each end case (inner end, mouth, closed slot, through-slot), a slanted notch, a
+   tapered notch, a splayed V, a pier, a stepped flank, a lone flank, the in-view rule just
+   under and just over the gap, and a notch made by new walls in After. (added)
 
 ---
 
@@ -451,21 +511,57 @@ Notch chains with opening stops, notches in rooms' insides, DXF.
 **Problem.** `useEstimate` prices `levels[0]` only. A project with more levels (imported
 today, maisonettes later) is under-priced without saying so.
 
-### Behaviour
-**Core** `projectEstimate(project, rates) → CostEstimate`:
-- Each level in `project.levels` is paired with its After copy (`id + AFTER_SUFFIX`).
-- Each pair runs `costEstimate`'s lines (carpentry, painting, building, floors, electrical)
-  **without** debris and contingency.
-- With 2 or more levels, each line's `place` is prefixed with the level's name: "Upper · Bedroom".
-- One debris line for the flat, if any level hacks. Contingency once, over every line.
-- Totals rounded as now.
-- With a renovation, a level that has no After copy adds nothing.
-- One level: identical to `costEstimate(levels[0], after)`.
+*Revised in PR 3 after the tech-lead's design review and the UX design (7 Nov).*
 
-**Web.**
-- `useEstimate` uses `projectEstimate` (cached on `levels`, `renovation` and rates).
-- Dialog and summary are unchanged, except that the places are prefixed.
-- Copy and Print include the prefixes.
+### Behaviour
+**Core** (`packages/core/src/cost.ts`).
+- `levelParts(before, after, rates)` returns one level's `{ changes, painting, carpentry,
+  electrical }` lines, without debris and contingency. (revised)
+- `projectEstimate(project, rates) → CostEstimate` pairs each level in `project.levels` with
+  its After copy (`id + AFTER_SUFFIX`), then assembles, in the one-level order: every level's
+  changes, debris once for the home (if any level hacks, cuts or widens), then painting,
+  carpentry and electrical, each level by level, then contingency once over every line.
+  `costEstimate(before, after)` is the one-level case, so the line order (which Copy uses)
+  is identical. (revised)
+- Each line carries `levelId` and `levelName` (computed, no schema change); debris and
+  contingency, which are the whole home's, carry none. (revised, UX design)
+- In a home of 2 or more levels (priced or not), each line's `place` starts with its level's
+  name: "Upper · Bedroom";
+  a line in no room is placed on the level itself ("Upper", not "Flat"). Debris is placed "Whole home".
+- `levels: { id, name, low, high }[]`: each level's subtotal (the sum of its lines). These and
+  the whole home's lines add up to the sum of all lines. (added)
+- Level names, every one different: a blank one is "Level n"; names shared by two levels get
+  their number ("Level 1", "Level 2"); a made-up name counts on past one a level already has
+  (`['', 'Level 1']` → "Level 2", "Level 1"). (added)
+- With a renovation, a level that has no After copy isn't priced and is listed by name in
+  `unpriced` (never dropped silently). (revised)
+- `renovation` is whether the project has one. Totals rounded as now.
+- One level: deep-equal to `costEstimate(levels[0], after)`.
+
+**Web** (`apps/web/src/cost/estimate.tsx`, words in `apps/web/src/cost/text.ts`).
+- `useEstimate` uses `projectEstimate`, cached on `doc.levels`, `doc.renovation` and rates
+  (Immer keeps those the same objects through unrelated edits).
+- The trade groups stay; within each, lines go level by level.
+- With 2 or more levels (revised, UX design):
+  - a **By level** block above the groups: each level's subtotal, then "Whole home (debris,
+    contingency)" (naming what is there). The foot's Total stays the only total, as in Copy
+    and Print (UX review: a second, rounded total there didn't match the rows);
+  - summary hint: "Covers both levels: Ground and Upper." ("all 3 levels: …" for more);
+  - dialog note, whenever a priced level isn't the one shown: "Upper is priced from the file.
+    It can't be shown or edited here yet." There is no level switcher, so no level is
+    highlighted as current.
+- A level with no renovation plan, in the summary and, first among the dialog's notes in the
+  warning style: "Upper has no renovation plan, so it isn't priced. It can't be planned here
+  yet."
+- Phone: each line keeps two rows; the place moves to the second row beside the quantity
+  ("Upper · Living · 71.9 m²", grey, the price dark on the right). The place wraps before the
+  quantity splits. A line with neither (contingency) keeps its price on the label's row.
+- With 2 or more levels, debris is placed "Whole home", not "Flat".
+- Copy leaves out a part a line hasn't got (no "Contingency (10%) ·  · $480–790").
+- The " · " separators are text, not drawn by CSS, so a copy or a screen reader keeps them; each
+  layout hides the one it doesn't use.
+- Copy and Print: the lines in the same order with their prefixes, then "By level" with the
+  subtotals, before the Total; the unpriced note after it.
 
 ### Out of scope
 A level switcher or adding levels in the UI. Built-ins sized to the level's ceiling when
@@ -475,5 +571,11 @@ placed (still open in carpentry-cost.md).
 1. One-level sample, with and without a renovation: `projectEstimate` deep-equals `costEstimate`.
 2. Two levels, each with a built-in wardrobe, no renovation: two wardrobe lines, places starting "Ground ·" and "Upper ·" (the level names).
 3. A wall hacked on each level: one debris line. Contingency is 10% of all lines.
-4. A renovation with an After copy for level 1 only: level 2 adds no lines.
-5. E2e: open a two-level project file (fixture in `e2e/`). The estimate dialog lists both levels' lines, and the total matches the core value.
+4. A renovation with an After copy for level 1 only: level 2 adds no lines and is in
+   `unpriced`. (revised)
+5. E2e: open a two-level project file (`apps/web/e2e/two-levels.dreamhome.json`, written from
+   core's `twoLevelProject`; a web unit test keeps it in step and fixes its total). The
+   estimate dialog lists both levels' lines and the By level rows, and the total matches the
+   core value. (revised)
+6. Blank and repeated level names fall back to "Level n". The By level rows add up to the
+   lines. On a phone, each line's place sits beside its quantity. (added)

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { addOpening, drawWall } from './commands';
+import { addOpening, deleteWall, drawWall } from './commands';
 import {
   type ChainSide,
   type DimensionChain,
+  type NotchDim,
   outlineBounds,
   planDimensions,
   roundChain,
@@ -13,6 +14,7 @@ import { sampleFlatProject } from './fixtures/sampleFlat';
 import { pointInPolygon } from './geometry';
 import { type EditorDoc, dispatch, emptyHistory } from './history';
 import { doorSwing, placeOpening, planGeometry } from './plan';
+import { startRenovation } from './renovation';
 import { roomShapes } from './rooms';
 import type { Level, Vec2 } from './schema';
 
@@ -405,6 +407,328 @@ describe('planDimensions: what the sheet needs clear', () => {
     // No width across the hacked wall; the depth beside it.
     expect(d.spans.filter((s) => s.axis === 'x')).toEqual([]);
     expect(d.spans.filter((s) => s.axis === 'y')).toHaveLength(1);
+  });
+});
+
+/** A U, 100 mm walls: the notch x 2–4 from y 2 opens to the bottom; the right arm `short` shorter. */
+const uPlan = (short = 0, slant = 0, slantRight = 0): [number, number][] => [
+  [0, 0],
+  [6, 0],
+  [6, 4 - short],
+  [4 + slantRight, 4 - short],
+  [4, 2],
+  [2, 2],
+  [2 - slant, 4],
+  [0, 4],
+  [0, 0],
+];
+const depth = (n: NotchDim) => Math.hypot(n.b.x - n.a.x, n.b.y - n.a.y);
+
+describe('planDimensions: notch depths (slice 2s C1)', () => {
+  it('1: a U: one depth on the centre line, back face to mouth; side chains unchanged', () => {
+    const d = planDimensions(build([{ pts: uPlan() }]));
+    expect(d.notches).toHaveLength(1);
+    const n = d.notches[0] as NotchDim;
+    expect(depth(n)).toBeCloseTo(2, 3);
+    expect(n.gap).toBeCloseTo(1.9, 3);
+    // From the inner end (the back face, y 2.05) to the mouth (y 4.05), on x = 3.
+    expect(n.a.x).toBeCloseTo(3, 3);
+    expect(n.a.y).toBeCloseTo(2.05, 3);
+    expect(n.b.x).toBeCloseTo(3, 3);
+    expect(n.b.y).toBeCloseTo(4.05, 3);
+    // An extension line from each flank's corner at the mouth.
+    const corners = [...n.corners].sort((p, q) => p.x - q.x);
+    expect(corners.map((c) => [c.x, c.y].map((v) => Number(v.toFixed(3))))).toEqual([
+      [2.05, 4.05],
+      [3.95, 4.05],
+    ]);
+    expect(chain(d.chains, 'left', 1)).toBeUndefined();
+    expect(chain(d.chains, 'right', 1)).toBeUndefined();
+  });
+
+  it('2: a window in a flank: the depth is the same, the window keeps its tag, chains unchanged', () => {
+    const plain = planDimensions(build([{ pts: uPlan() }]));
+    const d = planDimensions(
+      build([{ pts: uPlan() }], [{ kind: 'window', width: 0.6, at: { x: 2, y: 3 } }]),
+    );
+    expect(d.notches).toHaveLength(1);
+    expect(depth(d.notches[0] as NotchDim)).toBeCloseTo(2, 3);
+    expect(d.tags.filter((t) => t.kind === 'window')).toHaveLength(1);
+    expect(d.chains).toEqual(plain.chains);
+  });
+
+  it('3: flanks whose mouths differ by 0.3 m: a depth along each, gap / 4 from its face', () => {
+    const d = planDimensions(build([{ pts: uPlan(0.3) }]));
+    expect(d.notches).toHaveLength(2);
+    const [l, r] = [...d.notches].sort((p, q) => p.a.x - q.a.x) as [NotchDim, NotchDim];
+    expect(l.notch).toBe(r.notch);
+    expect(depth(l)).toBeCloseTo(2, 3);
+    expect(depth(r)).toBeCloseTo(1.7, 3);
+    expect(l.a.x).toBeCloseTo(2.05 + 1.9 / 4, 3);
+    expect(r.a.x).toBeCloseTo(3.95 - 1.9 / 4, 3);
+    expect(l.a.y).toBeCloseTo(2.05, 3);
+    expect(r.b.y).toBeCloseTo(3.75, 3);
+  });
+
+  it('4: a box and an L have no notches', () => {
+    expect(planDimensions(build([{ pts: box(4, 3) }])).notches).toEqual([]);
+    const l: [number, number][] = [
+      [0, 0],
+      [4, 0],
+      [4, 2],
+      [2, 2],
+      [2, 4],
+      [0, 4],
+      [0, 0],
+    ];
+    expect(planDimensions(build([{ pts: l }])).notches).toEqual([]);
+  });
+
+  it('5: the sample flat: one notch, between the air-con ledge and the kitchen', () => {
+    const level = sampleFlatProject('prj_t').levels[0] as Level;
+    const d = planDimensions(level);
+    expect(d.notches).toHaveLength(1);
+    const n = d.notches[0] as NotchDim;
+    expect(Math.abs(depth(n) - 0.999)).toBeLessThan(0.002);
+    expect(Math.round(depth(n) * 100) * 10).toBe(1000);
+    expect(Math.abs(n.gap - 0.647)).toBeLessThan(0.002);
+  });
+
+  it('a slot closed at its mouth (no free space past either end) gets no depth', () => {
+    // A wall just past the mouth, not joined to the U (so no room closes the slot).
+    const d = planDimensions(
+      build([
+        { pts: uPlan() },
+        {
+          pts: [
+            [2.06, 4.11],
+            [3.94, 4.11],
+          ],
+        },
+      ]),
+    );
+    expect(d.notches).toEqual([]);
+  });
+
+  it('a slot right through (free space past both ends) gets no depth', () => {
+    const d = planDimensions(
+      build([
+        { pts: box(2, 3) },
+        {
+          pts: [
+            [3, 0],
+            [5, 0],
+            [5, 3],
+            [3, 3],
+            [3, 0],
+          ],
+        },
+      ]),
+    );
+    expect(d.notches).toEqual([]);
+  });
+
+  it('a slanted notch: the depth follows the flanks', () => {
+    const th = Math.PI / 6;
+    const rot = ([x, y]: [number, number]): [number, number] => [
+      x * Math.cos(th) - y * Math.sin(th),
+      x * Math.sin(th) + y * Math.cos(th),
+    ];
+    const d = planDimensions(build([{ pts: uPlan().map(rot) }]));
+    expect(d.notches).toHaveLength(1);
+    const n = d.notches[0] as NotchDim;
+    expect(depth(n)).toBeCloseTo(2, 3);
+    expect(n.gap).toBeCloseTo(1.9, 3);
+    // Along the flanks: the U's y axis, turned.
+    expect((n.b.x - n.a.x) / depth(n)).toBeCloseTo(-Math.sin(th), 4);
+    expect((n.b.y - n.a.y) / depth(n)).toBeCloseTo(Math.cos(th), 4);
+    const [cx, cy] = rot([3, 2.05]);
+    expect(n.a.x).toBeCloseTo(cx, 3);
+    expect(n.a.y).toBeCloseTo(cy, 3);
+  });
+
+  it('a tapered notch: a depth along each flank, the gap its narrowest', () => {
+    const d = planDimensions(build([{ pts: uPlan(0, 0.3) }]));
+    expect(d.notches).toHaveLength(2);
+    expect(d.notches[0]?.notch).toBe(d.notches[1]?.notch);
+    const slanted = d.notches.find((n) => Math.abs(n.b.x - n.a.x) > 0.01) as NotchDim;
+    expect(slanted).toBeDefined();
+    // Along the slanted flank: 0.3 across in 2 down.
+    expect(Math.abs((slanted.b.x - slanted.a.x) / (slanted.b.y - slanted.a.y))).toBeCloseTo(
+      0.15,
+      2,
+    );
+    // At the back, where it is narrowest (it widens to 2.2 m at the mouth).
+    for (const n of d.notches) expect(Math.abs(n.gap - 1.9)).toBeLessThan(0.04);
+  });
+
+  it('a splayed V (both flanks 0.9 m out over 2 m): a depth along each flank', () => {
+    const d = planDimensions(build([{ pts: uPlan(0, 0.9, 0.9) }]));
+    expect(d.notches).toHaveLength(2);
+    expect(d.notches[0]?.notch).toBe(d.notches[1]?.notch);
+    for (const n of d.notches) {
+      // Along its flank (0.9 across in 2 down), back face to mouth.
+      expect(Math.abs((n.b.x - n.a.x) / (n.b.y - n.a.y))).toBeCloseTo(0.45, 2);
+      expect(n.b.y).toBeGreaterThan(n.a.y);
+      expect(depth(n)).toBeGreaterThan(2);
+      expect(depth(n)).toBeLessThan(Math.hypot(0.9, 2) + 0.1);
+    }
+  });
+
+  /** A U 6 m deep (notch x 2–4 from y 1, gap 1.9), its right arm `short` shorter. */
+  const deepU = (short: number): [number, number][] => [
+    [0, 0],
+    [6, 0],
+    [6, 6 - short],
+    [4, 6 - short],
+    [4, 1],
+    [2, 1],
+    [2, 6],
+    [0, 6],
+    [0, 0],
+  ];
+
+  it('a flank in view past the notch for less than the gap runs on to its turn', () => {
+    const d = planDimensions(build([{ pts: deepU(1.85) }]));
+    expect(d.notches).toHaveLength(2);
+    const lengths = d.notches.map(depth).sort((p, q) => p - q);
+    expect(lengths[0]).toBeCloseTo(5 - 1.85, 3);
+    expect(lengths[1]).toBeCloseTo(5, 3);
+  });
+
+  it('in view for more than the gap, it stops where it comes into view: one depth', () => {
+    const d = planDimensions(build([{ pts: deepU(1.95) }]));
+    expect(d.notches).toHaveLength(1);
+    const n = d.notches[0] as NotchDim;
+    expect(depth(n)).toBeCloseTo(5 - 1.95, 3);
+    expect(n.a.x).toBeCloseTo(3, 3);
+  });
+
+  it('a lone flank (facing a wall with no room behind it): one depth, gap / 2 out', () => {
+    const d = planDimensions(
+      build([
+        { pts: box(2, 4) },
+        {
+          pts: [
+            [2, 0],
+            [4, 0],
+            [4, 4],
+          ],
+        },
+      ]),
+    );
+    expect(d.notches).toHaveLength(1);
+    const n = d.notches[0] as NotchDim;
+    expect(n.gap).toBeCloseTo(1.9, 3);
+    expect(n.a.x).toBeCloseTo(2.05 + 1.9 / 2, 3);
+    expect(n.a.y).toBeCloseTo(0.05, 3);
+    expect(n.b.y).toBeCloseTo(4.05, 3);
+    expect(n.corners).toHaveLength(1);
+  });
+
+  it('a pier on a flank: the far flank pairs with the piece past it; the piece behind it, shut in, has none', () => {
+    const d = planDimensions(
+      build([
+        { pts: uPlan() },
+        {
+          pts: [
+            [2, 3],
+            [2.3, 3],
+          ],
+        },
+      ]),
+    );
+    // The far flank (2.00) and the piece past the pier (1.00): one notch, one along each.
+    const pair = d.notches.filter((n) => Math.abs(n.b.y - n.a.y) > 0.5);
+    expect(pair).toHaveLength(2);
+    expect(pair[0]?.notch).toBe(pair[1]?.notch);
+    const [short, long] = [...pair].sort((p, q) => depth(p) - depth(q)) as [NotchDim, NotchDim];
+    expect(depth(short)).toBeCloseTo(1, 3);
+    expect(short.a.y).toBeCloseTo(3.05, 3);
+    expect(short.a.x).toBeCloseTo(2.05 + 1.9 / 4, 3);
+    expect(depth(long)).toBeCloseTo(2, 3);
+    // The piece behind the pier (both ends shut) has none. The back face over the pier is a
+    // pocket open to the side: on its own, the pier's 0.25 m out from the flank.
+    const upright = (n: NotchDim) => Math.abs(n.b.x - n.a.x) < 0.01;
+    expect(d.notches.filter((n) => upright(n) && Math.max(n.a.y, n.b.y) < 3)).toEqual([]);
+    const pocket = d.notches.filter((n) => !pair.includes(n));
+    expect(pocket.map((n) => Number(depth(n).toFixed(3)))).toEqual([0.25]);
+    expect(pocket[0]?.notch).not.toBe(pair[0]?.notch);
+  });
+
+  it('a stepped flank: the far flank pairs with the step it overlaps most; the other step is on its own', () => {
+    // Narrower at the back: the left flank at x 2.5 for y 2–2.6, then x 2 to the mouth.
+    const stepped: [number, number][] = [
+      [0, 0],
+      [6, 0],
+      [6, 4],
+      [4, 4],
+      [4, 2],
+      [2.5, 2],
+      [2.5, 2.6],
+      [2, 2.6],
+      [2, 4],
+      [0, 4],
+      [0, 0],
+    ];
+    const d = planDimensions(build([{ pts: stepped }]));
+    expect(d.notches).toHaveLength(3);
+    const byLength = [...d.notches].sort((p, q) => depth(p) - depth(q)) as [
+      NotchDim,
+      NotchDim,
+      NotchDim,
+    ];
+    const [back, front, far] = byLength;
+    expect(depth(back)).toBeCloseTo(0.6, 3);
+    expect(depth(front)).toBeCloseTo(1.4, 3);
+    expect(depth(far)).toBeCloseTo(2, 3);
+    // The far flank overlaps the front step most (1.4 m against 0.6 m): those two pair.
+    expect(front.notch).toBe(far.notch);
+    expect(back.notch).not.toBe(far.notch);
+    // On its own: gap / 2 out from its face (x 2.55), the gap to the far flank 1.4.
+    expect(back.gap).toBeCloseTo(1.4, 3);
+    expect(back.a.x).toBeCloseTo(2.55 + 0.7, 3);
+  });
+
+  it('a notch made by new walls in a renovation is in the After plan, not the Before', () => {
+    let s: EditorDoc = { doc: blankProject('t', 'prj_t'), history: emptyHistory() };
+    const draw = (lvl: () => Level, pts: [number, number][]) => {
+      for (let i = 0; i + 1 < pts.length; i++) {
+        const [ax, ay] = pts[i] as [number, number];
+        const [bx, by] = pts[i + 1] as [number, number];
+        const r = drawWall(
+          lvl(),
+          { point: { x: ax, y: ay } },
+          { point: { x: bx, y: by } },
+          {
+            thickness: 0.1,
+          },
+        );
+        s = dispatch(s, r.command);
+      }
+    };
+    draw(() => s.doc.levels[0] as Level, box(6, 4));
+    s = dispatch(s, startRenovation());
+    const reno = () => s.doc.renovation?.levels[0] as Level;
+    draw(reno, [
+      [2, 4],
+      [2, 2],
+      [4, 2],
+      [4, 4],
+    ]);
+    const mouth = Object.values(reno().walls).find((w) => {
+      const a = reno().vertices[w.a];
+      const b = reno().vertices[w.b];
+      return (
+        a && b && a.y === 4 && b.y === 4 && Math.min(a.x, b.x) === 2 && Math.max(a.x, b.x) === 4
+      );
+    });
+    if (!mouth) throw new Error('no wall across the mouth');
+    s = dispatch(s, deleteWall(reno().id, mouth.id, reno()));
+    expect(planDimensions(s.doc.levels[0] as Level).notches).toEqual([]);
+    const d = planDimensions(reno());
+    expect(d.notches).toHaveLength(1);
+    expect(depth(d.notches[0] as NotchDim)).toBeCloseTo(2, 3);
   });
 });
 

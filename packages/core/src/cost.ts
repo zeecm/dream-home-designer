@@ -2,10 +2,11 @@ import { ELEC_KINDS, electricalChanges, pointName, pointRoom, trunkingMetres } f
 import { finish } from './finishes';
 import { furnitureKind, itemSize } from './furniture';
 import { pointInPolygon } from './geometry';
+import { AFTER_SUFFIX } from './levels';
 import type { DoorStyle } from './plan';
 import { type RenovationChange, renovationChanges, wallBefore } from './renovation';
 import { roomArea, roomShape } from './rooms';
-import type { ElecKind, ElecPoint, Item, Level } from './schema';
+import type { ElecKind, ElecPoint, Item, Level, Project } from './schema';
 import { SHELTER_ROOM } from './structural';
 
 /**
@@ -142,6 +143,20 @@ export interface CostLine {
   high: number;
   /** An electrical point line: the kind it counts. */
   point?: ElecKind;
+  /**
+   * The level the line is on, and its name as the estimate shows it (never blank, unique):
+   * none for what belongs to the whole home (debris, contingency).
+   */
+  levelId?: string;
+  levelName?: string;
+}
+
+/** A level's part of the estimate: the sum of its lines. */
+export interface LevelCost {
+  id: string;
+  name: string;
+  low: number;
+  high: number;
 }
 
 export interface CostEstimate {
@@ -150,6 +165,10 @@ export interface CostEstimate {
   high: number;
   /** Whether a renovation was priced (without one, only painting and carpentry). */
   renovation: boolean;
+  /** Each level priced, in the project's order, with the sum of its lines. */
+  levels: LevelCost[];
+  /** Levels left out, by name: a renovation with no plan for them. */
+  unpriced: string[];
 }
 
 /** A carpenter's foot run: the width in feet, to the nearest foot, at least one. */
@@ -238,17 +257,26 @@ function roomOfItem(level: Level, item: Item): string {
   return room?.name ?? 'Flat';
 }
 
+/** One level's lines by kind, without debris and contingency (which are the whole home's). */
+export interface LevelParts {
+  /** What the renovation changes: building, doors and windows, floors. */
+  changes: CostLine[];
+  painting: CostLine[];
+  carpentry: CostLine[];
+  electrical: CostLine[];
+}
+
 /**
- * The estimate: for the flat as it is (`before`) and its renovation (`after`), or, with no
+ * A level's lines: for it as it is (`before`) and its renovation (`after`), or, with no
  * renovation, painting and the carpentry drawn.
  */
-export function costEstimate(before: Level, after: Level | undefined, rates: Rates): CostEstimate {
-  const lines: CostLine[] = [];
+export function levelParts(before: Level, after: Level | undefined, rates: Rates): LevelParts {
+  const changes: CostLine[] = [];
   const shown = after ?? before;
   if (after) {
-    const changes = renovationChanges(before, after);
+    const all = renovationChanges(before, after);
     // A wall cut down to a half wall is hacked above; what's left isn't built anew.
-    const hacked = changes.filter((c) => c.kind === 'hack');
+    const hacked = all.filter((c) => c.kind === 'hack');
     const cutDown = (c: RenovationChange) =>
       c.kind === 'build' &&
       (c.what === 'half' || c.what === 'half-glass') &&
@@ -256,16 +284,14 @@ export function costEstimate(before: Level, after: Level | undefined, rates: Rat
         (h) =>
           h.kind === 'hack' && placeOf(h) === placeOf(c) && Math.abs(h.length - c.length) < 0.05,
       );
-    for (const c of changes) {
+    for (const c of all) {
       const priced = changeLines(c, before, after, rates);
-      lines.push(...(cutDown(c) ? priced.filter((l) => l.label !== 'Half wall') : priced));
-    }
-    if (rates.debrisOn && lines.some((l) => /^(Hack|Cut|Widen)/.test(l.label))) {
-      lines.push(line('Building', 'Debris disposal', 'Flat', 1, 'lot', rates.debris));
+      changes.push(...(cutDown(c) ? priced.filter((l) => l.label !== 'Half wall') : priced));
     }
   }
 
   // Repainting every room: walls (perimeter × ceiling) and ceiling.
+  const painting: CostLine[] = [];
   if (rates.painting) {
     const rooms = Object.values(shown.rooms).sort((a, b) => a.name.localeCompare(b.name));
     for (const room of rooms) {
@@ -283,12 +309,13 @@ export function costEstimate(before: Level, after: Level | undefined, rates: Rat
       const walls = tiled ? 0 : perimeter * height;
       const area = Math.round((walls + roomArea(shown, room)) * 10) / 10;
       const what = tiled ? 'Repaint ceiling' : 'Repaint walls and ceiling';
-      if (area > 0) lines.push(line('Painting', what, room.name, area, 'm²', rates.paint));
+      if (area > 0) painting.push(line('Painting', what, room.name, area, 'm²', rates.paint));
     }
   }
 
   // Built-ins: new or resized in the renovation; with none, all of them. A carpenter
   // measures a run, not its modules: widths add up per room and kind, then round to feet.
+  const carpentry: CostLine[] = [];
   const runs = new Map<string, { kind: Carpentry; label: string; where: string; width: number }>();
   for (const it of Object.values(shown.items)) {
     const c = carpentryOf(it);
@@ -311,14 +338,54 @@ export function costEstimate(before: Level, after: Level | undefined, rates: Rat
   }
   for (const { kind, label, where, width } of runs.values()) {
     const feet = footRun(width);
-    lines.push(line('Carpentry', label, where, feet, 'ft run', rates.carpentry[kind]));
+    carpentry.push(line('Carpentry', label, where, feet, 'ft run', rates.carpentry[kind]));
     if (kind === 'base')
-      lines.push(line('Carpentry', 'Countertop', where, feet, 'ft run', rates.countertop));
+      carpentry.push(line('Carpentry', 'Countertop', where, feet, 'ft run', rates.countertop));
   }
 
-  lines.push(...electricalLines(before, after, rates));
+  return { changes, painting, carpentry, electrical: electricalLines(before, after, rates) };
+}
 
-  const sum = (k: 'low' | 'high') => lines.reduce((t, l) => t + l[k], 0);
+/** A level priced: its id, the name the estimate shows, and its lines. */
+interface PricedLevel {
+  id: string;
+  name: string;
+  parts: LevelParts;
+}
+
+/**
+ * Every level's lines put together in the order one level has them: the renovation's
+ * changes, debris once for the home, then painting, carpentry and electrical, each level by
+ * level, then contingency over everything. In a home of two or more levels (`many`, priced
+ * or not) a line's place starts with its level's name ("Upper · Bedroom", or just "Upper" for
+ * a line in no room).
+ */
+function assemble(
+  priced: PricedLevel[],
+  rates: Rates,
+  renovation: boolean,
+  unpriced: string[],
+  many: boolean,
+): CostEstimate {
+  const tagged = (p: PricedLevel, key: keyof LevelParts) =>
+    p.parts[key].map((l): CostLine => {
+      const place = !many
+        ? l.place
+        : !l.place || l.place === 'Flat'
+          ? p.name
+          : `${p.name} · ${l.place}`;
+      return { ...l, place, levelId: p.id, levelName: p.name };
+    });
+  const lines: CostLine[] = priced.flatMap((p) => tagged(p, 'changes'));
+  if (rates.debrisOn && lines.some((l) => /^(Hack|Cut|Widen)/.test(l.label))) {
+    // The whole home's, in a home of levels; "Flat" as ever for one.
+    const place = many ? 'Whole home' : 'Flat';
+    lines.push(line('Building', 'Debris disposal', place, 1, 'lot', rates.debris));
+  }
+  for (const key of ['painting', 'carpentry', 'electrical'] as const) {
+    lines.push(...priced.flatMap((p) => tagged(p, key)));
+  }
+  const sum = (ls: CostLine[], k: 'low' | 'high') => ls.reduce((t, l) => t + l[k], 0);
   if (rates.contingency && lines.length) {
     lines.push({
       group: 'Contingency',
@@ -326,11 +393,74 @@ export function costEstimate(before: Level, after: Level | undefined, rates: Rat
       place: '',
       qty: 1,
       unit: 'lot',
-      low: to10(sum('low') * 0.1),
-      high: to10(sum('high') * 0.1),
+      low: to10(sum(lines, 'low') * 0.1),
+      high: to10(sum(lines, 'high') * 0.1),
     });
   }
-  return { lines, low: to100(sum('low')), high: to100(sum('high')), renovation: !!after };
+  const levels = priced.map((p) => {
+    const own = lines.filter((l) => l.levelId === p.id);
+    return { id: p.id, name: p.name, low: sum(own, 'low'), high: sum(own, 'high') };
+  });
+  return {
+    lines,
+    low: to100(sum(lines, 'low')),
+    high: to100(sum(lines, 'high')),
+    renovation,
+    levels,
+    unpriced,
+  };
+}
+
+/**
+ * Each level's name as an estimate shows it, every one different: a name only one level has
+ * stays; a blank one is "Level n", and one two levels share gets its number ("Level 1",
+ * "Level 2"), counting on from n while that is taken.
+ */
+export function levelNames(levels: readonly Pick<Level, 'name'>[]): string[] {
+  const names = levels.map((l) => l.name.trim());
+  const once = (n: string) => !!n && names.filter((m) => m === n).length === 1;
+  // The names that stay as they are, so a made-up one never takes one of them.
+  const taken = new Set(names.filter(once));
+  return names.map((n, i) => {
+    if (once(n)) return n;
+    const base = n || 'Level';
+    let k = i + 1;
+    while (taken.has(`${base} ${k}`)) k++;
+    const name = `${base} ${k}`;
+    taken.add(name);
+    return name;
+  });
+}
+
+/**
+ * The estimate for one level: as it is (`before`) and its renovation (`after`), or, with no
+ * renovation, painting and the carpentry drawn.
+ */
+export function costEstimate(before: Level, after: Level | undefined, rates: Rates): CostEstimate {
+  const [name = ''] = levelNames([before]);
+  const parts = levelParts(before, after, rates);
+  return assemble([{ id: before.id, name, parts }], rates, !!after, [], false);
+}
+
+/**
+ * The estimate for the whole home: every level, with its renovation copy (its id and
+ * AFTER_SUFFIX). With a renovation, a level that has no copy isn't priced: it is listed in
+ * `unpriced`. For one level, the same as `costEstimate`.
+ */
+export function projectEstimate(
+  project: Pick<Project, 'levels' | 'renovation'>,
+  rates: Rates,
+): CostEstimate {
+  const names = levelNames(project.levels);
+  const priced: PricedLevel[] = [];
+  const unpriced: string[] = [];
+  project.levels.forEach((before, i) => {
+    const name = names[i] ?? before.name;
+    const after = project.renovation?.levels.find((l) => l.id === `${before.id}${AFTER_SUFFIX}`);
+    if (project.renovation && !after) unpriced.push(name);
+    else priced.push({ id: before.id, name, parts: levelParts(before, after, rates) });
+  });
+  return assemble(priced, rates, !!project.renovation, unpriced, project.levels.length > 1);
 }
 
 /** One change of the renovation, priced (nothing for the household shelter: not allowed). */

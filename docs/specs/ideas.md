@@ -17,5 +17,8 @@
 | 13 | Brochure plans are 50–100 mm out; carpentry gets built to the wrong size | On-site measure: at key collection, tap a wall on the phone, type the laser reading; the plan corrects, differences over 30 mm flagged for the carpenter | M |
 | 14 | Owners shop by link (IKEA, Castlery, Taobao) and guess if it fits | Paste a product link: AI reads the size and price into My furniture, so it gets the fit, delivery and clearance checks; a shopping list with totals | M |
 | 15 | Owners don't know the order of works or how long it takes | Renovation timeline from the change list: permit, hacking, wet works, electrical, carpentry (measured after tiling), painting, cleaning; weeks from key collection, permit items flagged | S–M |
+| 16 | A storage shortfall gives no place to fix it | "Where could a wardrobe go?": ghost built-ins on free walls in short rooms, sized to the shortfall, kept clear of doors, windows, sockets and clearance zones; [Add] as one undo step | M |
+| 17 | Owners argue about whose things go where | Per-person wardrobes: split a wardrobe between named people and see each one's share | S+ |
+| 18 | The AI designer ignores storage | Give the AI designer the household and storage targets, and score its versions on the storage meter | S |
 
-Rows 1–6 are built; 7, 8, 10, 11 and 12 are planned (README Roadmap); 13–15 added 6 Nov 2026.
+Rows 1–6 are built; 7, 8, 10, 11 and 12 are planned (README Roadmap); 13–15 added 6 Nov 2026; 16–18 added 7 Nov 2026 (from the storage meter spec).
