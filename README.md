@@ -94,13 +94,15 @@ for any plan.
 - Ageing parents check (the "Older person" check), slice 1 built: doors, the way through, room
   to turn, their bathroom and switch heights for a walking aid or a wheelchair, and what HDB's
   EASE fits; next grab bars (1b) and steps (2). [spec](docs/specs/ageing-parents.md)
+- Storage meter, slice 1 built: clothes, shoes, kitchen and everything else against who lives
+  here, room by room, with shortfalls priced as built-in carpentry; next storage beds, a pantry
+  and a bay seat (1b), and the household saved in the project (2). [spec](docs/specs/storage-meter.md)
 
 ### Planned
 1. Ageing parents check, the rest: grab bars, shower and seat pieces with "Suggest grab bars"
    (slice 1b); steps, kerbs and ramps, and the choices saved in the project (slice 2).
-2. Storage meter: wardrobe and cabinet space against the household, room by room.
-3. A wall seen straight on (elevation): carpentry, windows, sockets and switches at height.
-4. Exact render, slice 2: quality settings, real textures, AI polish; daylight bounced up off
+2. A wall seen straight on (elevation): carpentry, windows, sockets and switches at height.
+3. Exact render, slice 2: quality settings, real textures, AI polish; daylight bounced up off
    the ground outside (rooms facing away from the sun can read up to a quarter too dark), and
    dark dots seen through a far window.
 

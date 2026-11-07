@@ -51,6 +51,10 @@ describe('EASE', () => {
       easeItems('4', { bathrooms: 1, doorFails: true, kerb: true }).map((i) => i.item.id),
     ).toContain('widen-and-lower');
     expect(easeItems('none', { bathrooms: 2, doorFails: true })).toEqual([]);
+    // No bathroom drawn: none of the toilet's items.
+    expect(easeItems('4', { bathrooms: 0, doorFails: false }).map((i) => i.item.id)).toEqual([
+      'rocker-switches',
+    ]);
     for (const it of EASE_ITEMS) expect(it.cents.every((c) => Number.isInteger(c))).toBe(true);
   });
 });

@@ -61,7 +61,7 @@ line has one of two labels:
 - **Needed**: from the code's rules for homes (Chapter 7) or a hard size, e.g. a door
   narrower than the chair. Drawn red.
 - **Recommended**: good practice, e.g. room to turn in a bedroom, or a door that opens out.
-  Drawn amber with a new `--advise` token (light #a16207, dark #e3a008), apart from the
+  Drawn amber with a new `--advise` token (light #a16207, dark #eab308), apart from the
   comment orange and the clearance red. In the list the words "Needed" and "Recommended" carry
   the meaning, so colour is never the only signal.
 - Walking aid lines: door widths and the way through are Needed (a hard size); the toilet's
@@ -676,3 +676,27 @@ Web (`apps/web/src/ageing/`):
   show, grey; dashed bars for the flat's own walls, labelled "· walls"); the Inspector's "For a
   wheelchair" section; the live region's line after a drop.
 - Phone: list rows 44 px, labels 11 px, nothing scrolls sideways.
+
+Review fixes (tech lead, UX, QA; 7 Nov):
+- **Bedrooms:** a room named as one, or with a bed in it ("Ah Ma's room", a studio), is a
+  bedroom for "Which bedroom to check?". Any habitable room (not a bathroom, kitchen, yard,
+  shelter or ledge) can be chosen, so a renamed room stays chosen. With one bedroom it is
+  chosen already. Until one is chosen the phone's top reads "Wheelchair · Which bedroom? ·
+  Bath/WC 2", the choice comes first in the list, and the desktop's Bedroom select is hidden.
+- **Only what's stricter:** a route held up by furniture at the walkways' own 0.90 m is the
+  walkway line, not repeated; the 1.00 m way to their bathroom and the flat's own narrow
+  corridors (which walkways cap away) are added.
+- **The bathroom line** says the room is too small even empty ("many HDB bathrooms can't")
+  whenever it is, furniture or not (`empty` on a `turn`).
+- **Show next** (from the plan details too) opens the line's details with "‹ Back to the list
+  (n of N)" focused, and the line's reason straight under it. The list's top is sticky. Marks
+  are drawn needed last (on top); outlines are solid, and only the flat's walls are dashed. A
+  view link can use the check (it changes nothing). A blank plan says what to add; with no
+  bathroom EASE lists none of the toilet's items. The toilet's front square is drawn inside
+  its room.
+- Wording: "someone with a walking aid", "… needs 0.45 m there to open it", "if someone falls
+  behind it, it can't be opened from outside", "Bedroom to check: …", "Bathroom to check: …",
+  "its door width", "from Furniture › Bathroom", EASE spelled out once.
+- The timing tests run by themselves after the rest (`src/perf.test.ts`), and what ageing adds
+  is bounded against walkways in the same run: at most max(15 ms, the walkways' time), three
+  times that off a laptop.

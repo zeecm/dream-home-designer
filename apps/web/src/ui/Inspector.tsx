@@ -247,7 +247,7 @@ export function Inspector() {
   ) : ageingShown ? (
     <AgeingPanel />
   ) : (
-    <PlanSummary level={level} />
+    <PlanSummary level={level} viewer={viewer} />
   );
   if (selection?.kind === 'wall' && level.walls[selection.id]) {
     body = <WallInspector key={key} level={level} id={selection.id} />;
@@ -262,23 +262,9 @@ export function Inspector() {
   } else if (selection?.kind === 'room' && level.rooms[selection.id]) {
     body = <RoomInspector key={key} level={level} id={selection.id} />;
   }
-  // Opened from the older person list: the way back to it, above the details.
-  if (ageingShown && selection && body) {
-    body = (
-      <>
-        <AgeingBack />
-        {body}
-      </>
-    );
-  }
-  if (storageShown && selection?.kind === 'item' && body) {
-    body = (
-      <>
-        <StorageBack />
-        {body}
-      </>
-    );
-  }
+  // The plan details and the older person list disable their own editing controls on a view
+  // link: the older person check is a way of looking, which a view link can use too.
+  const ownDisabling = !selection && !suggestShown;
   return (
     <aside
       ref={panel}
@@ -304,18 +290,19 @@ export function Inspector() {
       {!selection && !suggestShown && !ageingShown && (!storageShown || tool !== 'select') && (
         <ToolPanel />
       )}
-      {/* A view-only link shows the details but can't change them (the household is the
-          viewer's own, so storage's panel can). */}
-      <fieldset className="inspector-body" disabled={viewer && !(storageShown && !selection)}>
-        {body}
-      </fieldset>
-      {/* A way of looking, not a change: a view link can use it too. */}
-      {/* The storage panel works on a view link, with the viewer's own household. */}
-      {viewer && !selection && !suggestShown && !ageingShown && !storageShown && (
-        <div className="inspector-viewer-checks">
-          <StorageRow />
-        </div>
+      {/* Opened from the older person list: the way back to it, above the details. */}
+      {ageingShown && selection && <AgeingBack selection={selection} />}
+      {/* Opened from a storage card: the way back to it. */}
+      {storageShown && selection?.kind === 'item' && <StorageBack />}
+      {/* A view-only link shows the details but can't change them. */}
+      {ownDisabling ? (
+        <div className="inspector-body">{body}</div>
+      ) : (
+        <fieldset className="inspector-body" disabled={viewer}>
+          {body}
+        </fieldset>
       )}
+      {/* A way of looking, not a change: a view link can use it too. */}
       {!selection && !ageingShown && !storageShown && <CommentPinsSwitch />}
       {selection && !suggestShown && <ToolPanel />}
     </aside>
@@ -352,8 +339,7 @@ function DeleteButton({ label, onClick }: { label: string; onClick: () => void }
 
 const clear = () => useEditor.getState().select(null);
 
-function PlanSummary({ level }: { level: Level }) {
-  const viewer = useStore((s) => s.role === 'viewer');
+function PlanSummary({ level, viewer }: { level: Level; viewer: boolean }) {
   const dispatch = useStore((s) => s.dispatch);
   const select = useEditor((s) => s.select);
   const rooms = Object.values(level.rooms)
@@ -367,68 +353,74 @@ function PlanSummary({ level }: { level: Level }) {
 
   return (
     <>
-      <Header title="Plan" />
-      <section aria-labelledby="rooms-h">
-        <h3 id="rooms-h" className="section-title">
-          Rooms
-        </h3>
-        {rooms.length === 0 ? (
-          <p className="empty-line">Rooms appear when walls enclose a space.</p>
-        ) : (
-          <ul className="room-list">
-            {rooms.map(({ room, area }) => (
-              <li key={room.id}>
-                <button type="button" onClick={() => select({ kind: 'room', id: room.id })}>
-                  <span className="room-list-name">{room.name}</span>
-                  <span className="num">{formatArea(area)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="total">
-          <span>Floor area</span>
-          <span className={`num total-figure${rooms.length ? '' : ' muted'}`}>
-            {formatArea(total)}
-          </span>
-        </p>
-      </section>
-      <dl className="facts">
-        <div>
-          <dt>Walls</dt>
-          <dd className="num">{walls}</dd>
-        </div>
-        <div>
-          <dt>Doors</dt>
-          <dd className="num">{count('door')}</dd>
-        </div>
-        <div>
-          <dt>Windows</dt>
-          <dd className="num">{count('window')}</dd>
-        </div>
-      </dl>
-      <StructuralSuggestion />
+      <fieldset className="inspector-part" disabled={viewer}>
+        <Header title="Plan" />
+        <section aria-labelledby="rooms-h">
+          <h3 id="rooms-h" className="section-title">
+            Rooms
+          </h3>
+          {rooms.length === 0 ? (
+            <p className="empty-line">Rooms appear when walls enclose a space.</p>
+          ) : (
+            <ul className="room-list">
+              {rooms.map(({ room, area }) => (
+                <li key={room.id}>
+                  <button type="button" onClick={() => select({ kind: 'room', id: room.id })}>
+                    <span className="room-list-name">{room.name}</span>
+                    <span className="num">{formatArea(area)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="total">
+            <span>Floor area</span>
+            <span className={`num total-figure${rooms.length ? '' : ' muted'}`}>
+              {formatArea(total)}
+            </span>
+          </p>
+        </section>
+        <dl className="facts">
+          <div>
+            <dt>Walls</dt>
+            <dd className="num">{walls}</dd>
+          </div>
+          <div>
+            <dt>Doors</dt>
+            <dd className="num">{count('door')}</dd>
+          </div>
+          <div>
+            <dt>Windows</dt>
+            <dd className="num">{count('window')}</dd>
+          </div>
+        </dl>
+        <StructuralSuggestion />
+      </fieldset>
       {/* The checks: one row each, a line and a way in. */}
       <section className="checks" aria-labelledby="checks-h">
         <h3 id="checks-h" className="section-title">
           Checks
         </h3>
-        <ClearanceSummary />
-        <ElectricalSummary level={level} />
-        {/* A view link has it below the details, where it isn't disabled. */}
-        {!viewer && <StorageRow />}
+        <fieldset className="inspector-part" disabled={viewer}>
+          <ClearanceSummary />
+          <ElectricalSummary level={level} />
+        </fieldset>
+        {/* Ways of looking: a view link can use them (storage with the viewer's household). */}
+        <StorageRow />
         <OlderPersonSection />
       </section>
-      <RenovationSection />
-      <CostSummary />
-      <LengthField
-        label="Ceiling height"
-        value={level.ceilingHeight}
-        min={1.8}
-        max={6}
-        onCommit={(v) => v !== undefined && dispatch(setCeilingHeight(level.id, v))}
-      />
-      <NorthField />
+      <fieldset className="inspector-part" disabled={viewer}>
+        <RenovationSection />
+        <CostSummary />
+        <LengthField
+          label="Ceiling height"
+          value={level.ceilingHeight}
+          min={1.8}
+          max={6}
+          onCommit={(v) => v !== undefined && dispatch(setCeilingHeight(level.id, v))}
+        />
+        <NorthField />
+      </fieldset>
     </>
   );
 }

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { depthOff, largestSquare, sideAt, squareAt } from './ageing-zones';
 import { CLEARANCE_RULES, fixedParts, ruleSide } from './clearance';
-import { type Side, box, nearestOnPolygon, overlapDepth, sideOf, zoneOf } from './convex';
+import { type Side, box, clipHalf, nearestOnPolygon, overlapDepth, sideOf, zoneOf } from './convex';
 import { accessClearWidth } from './delivery';
 import { ELEC_KINDS, latchEnd, pointPosition } from './electrical';
 import { itemFootprint, itemSize } from './furniture';
@@ -15,6 +15,7 @@ import {
   type FurnishedPass,
   OUTSIDE,
   type Throat,
+  WALKWAY_NEED,
   type WalkwayReport,
   type WayMeasure,
   closedBarOf,
@@ -97,6 +98,8 @@ export interface AgeingIssue {
   flat?: boolean;
   /** A route: the rooms beyond the narrow place. */
   to?: string[];
+  /** A turn: the room's own room to turn, with nothing in it. */
+  empty?: number;
   /** A door's clear width (door-space), and the smaller door width that would do instead. */
   clear?: number;
   alt?: { clear: number; need: number };
@@ -125,6 +128,8 @@ export interface AgeingReport {
   bathroomAuto: boolean;
   /** Before a bedroom is chosen: each bedroom with what choosing it would add. */
   bedrooms: { roomId: string; count: number }[];
+  /** Every bedroom that can be chosen (their bedroom, by core's rule). */
+  bedroomIds: string[];
   bathrooms: string[];
   issues: AgeingIssue[];
   /** The checks run in each group and found fine ("Also checked"). */
@@ -230,6 +235,8 @@ interface Facts {
   start: string | null;
   rooms: RoomInfo[];
   bedrooms: string[];
+  /** Every room that can be chosen as theirs (bedrooms first). */
+  choosable: string[];
   bathrooms: string[];
   /** Living rooms and kitchens. */
   common: string[];
@@ -250,6 +257,10 @@ interface Facts {
 
 const factCache = new WeakMap<Level, Partial<Record<AgeingProfile, Facts>>>();
 const turnBuffers = new Buffers();
+
+/** A room someone could sleep in: not a bathroom, kitchen, yard, shelter, ledge or outside. */
+const habitable = (r: { kind: RoomKind; name: string }) =>
+  r.kind !== 'bathroom' && r.kind !== 'kitchen' && r.kind !== 'none' && !/yard/i.test(r.name);
 
 const BED = (it: Item) => {
   const r = CLEARANCE_RULES[it.assetId];
@@ -321,12 +332,16 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
   };
   const pieceRoom = (it: Item) => roomAtPoint({ x: it.position.x, y: it.position.z });
 
-  let bedrooms = rooms.filter((r) => r.kind === 'bedroom' && big(r)).map((r) => r.id);
-  if (!bedrooms.length) {
-    // A studio: the room the bed is in.
-    const withBed = new Set(pass.pieces.filter(BED).map(pieceRoom));
-    bedrooms = rooms.filter((r) => withBed.has(r.idx) && big(r)).map((r) => r.id);
-  }
+  // Bedrooms: named so, or with a bed in them ("Ah Ma's room", a studio). Any habitable room
+  // can be chosen as theirs (not a bathroom, kitchen, yard, shelter or ledge).
+  const withBed = new Set(pass.pieces.filter(BED).map(pieceRoom));
+  const bedrooms = rooms
+    .filter((r) => big(r) && (r.kind === 'bedroom' || (withBed.has(r.idx) && habitable(r))))
+    .map((r) => r.id);
+  const choosable = rooms
+    .filter((r) => big(r) && habitable(r))
+    .map((r) => r.id)
+    .sort((a, b) => Number(!bedrooms.includes(a)) - Number(!bedrooms.includes(b)));
   const bathrooms = rooms.filter((r) => r.kind === 'bathroom' && big(r)).map((r) => r.id);
   const common = rooms
     .filter((r) => (r.kind === 'living' || r.kind === 'kitchen') && big(r))
@@ -512,11 +527,12 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
         const sq = largestSquare(c, f.d, n, obstacles, need, [0], outside);
         if (sq.have < need - SLACK) {
           const poly = squareAt(c, f.d, n, need);
+          // The smallest wider door the space here would do for.
           const alt =
-            sq.have >= 1.0 - SLACK
-              ? { clear: 0.9, need: 1.0 }
-              : sq.have >= 1.1 - SLACK
-                ? { clear: 0.85, need: 1.1 }
+            sq.have >= 1.1 - SLACK
+              ? { clear: 0.85, need: 1.1 }
+              : sq.have >= 1.0 - SLACK
+                ? { clear: 0.9, need: 1.0 }
                 : undefined;
           out.push({
             key: `door-space:${o.id}`,
@@ -597,7 +613,7 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
       const standing = standingPieces(pass, barePath);
       const blamed = standing.length ? standing : narrowingPieces(pass, barePath, need);
       issues.push({
-        key: `route:${[...blamed].sort().join(',')}:${cm}`,
+        key: `route-closed:${[...blamed].sort().join(',')}:${cm}`,
         group: 'around',
         level: 'needed',
         kind: 'route',
@@ -610,7 +626,9 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
     } else {
       const path = pass.search.path(cell);
       const m = measureWay(pass, path, need);
-      if (m.have < m.need - SLACK && m.have < bareHave - 0.02 && m.pinch) {
+      // At the walkways' own 0.90 it is their line already: only what's stricter is added.
+      const stricter = need > WALKWAY_NEED + 1e-9;
+      if (stricter && m.have < m.need - SLACK && m.have < bareHave - 0.02 && m.pinch) {
         let blamed = m.by.map((i) => passPiece(pass, i)).filter((id): id is string => !!id);
         if (!blamed.length) blamed = narrowingPieces(pass, barePath, need);
         if (blamed.length) {
@@ -637,7 +655,7 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
         : null;
     return { need, issues, doors, last };
   };
-  const targets = new Set([...common, ...bedrooms, ...bathrooms]);
+  const targets = new Set([...common, ...choosable, ...bathrooms]);
   for (const r of rooms) {
     if (!targets.has(r.id)) continue;
     const needs = new Set<number>([N.route]);
@@ -655,7 +673,7 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
   const turnOf = new Map<string, string>();
   if (wheel) {
     const groups = roomGroups(bare);
-    const wanted = new Set([...bedrooms, ...bathrooms, ...common]);
+    const wanted = new Set([...choosable, ...bathrooms, ...common]);
     const byGroup = new Map<number, number[]>();
     for (const r of rooms) {
       const gi = groups[r.idx] as number;
@@ -668,6 +686,11 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
       const key = `turn:${[...ids].sort().join(',')}`;
       const t = turnCached(level, pass, set, key, fixed.walls, holes);
       if (!t) continue;
+      // The room as it is with nothing in it: can it turn a wheelchair at all?
+      const empty =
+        t.have >= N.turn - SLACK || !t.blamed.length
+          ? t.have
+          : (turnCached(level, pass, set, key, fixed.walls, holes, true)?.have ?? t.have);
       const ok = t.have >= N.turn - SLACK;
       const roomIds = [...ids].sort();
       const turn: AgeingTurn = { key, roomIds, c: t.c, have: t.have, ok };
@@ -687,6 +710,7 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
             itemIds: t.blamed,
             roomId: named,
             roomIds,
+            empty,
             ...(t.blamed.length ? {} : { flat: true }),
             draw: { circle: { c: t.c, r: t.have / 2 } },
           };
@@ -769,7 +793,7 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
           N.wcFront,
           [0, 0.025, -0.025, 0.05, -0.05],
         );
-        frontPoly = squareAt(sq.at, along, front.n, N.wcFront);
+        frontPoly = clipToRoom(squareAt(sq.at, along, front.n, N.wcFront), shapes.get(id)?.outer);
         if (sq.have < N.wcFront - SLACK) {
           issues.push({
             key: `wc-front:${toilet.id}`,
@@ -871,7 +895,7 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
 
   // --- beds ------------------------------------------------------------------------------------
   const beds = new Map<string, AgeingIssue | null>();
-  for (const id of bedrooms) {
+  for (const id of choosable) {
     const idx = idxOf.get(id) as number;
     const bed = pass.pieces
       .filter((it) => BED(it) && pieceRoom(it) === idx)
@@ -981,7 +1005,7 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
     return na.localeCompare(nb) || (a < b ? -1 : 1);
   });
   autoBath.set('', bare.startCells.length ? nearestBath(bare.startCells) : (byName[0] ?? null));
-  for (const id of bedrooms) {
+  for (const id of choosable) {
     const idx = idxOf.get(id) as number;
     const own = throats.filter((t) => t.rooms.includes(idx) && t.rooms.some((q) => q !== idx));
     // A bathroom opening off the bedroom is theirs.
@@ -1003,6 +1027,7 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
     start,
     rooms,
     bedrooms,
+    choosable,
     bathrooms,
     common,
     main,
@@ -1037,6 +1062,7 @@ function turnCached(
   key: string,
   walls: Vec2[][],
   holes: Vec2[][],
+  empty = false,
 ): ReturnType<typeof turnIn> {
   const bare = pass.bare;
   // The group's extent, a margin over, and the pieces reaching into it.
@@ -1061,7 +1087,7 @@ function turnCached(
       `${pass.pieces[i]?.id}:${fp.map((p) => `${p.x.toFixed(4)},${p.y.toFixed(4)}`).join(';')}`,
     );
   });
-  const k = `${key}|${sig.join('|')}`;
+  const k = empty ? `${key}|empty` : `${key}|${sig.join('|')}`;
   let m = turnCache.get(bare);
   if (!m) {
     m = new Map();
@@ -1069,7 +1095,7 @@ function turnCached(
   }
   if (m.has(k)) return m.get(k) ?? null;
   if (m.size > 200) m.clear();
-  const t = turnIn(level, pass, group, walls, holes);
+  const t = turnIn(level, pass, group, walls, holes, empty);
   m.set(k, t);
   return t;
 }
@@ -1085,6 +1111,7 @@ function turnIn(
   group: Set<number>,
   walls: Vec2[][],
   holes: Vec2[][],
+  empty = false,
 ): { c: Vec2; have: number; blamed: string[] } | null {
   const bare = pass.bare;
   const { g, room } = bare;
@@ -1111,7 +1138,7 @@ function turnIn(
   const inGroup = (i: number, j: number) => {
     if (i < 0 || j < 0 || i >= g.nx || j >= g.ny) return false;
     const k = j * g.nx + i;
-    return group.has(room[k] as number) && !pass.solid[k];
+    return group.has(room[k] as number) && !(empty ? bare.solid : pass.solid)[k];
   };
   for (let sj = 0; sj < ny; sj++) {
     for (let si = 0; si < nx; si++) {
@@ -1123,7 +1150,10 @@ function turnIn(
   const d2 = turnBuffers.d2;
   let max = -1;
   for (let k = 0; k < sub.n; k++) if (!solid[k] && (d2[k] as number) > max) max = d2[k] as number;
-  if (max < 0) return { c: cellCentre(sub, 0), have: 0, blamed: [] };
+  // No free floor at all (filled with furniture): the circle is drawn at the room's middle.
+  if (max < 0) {
+    return { c: { x: sub.x0 + (nx * g.c) / 2, y: sub.y0 + (ny * g.c) / 2 }, have: 0, blamed: [] };
+  }
   // Only cells near the best are candidates (sorting a whole living room is slow).
   const floor = Math.max(0, Math.sqrt(max) - 2) ** 2;
   const order: number[] = [];
@@ -1172,7 +1202,9 @@ function turnIn(
     ]);
   }
   const fixedPolys = [...walls, ...holes, ...edges].filter(nearBox);
-  const pieceIdx = pass.fps.map((_, i) => i).filter((i) => nearBox(pass.fps[i] as Vec2[]));
+  const pieceIdx = empty
+    ? []
+    : pass.fps.map((_, i) => i).filter((i) => nearBox(pass.fps[i] as Vec2[]));
   const all = [...fixedPolys, ...pieceIdx.map((i) => pass.fps[i] as Vec2[])];
   let local: Vec2[][] = all;
   const clearAt = (p: Vec2): number => {
@@ -1294,6 +1326,28 @@ function wayIn(
 }
 const waySearch = new Search(0);
 
+/** A shape clipped to a room's outline, when the room is convex (else as it is). */
+function clipToRoom(poly: Vec2[], outer: Vec2[] | undefined): Vec2[] {
+  if (!outer || outer.length < 3) return poly;
+  let area = 0;
+  for (let i = 0; i < outer.length; i++) {
+    const a = outer[i] as Vec2;
+    const b = outer[(i + 1) % outer.length] as Vec2;
+    area += a.x * b.y - b.x * a.y;
+  }
+  const sign = area > 0 ? 1 : -1;
+  let out = poly;
+  for (let i = 0; i < outer.length && out.length; i++) {
+    const a = outer[i] as Vec2;
+    const b = outer[(i + 1) % outer.length] as Vec2;
+    const c = outer[(i + 2) % outer.length] as Vec2;
+    // A reflex corner: not convex, leave the shape whole.
+    if (((b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)) * sign < -1e-9) return poly;
+    out = clipHalf(out, (p) => ((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)) * sign);
+  }
+  return out.length >= 3 ? out : poly;
+}
+
 function insideConvex(p: Vec2, poly: readonly Vec2[]): boolean {
   let sign = 0;
   for (let i = 0; i < poly.length; i++) {
@@ -1323,8 +1377,13 @@ export function ageingReport(level: Level, choice: AgeingChoice): AgeingReport {
   let byChoice = reportCache.get(facts);
   const hit = byChoice?.get(ck);
   if (hit) return hit;
+  // Chosen, or the only one there is.
   const bedroom =
-    choice.bedroomId && facts.bedrooms.includes(choice.bedroomId) ? choice.bedroomId : undefined;
+    choice.bedroomId && facts.choosable.includes(choice.bedroomId)
+      ? choice.bedroomId
+      : facts.bedrooms.length === 1
+        ? facts.bedrooms[0]
+        : undefined;
   const r = compose(facts, choice, bedroom);
   // Each bedroom's count, as if chosen.
   if (!bedroom) {
@@ -1515,6 +1574,7 @@ function compose(facts: Facts, choice: AgeingChoice, bedroom: string | undefined
     ...(bathroom ? { bathroom } : {}),
     bathroomAuto: !chosenBath,
     bedrooms: [],
+    bedroomIds: facts.choosable,
     bathrooms: facts.bathrooms,
     issues,
     passed,
@@ -1546,10 +1606,11 @@ export function ageingSupersedes(walk: WalkwayReport, age: AgeingReport): Set<st
  * the project): the profile (off by default), the rooms chosen, the flat type for EASE.
  */
 export const AgeingSetting = z.object({
-  profile: z.enum(['off', 'walking', 'wheelchair']),
-  bedroomId: z.string().optional(),
-  bathroomId: z.string().optional(),
-  flatType: z.enum(['1-3', '4', '5', 'exec', 'none']).optional(),
+  // Field by field: one unreadable value drops only itself.
+  profile: z.enum(['off', 'walking', 'wheelchair']).catch('off'),
+  bedroomId: z.string().optional().catch(undefined),
+  bathroomId: z.string().optional().catch(undefined),
+  flatType: z.enum(['1-3', '4', '5', 'exec', 'none']).optional().catch(undefined),
 });
 export type AgeingSetting = z.infer<typeof AgeingSetting>;
 

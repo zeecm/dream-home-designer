@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Viewport } from './Viewport';
 import { keepWithAccount, pullFromAccount, useAccount } from './account';
+import { AgeingSync } from './ageing/ageing';
 import { TraceBar } from './ai/TracePanel';
 import { DesignerCompare } from './ai/designer/Compare';
 import { DesignerBar, DesignerDialogs } from './ai/designer/Entry';
@@ -364,6 +365,7 @@ export function App() {
         {commentsOpen ? <CommentsPanel /> : designerOpen ? <DesignerPanel /> : <Inspector />}
       </div>
       <CommentsLive />
+      <AgeingSync />
       <DesignerDialogs />
       <h1 className="visually-hidden">{name} · Dream Home Designer</h1>
     </div>

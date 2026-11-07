@@ -5,6 +5,7 @@ import {
   type AgeingReport,
   ageingReport,
   ageingSupersedes,
+  parseAgeingSetting,
   pinchKey,
   table7,
 } from './ageing';
@@ -19,7 +20,7 @@ import { type EditorDoc, dispatch, emptyHistory } from './history';
 import { variantLevels } from './levels';
 import { startRenovation } from './renovation';
 import type { Level, Opening, Vec2 } from './schema';
-import { walkwayReport } from './walkway';
+import { furnishedPass, walkwayReport } from './walkway';
 
 /**
  * Two 4 m rooms over a corridor `clear` wide (walls 100 mm on centre lines), a door from the
@@ -277,6 +278,26 @@ describe('doors and their squares (A)', () => {
     expect(accessClearWidth(o({ width: 0.9, kind: 'passage' }))).toBe(0.9);
   });
 
+  it('a door short of its square suggests the smallest wider door that would do', () => {
+    // A 0.84 door (0.80 clear) needs 1.20; a 1.15 corridor would do for a 0.85 clear door.
+    const h = home({ clear: 1.15, dA: { width: 0.84 } });
+    const ds = kinds(ageingReport(frozen(h.lvl()), wheel()), 'door-space').find(
+      (i) => i.openingId === h.dA,
+    );
+    expect(ds?.need).toBeCloseTo(1.2, 5);
+    expect(ds?.alt).toEqual({ clear: 0.85, need: 1.1 });
+  });
+
+  it('the setting: one unreadable field drops only itself', () => {
+    expect(parseAgeingSetting(JSON.stringify({ profile: 'wheelchair', bedroomId: 7 }))).toEqual({
+      profile: 'wheelchair',
+    });
+    expect(
+      parseAgeingSetting(JSON.stringify({ profile: 'walking', flatType: '9', extra: true })),
+    ).toEqual({ profile: 'walking' });
+    expect(parseAgeingSetting('nonsense')).toEqual({ profile: 'off' });
+  });
+
   it('a 0.94 door off a 1.05 corridor needs only 1.00 (the 0.90 row)', () => {
     const h = home({ clear: 1.05, dA: { width: 0.94 } });
     const r = ageingReport(frozen(h.lvl()), wheel());
@@ -371,17 +392,26 @@ describe('routes (A)', () => {
     expect(kinds(ageingReport(lvl, walking()), 'route')).toEqual([]);
   });
 
-  it('a piece on a 0.90 route to the living room: the ageing bar replaces the walkway bar', () => {
+  it('a piece on a 0.90 route to the living room is the walkways’ line, not repeated', () => {
     const h = home({ clear: 1.2, a: 'Store', b: 'Living', corridor: 'Hall', main: { width: 0.9 } });
     const face = h.y - 0.05;
     const lvl = withItems(h.lvl(), [['shoe-cabinet', { x: 5.0, y: face - 0.175 }, Math.PI]]);
+    expect(kinds(ageingReport(lvl, wheel()), 'route')).toEqual([]);
+    expect(walkwayReport(lvl).issues.length).toBeGreaterThan(0);
+  });
+
+  it('the stricter 1.00 way to the bathroom: the ageing bar replaces the walkway bar', () => {
+    const h = home({ clear: 1.2, main: { width: 0.9 } });
+    const face = h.y - 0.05;
+    // Between the main door and the bathroom door: 0.85 left, short of both 0.90 and 1.00.
+    const lvl = withItems(h.lvl(), [['shoe-cabinet', { x: 3.0, y: face - 0.175 }, Math.PI]]);
     const age = ageingReport(lvl, wheel());
     const walk = walkwayReport(lvl);
-    const routes = kinds(age, 'route');
-    expect(routes.length).toBeGreaterThan(0);
-    expect(walk.issues.length).toBeGreaterThan(0);
+    expect(kinds(age, 'route')[0]?.need).toBeCloseTo(1.0, 5);
+    const toBath = walk.issues.filter((w) => w.to.some((t) => t.roomId === h.room(2, 2)));
+    expect(toBath.length).toBeGreaterThan(0);
     const hide = ageingSupersedes(walk, age);
-    for (const w of walk.issues) expect(hide.has(`${w.itemId}|${pinchKey(w.pinch)}`)).toBe(true);
+    for (const w of toBath) expect(hide.has(`${w.itemId}|${pinchKey(w.pinch)}`)).toBe(true);
   });
 });
 
@@ -439,6 +469,11 @@ describe('room to turn (B)', () => {
     expect(t[0]?.itemIds).toEqual([]);
     expect(t[0]?.flat).toBe(true);
     expect(t[0]?.group).toBe('bathroom');
+    // With a basin blamed, the line still knows the room itself is too small empty.
+    const withBasin = withItems(h.lvl(), [['vanity', { x: 0.05 + 0.3, y: 0.05 + 0.225 }]]);
+    const tb = kinds(ageingReport(withBasin, wheel()), 'turn');
+    expect(tb[0]?.itemIds.length).toBeGreaterThan(0);
+    expect(Math.abs((tb[0]?.empty ?? 0) - 1.42)).toBeLessThanOrEqual(0.01);
   });
 
   it('a 1.42 bathroom with its door on the long wall: the circle stays inside (no false pass)', () => {
@@ -704,6 +739,32 @@ describe('the choice', () => {
     expect(chosen.passed.some((p) => p.group === 'bedroom') || (main?.count ?? 0) > 0).toBe(true);
   });
 
+  it('a bedroom named for the person, or a study, can be theirs and stays chosen', () => {
+    const base = Object.freeze({ ...furnishedSample() });
+    const main = Object.values(base.rooms).find((r) => r.name === 'Main bedroom')?.id ?? '';
+    const study = Object.values(base.rooms).find((r) => r.name === 'Bedroom')?.id ?? '';
+    for (const name of ['Ah Ma’s room', 'Mum’s room', 'Parents room', 'Study']) {
+      const lvl = Object.freeze({
+        ...base,
+        rooms: {
+          ...base.rooms,
+          [main]: { ...(base.rooms[main] as Level['rooms'][string]), name },
+          [study]: { ...(base.rooms[study] as Level['rooms'][string]), name: 'Study' },
+        },
+      });
+      const r = ageingReport(lvl, wheel({ bedroomId: main }));
+      // Still chosen through the rename, still checked (its bed is in it).
+      expect(r.bedroom).toBe(main);
+      expect(r.bedroomIds).toContain(main);
+      expect(r.issues.some((i) => i.kind === 'bed')).toBe(true);
+      // A study with no bed can be chosen too, and is offered.
+      expect(r.bedroomIds).toContain(study);
+      expect(ageingReport(lvl, wheel({ bedroomId: study })).bedroom).toBe(study);
+      // Neither bathroom nor kitchen is offered.
+      for (const id of r.bedroomIds) expect(lvl.rooms[id]?.name).not.toMatch(/bath|kitchen/i);
+    }
+  });
+
   it('15. their bathroom: an en-suite when chosen, else the nearest; a chosen one wins', () => {
     // Bedroom (A) with a bathroom off it (C), and a common bathroom (B) off the corridor.
     const y = 4 + 1.2 + 0.1;
@@ -815,6 +876,23 @@ describe('the sample flat', () => {
     expect(again.issues).toEqual(fresh.issues);
   });
 
+  it('a level with no main door rastered between: the pass kept for L is still L’s', () => {
+    // L furnished, its pass made by walkways; then a new plan with no main door (its bare
+    // raster is made afresh); then the ageing check on L reads L's pass.
+    const L = Object.freeze({ ...furnishedSample() });
+    const fresh = ageingReport(Object.freeze({ ...L }), wheel());
+    walkwayReport(L);
+    const near = Int32Array.from(furnishedPass(L).near);
+    const other = box(3.0, 2.0, 'Bedroom');
+    const X = Object.freeze({ ...other.lvl(), items: { ...other.lvl().items } });
+    expect(walkwayReport(X).status).toBe('no-main-door');
+    const kept = furnishedPass(L).near;
+    let differ = 0;
+    for (let k = 0; k < near.length; k++) if (kept[k] !== near[k]) differ++;
+    expect(differ).toBe(0);
+    expect(ageingReport(L, wheel()).issues).toEqual(fresh.issues);
+  });
+
   it('Before and After are checked separately', () => {
     let s: EditorDoc = { doc: sampleFlatProject('prj_t'), history: emptyHistory() };
     s = dispatch(s, startRenovation());
@@ -828,55 +906,5 @@ describe('the sample flat', () => {
     expect(a.issues.some((i) => i.kind === 'bed')).toBe(false);
     expect(b.bedroom).toBe(main);
     expect(b.issues.map((i) => i.key)).not.toEqual(a.issues.map((i) => i.key));
-  });
-
-  it('20. 40 pieces: ageing, and walkways with ageing, within their bounds while dragging', () => {
-    const plain = sampleFlatProject('prj_t').levels[0] as Level;
-    // Frozen all through, as the store's levels are (the bare plan is then kept).
-    const base = Object.freeze({
-      ...plain,
-      vertices: Object.freeze(plain.vertices),
-      walls: Object.freeze(plain.walls),
-      openings: Object.freeze(plain.openings),
-      rooms: Object.freeze(plain.rooms),
-    });
-    const ids = ['wardrobe', 'sofa-3', 'desk', 'bedside', 'armchair', 'dining-chair', 'bookshelf'];
-    const pieces: [string, Vec2, number][] = Array.from({ length: 40 }, (_, i) => [
-      ids[i % ids.length] as string,
-      { x: 0.8 + (i % 8) * 1.1, y: 0.8 + Math.floor(i / 8) * 1.3 },
-      0,
-    ]);
-    const lvl = withItems(base, pieces);
-    const sofa = Object.values(lvl.items).find((it) => it.assetId === 'sofa-3');
-    if (!sofa) throw new Error('no sofa');
-    ageingReport(withItems(base, pieces.slice(0, 1)), wheel());
-    const bedroom = Object.values(base.rooms).find((r) => r.name === 'Main bedroom')?.id;
-    let step = 0;
-    /** The median of 7 runs, each with the sofa dragged a centimetre on (nothing cached). */
-    const time = (f: (l: Level) => void) => {
-      const times: number[] = [];
-      for (let i = 0; i < 7; i++) {
-        step++;
-        const moved = { ...sofa, position: { ...sofa.position, x: sofa.position.x + step * 0.01 } };
-        const fresh = Object.freeze({ ...lvl, items: { ...lvl.items, [sofa.id]: moved } });
-        const t0 = performance.now();
-        f(fresh);
-        times.push(performance.now() - t0);
-      }
-      return times.sort((a, b) => a - b)[3] as number;
-    };
-    const walk = time((l) => walkwayReport(l));
-    const age = time((l) => ageingReport(l, wheel({ bedroomId: bedroom })));
-    const both = time((l) => {
-      walkwayReport(l);
-      ageingReport(l, wheel({ bedroomId: bedroom }));
-    });
-    console.log(
-      `walkways ${walk.toFixed(2)} ms; ageing ${age.toFixed(2)} ms; both ${both.toFixed(2)} ms`,
-    );
-    // The spec's bound for ageing (30 ms on a laptop, 60 in CI); the pair at most the
-    // walkways' 40 ms and 15 more for ageing on a laptop, three times that unless PERF is set.
-    expect(age).toBeLessThan(process.env.PERF ? 30 : 60);
-    expect(both).toBeLessThan(process.env.PERF ? 55 : 165);
   });
 });

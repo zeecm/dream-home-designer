@@ -166,6 +166,13 @@ export function easeItems(
 ): { item: EaseItem; cents: number; because: EaseWhen }[] {
   if (type === 'none') return [];
   const i = TYPE_INDEX[type];
+  // No bathroom drawn: nothing here for the toilet's items to be about.
+  const toilet: EaseItemId[] = [
+    'grab-bars-first',
+    'grab-bars-second',
+    'slip-resistant',
+    'shower-seat',
+  ];
   const shown = (w: EaseWhen): boolean => {
     switch (w) {
       case 'always':
@@ -182,7 +189,9 @@ export function easeItems(
         return !!facts.step;
     }
   };
-  return EASE_ITEMS.filter((it) => shown(it.when)).map((item) => ({
+  return EASE_ITEMS.filter(
+    (it) => shown(it.when) && !(facts.bathrooms === 0 && toilet.includes(it.id)),
+  ).map((item) => ({
     item,
     cents: item.cents[i],
     because: item.when,

@@ -88,7 +88,8 @@
     --accent-soft: rgba(79, 179, 201, 0.16);
     --negative: #e5566f;
     --clearance: #ff6b5e;
-    --advise: #e3a008;
+    /* Yellower than the comment pins' #fdb022, so the two don't read as one family. */
+    --advise: #eab308;
     --suggest: #b49cf5;
     --suggest-soft: rgba(180, 156, 245, 0.18);
     --suggest-soft-solid: #2e2a3a;
@@ -1673,6 +1674,14 @@ h3.field-label {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+/* A run of the plan details a view link can't change: laid out as if it weren't there. */
+.inspector-part {
+  display: contents;
   margin: 0;
   padding: 0;
   border: 0;
@@ -3302,8 +3311,9 @@ h3.field-label {
 .estimate-cost {
   text-align: right;
 }
-.estimate-place::before {
-  content: " · ";
+/* The separators are text, so a copy or a screen reader keeps them; each layout shows one. */
+.estimate-qsep {
+  display: none;
 }
 /* By level: a name and its subtotal; the total under them. */
 .estimate-sub {
@@ -3357,11 +3367,11 @@ h3.field-label {
   .estimate-label {
     grid-column: 1 / -1;
   }
-  .estimate-place::before {
-    content: none;
+  .estimate-sep {
+    display: none;
   }
-  .has-place .estimate-qty:not(:empty)::before {
-    content: " · ";
+  .estimate-qsep {
+    display: inline;
     white-space: pre;
   }
   .estimate-qty {
@@ -5878,11 +5888,33 @@ textarea {
   justify-content: space-between;
   font-size: var(--fs-hint);
 }
-.ageing-oneline span {
+.ageing-oneline > span {
+  flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+/* The list's top stays in place while its lines scroll. */
+.ageing-top {
+  position: sticky;
+  top: calc(-1 * var(--pad));
+  z-index: 2;
+  display: grid;
+  gap: 10px;
+  margin: calc(-1 * var(--pad)) calc(-1 * var(--pad)) 0;
+  padding: var(--pad) var(--pad) 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+}
+.ageing-top .inspector-head {
+  margin: 0;
+}
+.ageing-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ageing-backed {
+  display: grid;
+  gap: 8px;
 }
 .ageing-rows {
   display: grid;
@@ -5939,11 +5971,23 @@ textarea {
 .ageing-line-shown {
   background: var(--active);
 }
+/* A bedroom to choose: a button that looks like one. */
 .ageing-choose {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
+  margin: 0;
+  width: 100%;
+  border-color: var(--control);
+  background: var(--surface);
+}
+.ageing-choose:hover {
+  border-color: var(--text);
+}
+.ageing-choose::after {
+  content: "›";
+  color: var(--muted);
 }
 .ageing-choose-name {
   font-weight: 500;
@@ -5982,13 +6026,12 @@ textarea {
 }
 .ageing-also {
   margin: 0;
-  font-size: var(--fs-small);
-  line-height: 16px;
+  font-size: var(--fs-hint);
+  line-height: 18px;
   color: var(--muted);
 }
 .ageing-back {
   justify-self: start;
-  margin-bottom: 8px;
   font-size: var(--fs-hint);
 }
 .ease-table {
@@ -5999,7 +6042,7 @@ textarea {
 }
 .ease-table th {
   padding: 4px 0;
-  font-size: var(--fs-small);
+  font-size: var(--fs-hint);
   font-weight: 400;
   color: var(--muted);
   text-align: left;
@@ -6018,8 +6061,8 @@ textarea {
 }
 .ease-why {
   display: block;
-  font-size: var(--fs-small);
-  line-height: 16px;
+  font-size: var(--fs-hint);
+  line-height: 18px;
   color: var(--muted);
 }
 .ageing-foot {
@@ -6046,11 +6089,15 @@ textarea {
 .ageing-advise {
   --tone: var(--advise);
 }
+/* Solid outlines; a dash means the flat's own walls only. */
 .ageing-marks polygon,
 .ageing-marks circle {
   fill: color-mix(in srgb, var(--tone, var(--muted)) 14%, transparent);
   stroke: var(--tone, var(--muted));
   stroke-width: 1.5px;
+}
+.ageing-marks .ageing-flat polygon,
+.ageing-marks .ageing-flat > circle {
   stroke-dasharray: 5 3;
 }
 .ageing-marks .ageing-bar line {
@@ -6087,10 +6134,10 @@ textarea {
   fill: color-mix(in srgb, var(--muted) 8%, transparent);
   stroke: var(--muted);
   stroke-width: 1px;
-  stroke-dasharray: 3 3;
 }
-.ageing-fine text {
+.ageing-fine-label {
   fill: var(--muted);
+  font-weight: 600;
 }
 @media (pointer: coarse) {
   .ageing-line,
@@ -6098,9 +6145,22 @@ textarea {
   .ageing-summary .btn {
     min-height: 44px;
   }
+  /* 44 px, and a label that doesn't fit its third of a narrow column takes two lines. */
   .ageing-entry .segmented button,
   .ageing-rows .segmented button {
-    height: 40px;
+    height: auto;
+    min-height: 44px;
+    white-space: normal;
+    line-height: 14px;
+  }
+  .ageing-change,
+  .ageing-oneline .link-btn {
+    min-width: 44px;
+  }
+  .ageing-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
   }
   .ageing-rows .input,
   .ageing-ease .input {
@@ -6129,13 +6189,17 @@ textarea {
   .inspector-ageing .ageing {
     gap: 8px;
   }
-  .inspector-ageing .ageing-head {
-    position: sticky;
-    top: calc(-1 * var(--pad));
-    z-index: 1;
-    margin: calc(-1 * var(--pad)) calc(-1 * var(--pad)) 0;
-    padding: 4px var(--pad) 0;
-    background: var(--surface);
+  .inspector-ageing .ageing-top {
+    gap: 4px;
+    padding: 4px var(--pad) 6px;
+  }
+  /* The rows opened by Change are too tall to stay over a half-height sheet: they scroll. */
+  .inspector-ageing .ageing-top:has(.ageing-rows-open) {
+    position: static;
+  }
+  /* After Show next: the way back and the reason, close together under the sheet's top. */
+  .ageing-backed {
+    gap: 4px;
   }
   .ageing-oneline {
     display: flex;
@@ -6171,6 +6235,21 @@ textarea {
   .inspector-ageing .ageing-foot .btn:only-child {
     grid-column: 1 / -1;
   }
+  /* The details' padding here is 8 px by 12 px: the top and foot reach its edges, no further. */
+  .inspector-ageing .ageing-top {
+    top: -8px;
+    gap: 4px;
+    margin: -8px -12px 0;
+    padding: 4px 12px 6px;
+  }
+  .inspector-ageing .ageing-top:has(.ageing-rows-open) {
+    position: static;
+  }
+  .inspector-ageing .ageing-foot {
+    bottom: -8px;
+    margin: auto -12px -8px;
+    padding: 8px 12px;
+  }
 }
 
 /* ---------------------------------------------------------------- checks (plan details) */
@@ -6182,7 +6261,9 @@ textarea {
 .checks > .section-title {
   margin: 0 0 2px;
 }
-.checks > .field {
+/* Clearance and Electrical sit in a fieldset a view link disables (laid out as if it weren't). */
+.checks > .field,
+.checks > .inspector-part > .field {
   padding: 10px 0;
   border-top: 1px solid var(--rule);
 }
@@ -6200,12 +6281,6 @@ textarea {
 }
 .check-line {
   justify-self: stretch;
-}
-/* A view link: storage's row under the (disabled) details, so it still opens. */
-.inspector-viewer-checks {
-  display: grid;
-  padding-top: 10px;
-  border-top: 1px solid var(--rule);
 }
 
 /* ---------------------------------------------------------------- storage meter */

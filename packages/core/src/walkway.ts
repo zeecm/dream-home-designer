@@ -119,6 +119,8 @@ const bareCache = new WeakMap<
 >();
 
 const buffers = new Buffers();
+/** The bare plan's own: a bare raster made between passes never overwrites a pass's `near`. */
+const bareBuffers = new Buffers();
 const mainSearch = new Search(0);
 const auxSearch = new Search(0);
 let solidBuf = new Uint8Array(0);
@@ -245,14 +247,14 @@ function bareOf(level: Level): Bare {
   }
 
   const width = new Float32Array(g.n);
-  buffers.fit(g);
-  distanceField(g, solid, buffers);
+  bareBuffers.fit(g);
+  distanceField(g, solid, bareBuffers);
   for (let k = 0; k < g.n; k++) {
     width[k] = solid[k]
       ? -1
       : throatOf[k] !== -1
         ? WIDE
-        : Math.min(WIDE, 2 * Math.sqrt(buffers.d2[k] as number) * c);
+        : Math.min(WIDE, 2 * Math.sqrt(bareBuffers.d2[k] as number) * c);
   }
 
   // Rooms joined (a door, a passage, a boundary): neighbouring open cells of two rooms.
