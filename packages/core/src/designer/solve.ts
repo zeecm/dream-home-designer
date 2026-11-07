@@ -506,6 +506,15 @@ export interface Swap {
   spare: Set<string>;
 }
 
+/**
+ * A sofa's name in its swap's line, as in any other ("the 3-seat sofa", "the chesterfield
+ * sofa"), without what follows a comma ("the leather sofa", not "the leather sofa, rolled
+ * arms for a 2-seat").
+ */
+export function sofaName(kind: FurnitureKind): string {
+  return nameOf(kind).split(',')[0] as string;
+}
+
 /** Smaller pieces to try, in order: the table first, then the sofa, then both. */
 function swapsFor(input: SolveInput): Swap[] {
   const { intents } = input;
@@ -581,7 +590,7 @@ function swapsFor(input: SolveInput): Swap[] {
           notes: [
             note(
               sofa,
-              `Swapped the ${sofa.want.kind.name.replace(/^(\d)/, '$1').replace(/^([A-Z])/, (c) => c.toLowerCase())} for a 2-seat to keep 0.60 m to the dining table.`,
+              `Swapped the ${sofaName(sofa.want.kind)} for a 2-seat to keep 0.60 m to the dining table.`,
             ),
           ],
           spare: new Set(),
