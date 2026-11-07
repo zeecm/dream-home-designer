@@ -5,7 +5,11 @@ import { wallElevation } from './elevation';
 import { roomFaces } from './faces';
 import { furnishedSample } from './fixtures/furnishedSample';
 import { sampleFlatProject } from './fixtures/sampleFlat';
-import { furnitureKind, newItem } from './furniture';
+import { tiledLevel } from './fixtures/tiled';
+import { furnitureKind, itemSize, newItem } from './furniture';
+import { type Circle, placeLabel } from './geometry';
+import { doorSwing, planGeometry, swingZone } from './plan';
+import { roomShapes } from './rooms';
 import type { Level, Vec2 } from './schema';
 import { walkwayReport } from './walkway';
 
@@ -123,5 +127,39 @@ describe('timing (the furnished sample, every wall seen straight on)', () => {
     );
     expect(median(cold)).toBeLessThan(20 * (PERF ? 1 : 3));
     expect(median(warm)).toBeLessThan(median(cold) + 1);
+  });
+});
+
+describe('timing (room labels on a terrace of 8 furnished flats, 72 rooms)', () => {
+  // Every room at once, as a new zoom step re-fits them (a drag re-fits only the rooms it
+  // changes): about 1.3 s before circlesNear and the nearest-first search, 65 ms after.
+  it('placeLabel for every room, clear of every swing and piece in the plan, within 100 ms', () => {
+    const level = freeze(tiledLevel(furnishedSample(), 4, 2), true) as Level;
+    // As the plan's labels pass them: every door's swing and every piece, plan-wide.
+    const avoid: Circle[] = [
+      ...planGeometry(level)
+        .openings.filter((o) => o.kind === 'door')
+        .map((o) => swingZone(doorSwing(o.frame, o.opening))),
+      ...Object.values(level.items).map((it) => {
+        const { w, d } = itemSize(it);
+        return { c: { x: it.position.x, y: it.position.z }, r: Math.hypot(w, d) / 2 };
+      }),
+    ];
+    const shapes = [...roomShapes(level).values()];
+    // A name and area at 40 px a metre (a big plan zoomed to fit), 10 cm clear of the walls.
+    const half = { x: 0.85, y: 0.6 };
+    const all = () => {
+      for (const s of shapes) placeLabel(s.outer, half, avoid, s.holes);
+    };
+    all();
+    const times: number[] = [];
+    for (let k = 0; k < 7; k++) {
+      const t0 = performance.now();
+      all();
+      times.push(performance.now() - t0);
+    }
+    const t = median(times);
+    console.log(`room labels: ${shapes.length} rooms, ${avoid.length} circles, ${t.toFixed(2)} ms`);
+    expect(t).toBeLessThan(100 * (PERF ? 1 : 3));
   });
 });

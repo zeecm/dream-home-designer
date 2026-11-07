@@ -32,8 +32,16 @@ export const EYE_HEIGHT = 1.6;
  * Doors and openings that lead outside the flat (the front door): a room on one side only.
  * Walking stops at them, and their doors are shown shut.
  */
-export function outsideOpenings(level: Level, geom: PlanGeometry = planGeometry(level)) {
-  const shapes = [...roomShapes(level).values()];
+export function outsideOpenings(
+  level: Level,
+  geom: PlanGeometry = planGeometry(level),
+): ReadonlySet<string> {
+  // Kept per geometry and room shapes (all it reads): a frame's callers, and a drag of
+  // furniture, share one.
+  const byShape = roomShapes(level);
+  const hit = outsideCache.get(geom);
+  if (hit && hit.shapes === byShape) return hit.out;
+  const shapes = [...byShape.values()];
   const inRoom = (p: Vec2) =>
     shapes.some((s) => pointInPolygon(p, s.outer) && !s.holes.some((h) => pointInPolygon(p, h)));
   const out = new Set<string>();
@@ -48,8 +56,11 @@ export function outsideOpenings(level: Level, geom: PlanGeometry = planGeometry(
     });
     if (!inRoom(side(1)) || !inRoom(side(-1))) out.add(o.opening.id);
   }
+  outsideCache.set(geom, { shapes: byShape, out });
   return out;
 }
+
+const outsideCache = new WeakMap<PlanGeometry, { shapes: object; out: ReadonlySet<string> }>();
 
 export function collisionSegments(level: Level, geom: PlanGeometry = planGeometry(level)) {
   const out: Segment[] = [];

@@ -194,6 +194,28 @@ export function pointInPolygon(p: Vec2, poly: readonly Vec2[]): boolean {
 }
 
 /**
+ * Where a horizontal line at `y` crosses the polygon's edges, worked out as `pointInPolygon`
+ * does: (x, y) is inside exactly when `insideAt(crossingsAt(poly, y), x)`. For testing a row
+ * of points (a raster's cells) at the cost of one edge pass.
+ */
+export function crossingsAt(poly: readonly Vec2[], y: number): number[] {
+  const xs: number[] = [];
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i] as Vec2;
+    const b = poly[j] as Vec2;
+    if (a.y > y !== b.y > y) xs.push(((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x);
+  }
+  return xs;
+}
+
+/** Whether x is inside, on a row whose `crossingsAt` are `xs` (even-odd, as pointInPolygon). */
+export function insideAt(xs: readonly number[], x: number): boolean {
+  let inside = false;
+  for (const c of xs) if (x < c) inside = !inside;
+  return inside;
+}
+
+/**
  * A point inside the polygon to hang its label on: the area centroid when that is
  * inside (most rooms), otherwise the middle of the widest horizontal run through the
  * polygon's vertical centre.
@@ -248,24 +270,93 @@ export function labelClearance(
   avoid: readonly Circle[],
   holes: readonly (readonly Vec2[])[],
 ) {
+  return clearance(p, half, poly, avoid, holes, 0, Number.NEGATIVE_INFINITY);
+}
+
+/**
+ * `labelClearance`, giving up early on a spot `placeLabel` would not pick: once it's known
+ * not to fit and to score (`clearance - cost`) below `beat` (or level with it, when
+ * `tiesLose`), the rest can only lower it, so it returns what it has so far (a value at or
+ * above the true clearance, never a fit).
+ */
+function clearance(
+  p: Vec2,
+  half: Vec2,
+  poly: readonly Vec2[],
+  avoid: readonly Circle[],
+  holes: readonly (readonly Vec2[])[],
+  cost: number,
+  beat: number,
+  tiesLose = false,
+) {
+  const rings = [poly, ...holes];
   let worst = Number.POSITIVE_INFINITY;
-  for (const sx of [-1, 0, 1]) {
-    for (const sy of [-1, 0, 1]) {
+  for (let sx = -1; sx <= 1; sx++) {
+    for (let sy = -1; sy <= 1; sy++) {
       const q = { x: p.x + sx * half.x, y: p.y + sy * half.y };
       let edge = Number.POSITIVE_INFINITY;
-      for (const ring of [poly, ...holes]) {
+      for (const ring of rings) {
         for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
           edge = Math.min(edge, segmentDistance(q, ring[j] as Vec2, ring[i] as Vec2));
         }
       }
-      const inside = pointInPolygon(q, poly) && !holes.some((h) => pointInPolygon(q, h));
+      let inside = pointInPolygon(q, poly);
+      for (let k = 0; inside && k < holes.length; k++) {
+        if (pointInPolygon(q, holes[k] as Vec2[])) inside = false;
+      }
       // Strictly negative outside, so a point on an edge never counts as fitting.
       let gap = inside ? edge : -edge - 1e-9;
       for (const c of avoid) gap = Math.min(gap, Math.hypot(q.x - c.c.x, q.y - c.c.y) - c.r);
       worst = Math.min(worst, gap);
+      if (worst < 0) {
+        const score = worst - cost;
+        if (score < beat || (score === beat && tiesLose)) return worst;
+      }
     }
   }
   return worst;
+}
+
+/** The smallest axis-aligned box round the points (both corners at 0, 0 when there are none). */
+export function polygonBounds(poly: readonly Vec2[]): Bounds {
+  if (poly.length === 0) return { min: { x: 0, y: 0 }, max: { x: 0, y: 0 } };
+  const min = { x: Number.POSITIVE_INFINITY, y: Number.POSITIVE_INFINITY };
+  const max = { x: Number.NEGATIVE_INFINITY, y: Number.NEGATIVE_INFINITY };
+  for (const p of poly) {
+    min.x = Math.min(min.x, p.x);
+    min.y = Math.min(min.y, p.y);
+    max.x = Math.max(max.x, p.x);
+    max.y = Math.max(max.y, p.y);
+  }
+  return { min, max };
+}
+
+/** How far past `near`'s reach a circle must be to be left out: well over rounding error. */
+const NEAR_MARGIN = 0.01;
+
+/**
+ * The circles that can change a label's clearance in this room: those reaching the room's box
+ * grown by `half` (where any label box's outline can be, centred in the room). One wholly
+ * outside it is further from every sampled point inside the room than the room's own edge
+ * is, and never covers one outside it, so `labelClearance` (and `placeLabel`) give the same
+ * answer without it, to the bit. On a big plan this is a few circles instead of hundreds.
+ */
+export function circlesNear(
+  poly: readonly Vec2[],
+  half: Vec2,
+  circles: readonly Circle[],
+): Circle[] {
+  const { min, max } = polygonBounds(poly);
+  const x0 = min.x - half.x;
+  const y0 = min.y - half.y;
+  const x1 = max.x + half.x;
+  const y1 = max.y + half.y;
+  return circles.filter(({ c, r }) => {
+    const dx = c.x - Math.max(x0, Math.min(c.x, x1));
+    const dy = c.y - Math.max(y0, Math.min(c.y, y1));
+    const reach = r + NEAR_MARGIN;
+    return dx * dx + dy * dy <= reach * reach;
+  });
 }
 
 /**
@@ -282,26 +373,42 @@ export function placeLabel(
   steps = 20,
 ): Vec2 {
   const home = labelPoint(poly);
-  if (poly.length < 3 || labelClearance(home, half, poly, avoid, holes) >= 0) return home;
-  const xs = poly.map((p) => p.x);
-  const ys = poly.map((p) => p.y);
-  const x0 = Math.min(...xs);
-  const y0 = Math.min(...ys);
-  const w = Math.max(...xs) - x0;
-  const h = Math.max(...ys) - y0;
-  let best = home;
-  let bestScore = Number.NEGATIVE_INFINITY;
+  if (poly.length < 3) return home;
+  // Only the circles that can tell: on a big plan most are rooms away (same answer, faster).
+  const near = circlesNear(poly, half, avoid);
+  if (labelClearance(home, half, poly, near, holes) >= 0) return home;
+  const {
+    min: { x: x0, y: y0 },
+    max,
+  } = polygonBounds(poly);
+  const w = max.x - x0;
+  const h = max.y - y0;
+  // The grid's spots nearest `home` first: once one fits, a spot further out can't beat it,
+  // so most are never measured. Ties go to the first spot in row order, as a plain scan of
+  // the grid gives them, so the answer is the same.
+  const spots: { p: Vec2; cost: number; k: number }[] = [];
   for (let i = 0; i <= steps; i++) {
     for (let j = 0; j <= steps; j++) {
       const p = { x: x0 + (w * i) / steps, y: y0 + (h * j) / steps };
-      if (!pointInPolygon(p, poly)) continue;
-      const clear = labelClearance(p, half, poly, avoid, holes);
       // Any spot that fits beats any that doesn't; among those, stay close to the centre.
-      const score = (clear >= 0 ? 1000 : clear) - 0.1 * Math.hypot(p.x - home.x, p.y - home.y);
-      if (score > bestScore) {
-        bestScore = score;
-        best = p;
-      }
+      spots.push({ p, cost: 0.1 * Math.hypot(p.x - home.x, p.y - home.y), k: spots.length });
+    }
+  }
+  spots.sort((a, b) => a.cost - b.cost || a.k - b.k);
+  let best = home;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  let bestK = -1;
+  const beats = (score: number, k: number) =>
+    score > bestScore || (score === bestScore && k < bestK);
+  for (const { p, cost, k } of spots) {
+    // Not even a fit here would beat the best: no need to measure it.
+    if (!beats(1000 - cost, k) || !pointInPolygon(p, poly)) continue;
+    const clear = clearance(p, half, poly, near, holes, cost, bestScore, k > bestK);
+    const score = (clear >= 0 ? 1000 : clear) - cost;
+    if (beats(score, k)) {
+      bestScore = score;
+      best = p;
+      bestK = k;
     }
   }
   return best;

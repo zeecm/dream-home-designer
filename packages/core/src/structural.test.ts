@@ -1,6 +1,9 @@
+import { freeze } from 'immer';
 import { describe, expect, it } from 'vitest';
-import { addOpening, deleteWall, renameRoom, updateWall } from './commands';
+import { addOpening, deleteWall, moveVertex, renameRoom, updateWall } from './commands';
+import { furnishedSample } from './fixtures/furnishedSample';
 import { sampleFlatProject } from './fixtures/sampleFlat';
+import { updateItem } from './furniture';
 import { type EditorDoc, dispatch, emptyHistory, undo } from './history';
 import { applyLayout, lockedWalls } from './layouts';
 import { AFTER_SUFFIX } from './levels';
@@ -180,5 +183,28 @@ describe('structural and shelter walls', () => {
 
   it('marking writes both versions itself, so it is not carried over again', () => {
     expect(markStructural(['x'], true).carry).toBe(false);
+  });
+});
+
+describe('wallStatuses, kept while the walls stand', () => {
+  it('is reused when only furniture moves, and found afresh when a corner does', () => {
+    const doc = freeze({ ...sample(), levels: [furnishedSample()] }, true);
+    let s: EditorDoc = { doc, history: emptyHistory() };
+    const first = wallStatuses(flat(s));
+    expect(first.size).toBeGreaterThan(0);
+    const piece = Object.values(flat(s).items)[0];
+    if (!piece) throw new Error('fixture');
+    s = dispatch(s, updateItem(L, piece.id, { position: { x: piece.position.x + 0.2 } }));
+    expect(wallStatuses(flat(s))).toBe(first);
+    const v = Object.values(flat(s).vertices)[3];
+    if (!v) throw new Error('fixture');
+    s = dispatch(s, moveVertex(L, v.id, { x: v.x + 0.05, y: v.y }));
+    expect(wallStatuses(flat(s))).not.toBe(first);
+    // The same as each wall's own status, every time.
+    for (const l of [flat(s), sample().levels[0] as Level]) {
+      for (const id of Object.keys(l.walls)) {
+        expect(wallStatuses(l).get(id) ?? 'none').toBe(wallStatus(l, id));
+      }
+    }
   });
 });
