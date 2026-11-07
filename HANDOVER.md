@@ -624,6 +624,29 @@ rests while Exact renders. Tests set `window.__DHD_EXACT_TEST__` (size box, samp
 - **Left for slice 2+:** Quality, Time, Lamps and Brightness settings; hints; full-screen
   viewer; real textures; Polish with AI; the slow-device estimate.
 
+**AI designer v2, slice 1 (merged 7 Nov, #47):** the model answers with intent (`against`,
+`faces`, `near`, `zone`) and `designer/solve.ts` places the pieces: candidates per piece,
+lookahead and backtracking under a tries budget (12k for a space's first solve, 5k per swap,
+10k for swaps, 3k for a walkway re-solve; counted, so results are deterministic). Ranking:
+essential pieces left out, then pieces short of room, then other drops, then score. Swaps
+(round or bench table, extendable table keeping every chair, 2-seat sofa) run only when the
+0.60 m dining-to-lounge gap, places or seats, or an essential piece need them. A walkway
+re-solve is kept only through `acceptResolve` (`designer/resolve.ts`): no new failing hard key,
+strictly fewer, pieces no worse. Principles once in `principles.ts`, hard/soft in `checks.ts`
+(HDB rules not waivable), regression cases in `fixtures/designer/cases/`, benchmark in
+`designer/benchmark/`. PERF: sample about 180 ms cold, 57 ms cached; heavy living rooms
+330-470 ms (bound 400 ms median under `PERF`): a follow-up (a worker or a cheaper first pass).
+Slice 2 (the conversation) is designed: `designer-v2/slice2-ux.md` and `slice2-tech.md` in
+the session scratchpad, decisions folded into the build; PR 1 is being built.
+
+**Drag on big plans (task #69):** room labels are fitted once per room (`fitRoomLabel`,
+memo keyed on everything the fit reads) with `placeLabel` filtering far circles and searching
+nearest-first (exact, ties kept); `wallStatuses`, `planGeometry`, `roomShapes` and
+`outsideOpenings` are cached on frozen level parts; the walkway bare raster is rebuilt
+incrementally from the last one (`rasterBare`, exact; widths recomputed within WIDE/2+1).
+72-room corner drag: about 970 ms CPU a step before, about 150 ms after; walkway run 126 to
+58 ms. Left: the main-door widest-way search (about 25 ms, global), possibly a Web Worker.
+
 ## 5. Owner to-dos
 
 - **Before the repo goes public:** `apps/web/public/samples/hdb-3room-type4.pdf` (and its PNG

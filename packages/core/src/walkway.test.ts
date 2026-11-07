@@ -1,14 +1,17 @@
+import { freeze } from 'immer';
 import { describe, expect, it } from 'vitest';
 import { bedSides, clearanceIssues, doorSweep } from './clearance';
-import { addOpening, drawWall, updateWall } from './commands';
+import { addOpening, drawWall, moveVertex, updateOpening, updateWall } from './commands';
 import { blankProject } from './factory';
+import { furnishedSample } from './fixtures/furnishedSample';
 import { sampleFlatProject } from './fixtures/sampleFlat';
-import { customKind, furnitureKind, newItem, setProjectModels } from './furniture';
-import { type EditorDoc, dispatch, emptyHistory } from './history';
+import { tiledLevel } from './fixtures/tiled';
+import { customKind, furnitureKind, newItem, setProjectModels, updateItem } from './furniture';
+import { type EditorDoc, dispatch, emptyHistory, undo } from './history';
 import { variantLevels } from './levels';
 import { startRenovation } from './renovation';
 import type { CustomModel, Level, Opening, Vec2 } from './schema';
-import { type WalkwayReport, walkwayReport, walkwayStatus } from './walkway';
+import { type Bare, type WalkwayReport, rasterBare, walkwayReport, walkwayStatus } from './walkway';
 
 /**
  * Two 4 m rooms side by side over a corridor `clear` wide (walls 100 mm on centre lines),
@@ -521,5 +524,86 @@ describe('walkways', () => {
     const r = walkwayReport(level(s));
     expect(r.grid.cells).toBeLessThanOrEqual(300_000);
     expect(r.grid.cell).toBeGreaterThan(0.05);
+  });
+});
+
+describe('the bare raster, made from the last one', () => {
+  it('is the same, cell for cell, as one made from scratch, across drags and edits', () => {
+    const project = {
+      ...sampleFlatProject('prj_t'),
+      levels: [tiledLevel(furnishedSample(), 3, 2)],
+    };
+    let s: EditorDoc = { doc: freeze(project, true), history: emptyHistory() };
+    const lvl = () => s.doc.levels[0] as Level;
+    const L = lvl().id;
+    const at = (id: string) => lvl().vertices[id] as Vec2;
+    const steps: { label: string; run: () => void }[] = [];
+    const drag = (id: string, dx: number, dy: number, n: number) => {
+      const from = at(id);
+      for (let k = 1; k <= n; k++) {
+        steps.push({
+          label: `${id} step ${k}`,
+          run: () => {
+            const to = { x: from.x + dx * k, y: from.y + dy * k };
+            s = dispatch(s, moveVertex(L, id, to), { coalesceKey: id });
+          },
+        });
+      }
+    };
+    // Corners between rooms, in the first flat and in another; then one on the outside edge,
+    // which moves the plan's extent (a new grid, so made from scratch).
+    drag('t0_v_6p495_3p098', 0.013, 0.007, 4);
+    drag('t4_v_2p95_3p098', -0.02, 0.03, 3);
+    drag('t0_v_0p15_0p075', -0.04, -0.03, 2);
+    const piece = lvl().items.t1_it_f004;
+    const door = lvl().openings['t3_op_door_living-and-dining_main-bedroom'];
+    if (!piece || !door) throw new Error('fixture');
+    steps.push({
+      label: 'a piece moved',
+      run: () => {
+        s = dispatch(s, updateItem(L, piece.id, { position: { x: piece.position.x + 0.4 } }));
+      },
+    });
+    steps.push({
+      label: 'a door widened',
+      run: () => {
+        s = dispatch(s, updateOpening(L, door.id, { width: door.width + 0.1 }));
+      },
+    });
+    steps.push({
+      label: 'undone',
+      run: () => {
+        s = undo(s);
+      },
+    });
+    const view = (b: Bare) => ({
+      g: b.g,
+      rooms: b.rooms,
+      room: [...b.room],
+      solid: [...b.solid],
+      owner: [...b.owner],
+      throatOf: [...b.throatOf],
+      throats: b.throats.map((t) => [t.openingId, t.cells, t.rooms]),
+      width: [...b.width],
+      start: [b.start, b.startCells, b.startRoom],
+      adj: b.adj.map((a) => [...a]),
+      first: [...b.first],
+      roomBoxes: [...b.roomBoxes],
+    });
+    let prev = rasterBare(lvl(), null);
+    let kept = 0;
+    for (const step of steps) {
+      step.run();
+      const full = view(rasterBare(lvl(), null));
+      const made = rasterBare(lvl(), prev);
+      if (JSON.stringify(made.g) === JSON.stringify(prev.g)) kept++;
+      const b = view(made);
+      for (const k of Object.keys(full) as (keyof typeof full)[]) {
+        expect(JSON.stringify(b[k]), `${step.label}: ${k}`).toBe(JSON.stringify(full[k]));
+      }
+      prev = made;
+    }
+    // Most steps kept the grid, so were made from the last raster.
+    expect(kept).toBeGreaterThan(steps.length / 2);
   });
 });

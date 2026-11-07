@@ -88,12 +88,20 @@ for any plan.
 - Exact render, slice 1: a photo-real picture drawn on your device from the 3D model itself
   (daylight through the windows, lamps, soft shadows), so nothing is added or moved; free, no
   key. [spec](docs/specs/exact-render.md)
+- AI interior designer v2, slice 1: layouts that pass the app's checks. The designer says what
+  it intends (against which wall, facing what, near what) and a solver places the pieces; a bed
+  for everyone, seating that faces the room, 0.60 m between dining and lounge, clear walkways,
+  smaller pieces swapped in when a room is tight, with regression cases.
+  [spec](docs/specs/ai-designer-v2.md)
+- Smooth dragging on big plans: room labels, wall statuses and the walkway check work out only
+  what a drag changed (a 70-room plan went from about 1 s to under 0.15 s a step).
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
-- AI interior designer v2: a designer you talk to. Slice 1 first: layouts that pass the app's
-  checks (a bed for everyone, seating that faces the room, clear walkways), placed by a solver
-  from the designer's intent, with regression cases from "This is wrong". [spec](docs/specs/ai-designer-v2.md)
+- AI interior designer v2: a designer you talk to. Slice 2 being built: a conversation panel
+  (a sheet on the phone) that greets you from your plan, asks what it needs, and proposes room by
+  room, with each change accepted on its own and every paid step priced first.
+  [spec](docs/specs/ai-designer-v2.md)
 - Storage meter, slice 1 built: clothes, shoes, kitchen and everything else against who lives
   here, room by room, with shortfalls priced as built-in carpentry; next storage beds, a pantry
   and a bay seat (1b), and the household saved in the project (2). [spec](docs/specs/storage-meter.md)

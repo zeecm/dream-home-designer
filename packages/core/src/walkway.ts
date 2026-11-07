@@ -8,11 +8,13 @@ import {
 import { box, near as nearBoxes, nearestOnPolygon } from './convex';
 import { entranceDoor } from './delivery';
 import { itemFootprint } from './furniture';
-import { pointInPolygon } from './geometry';
+import { crossingsAt, insideAt, pointInPolygon } from './geometry';
 import {
   Buffers,
   type Grid,
   Search,
+  type WaySearch,
+  WindowSearch,
   cellAt,
   cellCentre,
   distanceField,
@@ -20,7 +22,7 @@ import {
   widestWays,
 } from './grid';
 import { type WallFrame, planGeometry } from './plan';
-import { roomArea, roomShapes } from './rooms';
+import { type RoomShape, roomArea, roomShapes } from './rooms';
 import type { Item, Level, Vec2 } from './schema';
 
 /**
@@ -110,7 +112,11 @@ export interface Bare {
   first: Int32Array;
   caps: Map<string, number>;
   /** The bare plan's widest ways inside a bedroom from its doors (by room and seed doors). */
-  roomSearches: Map<string, Search>;
+  roomSearches: Map<string, WindowSearch>;
+  /** Each room's cells lie in columns i0..i1, rows j0..j1: [i0, i1, j0, j1] per room. */
+  roomBoxes: Int32Array;
+  /** The rooms' shapes it was rastered from. */
+  outlines: RoomShape[];
 }
 
 const bareCache = new WeakMap<
@@ -123,24 +129,98 @@ const buffers = new Buffers();
 const bareBuffers = new Buffers();
 const mainSearch = new Search(0);
 const auxSearch = new Search(0);
+/** Where a bedroom's bare search runs before it is kept for the room's cells. */
+const roomScratch = new Search(0);
 let solidBuf = new Uint8Array(0);
 let ownerBuf = new Int32Array(0);
 let widthBuf = new Float32Array(0);
 
-/** The level's walls, doors and rooms, rastered (kept while only furniture changes). */
-function rasterBare(level: Level): Bare {
+/** A block of cells: columns i0..i1, rows j0..j1 (empty when i0 > i1 or j0 > j1). */
+type Block = [number, number, number, number];
+
+/** The cells a polygon's box covers, two cells over each way (an edge's run can end past it). */
+function polyBlock(g: Grid, poly: readonly Vec2[]): Block {
+  if (poly.length < 3) return [0, -1, 0, -1];
+  const b = box(poly);
+  return [
+    Math.max(0, Math.floor((b.x0 - g.x0) / g.c) - 2),
+    Math.min(g.nx - 1, Math.floor((b.x1 - g.x0) / g.c) + 2),
+    Math.max(0, Math.floor((b.y0 - g.y0) / g.c) - 2),
+    Math.min(g.ny - 1, Math.floor((b.y1 - g.y0) / g.c) + 2),
+  ];
+}
+
+const meets = (a: Block, b: Block) => a[0] <= b[1] && b[0] <= a[1] && a[2] <= b[3] && b[2] <= a[3];
+const sameRing = (a: readonly Vec2[], b: readonly Vec2[]) =>
+  a.length === b.length && a.every((p, i) => p.x === b[i]?.x && p.y === b[i]?.y);
+const sameShape = (a: RoomShape, b: RoomShape) =>
+  sameRing(a.outer, b.outer) &&
+  a.holes.length === b.holes.length &&
+  a.holes.every((h, i) => sameRing(h, b.holes[i] as Vec2[]));
+
+/** The last raster made: the next one (a drag's next step) starts from it. */
+let lastBare: Bare | null = null;
+/** Cells being redone in an incremental raster (cleared after each). */
+let maskBuf = new Uint8Array(0);
+const localBuffers = new Buffers();
+
+/**
+ * Room cells of `s` (index `idx`) in `block`, as a full raster finds them: cells not yet
+ * taken whose centre is inside the outline and out of its holes. `only` limits it to cells
+ * marked there.
+ */
+function fillRoom(
+  g: Grid,
+  room: Int16Array,
+  s: RoomShape,
+  idx: number,
+  block: Block,
+  only: Uint8Array | null,
+) {
+  const [i0, i1, j0, j1] = block;
+  for (let j = j0; j <= j1; j++) {
+    // A row at a time: where its centre line crosses the room's edges (as pointInPolygon
+    // finds them, so the same cells), rather than every edge for every cell. Centres as
+    // cellCentre works them out.
+    const y = g.y0 + (j + 0.5) * g.c;
+    const outer = crossingsAt(s.outer, y);
+    if (!outer.length) continue;
+    const holes = s.holes.map((h) => crossingsAt(h, y));
+    for (let i = i0; i <= i1; i++) {
+      const k = j * g.nx + i;
+      if (room[k] !== -1 || (only && !only[k])) continue;
+      const x = g.x0 + (i + 0.5) * g.c;
+      if (!insideAt(outer, x)) continue;
+      let inHole = false;
+      for (let h = 0; !inHole && h < holes.length; h++) {
+        inHole = insideAt(holes[h] as number[], x);
+      }
+      if (!inHole) room[k] = idx;
+    }
+  }
+}
+
+/**
+ * The level's walls, doors and rooms, rastered (kept while only furniture changes). Made
+ * from `from` (the last raster) where it can be, the same to the cell: with the same grid,
+ * rooms and obstacle count, only the cells near the rooms and wall pieces that moved are
+ * filled again, and widths worked out again only near cells that changed (a width is capped
+ * at WIDE, so a cell's width depends only on obstacles within WIDE / 2).
+ */
+export function rasterBare(level: Level, from: Bare | null = lastBare): Bare {
   const geom = planGeometry(level);
   const shapes = roomShapes(level);
   const rooms = Object.values(level.rooms)
     .filter((r) => shapes.has(r.id))
     .map((r) => ({ id: r.id, area: roomArea(level, r) }));
+  const outlines = rooms.map((r) => shapes.get(r.id) as RoomShape);
   // The rooms' extent, a few cells over.
   let x0 = Number.POSITIVE_INFINITY;
   let y0 = Number.POSITIVE_INFINITY;
   let x1 = Number.NEGATIVE_INFINITY;
   let y1 = Number.NEGATIVE_INFINITY;
-  for (const r of rooms) {
-    const b = box((shapes.get(r.id) as { outer: Vec2[] }).outer);
+  for (const s of outlines) {
+    const b = box(s.outer);
     x0 = Math.min(x0, b.x0);
     y0 = Math.min(y0, b.y0);
     x1 = Math.max(x1, b.x1);
@@ -160,26 +240,26 @@ function rasterBare(level: Level): Bare {
   const ny = Math.ceil((y1 - y0 + 2 * pad) / c);
   const g: Grid = { c, nx, ny, x0: x0 - pad, y0: y0 - pad, n: nx * ny };
 
-  const room = new Int16Array(g.n).fill(-1);
-  rooms.forEach((r, idx) => {
-    const s = shapes.get(r.id);
-    if (!s) return;
+  // Each room's cells lie in its box's cells.
+  const roomBoxes = new Int32Array(4 * rooms.length);
+  outlines.forEach((s, idx) => {
     const b = box(s.outer);
-    const i0 = Math.max(0, Math.floor((b.x0 - g.x0) / c));
-    const i1 = Math.min(nx - 1, Math.floor((b.x1 - g.x0) / c));
-    const j0 = Math.max(0, Math.floor((b.y0 - g.y0) / c));
-    const j1 = Math.min(ny - 1, Math.floor((b.y1 - g.y0) / c));
-    for (let j = j0; j <= j1; j++) {
-      for (let i = i0; i <= i1; i++) {
-        const k = j * nx + i;
-        if (room[k] !== -1) continue;
-        const p = cellCentre(g, k);
-        if (pointInPolygon(p, s.outer) && !s.holes.some((h) => pointInPolygon(p, h))) {
-          room[k] = idx;
-        }
-      }
-    }
+    roomBoxes.set(
+      [
+        Math.max(0, Math.floor((b.x0 - g.x0) / c)),
+        Math.min(nx - 1, Math.floor((b.x1 - g.x0) / c)),
+        Math.max(0, Math.floor((b.y0 - g.y0) / c)),
+        Math.min(ny - 1, Math.floor((b.y1 - g.y0) / c)),
+      ],
+      4 * idx,
+    );
   });
+  const roomBlock = (boxes: Int32Array, idx: number): Block => [
+    boxes[4 * idx] as number,
+    boxes[4 * idx + 1] as number,
+    boxes[4 * idx + 2] as number,
+    boxes[4 * idx + 3] as number,
+  ];
 
   // Obstacles: solid walls and their hubs (half and glass walls too), windows, columns
   // (room holes), and everything outside the rooms. Not doorways, passages or boundaries.
@@ -189,20 +269,108 @@ function rasterBare(level: Level): Bare {
     ...geom.openings.filter((o) => o.kind === 'window').map((o) => o.polygon),
     ...[...shapes.values()].flatMap((s) => s.holes),
   ];
-  const solid = new Uint8Array(g.n);
-  const owner = new Int32Array(g.n).fill(-1);
-  for (let k = 0; k < g.n; k++) {
-    if (room[k] === -1) {
-      solid[k] = 1;
-      owner[k] = OUTSIDE;
+
+  const prev =
+    from &&
+    from.g.c === g.c &&
+    from.g.nx === nx &&
+    from.g.ny === ny &&
+    from.g.x0 === g.x0 &&
+    from.g.y0 === g.y0 &&
+    from.rooms.length === rooms.length &&
+    from.rooms.every((r, i) => r.id === rooms[i]?.id) &&
+    from.polys.length === polys.length
+      ? from
+      : null;
+
+  let room: Int16Array;
+  let solid: Uint8Array;
+  let owner: Int32Array;
+  /** The blocks of cells redone, from `prev` (null: all of them, from scratch). */
+  let blocks: Block[] | null = null;
+  if (prev) {
+    // What moved: rooms whose outline or holes changed, and obstacles that changed; the
+    // cells they covered before and cover now.
+    const moved: Block[] = [];
+    outlines.forEach((s, idx) => {
+      if (sameShape(prev.outlines[idx] as RoomShape, s)) return;
+      moved.push(roomBlock(prev.roomBoxes, idx), roomBlock(roomBoxes, idx));
+    });
+    polys.forEach((p, idx) => {
+      const q = prev.polys[idx] as Vec2[];
+      if (sameRing(q, p)) return;
+      moved.push(polyBlock(g, q), polyBlock(g, p));
+    });
+    blocks = moved.filter(([i0, i1, j0, j1]) => i0 <= i1 && j0 <= j1);
+    if (maskBuf.length < g.n) maskBuf = new Uint8Array(g.n);
+    const mask = maskBuf;
+    let span: Block = [nx, -1, ny, -1];
+    for (const [i0, i1, j0, j1] of blocks) {
+      span = [
+        Math.min(span[0], i0),
+        Math.max(span[1], i1),
+        Math.min(span[2], j0),
+        Math.max(span[3], j1),
+      ];
+      for (let j = j0; j <= j1; j++) mask.fill(1, j * nx + i0, j * nx + i1 + 1);
     }
+    room = prev.room.slice();
+    solid = prev.solid.slice();
+    owner = prev.owner.slice();
+    const each = (fn: (k: number) => void) => {
+      for (let j = span[2]; j <= span[3]; j++) {
+        for (let k = j * nx + span[0]; k <= j * nx + span[1]; k++) if (mask[k]) fn(k);
+      }
+    };
+    // Those cells as a full raster makes them: rooms in order (the first to cover a cell
+    // takes it), then outside or open, then the obstacles in order (the last one wins).
+    each((k) => {
+      room[k] = -1;
+    });
+    outlines.forEach((s, idx) => {
+      const b = roomBlock(roomBoxes, idx);
+      if (!meets(b, span)) return;
+      const cut: Block = [
+        Math.max(b[0], span[0]),
+        Math.min(b[1], span[1]),
+        Math.max(b[2], span[2]),
+        Math.min(b[3], span[3]),
+      ];
+      fillRoom(g, room, s, idx, cut, mask);
+    });
+    each((k) => {
+      solid[k] = room[k] === -1 ? 1 : 0;
+      owner[k] = room[k] === -1 ? OUTSIDE : -1;
+    });
+    polys.forEach((poly, idx) => {
+      if (!meets(polyBlock(g, poly), span)) return;
+      fillPolygon(g, poly, (k) => {
+        if (!mask[k]) return;
+        solid[k] = 1;
+        owner[k] = idx;
+      });
+    });
+    each((k) => {
+      mask[k] = 0;
+    });
+  } else {
+    room = new Int16Array(g.n).fill(-1);
+    outlines.forEach((s, idx) => fillRoom(g, room, s, idx, roomBlock(roomBoxes, idx), null));
+    solid = new Uint8Array(g.n);
+    owner = new Int32Array(g.n).fill(-1);
+    for (let k = 0; k < g.n; k++) {
+      if (room[k] === -1) {
+        solid[k] = 1;
+        owner[k] = OUTSIDE;
+      }
+    }
+    polys.forEach((poly, idx) =>
+      fillPolygon(g, poly, (k) => {
+        solid[k] = 1;
+        owner[k] = idx;
+      }),
+    );
   }
-  polys.forEach((poly, idx) =>
-    fillPolygon(g, poly, (k) => {
-      solid[k] = 1;
-      owner[k] = idx;
-    }),
-  );
 
   // Doorways and passages: their throats, the wall's thickness and a step into each room.
   const throatOf = new Int16Array(g.n).fill(-1);
@@ -237,30 +405,85 @@ function rasterBare(level: Level): Bare {
     throats.push(t);
   }
 
-  const width = new Float32Array(g.n);
-  bareBuffers.fit(g);
-  distanceField(g, solid, bareBuffers);
-  for (let k = 0; k < g.n; k++) {
-    width[k] = solid[k]
-      ? -1
-      : throatOf[k] !== -1
-        ? WIDE
-        : Math.min(WIDE, 2 * Math.sqrt(bareBuffers.d2[k] as number) * c);
+  const widthAt = (k: number, d2: number) =>
+    solid[k] ? -1 : throatOf[k] !== -1 ? WIDE : Math.min(WIDE, 2 * Math.sqrt(d2) * c);
+  let width: Float32Array | null = null;
+  if (prev && blocks) {
+    // The cells whose width can differ: within reach of a cell that became (or stopped
+    // being) solid, and those whose throat changed.
+    const reach = Math.ceil(WIDE / (2 * c)) + 1;
+    let u: Block = [nx, -1, ny, -1];
+    const grow = (i: number, j: number, r: number) => {
+      u = [
+        Math.min(u[0], i - r),
+        Math.max(u[1], i + r),
+        Math.min(u[2], j - r),
+        Math.max(u[3], j + r),
+      ];
+    };
+    for (const [i0, i1, j0, j1] of blocks) {
+      for (let j = j0; j <= j1; j++) {
+        for (let i = i0; i <= i1; i++) {
+          const k = j * nx + i;
+          if (solid[k] !== prev.solid[k]) grow(i, j, reach);
+        }
+      }
+    }
+    for (let k = 0; k < g.n; k++) {
+      if (throatOf[k] !== prev.throatOf[k]) grow(k % nx, Math.floor(k / nx), 0);
+    }
+    u = [Math.max(0, u[0]), Math.min(nx - 1, u[1]), Math.max(0, u[2]), Math.min(ny - 1, u[3])];
+    if (u[0] > u[1] || u[2] > u[3]) {
+      width = prev.width.slice();
+    } else if ((u[1] - u[0] + 1) * (u[3] - u[2] + 1) < g.n / 3) {
+      // Distances on a block `reach` cells round those cells: exact for every cell whose
+      // nearest obstacle is within `reach` of it, and beyond that its width is WIDE anyway.
+      const l: Block = [
+        Math.max(0, u[0] - reach),
+        Math.min(nx - 1, u[1] + reach),
+        Math.max(0, u[2] - reach),
+        Math.min(ny - 1, u[3] + reach),
+      ];
+      const lnx = l[1] - l[0] + 1;
+      const lny = l[3] - l[2] + 1;
+      const lg: Grid = { c, nx: lnx, ny: lny, x0: 0, y0: 0, n: lnx * lny };
+      const ls = new Uint8Array(lg.n);
+      for (let j = 0; j < lny; j++) {
+        ls.set(solid.subarray((l[2] + j) * nx + l[0], (l[2] + j) * nx + l[1] + 1), j * lnx);
+      }
+      distanceField(lg, ls, localBuffers);
+      width = prev.width.slice();
+      for (let j = u[2]; j <= u[3]; j++) {
+        for (let i = u[0]; i <= u[1]; i++) {
+          const k = j * nx + i;
+          width[k] = widthAt(k, localBuffers.d2[(j - l[2]) * lnx + (i - l[0])] as number);
+        }
+      }
+    }
+  }
+  if (!width) {
+    width = new Float32Array(g.n);
+    bareBuffers.fit(g);
+    distanceField(g, solid, bareBuffers);
+    for (let k = 0; k < g.n; k++) width[k] = widthAt(k, bareBuffers.d2[k] as number);
   }
 
   // Rooms joined (a door, a passage, a boundary): neighbouring open cells of two rooms.
   const adj = rooms.map(() => new Set<number>());
+  const join = (r: number, m: number) => {
+    if (m >= g.n || solid[m]) return;
+    const q = room[m] as number;
+    if (q !== r && q >= 0 && r >= 0) {
+      adj[r]?.add(q);
+      adj[q]?.add(r);
+    }
+  };
   for (let k = 0; k < g.n; k++) {
     if (solid[k]) continue;
     const r = room[k] as number;
-    for (const m of [k + 1, k + nx]) {
-      if (m >= g.n || solid[m]) continue;
-      const q = room[m] as number;
-      if (q !== r && q >= 0 && r >= 0) {
-        adj[r]?.add(q);
-        adj[q]?.add(r);
-      }
-    }
+    // The cell to the right, then the one below.
+    join(r, k + 1);
+    join(r, k + nx);
   }
 
   // The main door: its throat's cells inside the flat.
@@ -301,7 +524,10 @@ function rasterBare(level: Level): Bare {
     first,
     caps: new Map(),
     roomSearches: new Map(),
+    roomBoxes,
+    outlines,
   };
+  lastBare = bare;
   return bare;
 }
 
@@ -311,6 +537,17 @@ function rasterBare(level: Level): Bare {
  */
 const bareByContent = new Map<string, Bare>();
 const BARE_KEEP = 6;
+
+const jsonCache = new WeakMap<object, string>();
+/** JSON.stringify of a part of the level, kept while it is frozen. */
+function jsonOf(part: object): string {
+  let s = jsonCache.get(part);
+  if (s === undefined) {
+    s = JSON.stringify(part);
+    if (Object.isFrozen(part)) jsonCache.set(part, s);
+  }
+  return s;
+}
 
 function bareOf(level: Level): Bare {
   const hit = bareCache.get(level.walls);
@@ -322,7 +559,9 @@ function bareOf(level: Level): Bare {
   ) {
     return hit.bare;
   }
-  const key = JSON.stringify([level.walls, level.vertices, level.openings, level.rooms]);
+  // As JSON.stringify of the four together, from each one's own text (kept for frozen ones,
+  // so a drag of corners writes out only the corners).
+  const key = `[${[level.walls, level.vertices, level.openings, level.rooms].map(jsonOf).join(',')}]`;
   let bare = bareByContent.get(key);
   if (bare) {
     // Most recently used last.
@@ -903,7 +1142,7 @@ export function walkwayReport(level: Level): WalkwayReport {
     const k = cellAt(g, { x: bed.position.x, y: bed.position.z });
     const r = k >= 0 ? (room[k] as number) : -1;
     if (r < 0) continue;
-    const sides = bedSides(level, bed);
+    const sides = bedSides(level, bed, pass);
     if (!sides.length) continue;
     const all = throats.filter(
       (t) => t.rooms.includes(r) && !(t.rooms[0] === r && t.rooms[1] === r),
@@ -916,8 +1155,22 @@ export function walkwayReport(level: Level): WalkwayReport {
     const seedKey = `${r}|${doors.map((t) => t.openingId).join(',')}`;
     let bareRoom = own ? bare.roomSearches.get(seedKey) : undefined;
     if (own && !bareRoom) {
-      bareRoom = new Search(g.n);
-      widestWays(g, bare.width, seeds, null, bareRoom, { wide: WIDE, step: STEP, room, only: r });
+      // Searched on the whole raster, kept for the room's cells only (it never leaves them).
+      widestWays(g, bare.width, seeds, null, roomScratch, {
+        wide: WIDE,
+        step: STEP,
+        room,
+        only: r,
+      });
+      const b = bare.roomBoxes;
+      bareRoom = new WindowSearch(
+        g,
+        roomScratch,
+        b[4 * r] as number,
+        b[4 * r + 1] as number,
+        b[4 * r + 2] as number,
+        b[4 * r + 3] as number,
+      );
       bare.roomSearches.set(seedKey, bareRoom);
     }
     for (const side of sides) {
@@ -926,7 +1179,7 @@ export function walkwayReport(level: Level): WalkwayReport {
         const p = cellCentre(g, c);
         if (pointInPolygon(p, side.zone) && room[c] === r) zoneCells.push(c);
       });
-      const best = (s: Search, w: Float32Array) => {
+      const best = (s: WaySearch, w: Float32Array) => {
         let cell = -1;
         let bw = -1;
         for (const c of zoneCells) {

@@ -1,3 +1,4 @@
+import { isDraft } from 'immer';
 import { type Footprints, type WallFootprint, footprintSpans, wallFootprints } from './footprints';
 import { type Circle, clampOpeningT, openingsOnWall } from './geometry';
 import {
@@ -115,7 +116,31 @@ export interface PlanGeometry {
  * (so doors and windows read as gaps, the way architects draw them), the gaps themselves,
  * and the junction hubs.
  */
-export function planGeometry(level: Level, footprints = wallFootprints(level)): PlanGeometry {
+export function planGeometry(level: Level, footprints?: Footprints): PlanGeometry {
+  if (footprints) return buildGeometry(level, footprints);
+  // Kept by walls, corners and openings (all it reads), while frozen: the plan, the
+  // walkways, the delivery check and the rest of a frame share one, and a drag of furniture
+  // keeps it.
+  const hit = geometryCache.get(level.walls);
+  if (hit && hit.vertices === level.vertices && hit.openings === level.openings) return hit.geom;
+  const geom = buildGeometry(level, wallFootprints(level));
+  const frozen =
+    !isDraft(level) &&
+    Object.isFrozen(level.walls) &&
+    Object.isFrozen(level.vertices) &&
+    Object.isFrozen(level.openings);
+  if (frozen) {
+    geometryCache.set(level.walls, { vertices: level.vertices, openings: level.openings, geom });
+  }
+  return geom;
+}
+
+const geometryCache = new WeakMap<
+  object,
+  { vertices: object; openings: object; geom: PlanGeometry }
+>();
+
+function buildGeometry(level: Level, footprints: Footprints): PlanGeometry {
   const frames: Record<string, WallFrame> = {};
   const pieces: PlanWallPiece[] = [];
   const openings: PlanOpening[] = [];
