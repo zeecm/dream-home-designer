@@ -1,6 +1,7 @@
 import type { Design, DesignProblem, DesignResult, ResultCheck } from '@dhd/core';
 import { showPoint, showRoom } from './focus';
-import { humanize, problemRoom } from './words';
+import { checksLine, failingChecks, isUnplaced } from './parts';
+import { humanize, keepTogether, problemRoom } from './words';
 
 /**
  * A version's checks, in the app's words (spec docs/specs/ai-designer-v2.md, "Hard and soft"):
@@ -8,24 +9,7 @@ import { humanize, problemRoom } from './words';
  * pass (and what you accepted anyway), what was already in your plan, and the advice that
  * never blocks it. Never written by the model.
  */
-
-/** The checks a version caused that fail, waived or not. */
-export function failingChecks(r: DesignResult, d: Pick<Design, 'waivers'>) {
-  const waived = new Set((d.waivers ?? []).map((w) => w.key));
-  const caused = r.checks.filter((c) => c.hard && !c.already);
-  return {
-    open: caused.filter((c) => !waived.has(c.key)),
-    waived: caused.filter((c) => waived.has(c.key)),
-    already: r.checks.filter((c) => c.hard && c.already),
-  };
-}
-
-/** The checks' line on a version: "Passes all checks" or "2 don't pass". */
-export function checksLine(r: DesignResult, d: Pick<Design, 'waivers'>): string {
-  const { open } = failingChecks(r, d);
-  if (!open.length) return 'Passes all checks';
-  return `${open.length} ${open.length === 1 ? 'doesn’t' : 'don’t'} pass`;
-}
+export { checksLine, checksShort, failingChecks } from './parts';
 
 /** Fix rounds a version took, and what they fixed. */
 export function fixedCount(d: Design): number {
@@ -62,12 +46,14 @@ function Row({
 }) {
   const p = 'key' in c ? asProblem(c) : c;
   const it = p.itemId ? r.level.items[p.itemId] : undefined;
+  const text = keepTogether(humanize(p.text, d.aliases, r.level, d.baseLevel));
   const room = problemRoom(p, r.level);
   return (
     <li>
       <span>
-        {room ? <strong>{room}: </strong> : null}
-        {humanize(p.text, d.aliases, r.level, d.baseLevel)}
+        {/* The room once: not when the line names it already. */}
+        {room && !text.includes(room) ? <strong>{room}: </strong> : null}
+        {text}
         {note ? <span className="designer-check-note"> {note}</span> : null}
       </span>
       {(it || p.roomId) && (
@@ -87,20 +73,44 @@ function Row({
   );
 }
 
-export function ChecksView({ d, r }: { d: Design; r: DesignResult }) {
-  const { open, waived, already } = failingChecks(r, d);
+export function ChecksView({
+  d,
+  r,
+  pending = new Set(),
+}: {
+  d: Design;
+  r: DesignResult;
+  /** Rooms still being designed or fixed: their checks wait. */
+  pending?: Set<string>;
+}) {
+  const { open, waived, already } = failingChecks(r, d, pending);
+  const line = checksLine(r, d, pending);
   const fixed = fixedCount(d);
   const advice = adviceOf(r);
+  const assumed = r.checks.find((c) => c.key === 'P1|assumed');
+  const waiting = r.spaces.filter((s) => s.rooms.some((id) => pending.has(id)));
   const id = `checks-${d.id}`;
+  const hdb = open.some((c) => !c.waivable);
   return (
     <section className="designer-checks" aria-labelledby={id}>
       <h4 id={id} className="section-title">
         Checks
       </h4>
-      <p className={open.length ? 'designer-checks-line negative' : 'designer-checks-line'}>
-        <span aria-hidden="true">{open.length ? '✕' : '✓'}</span> {checksLine(r, d)}
-        {waived.length > 0 && <span className="muted"> · {waived.length} accepted anyway</span>}
+      <p className={`designer-checks-line designer-checks-${line.tone}`}>
+        <span aria-hidden="true">
+          {line.tone === 'pass' ? '✓' : line.tone === 'waived' ? '!' : '✕'}
+        </span>{' '}
+        {line.text}
+        {line.tone === 'fail' && waived.length > 0 && (
+          <span className="muted"> · {waived.length} accepted anyway</span>
+        )}
       </p>
+      {waiting.length > 0 && (
+        <p className="field-hint">
+          Checking {waiting.map((s) => s.name).join(', ')}… its results come when it’s done.
+        </p>
+      )}
+      {assumed && <p className="field-hint">{assumed.text}</p>}
       {fixed > 0 && (
         <p className="field-hint">
           Checked and fixed {fixed} {fixed === 1 ? 'problem' : 'problems'} before showing you this.
@@ -109,7 +119,17 @@ export function ChecksView({ d, r }: { d: Design; r: DesignResult }) {
       {open.length + waived.length > 0 && (
         <ul className="designer-problems designer-failing">
           {open.map((c) => (
-            <Row key={c.key} c={c} r={r} d={d} />
+            <Row
+              key={c.key}
+              c={c}
+              r={r}
+              d={d}
+              {...(isUnplaced(c)
+                ? { note: '(this flat can’t give everyone a bed as it is)' }
+                : !c.waivable
+                  ? { note: '(HDB rule)' }
+                  : {})}
+            />
           ))}
           {waived.map((c) => (
             <Row key={c.key} c={c} r={r} d={d} note="(accepted anyway)" />
@@ -118,7 +138,8 @@ export function ChecksView({ d, r }: { d: Design; r: DesignResult }) {
       )}
       {open.length > 0 && (
         <p className="field-hint">
-          These parts are left unticked in Accept; Change something can ask the designer again.
+          We’ve left these out of Accept. To fix them, use Change something
+          {hdb ? '; an HDB rule can’t be accepted anyway' : ''}.
         </p>
       )}
       {already.length > 0 && (

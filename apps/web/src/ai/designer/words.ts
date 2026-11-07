@@ -35,6 +35,22 @@ export function humanize(
   level: Level,
   base?: Level,
 ): string {
+  return humanizeOnly(text, aliases, level, base);
+}
+
+/**
+ * A line that doesn't break inside a measurement or a hyphenated name: "0.35\u00a0m",
+ * "3\u2011seat".
+ */
+export const keepTogether = (s: string) =>
+  s.replace(/(\d) (m|mm|cm|°)\b/g, '$1\u00a0$2').replace(/(\w)-(\w)/g, '$1\u2011$2');
+
+function humanizeOnly(
+  text: string,
+  aliases: Record<string, string>,
+  level: Level,
+  base?: Level,
+): string {
   let unknown: string | null = null;
   const out = text.replace(/\b([WDRP])(\d{1,3})\b/g, (whole, kind: string, n: string) => {
     const id = aliases[`${kind}${n}`];

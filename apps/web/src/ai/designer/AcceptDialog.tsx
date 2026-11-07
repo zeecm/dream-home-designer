@@ -3,6 +3,7 @@ import {
   type Design,
   type Item,
   type Part,
+  type ResultCheck,
   allowedParts,
   aspectOf,
   dependsOnWalls,
@@ -22,10 +23,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProject } from '../../store';
 import { changeText, placeText } from '../../ui/Renovation';
 import { icons } from '../../ui/icons';
-import { failingChecks } from './Checks';
+import { failingParts } from './parts';
 import { baseOf, changeFrom, onPlanNow, planChanged, resultFor } from './plan';
 import { acceptVersion, designOpts, useDesigner, waiveChecks } from './state';
-import { humanize } from './words';
+import { humanize, keepTogether } from './words';
 
 /**
  * Put a version into the renovation: the walls (all or nothing), then per space its
@@ -109,17 +110,13 @@ export function AcceptDialog({ design: d, onClose }: { design: Design; onClose: 
   const [ticked, setTicked] = useState<Set<string> | null>(null);
   const [removeHand, setRemoveHand] = useState(false);
   const [asking, setAsking] = useState<string | null>(null);
-  // The hard checks the version caused that fail, by the part they belong to.
-  const failing = useMemo(() => {
-    const out = new Map<string, NonNullable<typeof r>['checks']>();
-    if (!r) return out;
-    for (const c of failingChecks(r, d).open) {
-      if (!c.part) continue;
-      const k = 'space' in c.part ? `${c.part.space}|${c.part.aspect}` : 'walls';
-      out.set(k, [...(out.get(k) ?? []), c]);
-    }
-    return out;
-  }, [r, d]);
+  // Accepted anyway in this dialog: held here, saved only when the accept goes through.
+  const [anyway, setAnyway] = useState<Set<string>>(new Set());
+  // The hard checks the version caused that fail (not waived before), by the part they belong to.
+  const failing = useMemo(
+    () => (r ? failingParts(r, new Set((d.waivers ?? []).map((w) => w.key))) : new Map()),
+    [r, d],
+  );
   if (!r || !now || !rows) return null;
   const all: Part[] = [
     ...(rows.changes.length ? [{ aspect: 'walls' } as Part] : []),
@@ -131,7 +128,8 @@ export function AcceptDialog({ design: d, onClose }: { design: Design; onClose: 
     ...(d.concept?.bathrooms.length ? [{ space: BATHROOMS, aspect: 'finishes' } as Part] : []),
   ];
   const on = ticked ?? new Set(all.map(key).filter((k) => !failing.has(k)));
-  const hdb = (k: string) => (failing.get(k) ?? []).some((c) => !c.waivable);
+  const hdb = (k: string) => !!failing.get(k)?.hdb;
+  const failsOf = (k: string) => (failing.get(k)?.checks ?? []) as ResultCheck[];
   const chosen = all.filter((p) => on.has(key(p)));
   const allowed = allowedParts(now, r.level, chosen);
   const ok = new Set(allowed.map(key));
@@ -145,38 +143,59 @@ export function AcceptDialog({ design: d, onClose }: { design: Design; onClose: 
   const toggle = (k: string) => {
     const next = new Set(on);
     if (next.has(k)) next.delete(k);
-    else if (failing.has(k)) {
-      // Not without saying so: Accept anyway records a waiver (never for an HDB rule).
+    else if (failing.has(k) && !anyway.has(k)) {
+      // Not without saying so: Accept anyway (never for an HDB rule).
       if (!hdb(k)) setAsking(k);
       return;
     } else next.add(k);
     setTicked(next);
   };
   const acceptAnyway = (k: string) => {
-    const checks = failing.get(k) ?? [];
     setAsking(null);
+    setAnyway(new Set([...anyway, k]));
     setTicked(new Set([...on, k]));
-    void waiveChecks(d, checks);
+  };
+  const words = (t: string) => keepTogether(humanize(t, d.aliases, r.level, d.baseLevel));
+  /** What leaving a part out leaves out, in words. */
+  const leaves = (k: string) => {
+    if (k === 'walls')
+      return `Leaves out all ${plural(rows.changes.length, 'change')} to walls and doors.`;
+    const [space, aspect] = k.split('|') as [string, Aspect];
+    const x = rows.spaces.find((y) => y.s.key === space);
+    if (!x) return null;
+    const n = x.counts[aspect];
+    const what = aspect === 'built-ins' ? 'built-in' : aspect === 'furniture' ? 'piece' : null;
+    return what ? `Leaves out all ${plural(n, what)} in ${x.s.name}.` : null;
   };
   const why = (k: string) => {
-    const cs = failing.get(k);
-    if (!cs?.length) return null;
-    const first = humanize(cs[0]?.text ?? '', d.aliases, r.level, d.baseLevel);
+    const cs = failsOf(k);
+    if (!cs.length) return null;
+    if (anyway.has(k)) {
+      return (
+        <span className="field-hint accept-why advise">
+          Accepting anyway: {plural(cs.length, 'problem')}
+        </span>
+      );
+    }
     return (
       <span className="field-hint accept-why negative">
         {hdb(k) ? 'HDB rule, can’t be accepted: ' : 'Doesn’t pass: '}
-        {first}
+        {words(cs[0]?.text ?? '')}
         {cs.length > 1 ? ` (and ${cs.length - 1} more)` : ''}
+        {!on.has(k) && leaves(k) ? <span className="accept-leaves"> {leaves(k)}</span> : null}
+        {hdb(k) ? <span className="accept-leaves"> Change something to fix it.</span> : null}
       </span>
     );
   };
   const askRow = (k: string) =>
     asking === k ? (
       <div className="notice-warning accept-anyway" role="alertdialog" aria-label="Accept anyway?">
-        <p>
-          Accept anyway?{' '}
-          {humanize(failing.get(k)?.[0]?.text ?? '', d.aliases, r.level, d.baseLevel)}
-        </p>
+        <p>Accept anyway? {plural(failsOf(k).length, 'problem')}:</p>
+        <ul className="accept-anyway-list">
+          {failsOf(k).map((c) => (
+            <li key={c.key}>{words(c.text)}</li>
+          ))}
+        </ul>
         <div className="button-row">
           <button type="button" className="btn btn-small" onClick={() => setAsking(null)}>
             Keep it out
@@ -313,7 +332,13 @@ export function AcceptDialog({ design: d, onClose }: { design: Design; onClose: 
             className="btn btn-primary"
             disabled={count === 0}
             onClick={() => {
-              void acceptVersion(d, allowed, removeHand).then((done) => done && close());
+              // What was accepted anyway is saved with the accept, never before it.
+              const waived = allowed.flatMap((p) =>
+                anyway.has(key(p)) ? failsOf(key(p)).filter((c) => c.waivable) : [],
+              );
+              void (waived.length ? waiveChecks(d, waived) : Promise.resolve(d))
+                .then((saved) => acceptVersion(saved, allowed, removeHand))
+                .then((done) => done && close());
             }}
           >
             Accept {plural(count, 'change')}

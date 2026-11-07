@@ -17,7 +17,7 @@ import { AiSettingsDialog } from '../AiSettingsDialog';
 import { useAi } from '../credentials';
 import { AcceptDialog } from './AcceptDialog';
 import { CaseDialog } from './CaseDialog';
-import { ChecksView, failingChecks } from './Checks';
+import { ChecksView, checksShort, failingChecks } from './Checks';
 import { CostCheck } from './CostCheck';
 import { showPoint, showRoom } from './focus';
 import {
@@ -149,7 +149,7 @@ function RunView({ run, live }: { run: Running; live: boolean }) {
   const cutOff = cut.reduce((t, x) => t + (x.cutOffHigh ?? 0), 0);
   const phaseLine =
     live && running
-      ? `Step ${progressOf(s).step} of ${progressOf(s).of}: ${running.label}…`
+      ? `Step ${progressOf(s).step} of ${progressOf(s).of}: ${running.label}${running.fixing ? ', checking and fixing' : ''}…`
       : s.phase === 'paused'
         ? 'Paused at your limit for this tab.'
         : null;
@@ -621,6 +621,17 @@ function ChangeSomething({ d, next }: { d: Design; next: number }) {
           </ul>
         </section>
       )}
+      <p className="field-hint">
+        Who lives here or sleeps where changed?{' '}
+        <button
+          type="button"
+          className="link-btn"
+          onClick={() => useDesigner.setState({ briefOpen: true })}
+        >
+          Edit the brief
+        </button>{' '}
+        (it makes a new version; these stay).
+      </p>
       <label className="field">
         <span className="field-label">What would you like different?</span>
         <textarea
@@ -678,6 +689,16 @@ function ChangeSomething({ d, next }: { d: Design; next: number }) {
   );
 }
 
+/** Whether an accept took only some of a version's parts. */
+function partly(d: Design): boolean {
+  const parts = d.accepted?.parts ?? [];
+  const spaces = Object.entries(d.spaces)
+    .filter(([, s]) => s.design)
+    .map(([k]) => k);
+  const took = new Set(parts.flatMap((p) => ('space' in p ? [p.space] : [])));
+  return spaces.some((k) => !took.has(k)) || parts.length === 0;
+}
+
 /** The version's card: kept as it is while a run's steps tick (its props don't change). */
 const Card = memo(function Card({
   d,
@@ -696,6 +717,19 @@ const Card = memo(function Card({
   const [finishing, setFinishing] = useState<{ est: RunEstimate; only?: string[] } | null>(null);
   const [wrong, setWrong] = useState(false);
   const failing = failingChecks(r, d).open.length;
+  const short = checksShort(r, d);
+  // While a run goes on, rooms not done yet (or being fixed) have no results to show.
+  const pending = useMemo(
+    () =>
+      new Set(
+        running
+          ? r.spaces
+              .filter((s) => !['done', 'copied', 'locked'].includes(s.status))
+              .flatMap((s) => s.rooms)
+          : [],
+      ),
+    [running, r],
+  );
   const base = baseOf(project, d.base.variant)?.base;
   const changes = useMemo(
     () =>
@@ -756,7 +790,7 @@ const Card = memo(function Card({
   const notes = useMemo(
     () => [
       {
-        title: 'Fixed for you',
+        title: 'Adjusted to fit',
         cls: 'designer-fixed',
         groups: byRoom(fixedNotes(r), r, d.aliases, d.baseLevel),
       },
@@ -816,8 +850,8 @@ const Card = memo(function Card({
         </div>
         <div>
           <dt>Checks</dt>
-          <dd className={failing ? 'num negative' : 'num'}>
-            {failing ? `${failing} fail` : 'Pass'}
+          <dd className={failing ? 'num negative' : short === 'Pass' ? 'num' : 'num advise'}>
+            {short}
           </dd>
         </div>
       </dl>
@@ -884,7 +918,7 @@ const Card = memo(function Card({
           Finish the design{finishEst.usd ? ` · about ${usd(finishEst.usd.typical)}` : ''}
         </button>
       )}
-      <ChecksView d={d} r={r} />
+      <ChecksView d={d} r={r} pending={pending} />
       {notes.map(
         (g) =>
           g.groups.length > 0 && (
@@ -961,7 +995,11 @@ const Card = memo(function Card({
               Delete version
             </button>
           </div>
-          {acceptedNow(d, after) && <p className="field-hint">In your renovation.</p>}
+          {acceptedNow(d, after) && (
+            <p className="field-hint">
+              {partly(d) ? 'Partly in your renovation.' : 'In your renovation.'}
+            </p>
+          )}
         </div>
       )}
       {wrong && (

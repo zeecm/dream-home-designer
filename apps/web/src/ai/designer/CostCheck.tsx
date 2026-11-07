@@ -69,7 +69,9 @@ export function CostCheck(p: CostCheckProps) {
   useEffect(() => heading.current?.focus(), []);
   const price = priceOf(p.ai.model, prices);
   const typical = p.est.usd?.typical ?? null;
-  const high = p.est.usd?.high ?? null;
+  // At most: every request at its limit, and every room sent back to be fixed.
+  const fix = p.est.usd?.fix ?? 0;
+  const high = p.est.usd ? p.est.usd.high + fix : null;
   const over = cap !== null && high !== null && spend.usd + high > cap;
   const tooBig = p.est.steps.some((s) => s.input > MAX_STEP_INPUT);
   const unsupported = designerCannotUse(p.ai);
@@ -90,13 +92,8 @@ export function CostCheck(p: CostCheckProps) {
             <p className="cost-figure num">About {usd(typical)}</p>
             <p className="cost-sub num">
               {tokens(p.est.tokens.typical)} tokens · at most {usd(high)}
+              {fix > 0 ? `, including up to ${usd(fix)} if the app sends rooms back to fix` : ''}
             </p>
-            {(p.est.usd?.fix ?? 0) > 0 && (
-              <p className="cost-sub num">
-                If the app sends a room back to fix what fails its checks, up to{' '}
-                {usd(p.est.usd?.fix ?? 0)} more.
-              </p>
-            )}
             <SpendMeter run={typical} high={high} />
           </>
         ) : (

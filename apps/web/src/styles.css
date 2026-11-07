@@ -5569,6 +5569,40 @@ textarea {
   gap: 4px 16px;
 }
 
+.advise {
+  color: var(--advise);
+}
+.designer-checks-waived {
+  color: var(--advise);
+}
+.designer-checks-fail {
+  color: var(--negative);
+}
+.accept-anyway-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--fs-hint);
+}
+.accept-leaves {
+  display: block;
+  color: var(--muted);
+}
+.accept-grid .check-row,
+.accept-body .check-row {
+  align-items: flex-start;
+}
+.accept-grid .check-row input,
+.accept-body .check-row input {
+  flex: none;
+  margin-top: 3px;
+}
+.sleep-row .chip[aria-pressed="true"]::before {
+  content: "✓ ";
+}
+.sleep-row .chip[data-assumed] {
+  border-style: dashed;
+}
+
 /* This is wrong: a case file to copy. */
 .case-dialog {
   width: min(480px, calc(100vw - 32px));
@@ -5576,6 +5610,7 @@ textarea {
 .case-body {
   display: grid;
   gap: 12px;
+  align-content: start;
   padding: 8px 20px 16px;
 }
 
@@ -5595,8 +5630,11 @@ textarea {
 .sleep-row {
   display: grid;
   grid-template-columns: minmax(96px, 30%) minmax(0, 1fr);
-  align-items: center;
+  align-items: start;
   gap: 8px;
+}
+.sleep-room {
+  padding-top: 6px;
 }
 .sleep-room {
   font-size: var(--fs-hint);
@@ -5607,8 +5645,14 @@ textarea {
   cursor: pointer;
   font-size: var(--fs-hint);
   min-height: 32px;
-  display: flex;
-  align-items: center;
+  display: list-item;
+  line-height: 32px;
+}
+@media (pointer: coarse) {
+  .sleep-names summary {
+    min-height: 44px;
+    line-height: 44px;
+  }
 }
 .sleep-names-grid {
   display: grid;
@@ -5637,6 +5681,7 @@ textarea {
 .accept-body {
   display: grid;
   gap: 12px;
+  align-content: start;
   padding: 8px 20px 16px;
 }
 .accept-space {

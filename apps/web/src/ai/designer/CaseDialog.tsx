@@ -42,12 +42,17 @@ export function CaseDialog({
   // What it can be about: a room of the version, or a piece in it.
   const targets = useMemo(() => {
     const rooms = r.spaces.map((s) => ({ value: `room:${s.main}`, label: s.name }));
+    // One entry per kind of piece in a room ("Dining chair · Living and dining", not four).
+    const seen = new Set<string>();
     const pieces = r.spaces.flatMap((s) =>
       s.items.flatMap((id) => {
         const it = r.level.items[id];
         const kind = it && furnitureKind(it.assetId);
         if (!kind || kind.ceiling) return [];
-        return [{ value: `item:${id}`, label: `${kind.name} · ${s.name}` }];
+        const label = `${kind.name} · ${s.name}`;
+        if (seen.has(label)) return [];
+        seen.add(label);
+        return [{ value: `item:${id}`, label }];
       }),
     );
     return { rooms, pieces };
@@ -145,8 +150,17 @@ export function CaseDialog({
         </label>
         <p className="field-hint">
           {file
-            ? `A case file of ${Math.ceil(new TextEncoder().encode(text).length / 1024)} KB: the plan before and as V${d.n} has it, your brief and the checks. No key, prices or plan image. Paste it into a GitHub issue to help fix this.`
-            : 'Pick what’s wrong to make a case file you can paste into a GitHub issue. Nothing is sent.'}
+            ? `A case file of ${Math.ceil(new TextEncoder().encode(text).length / 1024)} KB: the plan before and as V${d.n} has it, your brief (with names) and the checks. No key, prices or plan image. `
+            : 'Pick what’s wrong to make a case file. '}
+          Nothing is sent: you copy or download it, then{' '}
+          <a
+            href="https://github.com/zeecm/dream-home-designer/issues/new"
+            target="_blank"
+            rel="noreferrer"
+          >
+            paste it into a new GitHub issue
+          </a>{' '}
+          to help fix this.
         </p>
       </div>
       <footer className="dialog-foot">
