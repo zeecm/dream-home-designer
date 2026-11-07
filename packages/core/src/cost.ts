@@ -356,16 +356,17 @@ interface PricedLevel {
 /**
  * Every level's lines put together in the order one level has them: the renovation's
  * changes, debris once for the home, then painting, carpentry and electrical, each level by
- * level, then contingency over everything. With two or more levels a line's place starts
- * with its level's name ("Upper · Bedroom", or just "Upper" for a line in no room).
+ * level, then contingency over everything. In a home of two or more levels (`many`, priced
+ * or not) a line's place starts with its level's name ("Upper · Bedroom", or just "Upper" for
+ * a line in no room).
  */
 function assemble(
   priced: PricedLevel[],
   rates: Rates,
   renovation: boolean,
   unpriced: string[],
+  many: boolean,
 ): CostEstimate {
-  const many = priced.length > 1;
   const tagged = (p: PricedLevel, key: keyof LevelParts) =>
     p.parts[key].map((l): CostLine => {
       const place = !many
@@ -409,14 +410,24 @@ function assemble(
 }
 
 /**
- * Each level's name as an estimate shows it: "Level n" for a blank one, and its number added
- * when two share a name ("Level 1", "Level 2").
+ * Each level's name as an estimate shows it, every one different: a name only one level has
+ * stays; a blank one is "Level n", and one two levels share gets its number ("Level 1",
+ * "Level 2"), counting on from n while that is taken.
  */
 export function levelNames(levels: readonly Pick<Level, 'name'>[]): string[] {
   const names = levels.map((l) => l.name.trim());
-  return names.map((n, i) =>
-    !n ? `Level ${i + 1}` : names.filter((m) => m === n).length > 1 ? `${n} ${i + 1}` : n,
-  );
+  const once = (n: string) => !!n && names.filter((m) => m === n).length === 1;
+  // The names that stay as they are, so a made-up one never takes one of them.
+  const taken = new Set(names.filter(once));
+  return names.map((n, i) => {
+    if (once(n)) return n;
+    const base = n || 'Level';
+    let k = i + 1;
+    while (taken.has(`${base} ${k}`)) k++;
+    const name = `${base} ${k}`;
+    taken.add(name);
+    return name;
+  });
 }
 
 /**
@@ -426,7 +437,7 @@ export function levelNames(levels: readonly Pick<Level, 'name'>[]): string[] {
 export function costEstimate(before: Level, after: Level | undefined, rates: Rates): CostEstimate {
   const [name = ''] = levelNames([before]);
   const parts = levelParts(before, after, rates);
-  return assemble([{ id: before.id, name, parts }], rates, !!after, []);
+  return assemble([{ id: before.id, name, parts }], rates, !!after, [], false);
 }
 
 /**
@@ -447,7 +458,7 @@ export function projectEstimate(
     if (project.renovation && !after) unpriced.push(name);
     else priced.push({ id: before.id, name, parts: levelParts(before, after, rates) });
   });
-  return assemble(priced, rates, !!project.renovation, unpriced);
+  return assemble(priced, rates, !!project.renovation, unpriced, project.levels.length > 1);
 }
 
 /** One change of the renovation, priced (nothing for the household shelter: not allowed). */

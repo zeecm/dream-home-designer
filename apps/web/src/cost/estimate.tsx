@@ -408,7 +408,7 @@ export function EstimateDialog({ onClose }: { onClose: () => void }) {
               </h3>
               <ul className="estimate-lines">
                 {levels.map((r) => (
-                  <li key={r.name} className="estimate-line estimate-sub">
+                  <li key={r.id} className="estimate-line estimate-sub">
                     <span className="estimate-item">{r.name}</span>
                     <span className="num estimate-cost">{range(r.low, r.high)}</span>
                   </li>

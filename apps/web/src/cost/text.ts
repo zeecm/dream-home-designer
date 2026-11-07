@@ -26,10 +26,10 @@ export function unpricedText(est: CostEstimate): string | null {
     : `${listOf(n)} have no renovation plan, so they aren’t priced.`;
 }
 
-/** Levels priced that the app can't show (all but the first): they come from the file. */
+/** Levels priced that the app can't show (any but the one shown): they come from the file. */
 export function fromFileText(est: CostEstimate, shownId: string | undefined): string | null {
   const n = est.levels.filter((l) => l.id !== shownId).map((l) => l.name);
-  if (!n.length || est.levels.length < 2) return null;
+  if (!n.length) return null;
   return n.length === 1
     ? `${n[0]} is priced from the file. It can’t be shown or edited here yet.`
     : `${listOf(n)} are priced from the file. They can’t be shown or edited here yet.`;
@@ -39,16 +39,20 @@ export function fromFileText(est: CostEstimate, shownId: string | undefined): st
  * With two or more levels, the estimate by level: each level's lines, then what is the whole
  * home's (debris, contingency); they add up to the lines' total.
  */
-export function byLevel(est: CostEstimate): { name: string; low: number; high: number }[] {
+export function byLevel(
+  est: CostEstimate,
+): { id: string; name: string; low: number; high: number }[] {
   if (est.levels.length < 2) return [];
   const home = est.lines.filter((l) => !l.levelId);
-  const rows = est.levels.map((l) => ({ name: l.name, low: l.low, high: l.high }));
+  const rows = est.levels.map((l) => ({ id: l.id, name: l.name, low: l.low, high: l.high }));
   if (home.length) {
     const what = [
       home.some((l) => l.label === 'Debris disposal') && 'debris',
       home.some((l) => l.group === 'Contingency') && 'contingency',
     ].filter(Boolean);
     rows.push({
+      // No level has it: level ids are never blank.
+      id: '',
       name: `Whole home (${what.join(', ')})`,
       low: home.reduce((t, l) => t + l.low, 0),
       high: home.reduce((t, l) => t + l.high, 0),

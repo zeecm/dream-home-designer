@@ -769,6 +769,15 @@ function Rooms({
   );
 }
 
+/**
+ * How the chains outside are laid out, mm: the first one's line out from the outline and the
+ * step to each further out; an extension line starts off its face and runs past the line;
+ * figures stand off the line, a second row further out. `chainSegs` follows the same numbers.
+ */
+const CHAIN_MM = { first: 7, step: 7.5, extFrom: 1.5, extPast: 1.2, figGap: 0.7, row: 2.7 };
+/** How far out the `i`-th chain on a side runs (an aligned chain is the first). */
+const chainOffset = (i: number) => CHAIN_MM.first + i * CHAIN_MM.step;
+
 /** One chain of dimensions outside a side: extension lines, the line, ticks and figures. */
 function Chain({
   chain,
@@ -813,8 +822,8 @@ function Chain({
           strokeWidth={0.15}
         />
         {chain.stops.map((s, i) => {
-          const a = at(s, 1.5);
-          const b = at(s, offset + 1.2);
+          const a = at(s, CHAIN_MM.extFrom);
+          const b = at(s, offset + CHAIN_MM.extPast);
           const t0 = at(s, offset);
           return (
             // biome-ignore lint/suspicious/noArrayIndexKey: stops in order
@@ -919,7 +928,10 @@ function Chain({
     }
     rows[row] = mid + w / 2;
     // Text baseline, out from the line by a gap (and a row): letters stand outside it.
-    const across = lineAt + outSign * (0.7 + row * 2.7) + (outSign > 0 ? DIM_TEXT * 0.72 : 0);
+    const across =
+      lineAt +
+      outSign * (CHAIN_MM.figGap + row * CHAIN_MM.row) +
+      (outSign > 0 ? DIM_TEXT * 0.72 : 0);
     if (horizontal) {
       return (
         <text
@@ -958,11 +970,11 @@ function Chain({
     <g className="dim-chain" data-side={side} data-tier={chain.tier}>
       {chain.stops.map((s, i) => {
         const a = alongP(s);
-        const from = acrossP(chain.from[i] ?? chain.at) + outSign * 1.5;
+        const from = acrossP(chain.from[i] ?? chain.at) + outSign * CHAIN_MM.extFrom;
         return (
           // biome-ignore lint/suspicious/noArrayIndexKey: stops in order
           <g key={i}>
-            {L(pt(a, from), pt(a, lineAt + outSign * 1.2), 0.1, MUTED)}
+            {L(pt(a, from), pt(a, lineAt + outSign * CHAIN_MM.extPast), 0.1, MUTED)}
             {L(pt(a - 0.6, lineAt + 0.6), pt(a + 0.6, lineAt - 0.6), 0.25, INK)}
           </g>
         );
@@ -984,7 +996,7 @@ function Chains({ dims, sheet }: { dims: PlanDimensions; sheet: Sheet }) {
           key={`${side}${c.tier}`}
           chain={c}
           sheet={sheet}
-          offset={7 + i * 7.5}
+          offset={chainOffset(i)}
           blockers={outer}
         />,
       );
@@ -993,7 +1005,9 @@ function Chains({ dims, sheet }: { dims: PlanDimensions; sheet: Sheet }) {
   dims.chains
     .filter((c) => c.side === 'aligned')
     // biome-ignore lint/suspicious/noArrayIndexKey: aligned chains in order
-    .forEach((c, i) => out.push(<Chain key={`al${i}`} chain={c} sheet={sheet} offset={7} />));
+    .forEach((c, i) =>
+      out.push(<Chain key={`al${i}`} chain={c} sheet={sheet} offset={chainOffset(0)} />),
+    );
   return <g className="dimensions">{out}</g>;
 }
 
@@ -1013,14 +1027,16 @@ function chainSegs(dims: PlanDimensions, sheet: Sheet): Seg[] {
       horizontal ? sheet.P({ x: 0, y: v }).y : sheet.P({ x: v, y: 0 }).x;
     const pt = (a: number, c: number) => (horizontal ? { x: a, y: c } : { x: c, y: a });
     list.forEach((c, i) => {
-      const lineAt = acrossP(c.at) + outSign * (7 + i * 7.5);
+      const lineAt = acrossP(c.at) + outSign * chainOffset(i);
       c.stops.forEach((s, j) => {
-        const from = acrossP(c.from[j] ?? c.at) + outSign * 1.5;
-        segs.push([pt(alongP(s), from), pt(alongP(s), lineAt + outSign * 1.2)]);
+        const from = acrossP(c.from[j] ?? c.at) + outSign * CHAIN_MM.extFrom;
+        segs.push([pt(alongP(s), from), pt(alongP(s), lineAt + outSign * CHAIN_MM.extPast)]);
       });
       const a0 = alongP(c.stops[0] ?? 0) - 1.2;
       const a1 = alongP(c.stops[c.stops.length - 1] ?? 0) + 1.2;
-      for (const row of [0, 1.5, 4.2]) {
+      // The line, and the middles of its two rows of figures.
+      const mid = CHAIN_MM.figGap + DIM_TEXT * 0.36;
+      for (const row of [0, mid, mid + CHAIN_MM.row]) {
         segs.push([pt(a0, lineAt + outSign * row), pt(a1, lineAt + outSign * row)]);
       }
     });
@@ -1036,7 +1052,9 @@ function chainSegs(dims: PlanDimensions, sheet: Sheet): Seg[] {
       });
       return { x: p.x + l.out.x * out, y: p.y + l.out.y * out };
     };
-    for (const s of c.stops) segs.push([at(s, 1.5), at(s, 7 + 1.2)]);
+    for (const s of c.stops) {
+      segs.push([at(s, CHAIN_MM.extFrom), at(s, chainOffset(0) + CHAIN_MM.extPast)]);
+    }
   }
   return segs;
 }

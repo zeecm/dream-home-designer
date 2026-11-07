@@ -419,8 +419,10 @@ the rules. The changes are marked "(revised)".*
   long outside wall past the notch, which the side chain measures), the flank stops where it
   comes into view. That gives the U below two depths (2.00 and 1.70) and the sample one (1.00,
   not the kitchen's whole 2.8 m west face).
-- **Mouth and inner end** (revised): probed just past each end of the flank, a little in front
-  (5 cm, or `gap / 2` if less). Free space: the mouth. A wall or a room: the inner end.
+- **Mouth and inner end** (revised): probed just past each end of the flank, 5 mm in front
+  and a little further (5 cm, or `gap / 2` if less). Free space at both: the mouth. A wall or
+  a room at either: the inner end. (The 5 mm probe keeps a splayed V's back wall; the further
+  one finds a wall just past a closed slot's mouth.)
   - Neither end free (a shaft, or a slot closed at its mouth): no depth.
   - Both ends free (a slot right through, between two wings): no depth. **Gap in this spec:**
     a through-slot's length isn't measured anywhere yet; decide later whether it wants one.
@@ -447,9 +449,11 @@ the rules. The changes are marked "(revised)".*
   - 2.8 mm to 5 mm: in a break in the line;
   - under 2.8 mm: beyond the mouth along the line, moved out until it touches no chain line,
     extension line or chain figure row.
-- Two dimensions of one notch under 8 mm apart on paper: one short chain on the centre line
+- Two dimensions of one notch, parallel within 1° and under 8 mm apart on paper: one short
+  chain on the centre line
   (back face, nearer mouth, further mouth) with a figure per piece ("1700 | 300"), and an
-  extension line from each flank's mouth corner. Nothing is dropped.
+  extension line from each flank's mouth corner. Nothing is dropped. A tapered pair stays two
+  dimensions however close: one chain line can't carry two slanting depths.
 - Each is a `g.dim-notch` with `data-notch` (the group) and `data-depth` (the figures printed,
   space-separated). Not `.dim-chain`: the e2e suite counts `.dim-chain[data-tier="2"]` as the
   four overalls.
@@ -462,7 +466,10 @@ the rules. The changes are marked "(revised)".*
   side chain changes (today such a window is on no side chain; notch chains with opening stops
   are out of scope). (revised)
 - A slanted notch: the line follows the flanks.
-- Tapered or stepped flanks: a dimension along each flank (above).
+- Tapered or stepped flanks: a dimension along each flank (above). A stepped flank or one
+  broken by a pier is two flanks: the far flank pairs with the one it overlaps most; a piece
+  shut in at both ends has none; one left over is on its own (`gap / 2`).
+- A splayed V: a dimension along each flank.
 - After: hacked walls don't make notches; new walls do (the sheet measures the shown level).
 - A courtyard closed on all sides is a room or a hole, so it is not a notch; the end probe
   guarantees it even if one weren't.
@@ -487,7 +494,8 @@ Notch chains with opening stops, notches in rooms' insides, a through-slot's len
 7. E2e: sample, A4 (1:100): page 1 has one `.dim-notch` with `data-depth="1000"`, inside the
    outline's bounds, and still four tier-2 chains.
 8. Core: each end case (inner end, mouth, closed slot, through-slot), a slanted notch, a
-   tapered notch and a notch made by new walls in After. (added)
+   tapered notch, a splayed V, a pier, a stepped flank, a lone flank, the in-view rule just
+   under and just over the gap, and a notch made by new walls in After. (added)
 
 ---
 
@@ -510,12 +518,14 @@ today, maisonettes later) is under-priced without saying so.
   is identical. (revised)
 - Each line carries `levelId` and `levelName` (computed, no schema change); debris and
   contingency, which are the whole home's, carry none. (revised, UX design)
-- With 2 or more levels, each line's `place` starts with its level's name: "Upper · Bedroom";
+- In a home of 2 or more levels (priced or not), each line's `place` starts with its level's
+  name: "Upper · Bedroom";
   a line in no room is placed on the level itself ("Upper", not "Flat"). Debris stays "Flat".
 - `levels: { id, name, low, high }[]`: each level's subtotal (the sum of its lines). These and
   the whole home's lines add up to the sum of all lines. (added)
-- Level names: a blank one is "Level n"; names shared by two levels get their number
-  ("Level 1", "Level 2"). (added)
+- Level names, every one different: a blank one is "Level n"; names shared by two levels get
+  their number ("Level 1", "Level 2"); a made-up name counts on past one a level already has
+  (`['', 'Level 1']` → "Level 2", "Level 1"). (added)
 - With a renovation, a level that has no After copy isn't priced and is listed by name in
   `unpriced` (never dropped silently). (revised)
 - `renovation` is whether the project has one. Totals rounded as now.
@@ -529,8 +539,9 @@ today, maisonettes later) is under-priced without saying so.
   - a **By level** block above the groups: each level's subtotal, "Whole home (debris,
     contingency)" (naming what is there), then "Total, about $x–y";
   - summary hint: "Covers both levels: Ground and Upper." ("all 3 levels: …" for more);
-  - dialog note: "Upper is priced from the file. It can't be shown or edited here yet." There is
-    no level switcher, so no level is highlighted as current.
+  - dialog note, whenever a priced level isn't the one shown: "Upper is priced from the file.
+    It can't be shown or edited here yet." There is no level switcher, so no level is
+    highlighted as current.
 - A level with no renovation plan, in the summary and the dialog: "Upper has no renovation
   plan, so it isn't priced."
 - Phone: each line keeps two rows; the place moves to the second row beside the quantity

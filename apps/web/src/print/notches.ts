@@ -169,8 +169,8 @@ function extension(corner: Vec2, to: Vec2): Seg | null {
 
 /**
  * The notches' depths laid out on paper: `P` maps plan metres to paper mm, `k` is mm per
- * metre. One depth per line; two of one notch less than 8 mm apart become one chain on the
- * centre line between them (back face, nearer mouth, further mouth), with a figure per piece.
+ * metre. One depth per line; two of one notch, parallel and less than 8 mm apart, become one
+ * chain on the centre line between them (back face, nearer mouth, further mouth), with a figure per piece.
  * `blockers` are what a figure keeps off: the chains' extension lines and lines.
  */
 export function notchDrawings(
@@ -193,7 +193,12 @@ export function notchDrawings(
             ),
           )
         : Number.POSITIVE_INFINITY;
-    if (x && y && list.length === 2 && apart < NOTCH_MM.merge) {
+    // Parallel within 1° only: a chain's stops on one line can't stand for a taper's depths.
+    const parallel =
+      !!x &&
+      !!y &&
+      Math.abs(dot(unit(sub(x.b, x.a)), unit(sub(y.b, y.a)))) > Math.cos((1 * Math.PI) / 180);
+    if (x && y && list.length === 2 && parallel && apart < NOTCH_MM.merge) {
       out.push(chainOf(notch, x, y, P, k, blockers));
       continue;
     }

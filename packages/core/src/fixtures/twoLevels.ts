@@ -15,7 +15,7 @@ function renamed(level: Level): Level {
  * A home on two levels (a maisonette), for the estimate across levels: the reference 4-room
  * plan as "Ground" with a built-in wardrobe in the master bedroom, and again as "Upper", 2.8 m
  * above, with one in bedroom 2. No renovation. The e2e suite opens it as a file
- * (apps/web/e2e/fixtures/two-levels.dreamhome.json, written from this).
+ * (apps/web/e2e/two-levels.dreamhome.json, written from this).
  */
 export function twoLevelProject(id = 'prj_two_levels'): Project {
   const ward = furnitureKind('built-in-wardrobe');

@@ -411,11 +411,11 @@ describe('planDimensions: what the sheet needs clear', () => {
 });
 
 /** A U, 100 mm walls: the notch x 2–4 from y 2 opens to the bottom; the right arm `short` shorter. */
-const uPlan = (short = 0, slant = 0): [number, number][] => [
+const uPlan = (short = 0, slant = 0, slantRight = 0): [number, number][] => [
   [0, 0],
   [6, 0],
   [6, 4 - short],
-  [4, 4 - short],
+  [4 + slantRight, 4 - short],
   [4, 2],
   [2, 2],
   [2 - slant, 4],
@@ -560,6 +560,134 @@ describe('planDimensions: notch depths (slice 2s C1)', () => {
     );
     // At the back, where it is narrowest (it widens to 2.2 m at the mouth).
     for (const n of d.notches) expect(Math.abs(n.gap - 1.9)).toBeLessThan(0.04);
+  });
+
+  it('a splayed V (both flanks 0.9 m out over 2 m): a depth along each flank', () => {
+    const d = planDimensions(build([{ pts: uPlan(0, 0.9, 0.9) }]));
+    expect(d.notches).toHaveLength(2);
+    expect(d.notches[0]?.notch).toBe(d.notches[1]?.notch);
+    for (const n of d.notches) {
+      // Along its flank (0.9 across in 2 down), back face to mouth.
+      expect(Math.abs((n.b.x - n.a.x) / (n.b.y - n.a.y))).toBeCloseTo(0.45, 2);
+      expect(n.b.y).toBeGreaterThan(n.a.y);
+      expect(depth(n)).toBeGreaterThan(2);
+      expect(depth(n)).toBeLessThan(Math.hypot(0.9, 2) + 0.1);
+    }
+  });
+
+  /** A U 6 m deep (notch x 2–4 from y 1, gap 1.9), its right arm `short` shorter. */
+  const deepU = (short: number): [number, number][] => [
+    [0, 0],
+    [6, 0],
+    [6, 6 - short],
+    [4, 6 - short],
+    [4, 1],
+    [2, 1],
+    [2, 6],
+    [0, 6],
+    [0, 0],
+  ];
+
+  it('a flank in view past the notch for less than the gap runs on to its turn', () => {
+    const d = planDimensions(build([{ pts: deepU(1.85) }]));
+    expect(d.notches).toHaveLength(2);
+    const lengths = d.notches.map(depth).sort((p, q) => p - q);
+    expect(lengths[0]).toBeCloseTo(5 - 1.85, 3);
+    expect(lengths[1]).toBeCloseTo(5, 3);
+  });
+
+  it('in view for more than the gap, it stops where it comes into view: one depth', () => {
+    const d = planDimensions(build([{ pts: deepU(1.95) }]));
+    expect(d.notches).toHaveLength(1);
+    const n = d.notches[0] as NotchDim;
+    expect(depth(n)).toBeCloseTo(5 - 1.95, 3);
+    expect(n.a.x).toBeCloseTo(3, 3);
+  });
+
+  it('a lone flank (facing a wall with no room behind it): one depth, gap / 2 out', () => {
+    const d = planDimensions(
+      build([
+        { pts: box(2, 4) },
+        {
+          pts: [
+            [2, 0],
+            [4, 0],
+            [4, 4],
+          ],
+        },
+      ]),
+    );
+    expect(d.notches).toHaveLength(1);
+    const n = d.notches[0] as NotchDim;
+    expect(n.gap).toBeCloseTo(1.9, 3);
+    expect(n.a.x).toBeCloseTo(2.05 + 1.9 / 2, 3);
+    expect(n.a.y).toBeCloseTo(0.05, 3);
+    expect(n.b.y).toBeCloseTo(4.05, 3);
+    expect(n.corners).toHaveLength(1);
+  });
+
+  it('a pier on a flank: the far flank pairs with the piece past it; the piece behind it, shut in, has none', () => {
+    const d = planDimensions(
+      build([
+        { pts: uPlan() },
+        {
+          pts: [
+            [2, 3],
+            [2.3, 3],
+          ],
+        },
+      ]),
+    );
+    // The far flank (2.00) and the piece past the pier (1.00): one notch, one along each.
+    const pair = d.notches.filter((n) => Math.abs(n.b.y - n.a.y) > 0.5);
+    expect(pair).toHaveLength(2);
+    expect(pair[0]?.notch).toBe(pair[1]?.notch);
+    const [short, long] = [...pair].sort((p, q) => depth(p) - depth(q)) as [NotchDim, NotchDim];
+    expect(depth(short)).toBeCloseTo(1, 3);
+    expect(short.a.y).toBeCloseTo(3.05, 3);
+    expect(short.a.x).toBeCloseTo(2.05 + 1.9 / 4, 3);
+    expect(depth(long)).toBeCloseTo(2, 3);
+    // The piece behind the pier (both ends shut) has none. The back face over the pier is a
+    // pocket open to the side: on its own, the pier's 0.25 m out from the flank.
+    const upright = (n: NotchDim) => Math.abs(n.b.x - n.a.x) < 0.01;
+    expect(d.notches.filter((n) => upright(n) && Math.max(n.a.y, n.b.y) < 3)).toEqual([]);
+    const pocket = d.notches.filter((n) => !pair.includes(n));
+    expect(pocket.map((n) => Number(depth(n).toFixed(3)))).toEqual([0.25]);
+    expect(pocket[0]?.notch).not.toBe(pair[0]?.notch);
+  });
+
+  it('a stepped flank: the far flank pairs with the step it overlaps most; the other step is on its own', () => {
+    // Narrower at the back: the left flank at x 2.5 for y 2–2.6, then x 2 to the mouth.
+    const stepped: [number, number][] = [
+      [0, 0],
+      [6, 0],
+      [6, 4],
+      [4, 4],
+      [4, 2],
+      [2.5, 2],
+      [2.5, 2.6],
+      [2, 2.6],
+      [2, 4],
+      [0, 4],
+      [0, 0],
+    ];
+    const d = planDimensions(build([{ pts: stepped }]));
+    expect(d.notches).toHaveLength(3);
+    const byLength = [...d.notches].sort((p, q) => depth(p) - depth(q)) as [
+      NotchDim,
+      NotchDim,
+      NotchDim,
+    ];
+    const [back, front, far] = byLength;
+    expect(depth(back)).toBeCloseTo(0.6, 3);
+    expect(depth(front)).toBeCloseTo(1.4, 3);
+    expect(depth(far)).toBeCloseTo(2, 3);
+    // The far flank overlaps the front step most (1.4 m against 0.6 m): those two pair.
+    expect(front.notch).toBe(far.notch);
+    expect(back.notch).not.toBe(far.notch);
+    // On its own: gap / 2 out from its face (x 2.55), the gap to the far flank 1.4.
+    expect(back.gap).toBeCloseTo(1.4, 3);
+    expect(back.a.x).toBeCloseTo(2.55 + 0.7, 3);
   });
 
   it('a notch made by new walls in a renovation is in the After plan, not the Before', () => {

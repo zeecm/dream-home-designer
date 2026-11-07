@@ -66,6 +66,20 @@ describe('the estimate across levels, as the dialog and Copy show it', () => {
     );
     expect(unpricedText(est)).toBe('Upper has no renovation plan, so it isn’t priced.');
     expect(levelsHint(est)).toBeNull();
+    // Ground is shown: nothing is priced from the file.
+    expect(fromFileText(est, ground.id)).toBeNull();
+    // Only Upper priced, and the app shows Ground: Upper comes from the file.
+    const upper = p.levels[1];
+    if (!upper) throw new Error('no upper');
+    const onlyUpper = projectEstimate(
+      { ...p, renovation: { levels: [{ ...upper, id: `${upper.id}~after` }] } },
+      TYPICAL_RATES,
+    );
+    expect(fromFileText(onlyUpper, ground.id)).toBe(
+      'Upper is priced from the file. It can’t be shown or edited here yet.',
+    );
+    // Still a home of two levels: the places say which.
+    expect(onlyUpper.lines.find((l) => l.group === 'Painting')?.place).toMatch(/^Upper · /);
     expect(estimateText(est, 'x')).toContain('Upper has no renovation plan');
   });
 });

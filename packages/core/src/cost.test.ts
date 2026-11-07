@@ -297,6 +297,8 @@ describe('estimate across levels (slice 2s C2)', () => {
     expect(est.levels.map((l) => l.name)).toEqual(['Ground']);
     expect(est.unpriced).toEqual(['Upper']);
     expect(est.renovation).toBe(true);
+    // Still a home of two levels: Ground's places say so.
+    expect(est.lines.find((l) => l.group === 'Painting')?.place).toMatch(/^Ground · /);
     // A renovation level renamed on loading (it is no level's copy): nothing is priced.
     const odd = { levels: [{ ...first, id: 'lvl_x~after2' }] };
     const none = projectEstimate({ ...s.doc, renovation: odd }, R);
@@ -311,6 +313,18 @@ describe('estimate across levels (slice 2s C2)', () => {
       'Upper 1',
       'Upper 2',
       'Roof',
+    ]);
+    // Never one name twice: a made-up name counts on past one a level already has.
+    expect(levelNames([{ name: '' }, { name: 'Level 1' }])).toEqual(['Level 2', 'Level 1']);
+    expect(levelNames([{ name: 'A' }, { name: 'A' }, { name: 'A 2' }])).toEqual([
+      'A 1',
+      'A 3',
+      'A 2',
+    ]);
+    expect(levelNames([{ name: '' }, { name: '' }, { name: 'Level 2' }])).toEqual([
+      'Level 1',
+      'Level 3',
+      'Level 2',
     ]);
     const est = projectEstimate(withUpper(room(3, 4), '').doc, R);
     expect(est.levels.map((l) => l.name)).toEqual(['Ground', 'Level 2']);

@@ -1,4 +1,14 @@
-import { type Level, type NotchDim, planDimensions, sampleFlatProject } from '@dhd/core';
+import {
+  type EditorDoc,
+  type Level,
+  type NotchDim,
+  blankProject,
+  dispatch,
+  drawWall,
+  emptyHistory,
+  planDimensions,
+  sampleFlatProject,
+} from '@dhd/core';
 import { describe, expect, it } from 'vitest';
 import { type Seg, notchDrawings, notchFigure, readingAngle } from './notches';
 
@@ -107,5 +117,47 @@ describe('notchDrawings', () => {
     expect(d[0]?.ticks.map((t) => Number(t.y.toFixed(2)))).toEqual([20.5, 37.5, 40.5]);
     expect(d[0]?.ticks.every((t) => Math.abs(t.x - 27.5) < 1e-6)).toBe(true);
     expect(d[0]?.ext).toHaveLength(2);
+  });
+
+  it('a tapered pair, however close on paper, stays two depths: a chain would make up figures', () => {
+    // A U whose left flank slants 0.3 m out over its 2 m (core's tapered-notch fixture).
+    let st: EditorDoc = { doc: blankProject('t', 'prj_t'), history: emptyHistory() };
+    const pts: [number, number][] = [
+      [0, 0],
+      [6, 0],
+      [6, 4],
+      [4, 4],
+      [4, 2],
+      [2, 2],
+      [1.7, 4],
+      [0, 4],
+      [0, 0],
+    ];
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const [ax, ay] = pts[i] as [number, number];
+      const [bx, by] = pts[i + 1] as [number, number];
+      const lvl = st.doc.levels[0] as Level;
+      const r = drawWall(
+        lvl,
+        { point: { x: ax, y: ay } },
+        { point: { x: bx, y: by } },
+        {
+          thickness: 0.1,
+        },
+      );
+      st = dispatch(st, r.command);
+    }
+    const notches = planDimensions(st.doc.levels[0] as Level).notches;
+    expect(notches).toHaveLength(2);
+    // At 1:200 (5 mm a metre) the two lines are under 8 mm apart, but not parallel.
+    const P5 = (v: { x: number; y: number }) => ({ x: v.x * 5, y: v.y * 5 });
+    const d = notchDrawings(notches, P5, 5);
+    expect(d).toHaveLength(2);
+    const depths = d.flatMap((x) => x.depths).sort();
+    const expected = notches
+      .map((n) => String(Math.round(Math.hypot(n.b.x - n.a.x, n.b.y - n.a.y) * 100) * 10))
+      .sort();
+    expect(depths).toEqual(expected);
+    expect(depths).toEqual(['2000', '2020']);
   });
 });

@@ -524,9 +524,9 @@ function flanksOf(facing: Facing[], polys: Polys): Flank[] {
  * front ray meets the flat), and its gap the shortest of those rays. It runs on to where the
  * face turns, unless the face goes on in view for more than the gap (a long outside wall
  * past the notch, measured on the side chain): then it stops where the face comes into view.
- * Probed just past each end, a little in front (5 cm, or `gap / 2` if less): free space is
- * its mouth, the flat its inner end. Neither (a shaft or closed slot) or both (a slot right through) give no depth. Two
- * flanks face each other when each one's rays land on the other's face; paired by the most
+ * Probed just past each end, 5 mm in front and a little further (5 cm, or `gap / 2` if
+ * less): free space at both is its mouth, the flat at either its inner end. Neither (a shaft
+ * or closed slot) or both (a slot right through) give no depth. Two flanks face each other when each one's rays land on the other's face; paired by the most
  * overlap. Facing within 1°, with ends that agree within 5 mm: one depth on the centre line
  * between them. Otherwise (mouths that differ, or a taper), one along each flank, `gap / 4`
  * out from its face; a flank on its own, `gap / 2` out. Flanks under 0.10 m are left out.
@@ -559,9 +559,11 @@ function notchDims(facing: Facing[], polys: Polys, segs: Seg[]): NotchDim[] {
     if (d1 - d0 < MIN_NOTCH) return [];
     const a = offset(f.a, t, d0);
     const b = offset(f.a, t, d1);
-    // Close in front (a probe out in the middle of a tapered notch could miss its back).
+    // Free only if free both just off the face (a splayed flank leaves the back wall's
+    // thickness quickly) and a little further out (a wall just past a closed slot's mouth).
     const ahead = Math.min(gap / 2, PROBE);
-    const freeAt = (end: Vec2, k: number) => free(offset(offset(end, t, k), f.out, ahead), polys);
+    const freeAt = (end: Vec2, k: number) =>
+      [0.005, ahead].every((o) => free(offset(offset(end, t, k), f.out, o), polys));
     const freeA = freeAt(a, -PAST_END);
     const freeB = freeAt(b, PAST_END);
     if (freeA === freeB) return [];
