@@ -845,7 +845,9 @@ function work(
   }).map((c) => {
     // In the plan before and not the version's doing: a piece it didn't touch, a room it
     // didn't furnish, or what furnishing can't change (a window, the bedroom count).
+    // Someone with nowhere to sleep is always the version's to answer for.
     const already =
+      !c.key.startsWith('P1|unplaced') &&
       baseKeys.has(c.key) &&
       (c.itemId
         ? unchanged(c.itemId)
@@ -860,10 +862,8 @@ function work(
       if (key && (aspect === 'furniture' || aspect === 'built-ins')) part = { space: key, aspect };
     } else if (c.key.startsWith('P1|window')) {
       part = { aspect: 'walls' };
-    } else if (c.roomId) {
-      const key = spaceKeyOf(c.roomId);
-      if (key) part = { space: key, aspect: 'furniture' };
     }
+    // A missing piece (a bed, a seat) is the room's: the pieces that are there stay ticked.
     return { ...c, already, part };
   });
   const passes = !checks.some((c) => c.hard && !c.already);

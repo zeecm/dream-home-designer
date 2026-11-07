@@ -91,7 +91,7 @@ describe('P1: function per room (criteria 1, 2)', () => {
   it('a double bed needs one long side to get in (0.50 m); 0.60 m is better (advice)', () => {
     // QUEEN: 0.29 m to the north wall, a metre to the south: the short side is a note.
     const cs = run(withPieces(base, [QUEEN]));
-    const zone = cs.filter((c) => c.key.startsWith(`P4|zone|it_f000`));
+    const zone = cs.filter((c) => c.key.startsWith('P4|zone|it_f000'));
     expect(zone.every((c) => !c.hard)).toBe(true);
     expect(zone.map((c) => c.text)).toContain(
       'The queen bed has one side to get in; the other is against the wall, fine in a small room.',

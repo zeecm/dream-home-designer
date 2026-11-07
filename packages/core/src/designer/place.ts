@@ -45,7 +45,7 @@ export type Hit =
 const SOFT = new Set<Hit['kind']>(['zone', 'in-zone']);
 export const blocking = (hs: Hit[]) => hs.some((h) => !SOFT.has(h.kind));
 
-const SEAT = /dining-chair|stool|plastic-chair/;
+const SEAT = /dining-chair|desk-chair|stool|plastic-chair/;
 const TABLE = /table|desk|dining-\d/;
 
 interface Placed {

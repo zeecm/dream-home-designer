@@ -22,6 +22,15 @@ export const CASE_MAX_BYTES = 200_000;
 
 export const WRONG = ['missing', 'facing', 'in-the-way', 'doesnt-fit', 'odd', 'other'] as const;
 export type Wrong = (typeof WRONG)[number];
+/** The checks each kind of wrong is about (by key prefix); '' for any. */
+const WHAT_KEY: Record<Wrong, string> = {
+  missing: 'P1',
+  facing: 'P2|faces',
+  'in-the-way': 'P3',
+  'doesnt-fit': 'P4',
+  odd: '',
+  other: '',
+};
 export const WRONG_TEXT: Record<Wrong, string> = {
   missing: 'Missing something',
   facing: 'Facing the wrong way',
@@ -53,6 +62,8 @@ export const CaseFile = z.object({
   model: z.string().nullable(),
   /** No check flags it yet: why, so the suite still passes until a principle covers it. */
   known: z.string().optional(),
+  /** The check (a key prefix, "P2|faces") that must flag it; else the one its `what` names. */
+  expect: z.string().optional(),
 });
 export type CaseFile = z.infer<typeof CaseFile>;
 
@@ -121,5 +132,7 @@ export function checkCase(
           ? x.roomId === p.roomId || inRoom(x.itemId)
           : !before.has(x.key)),
   );
-  return { flagged, ok: flagged.length > 0 };
+  // Its own line: the check it pins, else the principle what's wrong points to.
+  const own = c.expect ?? WHAT_KEY[c.what];
+  return { flagged, ok: flagged.some((x) => !own || x.key.startsWith(own)) };
 }

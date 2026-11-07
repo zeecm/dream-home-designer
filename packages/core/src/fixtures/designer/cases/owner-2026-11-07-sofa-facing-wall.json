@@ -1695,5 +1695,6 @@
  "rules": [],
  "app": "designer-checks-1",
  "schemaVersion": 10,
- "model": null
+ "model": null,
+ "expect": "P2|faces"
 }

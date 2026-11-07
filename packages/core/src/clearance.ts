@@ -56,6 +56,7 @@ export const CLEARANCE_RULES: Record<string, ClearanceRule> = {
   'bed-queen': { side: 'sides', need: 0.6, what: 'Getting into bed needs' },
   'bed-king': { side: 'sides', need: 0.6, what: 'Getting into bed needs' },
   'bed-single': { side: 'either-side', need: 0.6, what: 'Getting into bed needs' },
+  'bed-bunk': { side: 'either-side', need: 0.6, what: 'Getting into bed needs' },
   'bed-super-single': { side: 'either-side', need: 0.6, what: 'Getting into bed needs' },
 };
 
@@ -121,7 +122,7 @@ export type ClearanceIssue =
 export const issueItem = (i: ClearanceIssue): string | null => ('itemId' in i ? i.itemId : null);
 
 /** Pieces that sit under a table or desk, and the tables and desks they sit under. */
-const SEAT = /dining-chair|stool|plastic-chair/;
+const SEAT = /dining-chair|desk-chair|stool|plastic-chair/;
 const TABLE = /table|desk|dining-\d/;
 /** Pieces of a kitchen run: cabinets, and the fridge and washer that stand in line with them. */
 const isKitchen = (id: string) =>

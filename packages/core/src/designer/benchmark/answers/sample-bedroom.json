@@ -53,6 +53,23 @@
       "zone": "sleep"
     },
     {
+      "ref": "chair1",
+      "assetId": "armchair",
+      "keep": null,
+      "wall": null,
+      "along": null,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "A firm chair with arms for Mdm Koh to sit and stand from.",
+      "against": "free",
+      "faces": "room",
+      "near": null,
+      "zone": "sleep"
+    },
+    {
       "ref": "ward1",
       "assetId": "wardrobe",
       "keep": null,

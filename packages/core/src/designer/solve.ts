@@ -91,7 +91,7 @@ const KEEP = 16;
 /** How many of a piece's best candidates are tried with the pieces that go with it. */
 const LOOK = 8;
 /** Going back: how many other places each piece tried. */
-const ALTS = 5;
+const ALTS = 8;
 const GRID = 0.25;
 const ALONG = 0.2;
 const deg = (r: number) => (r * 180) / Math.PI;
@@ -219,7 +219,7 @@ export function solveSpace(input: SolveInput): SolveOutcome {
   }
 
   /** The candidates for a piece, given what is placed (by ref), best first. */
-  function candidates(t: Intent, placed: Map<string, Item>): Candidate[] {
+  function candidates(t: Intent, placed: Map<string, Item>, all = false): Candidate[] {
     const w = t.want;
     const k = w.kind;
     const rel = relationOf(k);
@@ -230,7 +230,13 @@ export function solveSpace(input: SolveInput): SolveOutcome {
     // Facing a TV: along its line as well as on a wall (a floating sofa).
     const facesTv = !!anchor && !!rel?.faces && anchorRole === 'tv';
     // A seat facing the TV is tried against a wall too, whatever the designer said.
-    const onWall = t.against !== 'free' || wallOnly || (facesTv && !!rel?.backs);
+    // A free piece with nothing to go with is tried against the walls too (an armchair in a
+    // corner the floor grid steps over).
+    const onWall =
+      t.against !== 'free' ||
+      wallOnly ||
+      (facesTv && !!rel?.backs) ||
+      (!anchorRef && !k.walkThrough);
     const out: Candidate[] = [];
     const seen = new Set<string>();
     const keepOut = ix.keepOut;
@@ -305,9 +311,9 @@ export function solveSpace(input: SolveInput): SolveOutcome {
       }
     }
 
-    if (!onWall || facesTv || (!out.length && !wallOnly)) {
+    if (!onWall || facesTv || (t.against === 'free' && !wallOnly) || (!out.length && !wallOnly)) {
       // Free-standing; a little less wished for when the designer asked for a wall.
-      const wish = onWall ? -1 : 0;
+      const wish = t.against !== 'free' ? -1 : 0;
       const poses: { at: Vec2; r: number }[] = [];
       if (anchor) {
         const a = centre(anchor);
@@ -396,6 +402,8 @@ export function solveSpace(input: SolveInput): SolveOutcome {
     }
     ix.keepOut = keepOut;
     out.sort((p, q) => q.score - p.score);
+    // Going back looks at every clear place, not just the best few.
+    if (all) return out;
     const best = out.slice(0, KEEP);
     // The pieces that go with it must still fit: try the best few with them.
     const deps = dependents.get(w.ref) ?? [];
@@ -498,6 +506,58 @@ export function solveSpace(input: SolveInput): SolveOutcome {
         s -= 8;
         related = false;
       } else s -= Math.abs(dist - (f.min + f.max) / 2.6) * 0.3;
+    }
+    // A seat faces a sofa from in front of it, never its arm.
+    if (anchor && anchorRole === 'sofa' && rel?.faces) {
+      if (dotTo(anchor, at) <= itemSize(anchor).d / 2) {
+        s -= 8;
+        related = false;
+      }
+    }
+    // Chairs evenly round their table: a side with more than its opposite costs.
+    if (anchor && role === 'dining-chair') {
+      const sideOf2 = (p: Vec2) => {
+        const c = Math.cos(-anchor.rotationY);
+        const sn = Math.sin(-anchor.rotationY);
+        const dx = p.x - anchor.position.x;
+        const dy = p.y - anchor.position.z;
+        const lx = dx * c - dy * sn;
+        const ly = dx * sn + dy * c;
+        const { w: aw, d: ad } = itemSize(anchor);
+        return Math.abs(lx) / aw > Math.abs(ly) / ad
+          ? lx > 0
+            ? 'x+'
+            : 'x-'
+          : ly > 0
+            ? 'y+'
+            : 'y-';
+      };
+      const opposite: Record<string, string> = { 'x+': 'x-', 'x-': 'x+', 'y+': 'y-', 'y-': 'y+' };
+      const mine = sideOf2(at);
+      const seats = [...placed.values()].filter(
+        (q) =>
+          roleOf(furnitureKind(q.assetId)) === 'dining-chair' &&
+          polygonGap(itemFootprint(q), itemFootprint(anchor)).d < 0.4,
+      );
+      const same = seats.filter((q) => sideOf2(centre(q)) === mine).length;
+      const opp = seats.filter((q) => sideOf2(centre(q)) === opposite[mine]).length;
+      if (same > opp) s -= 1.5 * (same - opp);
+    }
+    // Dining apart from the lounge, with a way between.
+    if (rel?.apart) {
+      const ap = rel.apart;
+      for (const q of placed.values()) {
+        if (!ap.from.includes(roleOf(furnitureKind(q.assetId)))) continue;
+        const d = polygonGap(fp, itemFootprint(q)).d;
+        if (d < ap.gap) s -= 1.5 + (ap.gap - d) * 2;
+      }
+    }
+    // A bed's long side against a wall, or a proper way beside it: not a gap pillows fall into.
+    if (role === 'bed') {
+      for (const side of ['left', 'right'] as const) {
+        const g = roomOff(sideOf(fp, side), 0.35, solids);
+        if (g > 0.03 && g < 0.3) s -= 2;
+      }
     }
     if (anchor && rel?.before) {
       const gap = roomOff(sideOf(itemFootprint(anchor), 'front'), rel.before.max + 1, [fp]);
@@ -656,7 +716,7 @@ export function solveSpace(input: SolveInput): SolveOutcome {
     for (const j of backs) {
       const was = chosen.slice(j, i + 1);
       undoTo(j);
-      const alts = alternatives(candidates(order[j] as Intent, placed));
+      const alts = alternatives(candidates(order[j] as Intent, placed, true));
       for (const alt of alts) {
         put(j, alt);
         for (let m = j + 1; m <= i; m++) put(m, candidates(order[m] as Intent, placed)[0] ?? null);

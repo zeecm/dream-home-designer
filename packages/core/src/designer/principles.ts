@@ -33,6 +33,7 @@ export type Role =
   | 'rug'
   | 'dining-table'
   | 'dining-chair'
+  | 'desk-chair'
   | 'stool'
   | 'kitchen'
   | 'fridge'
@@ -51,6 +52,8 @@ const ROLE_OF: Record<string, Role> = {
   'bed-super-single': 'bed',
   'bed-queen': 'bed',
   'bed-king': 'bed',
+  'bed-bunk': 'bed',
+  'desk-chair': 'desk-chair',
   bedside: 'bedside',
   'nightstand-painted': 'bedside',
   wardrobe: 'wardrobe',
@@ -148,6 +151,8 @@ export const roleOfItem = (it: Item, kind = furnitureKind(it.assetId)): Role => 
  * - near: within `within` of a piece of `of` (by its head end, with `head`).
  * - belongs: within `within` of a piece of `of`, facing it within `angle`.
  * - before: its nearest edge `min`–`max` from the front of a piece of `of`.
+ * - apart: at least `gap` from every piece of `from` (advice, never a block).
+ * Facing a seat (an armchair to the sofa) means from in front of it, never its arm.
  */
 export interface Relation {
   backs?: { gap: number; free?: number; window?: boolean };
@@ -155,6 +160,8 @@ export interface Relation {
   near?: { of: Role[]; within: number; head?: boolean };
   belongs?: { of: Role[]; within: number; angle: number };
   before?: { of: Role[]; min: number; max: number };
+  /** At least `gap` from any piece of `from` (advice: a way between two zones). */
+  apart?: { from: Role[]; gap: number };
 }
 
 /** Each role's relationships (spec table P2). A new kind needs only its row. */
@@ -177,7 +184,8 @@ export const RELATIONS: Partial<Record<Role, Relation>> = {
     backs: { gap: 0.05 },
     faces: { focus: ['sofa'], angle: 30, min: 0, max: 6, over: 9, clear: 0 },
   },
-  'tv-console': { backs: { gap: 0.05 }, near: { of: ['tv'], within: 0.3 } },
+  // The TV stands on its console (or none at all).
+  'tv-console': { backs: { gap: 0.05 }, near: { of: ['tv'], within: 0.05 } },
   bed: { backs: { gap: 0.05 } },
   wardrobe: { backs: { gap: 0.05 } },
   drawers: { backs: { gap: 0.05 } },
@@ -188,9 +196,12 @@ export const RELATIONS: Partial<Record<Role, Relation>> = {
   washer: { backs: { gap: 0.1 } },
   console: { backs: { gap: 0.05 } },
   'dining-chair': { belongs: { of: ['dining-table', 'desk'], within: 0.3, angle: 45 } },
+  'desk-chair': { belongs: { of: ['desk'], within: 0.35, angle: 60 } },
   desk: { backs: { gap: 0.05, free: 0.8 } },
   bedside: { near: { of: ['bed'], within: 0.15, head: true } },
   'coffee-table': { before: { of: ['sofa'], min: 0.35, max: 0.5 } },
+  // Dining apart from the lounge: a walkway between the zones (advice).
+  'dining-table': { apart: { from: ['sofa', 'armchair', 'coffee-table', 'tv-console'], gap: 0.9 } },
 };
 
 /** The relationships of a kind: its own row (`extra`, by kind id, for a new kind) or its role's. */
@@ -230,7 +241,9 @@ export const FIT = {
 /** How high a piece stands where a window's sill is concerned (a bed: its mattress). */
 export function sillTop(kind: FurnitureKind, height: number): number {
   const bottom = kind.elevation ?? 0;
-  return bottom + (roleOf(kind) === 'bed' ? Math.min(height, FIT.mattress) : height);
+  // A bunk's upper bed stands well above any sill: measured whole.
+  const mattress = roleOf(kind) === 'bed' && sleepsOf(kind) === 1;
+  return bottom + (mattress ? Math.min(height, FIT.mattress) : height);
 }
 
 /**
@@ -244,6 +257,7 @@ export const ACCESS: Record<string, { hard: number; soft: number; oneSide?: bool
   'bed-super-single': { hard: 0.5, soft: 0.6 },
   'bed-queen': { hard: 0.5, soft: 0.6, oneSide: true },
   'bed-king': { hard: 0.5, soft: 0.6, oneSide: true },
+  'bed-bunk': { hard: 0.5, soft: 0.6 },
   'built-in-wardrobe': { hard: 0.5, soft: 0.6 },
 };
 
@@ -341,8 +355,15 @@ export function placesOf(kind: FurnitureKind, width = kind.size.w, depth = kind.
   return long >= 1.75 ? 6 : 4;
 }
 
+/** "is" or "are" after a piece's name ("the steel-frame shelves are"). */
+export const isAre = (name: string) =>
+  /\b(shelves|baskets|compressors)\b/i.test(name) ? 'are' : 'is';
+
 /** A bed for two: at least a queen's width. */
 export const isDouble = (width: number) => width >= 1.52 - 0.01;
+
+/** Single places a bed has, one above the other (a bunk bed's two). */
+export const sleepsOf = (kind: FurnitureKind) => (kind.id === 'bed-bunk' ? 2 : 1);
 
 // ------------------------------------------------------------------ the household
 
@@ -395,7 +416,10 @@ export function sleepingPlan(
 ): SleepingPlan {
   const people = peopleOf(brief);
   const byKey = new Map(people.map((p) => [p.key, p]));
-  const said = Object.entries(brief.sleeping ?? {}).filter(([, ps]) => ps.length);
+  // Said only if it names someone in the household (a stale assignment falls back to assumed).
+  const said = Object.entries(brief.sleeping ?? {}).filter(([, ps]) =>
+    ps.some((k) => byKey.has(k)),
+  );
   const rooms = new Map<string, Person[]>();
   if (said.length) {
     const placed = new Set<string>();

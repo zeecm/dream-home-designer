@@ -36,8 +36,10 @@ describe('the cases folder (criteria 15, 16)', () => {
         expect(ok).toBe(false);
         return;
       }
-      expect(flagged.map((x) => x.text)).not.toEqual([]);
-      expect(ok).toBe(true);
+      expect(
+        ok,
+        `${f} (“${c.title}”): no hard check flags it on what was pointed at (got: ${flagged.map((x) => x.text).join(' | ') || 'none'}). Fix the principle or catalogue row that covers it, or mark the case "known" with why.`,
+      ).toBe(true);
     });
   }
 

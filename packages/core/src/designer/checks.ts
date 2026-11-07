@@ -20,6 +20,7 @@ import {
   type Relation,
   type Role,
   UNDER_WINDOW,
+  isAre,
   isDouble,
   peopleOf,
   placesOf,
@@ -28,6 +29,7 @@ import {
   seatsOf,
   sillTop,
   sleepingPlan,
+  sleepsOf,
   windowZones,
 } from './principles';
 import type { DesignBrief, RoomUse } from './schema';
@@ -269,8 +271,8 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
           hard: true,
           waivable: !hdb,
           text: hdb
-            ? `${cap(label(i.itemId))} is in the shelter door’s swing: the shelter door must open.`
-            : `${cap(label(i.itemId))} is in a door’s swing.`,
+            ? `${cap(label(i.itemId))} ${isAre(label(i.itemId))} in the shelter door’s swing: the shelter door must open.`
+            : `${cap(label(i.itemId))} ${isAre(label(i.itemId))} in a door’s swing.`,
           itemId: i.itemId,
           openingId: i.openingId,
           issue: i,
@@ -395,8 +397,13 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
       const f = rel.faces;
       const front = sideOf(p.fp, 'front');
       const ahead = roomOff(front, f.clear, walls);
+      // A seat is faced from in front of it, never from its arm or its back.
+      const inFront = (q: Piece) => {
+        const v = { x: p.it.position.x - q.it.position.x, y: p.it.position.z - q.it.position.z };
+        return dot(v, fwd(q.it)) > q.size.d / 2;
+      };
       const focus = others
-        .filter((q) => f.focus.includes(q.role))
+        .filter((q) => f.focus.includes(q.role) && (q.role !== 'sofa' || inFront(q)))
         .sort(
           (a, b) =>
             offAngle(p.it, centre(a.it)) - offAngle(p.it, centre(b.it)) ||
@@ -471,6 +478,23 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
         if (offAngle(p.it, target) > bel.angle + 1e-6 && offAngle(p.it, centre(best.q.it)) > 90) {
           fail('belongs', `The ${name} faces away from its table.`);
         }
+      }
+    }
+    if (rel.apart) {
+      const ap = rel.apart;
+      const close = others
+        .filter((q) => ap.from.includes(q.role) && blocks(q.it))
+        .map((q) => ({ q, d: polygonGap(p.fp, q.fp).d }))
+        .sort((a, b) => a.d - b.d)[0];
+      if (close && close.d < ap.gap - 0.005) {
+        out.push({
+          key: `P2|apart|${p.it.id}`,
+          principle: 'P2',
+          hard: false,
+          waivable: true,
+          text: `Leave ${m(ap.gap)} between the ${name} and the ${nameOf(close.q.kind)} to walk between them: ${m(close.d)} now.`,
+          itemId: p.it.id,
+        });
       }
     }
     if (rel.before) {
@@ -648,7 +672,7 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
                   principle: 'P1',
                   hard: true,
                   waivable: true,
-                  text: `${cap(label(p.it.id))} is too deep for ${r.name}: ${m(CIRCULATION.corridorDepth)} at most here.`,
+                  text: `${cap(label(p.it.id))} ${isAre(label(p.it.id))} too deep for ${r.name}: ${m(CIRCULATION.corridorDepth)} at most here.`,
                   itemId: p.it.id,
                   roomId: r.id,
                 });
@@ -747,7 +771,7 @@ function bedNeeds(
   const people: Person[] = plan.rooms.get(roomId) ?? [];
   const beds = pieces
     .filter((p) => p.role === 'bed')
-    .map((p) => ({ double: isDouble(p.size.w), w: p.size.w }));
+    .map((p) => ({ double: isDouble(p.size.w), w: p.size.w, places: sleepsOf(p.kind) }));
   if (!people.length) {
     if (plan.assumed && !beds.length) {
       return [{ who: 'anyone', text: `${roomName} has no bed.` }];
@@ -755,11 +779,16 @@ function bedNeeds(
     return [];
   }
   let doubles = beds.filter((b) => b.double).length;
-  let singles = beds.length - doubles;
+  // A bunk bed is two single places.
+  let singles = beds.filter((b) => !b.double).reduce((t, b) => t + b.places, 0);
   const missing: Person[] = [];
   const sleepers = people.filter((p) => !(p.kind === 'child' && p.detail === 'baby'));
   const adults = sleepers.filter((p) => p.kind === 'adult');
-  const rest = sleepers.filter((p) => !adults.slice(0, 2).includes(p) || adults.length < 2);
+  // Elders get a bed first, then adults, then children (whatever order they were named in).
+  const rank = { elder: 0, adult: 1, helper: 1, child: 2 } as const;
+  const rest = sleepers
+    .filter((p) => !adults.slice(0, 2).includes(p) || adults.length < 2)
+    .sort((p, q) => rank[p.kind] - rank[q.kind]);
   if (adults.length >= 2) {
     const [a, b] = adults as [Person, Person];
     if (doubles) doubles--;
@@ -774,7 +803,16 @@ function bedNeeds(
     else if (doubles) doubles--;
     else missing.push(p);
   }
-  return missing.map((p) => ({ who: p.key, text: `${p.name} has no bed in ${roomName}.` }));
+  const children = sleepers.filter((p) => p.kind === 'child').length;
+  return missing.map((p) => ({
+    who: p.key,
+    text:
+      p.kind === 'child' && children >= 2 && beds.length > 0
+        ? `${p.name} has no bed in ${roomName}: two beds don’t fit; a bunk bed sleeps two children in the space of one.`
+        : p.kind === 'child' && beds.length > 0 && sleepers.length >= 2
+          ? `${p.name} has no bed in ${roomName}: two beds don’t fit; a bunk bed would.`
+          : `${p.name} has no bed in ${roomName}.`,
+  }));
 }
 
 /**
