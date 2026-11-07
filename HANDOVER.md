@@ -634,8 +634,15 @@ essential pieces left out, then pieces short of room, then other drops, then sco
 re-solve is kept only through `acceptResolve` (`designer/resolve.ts`): no new failing hard key,
 strictly fewer, pieces no worse. Principles once in `principles.ts`, hard/soft in `checks.ts`
 (HDB rules not waivable), regression cases in `fixtures/designer/cases/`, benchmark in
-`designer/benchmark/`. PERF: sample about 180 ms cold, 57 ms cached; heavy living rooms
-330-470 ms (bound 400 ms median under `PERF`): a follow-up (a worker or a cheaper first pass).
+`designer/benchmark/`. PERF (7 Nov, follow-up): sample about 110-150 ms cold, 35-55 ms
+cached; heavy living rooms about 140-190 ms median (bound 300 ms under `PERF`; they were
+330-470 ms). Each piece's poses are made once per space and kept for the first solve, its
+swaps and the walkway re-solves (`PoseCache`, with what the walls and doors do to each), a
+pose's room-only score parts once (`PoseRoom`; the room off a side is the nearer of the walls'
+and the pieces', so only the pieces' part is redone), and a walkway re-solve stops once its
+budget is spent and it already leaves out, squeezes or turns more pieces than the solve it
+would replace (`noWorseThan`: it could only be refused). Layouts unchanged. Next for phones
+(about 4x slower): `designResult` in a Web Worker.
 Slice 2 (the conversation) is designed: `designer-v2/slice2-ux.md` and `slice2-tech.md` in
 the session scratchpad, decisions folded into the build; PR 1 is being built.
 
