@@ -82,13 +82,12 @@ for any plan.
 - AI interior designer, slice 1c: compare Before and two versions side by side (one at a time
   on a phone), and what you change by hand after accepting is kept by the next version and
   by accepting again. [spec](docs/specs/ai-interior-designer.md#6-compare)
+- Exact render, slice 1: a photo-real picture drawn on your device from the 3D model itself
+  (daylight through the windows, lamps, soft shadows), so nothing is added or moved; free, no
+  key. [spec](docs/specs/exact-render.md)
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
-- Exact render: a photo-real picture drawn on your device from the 3D model itself (true
-  light through the windows, lamps, soft shadows), so nothing is added or moved; free, no
-  key. Slice 1 built (the Exact side of the render dialog, Good quality); settings, real
-  textures and AI polish next. [spec](docs/specs/exact-render.md)
 
 ### Planned
 1. Slice 2s, the rest: notch depths on the contractor sheet and the estimate on every level.
@@ -97,6 +96,9 @@ for any plan.
    in the bathroom (HDB EASE items).
 3. Storage meter: wardrobe and cabinet space against the household, room by room.
 4. A wall seen straight on (elevation): carpentry, windows, sockets and switches at height.
+5. Exact render, slice 2: quality settings, real textures, AI polish; daylight bounced up off
+   the ground outside (rooms facing away from the sun can read up to a quarter too dark), and
+   dark dots seen through a far window.
 
 More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
 
