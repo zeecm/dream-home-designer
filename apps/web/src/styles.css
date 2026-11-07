@@ -3299,6 +3299,17 @@ h3.field-label {
 .estimate-cost {
   text-align: right;
 }
+.estimate-place::before {
+  content: " · ";
+}
+/* By level: a name and its subtotal; the total under them. */
+.estimate-sub {
+  grid-template-columns: 1fr 9.5em;
+}
+.estimate-sub-total {
+  border-bottom: 0;
+  font-weight: 600;
+}
 .estimate-total {
   display: flex;
   justify-content: space-between;
@@ -3328,11 +3339,32 @@ h3.field-label {
 }
 /* Phones: each line a small card; the rates stack. */
 @media (max-width: 560px) {
+  /* Two rows: what; then where and how much, and the price. */
   .estimate-line {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: auto 1fr auto;
+    column-gap: 0;
   }
   .estimate-item {
+    display: contents;
+  }
+  .estimate-label {
     grid-column: 1 / -1;
+  }
+  .estimate-place::before {
+    content: none;
+  }
+  .has-place .estimate-qty:not(:empty)::before {
+    content: " · ";
+    white-space: pre;
+  }
+  .estimate-qty {
+    text-align: left;
+  }
+  .estimate-cost {
+    padding-left: 8px;
+  }
+  .estimate-sub {
+    grid-template-columns: 1fr auto;
   }
   .rate-row {
     grid-template-columns: 1fr 1fr;
