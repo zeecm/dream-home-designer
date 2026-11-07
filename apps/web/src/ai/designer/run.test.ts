@@ -495,6 +495,59 @@ describe('the runner (criteria 25–28)', () => {
   });
 });
 
+describe('fix rounds: the app checks each answer before it is shown (designer v2, 10–11)', () => {
+  /** The living room's fixture answer with its sofa turned to face the wall. */
+  const facingWall = () => {
+    const a = structuredClone(answerFor('furnish "Living')?.answer) as {
+      items: Record<string, unknown>[];
+    };
+    const sofa = a.items.find((i) => i.ref === 'sofa1') as Record<string, unknown>;
+    Object.assign(sofa, { wall: null, along: null, at: { x: 8.15, y: 2.6 }, rotation: 180 });
+    return a;
+  };
+  const sse = (answer: unknown) =>
+    new Response(anthropicStream(answer, USAGE), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  const living = (c: { step: string }) => c.step === 'furnish "Living';
+
+  it('10: a sofa facing the wall goes back once, naming the piece and the failure; the fix passes', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => (living(c) && n === 1 ? sse(facingWall()) : null),
+    });
+    const r = start('anthropic', { fetch: prov.fetch });
+    const { state, design } = await r.run;
+    expect(state.phase).toBe('done');
+    const calls = prov.calls.filter(living);
+    expect(calls).toHaveLength(2);
+    const body = promptOf(calls[1]?.body);
+    expect(body).toContain('## Fix round 1');
+    expect(body).toMatch(
+      /- \["sofa1"\] "The 3-seat sofa faces the wall: 0\.\d\d m in front of it\."/,
+    );
+    const space = Object.values(design.spaces).find((s) => s.name.startsWith('Living'));
+    expect(space).toMatchObject({ status: 'done', fixes: 1, fixed: 3 });
+    // Both requests are metered, under the room's step.
+    const key = Object.keys(design.spaces).find((k) => design.spaces[k] === space);
+    expect(state.usage.filter((u) => u.step === key)).toHaveLength(2);
+    expect(prov.calls).toHaveLength(6);
+  });
+
+  it('11: an answer that fails twice keeps failing after two fix rounds, and is kept', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (living(c) ? sse(facingWall()) : null),
+    });
+    const r = start('anthropic', { fetch: prov.fetch });
+    const { design } = await r.run;
+    expect(prov.calls.filter(living)).toHaveLength(3);
+    const space = Object.values(design.spaces).find((s) => s.name.startsWith('Living'));
+    expect(space).toMatchObject({ status: 'done', fixes: 2, fixed: 0 });
+  });
+});
+
 describe('a whole design with each provider (41)', () => {
   for (const p of ['openai', 'gemini'] as const) {
     it(`${p}: streamed, usage read from the final chunk`, async () => {

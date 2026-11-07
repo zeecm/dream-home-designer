@@ -65,6 +65,7 @@ export {
 } from './place';
 export {
   CHARS_PER_TOKEN,
+  FIX_ROUNDS,
   OUTPUT,
   PRICES,
   PRICES_AS_OF,

@@ -473,9 +473,17 @@ export const Design = z.object({
       status: SpaceStatus,
       design: SpaceDesign.optional(),
       error: z.string().optional(),
+      /** Fix rounds its answer took (sent back with the checks it failed), and what they fixed. */
+      fixes: z.number().int().min(0).optional(),
+      fixed: z.number().int().min(0).optional(),
     }),
   ),
   usage: z.array(Usage),
+  /**
+   * Checks the person chose to accept anyway (by check key), with the line they were shown.
+   * Never an HDB rule. Absent in versions kept before.
+   */
+  waivers: z.array(z.object({ key: z.string(), text: z.string(), at: z.string() })).default([]),
   /**
    * After as accepted (`level`), and as it was just before (`prior`: what the accept itself
    * changed is the difference; records from before it was kept have none).

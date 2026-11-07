@@ -133,6 +133,7 @@ describe('a stored version', () => {
       n: 1,
       name: d.concept?.name ?? 'V1',
       parent: null,
+      waivers: [],
       createdAt: '2026-11-06T10:00:00.000Z',
       base: { variant: 'before', fingerprint: 'x' },
       baseLevel: level,

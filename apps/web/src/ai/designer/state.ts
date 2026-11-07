@@ -286,6 +286,7 @@ async function beginRun(b: Begin, started: () => void) {
     name: d.concept?.name ?? 'Design',
     parent: b.parent?.id ?? null,
     createdAt: new Date().toISOString(),
+    waivers: [],
     base: { variant: ctx.variant, fingerprint: levelFingerprint(startedOn) },
     baseLevel: startedOn,
     brief: b.brief,

@@ -102,6 +102,8 @@ export interface DesignResult {
   checks: ResultCheck[];
   /** No hard check the version caused fails (waivers aside). */
   passes: boolean;
+  /** The answer's ref of each piece placed (by item id), to name it to the designer. */
+  refs: Record<string, string>;
   cost: CostEstimate;
   points: Suggestion[];
   budget: 'within' | 'over' | 'unknown';
@@ -328,6 +330,7 @@ function work(
   const inKitchen = (p: Vec2) => kitchens.some((k) => pointInPolygon(p, k));
 
   const resultSpaces: ResultSpace[] = [];
+  const refs: Record<string, string> = {};
   /** Each furnished space's index and pieces, to move a piece off a walkway after. */
   const runs: Run[] = [];
   /** The ways through the bare plan (for the solver to keep free). */
@@ -397,6 +400,7 @@ function work(
       }
       lvl.items[item.id] = item;
       rs.items.push(item.id);
+      refs[item.id] = want.ref;
       placedKinds.add(want.kind.id);
       if (want.brought) placedBrought.add(item.id);
       else placedNew.add(item.id);
@@ -812,6 +816,7 @@ function work(
     problems,
     checks,
     passes,
+    refs,
     cost,
     points,
     budget,

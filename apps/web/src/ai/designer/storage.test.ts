@@ -13,6 +13,7 @@ function design(id: string, projectId = 'prj_a'): Omit<Design, 'n'> {
     name: 'Warm Japandi',
     parent: null,
     createdAt: '2026-11-06T10:00:00.000Z',
+    waivers: [],
     base: { variant: 'before', fingerprint: 'abc' },
     baseLevel: level,
     brief: defaultBrief(),

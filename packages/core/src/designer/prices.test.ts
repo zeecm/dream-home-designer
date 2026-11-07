@@ -76,21 +76,26 @@ describe('estimateRun (criterion 21)', () => {
       const stable = Math.ceil((p.system.length + p.prefix.length + p.shared.length) / 3.2);
       const out = i === 0 ? 8000 : 5000;
       const max = i === 0 ? 24_000 : 16_000;
-      high += (input * 4 + max * 20) / 1e6;
+      // A room step's high figure has its two fix rounds.
+      high += ((input * 4 + max * 20) / 1e6) * (i === 0 ? 1 : 3);
       if (i <= 0) typical += (input * 4 + out * 20) / 1e6;
       else if (i === 1) typical += ((input - stable) * 4 + stable * 5 + out * 20) / 1e6;
       else typical += ((input - stable) * 4 + stable * 0.2 + out * 20) / 1e6;
     });
     expect(est.usd?.typical.toFixed(2)).toBe(typical.toFixed(2));
     expect(est.usd?.high.toFixed(2)).toBe(high.toFixed(2));
-    // About US$0.62 typical and US$1.54 at most for the sample: output dominates.
+    // About US$0.62 typical, and at most about US$4 with every room's fix rounds.
     expect(est.usd!.typical).toBeGreaterThan(0.6);
     expect(est.usd!.typical).toBeLessThan(0.9);
-    expect(est.usd!.high).toBeGreaterThan(1.4);
-    expect(est.usd!.high).toBeLessThan(1.9);
+    expect(est.usd!.high).toBeGreaterThan(3);
+    expect(est.usd!.high).toBeLessThan(6);
     expect(opus.cachedInput).toBe(0.2);
     expect(est.tokens.typical).toBe(est.input + 8000 + 4 * 5000);
-    expect(est.tokens.high).toBe(est.input + 24_000 + 4 * 16_000);
+    // Each room's high figure has its two fix rounds (the prompt again, and the output).
+    const rooms = est.steps.filter((s) => s.kind === 'room');
+    expect(est.tokens.high).toBe(
+      est.input + 24_000 + rooms.reduce((t, s) => t + 3 * 16_000 + 2 * s.input, 0),
+    );
   });
 
   it('an unknown model gives tokens and no price; quick lowers both figures', () => {
