@@ -194,12 +194,58 @@ export interface OnFace {
   top: number;
 }
 
-/** What a piece at this position runs into (empty: it can stand there). */
-export function hitsOf(ix: SpaceIndex, item: Item, kind: FurnitureKind, on?: OnFace): Hit[] {
+/**
+ * What blocks a piece at this position whatever else is placed: outside the rooms, a wall, a
+ * doorway, a door's sweep, a way kept clear, a window. Null: nothing.
+ */
+export function fixedHit(ix: SpaceIndex, item: Item, kind: FurnitureKind, on?: OnFace): Hit | null {
+  const fp = itemFootprint(item, kind);
+  if (!inset(fp).every((p) => inRooms(ix, p))) return { kind: 'outside' };
+  if (on) {
+    for (const o of on.face.openings) {
+      const vertical =
+        o.kind === 'window' ? on.top > o.sill - 0.02 && on.bottom < o.top : on.bottom < o.top;
+      if (vertical && on.u0 < o.u1 - 1e-6 && o.u0 < on.u1 - 1e-6) {
+        return { kind: 'opening', window: o.kind === 'window' };
+      }
+    }
+  }
+  if (!blocksFloor(kind)) return null;
+  const box = boxOf(fp);
+  const hit = (shapes: Shape[], depth: number) =>
+    shapes.some((s) => !apart(s.box, box) && overlapDepth(fp, s.poly) > depth);
+  if (hit(ix.solid, 0.01)) return { kind: 'wall' };
+  if (hit(ix.doorways, 0.01)) return { kind: 'doorway' };
+  if (hit(ix.sweeps, 0.005)) return { kind: 'door' };
+  if (hit(ix.keepOut, 0.01)) return { kind: 'keep-out' };
+  if (!UNDER_WINDOW.has(roleOf(kind))) {
+    const top = sillTop(kind, itemSize(item, kind).h);
+    const high = ix.windows.filter((w) => top > w.sill - FIT.sill);
+    if (hit(high, 0.01)) return { kind: 'opening', window: true };
+  }
+  return null;
+}
+
+/**
+ * What a piece at this position runs into (empty: it can stand there). `fixedChecked`: its
+ * fixed hits (fixedHit) are known to be none.
+ */
+export function hitsOf(
+  ix: SpaceIndex,
+  item: Item,
+  kind: FurnitureKind,
+  on?: OnFace,
+  fixedChecked = false,
+): Hit[] {
   const fp = itemFootprint(item, kind);
   const out: Hit[] = [];
   // What blocks it outright: the first reason is enough (it is the one said).
-  if (!inset(fp).every((p) => inRooms(ix, p))) return [{ kind: 'outside' }];
+  if (!fixedChecked) {
+    const fixed = fixedHit(ix, item, kind, on);
+    if (fixed) return [fixed];
+  }
+  if (!blocksFloor(kind)) return out;
+  const box = boxOf(fp);
   if (on) {
     for (const o of on.face.openings) {
       const vertical =
@@ -208,19 +254,6 @@ export function hitsOf(ix: SpaceIndex, item: Item, kind: FurnitureKind, on?: OnF
         return [{ kind: 'opening', window: o.kind === 'window' }];
       }
     }
-  }
-  if (!blocksFloor(kind)) return out;
-  const box = boxOf(fp);
-  const hit = (shapes: Shape[], depth: number) =>
-    shapes.some((s) => !apart(s.box, box) && overlapDepth(fp, s.poly) > depth);
-  if (hit(ix.solid, 0.01)) return [{ kind: 'wall' }];
-  if (hit(ix.doorways, 0.01)) return [{ kind: 'doorway' }];
-  if (hit(ix.sweeps, 0.005)) return [{ kind: 'door' }];
-  if (hit(ix.keepOut, 0.01)) return [{ kind: 'keep-out' }];
-  if (!UNDER_WINDOW.has(roleOf(kind))) {
-    const top = sillTop(kind, itemSize(item, kind).h);
-    const high = ix.windows.filter((w) => top > w.sill - FIT.sill);
-    if (hit(high, 0.01)) return [{ kind: 'opening', window: true }];
   }
   const tuckedWith = (p: Placed) =>
     (SEAT.test(item.assetId) && TABLE.test(p.assetId)) ||

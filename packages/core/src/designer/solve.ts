@@ -11,6 +11,7 @@ import {
   type Want,
   addToIndex,
   blocking,
+  fixedHit,
   hitsOf,
   inRooms,
   itemAt,
@@ -58,6 +59,10 @@ export interface SolveInput {
   keepOutFor?: Set<string>;
   /** The household (helpers aside): a smaller piece is swapped in only if it still seats them. */
   household?: number;
+  /** Poses it may try before it stops looking ahead and going back (BUDGET by default). */
+  budget?: number;
+  /** Whether smaller pieces may be swapped in (the first solve of a space, not a re-solve). */
+  swaps?: boolean;
 }
 
 export interface SolveOutcome {
@@ -66,6 +71,12 @@ export interface SolveOutcome {
   dropped: Note[];
   /** Poses tried. */
   tries: number;
+  /** Pieces placed short of the room they need (each fails a hard check). */
+  soft: number;
+  /** Pieces placed breaking one of their relationships (P2: a sofa turned from its TV). */
+  broken: number;
+  /** Smaller pieces swapped in: a re-solve of the space keeps them (applySwap). */
+  swap?: Swap;
 }
 
 interface Candidate {
@@ -77,14 +88,21 @@ interface Candidate {
   short: number;
   /** Short of that way, or the dining group standing on a way through the flat. */
   apart: boolean;
+  /** Stands in the room another piece needs to be used (it spoils that piece too). */
+  intrudes: boolean;
+  /** Breaks none of its relationships. */
+  related: boolean;
   /** Short of the room needed to walk between them at all (P2 apart, hard). */
   tight: boolean;
   /** The dining group standing on a way through the flat. */
   way: boolean;
 }
 
-/** A set of placements' cost, worst first: short of room, left out, -score. */
-type Cost = [number, number, number];
+/**
+ * A set of placements' cost, worst first: what the room can't do without left out, pieces
+ * short of room, anything else left out (both by priority), -score.
+ */
+type Cost = [number, number, number, number];
 
 /** What a room can't do without: placed short of room rather than left out. */
 export const ESSENTIAL = new Set<Role>([
@@ -105,6 +123,12 @@ const KEEP = 16;
 const LOOK = 6;
 /** Going back: how many other places each piece tried. */
 const ALTS = 8;
+/**
+ * Poses a solve may try before it stops looking ahead and going back, and keeps the best
+ * found so far: a count, not a clock, so the same answer always places the same. The sample's
+ * spaces take 200–8,500.
+ */
+export const BUDGET = 12_000;
 const GRID = 0.25;
 const ALONG = 0.2;
 /** How far a dining chair reaches past its table's edge, tucked in. */
@@ -159,22 +183,28 @@ export function solveSpace(input: SolveInput): SolveOutcome {
   const mark = input.ix.placed.length;
   const first = solveOnce(input);
   // Short of the way between the groups, or the dining group left standing on a way through
-  // the flat: smaller pieces are tried.
+  // the flat: smaller pieces are tried (on a space's first solve only).
   const bad = (items: Item[]) => tightIn(input, items, mark) || diningOnWay(input, items);
-  if (!bad(first.items)) return first;
+  if (!bad(first.items) || input.swaps === false) return first;
+  const lost = essentialDrops(first, input.intents, new Set());
+  const seats = seatsShort(input, first.items, mark, input.intents);
   for (const swap of swapsFor(input)) {
     input.ix.placed.length = mark;
     const out = solveOnce({ ...input, intents: swap.intents });
     out.tries += first.tries;
+    // Taken only if it keeps the way and is no worse otherwise: nothing more the room needs
+    // left out, no more pieces short of room or turned from what they go with, and seats and
+    // places at the table for the household as before.
     if (
-      !bad(out.items) &&
-      [...essentialDrops(out, swap.intents)].every((ref) =>
-        essentialDrops(first, input.intents).has(ref),
-      )
+      bad(out.items) ||
+      [...essentialDrops(out, swap.intents, swap.spare)].some((ref) => !lost.has(ref)) ||
+      out.soft > first.soft ||
+      out.broken > first.broken ||
+      seatsShort(input, out.items, mark, swap.intents) > seats
     ) {
-      out.repaired.unshift(...swap.notes);
-      return out;
+      continue;
     }
+    return applySwap(out, swap);
   }
   // Nothing smaller keeps the way: the first solve stands, and the check fails.
   input.ix.placed.length = mark;
@@ -184,6 +214,72 @@ export function solveSpace(input: SolveInput): SolveOutcome {
     if (kind) addToIndex(input.ix, item, kind);
   }
   return first;
+}
+
+/**
+ * A solve with a swap's lines said, and the extendable table's spare chairs that found no
+ * room waiting by the wall (not left out). For a space's re-solves too.
+ */
+export function applySwap(out: SolveOutcome, swap: Swap): SolveOutcome {
+  const waiting = out.dropped.filter((n) => n.ref && swap.spare.has(n.ref));
+  const notes = [...swap.notes];
+  const n = swap.spare.size;
+  if (n) {
+    notes.push({
+      text: `${n === 1 ? 'One chair waits' : `${n} chairs wait`} by the wall until the table is pulled out.`,
+      ref: [...swap.spare][0] as string,
+    });
+  }
+  return {
+    ...out,
+    dropped: out.dropped.filter((n) => !waiting.includes(n)),
+    repaired: [...notes, ...out.repaired],
+    swap,
+  };
+}
+
+/**
+ * How many of P1's seat checks a solve fails for the household: places at the dining table
+ * (chairs at it, an extendable table with four counted at six) and seats on sofas and chairs.
+ */
+function seatsShort(input: SolveInput, items: Item[], mark: number, intents: Intent[]): number {
+  const household = input.household ?? 0;
+  if (!household) return 0;
+  const kinds = new Map(intents.map((t) => [t.want.id, t.want]));
+  const pieces = [
+    ...input.ix.placed
+      .slice(0, mark)
+      .map((p) => ({ kind: furnitureKind(p.assetId), fp: p.fp, w: 0 })),
+    ...items.map((it) => {
+      const want = kinds.get(it.id);
+      return {
+        kind: want?.kind ?? furnitureKind(it.assetId),
+        fp: itemFootprint(it),
+        w: want?.w ?? 0,
+      };
+    }),
+  ].filter((p): p is { kind: NonNullable<typeof p.kind>; fp: Vec2[]; w: number } => !!p.kind);
+  const role = (p: (typeof pieces)[number]) => roleOf(p.kind);
+  const chairs = pieces.filter((p) => role(p) === 'dining-chair');
+  let places = 0;
+  let tables = 0;
+  for (const t of pieces.filter((p) => role(p) === 'dining-table')) {
+    tables++;
+    const at = chairs.filter((c) => polygonGap(c.fp, t.fp).d <= 0.3).length;
+    const most = placesOf(t.kind);
+    places +=
+      t.kind.id === 'dining-bench-2' || t.kind.id === 'bistro-set'
+        ? most
+        : t.kind.id === 'dining-extendable' && at >= 4
+          ? most
+          : Math.min(most, at);
+  }
+  const seats = pieces
+    .filter((p) => role(p) === 'sofa' || role(p) === 'armchair')
+    .reduce((n, p) => n + seatsOf(p.kind, p.w || p.kind.size.w), 0);
+  return (
+    (tables && places < Math.min(household, 6) ? 1 : 0) + (seats < Math.min(household, 3) ? 1 : 0)
+  );
 }
 
 /** Whether a dining group stands short of 0.60 m from the lounge (pieces solved and fixed). */
@@ -227,13 +323,16 @@ function diningOnWay(input: SolveInput, items: Item[]): boolean {
   });
 }
 
-/** Pieces a room can't do without that a solve left out (by ref): a swap may not add one. */
-function essentialDrops(o: SolveOutcome, intents: Intent[]): Set<string> {
+/**
+ * Pieces a room can't do without that a solve left out (by ref): a swap may not add one.
+ * `spare`: an extendable table's extra chairs, which may wait by the wall.
+ */
+function essentialDrops(o: SolveOutcome, intents: Intent[], spare: Set<string>): Set<string> {
   const kinds = new Map(intents.map((t) => [t.want.ref, t.want.kind]));
   return new Set(
     o.dropped.flatMap((n) => {
       const k = n.ref ? kinds.get(n.ref) : undefined;
-      return k && n.ref && ESSENTIAL.has(roleOf(k)) ? [n.ref] : [];
+      return k && n.ref && !spare.has(n.ref) && ESSENTIAL.has(roleOf(k)) ? [n.ref] : [];
     }),
   );
 }
@@ -258,9 +357,11 @@ function swapped(t: Intent, id: string): Intent | null {
   };
 }
 
-interface Swap {
+export interface Swap {
   intents: Intent[];
   notes: Note[];
+  /** Chairs that may wait by the wall (an extendable table's beyond four). */
+  spare: Set<string>;
 }
 
 /** Smaller pieces to try, in order: the table first, then the sofa, then both. */
@@ -279,21 +380,28 @@ function swapsFor(input: SolveInput): Swap[] {
   if (table) {
     const places = placesOf(table.want.kind, table.want.w, table.want.d);
     const chairs = chairsOf(table);
-    const replace = (id: string, keepChairs: number, text: string) => {
+    /**
+     * The table as another kind: chairs beyond `keepChairs` aren't placed round it; with
+     * `spare` they wait by the wall (said in a line, still the household's chairs).
+     */
+    const replace = (id: string, keepChairs: number, text: string, spare = false) => {
       const t2 = swapped(table, id);
       if (!t2) return;
-      const drop = new Set(chairs.slice(keepChairs).map((c) => c.want.ref));
+      const extra = new Set(chairs.slice(keepChairs).map((c) => c.want.ref));
       tables.push({
-        intents: intents.filter((x) => !drop.has(x.want.ref)).map((x) => (x === table ? t2 : x)),
+        intents: intents.filter((x) => !extra.has(x.want.ref)).map((x) => (x === table ? t2 : x)),
         notes: [note(table, text)],
+        spare: spare ? extra : new Set(),
       });
     };
     const name = table.want.kind.name.replace(/^Dining table/, 'dining table');
     if (places >= 6) {
+      // Every chair is kept: four round it, the rest wait by the wall till it is pulled out.
       replace(
         'dining-extendable',
         4,
         `Swapped the ${name} for an extendable table to keep 0.60 m to the sofa: it fits 4, and 6 with the table pulled out.`,
+        true,
       );
     } else if (table.want.kind.id !== 'pedestal-table-round') {
       replace(
@@ -325,6 +433,7 @@ function swapsFor(input: SolveInput): Swap[] {
           notes: [
             note(sofa, 'Swapped the 3-seat sofa for a 2-seat to keep 0.60 m to the dining table.'),
           ],
+          spare: new Set(),
         });
       }
     }
@@ -337,6 +446,7 @@ function swapsFor(input: SolveInput): Swap[] {
       both.push({
         intents: t.intents.map((x) => (x.want.ref === sofa.want.ref ? s2i : x)),
         notes: [...t.notes, ...s2.notes],
+        spare: t.spare,
       });
     }
   }
@@ -344,6 +454,7 @@ function swapsFor(input: SolveInput): Swap[] {
 }
 
 function solveOnce(input: SolveInput): SolveOutcome {
+  const budget = input.budget ?? BUDGET;
   const { ix, faces, intents } = input;
   const repaired: Note[] = [];
   const dropped: Note[] = [];
@@ -355,6 +466,8 @@ function solveOnce(input: SolveInput): SolveOutcome {
   let related = true;
   /** Each free piece's poses in its zone (they don't depend on what is placed). */
   const zoneMemo = new Map<string, { at: Vec2; r: number }[]>();
+  /** Each free piece's zone poses as pieces, and whether walls, doors or ways block them. */
+  const fixedMemo = new Map<string, { item: Item; ok: boolean }[]>();
 
   // Each piece's anchor: the ref it names (faces or near), else the first piece of a role its
   // row goes with (a sofa the TV, chairs their table, a bedside table its bed).
@@ -597,6 +710,8 @@ function solveOnce(input: SolveInput): SolveOutcome {
         short,
         apart: short > EPS || way,
         tight: short > sh.slack + EPS,
+        related,
+        intrudes: hs.some((h) => h.kind === 'in-zone'),
         way,
         score: wish + s - (short > EPS ? 3 + short * 4 : 0),
       });
@@ -768,17 +883,35 @@ function solveOnce(input: SolveInput): SolveOutcome {
         zoneMemo.set(w.ref, out);
         return out;
       };
-      const tryPoses = (list: { at: Vec2; r: number }[], checked = false) => {
+      const tryPoses = (list: { at: Vec2; r: number }[]) => {
         for (const p of list) {
-          if (!checked && !inRooms(ix, p.at)) continue;
+          if (!inRooms(ix, p.at)) continue;
           const item = itemAt(w, p.at, p.r, w.w);
           add(item, hitsOf(ix, item, k), false, wish);
         }
       };
+      // The zone's poses: what walls, doors and the ways kept clear block is worked out once.
+      const tryZone = () => {
+        let list = fixedMemo.get(w.ref);
+        if (!list) {
+          list = zonePoses().map((p) => {
+            const item = itemAt(w, p.at, p.r, w.w);
+            return { item, ok: !fixedHit(ix, item, k) };
+          });
+          fixedMemo.set(w.ref, list);
+        }
+        for (const p of list) {
+          if (!p.ok) {
+            tries++;
+            continue;
+          }
+          add(p.item, hitsOf(ix, p.item, k, undefined, true), false, wish);
+        }
+      };
       if (poses.length && anchor) tryPoses(poses);
-      else tryPoses(zonePoses(), true);
+      else tryZone();
       // Nothing by its anchor: anywhere in its zone.
-      if (!out.length && poses.length && anchor && !rel?.belongs) tryPoses(zonePoses(), true);
+      if (!out.length && poses.length && anchor && !rel?.belongs) tryZone();
     }
     ix.keepOut = keepOut;
     // The way between the dining and the lounge groups is kept wherever any clear pose keeps
@@ -797,7 +930,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
     const best = out.slice(0, KEEP);
     // The pieces that go with it must still fit: try the best few with them.
     const deps = dependents.get(w.ref) ?? [];
-    if (deps.length && out.length > 1) {
+    if (deps.length && out.length > 1 && tries < budget) {
       // The best few, unlike each other (another wall, or apart), with what goes with them.
       const looked: Candidate[] = [];
       for (const c of out) {
@@ -1059,25 +1192,39 @@ function solveOnce(input: SolveInput): SolveOutcome {
   /** A piece's weight when it is left out: a bed counts for more than any number of lamps. */
   const weight = (t: Intent) => 10 ** (6 - Math.min(6, priorityOf(t.want.kind)));
   /**
-   * How good the placements up to `i` are, worst first: pieces short of the room they need
-   * (they fail a hard check), then what is left out (by priority), then the score.
+   * How good the placements up to `i` are, worst first: a piece the room can't do without
+   * left out (an essential piece short of room beats leaving it out, as ESSENTIAL says), then
+   * pieces short of the room they need (each fails a hard check), then anything else left
+   * out (by priority), then the score.
    */
   const costOf = (i: number): Cost => {
+    let lost = 0;
     let soft = 0;
     let drops = 0;
     let score = 0;
     for (let j = 0; j <= i; j++) {
       const c = chosen[j];
-      if (!c) drops += weight(order[j] as Intent);
-      else {
+      const t = order[j] as Intent;
+      if (!c) {
+        if (ESSENTIAL.has(roleOf(t.want.kind))) lost += weight(t);
+        else drops += weight(t);
+      } else {
         if (c.soft) soft++;
+        // Squeezed into the room another piece needs, it spoils that piece too: worse than
+        // leaving it out. A bed short of room is nearly no bed. So three singles squeezed in
+        // don't beat two that pass and the bunk-bed hint for the third.
+        if (c.intrudes) lost += 1.1 * weight(t);
+        else if (c.soft && roleOf(t.want.kind) === 'bed') lost += 0.9 * weight(t);
         score += c.score;
       }
     }
-    return [soft, drops, -score];
+    return [lost, soft, drops, -score];
   };
-  const better = (p: Cost, q: Cost) =>
-    p[0] < q[0] || (p[0] === q[0] && (p[1] < q[1] || (p[1] === q[1] && p[2] < q[2] - 1e-6)));
+  /** Strictly better: the first difference decides; scores within 1e-6 are a tie (not better). */
+  const better = (p: Cost, q: Cost) => {
+    for (let k = 0; k < 3; k++) if (p[k] !== q[k]) return (p[k] as number) < (q[k] as number);
+    return (p[3] as number) < (q[3] as number) - 1e-6;
+  };
   /** Puts back a whole set of placements from `j` on. */
   const restore = (j: number, list: (Candidate | null)[]) => {
     undoTo(j);
@@ -1092,15 +1239,17 @@ function solveOnce(input: SolveInput): SolveOutcome {
     // Nowhere for it, or only short of room: try its anchor and the two pieces before it
     // elsewhere, the pieces after them placed again, and keep the whole set only if it is
     // better. A more important piece is never left out to place a less important one.
-    if (first && !first.soft) continue;
+    if ((first && !first.soft) || tries >= budget) continue;
     let best = { cost: costOf(i), list: chosen.slice(0, i + 1), changed: false };
     const anchorIdx = order.findIndex((o) => o.want.ref === anchorOf.get(t.want.ref));
     const backs = [...new Set([anchorIdx, i - 1, i - 2].filter((j) => j >= 0 && j < i))];
     for (const j of backs) {
+      if (tries >= budget) break;
       const was = chosen.slice(j, i + 1);
       undoTo(j);
       const alts = alternatives(candidates(order[j] as Intent, placed, true));
       for (const alt of alts) {
+        if (tries >= budget) break;
         put(j, alt);
         for (let m = j + 1; m <= i; m++) put(m, candidates(order[m] as Intent, placed)[0] ?? null);
         const dropsMore = was.some(
@@ -1146,7 +1295,14 @@ function solveOnce(input: SolveInput): SolveOutcome {
     }
     items.push(c.item);
   });
-  return { items, repaired, dropped, tries };
+  return {
+    items,
+    repaired,
+    dropped,
+    tries,
+    soft: chosen.filter((c) => c?.soft).length,
+    broken: chosen.filter((c) => c && !c.related).length,
+  };
 }
 
 /** How far a point is ahead of a piece's middle (towards its front). */

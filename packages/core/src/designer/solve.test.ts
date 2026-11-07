@@ -133,6 +133,37 @@ describe('the solver', () => {
     const hardIn = (r: ReturnType<typeof run>) =>
       r.checks.filter((c) => c.hard && !c.already).map((c) => c.text);
 
+    it('three singles for three children in the Bedroom: a bed placed only where it passes, else the bunk hint', () => {
+      const r = run(
+        SAMPLE_KEYS.bedroom,
+        intent([
+          { ref: 'bed1', assetId: 'bed-single' },
+          { ref: 'bed2', assetId: 'bed-single' },
+          { ref: 'bed3', assetId: 'bed-single' },
+        ]),
+        {
+          ...defaultBrief(),
+          household: {
+            ...defaultBrief().household,
+            adults: 2,
+            children: ['primary', 'primary', 'teen'],
+          },
+          sleeping: {
+            'rm_main-bedroom': ['adult-1', 'adult-2'],
+            rm_bedroom: ['child-1', 'child-2', 'child-3'],
+          },
+        },
+        'dsn_three_singles',
+      );
+      const beds = byRole(r, 'bed');
+      expect(beds.length).toBeGreaterThanOrEqual(2);
+      // No bed is squeezed in short of room (P4) to make the count.
+      expect(hardIn(r).filter((t) => /bed/.test(t) && !/has no bed/.test(t))).toEqual([]);
+      if (beds.length < 3) {
+        expect(hardIn(r).find((t) => /has no bed/.test(t))).toMatch(/bunk bed/);
+      }
+    });
+
     it('A: no piece is left standing where another moves (Main bedroom, six pieces)', () => {
       const r = run(
         SAMPLE_KEYS.main,
@@ -218,8 +249,69 @@ describe('the solver', () => {
     console.log(
       `v2 designResult: ${cold.toFixed(0)} ms (median of 7), again ${warm.toFixed(0)} ms`,
     );
-    expect(cold).toBeLessThan(process.env.PERF ? 350 : 2000);
-    expect(warm).toBeLessThan(process.env.PERF ? 150 : 600);
+    expect(cold).toBeLessThan(process.env.PERF ? 350 : 1050);
+    expect(warm).toBeLessThan(process.env.PERF ? 150 : 450);
+  });
+
+  it('PERF: a full living room (a table for six and six chairs, a chesterfield, two armchairs, a household of six) within the same bound', () => {
+    const full = v2({
+      v: 2,
+      items: answer([
+        { ref: 'tv1', assetId: 'tv' },
+        { ref: 'tvc1', assetId: 'tv-console' },
+        { ref: 'sofa1', assetId: 'chesterfield-sofa' },
+        { ref: 'arm1', assetId: 'armchair' },
+        { ref: 'arm2', assetId: 'armchair' },
+        { ref: 'coffee1', assetId: 'coffee-table' },
+        { ref: 'dine1', assetId: 'dining-6' },
+        ...[1, 2, 3, 4, 5, 6].map((n) => ({ ref: `chair${n}`, assetId: 'dining-chair' })),
+      ]).items.map((i) => ({
+        ...i,
+        against: /tv|sofa/.test(i.assetId) ? 'wall' : 'free',
+        faces:
+          i.ref === 'tv1'
+            ? 'sofa1'
+            : /^(sofa1|arm)/.test(i.ref)
+              ? 'tv1'
+              : /^chair/.test(i.ref)
+                ? 'dine1'
+                : null,
+        near:
+          i.ref === 'tvc1'
+            ? 'tv1'
+            : i.ref === 'coffee1'
+              ? 'sofa1'
+              : /^chair/.test(i.ref)
+                ? 'dine1'
+                : null,
+        zone: /dine|chair/.test(i.ref) ? 'dine' : 'lounge',
+      })),
+      faces: [],
+      notes: [],
+    });
+    const six = {
+      ...defaultBrief(),
+      household: {
+        ...defaultBrief().household,
+        adults: 2,
+        children: ['primary', 'teen', 'teen', 'primary'] as ('primary' | 'teen')[],
+      },
+    };
+    const make = (id: string) =>
+      designResult(level, level, {
+        ...sampleDesign({ answers: { [SAMPLE_KEYS.living]: full }, brief: six, concept: null, id }),
+        aliases: aliasesFor(level),
+      });
+    make('dsn_full_warm');
+    const times: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const t0 = performance.now();
+      make(`dsn_full_${i}`);
+      times.push(performance.now() - t0);
+    }
+    const cold = [...times].sort((a, b) => a - b)[2] as number;
+    console.log(`full living room: ${cold.toFixed(0)} ms (median of 5)`);
+    expect(cold).toBeLessThan(process.env.PERF ? 350 : 1050);
   });
 
   describe('owner 7 Nov: the dining jammed against the sofa (P2 apart: 0.60 m, 0.90 m advised)', () => {
@@ -281,9 +373,40 @@ describe('the solver', () => {
       expect(swaps(r)).toEqual([
         'Swapped the dining table, 6 seats for an extendable table to keep 0.60 m to the sofa: it fits 4, and 6 with the table pulled out.',
       ]);
+      expect(r.repaired.map((n) => n.text)).toContain(
+        '2 chairs wait by the wall until the table is pulled out.',
+      );
       expect(zoneGap(r)).toBeGreaterThanOrEqual(0.6 - 0.005);
       expect(r.checks.filter((c) => c.hard && !c.already)).toEqual([]);
     });
+
+    for (const n of [5, 6]) {
+      it(`a household of ${n}: the extendable table seats them; no chair is lost, no seat check fails`, () => {
+        const kids = (['primary', 'teen', 'teen', 'primary'] as const).slice(0, n - 2);
+        const r = run(
+          SAMPLE_KEYS.living,
+          v2(ownerDining),
+          {
+            ...defaultBrief(),
+            household: { ...defaultBrief().household, adults: 2, children: [...kids] },
+          },
+          `dsn_apart_six_${n}`,
+        );
+        const [table] = byRole(r, 'dining-table');
+        expect(table?.assetId).toBe('dining-extendable');
+        expect(byRole(r, 'dining-chair')).toHaveLength(4);
+        // Six chairs asked for: none left out, two wait by the wall.
+        expect(r.dropped.filter((d) => /dining chair/.test(d.text))).toEqual([]);
+        expect(r.repaired.map((d) => d.text)).toContain(
+          '2 chairs wait by the wall until the table is pulled out.',
+        );
+        const living = r.checks.filter(
+          (c) =>
+            c.hard && !c.already && !c.key.startsWith('P1|unplaced') && !c.key.startsWith('P1|bed'),
+        );
+        expect(living).toEqual([]);
+      });
+    }
 
     it('in a living room 1.25 m wider, the dining is on open floor, 0.90 m from the lounge', () => {
       const r = runOn(withEastWall(11.4), sampleLiving, ONGS, 'dsn_apart_wide');

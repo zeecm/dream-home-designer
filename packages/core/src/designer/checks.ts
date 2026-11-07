@@ -639,7 +639,10 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
               places +=
                 t.kind.id === 'bistro-set' || t.kind.id === 'dining-bench-2'
                   ? 2
-                  : Math.min(placesOf(t.kind, t.size.w, t.size.d), at);
+                  : // An extendable table with four at it seats six pulled out.
+                    t.kind.id === 'dining-extendable' && at >= 4
+                    ? placesOf(t.kind)
+                    : Math.min(placesOf(t.kind, t.size.w, t.size.d), at);
             }
             if (want > 0 && !tables.length) {
               need('dining', r.id, `${r.name} has no dining table for the household.`, hard);

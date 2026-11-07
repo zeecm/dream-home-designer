@@ -29,10 +29,10 @@ import {
   placePiece,
   spaceIndex,
 } from './place';
-import { ACCESS, peopleOf, roleOf } from './principles';
+import { ACCESS, peopleOf } from './principles';
 import type { Concept, DesignInput, DesignItem, RoomUse, SpaceDesign, SpaceStatus } from './schema';
 import type { Zone } from './schema';
-import { ESSENTIAL, type Intent, type SolveOutcome, solveSpace } from './solve';
+import { type Intent, type SolveOutcome, applySwap, solveSpace } from './solve';
 import {
   type Face,
   type Space,
@@ -442,6 +442,8 @@ function work(
       const base = ix.placed.length;
       const wantOf = new Map(wants.map((w) => [w.id, w]));
       let firstKey = '';
+      /** What the first solve swapped in (smaller pieces), kept by re-solves. */
+      let firstSwap: SolveOutcome['swap'];
       const fixedKey = ix.placed.map(
         (p) => `${p.id}:${p.fp.map((q) => q.x.toFixed(3) + q.y.toFixed(3)).join()}`,
       );
@@ -464,6 +466,7 @@ function work(
         const hit =
           (keepOut.length ? undefined : settledMemo.get(memoKey)) ?? solveMemo.get(memoKey);
         if (!keepOut.length) firstKey = memoKey;
+        if (hit && !keepOut.length) firstSwap = hit.swap;
         if (hit) {
           for (const item of hit.items) {
             const w = wantOf.get(item.id);
@@ -473,16 +476,21 @@ function work(
           return hit;
         }
         ix.keepOut = keepOut;
-        const out = solveSpace({
+        const solved = solveSpace({
           ix,
           faces,
-          intents,
+          // A re-solve keeps what the first solve swapped in.
+          intents: (keepOut.length && firstSwap?.intents) || intents,
           zoneArea,
           ways,
           household: peopleOf(brief).filter((p) => p.kind !== 'helper').length,
+          // A walkway re-solve looks less far, and keeps the pieces the first solve chose.
+          ...(keepOut.length ? { budget: RESOLVE_BUDGET, swaps: false } : {}),
           ...(keepOutFor ? { keepOutFor } : {}),
         });
         ix.keepOut = [];
+        const out = keepOut.length && firstSwap ? applySwap(solved, firstSwap) : solved;
+        if (!keepOut.length) firstSwap = out.swap;
         solveMemo.set(memoKey, out);
         if (solveMemo.size > 48) solveMemo.delete(solveMemo.keys().next().value as string);
         return out;
@@ -938,6 +946,8 @@ function zoneAreaOf(
 }
 
 const solveMemo = new Map<string, SolveOutcome>();
+/** Poses a walkway re-solve may try before it stops looking ahead and going back. */
+const RESOLVE_BUDGET = 3000;
 /** The bare plan's ways by its walls, doors and rooms (geomKey). */
 const waysMemo = new Map<string, ReturnType<typeof keepOutOf>>();
 const WAYS_KEEP = 8;
@@ -969,15 +979,6 @@ function hardCount(level: Level, walk?: WalkwayReport): number {
     );
   }).length;
   return w + c;
-}
-
-/** Pieces a solve left out that the room needs (beds, seats, the table and its chairs). */
-function neededDrops(run: Run, o: SolveOutcome): number {
-  const kinds = new Map(run.wants.map((w) => [w.ref, w.kind]));
-  return o.dropped.filter((n) => {
-    const k = n.ref ? kinds.get(n.ref) : undefined;
-    return !!k && ESSENTIAL.has(roleOf(k));
-  }).length;
 }
 
 const baseMemo = new WeakMap<Level, Map<string, Set<string>>>();
@@ -1066,12 +1067,21 @@ function keepWalkwaysClear(lvl: Level, runs: Run[], repaired: Note[]): WalkwayRe
       const was = run.outcome;
       const out = run.solveWith?.(kept.get(run) ?? [], keptFor.get(run));
       if (!out || !was || !run.apply || !run.unapply) continue;
-      // Taken whole, and only if no worse: nothing more it needs left out, fewer failures.
+      // Taken whole, and only if no worse: no more pieces of any kind left out, none more
+      // short of room or turned from what it goes with (P2), and fewer hard failures.
+      if (
+        out.dropped.length > was.dropped.length ||
+        out.soft > was.soft ||
+        out.broken > was.broken
+      ) {
+        rejected.add(run);
+        continue;
+      }
       const before = changed ? hardCount(lvl) : hardCount(lvl, report);
       run.unapply();
       run.apply(out);
       const after = hardCount(lvl);
-      if (neededDrops(run, out) <= neededDrops(run, was) && after < before) {
+      if (after < before) {
         run.outcome = out;
         run.settle?.(out);
         changed = true;
