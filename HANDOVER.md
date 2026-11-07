@@ -1224,6 +1224,12 @@ algorithm notes and the checklists for Phases 3 to 5.
 
 ## 7. Conventions
 
+**Never go idle (owner, 7 Nov).** This session only wakes on a message, a finished agent or
+command, a PR event or a scheduled check-in, so a turn that ends with nothing running stops all
+work until the owner prompts. After a merge, start the next roadmap item (spec, design or
+build agents) in the same turn. Before ending any turn, make sure something is running or a
+check-in is scheduled (`send_later`). A merge is not a stopping point.
+
 **Acceptance testing method (owner, 30 Oct: "add more testing methods").** Basic phone
 interactions got through earlier rounds (no wall preview under the finger; no way to adjust
 a wall just drawn). Every acceptance round now does all of these, and reports a missing
