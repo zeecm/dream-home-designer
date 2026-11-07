@@ -1,0 +1,21 @@
+{
+  "v": 2,
+  "items": [
+    { "ref": "tv1", "assetId": "tv", "keep": null, "wall": "W21", "along": null, "at": null, "rotation": null, "width": null, "depth": null, "height": null, "why": "The TV on the solid shelter wall, away from the window's glare.", "against": "wall", "faces": "sofa1", "near": null, "zone": "lounge" },
+    { "ref": "tvc1", "assetId": "built-in-tv-console", "keep": null, "wall": "W21", "along": null, "at": null, "rotation": null, "width": 1.8, "depth": null, "height": null, "why": "A low built-in console under the TV.", "against": "wall", "faces": null, "near": "tv1", "zone": "lounge" },
+    { "ref": "sofa1", "assetId": "sofa-3", "keep": null, "wall": "W4", "along": null, "at": null, "rotation": null, "width": null, "depth": null, "height": null, "why": "Low enough to sit under the window, facing the TV.", "against": "wall", "faces": "tv1", "near": null, "zone": "lounge" },
+    { "ref": "coffee1", "assetId": "coffee-table", "keep": null, "wall": null, "along": null, "at": null, "rotation": null, "width": null, "depth": null, "height": null, "why": "Within reach of the sofa.", "against": "free", "faces": null, "near": "sofa1", "zone": "lounge" },
+    { "ref": "rug1", "assetId": "rug", "keep": null, "wall": null, "along": null, "at": null, "rotation": null, "width": null, "depth": null, "height": null, "why": "Softens the seating area.", "against": "free", "faces": null, "near": "coffee1", "zone": "lounge" },
+    { "ref": "dine1", "assetId": "dining-4", "keep": null, "wall": null, "along": null, "at": null, "rotation": null, "width": null, "depth": null, "height": null, "why": "Dining by the dry kitchen.", "against": "free", "faces": null, "near": null, "zone": "dine" },
+    { "ref": "chair1", "assetId": "dining-chair", "keep": null, "wall": null, "along": null, "at": null, "rotation": null, "width": null, "depth": null, "height": null, "why": "", "against": "free", "faces": "dine1", "near": "dine1", "zone": "dine" },
+    { "ref": "chair2", "assetId": "dining-chair", "keep": null, "wall": null, "along": null, "at": null, "rotation": null, "width": null, "depth": null, "height": null, "why": "", "against": "free", "faces": "dine1", "near": "dine1", "zone": "dine" },
+    { "ref": "chair3", "assetId": "dining-chair", "keep": null, "wall": null, "along": null, "at": null, "rotation": null, "width": null, "depth": null, "height": null, "why": "", "against": "free", "faces": "dine1", "near": "dine1", "zone": "dine" },
+    { "ref": "chair4", "assetId": "dining-chair", "keep": null, "wall": null, "along": null, "at": null, "rotation": null, "width": null, "depth": null, "height": null, "why": "", "against": "free", "faces": "dine1", "near": "dine1", "zone": "dine" },
+    { "ref": "fridge1", "assetId": "fridge", "keep": null, "wall": "W20", "along": null, "at": null, "rotation": null, "width": null, "depth": null, "height": null, "why": "The fridge in the dry kitchen.", "against": "wall", "faces": null, "near": null, "zone": "dine" },
+    { "ref": "shoe1", "assetId": "shoe-cabinet", "keep": null, "wall": "W12", "along": 3.8, "at": null, "rotation": null, "width": null, "depth": null, "height": null, "why": "Shoes by the main door.", "against": "wall", "faces": null, "near": null, "zone": "entry" },
+    { "ref": "lamp1", "assetId": "floor-lamp", "keep": null, "wall": null, "along": null, "at": null, "rotation": null, "width": null, "depth": null, "height": null, "why": "Reading light by the sofa.", "against": "free", "faces": null, "near": "sofa1", "zone": "lounge" },
+    { "ref": "pend1", "assetId": "pendant", "keep": null, "wall": null, "along": null, "at": null, "rotation": null, "width": null, "depth": null, "height": null, "why": "Over the table.", "against": "free", "faces": null, "near": "dine1", "zone": "dine" }
+  ],
+  "faces": [{ "wall": "W21", "finish": "wallpaper-linen" }],
+  "notes": []
+}

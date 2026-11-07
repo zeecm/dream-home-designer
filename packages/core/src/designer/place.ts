@@ -43,7 +43,7 @@ export type Hit =
 
 /** Hits a position may still be taken with, when nothing better is found. */
 const SOFT = new Set<Hit['kind']>(['zone', 'in-zone']);
-const blocking = (hs: Hit[]) => hs.some((h) => !SOFT.has(h.kind));
+export const blocking = (hs: Hit[]) => hs.some((h) => !SOFT.has(h.kind));
 
 const SEAT = /dining-chair|stool|plastic-chair/;
 const TABLE = /table|desk|dining-\d/;
@@ -145,7 +145,7 @@ function inset(fp: Vec2[]): Vec2[] {
   });
 }
 
-const inRooms = (ix: SpaceIndex, p: Vec2) =>
+export const inRooms = (ix: SpaceIndex, p: Vec2) =>
   ix.rooms.some((r) => pointInPolygon(p, r.outer) && !r.holes.some((h) => pointInPolygon(p, h)));
 
 /** Whether a piece blocks the floor (rugs, lamps, wall cabinets and ceiling lights don't). */
@@ -249,13 +249,15 @@ function zonesOf(kind: FurnitureKind, fp: Vec2[]): Vec2[][] {
 }
 
 /**
- * The way to keep clear around a walkway's narrow point: the path within 1.5 m of the pinch,
- * as wide as the walkway needs.
+ * The way to keep clear around a walkway's narrow point: the path within 1.5 m of the pinch
+ * (all of it, with none), as wide as the walkway needs.
  */
-export function keepOutOf(path: Vec2[], pinch: [Vec2, Vec2], need: number): Shape[] {
-  const mid = { x: (pinch[0].x + pinch[1].x) / 2, y: (pinch[0].y + pinch[1].y) / 2 };
+export function keepOutOf(path: Vec2[], pinch: [Vec2, Vec2] | null, need: number): Shape[] {
+  const mid = pinch
+    ? { x: (pinch[0].x + pinch[1].x) / 2, y: (pinch[0].y + pinch[1].y) / 2 }
+    : null;
   const h = need / 2;
-  const close = (p: Vec2) => Math.hypot(p.x - mid.x, p.y - mid.y) <= 1.5;
+  const close = (p: Vec2) => !mid || Math.hypot(p.x - mid.x, p.y - mid.y) <= 1.5;
   const out: Shape[] = [];
   for (let i = 0; i + 1 < path.length; i++) {
     const p = path[i] as Vec2;
@@ -351,14 +353,14 @@ export interface PlaceOutcome {
   tries: number;
 }
 
-const BUILT_IN_MIN = 0.3;
+export const BUILT_IN_MIN = 0.3;
 const SLIDE = 0.6;
 const MOVE = 0.4;
 const STEP = 0.05;
 const NARROW = [0.95, 0.9, 0.85, 0.8];
 
 /** The item for a piece at a pose. */
-function itemAt(want: Want, at: Vec2, rotation: number, w: number): Item {
+export function itemAt(want: Want, at: Vec2, rotation: number, w: number): Item {
   const k = want.kind;
   const base = want.brought
     ? { ...structuredClone(want.brought), position: { ...want.brought.position, x: at.x, z: at.y } }
@@ -379,7 +381,7 @@ function itemAt(want: Want, at: Vec2, rotation: number, w: number): Item {
 }
 
 /** A pose backed onto a face: the centre `along` the wall, its back on the face, facing in. */
-function onFace(f: Face, along: number, d: number): { at: Vec2; rotation: number } {
+export function onFace(f: Face, along: number, d: number): { at: Vec2; rotation: number } {
   const off = f.frame.half + d / 2 + 0.0005;
   const fr = f.frame;
   return {
@@ -391,7 +393,7 @@ function onFace(f: Face, along: number, d: number): { at: Vec2; rotation: number
   };
 }
 
-const vertical = (want: Want) => {
+export const vertical = (want: Want) => {
   const bottom = want.kind.elevation ?? 0;
   return { bottom, top: bottom + want.h };
 };
