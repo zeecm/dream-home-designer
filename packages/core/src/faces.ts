@@ -573,3 +573,26 @@ export function otherSide(level: Level, face: RoomFace): RoomFace | null {
   }
   return null;
 }
+
+/** A piece is on the wall it stands with its back (or a side) this close to. */
+const ON_WALL = 0.15;
+
+/**
+ * The face a piece stands against: in its room, the face its footprint comes within 0.15 m of
+ * (the nearest), or null for a piece out in the room.
+ */
+export function itemFace(level: Level, itemId: string): RoomFace | null {
+  const it = level.items[itemId];
+  if (!it) return null;
+  let best: { f: RoomFace; v: number } | null = null;
+  for (const id of Object.keys(level.rooms)) {
+    if (!roomItems(level, id).includes(it)) continue;
+    for (const f of roomFaces(level, id)) {
+      const b = itemBand(f, it);
+      if (Math.min(b.u1, f.length) - Math.max(b.u0, 0) <= 0.05) continue;
+      if (b.v0 > ON_WALL || b.v1 < 0) continue;
+      if (!best || b.v0 < best.v) best = { f, v: b.v0 };
+    }
+  }
+  return best?.f ?? null;
+}

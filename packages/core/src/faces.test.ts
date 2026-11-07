@@ -5,6 +5,7 @@ import {
   faceAt,
   faceRef,
   faceUV,
+  itemFace,
   otherSide,
   resolveFace,
   roomFaces,
@@ -16,11 +17,13 @@ import {
   apply,
   level,
   opening,
+  piece,
   roomId,
   roomR,
   wallAlong,
   walls,
 } from './fixtures/roomR';
+import { addItem } from './furniture';
 import { redo, undo } from './history';
 import type { Level } from './schema';
 
@@ -176,5 +179,16 @@ describe('roomFaces', () => {
     const l = level(roomR());
     expect(Object.isFrozen(l)).toBe(true);
     expect(roomFaces(l, roomId(l))).toBe(roomFaces(l, roomId(l)));
+  });
+
+  it('itemFace: the wall a piece stands against, none for one out in the room', () => {
+    const s = apply(
+      roomR(),
+      addItem(LID, piece('it_w', 'built-in-wardrobe', 3.65, 1.5, Math.PI / 2)),
+      addItem(LID, piece('it_t', 'coffee-table', 2, 1.5)),
+    );
+    const l = level(s);
+    expect(itemFace(l, 'it_w')?.letter).toBe('D');
+    expect(itemFace(l, 'it_t')).toBeNull();
   });
 });
