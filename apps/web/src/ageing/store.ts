@@ -69,7 +69,7 @@ export const useAgeing = create<AgeingState>((set, get) => ({
   fitAll: 0,
   load: (projectId) => {
     if (get().projectId === projectId) return;
-    set({ projectId, setting: loadSetting(projectId), listOpen: false, shown: null });
+    set({ projectId, setting: loadSetting(projectId), listOpen: false, shown: null, intro: false });
   },
   set: (patch) => {
     const { projectId, setting } = get();
