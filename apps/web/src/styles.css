@@ -6278,6 +6278,7 @@ textarea {
   gap: 12px;
 }
 .elev-title {
+  flex: 1;
   margin: 0;
   font-size: var(--fs-title);
   font-weight: 600;
@@ -6321,14 +6322,14 @@ textarea {
   text-align: center;
 }
 .elev-close {
-  margin-left: auto;
+  flex: none;
+  align-self: center;
 }
 .elev-check {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   flex: none;
-  color: var(--negative);
   font-size: var(--fs-small);
 }
 .elev-badge {
@@ -6423,6 +6424,9 @@ textarea {
 .elev-key-new {
   border: 2px solid #0f8288;
 }
+.elev-key-moved {
+  border: 2px dashed #0f8288;
+}
 .elev-key-removed {
   border: 1.5px dashed #c0392b;
 }
@@ -6431,6 +6435,13 @@ textarea {
   border: 1px dashed #c0392b;
 }
 
+/* The drawing and its list: the drawing takes the height, the list what's left. */
+.elev-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 /* The drawing on a framed white sheet, white in both themes (it shows real colours). */
 .elev-sheet-wrap {
   flex: 1 1 auto;
@@ -6457,7 +6468,7 @@ textarea {
 /* The list of points and what to check, as text under the drawing. */
 .elev-list {
   flex: 0 1 auto;
-  max-height: 36%;
+  max-height: 30%;
   overflow: auto;
   padding: 0 16px 12px;
 }
@@ -6507,8 +6518,28 @@ textarea {
   font-size: var(--fs-small);
   color: var(--muted);
 }
-.elev-row-sub.warning-text {
-  color: var(--negative);
+.elev-row-moved {
+  color: #0f8288;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .elev-row-moved {
+    color: #5cc3c8;
+  }
+}
+/* A point's own warning: a ring with its number, quieter than a note's badge. */
+.elev-ring {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1.5px solid #c4242a;
+  border-radius: 9px;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  line-height: 15px;
 }
 .elev-list .field-hint {
   margin: 6px 0 0;
@@ -6604,9 +6635,28 @@ textarea {
 .elev-bar-arrow {
   font-size: 22px;
 }
-.elev-bar-wide {
-  display: block;
+/* See from: a small "See from" over the room's name, so the name isn't cut short. */
+.elev-bar-flip {
+  flex-direction: column;
+  gap: 0;
+  line-height: 16px;
   font-weight: 500;
+}
+.elev-flip-small {
+  font-size: var(--fs-small);
+  font-weight: 400;
+  color: var(--muted);
+}
+.elev-flip-room {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.elev-menu-item {
+  height: 44px;
+}
+.elev-landscape-only {
+  display: none;
 }
 .elev-bar-btn:disabled {
   color: var(--control);
@@ -6630,13 +6680,30 @@ textarea {
   .elev-sub {
     margin-bottom: 6px;
   }
-  .elev-sheet-wrap {
-    padding: 0 8px 8px;
-    min-height: 160px;
+  /* Held upright: one scrolling column, the sheet as tall as the drawing needs, the list
+     under it. */
+  .elev-phone .elev-body {
+    display: block;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
-  .elev-list {
+  .elev-phone .elev-sheet-wrap {
+    height: var(--sheet-h, 260px);
+    min-height: 0;
+    padding: 0 8px 8px;
+  }
+  .elev-phone .elev-list {
+    max-height: none;
+    overflow: visible;
     padding: 0 12px 8px;
-    max-height: 45%;
+  }
+  /* One Before | After switch: the wall view's own. */
+  .app-wall-view .reno-bar {
+    display: none;
+  }
+  /* Nothing selected: no details handle under the bar. */
+  .app-wall-view-bare .inspector {
+    display: none;
   }
   .elev-row {
     min-height: 44px;
@@ -6644,12 +6711,25 @@ textarea {
 }
 /* On its side the drawing has the height: the list is behind ⋯. */
 @media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  .elev-phone .elev-body {
+    display: flex;
+    flex-direction: row;
+    overflow: hidden;
+  }
+  .elev-phone .elev-sheet-wrap {
+    flex: 1 1 60%;
+    height: auto;
+  }
   .elev-phone .elev-list {
+    flex: 0 0 40%;
+    overflow: auto;
+    padding: 0 12px 8px 4px;
+  }
+  .elev-phone.elev-list-hidden .elev-list {
     display: none;
   }
-  .elev-phone.elev-list-open .elev-list {
-    display: block;
-    max-height: 40%;
+  .elev-landscape-only {
+    display: inline-flex;
   }
   .elev-phone .elev-sub {
     display: none;

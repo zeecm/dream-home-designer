@@ -12,6 +12,8 @@ import { faceForSelection } from './nav';
  */
 
 let opener: HTMLElement | null = null;
+/** The opening button's `data-wall-entry`, to find it again if it was drawn afresh. */
+let openerKey: string | null = null;
 let lastRoom: string | null = null;
 const HISTORY_KEY = 'dhdWallView';
 /** Whether this page added the history entry the open view is on (a phone's). */
@@ -43,7 +45,15 @@ export function openFace(level: Level, face: RoomFace, from?: Element | null) {
   const wasOpen = !!ed.elevation;
   if (!wasOpen) {
     const active = from ?? document.activeElement;
-    opener = active instanceof HTMLElement ? active : null;
+    opener = active instanceof HTMLElement && active !== document.body ? active : null;
+    openerKey = opener?.dataset.wallEntry ?? null;
+  } else if (ed.selection?.kind === 'wall') {
+    // Stepping or flipping with a wall selected: the selection moves to the wall now shown.
+    const solid = face.stretches.filter((s) => !s.boundary);
+    const pick = [...(solid.length ? solid : face.stretches)].sort(
+      (a, b) => b.u1 - b.u0 - (a.u1 - a.u0),
+    )[0];
+    if (pick) ed.select({ kind: 'wall', id: pick.wallId });
   }
   lastRoom = face.roomId;
   ed.openElevation(faceRef(face));
@@ -62,9 +72,6 @@ export function openFace(level: Level, face: RoomFace, from?: Element | null) {
       useEditor.getState().requestFit(48);
     }
   }
-  // A phone gives the drawing the stage: the Inspector sheet folds until something in the
-  // drawing is tapped.
-  if (!wasOpen && phone()) ed.select(null);
   if (!wasOpen && phone() && !pushed) {
     window.history.pushState({ ...(window.history.state ?? {}), [HISTORY_KEY]: true }, '');
     pushed = true;
@@ -84,9 +91,17 @@ export function openSelected(): boolean {
 function closed() {
   useEditor.getState().closeElevation();
   const back = opener;
+  const key = openerKey;
   opener = null;
+  openerKey = null;
+  // Back to the button it was opened from (drawn again, if it was hidden while open), else
+  // the plan.
   requestAnimationFrame(() => {
-    if (back?.isConnected) back.focus();
+    const again = key
+      ? document.querySelector<HTMLElement>(`[data-wall-entry="${CSS.escape(key)}"]`)
+      : null;
+    const to = back?.isConnected ? back : again;
+    if (to) to.focus();
     else document.querySelector<SVGSVGElement>('svg.plan-svg')?.focus();
   });
 }

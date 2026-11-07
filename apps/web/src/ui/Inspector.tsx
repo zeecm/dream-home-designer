@@ -85,6 +85,7 @@ import { ToolPanel } from './Palette';
 import { RenovationSection } from './Renovation';
 import { LengthField, Segmented, SelectField, TextField } from './fields';
 import { icons } from './icons';
+import { useOneView } from './oneView';
 
 const FLOORS = FLOOR_FINISHES.map((f) => ({ value: f.id, label: f.name }));
 
@@ -190,6 +191,16 @@ export function Inspector() {
   // its room on a phone.
   // biome-ignore lint/correctness/useExhaustiveDependencies: another object decides afresh
   useEffect(() => setUserOpen(null), [key]);
+  // A phone's wall view gets the stage: the sheet folds as it opens (what's selected stays
+  // selected) and opens again as it closes.
+  const wallView = useEditor((s) => !!s.elevation);
+  const oneView = useOneView();
+  const hadWallView = useRef(false);
+  useEffect(() => {
+    if (wallView && !hadWallView.current && oneView) setUserOpen(false);
+    if (!wallView && hadWallView.current) setUserOpen(null);
+    hadWallView.current = wallView;
+  }, [wallView, oneView]);
   // Another tool or object starts the panel at its top, with its toggle in view.
   const panel = useRef<HTMLElement>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: on another object or tool
@@ -286,7 +297,13 @@ export function Inspector() {
           setUserOpen(!open);
         }}
       >
-        {open ? 'Hide details' : 'Show plan details'}
+        {open
+          ? 'Hide details'
+          : wallView && selection
+            ? selection.kind === 'wall'
+              ? 'Show wall details'
+              : 'Show details'
+            : 'Show plan details'}
       </button>
       {/* With something selected (a piece just placed), its details come first. */}
       {/* Storage's panel keeps a tool's panel (a phone's catalogue, from Add a wardrobe). */}

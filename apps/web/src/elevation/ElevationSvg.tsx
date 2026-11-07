@@ -73,6 +73,9 @@ export interface ElevationSvgProps {
 
 /** Room round the drawing for dimensions, heights and tags (px). */
 export const MARGIN_PX = { left: 58, right: 48, top: 32, chain: 22, below: 16 };
+/** Compact (a phone): every height at the right, so little room on the left. */
+const COMPACT_PX = { ...MARGIN_PX, left: 14, right: 52, top: 26 };
+const marginsOf = (compact: boolean) => (compact ? COMPACT_PX : MARGIN_PX);
 
 /** How many chains are drawn below the floor. */
 export const chainsShown = (labels: ElevationLabels, dims: boolean) =>
@@ -83,22 +86,39 @@ export function drawingBox(
   elev: Elevation,
   pxPerM: number,
   chains: number,
+  compact = false,
 ): { x: number; y: number; w: number; h: number } {
+  const m = marginsOf(compact);
   const px = (n: number) => n / pxPerM;
   const ends = Math.max(0, ...elev.ends.map((e) => Math.max(-e.u0, e.u1 - elev.width)));
-  const x = -ends - px(MARGIN_PX.left);
-  const y = -px(MARGIN_PX.top);
-  const w = elev.width + 2 * ends + px(MARGIN_PX.left + MARGIN_PX.right);
-  const h = elev.ceiling + px(MARGIN_PX.top + MARGIN_PX.below + chains * MARGIN_PX.chain);
+  const x = -ends - px(m.left);
+  const y = -px(m.top);
+  const w = elev.width + 2 * ends + px(m.left + m.right);
+  const h = elev.ceiling + px(m.top + m.below + chains * m.chain);
   return { x, y, w, h };
 }
 
 /** The scale at which a drawing with this many chains fits `w` × `h` px. */
-export function fitScale(elev: Elevation, w: number, h: number, chains: number): number {
+export function fitScale(
+  elev: Elevation,
+  w: number,
+  h: number,
+  chains: number,
+  compact = false,
+): number {
+  const m = marginsOf(compact);
   const ends = Math.max(0, ...elev.ends.map((e) => Math.max(-e.u0, e.u1 - elev.width)));
-  const across = (w - MARGIN_PX.left - MARGIN_PX.right) / (elev.width + 2 * ends);
-  const down = (h - MARGIN_PX.top - MARGIN_PX.below - chains * MARGIN_PX.chain) / elev.ceiling;
+  const across = (w - m.left - m.right) / (elev.width + 2 * ends);
+  const down = (h - m.top - m.below - chains * m.chain) / elev.ceiling;
   return Math.max(8, Math.min(across, down));
+}
+
+/** The height a sheet `w` px wide needs to show the drawing whole at the width's scale. */
+export function heightFor(elev: Elevation, w: number, chains: number, compact = false): number {
+  const m = marginsOf(compact);
+  const ends = Math.max(0, ...elev.ends.map((e) => Math.max(-e.u0, e.u1 - elev.width)));
+  const k = (w - m.left - m.right) / (elev.width + 2 * ends);
+  return Math.round(elev.ceiling * k + m.top + m.below + chains * m.chain);
 }
 
 const mm = (z: number) => String(Math.round(z * 1000));
@@ -365,16 +385,33 @@ export function ElevationSvg({
     );
   }
 
-  // Points: plates at their size, the plan's symbol inside, their tags.
+  // Points: plates at their size, the plan's symbol inside (their tags go on top, later).
+  const moved = new Set((changes?.moved ?? []).map((m) => m.id));
+  const tagsOut: ReactNode[] = [];
   for (const p of elev.points) {
     const r = { u0: p.u - p.w / 2, u1: p.u + p.w / 2, z0: p.z - p.h / 2, z1: p.z + p.h / 2 };
     const warn = p.warnings.length > 0 || p.onGlass;
+    if (labels.tags !== 'none') {
+      tagsOut.push(
+        <g key={`tag${p.id}`} data-tag={p.id}>
+          {text(p.u, Y(r.z1) - px(5), tagText(p, labels.tags === 'full', labels.tagNotes[p.id]), {
+            size: font,
+            fill: labels.tagNotes[p.id] ? PAPER.note : PAPER.ink,
+          })}
+        </g>,
+      );
+    }
     out.push(
-      <g key={p.id}>
+      <g
+        key={p.id}
+        data-point={p.id}
+        data-change={moved.has(p.id) ? 'moved' : added.has(p.id) ? 'new' : undefined}
+      >
         {rect(r, {
           fill: PAPER.white,
           stroke: added.has(p.id) ? PAPER.new : PAPER.ink,
           strokeWidth: added.has(p.id) ? px(2) : sw,
+          strokeDasharray: moved.has(p.id) ? `${px(3)} ${px(2)}` : undefined,
         })}
         <g transform={`translate(${p.u} ${Y(p.z)})`}>
           <ElecGlyph
@@ -395,19 +432,24 @@ export function ElevationSvg({
             strokeWidth={px(1.5)}
           />
         )}
-        {labels.tags !== 'none' &&
-          text(p.u, Y(r.z1) - px(5), tagText(p, labels.tags === 'full'), { size: font })}
       </g>,
     );
   }
 
   // Notes: a red outline and a numbered badge.
   for (const n of elev.notes) {
-    const bx = Math.min(n.at.u1, elev.width);
-    const by = Y(Math.min(n.at.z1, C));
     out.push(
       <g key={`n${n.n}`} data-note={n.n}>
         {rect(n.at, { fill: 'none', stroke: PAPER.note, strokeWidth: px(2) })}
+      </g>,
+    );
+  }
+  const badgesOut: ReactNode[] = [];
+  for (const b of labels.badges) {
+    const bx = b.u;
+    const by = Y(b.z);
+    badgesOut.push(
+      <g key={`b${b.n}`} data-badge={b.n}>
         <rect
           x={bx - px(13)}
           y={by - px(9)}
@@ -425,13 +467,14 @@ export function ElevationSvg({
           textAnchor="middle"
           fill={PAPER.white}
         >
-          {`!${n.n}`}
+          {`!${b.n}`}
         </text>
       </g>,
     );
   }
 
-  // Selected: an accent outline.
+  // Selected: an accent outline (and a ring round a point, a plate being small).
+  const selPoint = selected ? elev.points.find((x) => x.id === selected) : undefined;
   const sel = (() => {
     if (!selected) return null;
     const p = elev.points.find((x) => x.id === selected);
@@ -491,7 +534,34 @@ export function ElevationSvg({
         </g>,
       );
     });
+    const merged = labels.merged;
+    if (merged?.marks.length) {
+      const x = right + px(10);
+      const top = Math.max(...merged.marks);
+      dimsOut.push(
+        <g key="ht-all" data-height="all">
+          <line x1={x} x2={x} y1={Y(0)} y2={Y(top)} stroke={PAPER.muted} strokeWidth={sw} />
+          {[0, ...merged.marks].map((z) => (
+            <line
+              key={z}
+              x1={x - px(4)}
+              x2={x + px(4)}
+              y1={Y(z)}
+              y2={Y(z)}
+              stroke={PAPER.ink}
+              strokeWidth={px(1.25)}
+            />
+          ))}
+          {merged.marks.map((z, i) =>
+            merged.shown[i] ? (
+              <g key={`l${z}`}>{text(x + px(5), Y(z) + font * 0.35, mm(z), { anchor: 'start' })}</g>
+            ) : null,
+          )}
+        </g>,
+      );
+    }
     elev.heights.forEach((h, hi) => {
+      if (merged) return;
       const shown = labels.heights[hi] ?? [];
       const top = Math.max(...h.marks);
       const x =
@@ -627,7 +697,19 @@ export function ElevationSvg({
       </defs>
       {out}
       {sel && rect(sel, { fill: 'none', stroke: PAPER.accent, strokeWidth: px(2.5) })}
+      {selPoint && (
+        <circle
+          cx={selPoint.u}
+          cy={Y(selPoint.z)}
+          r={Math.max(selPoint.w, selPoint.h) / 2 + px(7)}
+          fill="none"
+          stroke={PAPER.accent}
+          strokeWidth={px(2.5)}
+        />
+      )}
       {dimsOut}
+      {badgesOut}
+      {tagsOut}
       {hits}
     </g>
   );

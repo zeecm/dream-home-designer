@@ -1,5 +1,6 @@
-import { type Level, faceMid, resolveFace, roomFaces } from '@dhd/core';
+import { type Level, faceGeometry, faceMid, resolveFace, roomFaces } from '@dhd/core';
 import { useEditor } from '../editor';
+import { roomLabelBoxes } from '../plan/layers';
 import { type Size, type View, worldToScreen } from '../plan/view';
 import { openFace } from './open';
 
@@ -10,17 +11,33 @@ import { openFace } from './open';
  */
 export function WallViewMarkers({ level, view, size }: { level: Level; view: View; size: Size }) {
   const ref = useEditor((s) => s.elevation?.ref);
+  // The selected wall's length tag sits at its middle: a marker on that wall moves along it.
+  const selected = useEditor((s) => (s.selection?.kind === 'wall' ? s.selection.id : null));
   const face = ref ? resolveFace(level, ref) : null;
   if (!face) return null;
   const faces = roomFaces(level, face.roomId).filter((f) => f.steppable || f.index === face.index);
-  const R = 11;
+  const R = 12;
+  const labels = roomLabelBoxes(level, faceGeometry(level), view.zoom).map((l) => {
+    const c = worldToScreen(view, size, l.at);
+    const hx = l.half.x * view.zoom;
+    const hy = l.half.y * view.zoom;
+    return { x0: c.x - hx, x1: c.x + hx, y0: c.y - hy, y1: c.y + hy };
+  });
   return (
     <g className="wall-markers" data-export="skip">
       {faces.map((f) => {
-        const mid = faceMid(f);
-        const at = worldToScreen(view, size, mid);
-        // Out into the room, clear of the wall.
-        const c = { x: at.x + f.normal.x * (R + 10), y: at.y + f.normal.y * (R + 10) };
+        // Where along the wall: its middle, or clear of the length tag and room labels.
+        const onSelected = f.stretches.some((s) => s.wallId === selected);
+        const spots = (onSelected ? [0.22, 0.78, 0.5] : [0.5, 0.3, 0.7, 0.15, 0.85]).map((k) => {
+          const p = { x: f.left.x + f.dir.x * f.length * k, y: f.left.y + f.dir.y * f.length * k };
+          const at = worldToScreen(view, size, p);
+          return { at, c: { x: at.x + f.normal.x * (R + 10), y: at.y + f.normal.y * (R + 10) } };
+        });
+        const clear = (c: { x: number; y: number }) =>
+          !labels.some((b) => c.x + R > b.x0 && c.x - R < b.x1 && c.y + R > b.y0 && c.y - R < b.y1);
+        const spot = spots.find((s) => clear(s.c)) ?? (spots[0] as (typeof spots)[number]);
+        const at = spot.at;
+        const c = spot.c;
         const tip = { x: at.x + f.normal.x * 3, y: at.y + f.normal.y * 3 };
         const side = { x: -f.normal.y, y: f.normal.x };
         const base = (k: number) => ({

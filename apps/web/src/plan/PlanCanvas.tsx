@@ -341,7 +341,8 @@ export function PlanCanvas() {
       useEditor.getState().fitPadding,
       Math.max(16, Math.min(size.width, size.height) / 8),
     );
-    setView(fitBounds(b, size, pad));
+    // A room beside the wall view is framed close (a room is smaller than a plan).
+    setView(fitBounds(b, size, pad, useEditor.getState().fitBox ? 3 : undefined));
     lastFit.current = { at: Date.now(), ink, image: image.status };
     // Only a fit that was asked for answers the request. This run may be a refit (the plan
     // image measured) left over from a commit before a view switch asked for one: clearing

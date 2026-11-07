@@ -60,16 +60,16 @@ test.describe('desktop', () => {
 
     // 19: next and previous, by button and by ] and [.
     await wallView(page).getByRole('button', { name: 'Next wall' }).click();
-    await expect(title(page)).toHaveText(/^Main bedroom · E/);
+    await expect(title(page)).toHaveText(/^Main bedroom · (Wall )?E/);
     await wallView(page).getByRole('button', { name: 'Previous wall' }).click();
-    await expect(title(page)).toHaveText(/^Main bedroom · D/);
+    await expect(title(page)).toHaveText(/^Main bedroom · (Wall )?D/);
     await page.keyboard.press(']');
-    await expect(title(page)).toHaveText(/^Main bedroom · E/);
+    await expect(title(page)).toHaveText(/^Main bedroom · (Wall )?E/);
     await page.keyboard.press('[');
-    await expect(title(page)).toHaveText(/^Main bedroom · D/);
+    await expect(title(page)).toHaveText(/^Main bedroom · (Wall )?D/);
     // A letter on the plan opens its wall.
     await page.locator('.wall-marker[data-letter="C"]').click();
-    await expect(title(page)).toHaveText(/^Main bedroom · C/);
+    await expect(title(page)).toHaveText(/^Main bedroom · (Wall )?C/);
     await page.locator('.wall-marker[data-letter="D"]').click();
 
     // 24: a picture named after the room and the wall, with the drawing's dimensions.
@@ -101,7 +101,7 @@ test.describe('desktop', () => {
     ).toBeFocused();
     // L opens the selected wall too.
     await page.keyboard.press('l');
-    await expect(title(page)).toHaveText(/^Main bedroom · D/);
+    await expect(title(page)).toHaveText(/^Main bedroom · (Wall )?D/);
   });
 
   test('20, 21, 22: the other side; a socket set in the Inspector; paint and wallpaper', async ({
@@ -112,11 +112,11 @@ test.describe('desktop', () => {
     await selectWall(page, BETWEEN_BEDROOMS);
     await expect(page.locator('.inspector .elev-entry button')).toHaveCount(2);
     await page.getByRole('button', { name: 'Main bedroom side', exact: true }).click();
-    await expect(title(page)).toHaveText(/^Main bedroom · E/);
+    await expect(title(page)).toHaveText(/^Main bedroom · (Wall )?E/);
     await wallView(page).getByRole('button', { name: 'See from Bedroom' }).click();
     await expect(title(page)).toHaveText(/^Bedroom · (Wall )?B/);
     await wallView(page).getByRole('button', { name: 'See from Main bedroom' }).click();
-    await expect(title(page)).toHaveText(/^Main bedroom · E/);
+    await expect(title(page)).toHaveText(/^Main bedroom · (Wall )?E/);
     // An outside wall has no other side.
     await page.keyboard.press('Escape');
     await openWall(page, BEDROOM_WALL, 'Main bedroom');
@@ -187,7 +187,7 @@ test.describe('desktop', () => {
       .click();
     await expect(wallView(page)).toContainText('That wall is gone.');
     await page.keyboard.press('Control+z');
-    await expect(title(page)).toHaveText(/^Main bedroom · E/);
+    await expect(title(page)).toHaveText(/^Main bedroom · (Wall )?E/);
   });
 
   test('27: a renovation: a new window in teal; Before keeps the wall; the wall taken down', async ({
@@ -215,11 +215,15 @@ test.describe('desktop', () => {
     await expect(svg(page).locator('[data-new="op_new"]')).toHaveCount(1);
     await expect(wallView(page).locator('.elev-key')).toContainText('New');
     // Before: the same wall, without the window.
-    await wallView(page).getByRole('button', { name: 'Before', exact: true }).click();
-    await expect(title(page)).toHaveText(/^Main bedroom · E/);
+    // One Before | After switch: the app's.
+    await expect(wallView(page).getByRole('button', { name: 'Before', exact: true })).toHaveCount(
+      0,
+    );
+    await page.locator('.reno-bar').getByRole('button', { name: 'Before', exact: true }).click();
+    await expect(title(page)).toHaveText(/^Main bedroom · (Wall )?E/);
     await expect(svg(page).locator('[data-opening="op_new"]')).toHaveCount(0);
     // After, the whole wall hacked.
-    await wallView(page).getByRole('button', { name: 'After', exact: true }).click();
+    await page.locator('.reno-bar').getByRole('button', { name: 'After', exact: true }).click();
     await clickWallInView(page, BETWEEN_BEDROOMS);
     await page
       .locator('.inspector')
@@ -227,7 +231,7 @@ test.describe('desktop', () => {
       .click();
     await expect(wallView(page)).toContainText('This wall is taken down in the renovation.');
     await wallView(page).getByRole('button', { name: 'See it as it is' }).click();
-    await expect(title(page)).toHaveText(/^Main bedroom · E/);
+    await expect(title(page)).toHaveText(/^Main bedroom · (Wall )?E/);
     await expect(wallView(page).locator('.elev-sub')).toContainText('Taken down in the renovation');
   });
 
@@ -245,9 +249,9 @@ test.describe('desktop', () => {
     await viewer.keyboard.press('2');
     await selectWall(viewer, BEDROOM_WALL);
     await viewer.getByRole('button', { name: 'Main bedroom side', exact: true }).click();
-    await expect(title(viewer)).toHaveText(/^Main bedroom · D/);
+    await expect(title(viewer)).toHaveText(/^Main bedroom · (Wall )?D/);
     await wallView(viewer).getByRole('button', { name: 'Next wall' }).click();
-    await expect(title(viewer)).toHaveText(/^Main bedroom · E/);
+    await expect(title(viewer)).toHaveText(/^Main bedroom · (Wall )?E/);
     await expect(undoButton(viewer)).toBeDisabled();
   });
 
@@ -292,7 +296,9 @@ test.describe('phone', () => {
     page,
   }) => {
     await openByFinger(page);
-    await expect(title(page)).toHaveText(/^Main bedroom · A/);
+    await expect(title(page)).toHaveText(/^Main bedroom · (Wall )?A/);
+    // The room stays selected; its details fold away under a handle.
+    await expect(page.locator('.inspector-toggle')).toHaveText('Show details');
     // The stage is the wall view's: no plan, no tool bar; its own bar of 44 px targets.
     await expect(page.locator('svg.plan-svg')).toHaveCount(0);
     await expect(page.locator('.palette')).toBeHidden();
@@ -353,7 +359,7 @@ test.describe('phone', () => {
     await expect(page.locator('svg.plan-svg')).toBeVisible();
     // And Close does too.
     await tapCentre(page, page.getByRole('button', { name: 'See on its wall' }));
-    await expect(title(page)).toHaveText(/^Main bedroom · D/);
+    await expect(title(page)).toHaveText(/^Main bedroom · (Wall )?D/);
     await tapCentre(page, bar.getByRole('button', { name: 'Close' }));
     await expect(wallView(page)).toHaveCount(0);
     await expect(page.locator('.palette')).toBeVisible();
@@ -385,12 +391,22 @@ test.describe('phone', () => {
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
   });
 
-  test('on its side: the drawing has the height; the list is behind ⋯', async ({ page }) => {
+  test('on its side: the list is a panel beside the drawing, hidden and shown from ⋯', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 844, height: 390 });
     await openByFinger(page);
-    await expect(wallView(page).locator('.elev-list')).toBeHidden();
+    const list = wallView(page).locator('.elev-list');
+    const sheet = wallView(page).locator('.elev-sheet');
+    await expect(list).toBeVisible();
+    const lb = await list.boundingBox();
+    const sb = await sheet.boundingBox();
+    expect((lb?.x ?? 0) > (sb?.x ?? 0) + (sb?.width ?? 0) - 1).toBe(true);
     await tapCentre(page, wallView(page).locator('summary[aria-label="More"]'));
-    await tapCentre(page, wallView(page).getByRole('button', { name: 'List of points' }));
-    await expect(wallView(page).locator('.elev-list')).toBeVisible();
+    await tapCentre(page, wallView(page).getByRole('button', { name: 'Hide list' }));
+    await expect(list).toBeHidden();
+    await tapCentre(page, wallView(page).locator('summary[aria-label="More"]'));
+    await tapCentre(page, wallView(page).getByRole('button', { name: 'Show list' }));
+    await expect(list).toBeVisible();
   });
 });

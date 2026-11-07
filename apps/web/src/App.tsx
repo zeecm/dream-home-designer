@@ -296,6 +296,7 @@ export function App() {
   const designerOpen = useDesigner((s) => s.panel);
   const previewing = useEditor((s) => !!s.preview);
   const wallView = useEditor((s) => !!s.elevation);
+  const selecting = useEditor((s) => !!s.selection);
   const oneView = useOneView();
 
   useEffect(() => {
@@ -357,7 +358,9 @@ export function App() {
   }, [opened, projectId, hasRooms]);
 
   return (
-    <div className={`app${walking ? ' app-walking' : ''}${wallView ? ' app-wall-view' : ''}`}>
+    <div
+      className={`app${walking ? ' app-walking' : ''}${wallView ? ' app-wall-view' : ''}${wallView && !selecting ? ' app-wall-view-bare' : ''}`}
+    >
       <TopBar />
       <div className={designerOpen && !commentsOpen ? 'workspace workspace-designer' : 'workspace'}>
         <Palette />

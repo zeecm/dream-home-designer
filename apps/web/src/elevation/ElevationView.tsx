@@ -15,6 +15,7 @@ import {
   wallElevation,
 } from '@dhd/core';
 import {
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   useEffect,
   useMemo,
@@ -27,7 +28,7 @@ import { useLevel, useProject, useStore } from '../store';
 import { Segmented } from '../ui/fields';
 import { icons } from '../ui/icons';
 import { useOneView } from '../ui/oneView';
-import { ElevationSvg, chainsShown, drawingBox, fitScale } from './ElevationSvg';
+import { ElevationSvg, chainsShown, drawingBox, fitScale, heightFor } from './ElevationSvg';
 import { facePlace, flipRef, stepRef } from './nav';
 import { closeView, openFace } from './open';
 import { loadWallpapers, saveElevationImage, wallpaperUrl } from './saveImage';
@@ -145,6 +146,30 @@ export function ElevationView() {
   useEffect(() => {
     headRef.current?.focus({ preventScroll: true });
   }, []);
+  // The list beside the drawing (a phone on its side can hide it).
+  const [listShown, setListShown] = useState(true);
+  // Its menus close on Esc (which then goes no further) and on a press outside them.
+  useEffect(() => {
+    const openMenus = () => [...document.querySelectorAll<HTMLDetailsElement>('.elev-menu[open]')];
+    const down = (e: PointerEvent) => {
+      for (const m of openMenus()) if (!m.contains(e.target as Node)) m.open = false;
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const open = openMenus();
+      if (!open.length) return;
+      for (const m of open) m.open = false;
+      open[0]?.querySelector('summary')?.focus();
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener('pointerdown', down, { capture: true });
+    window.addEventListener('keydown', key, { capture: true });
+    return () => {
+      window.removeEventListener('pointerdown', down, { capture: true });
+      window.removeEventListener('keydown', key, { capture: true });
+    };
+  }, []);
 
   if (!level || !ref) return null;
   if (!face || !elev) {
@@ -207,7 +232,9 @@ export function ElevationView() {
   ]
     .filter(Boolean)
     .join(' · ');
-  const notes = elev.notes.length;
+  // What to check: the notes, and each point with a warning (as the plan has them).
+  const warned = elev.points.filter((p) => p.warnings.length > 0 || p.onGlass);
+  const toCheck = elev.notes.length + warned.length;
   const save = () =>
     void saveElevationImage({
       elev,
@@ -222,43 +249,67 @@ export function ElevationView() {
         }),
       ),
     }).catch((e: Error) => useStore.setState({ notice: e.message }));
-  const showList = () =>
-    document.getElementById('elev-list')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  const showList = () => {
+    setListShown(true);
+    requestAnimationFrame(() => {
+      const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      const list = document.getElementById('elev-list');
+      list?.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
+      list?.querySelector<HTMLElement>('.elev-row')?.focus({ preventScroll: true });
+    });
+  };
   const allFaces = roomFaces(level, face.roomId).filter((f) => f.steppable);
+  const closeMenu = (e: { currentTarget: Element }) =>
+    e.currentTarget.closest('details')?.removeAttribute('open');
 
-  const showMenu = (
-    <details className="elev-menu">
-      <summary className="btn btn-small">
-        Show <span aria-hidden="true">{icons.chevronDown}</span>
-      </summary>
-      <div className="elev-menu-body">
-        <span className="elev-menu-label">Furniture</span>
-        <Segmented
-          label="Furniture"
-          value={prefs.furniture}
-          options={[
-            { value: 'wall', label: 'Against the wall' },
-            { value: 'none', label: 'None' },
-          ]}
-          onChange={(furniture) => setPrefs({ ...prefs, furniture })}
-        />
-        <span className="elev-menu-label">Dimensions</span>
-        <Segmented
-          label="Dimensions"
-          value={prefs.dims ? 'on' : 'off'}
-          options={[
-            { value: 'on', label: 'Shown' },
-            { value: 'off', label: 'None' },
-          ]}
-          onChange={(v) => setPrefs({ ...prefs, dims: v === 'on' })}
-        />
-      </div>
-    </details>
+  const furniture = (
+    <>
+      <span className="elev-menu-label">Furniture</span>
+      <Segmented
+        label="Furniture"
+        value={prefs.furniture}
+        options={[
+          { value: 'wall', label: 'Against the wall' },
+          { value: 'none', label: 'None' },
+        ]}
+        onChange={(furniture) => setPrefs({ ...prefs, furniture })}
+      />
+      <span className="elev-menu-label">Dimensions</span>
+      <Segmented
+        label="Dimensions"
+        value={prefs.dims ? 'on' : 'off'}
+        options={[
+          { value: 'on', label: 'Shown' },
+          { value: 'off', label: 'None' },
+        ]}
+        onChange={(v) => setPrefs({ ...prefs, dims: v === 'on' })}
+      />
+    </>
+  );
+  const key = changes && (
+    <span className="elev-key" aria-label="Key">
+      <span>
+        <span className="elev-key-swatch elev-key-new" aria-hidden="true" />
+        New
+      </span>
+      <span>
+        <span className="elev-key-swatch elev-key-moved" aria-hidden="true" />
+        Moved
+      </span>
+      <span>
+        <span className="elev-key-swatch elev-key-removed" aria-hidden="true" />
+        Removed
+      </span>
+      <span>
+        <span className="elev-key-swatch elev-key-hacked" aria-hidden="true" />
+        Hacked
+      </span>
+    </span>
   );
 
   return (
     <section
-      className={`elev-pane${oneView ? ' elev-phone' : ''}`}
+      className={`elev-pane${oneView ? ' elev-phone' : ''}${listShown ? '' : ' elev-list-hidden'}`}
       aria-label="Wall seen straight on"
       data-testid="wall-view"
     >
@@ -267,12 +318,23 @@ export function ElevationView() {
           <h2 className="elev-title" ref={headRef} tabIndex={-1}>
             {title}
           </h2>
-          {notes > 0 && (
-            <button type="button" className="link-btn elev-check" onClick={showList}>
+          {toCheck > 0 && (
+            <button type="button" className="link-btn elev-check warning-text" onClick={showList}>
               <span className="elev-badge" aria-hidden="true">
                 !
               </span>
-              {notes} to check
+              {toCheck} to check
+            </button>
+          )}
+          {!oneView && (
+            <button
+              type="button"
+              className="icon-btn elev-close"
+              aria-label="Close"
+              title="Close (Esc)"
+              onClick={closeView}
+            >
+              {icons.close}
             </button>
           )}
         </div>
@@ -290,7 +352,7 @@ export function ElevationView() {
                 ‹
               </button>
               <span className="elev-place num">
-                {face.letter} of {place.of}
+                {place.at > 0 ? `${face.letter} of ${place.of}` : face.letter}
               </span>
               <button
                 type="button"
@@ -307,21 +369,20 @@ export function ElevationView() {
                 See from {otherName}
               </button>
             )}
-            {showMenu}
+            <details className="elev-menu">
+              <summary className="btn btn-small">
+                Show <span aria-hidden="true">{icons.chevronDown}</span>
+              </summary>
+              <div className="elev-menu-body">{furniture}</div>
+            </details>
             <button type="button" className="btn btn-small" onClick={save}>
               Save image
             </button>
-            <button
-              type="button"
-              className="btn btn-small elev-close"
-              title="Close (Esc)"
-              onClick={closeView}
-            >
-              Close
-            </button>
+            {/* The app's own Before | After switch is above; the key says what the colours mean. */}
+            {key}
           </div>
         )}
-        {hasReno && (
+        {oneView && hasReno && (
           <div className="elev-reno">
             <Segmented
               label="Version"
@@ -335,36 +396,24 @@ export function ElevationView() {
                 useEditor.getState().setVariant(v);
               }}
             />
-            {variant === 'after' && (
-              <span className="elev-key" aria-label="Key">
-                <span>
-                  <span className="elev-key-swatch elev-key-new" aria-hidden="true" />
-                  New
-                </span>
-                <span>
-                  <span className="elev-key-swatch elev-key-removed" aria-hidden="true" />
-                  Removed
-                </span>
-                <span>
-                  <span className="elev-key-swatch elev-key-hacked" aria-hidden="true" />
-                  Hacked
-                </span>
-              </span>
-            )}
+            {key}
           </div>
         )}
       </header>
-      <Sheet
-        elev={elev}
-        changes={changes}
-        dims={prefs.dims}
-        selection={selection}
-        hitPx={oneView ? 44 : 24}
-        openTo={face.openTo ? (level.rooms[face.openTo]?.name ?? null) : null}
-        label={`${title}, ${size}`}
-        tiles={tiles}
-      />
-      <PointList level={level} elev={elev} />
+      <div className="elev-body">
+        <Sheet
+          elev={elev}
+          changes={changes}
+          dims={prefs.dims}
+          selection={selection}
+          hitPx={oneView ? 44 : 24}
+          openTo={face.openTo ? (level.rooms[face.openTo]?.name ?? null) : null}
+          label={`${title}, ${size}`}
+          tiles={tiles}
+          compact={oneView}
+        />
+        <PointList level={level} elev={elev} changes={changes} />
+      </div>
       {oneView && (
         <nav className="elev-bar" aria-label="Walls">
           <button
@@ -378,9 +427,9 @@ export function ElevationView() {
           <details className="elev-menu elev-menu-up">
             <summary
               className="elev-bar-btn num"
-              aria-label={`Wall ${face.letter} of ${place.of}: choose a wall`}
+              aria-label={`Wall ${face.letter}${place.at > 0 ? ` of ${place.of}` : ''}: choose a wall`}
             >
-              {face.letter} of {place.of}
+              {place.at > 0 ? `${face.letter} of ${place.of}` : face.letter}
             </summary>
             <div className="elev-menu-body elev-walls">
               {allFaces.map((f) => (
@@ -390,7 +439,7 @@ export function ElevationView() {
                   className="elev-wall-choice"
                   aria-pressed={f.index === face.index}
                   onClick={(e) => {
-                    e.currentTarget.closest('details')?.removeAttribute('open');
+                    closeMenu(e);
                     openFace(level, f);
                   }}
                 >
@@ -407,52 +456,45 @@ export function ElevationView() {
           >
             ›
           </button>
-          <button
-            type="button"
-            className="elev-bar-btn elev-bar-wide"
-            disabled={!otherName}
-            onClick={flip}
-            aria-label={otherName ? `See from ${otherName}` : 'No room on the other side'}
-          >
-            {otherName ? `See from ${otherName}` : 'See from…'}
-          </button>
+          {otherName ? (
+            <button
+              type="button"
+              className="elev-bar-btn elev-bar-flip"
+              onClick={flip}
+              aria-label={`See from ${otherName}`}
+            >
+              <span className="elev-flip-small">See from</span>
+              <span className="elev-flip-room">{otherName}</span>
+            </button>
+          ) : (
+            // No room on the other side: nothing to see from; its place is kept.
+            <span className="elev-bar-gap" aria-hidden="true" />
+          )}
           <details className="elev-menu elev-menu-up elev-menu-end">
             <summary className="elev-bar-btn" aria-label="More">
               {icons.more}
             </summary>
             <div className="elev-menu-body">
-              <span className="elev-menu-label">Furniture</span>
-              <Segmented
-                label="Furniture"
-                value={prefs.furniture}
-                options={[
-                  { value: 'wall', label: 'Against the wall' },
-                  { value: 'none', label: 'None' },
-                ]}
-                onChange={(furniture) => setPrefs({ ...prefs, furniture })}
-              />
-              <span className="elev-menu-label">Dimensions</span>
-              <Segmented
-                label="Dimensions"
-                value={prefs.dims ? 'on' : 'off'}
-                options={[
-                  { value: 'on', label: 'Shown' },
-                  { value: 'off', label: 'None' },
-                ]}
-                onChange={(v) => setPrefs({ ...prefs, dims: v === 'on' })}
-              />
-              <button type="button" className="btn" onClick={save}>
+              {furniture}
+              <button
+                type="button"
+                className="btn elev-menu-item"
+                onClick={(e) => {
+                  closeMenu(e);
+                  save();
+                }}
+              >
                 Save image
               </button>
               <button
                 type="button"
-                className="btn elev-list-toggle"
+                className="btn elev-menu-item elev-landscape-only"
                 onClick={(e) => {
-                  e.currentTarget.closest('details')?.removeAttribute('open');
-                  document.querySelector('.elev-pane')?.classList.toggle('elev-list-open');
+                  closeMenu(e);
+                  setListShown(!listShown);
                 }}
               >
-                List of points
+                {listShown ? 'Hide list' : 'Show list'}
               </button>
             </div>
           </details>
@@ -481,6 +523,7 @@ function Sheet({
   openTo,
   label,
   tiles,
+  compact,
 }: {
   elev: Elevation;
   changes: ElevationChanges | null;
@@ -491,6 +534,8 @@ function Sheet({
   label: string;
   /** Bumped when wallpaper tiles have been drawn. */
   tiles: number;
+  /** A phone: compact labels, and (held upright) the sheet as tall as the drawing needs. */
+  compact: boolean;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -518,14 +563,24 @@ function Sheet({
 
   // The fit (scale and box) only changes with the drawing, the sheet's size or the dimensions
   // shown: a pinch or a pan changes only the transform below.
-  const { base, vb } = useMemo(() => {
+  const { base, vb, natural } = useMemo(() => {
+    const lab = (k: number) => elevationLabels(elev, k, 11, { compact });
     const maxChains = dims ? elev.chains.length : 0;
-    const base0 = size.w > 0 ? fitScale(elev, size.w, size.h, maxChains) : 50;
-    const shown0 = chainsShown(elevationLabels(elev, base0), dims);
-    const base = size.w > 0 ? fitScale(elev, size.w, size.h, shown0) : 50;
-    return { base, vb: drawingBox(elev, base, chainsShown(elevationLabels(elev, base), dims)) };
-  }, [elev, size.w, size.h, dims]);
-  const labels = useMemo(() => elevationLabels(elev, base * labelK), [elev, base, labelK]);
+    const base0 = size.w > 0 ? fitScale(elev, size.w, size.h, maxChains, compact) : 50;
+    const shown0 = chainsShown(lab(base0), dims);
+    const base = size.w > 0 ? fitScale(elev, size.w, size.h, shown0, compact) : 50;
+    const shown = chainsShown(lab(base), dims);
+    return {
+      base,
+      vb: drawingBox(elev, base, shown, compact),
+      // The height that shows the whole drawing at the sheet's width.
+      natural: size.w > 0 ? heightFor(elev, size.w, maxChains, compact) : 0,
+    };
+  }, [elev, size.w, size.h, dims, compact]);
+  const labels = useMemo(
+    () => elevationLabels(elev, base * labelK, 11, { compact: compact && labelK < 1.5 }),
+    [elev, base, labelK, compact],
+  );
   // Centred in the sheet.
   const w = size.w / base;
   const h = size.h / base;
@@ -542,6 +597,7 @@ function Sheet({
     target: EventTarget | null;
   } | null>(null);
   const lastTap = useRef(0);
+  const beforeTap = useRef<Selection | null>(null);
   const local = (e: { clientX: number; clientY: number }) => {
     const r = box.current?.getBoundingClientRect();
     return { x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0) };
@@ -603,12 +659,16 @@ function Sheet({
     if (!g || g.moved) return;
     // A tap: select what's under it; a second tap soon after fits the drawing again.
     const now = e.timeStamp;
+    const ed0 = useEditor.getState();
     if (now - lastTap.current < 300) {
       setZoom({ k: 1, x: 0, y: 0 });
       lastTap.current = 0;
+      // The first tap's selection was the start of a double tap, not a choice.
+      ed0.select(beforeTap.current);
       return;
     }
     lastTap.current = now;
+    beforeTap.current = ed0.selection;
     const hit = (g.target as Element | null)
       ?.closest?.('[data-elev-hit]')
       ?.getAttribute('data-elev-hit');
@@ -665,7 +725,16 @@ function Sheet({
     [elev, labels, pxPerM, changes, selected, dims, hitPx, openTo, tiles],
   );
   return (
-    <div className="elev-sheet-wrap">
+    <div
+      className="elev-sheet-wrap"
+      style={
+        natural
+          ? ({
+              '--sheet-h': `${Math.max(180, Math.min(natural, Math.round(window.innerHeight * 0.62)))}px`,
+            } as CSSProperties)
+          : undefined
+      }
+    >
       <div
         ref={box}
         className="elev-sheet"
@@ -698,7 +767,15 @@ function Sheet({
 }
 
 /** What's on the wall as text: what to check, then each point, selectable. */
-function PointList({ level, elev }: { level: Level; elev: Elevation }) {
+function PointList({
+  level,
+  elev,
+  changes,
+}: {
+  level: Level;
+  elev: Elevation;
+  changes: ElevationChanges | null;
+}) {
   const select = (s: Selection) => useEditor.getState().select(s);
   const kindOf = (id: string): Selection['kind'] | null =>
     elev.points.some((p) => p.id === id)
@@ -709,9 +786,19 @@ function PointList({ level, elev }: { level: Level; elev: Elevation }) {
           ? 'opening'
           : null;
   const fronts = elev.items.some((i) => i.fronts.length > 0);
+  const nameOf = (id: string) => {
+    const pt = level.points?.[id];
+    return pt ? pointName(pt) : 'Point';
+  };
+  const warnings = (p: Elevation['points'][number]) => [
+    ...p.warnings.map((w) => WARNING_TEXT[w]),
+    ...(p.onGlass ? ['On a glass wall, where no point can be.'] : []),
+  ];
+  const warned = elev.points.filter((p) => warnings(p).length > 0);
+  const moved = new Set((changes?.moved ?? []).map((m) => m.id));
   return (
     <div className="elev-list" id="elev-list">
-      {elev.notes.length > 0 && (
+      {(elev.notes.length > 0 || warned.length > 0) && (
         <section aria-labelledby="elev-check-h">
           <h3 id="elev-check-h" className="elev-list-title">
             To check
@@ -735,6 +822,23 @@ function PointList({ level, elev }: { level: Level; elev: Elevation }) {
                 </li>
               );
             })}
+            {/* Points' own warnings, as the plan has them: a quieter kind, ringed on the drawing. */}
+            {warned.map((p) => (
+              <li key={`w${p.id}`}>
+                <button
+                  type="button"
+                  className="elev-row elev-row-point-warning"
+                  onClick={() => select({ kind: 'point', id: p.id })}
+                >
+                  <span className="elev-ring num" aria-hidden="true">
+                    {p.n}
+                  </span>
+                  <span className="warning-text">
+                    {nameOf(p.id)} {p.n}: {warnings(p).join(' ')}
+                  </span>
+                </button>
+              </li>
+            ))}
           </ul>
         </section>
       )}
@@ -744,38 +848,29 @@ function PointList({ level, elev }: { level: Level; elev: Elevation }) {
             Points on this wall
           </h3>
           <ul className="elev-rows">
-            {elev.points.map((p) => {
-              const pt = level.points?.[p.id];
-              const warn = [
-                ...p.warnings.map((w) => WARNING_TEXT[w]),
-                ...(p.onGlass ? ['On a glass wall, where no point can be.'] : []),
-              ];
-              return (
-                <li key={p.id}>
-                  <button
-                    type="button"
-                    className="elev-row"
-                    data-point={p.id}
-                    onClick={() => select({ kind: 'point', id: p.id })}
-                  >
-                    <span className="elev-n num">{p.n}</span>
-                    <span>
-                      <span className="elev-row-name">{pt ? pointName(pt) : p.kind}</span>
-                      <span className="elev-row-sub num">
-                        {Math.round(p.tagHeight * 1000)} from floor ·{' '}
-                        {Math.round(p.fromLeft * 1000)} from left corner
-                        {p.kind === 'aircon' ? ' (to the top of the unit)' : ''}
-                      </span>
-                      {warn.map((w) => (
-                        <span key={w} className="elev-row-sub warning-text">
-                          {w}
-                        </span>
-                      ))}
+            {elev.points.map((p) => (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  className="elev-row"
+                  data-point={p.id}
+                  onClick={() => select({ kind: 'point', id: p.id })}
+                >
+                  <span className="elev-n num">{p.n}</span>
+                  <span>
+                    <span className="elev-row-name">{nameOf(p.id)}</span>
+                    <span className="elev-row-sub num">
+                      {Math.round(p.tagHeight * 1000)} from floor · {Math.round(p.fromLeft * 1000)}{' '}
+                      from left corner
+                      {p.kind === 'aircon' ? ' (to the top of the unit)' : ''}
                     </span>
-                  </button>
-                </li>
-              );
-            })}
+                    {moved.has(p.id) && (
+                      <span className="elev-row-sub elev-row-moved">Moved in the renovation</span>
+                    )}
+                  </span>
+                </button>
+              </li>
+            ))}
           </ul>
         </section>
       )}
