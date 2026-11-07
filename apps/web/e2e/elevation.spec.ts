@@ -47,7 +47,7 @@ test.describe('desktop', () => {
     await expect(page.locator('svg.plan-svg')).toBeVisible();
     await expect(page.locator('.viewport canvas')).toHaveCount(0);
     await expect(title(page)).toHaveText('Main bedroom · D · wardrobe wall');
-    await expect(wallView(page).locator('.elev-sub')).toHaveText('2 916 × 2 600 mm · Plain paint');
+    await expect(wallView(page).locator('.elev-sub')).toHaveText('2 920 × 2 600 mm · Plain paint');
     // The window's sill and head from the floor, the overall length, the ceiling.
     const win = svg(page).locator('[data-height="window"]');
     await expect(win).toContainText('900');

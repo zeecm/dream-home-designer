@@ -95,5 +95,5 @@ export function facePlace(level: Level, face: RoomFace): { at: number; of: numbe
  */
 export function imageName(roomName: string, face: Pick<RoomFace, 'letter' | 'label'>): string {
   const what = face.label ? `${face.letter} ${face.label}` : `Wall ${face.letter}`;
-  return `${roomName} - ${what}.png`.replace(/[\\/:*?"<>|]+/g, ' ');
+  return `${roomName} - ${what}.png`.replace(/\s*[\\/:*?"<>|]+\s*/g, ' - ').replace(/\s+/g, ' ');
 }

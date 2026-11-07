@@ -1,4 +1,4 @@
-import { type Level, type RoomFace, faceRef, roomShapes } from '@dhd/core';
+import { type Level, type RoomFace, faceRef, roomShapes, wallElevation } from '@dhd/core';
 import { useEditor } from '../editor';
 import { currentLevel } from '../store';
 import { ONE_VIEW_QUERY } from '../ui/oneView';
@@ -54,6 +54,17 @@ export function openFace(level: Level, face: RoomFace, from?: Element | null) {
       (a, b) => b.u1 - b.u0 - (a.u1 - a.u0),
     )[0];
     if (pick) ed.select({ kind: 'wall', id: pick.wallId });
+  } else if (ed.selection && ed.selection.kind !== 'room' && ed.selection.kind !== 'vertex') {
+    // A point, opening or piece stays selected only if it is on the wall now shown.
+    const sel = ed.selection;
+    const e = wallElevation(level, face);
+    const on =
+      sel.kind === 'point'
+        ? e.points.some((p) => p.id === sel.id)
+        : sel.kind === 'opening'
+          ? e.openings.some((o) => o.id === sel.id)
+          : e.items.some((i) => i.id === sel.id);
+    if (!on) ed.select(null);
   }
   lastRoom = face.roomId;
   ed.openElevation(faceRef(face));

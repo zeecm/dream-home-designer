@@ -143,8 +143,21 @@ export function ElevationView() {
   }, [papers]);
 
   const headRef = useRef<HTMLHeadingElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: again when the wall goes or comes back
   useEffect(() => {
     headRef.current?.focus({ preventScroll: true });
+  }, [!!face]);
+  // Esc in a field (or anything else) that leaves focus nowhere: back to the view.
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      requestAnimationFrame(() => {
+        if (useEditor.getState().elevation && document.activeElement === document.body)
+          document.querySelector<HTMLElement>('.elev-pane h2')?.focus({ preventScroll: true });
+      });
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
   }, []);
   // The list beside the drawing (a phone on its side can hide it).
   const [listShown, setListShown] = useState(true);
@@ -224,7 +237,8 @@ export function ElevationView() {
     if (f) openFace(level, f);
   };
   const title = `${roomName} · ${faceTitle(face)}`;
-  const size = `${mmText(face.length)} × ${mmText(face.ceiling)} mm`;
+  // To 10 mm, as the overall dimension under the drawing says it.
+  const size = `${mmText(Math.round(face.length * 100) / 100)} × ${mmText(face.ceiling)} mm`;
   const sub = [
     size,
     elev.finishName,

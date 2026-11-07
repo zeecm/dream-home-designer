@@ -85,7 +85,7 @@ describe('the wall view', () => {
       'Main bedroom - C bed wall.png',
     );
     expect(imageName('Study/office', { letter: 'B', label: null })).toBe(
-      'Study office - Wall B.png',
+      'Study - office - Wall B.png',
     );
   });
 });

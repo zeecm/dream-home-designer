@@ -1027,8 +1027,10 @@ export interface ElevationChanges {
   moved: { id: string; from: { u: number; z: number } | null }[];
   /** Before's openings, points and pieces gone in After, where they were on this face. */
   removed: { kind: 'opening' | 'point' | 'item'; id: string; at: Rect }[];
-  /** Stretches of the face hacked, and of new wall, as [u0, u1]. */
+  /** Stretches of the face hacked, and of new wall, as [u0, u1] (kept to the face). */
   hacked: [number, number][];
+  /** Each hacked stretch's whole length (more than shows when the face got shorter). */
+  hackedLength: number[];
   built: [number, number][];
 }
 
@@ -1077,8 +1079,8 @@ export function elevationChanges(before: Level, after: Level, face: RoomFace): E
     const { u, v } = faceUV(face, p);
     return v >= -behind - 0.02 && v <= 0.02 ? u : null;
   };
-  const stretchesOf = (xs: typeof walls.demolished, lvl: Level): [number, number][] =>
-    xs.flatMap((s): [number, number][] => {
+  const stretchesOf = (xs: typeof walls.demolished, lvl: Level) =>
+    xs.flatMap((s): { at: [number, number]; length: number }[] => {
       const w = lvl.walls[s.wallId];
       const behind = w ? w.thickness : 0.3;
       const a = onLine(s.from, behind);
@@ -1086,8 +1088,14 @@ export function elevationChanges(before: Level, after: Level, face: RoomFace): E
       if (a === null || b === null) return [];
       const u0 = clamp(Math.min(a, b), 0, L);
       const u1 = clamp(Math.max(a, b), 0, L);
-      return u1 - u0 > 0.01 ? [[u0, u1]] : [];
+      // A stretch past the face's end (the face got shorter) still shows a sliver.
+      const near = Math.min(a, b) < L + 0.3 && Math.max(a, b) > -0.3;
+      if (u1 - u0 > 0.01) return [{ at: [u0, u1], length: s.length }];
+      if (!near) return [];
+      const edge = Math.max(a, b) <= 0.01 ? 0 : L;
+      return [{ at: edge === 0 ? [0, 0.02] : [L - 0.02, L], length: s.length }];
     });
+  const hacked = stretchesOf(walls.demolished, before);
   const removed: ElevationChanges['removed'] = [];
   const bGeom = faceGeometry(before);
   for (const id of walls.openingsRemoved) {
@@ -1140,7 +1148,8 @@ export function elevationChanges(before: Level, after: Level, face: RoomFace): E
     added,
     moved,
     removed,
-    hacked: stretchesOf(walls.demolished, before),
-    built: stretchesOf(walls.built, after),
+    hacked: hacked.map((h) => h.at),
+    hackedLength: hacked.map((h) => h.length),
+    built: stretchesOf(walls.built, after).map((h) => h.at),
   };
 }

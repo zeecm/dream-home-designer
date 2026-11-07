@@ -238,6 +238,12 @@ export function ElevationSvg({
     );
     if (w.build === 'glass') {
       out.push(glass);
+      if ((w.u1 - w.u0) * pxPerM > 110)
+        out.push(
+          <g key={`${key}l`}>
+            {text((w.u0 + w.u1) / 2, Y(C) + px(18), 'Glass partition', { fill: PAPER.muted })}
+          </g>,
+        );
       continue;
     }
     out.push(
@@ -301,7 +307,15 @@ export function ElevationSvg({
             strokeDasharray: `${px(6)} ${px(4)}`,
           },
         )}
-        {text((u0 + u1) / 2, Y(C) + px(16), 'Hacked', { fill: PAPER.hack, weight: 500 })}
+        {text(
+          Math.min(Math.max((u0 + u1) / 2, px(40)), elev.width - px(40)),
+          Y(C) + px(16),
+          // The whole stretch's length, when more of it was hacked than shows here.
+          (changes?.hackedLength[i] ?? 0) > u1 - u0 + 0.05
+            ? `Hacked · ${(changes?.hackedLength[i] ?? 0).toFixed(2)} m`
+            : 'Hacked',
+          { fill: PAPER.hack, weight: 500 },
+        )}
       </g>,
     );
   }

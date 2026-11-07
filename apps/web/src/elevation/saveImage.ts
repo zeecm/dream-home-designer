@@ -54,7 +54,6 @@ export async function elevationImageSvg(
   const labels = elevationLabels(elev, pxPerM, 13);
   const box = drawingBox(elev, pxPerM, chainsShown(labels, a.dims));
   const pad = 32;
-  const titleH = 64;
   const lines: { text: string; colour: string; size: number; weight?: number }[] = [];
   for (const n of elev.notes)
     lines.push({ text: `!${n.n}  ${n.text}`, colour: PAPER.note, size: 14 });
@@ -72,20 +71,38 @@ export async function elevationImageSvg(
     colour: PAPER.muted,
     size: 13,
   });
-  const listH = lines.reduce((s, l) => s + l.size * 1.6, 0);
   const w = Math.max(720, Math.round(box.w * pxPerM + 2 * pad));
-  const drawH = Math.round(box.h * pxPerM);
-  const h = Math.round(pad + titleH + drawH + 24 + listH + pad);
-  const title = `${a.roomName} · ${faceTitle(elev.face)}`;
+  // Every line wrapped to the picture's width, so nothing is cut at its right edge.
+  const wrap = (text: string, size: number): string[] => {
+    const max = Math.max(20, Math.floor((w - 2 * pad) / (size * 0.56)));
+    const out: string[] = [];
+    let line = '';
+    for (const word of text.split(' ')) {
+      if (line && `${line} ${word}`.length > max) {
+        out.push(line);
+        line = word;
+      } else line = line ? `${line} ${word}` : word;
+    }
+    out.push(line);
+    return out;
+  };
+  const rows = lines.flatMap((l) =>
+    l.text ? wrap(l.text, l.size).map((text) => ({ ...l, text })) : [l],
+  );
+  const listH = rows.reduce((s, l) => s + l.size * 1.6, 0);
+  const title = wrap(`${a.roomName} · ${faceTitle(elev.face)}`, 22);
   const sub = [
-    `${Math.round(elev.width * 1000)} × ${Math.round(elev.ceiling * 1000)} mm`,
+    `${Math.round(elev.width * 100) * 10} × ${Math.round(elev.ceiling * 100) * 10} mm`,
     elev.finishName,
   ]
     .filter(Boolean)
     .join(' · ');
+  const titleH = title.length * 30 + 34;
+  const drawH = Math.round(box.h * pxPerM);
+  const h = Math.round(pad + titleH + drawH + 24 + listH + pad);
   const font = 'IBM Plex Sans, Helvetica, Arial, sans-serif';
   let y = pad + titleH + drawH + 24;
-  const list = lines.map((l, i) => {
+  const list = rows.map((l, i) => {
     y += l.size * 1.6;
     return createElement(
       'text',
@@ -109,26 +126,46 @@ export async function elevationImageSvg(
       idPrefix: 'png',
     }),
   );
+  // Drawn at least 1440 px wide (twice its layout), sharp enough to zoom into on a phone.
+  const k = Math.max(2, 1440 / w);
+  const W = Math.round(w * k);
+  const H = Math.round(h * k);
   const svg = renderToStaticMarkup(
     createElement(
       'svg',
-      { xmlns: 'http://www.w3.org/2000/svg', width: w, height: h, viewBox: `0 0 ${w} ${h}` },
+      { xmlns: 'http://www.w3.org/2000/svg', width: W, height: H, viewBox: `0 0 ${w} ${h}` },
       createElement('rect', { width: w, height: h, fill: '#ffffff' }),
-      createElement(
-        'text',
-        { x: pad, y: pad + 22, fontSize: 22, fontWeight: 600, fill: PAPER.ink, fontFamily: font },
-        title,
+      ...title.map((t, i) =>
+        createElement(
+          'text',
+          {
+            key: `t${i}`,
+            x: pad,
+            y: pad + 22 + i * 30,
+            fontSize: 22,
+            fontWeight: 600,
+            fill: PAPER.ink,
+            fontFamily: font,
+          },
+          t,
+        ),
       ),
       createElement(
         'text',
-        { x: pad, y: pad + 48, fontSize: 15, fill: PAPER.muted, fontFamily: font },
+        {
+          x: pad,
+          y: pad + title.length * 30 + 18,
+          fontSize: 15,
+          fill: PAPER.muted,
+          fontFamily: font,
+        },
         sub,
       ),
       drawing,
       ...list,
     ),
   );
-  return { svg, w, h };
+  return { svg, w: W, h: H };
 }
 
 async function toPng(svg: string, w: number, h: number): Promise<Blob> {
