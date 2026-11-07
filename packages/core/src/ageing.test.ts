@@ -392,17 +392,26 @@ describe('routes (A)', () => {
     expect(kinds(ageingReport(lvl, walking()), 'route')).toEqual([]);
   });
 
-  it('a piece on a 0.90 route to the living room: the ageing bar replaces the walkway bar', () => {
+  it('a piece on a 0.90 route to the living room is the walkways’ line, not repeated', () => {
     const h = home({ clear: 1.2, a: 'Store', b: 'Living', corridor: 'Hall', main: { width: 0.9 } });
     const face = h.y - 0.05;
     const lvl = withItems(h.lvl(), [['shoe-cabinet', { x: 5.0, y: face - 0.175 }, Math.PI]]);
+    expect(kinds(ageingReport(lvl, wheel()), 'route')).toEqual([]);
+    expect(walkwayReport(lvl).issues.length).toBeGreaterThan(0);
+  });
+
+  it('the stricter 1.00 way to the bathroom: the ageing bar replaces the walkway bar', () => {
+    const h = home({ clear: 1.2, main: { width: 0.9 } });
+    const face = h.y - 0.05;
+    // Between the main door and the bathroom door: 0.85 left, short of both 0.90 and 1.00.
+    const lvl = withItems(h.lvl(), [['shoe-cabinet', { x: 3.0, y: face - 0.175 }, Math.PI]]);
     const age = ageingReport(lvl, wheel());
     const walk = walkwayReport(lvl);
-    const routes = kinds(age, 'route');
-    expect(routes.length).toBeGreaterThan(0);
-    expect(walk.issues.length).toBeGreaterThan(0);
+    expect(kinds(age, 'route')[0]?.need).toBeCloseTo(1.0, 5);
+    const toBath = walk.issues.filter((w) => w.to.some((t) => t.roomId === h.room(2, 2)));
+    expect(toBath.length).toBeGreaterThan(0);
     const hide = ageingSupersedes(walk, age);
-    for (const w of walk.issues) expect(hide.has(`${w.itemId}|${pinchKey(w.pinch)}`)).toBe(true);
+    for (const w of toBath) expect(hide.has(`${w.itemId}|${pinchKey(w.pinch)}`)).toBe(true);
   });
 });
 
@@ -460,6 +469,11 @@ describe('room to turn (B)', () => {
     expect(t[0]?.itemIds).toEqual([]);
     expect(t[0]?.flat).toBe(true);
     expect(t[0]?.group).toBe('bathroom');
+    // With a basin blamed, the line still knows the room itself is too small empty.
+    const withBasin = withItems(h.lvl(), [['vanity', { x: 0.05 + 0.3, y: 0.05 + 0.225 }]]);
+    const tb = kinds(ageingReport(withBasin, wheel()), 'turn');
+    expect(tb[0]?.itemIds.length).toBeGreaterThan(0);
+    expect(Math.abs((tb[0]?.empty ?? 0) - 1.42)).toBeLessThanOrEqual(0.01);
   });
 
   it('a 1.42 bathroom with its door on the long wall: the circle stays inside (no false pass)', () => {
@@ -723,6 +737,32 @@ describe('the choice', () => {
     expect(chosen.bedroom).toBe(main?.roomId);
     expect(chosen.issues.filter((i) => i.group === 'bedroom')).toHaveLength(main?.count ?? -1);
     expect(chosen.passed.some((p) => p.group === 'bedroom') || (main?.count ?? 0) > 0).toBe(true);
+  });
+
+  it('a bedroom named for the person, or a study, can be theirs and stays chosen', () => {
+    const base = Object.freeze({ ...furnishedSample() });
+    const main = Object.values(base.rooms).find((r) => r.name === 'Main bedroom')?.id ?? '';
+    const study = Object.values(base.rooms).find((r) => r.name === 'Bedroom')?.id ?? '';
+    for (const name of ['Ah Ma’s room', 'Mum’s room', 'Parents room', 'Study']) {
+      const lvl = Object.freeze({
+        ...base,
+        rooms: {
+          ...base.rooms,
+          [main]: { ...(base.rooms[main] as Level['rooms'][string]), name },
+          [study]: { ...(base.rooms[study] as Level['rooms'][string]), name: 'Study' },
+        },
+      });
+      const r = ageingReport(lvl, wheel({ bedroomId: main }));
+      // Still chosen through the rename, still checked (its bed is in it).
+      expect(r.bedroom).toBe(main);
+      expect(r.bedroomIds).toContain(main);
+      expect(r.issues.some((i) => i.kind === 'bed')).toBe(true);
+      // A study with no bed can be chosen too, and is offered.
+      expect(r.bedroomIds).toContain(study);
+      expect(ageingReport(lvl, wheel({ bedroomId: study })).bedroom).toBe(study);
+      // Neither bathroom nor kitchen is offered.
+      for (const id of r.bedroomIds) expect(lvl.rooms[id]?.name).not.toMatch(/bath|kitchen/i);
+    }
   });
 
   it('15. their bathroom: an en-suite when chosen, else the nearest; a chosen one wins', () => {

@@ -6176,4 +6176,11 @@ textarea {
   .inspector-ageing .ageing-foot .btn:only-child {
     grid-column: 1 / -1;
   }
+  .inspector-ageing .ageing-top {
+    gap: 4px;
+    padding: 4px var(--pad) 6px;
+  }
+  .inspector-ageing .ageing-top:has(.ageing-rows-open) {
+    position: static;
+  }
 }
