@@ -253,65 +253,123 @@ describe('the solver', () => {
     expect(warm).toBeLessThan(process.env.PERF ? 150 : 450);
   });
 
-  it('PERF: a full living room (a table for six and six chairs, a chesterfield, two armchairs, a household of six) within the same bound', () => {
-    const full = v2({
-      v: 2,
-      items: answer([
-        { ref: 'tv1', assetId: 'tv' },
-        { ref: 'tvc1', assetId: 'tv-console' },
-        { ref: 'sofa1', assetId: 'chesterfield-sofa' },
-        { ref: 'arm1', assetId: 'armchair' },
-        { ref: 'arm2', assetId: 'armchair' },
-        { ref: 'coffee1', assetId: 'coffee-table' },
-        { ref: 'dine1', assetId: 'dining-6' },
-        ...[1, 2, 3, 4, 5, 6].map((n) => ({ ref: `chair${n}`, assetId: 'dining-chair' })),
-      ]).items.map((i) => ({
-        ...i,
-        against: /tv|sofa/.test(i.assetId) ? 'wall' : 'free',
-        faces:
-          i.ref === 'tv1'
-            ? 'sofa1'
-            : /^(sofa1|arm)/.test(i.ref)
-              ? 'tv1'
-              : /^chair/.test(i.ref)
-                ? 'dine1'
-                : null,
-        near:
-          i.ref === 'tvc1'
-            ? 'tv1'
-            : i.ref === 'coffee1'
+  describe('heavy living rooms (tech-lead, 7 Nov)', () => {
+    /** A living room by intent: the TV and its console, a sofa, armchairs, a coffee table, a table and chairs. */
+    const living = (sofa: string, armchairs: number, table: string, chairs: number) =>
+      v2({
+        v: 2,
+        items: answer([
+          { ref: 'tv1', assetId: 'tv' },
+          { ref: 'tvc1', assetId: 'tv-console' },
+          { ref: 'sofa1', assetId: sofa },
+          ...Array.from({ length: armchairs }, (_, n) => ({
+            ref: `arm${n + 1}`,
+            assetId: 'armchair',
+          })),
+          { ref: 'coffee1', assetId: 'coffee-table' },
+          { ref: 'dine1', assetId: table },
+          ...Array.from({ length: chairs }, (_, n) => ({
+            ref: `chair${n + 1}`,
+            assetId: 'dining-chair',
+          })),
+        ]).items.map((i) => ({
+          ...i,
+          against: /tv|sofa/.test(i.assetId) ? 'wall' : 'free',
+          faces:
+            i.ref === 'tv1'
               ? 'sofa1'
-              : /^chair/.test(i.ref)
-                ? 'dine1'
-                : null,
-        zone: /dine|chair/.test(i.ref) ? 'dine' : 'lounge',
-      })),
-      faces: [],
-      notes: [],
-    });
-    const six = {
+              : /^(sofa1|arm)/.test(i.ref)
+                ? 'tv1'
+                : /^chair/.test(i.ref)
+                  ? 'dine1'
+                  : null,
+          near:
+            i.ref === 'tvc1'
+              ? 'tv1'
+              : i.ref === 'coffee1'
+                ? 'sofa1'
+                : /^chair/.test(i.ref)
+                  ? 'dine1'
+                  : null,
+          zone: /dine|chair/.test(i.ref) ? 'dine' : 'lounge',
+        })),
+        faces: [],
+        notes: [],
+      });
+    const household = (n: number) => ({
       ...defaultBrief(),
       household: {
         ...defaultBrief().household,
         adults: 2,
-        children: ['primary', 'teen', 'teen', 'primary'] as ('primary' | 'teen')[],
+        children: (['primary', 'teen', 'teen', 'primary'] as ('primary' | 'teen')[]).slice(
+          0,
+          n - 2,
+        ),
       },
-    };
-    const make = (id: string) =>
+    });
+    const FULL = living('chesterfield-sofa', 2, 'dining-6', 6);
+    const make = (a: SpaceDesign, brief: ReturnType<typeof household>, id: string) =>
       designResult(level, level, {
-        ...sampleDesign({ answers: { [SAMPLE_KEYS.living]: full }, brief: six, concept: null, id }),
+        ...sampleDesign({ answers: { [SAMPLE_KEYS.living]: a }, brief, concept: null, id }),
         aliases: aliasesFor(level),
       });
-    make('dsn_full_warm');
-    const times: number[] = [];
-    for (let i = 0; i < 5; i++) {
-      const t0 = performance.now();
-      make(`dsn_full_${i}`);
-      times.push(performance.now() - t0);
-    }
-    const cold = [...times].sort((a, b) => a - b)[2] as number;
-    console.log(`full living room: ${cold.toFixed(0)} ms (median of 5)`);
-    expect(cold).toBeLessThan(process.env.PERF ? 350 : 1050);
+    /** Median of 5 cold runs (another version each time), after one to warm up. */
+    const coldOf = (a: SpaceDesign, brief: ReturnType<typeof household>, id: string) => {
+      make(a, brief, `${id}_warm`);
+      const times: number[] = [];
+      for (let i = 0; i < 5; i++) {
+        const t0 = performance.now();
+        make(a, brief, `${id}_${i}`);
+        times.push(performance.now() - t0);
+      }
+      return [...times].sort((p, q) => p - q)[2] as number;
+    };
+
+    it('PERF: the full living room (a table for six and six chairs, a chesterfield, two armchairs, six people) under 300 ms', () => {
+      const cold = coldOf(FULL, household(6), 'dsn_full');
+      console.log(`full living room: ${cold.toFixed(0)} ms (median of 5)`);
+      expect(cold).toBeLessThan(process.env.PERF ? 300 : 900);
+    });
+
+    it('PERF: a 3-seat sofa, two armchairs, a table for four and its chairs (four people) under 300 ms', () => {
+      const cold = coldOf(living('sofa-3', 2, 'dining-4', 4), household(4), 'dsn_two_arms');
+      console.log(`sofa, two armchairs, table for four: ${cold.toFixed(0)} ms (median of 5)`);
+      expect(cold).toBeLessThan(process.env.PERF ? 300 : 900);
+    });
+
+    it('a walkway re-solve is taken only if the space’s hard checks get strictly better', () => {
+      // The full living room and its kin, for four to six people: the hard checks after the
+      // walkway step are never more than the first placing's, and a re-solve taken always
+      // leaves its space strictly better.
+      const hard = (r: ReturnType<typeof make>) => r.checks.filter((c) => c.hard).length;
+      const cases: [SpaceDesign, number][] = [
+        [FULL, 6],
+        [FULL, 5],
+        [living('chesterfield-sofa', 2, 'dining-6', 6), 4],
+        [living('sofa-3', 2, 'dining-4', 4), 4],
+        [living('sofa-3', 1, 'dining-6', 6), 6],
+      ];
+      cases.forEach(([a, n], k) => {
+        const id = `dsn_resolve_${k}`;
+        const first = designResult(
+          level,
+          level,
+          {
+            ...sampleDesign({
+              answers: { [SAMPLE_KEYS.living]: a },
+              brief: household(n),
+              concept: null,
+              id,
+            }),
+            aliases: aliasesFor(level),
+          },
+          { walkways: false },
+        );
+        const r = make(a, household(n), id);
+        expect(hard(r)).toBeLessThanOrEqual(hard(first));
+        for (const x of r.resolves) if (x.taken) expect(x.after).toBeLessThan(x.before);
+      });
+    });
   });
 
   describe('owner 7 Nov: the dining jammed against the sofa (P2 apart: 0.60 m, 0.90 m advised)', () => {

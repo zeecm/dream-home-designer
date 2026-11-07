@@ -106,6 +106,11 @@ export interface DesignResult {
   passes: boolean;
   /** The answer's ref of each piece placed (by item id), to name it to the designer. */
   refs: Record<string, string>;
+  /**
+   * Walkway re-solves tried: the space, its hard checks before and after, and whether it was
+   * taken (only ever when strictly better).
+   */
+  resolves: { space: string; before: number; after: number; taken: boolean }[];
   cost: CostEstimate;
   points: Suggestion[];
   budget: 'within' | 'over' | 'unknown';
@@ -116,6 +121,8 @@ export interface DesignOptions {
   site?: Site;
   /** The project's own furniture models. */
   models?: Project['models'];
+  /** false: pieces are left where first placed, not moved off the walkways (for tests). */
+  walkways?: boolean;
 }
 
 const BEDROOM_USES = new Set<RoomUse>(['master', 'bedroom', 'kids', 'parents', 'guest']);
@@ -531,6 +538,17 @@ function work(
           settledMemo.set(firstKey, o);
           if (settledMemo.size > 48) settledMemo.delete(settledMemo.keys().next().value as string);
         },
+        // The hard checks with only this space furnished (the rest of the plan as it is).
+        spaceHard: (l: Level) => {
+          const items = Object.fromEntries(
+            Object.entries(l.items).filter(([, it]) => inRooms(s.rooms, centreOf(it))),
+          );
+          return new Set(
+            designChecks({ ...l, items }, { brief, uses })
+              .filter((c) => c.hard)
+              .map((c) => c.key),
+          );
+        },
       });
     } else {
       runs.push({ ix, wants, key: s.key });
@@ -694,7 +712,8 @@ function work(
   // Walkways, once every space is furnished: a piece the version placed that narrows the way
   // from the main door (or to a bed) is moved off it where it can be, else left for the
   // checks to say.
-  const walked = keepWalkwaysClear(lvl, runs, repaired);
+  const resolves: DesignResult['resolves'] = [];
+  const walked = opts.walkways === false ? null : keepWalkwaysClear(lvl, runs, repaired, resolves);
   // The notes of each space solved by intent, as finally placed.
   for (const run of runs) {
     if (!run.outcome) continue;
@@ -910,6 +929,7 @@ function work(
     checks,
     passes,
     refs,
+    resolves,
     cost,
     points,
     budget,
@@ -1023,9 +1043,16 @@ interface Run {
   unapply?: () => void;
   /** Remembers a re-solve taken, so the same space is placed so next time at once. */
   settle?: (o: SolveOutcome) => void;
+  /** The space's hard checks (their keys) on a level, the space alone furnished. */
+  spaceHard?: (l: Level) => Set<string>;
 }
 
-function keepWalkwaysClear(lvl: Level, runs: Run[], repaired: Note[]): WalkwayReport | null {
+function keepWalkwaysClear(
+  lvl: Level,
+  runs: Run[],
+  repaired: Note[],
+  resolves: DesignResult['resolves'],
+): WalkwayReport | null {
   const moved = new Set<string>();
   const kept = new Map<Run, SpaceIndex['keepOut']>();
   const keptFor = new Map<Run, Set<string>>();
@@ -1078,10 +1105,26 @@ function keepWalkwaysClear(lvl: Level, runs: Run[], repaired: Note[]): WalkwayRe
         continue;
       }
       const before = changed ? hardCount(lvl) : hardCount(lvl, report);
+      const hardBefore = run.spaceHard?.(lvl);
       run.unapply();
       run.apply(out);
       const after = hardCount(lvl);
-      if (after < before) {
+      // The space's own hard checks strictly better: none failing that didn't before, and
+      // fewer; and the plan's walkways and clearances no worse.
+      const hardAfter = run.spaceHard?.(lvl);
+      const better =
+        !hardBefore || !hardAfter
+          ? after < before
+          : [...hardAfter].every((k) => hardBefore.has(k)) &&
+            hardAfter.size < hardBefore.size &&
+            after <= before;
+      resolves.push({
+        space: run.key,
+        before: hardBefore?.size ?? before,
+        after: hardAfter?.size ?? after,
+        taken: better,
+      });
+      if (better) {
         run.outcome = out;
         run.settle?.(out);
         changed = true;

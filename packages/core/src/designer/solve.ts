@@ -188,10 +188,17 @@ export function solveSpace(input: SolveInput): SolveOutcome {
   if (!bad(first.items) || input.swaps === false) return first;
   const lost = essentialDrops(first, input.intents, new Set());
   const seats = seatsShort(input, first.items, mark, input.intents);
+  // One budget for the first solve and all its swaps: a swap starts only while some is left,
+  // and looks ahead and goes back only as far as what is left allows.
+  let left = (input.budget ?? BUDGET) - first.tries;
+  let tries = first.tries;
   for (const swap of swapsFor(input)) {
+    if (left <= 0) break;
     input.ix.placed.length = mark;
-    const out = solveOnce({ ...input, intents: swap.intents });
-    out.tries += first.tries;
+    const out = solveOnce({ ...input, intents: swap.intents, budget: Math.max(0, left) });
+    left -= out.tries;
+    tries += out.tries;
+    out.tries = tries;
     // Taken only if it keeps the way and is no worse otherwise: nothing more the room needs
     // left out, no more pieces short of room or turned from what they go with, and seats and
     // places at the table for the household as before.
@@ -207,6 +214,7 @@ export function solveSpace(input: SolveInput): SolveOutcome {
     return applySwap(out, swap);
   }
   // Nothing smaller keeps the way: the first solve stands, and the check fails.
+  first.tries = tries;
   input.ix.placed.length = mark;
   const kinds = new Map(input.intents.map((t) => [t.want.id, t.want.kind]));
   for (const item of first.items) {
@@ -395,6 +403,15 @@ function swapsFor(input: SolveInput): Swap[] {
       });
     };
     const name = table.want.kind.name.replace(/^Dining table/, 'dining table');
+    // For two, the wall-side table with a bench first: the smallest, the likeliest to fit
+    // (the swaps share one budget).
+    if (household <= 2 && table.want.kind.id !== 'dining-bench-2') {
+      replace(
+        'dining-bench-2',
+        0,
+        `Swapped the ${name} for a wall-side table with a bench for two to keep 0.60 m to the sofa.`,
+      );
+    }
     if (places >= 6) {
       // Every chair is kept: four round it, the rest wait by the wall till it is pulled out.
       replace(
@@ -403,18 +420,12 @@ function swapsFor(input: SolveInput): Swap[] {
         `Swapped the ${name} for an extendable table to keep 0.60 m to the sofa: it fits 4, and 6 with the table pulled out.`,
         true,
       );
-    } else if (table.want.kind.id !== 'pedestal-table-round') {
+    } else if (table.want.kind.id !== 'pedestal-table-round' && household > 2) {
+      // (For two, the bench table is smaller every way: the round table isn't tried.)
       replace(
         'pedestal-table-round',
         4,
         `Swapped the ${name} for a round table for four to keep 0.60 m to the sofa.`,
-      );
-    }
-    if (household <= 2 && table.want.kind.id !== 'dining-bench-2') {
-      replace(
-        'dining-bench-2',
-        0,
-        `Swapped the ${name} for a wall-side table with a bench for two to keep 0.60 m to the sofa.`,
       );
     }
   }
@@ -468,6 +479,18 @@ function solveOnce(input: SolveInput): SolveOutcome {
   const zoneMemo = new Map<string, { at: Vec2; r: number }[]>();
   /** Each free piece's zone poses as pieces, and whether walls, doors or ways block them. */
   const fixedMemo = new Map<string, { item: Item; ok: boolean }[]>();
+  /** What walls, doors and the ways kept clear do to a pose: the same however often it's tried. */
+  const fixedAt = new Map<string, Hit | null>();
+  /** What a pose runs into: its fixed hits remembered, then the pieces placed. */
+  const hits = (item: Item, kind: Want['kind'], on?: Parameters<typeof hitsOf>[3]): Hit[] => {
+    const key = `${item.id}|${item.position.x.toFixed(4)}|${item.position.z.toFixed(4)}|${item.rotationY.toFixed(4)}|${item.scale.x.toFixed(4)}|${ix.keepOut.length}|${on ? `${on.face.wallId}:${on.face.side}:${on.u0.toFixed(3)}` : ''}`;
+    let fixed = fixedAt.get(key);
+    if (fixed === undefined) {
+      fixed = fixedHit(ix, item, kind, on);
+      fixedAt.set(key, fixed);
+    }
+    return fixed ? [fixed] : hitsOf(ix, item, kind, on, true);
+  };
 
   // Each piece's anchor: the ref it names (faces or near), else the first piece of a role its
   // row goes with (a sofa the TV, chairs their table, a bedside table its bed).
@@ -761,7 +784,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
             const item = itemAt(w, pose.at, pose.rotation, width);
             add(
               item,
-              hitsOf(ix, item, k, { face, u0: u - width / 2, u1: u + width / 2, bottom, top }),
+              hits(item, k, { face, u0: u - width / 2, u1: u + width / 2, bottom, top }),
               narrowed,
               t.against === 'free' && !wallOnly ? -0.5 : 0,
             );
@@ -769,7 +792,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
             if (endOn && !narrowed) {
               const end = onFace(face, u, w.w);
               const turned = itemAt(w, end.at, end.rotation + Math.PI / 2, w.w);
-              add(turned, hitsOf(ix, turned, k), false, -0.5);
+              add(turned, hits(turned, k), false, -0.5);
             }
           }
         }
@@ -887,7 +910,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
         for (const p of list) {
           if (!inRooms(ix, p.at)) continue;
           const item = itemAt(w, p.at, p.r, w.w);
-          add(item, hitsOf(ix, item, k), false, wish);
+          add(item, hits(item, k), false, wish);
         }
       };
       // The zone's poses: what walls, doors and the ways kept clear block is worked out once.
