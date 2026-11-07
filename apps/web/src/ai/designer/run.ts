@@ -251,6 +251,7 @@ export function mergeAnswer(
     ],
     faces: keep.includes('finishes') ? previous.faces : next.faces,
     notes: next.notes,
+    summary: next.summary,
   };
 }
 

@@ -112,6 +112,7 @@ export function answer(
     })),
     faces,
     notes: [],
+    summary: '',
   };
 }
 

@@ -1,11 +1,12 @@
-import type { Draft } from 'immer';
+import { type Draft, current, isDraft } from 'immer';
 import type { z } from 'zod';
+import { type Change, mergeChanges } from './designer/talk/changes';
 import { clearPointsOn } from './electrical';
 import { furnitureKind } from './furniture';
 import { clampOpeningT } from './geometry';
 import type { Command } from './history';
 import { newId } from './ids';
-import { draftLevel } from './levels';
+import { AFTER_SUFFIX, draftLevel } from './levels';
 import { syncRooms } from './rooms';
 import {
   DEFAULT_SITE,
@@ -21,7 +22,7 @@ import {
   isHalfWall,
 } from './schema';
 import { projectOnSegment, segmentIntersection } from './snap';
-import { endCapture, reclampOpenings, splitWallAt } from './topology';
+import { applyLevel, endCapture, reclampOpenings, splitWallAt } from './topology';
 import { followRuns } from './trunking';
 
 const level = draftLevel;
@@ -747,5 +748,61 @@ export function drawWall(
     wallIds,
     startVertexId: startIds.vertexId,
     endVertexId: endIdsResolved.vertexId,
+  };
+}
+
+/**
+ * Accepting some of a designer's proposed changes (the ticked ones of `changes`, by id) into
+ * the renovation of level `levelId` (the flat as it is), starting one if there is none: one
+ * undo step. `target` is the proposal's result, worked out on After as it is now (or the flat
+ * with no renovation), so only the ticked changes move from it into the plan.
+ */
+export function acceptChanges(
+  levelId: string,
+  target: Level,
+  changes: Change[],
+  ids: readonly string[],
+  opts: { label?: string } = {},
+): Command {
+  return {
+    label: opts.label ?? 'Use design',
+    recipe: (d) => {
+      if (!d.renovation) {
+        const levels = d.levels.map((l) => ({
+          ...structuredClone(current(l)),
+          id: `${l.id}${AFTER_SUFFIX}`,
+        }));
+        d.renovation = { levels };
+      }
+      const after = draftLevel(d, `${levelId}${AFTER_SUFFIX}`);
+      const now = (isDraft(after) ? current(after) : after) as Level;
+      applyLevel(after, mergeChanges(now, target, changes, ids), { items: true });
+    },
+  };
+}
+
+/**
+ * "Put it back": the renovation of level `levelId` as it was when the conversation started
+ * (`level`, After then), or no renovation when there was none. One undo step.
+ */
+export function putPlanBack(levelId: string, level: Level | null): Command {
+  return {
+    label: 'Put the plan back',
+    recipe: (d) => {
+      if (!level) {
+        delete d.renovation;
+        return;
+      }
+      if (!d.renovation) {
+        d.renovation = {
+          levels: d.levels.map((l) => ({
+            ...structuredClone(current(l)),
+            id: `${l.id}${AFTER_SUFFIX}`,
+          })),
+        };
+      }
+      const after = draftLevel(d, `${levelId}${AFTER_SUFFIX}`);
+      applyLevel(after, { ...level, id: `${levelId}${AFTER_SUFFIX}` }, { items: true });
+    },
   };
 }

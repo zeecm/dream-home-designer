@@ -136,6 +136,7 @@ export const LIMITS = {
   ref: 12,
   why: 120,
   id: 40,
+  spaceSummary: 160,
 } as const;
 
 /** Enum fields matched in any case (a model may answer "Remove_Wall" or "SWING"). */
@@ -351,6 +352,8 @@ const spaceSchemas = (ctx: Ctx) => {
     items: list(ctx, Item, LIMITS.items, 'pieces'),
     faces: list(ctx, Face, LIMITS.faces, 'wall finishes'),
     notes: list(ctx, text(ctx, LIMITS.note), LIMITS.roomNotes, 'notes'),
+    /** One line on what the layout does, in the household's words (absent in older answers). */
+    summary: text(ctx, LIMITS.spaceSummary).default(''),
   });
   return { Item, SpaceDesign };
 };
