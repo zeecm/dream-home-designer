@@ -5,6 +5,11 @@ Project-manager, 7 Nov 2026. Roadmap "Planned" item 2. It builds on the
 search (`walkway.ts`, `grid.ts`), the same red-on-the-plan style and Inspector lines.
 Overall effort **M+**, in three PRs. Only slice 2 changes the schema (**11**).
 
+**Slice 1 is built (7 Nov 2026).** The tech-lead and UX design notes bound where they
+refined this spec, and this text now says what was built. The eight defects the tech lead found
+are fixed in place (marked *fixed*), the wording is the UX design's, and AC7 is corrected. See
+[Slice 1 as built](#slice-1-as-built) for the implementation notes.
+
 **Problem.** Families renovate for a parent who walks with a stick or a frame today and may
 use a wheelchair in a few years. They find out too late, often after the carpentry is
 built, that the wheelchair doesn't fit:
@@ -56,7 +61,11 @@ line has one of two labels:
 - **Needed**: from the code's rules for homes (Chapter 7) or a hard size, e.g. a door
   narrower than the chair. Drawn red.
 - **Recommended**: good practice, e.g. room to turn in a bedroom, or a door that opens out.
-  Drawn amber with the `--warn` token (ux-reviewer to confirm the token).
+  Drawn amber with a new `--advise` token (light #a16207, dark #eab308), apart from the
+  comment orange and the clearance red. In the list the words "Needed" and "Recommended" carry
+  the meaning, so colour is never the only signal.
+- Walking aid lines: door widths and the way through are Needed (a hard size); the toilet's
+  front and side are Recommended.
 
 ## Sources
 
@@ -74,12 +83,16 @@ intro says so.
 
 ## Rules
 
-All widths are clear widths. Door clear width is `clearWidth(opening)` from `delivery.ts`:
+All widths are clear widths. Door clear width is `accessClearWidth(opening)` in `delivery.ts`
+(*fixed*: `clearWidth` counts both leaves of a double door, so it isn't reused), **rounded to the
+millimetre** before any step lookup (*fixed*: 0.94 − 0.04 is 0.8999… in floating point, which
+would land in the 1.10 row):
 - swing door: width − 0.04;
-- double door: per leaf (see the edge cases);
-- sliding door: width × (1 − 1/panels);
+- double door: one leaf, (width − 0.08) / 2 (*fixed*);
+- sliding door: width × (1 − 1/panels); a single sliding (barn) door slides clear, its full width;
 - pocket door or passage: the full width;
-- folding door: width − 0.04 per panel.
+- bi-fold and folding door: width − 0.04 per panel, with the panels as drawn (`doorPanels`: a
+  bi-fold up to 1.2 m has 2).
 
 COA measures clear width from the face of the open door to the stop (4.4.2.1).
 
@@ -108,13 +121,19 @@ only ("Main bedroom: 3 to change"), not its room checks.
   - floor pieces that `blocks()`.
 
   Door leaves are ignored and room boundaries are free. A door that fails only its square
-  says which way out works: "A 0.90 m clear door would need only 1.00 m."
+  says which way out works: "Or fit a wider door: a 0.90 m opening needs only 1.00 m in front."
+- **Table 7 steps** (*fixed*, written down): clear width 0.90 and over needs 1.00; 0.85 up to
+  0.90 needs 1.10; 0.80 up to 0.85 needs 1.20; under 0.80 the door fails its width instead.
 - **Inside the main door:**
   - The 1.25 × 1.50 m box is aligned to the door. It starts at the inside wall face and is
     centred on the clear opening, but slides along the wall up to 0.30 m toward the handle
     side to fit (Fig. 66 puts it off-centre).
-  - The 0.45 m strip is 0.45 m wide and 1.50 m deep, beside the latch jamb. It applies only
-    to swing and double doors.
+  - The 0.45 m strip is 0.45 m wide and up to 1.50 m deep (no deeper than the space in front of
+    the door goes), beside the latch jamb. It applies only to a single swing door that swings
+    **into the flat** (*fixed*): an out-swinging door is pulled from the common corridor, which
+    isn't drawn, and a double door has no handle end (its other leaf gives the room).
+  - `entrance-space`'s `have` is the best depth of the 1.25 m wide box over its slides, against
+    a need of 1.50 (*fixed*).
   - The usual blocker is the shoe cabinet, which is then named.
 - **Routes:** these use the slice 2 walkway search with the needs above, but **not capped**
   at the flat's own width.
@@ -248,12 +267,25 @@ step "Add 4 grab bars to Bath/WC 2". The ghosts:
 
 ### F. Steps, kerbs and ramps (slice 2, schema 11)
 
-**Storage (schema 11)**, for tech-lead to confirm the shape:
-- `Opening.step?: number`: the height in metres (0.005–0.60) of the step or kerb crossed at
-  the doorway. Missing means not entered (not "level").
-- `Opening.ramp?: boolean`: a ramp is fitted.
-- `Project.household?: { check: 'walking' | 'wheelchair'; bedroomId?: string; bathroomId?:
-  string }`.
+**Storage (schema 11)**, the shape the tech lead proposed (7 Nov), shared with the storage
+meter:
+- `Opening.step?: number`: the height in metres (0–0.60; 0 is level) of the step or kerb
+  crossed at the doorway. Missing means not entered.
+- `Opening.ramp?: 'left' | 'right'`: a ramp is fitted, on that side of the wall (the plan
+  can't tell which floor is lower), as an `ElecPoint`'s side.
+- One household object for both features:
+  ```ts
+  Project.household?: {
+    flatType?: '1-3' | '4' | '5' | 'exec' | 'none';   // shared by EASE and the storage meter
+    ageing?: { profile: 'walking' | 'wheelchair'; bedroomId?: string; bathroomId?: string };
+    storage?: { … };                                    // the storage meter's
+  }
+  ```
+  Absent `ageing` means Off. The slice 1 browser setting (`AgeingSetting`: `profile` 'off' |
+  'walking' | 'wheelchair', `bedroomId`, `bathroomId`, `flatType`) maps onto it directly:
+  `flatType` to `household.flatType`, the rest to `household.ageing` unless the profile is
+  'off'. It seeds the project once, with one Command, only when the project can be edited
+  (never on view links), and the key is then deleted.
 - `SCHEMA_VERSION` 11 and Go `SchemaVersion` 11 together, with a no-op 10→11 migration and
   a regenerated `testdata/hdb4room.json`.
 
@@ -288,7 +320,8 @@ The report ends with "What HDB's EASE can fit here". It opens with a flat type s
 - **5-room**: the default with 4 or more;
 - **Executive**.
 
-The flat type is per browser, then in `household` in slice 2.
+The flat type is per browser, then `household.flatType` in slice 2 (shared with the storage
+meter).
 
 It lists the items that apply to this plan, with the owner's share for that flat type:
 
@@ -323,15 +356,20 @@ It lists the items that apply to this plan, with the owner's share for that flat
 ## Behaviour
 
 **Entry.**
-- Plan details: a new row "Ageing parents" with the select "Check for: Off / Walking aid /
-  Wheelchair".
+- Plan details: a section "Older person" (not "Ageing parents": the older person may be
+  planning for themselves), after Clearance checks, with a segmented control "Check for: Off |
+  Walking aid | Wheelchair" (44 px on touch).
 - When the select isn't Off:
-  - "Their bedroom: [Choose ▾]" and "Their bathroom: [Auto: Bath/WC 2 ▾]";
-  - the summary "4 things to change for a wheelchair" [Show next] [See the list];
-  - hidden at 0, replaced by "Ready for a wheelchair: nothing to change."
-- Intro (first time on, muted): "Checks doors, room to turn, the bathroom and switches
-  against Singapore's accessibility code for homes, for a parent now or later. Choose
-  Wheelchair to plan ahead."
+  - the summary "5 to look at for a wheelchair: 2 needed, 3 recommended" [See the list]
+    [Show next];
+  - at 0: "Nothing to change in what's checked: doors, the way through, turning, bathroom,
+    switches." (not "Ready for a wheelchair": steps and grab bars aren't checked yet);
+  - the "Bedroom" (Choose…) and "Bathroom" (Auto: Bath/WC 2) pickers are at the top of the
+    list, not in Plan details.
+- Intro (the first time it is turned on in this browser, muted): "Checks doors, the way
+  through, room to turn, the bathroom and switch heights for a walking aid or wheelchair, now or
+  later. Choose Wheelchair to plan ahead. Older flats weren't built to today's code: treat this
+  as a goal for the renovation."
 - View links: the check can be turned on to look, but [Suggest grab bars] is hidden.
 
 **Report** (desktop: right-hand panel; phone: bottom sheet at half height, plan above).
@@ -352,7 +390,8 @@ It lists the items that apply to this plan, with the owner's share for that flat
   change"). A tap chooses it.
 
 **Example lines** (exact copy; numbers vary):
-- "Main door: 0.81 m clear; a wheelchair needs 0.85 m."
+- "Main door: 0.81 m clear (the gap with the door open); a wheelchair needs 0.85 m." (what
+  "clear" means is said on the first door line only)
 - "Inside the main door: the shoe cabinet leaves 0.30 m beside the handle; a wheelchair needs
   0.45 m to reach it, and 1.25 × 1.50 m to turn in."
 - "Bedroom 2 door: 0.76 m clear; a wheelchair needs at least 0.80 m."
@@ -364,17 +403,20 @@ It lists the items that apply to this plan, with the owner's share for that flat
   recommended)."
 - "Getting into bed from a wheelchair needs 1.00 m along one side; 0.70 m on the better
   side."
-- "In front of the toilet: 0.82 m clear; 1.00 × 1.00 m needed to come alongside."
+- "In front of the toilet: 0.82 × 0.82 m clear; 1.00 × 1.00 m needed to pull up beside it."
+  (*fixed*: `have` is the side of the largest clear square, so a toilet too narrow a space
+  says so as well as one too shallow)
 - "Beside the toilet: 0.38 m from its centre to the Basin and vanity; 0.45 m needed on one
   side for a grab bar."
 - "From the door to the toilet and basin: 0.85 m; 1.00 m needed."
 
 **Bed rule** (in "Their bedroom"):
-- Wheelchair: **1.00 m** along one long side of their bed, head to foot. Walking aid:
+- Wheelchair: **1.00 m** along one long side of their bed. Walking aid:
   **0.75 m**.
 - Source: M4(3) and M4(2) *(from memory, not re-checked)*. Our rule for HDB bedrooms, not
   in COA.
-- Measured as slice 1's bed side zone, but head to foot. The better side counts.
+- Measured as slice 1's bed side zone, from the foot to the bedside table (*fixed*: head to
+  foot puts the bedside table in the zone, so almost every bed failed). The better side counts.
 
 **Plan** (desktop and phone), only while the select isn't Off:
 - **Turning circles:** dashed, at their best spot in each room checked. Faint grey with
@@ -444,6 +486,7 @@ suggestGrabBars(level, bathroomId): Suggestion[]   // 1b, same shape as suggestP
 - **A sliding or pocket bathroom door:** no "opens in" line. Its clear width follows
   `clearWidth`.
 - **A passage (no door):** its full width; no swing line; steps still apply (slice 2).
+- **A bi-fold door counts as folding too** (*fixed*).
 - **A folding door counts as folding:** COA allows it, so no "opens in" line, even folding
   inwards.
 - **A bathroom with two toilets, or a toilet in the middle of the floor:** the toilet nearest
@@ -498,8 +541,9 @@ Core (Vitest):
    plan: no issue. The same corridor to a bedroom: no ageing issue (0.90).
 6. A dining table narrowing the way to the bathroom to 0.92 m: `route` on the table, `need`
    1.00. Walking aid: none.
-7. Room 3.0 × 2.0 m inside, empty: `turn` none (`have` ≥ 1.50). A 1.0 m wide bed along a long
-   wall: `turn`, `have` 1.00 ± 0.01, blamed on the bed. Room 2.0 × 1.42 m, empty: `turn`,
+7. Room 3.0 × 2.0 m inside, empty: `turn` none (`have` ≥ 1.50). A 1.0 m wide, 2.0 m long bed
+   along a long wall: `turn`, `have` **1.17** ± 0.01 (the L-shaped space left), blamed on the
+   bed (*fixed*: not 1.00). The bed 3.0 m long, wall to wall: `have` 1.00 ± 0.01. Room 2.0 × 1.42 m, empty: `turn`,
    `have` 1.42 ± 0.01, no pieces blamed. Walking aid: no `turn` issues at all.
 8. Living and dry kitchen joined by a room boundary: checked as one space (one `turn` result).
 9. Queen bed, wheelchair, 0.80 m left and 0.70 m right: `bed`, `need` 1.00, `have` 0.80. With
@@ -586,3 +630,82 @@ E2e (desktop, and a 390 px phone by finger):
 43. The profile, bedroom and bathroom are saved in the project. A share link shows the same
     report. The old browser value seeds it once.
 44. Production accepts a v11 save (after the API deploy, before the merge).
+
+## Slice 1 as built
+
+Core (`packages/core`):
+- `ageing.ts`: `ageingFacts(level, profile)` (cached per frozen level and profile) does
+  everything that doesn't depend on the choice: the main door, every door on a route (by the
+  side the route comes from), every route at 0.90 and, for bathrooms, 1.00, every turning space,
+  every bathroom's toilet checks, every bedroom's bed, the points, and the auto bathroom for
+  each bedroom. `ageingReport(level, choice)` only puts the chosen bedroom and bathroom
+  together, so the "Which bedroom?" counts and a change of choice are nearly free.
+  `ageingSupersedes(walk, age)` names the walkway pinches the ageing bars replace;
+  `AgeingSetting`/`parseAgeingSetting` the per-browser setting.
+- `walkway.ts`: one shared `furnishedPass(level)` (the furnished raster, widths and widest ways
+  from the main door), recomputed whenever the level isn't the last one (*stale-cache guard*:
+  walkways on After, then ageing on Before, read Before's), built even with no main door.
+  Ageing re-measures the walkway paths at its needs with no cap at the flat's own width; a bare
+  path short of the need is a `flat` issue with nothing blamed; a furnished one more than 0.02
+  below the bare width is blamed on the pieces as walkways are.
+- Turning: the raster of the room group only (rooms joined by boundaries; cells outside are
+  solid, so the circle can't bulge out through a doorway: a 1.42 m bathroom with its door on
+  the long wall measured 1.526 before), then a pattern search on the polygons (walls with their
+  doorways closed, columns, pieces, boundaries out of the group) to about a millimetre. Turning
+  spaces are cached by the pieces near them, so a drag redoes only its own room's.
+- `ageing-zones.ts`: `depthOff`, `largestSquare` (Table 7 squares, the toilet's front),
+  `squareAt`. `delivery.ts`: `accessClearWidth`. `clearance.ts` exports `fixedParts`,
+  `ruleSide`. `ease.ts`: prices in cents, `defaultFlatType`, `easeItems`, the copy.
+- Timing (sample, 40 pieces, a drag): walkways about 8 ms, ageing on top of them about 6 ms,
+  ageing alone (clearance checks off) about 15 ms on a laptop. The bounds are in the timing
+  note below.
+
+Web (`apps/web/src/ageing/`):
+- `store.ts`: per browser and project (`dhd-ageing-<projectId>`: profile, bedroom, bathroom,
+  flat type), unreadable data is Off; the list's state.
+- The runner (`clearance/walkways.ts`) runs ageing in the same throttled pass as walkways, and
+  runs it when ageing is on even with clearance checks off.
+- `ageing.tsx`: the Plan details section; the list replacing Plan details (a half-height sheet
+  on a phone with a one-line top "Wheelchair · Bedroom 2 · Bath/WC 2 [Change]"; the right-hand
+  column on a phone on its side), each line a full-width button with a Needed or Recommended
+  tag; a tap selects its door, piece, room or point and pans, and the details then open with
+  "‹ Back to the list (3 of 7)"; group headings "Getting in", "Getting around", "Bedroom: …",
+  "Bathroom: …", "Switches and sockets"; "Also checked: … (all fine)."; the EASE panel (flat
+  type select with "Not an HDB flat", the item and "You pay", a grey "Because …" line for items
+  this plan brings in, no total, the eligibility sentence and the link); the plan layer (only
+  what's short, unless its room is selected: then passing turning circles and the toilet zones
+  show, grey; dashed bars for the flat's own walls, labelled "· walls"); the Inspector's "For a
+  wheelchair" section; the live region's line after a drop.
+- Phone: list rows 44 px, labels 11 px, nothing scrolls sideways.
+
+Review fixes (tech lead, UX, QA; 7 Nov):
+- **Bedrooms:** a room named as one, or with a bed in it ("Ah Ma's room", a studio), is a
+  bedroom for "Which bedroom to check?". Any habitable room (not a bathroom, kitchen, yard,
+  shelter or ledge) can be chosen, so a renamed room stays chosen. With one bedroom it is
+  chosen already. Until one is chosen the phone's top reads "Wheelchair · Which bedroom? ·
+  Bath/WC 2", the choice comes first in the list, and the desktop's Bedroom select is hidden.
+- **One line per pinch:** the ageing list keeps every route line, 0.90 m ones included (a
+  walking aid's routes are all 0.90 m, and clearance checks may be off). Where the walkways
+  have the same pinch (the same pieces, on the way to the same rooms), the clearance list and
+  its bar leave theirs out (`ageingSupersedes`). A route is never "also checked" while a way
+  to one of the group's rooms is short.
+- **Bedrooms, again:** a living room with a bed in it isn't a bedroom (it can still be chosen,
+  and its own lines stay in the list). Corridors, foyers, stores and utility rooms are never
+  offered. With no bedroom found (rooms still "Room 1", no beds), every room that can be chosen
+  is offered in "Which bedroom to check?". A bedroom found for them is saved once shown, so a
+  bed dragged into another room later doesn't switch it. A bed made by size in the bed shape
+  counts as a bed. The toilet's zones are drawn inside the room's wall faces.
+- **The bathroom line** says the room is too small even empty ("many HDB bathrooms can't")
+  whenever it is, furniture or not (`empty` on a `turn`).
+- **Show next** (from the plan details too) opens the line's details with "‹ Back to the list
+  (n of N)" focused, and the line's reason straight under it. The list's top is sticky. Marks
+  are drawn needed last (on top); outlines are solid, and only the flat's walls are dashed. A
+  view link can use the check (it changes nothing). A blank plan says what to add; with no
+  bathroom EASE lists none of the toilet's items. The toilet's front square is drawn inside
+  its room.
+- Wording: "someone with a walking aid", "… needs 0.45 m there to open it", "if someone falls
+  behind it, it can't be opened from outside", "Bedroom to check: …", "Bathroom to check: …",
+  "its door width", "from Furniture › Bathroom", EASE spelled out once.
+- The timing tests run by themselves after the rest (`src/perf.test.ts`), and what ageing adds
+  is bounded against walkways in the same run: at most max(15 ms, the walkways' time), three
+  times that off a laptop.

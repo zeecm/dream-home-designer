@@ -1431,6 +1431,21 @@ the version shown; issues and the walkway line list rooms worst first (a room be
 en-suite); bed sides name their room when there are several beds; door names and plan geometry
 are cached by walls/openings/rooms. Drag p95 on 21 pieces: 16.7 ms on, 16.8 off.
 
+**Ageing parents check, slice 1 (7 Nov, spec `docs/specs/ageing-parents.md`, "Slice 1 as
+built"):** no schema change. Core `ageing.ts`: `ageingFacts(level, profile)` (choice-free, cached
+per frozen level) and `ageingReport(level, choice)` → issues by group (in, around, bedroom,
+bathroom, points) with Needed/Recommended, `passed`, `notes`, `turns`, bedroom counts, the
+auto bathroom; `ageingSupersedes` hides walkway bars it redraws. `walkway.ts` shares one
+`furnishedPass(level)` with it (guarded by level: never read its buffers for another level).
+Turning: a raster of the room group only, refined on polygons (doorways closed) and cached by
+the pieces near it. `ageing-zones.ts` (`depthOff`, `largestSquare`), `accessClearWidth` (mm,
+per leaf), `ease.ts` (EASE 2026 prices in cents). Web `ageing/`: per-browser store
+`dhd-ageing-<projectId>` (zod `AgeingSetting`), the runner in `clearance/walkways.ts` runs it
+even with clearance off, the "Older person" section, the list (sheet on a phone, "‹ Back to the
+list"), the plan layer (`--advise` amber), "For a wheelchair" in a piece's or door's details,
+the live region. E2e `ageing.spec.ts` (desktop, phone by finger). Slice 2's `household` shape
+is shared with the storage meter (`household.flatType`, `household.ageing`).
+
 **Carpentry and cost estimate (5 Nov, spec `docs/specs/carpentry-cost.md`, slice 1):** five
 built-ins in the catalogue's Built-in category (wardrobe and shoe cabinet 2.6 m high, TV
 console, kitchen base and wall runs), `carpentry` on their kinds and on the kitchen cabinets.

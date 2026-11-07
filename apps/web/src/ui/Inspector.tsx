@@ -52,6 +52,8 @@ import {
 } from '@dhd/core';
 import { wallpaperCanvas } from '@dhd/render';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { AgeingBack, AgeingPanel, ItemAgeing, OlderPersonSection } from '../ageing/ageing';
+import { useAgeing } from '../ageing/store';
 import {
   doorIssueLines,
   doorsWithIssues,
@@ -169,6 +171,8 @@ export function Inspector() {
   const tool = useEditor((s) => s.tool);
   const viewer = useStore((s) => s.role === 'viewer');
   const suggesting = useSuggest((s) => s.open);
+  // The older person list (a view link can look at it too).
+  const ageingList = useAgeing((s) => s.listOpen && s.setting.profile !== 'off');
   // On a phone the panel folds to one row when there's nothing to edit, so the plan gets
   // the screen; it opens for a selection or a drawing tool, or by hand.
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
@@ -200,6 +204,7 @@ export function Inspector() {
   // Running trunking folds it too: on a phone the plan needs the height for the bends.
   const open =
     (suggesting && !viewer) ||
+    ageingList ||
     (userOpen ?? (!running && (!!selection || (tool !== 'select' && tool !== 'comment'))));
   // A tap low on the plan selects as the finger lifts, and the panel opens under it; the
   // click the browser then sends for that tap lands on the toggle now there, and would fold
@@ -228,7 +233,14 @@ export function Inspector() {
   if (!level) return null;
   // Suggested points take the plan details' place (a selection still shows its own).
   const suggestShown = suggesting && !viewer;
-  let body = suggestShown ? <SuggestPanel /> : <PlanSummary level={level} />;
+  const ageingShown = ageingList && !suggestShown;
+  let body = suggestShown ? (
+    <SuggestPanel />
+  ) : ageingShown ? (
+    <AgeingPanel />
+  ) : (
+    <PlanSummary level={level} viewer={viewer} />
+  );
   if (selection?.kind === 'wall' && level.walls[selection.id]) {
     body = <WallInspector key={key} level={level} id={selection.id} />;
   } else if (selection?.kind === 'vertex' && level.vertices[selection.id]) {
@@ -242,10 +254,13 @@ export function Inspector() {
   } else if (selection?.kind === 'room' && level.rooms[selection.id]) {
     body = <RoomInspector key={key} level={level} id={selection.id} />;
   }
+  // The plan details and the older person list disable their own editing controls on a view
+  // link: the older person check is a way of looking, which a view link can use too.
+  const ownDisabling = !selection && !suggestShown;
   return (
     <aside
       ref={panel}
-      className={`panel inspector${open ? '' : ' inspector-folded'}${suggestShown && !selection ? ' inspector-suggest' : ''}`}
+      className={`panel inspector${open ? '' : ' inspector-folded'}${suggestShown && !selection ? ' inspector-suggest' : ''}${ageingShown && !selection ? ' inspector-ageing' : ''}`}
       aria-label="Details"
     >
       <button
@@ -263,13 +278,19 @@ export function Inspector() {
         {open ? 'Hide details' : 'Show plan details'}
       </button>
       {/* With something selected (a piece just placed), its details come first. */}
-      {!selection && !suggestShown && <ToolPanel />}
+      {!selection && !suggestShown && !ageingShown && <ToolPanel />}
+      {/* Opened from the older person list: the way back to it, above the details. */}
+      {ageingShown && selection && <AgeingBack selection={selection} />}
       {/* A view-only link shows the details but can't change them. */}
-      <fieldset className="inspector-body" disabled={viewer}>
-        {body}
-      </fieldset>
+      {ownDisabling ? (
+        <div className="inspector-body">{body}</div>
+      ) : (
+        <fieldset className="inspector-body" disabled={viewer}>
+          {body}
+        </fieldset>
+      )}
       {/* A way of looking, not a change: a view link can use it too. */}
-      {!selection && <CommentPinsSwitch />}
+      {!selection && !ageingShown && <CommentPinsSwitch />}
       {selection && !suggestShown && <ToolPanel />}
     </aside>
   );
@@ -305,7 +326,7 @@ function DeleteButton({ label, onClick }: { label: string; onClick: () => void }
 
 const clear = () => useEditor.getState().select(null);
 
-function PlanSummary({ level }: { level: Level }) {
+function PlanSummary({ level, viewer }: { level: Level; viewer: boolean }) {
   const dispatch = useStore((s) => s.dispatch);
   const select = useEditor((s) => s.select);
   const rooms = Object.values(level.rooms)
@@ -319,59 +340,65 @@ function PlanSummary({ level }: { level: Level }) {
 
   return (
     <>
-      <Header title="Plan" />
-      <section aria-labelledby="rooms-h">
-        <h3 id="rooms-h" className="section-title">
-          Rooms
-        </h3>
-        {rooms.length === 0 ? (
-          <p className="empty-line">Rooms appear when walls enclose a space.</p>
-        ) : (
-          <ul className="room-list">
-            {rooms.map(({ room, area }) => (
-              <li key={room.id}>
-                <button type="button" onClick={() => select({ kind: 'room', id: room.id })}>
-                  <span className="room-list-name">{room.name}</span>
-                  <span className="num">{formatArea(area)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="total">
-          <span>Floor area</span>
-          <span className={`num total-figure${rooms.length ? '' : ' muted'}`}>
-            {formatArea(total)}
-          </span>
-        </p>
-      </section>
-      <dl className="facts">
-        <div>
-          <dt>Walls</dt>
-          <dd className="num">{walls}</dd>
-        </div>
-        <div>
-          <dt>Doors</dt>
-          <dd className="num">{count('door')}</dd>
-        </div>
-        <div>
-          <dt>Windows</dt>
-          <dd className="num">{count('window')}</dd>
-        </div>
-      </dl>
-      <StructuralSuggestion />
-      <ClearanceSummary />
-      <ElectricalSummary level={level} />
-      <RenovationSection />
-      <CostSummary />
-      <LengthField
-        label="Ceiling height"
-        value={level.ceilingHeight}
-        min={1.8}
-        max={6}
-        onCommit={(v) => v !== undefined && dispatch(setCeilingHeight(level.id, v))}
-      />
-      <NorthField />
+      <fieldset className="inspector-part" disabled={viewer}>
+        <Header title="Plan" />
+        <section aria-labelledby="rooms-h">
+          <h3 id="rooms-h" className="section-title">
+            Rooms
+          </h3>
+          {rooms.length === 0 ? (
+            <p className="empty-line">Rooms appear when walls enclose a space.</p>
+          ) : (
+            <ul className="room-list">
+              {rooms.map(({ room, area }) => (
+                <li key={room.id}>
+                  <button type="button" onClick={() => select({ kind: 'room', id: room.id })}>
+                    <span className="room-list-name">{room.name}</span>
+                    <span className="num">{formatArea(area)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="total">
+            <span>Floor area</span>
+            <span className={`num total-figure${rooms.length ? '' : ' muted'}`}>
+              {formatArea(total)}
+            </span>
+          </p>
+        </section>
+        <dl className="facts">
+          <div>
+            <dt>Walls</dt>
+            <dd className="num">{walls}</dd>
+          </div>
+          <div>
+            <dt>Doors</dt>
+            <dd className="num">{count('door')}</dd>
+          </div>
+          <div>
+            <dt>Windows</dt>
+            <dd className="num">{count('window')}</dd>
+          </div>
+        </dl>
+        <StructuralSuggestion />
+        <ClearanceSummary />
+      </fieldset>
+      {/* A way of looking: a view link can use it. */}
+      <OlderPersonSection />
+      <fieldset className="inspector-part" disabled={viewer}>
+        <ElectricalSummary level={level} />
+        <RenovationSection />
+        <CostSummary />
+        <LengthField
+          label="Ceiling height"
+          value={level.ceilingHeight}
+          min={1.8}
+          max={6}
+          onCommit={(v) => v !== undefined && dispatch(setCeilingHeight(level.id, v))}
+        />
+        <NorthField />
+      </fieldset>
     </>
   );
 }
@@ -988,6 +1015,7 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
       <Header title={kind?.name ?? 'Furniture'} onClose={clear} />
       {/* First, so a phone's sheet shows it without scrolling. */}
       <ItemClearances level={level} id={id} />
+      <ItemAgeing level={level} id={id} kind="item" />
       <CarpentryLine item={it} />
       <GettingItIn level={level} id={id} />
       <LengthField
@@ -1157,6 +1185,7 @@ function OpeningInspector({ level, id }: { level: Level; id: string }) {
       <Header title={title} onClose={clear} />
       {/* First, so a phone's sheet shows it without scrolling. */}
       <DoorClearances level={level} id={id} />
+      <ItemAgeing level={level} id={id} kind="opening" />
       <Segmented
         label="Kind"
         value={o.kind}

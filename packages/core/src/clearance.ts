@@ -170,7 +170,7 @@ export function blocks(item: Item): boolean {
 }
 
 /** A side of a piece as the rule sees it: a bed's long side from the foot to the bedside table. */
-function ruleSide(fp: Vec2[], side: 'front' | 'left' | 'right'): Side {
+export function ruleSide(fp: Vec2[], side: 'front' | 'left' | 'right'): Side {
   const s = sideOf(fp, side);
   return side !== 'front' && s.width > HEAD_END + 0.3 ? shorten(s, s.width - HEAD_END) : s;
 }
@@ -444,7 +444,9 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
   return out;
 }
 
-type Fixed = {
+/** The level's walls and doors as the clearance checks see them (kept while furniture moves). */
+export type Fixed = {
+  /** Every wall's outline (openings count as wall) and the hubs; not room boundaries. */
   walls: Vec2[][];
   solid: Vec2[][];
   sweeps: [string, Vec2[][]][];
@@ -454,7 +456,7 @@ type Fixed = {
 // (Immer keeps those objects while only items change).
 const fixedCache = new WeakMap<object, { vertices: object; openings: object; fixed: Fixed }>();
 
-function fixedParts(level: Level): Fixed {
+export function fixedParts(level: Level): Fixed {
   const hit = fixedCache.get(level.walls);
   if (hit && hit.vertices === level.vertices && hit.openings === level.openings) return hit.fixed;
   const fw = wallFootprints(level);

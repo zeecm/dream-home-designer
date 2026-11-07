@@ -1,0 +1,96 @@
+import { describe, expect, it } from 'vitest';
+import { ageingReport } from './ageing';
+import { sampleFlatProject } from './fixtures/sampleFlat';
+import { furnitureKind, newItem } from './furniture';
+import type { Level, Vec2 } from './schema';
+import { walkwayReport } from './walkway';
+
+/**
+ * Timing, run on its own after the other tests (`pnpm test` runs this file by itself), so the
+ * suite's other work doesn't share the machine with it. Walkways (clearance slice 2, W16) and
+ * the ageing check (ageing parents AC20) on the sample flat with 40 pieces, each run a drag
+ * step (one piece moved a centimetre, so nothing is cached). What ageing adds is bounded
+ * against walkways measured in the same run, so a busy runner slows both alike. `PERF=1`
+ * applies the spec's laptop bounds.
+ */
+const PERF = !!process.env.PERF;
+
+function sample40(): { lvl: Level; moved: (k: number) => Level; bedroom?: string } {
+  const plain = sampleFlatProject('prj_t').levels[0] as Level;
+  // Frozen all through, as the store's levels are (the bare plan is then kept).
+  const base = Object.freeze({
+    ...plain,
+    vertices: Object.freeze(plain.vertices),
+    walls: Object.freeze(plain.walls),
+    openings: Object.freeze(plain.openings),
+    rooms: Object.freeze(plain.rooms),
+  });
+  const ids = ['wardrobe', 'sofa-3', 'desk', 'bedside', 'armchair', 'dining-chair', 'bookshelf'];
+  const items = { ...base.items };
+  for (let i = 0; i < 40; i++) {
+    const kind = furnitureKind(ids[i % ids.length] as string);
+    if (!kind) throw new Error('no kind');
+    const at: Vec2 = { x: 0.8 + (i % 8) * 1.1, y: 0.8 + Math.floor(i / 8) * 1.3 };
+    const it = newItem(`it_p${i}`, kind, at, 0);
+    items[it.id] = it;
+  }
+  const lvl = Object.freeze({ ...base, items });
+  const sofa = Object.values(items).find((it) => it.assetId === 'sofa-3');
+  if (!sofa) throw new Error('no sofa');
+  const moved = (k: number) =>
+    Object.freeze({
+      ...lvl,
+      items: {
+        ...lvl.items,
+        [sofa.id]: { ...sofa, position: { ...sofa.position, x: sofa.position.x + k * 0.01 } },
+      },
+    });
+  return {
+    lvl,
+    moved,
+    bedroom: Object.values(base.rooms).find((r) => r.name === 'Main bedroom')?.id,
+  };
+}
+
+const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] as number;
+
+describe('timing (sample flat, 40 pieces, dragging)', () => {
+  it('walkways within the bound; ageing adds at most its share on top', () => {
+    const { lvl, moved, bedroom } = sample40();
+    walkwayReport(lvl);
+    ageingReport(lvl, { profile: 'wheelchair', bedroomId: bedroom });
+    const walk: number[] = [];
+    const both: number[] = [];
+    const alone: number[] = [];
+    // Interleaved, so a slow patch of the machine falls on both alike.
+    for (let k = 1; k <= 9; k++) {
+      const a = moved(2 * k);
+      let t0 = performance.now();
+      walkwayReport(a);
+      walk.push(performance.now() - t0);
+      const b = moved(2 * k + 1);
+      t0 = performance.now();
+      walkwayReport(b);
+      ageingReport(b, { profile: 'wheelchair', bedroomId: bedroom });
+      both.push(performance.now() - t0);
+      // Clearance checks off: ageing alone, building the furnished pass itself.
+      const c = moved(100 + k);
+      t0 = performance.now();
+      ageingReport(c, { profile: 'wheelchair', bedroomId: bedroom });
+      alone.push(performance.now() - t0);
+    }
+    const w = median(walk);
+    const added = median(both) - w;
+    const a = median(alone);
+    console.log(
+      `walkways ${w.toFixed(2)} ms; ageing adds ${added.toFixed(2)} ms; ageing alone ${a.toFixed(2)} ms`,
+    );
+    // Walkways: the spec's 40 ms on a laptop; otherwise only a sanity bound (CI varies).
+    expect(w).toBeLessThan(PERF ? 40 : 400);
+    // Ageing on top of walkways: at most 15 ms, or the walkways' own time on a slow machine,
+    // three times that off a laptop.
+    expect(added).toBeLessThan(Math.max(15, w) * (PERF ? 1 : 3));
+    // Ageing alone (clearance off) builds the pass walkways would have: at most the pair's time.
+    expect(a).toBeLessThan((w + Math.max(15, w)) * (PERF ? 1 : 3));
+  });
+});
