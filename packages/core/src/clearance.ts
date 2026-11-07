@@ -283,14 +283,24 @@ export function doorSweep(
  * short isn't checked again), and of a single bed only the better one. Each with the area
  * beside it, from the foot to the bedside table.
  */
-export function bedSides(level: Level, item: Item): { side: 'left' | 'right'; zone: Vec2[] }[] {
+export function bedSides(
+  level: Level,
+  item: Item,
+  /**
+   * The level's pieces that `blocks`, in its order, and their footprints, when the caller
+   * has them (the walkways, for every bed): the same obstacles, worked out once.
+   */
+  standing?: { pieces: readonly Item[]; fps: readonly Vec2[][] },
+): { side: 'left' | 'right'; zone: Vec2[] }[] {
   const rule = CLEARANCE_RULES[item.assetId];
   if (!rule || rule.side === 'front' || !blocks(item)) return [];
   const fp = itemFootprint(item);
   const { walls } = fixedParts(level);
-  const others = Object.values(level.items)
-    .filter((o) => o.id !== item.id && blocks(o))
-    .map((o) => itemFootprint(o));
+  const others = standing
+    ? standing.fps.filter((_, i) => standing.pieces[i]?.id !== item.id)
+    : Object.values(level.items)
+        .filter((o) => o.id !== item.id && blocks(o))
+        .map((o) => itemFootprint(o));
   const obstacles = [...walls, ...others];
   const sides = (['left', 'right'] as const).map((side) => {
     const s = ruleSide(fp, side);

@@ -130,17 +130,27 @@ export interface RoomShape {
   holeLoops: string[][];
 }
 
-const shapeCache = new WeakMap<object, Map<string, RoomShape>>();
+/** Shapes, kept by the walls they were traced from with the corners and rooms they saw. */
+const shapeCache = new WeakMap<
+  object,
+  { vertices: object; rooms: object; out: Map<string, RoomShape> }
+>();
 
 /**
- * Every room's outline and holes. Cached per frozen level object, so call it freely on
- * immutable levels; drafts and unfrozen levels are measured afresh each time.
+ * Every room's outline and holes. Cached for a frozen level while its walls, corners and rooms
+ * stay the same objects (all the shapes depend on: a drag of furniture keeps them), so call
+ * it freely on immutable levels; drafts and unfrozen levels are measured afresh each time.
  */
 export function roomShapes(level: Level): Map<string, RoomShape> {
   // Only frozen levels (Immer's output) are cached; drafts and plain objects can change.
-  const cacheable = !isDraft(level) && Object.isFrozen(level);
-  const cached = cacheable && shapeCache.get(level);
-  if (cached) return cached;
+  const cacheable =
+    !isDraft(level) &&
+    Object.isFrozen(level) &&
+    Object.isFrozen(level.walls) &&
+    Object.isFrozen(level.vertices) &&
+    Object.isFrozen(level.rooms);
+  const hit = cacheable && shapeCache.get(level.walls);
+  if (hit && hit.vertices === level.vertices && hit.rooms === level.rooms) return hit.out;
   const pos = (id: string) => {
     const v = level.vertices[id];
     if (!v) throw new Error(`missing vertex ${id}`);
@@ -162,7 +172,7 @@ export function roomShapes(level: Level): Map<string, RoomShape> {
       holeLoops: loops,
     });
   });
-  if (cacheable) shapeCache.set(level, out);
+  if (cacheable) shapeCache.set(level.walls, { vertices: level.vertices, rooms: level.rooms, out });
   return out;
 }
 

@@ -1,9 +1,11 @@
 import {
+  type Circle,
   type LeafPose,
   type Level,
   type PlanGeometry,
   type RoomShape,
   type Vec2,
+  circlesNear,
   doorLeaves,
   doorStyle,
   doorSwing,
@@ -406,7 +408,7 @@ interface ScreenProps {
 }
 
 /** Room names and areas, set in screen pixels so they stay legible at any zoom. */
-interface RoomLabel {
+export interface RoomLabel {
   id: string;
   name: string;
   area: string | null;
@@ -417,9 +419,16 @@ interface RoomLabel {
 
 /**
  * Fits each room's name (and area, if there is space) at this zoom, clear of door swings
- * and of the furniture standing in the room.
+ * and of the furniture standing in the room. Each room's fit is kept (`memo`) under what it
+ * depends on: its outline, holes, name, area, the zoom step and the circles near it; so a drag
+ * re-fits only the rooms it changes, with the same result as fitting them all again.
  */
-function roomLabels(level: Level, geom: PlanGeometry, zoom: number): RoomLabel[] {
+export function roomLabels(
+  level: Level,
+  geom: PlanGeometry,
+  zoom: number,
+  memo: Map<string, RoomLabel> | null = fitMemo,
+): RoomLabel[] {
   const swings = [
     ...geom.openings
       .filter((o) => o.kind === 'door')
@@ -477,46 +486,99 @@ function roomLabels(level: Level, geom: PlanGeometry, zoom: number): RoomLabel[]
     };
     // Keep 10 cm clear of the walls' centre lines, so a label never sits on a thick wall.
     const half = { x: halfPx.x / zoom + 0.1, y: halfPx.y / zoom + 0.1 };
-    const at = placeLabel(poly, half, swings, shape.holes);
-    // Nowhere clear with its area (a small ledge with its compressor): the name alone, if
-    // that finds a clear spot.
-    if (areaFits && labelClearance(at, half, poly, swings, shape.holes) < 0) {
-      const slim = { x: (name.length * 7.6) / 2 / zoom + 4 / zoom + 0.1, y: 10 / zoom + 0.1 };
-      const at2 = placeLabel(poly, slim, swings, shape.holes);
-      if (labelClearance(at2, slim, poly, swings, shape.holes) >= 0) {
-        out.push({ id: r.id, name, area: null, at: at2, half: slim });
-        continue;
-      }
+    if (!memo) {
+      out.push(fitRoomLabel(r.id, name, area, areaFits, zoom, shape, half, swings));
+      continue;
     }
-    // Nowhere clear at all (a room the designer filled): the room's own label point, well
-    // inside it, rather than a spot squeezed against a wall; the halo keeps it readable.
-    const clear = labelClearance(at, half, poly, [], shape.holes) >= 0;
-    const spot = clear ? at : placeLabel(poly, half, [], shape.holes);
-    // The area's line (under the name) over a symbol (a compressor on a ledge): left out,
-    // rather than drawn with the symbol through it; the room list has it.
-    const areaBox = {
-      x0: spot.x - (area.length * 6.8) / 2 / zoom,
-      x1: spot.x + (area.length * 6.8) / 2 / zoom,
-      y0: spot.y + 3 / zoom,
-      y1: spot.y + 18 / zoom,
-    };
-    const areaHit = swings.some(({ c, r: rad }) => {
-      const dx = c.x - Math.max(areaBox.x0, Math.min(c.x, areaBox.x1));
-      const dy = c.y - Math.max(areaBox.y0, Math.min(c.y, areaBox.y1));
-      return dx * dx + dy * dy < rad * rad * 0.5;
-    });
-    out.push({
-      id: r.id,
-      name,
-      area:
-        areaFits && !(areaHit && labelClearance(spot, half, poly, swings, shape.holes) < 0)
-          ? area
-          : null,
-      at: spot,
-      half,
-    });
+    // Every box tried (the slim one too, and the area's line) is within `half` of a point in
+    // the room, so the circles away from it can't change the fit.
+    const near = circlesNear(poly, half, swings);
+    const key = fitKey(r.id, name, area, zoom, shape, near);
+    let l = memo.get(key);
+    if (!l) {
+      l = fitRoomLabel(r.id, name, area, areaFits, zoom, shape, half, near);
+      if (memo.size >= FIT_MEMO_SIZE) memo.clear();
+      memo.set(key, l);
+    }
+    out.push(l);
   }
   return out;
+}
+
+/** Room fits kept across levels: enough for every room of a big house at a few zoom steps. */
+const FIT_MEMO_SIZE = 4000;
+const fitMemo = new Map<string, RoomLabel>();
+
+/** All a room's fit depends on, as text (numbers in full, so equal keys mean equal inputs). */
+function fitKey(
+  id: string,
+  name: string,
+  area: string,
+  zoom: number,
+  shape: RoomShape,
+  near: readonly Circle[],
+): string {
+  const ring = (ps: readonly Vec2[]) => ps.map((p) => `${p.x},${p.y}`).join(' ');
+  return [
+    id,
+    name,
+    area,
+    zoom,
+    ring(shape.outer),
+    shape.holes.map(ring).join(';'),
+    near.map(({ c, r }) => `${c.x},${c.y},${r}`).join(' '),
+  ].join('\n');
+}
+
+/** One room's label: where it fits, and whether its area's line goes with it. */
+function fitRoomLabel(
+  id: string,
+  name: string,
+  area: string,
+  areaFits: boolean,
+  zoom: number,
+  shape: RoomShape,
+  half: Vec2,
+  swings: readonly Circle[],
+): RoomLabel {
+  const poly = shape.outer;
+  const at = placeLabel(poly, half, swings, shape.holes);
+  // Nowhere clear with its area (a small ledge with its compressor): the name alone, if
+  // that finds a clear spot.
+  if (areaFits && labelClearance(at, half, poly, swings, shape.holes) < 0) {
+    const slim = { x: (name.length * 7.6) / 2 / zoom + 4 / zoom + 0.1, y: 10 / zoom + 0.1 };
+    const at2 = placeLabel(poly, slim, swings, shape.holes);
+    if (labelClearance(at2, slim, poly, swings, shape.holes) >= 0) {
+      return { id, name, area: null, at: at2, half: slim };
+    }
+  }
+  // Nowhere clear at all (a room the designer filled): the room's own label point, well
+  // inside it, rather than a spot squeezed against a wall; the halo keeps it readable.
+  const clear = labelClearance(at, half, poly, [], shape.holes) >= 0;
+  const spot = clear ? at : placeLabel(poly, half, [], shape.holes);
+  // The area's line (under the name) over a symbol (a compressor on a ledge): left out,
+  // rather than drawn with the symbol through it; the room list has it.
+  const areaBox = {
+    x0: spot.x - (area.length * 6.8) / 2 / zoom,
+    x1: spot.x + (area.length * 6.8) / 2 / zoom,
+    y0: spot.y + 3 / zoom,
+    y1: spot.y + 18 / zoom,
+  };
+  const areaHit = swings.some(({ c, r: rad }) => {
+    const dx = c.x - Math.max(areaBox.x0, Math.min(c.x, areaBox.x1));
+    const dy = c.y - Math.max(areaBox.y0, Math.min(c.y, areaBox.y1));
+    return dx * dx + dy * dy < rad * rad * 0.5;
+  });
+  return {
+    id,
+    name,
+    area:
+      areaFits && !(areaHit && labelClearance(spot, half, poly, swings, shape.holes) < 0)
+        ? area
+        : null,
+    at: spot,
+    half,
+  };
 }
 
 /** Labels are fitted to zoom in steps of about 9%, so a wheel zoom doesn't re-place them. */
@@ -577,7 +639,7 @@ export function roomHandleAt(
   const shape = room && roomShapes(level).get(roomId);
   let at: Vec2 | null = null;
   if (shape && shape.outer.length >= 3) {
-    const label = roomLabels(level, geom, step).find((l) => l.id === roomId);
+    const label = labelsAt(level, geom, step).find((l) => l.id === roomId);
     const avoid = [
       ...geom.openings
         .filter((o) => o.kind === 'door')
