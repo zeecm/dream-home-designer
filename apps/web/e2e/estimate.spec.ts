@@ -119,6 +119,13 @@ test('slice 2s C2: a two-level file is priced on both levels, by level and in to
   await expect(wardrobes).toHaveCount(2);
   await expect(wardrobes.nth(0)).toContainText('Ground · Master bedroom');
   await expect(wardrobes.nth(1)).toContainText('Upper · Bedroom 2');
+  // The separator is in the text (a copy, a screen reader), not drawn by CSS.
+  expect(await wardrobes.nth(0).locator('.estimate-item').innerText()).toBe(
+    'Built-in wardrobe · Ground · Master bedroom',
+  );
+  expect(await wardrobes.nth(0).locator('.estimate-item').textContent()).toBe(
+    'Built-in wardrobe · Ground · Master bedroom',
+  );
   await expect(dialog.locator('.estimate-line[data-level="lvl_upper"]').first()).toBeVisible();
   // The level the app can't show yet is said to come from the file.
   await expect(dialog).toContainText(
@@ -160,7 +167,9 @@ test.describe('phone', () => {
     if (!place || !qty || !label) throw new Error('line not laid out');
     expect(Math.abs(place.y - qty.y)).toBeLessThan(4);
     expect(place.y).toBeGreaterThan(label.y + label.height - 2);
-    await expect(line.locator('.estimate-place')).toHaveText(/^Ground · /);
+    // The separators are text: on a phone, the place's goes and the quantity's shows.
+    expect(await line.locator('.estimate-place').innerText()).toMatch(/^Ground · /);
+    expect(await line.locator('.estimate-qty').innerText()).toMatch(/^\s*·\s*\d/);
     // With no place or quantity (contingency), the price stays on the label's row.
     const bare = dialog.locator('.estimate-line', { hasText: 'Contingency (10%)' });
     const name = await bare.locator('.estimate-label').boundingBox();

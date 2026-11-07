@@ -437,9 +437,17 @@ export function EstimateDialog({ onClose }: { onClose: () => void }) {
                     >
                       <span className="estimate-item">
                         <span className="estimate-label">{l.label}</span>
-                        {l.place && <span className="muted estimate-place">{l.place}</span>}
+                        {l.place && (
+                          <span className="muted estimate-place">
+                            <span className="estimate-sep"> · </span>
+                            {l.place}
+                          </span>
+                        )}
                       </span>
-                      <span className="num estimate-qty">{qtyText(l)}</span>
+                      <span className="num estimate-qty">
+                        {l.place && qtyText(l) && <span className="estimate-qsep"> · </span>}
+                        {qtyText(l)}
+                      </span>
                       <span className="num estimate-cost">{range(l.low, l.high)}</span>
                     </li>
                   ))}

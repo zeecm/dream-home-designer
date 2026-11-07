@@ -3299,8 +3299,9 @@ h3.field-label {
 .estimate-cost {
   text-align: right;
 }
-.estimate-place::before {
-  content: " · ";
+/* The separators are text, so a copy or a screen reader keeps them; each layout shows one. */
+.estimate-qsep {
+  display: none;
 }
 /* By level: a name and its subtotal; the total under them. */
 .estimate-sub {
@@ -3354,11 +3355,11 @@ h3.field-label {
   .estimate-label {
     grid-column: 1 / -1;
   }
-  .estimate-place::before {
-    content: none;
+  .estimate-sep {
+    display: none;
   }
-  .has-place .estimate-qty:not(:empty)::before {
-    content: " · ";
+  .estimate-qsep {
+    display: inline;
     white-space: pre;
   }
   .estimate-qty {
