@@ -123,9 +123,13 @@ function Catalogue({ idPrefix }: { idPrefix: string }) {
   const list = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!armedFrom) return;
-    list.current
-      ?.querySelector<HTMLElement>('[aria-pressed="true"]')
-      ?.scrollIntoView({ block: 'center' });
+    // After the palette's own reset to its top for the new tool.
+    const frame = requestAnimationFrame(() =>
+      list.current
+        ?.querySelector<HTMLElement>('[aria-pressed="true"]')
+        ?.scrollIntoView({ block: 'center' }),
+    );
+    return () => cancelAnimationFrame(frame);
   }, [armedFrom]);
   const pick = useEditor.getState().setFurnitureKind;
   const [filter, setFilter] = useState('');

@@ -95,15 +95,16 @@ test.describe('desktop', () => {
     const checks = page.locator('section.checks');
     await expect(checks.getByRole('heading', { name: 'Checks' })).toBeVisible();
     await expect(page.getByTestId('storage-summary')).toHaveText(
-      'Clothes, shoes, kitchen and everything else could use more.',
+      'Clothes, kitchen and everything else could use more. No shoe cabinet drawn yet.',
     );
     await seeStorage(page);
     await expect(panel(page).getByRole('heading', { name: 'Storage' })).toBeFocused();
     await expect(panel(page)).toContainText('Do you have room for everything?');
-    // Who lives here, guessed from the beds, unfolded the first time.
+    // Who lives here, guessed from the beds: one line, Change to see the steppers.
     await expect(page.getByTestId('storage-household')).toHaveText(
-      '3 people: 1 in Bedroom, 2 in Main bedroom',
+      '3 people (guessed from the beds): 1 in Bedroom, 2 in Main bedroom',
     );
+    await page.locator('.storage-oneline').getByRole('button', { name: 'Change' }).click();
     const main = page.locator('.storage-people[data-room="Main bedroom"]');
     await expect(main).toContainText('Guessed from the beds');
     await expect(main.locator('.storage-step').first()).toContainText('2');
@@ -128,12 +129,17 @@ test.describe('desktop', () => {
     await expect(card(page, 'Main bedroom')).toContainText(
       'Needs about 0.80 m more: a 3 ft run, about $600–1,050 built in.',
     );
-    await expect(card(page, 'Bedroom')).toContainText('No wardrobe; about 1.00 m is usual.');
-    // The chips on the plan, amber where more is needed.
+    await expect(card(page, 'Bedroom')).toContainText(
+      'No wardrobe yet; about 1.00 m is usual: a 3 ft run, about $600–1,050 built in.',
+    );
+    // The chips on the plan, amber where something drawn needs more; nothing drawn is dashed.
     await expect(chip(page).filter({ hasText: 'Wardrobe 1.20 of 2.00 m' })).toHaveClass(
       /storage-chip-warn/,
     );
     await expect(chip(page).filter({ hasText: 'Shelves 4.8 of 12 m' })).toBeVisible();
+    const noWardrobe = chip(page).filter({ hasText: 'No wardrobe · about 1.00 m usual' });
+    await expect(noWardrobe).toHaveClass(/storage-chip-empty/);
+    await expect(noWardrobe).not.toHaveClass(/storage-chip-warn/);
 
     // 18. A built-in wardrobe in Bedroom: its line and chip, live; Undo takes both back.
     await place(page, /^Built-in wardrobe/, 4.3, 2.8);
@@ -150,8 +156,8 @@ test.describe('desktop', () => {
       '1.80 m of wardrobe; about 1.00 m is usual. Enough.',
     );
     await page.keyboard.press('Control+z');
-    await expect(card(page, 'Bedroom')).toContainText('No wardrobe; about 1.00 m is usual.');
-    await expect(chip(page).filter({ hasText: 'Wardrobe 0.00 of 1.00 m' })).toBeVisible();
+    await expect(card(page, 'Bedroom')).toContainText('No wardrobe yet; about 1.00 m is usual');
+    await expect(chip(page).filter({ hasText: 'No wardrobe · about 1.00 m usual' })).toBeVisible();
 
     // 19. The Main bedroom wardrobe, picked from its card, made 2.40 m wide by its corner.
     await card(page, 'Main bedroom')
@@ -168,10 +174,14 @@ test.describe('desktop', () => {
     await expect(chip(page).filter({ hasText: 'Wardrobe 2.40 of 2.00 m' })).not.toHaveClass(
       /storage-chip-warn/,
     );
+    // Back to storage: where it was, focus on the card the piece was opened from.
     await page.getByRole('button', { name: '‹ Back to storage' }).click();
     await expect(card(page, 'Main bedroom')).toContainText(
       '2.40 m of wardrobe; about 2.00 m is usual. Enough.',
     );
+    await expect(
+      card(page, 'Main bedroom').getByRole('button', { name: 'Main bedroom: show on the plan' }),
+    ).toBeFocused();
 
     // 23. Lines in the details: a shoe cabinet, a base cabinet, a bookshelf; a sofa has none.
     await place(page, /^Shoe cabinet/, 9.85, 5.3);
@@ -203,6 +213,7 @@ test.describe('desktop', () => {
     await seeStorage(page);
     const bedroom = page.locator('.storage-people[data-room="Bedroom"]');
     // 20. A child in Bedroom: its target rises by 0.60 m, the guess goes; kept after a reload.
+    await page.locator('.storage-oneline').getByRole('button', { name: 'Change' }).click();
     await expect(bedroom).toContainText('Guessed from the beds');
     await bedroom.getByRole('button', { name: 'More children in Bedroom' }).click();
     await expect(card(page, 'Bedroom')).toContainText('about 1.60 m is usual');
@@ -210,12 +221,16 @@ test.describe('desktop', () => {
     await expect(page.getByTestId('storage-household')).toHaveText(
       '4 people: 2 in Bedroom, 2 in Main bedroom',
     );
+    // One line read for the change.
+    await expect(page.locator('.storage-household [aria-live]')).toHaveText(
+      'Bedroom: 1 adult and 1 child',
+    );
     await page.reload();
     await waitSaved(page);
     await page.keyboard.press('1');
     await seeStorage(page);
     await expect(card(page, 'Bedroom')).toContainText('1 adult and 1 child');
-    // Folded after the first visit: Change opens it.
+    // Folded: Change opens it.
     await page.locator('.storage-oneline').getByRole('button', { name: 'Change' }).click();
     await page.getByRole('button', { name: 'Reset to the beds' }).click();
     await expect(card(page, 'Bedroom')).toContainText('about 1.00 m is usual');
@@ -246,9 +261,14 @@ test.describe('desktop', () => {
 
     // 25. Copy: the household, four meters, room lines and the disclaimer, as text.
     await panel(page).getByRole('button', { name: 'Copy summary' }).click();
+    await expect(panel(page).getByRole('button', { name: 'Copied' })).toBeVisible();
+    await expect(panel(page).getByRole('button', { name: 'Copy summary' })).toBeVisible({
+      timeout: 4000,
+    });
     const text = await page.evaluate(() => navigator.clipboard.readText());
     expect(text).toContain('Storage for 3 people (Typical)');
     expect(text).toContain('Who lives here: 1 in Bedroom, 2 in Main bedroom');
+    expect(text).toContain('Shoes: No shoe cabinet drawn · about 28 pairs is usual');
     expect(text).toContain('Clothes: 1.20 of 3.00 m (4 of 10 ft). Needs 1.80 m more');
     expect(text).toContain('Shoes: No shoe cabinet drawn');
     expect(text).toContain('Main bedroom, 2 adults: 1.20 m of wardrobe; about 2.00 m is usual.');
@@ -289,6 +309,73 @@ test.describe('desktop', () => {
     await page.getByRole('button', { name: 'Close storage' }).click();
     await expect(page.getByTestId('storage-chips')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'See storage' })).toBeFocused();
+  });
+
+  test('chips keep clear of the clearance labels, which draw over them (the default Split view)', async ({
+    page,
+  }) => {
+    await openFurnished(page);
+    await seeStorage(page);
+    await expect(chip(page).first()).toBeVisible();
+    const clearance = page.locator('.clearance-chip');
+    await expect(clearance.first()).toBeVisible();
+    const boxes = async (l: Locator) =>
+      (await l.evaluateAll((els) =>
+        els.map((e) => {
+          const r = e.getBoundingClientRect();
+          return { x0: r.left, y0: r.top, x1: r.right, y1: r.bottom };
+        }),
+      )) as { x0: number; y0: number; x1: number; y1: number }[];
+    const chips = await boxes(chip(page));
+    for (const c of await boxes(clearance)) {
+      for (const s of chips) {
+        const over = c.x0 < s.x1 - 1 && s.x0 < c.x1 - 1 && c.y0 < s.y1 - 1 && s.y0 < c.y1 - 1;
+        expect(over, JSON.stringify({ c, s })).toBe(false);
+      }
+    }
+    // The clearance marks come after the chips: drawn over them.
+    const after = await page.evaluate(() => {
+      const s = document.querySelector('[data-testid="storage-chips"]');
+      const c = document.querySelector('.clearance-chip');
+      return !!s && !!c && !!(s.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+    expect(after).toBe(true);
+  });
+
+  test('Add a shoe cabinet: what to do, placed with a click, the panel back with it counted', async ({
+    page,
+  }) => {
+    await openFurnished(page);
+    await page.keyboard.press('1');
+    await seeStorage(page);
+    await meter(page, 'shoes').getByRole('button', { name: 'Add a shoe cabinet' }).click();
+    await expect(page.locator('.storage-add-bar')).toContainText(
+      'Click where the shoe cabinet goes',
+    );
+    await expect(page.locator('.tool-hint')).toHaveText(
+      'Shoe cabinet chosen. Click the plan where it goes; Esc to cancel.',
+    );
+    await expect(page.getByRole('button', { name: /^Shoe cabinet/ }).first()).toBeInViewport();
+    await expect(panel(page)).toBeVisible();
+    const p = await at(page, 9.85, 5.3);
+    await page.mouse.click(p.x, p.y);
+    // Placed: the panel is back, the bar gone, the shoes counted.
+    await expect(page.locator('.storage-add-bar')).toHaveCount(0);
+    await expect(panel(page)).toBeVisible();
+    await expect(meter(page, 'shoes')).toContainText('15 of 28 pairs');
+    await expect(page.getByRole('button', { name: /^Select/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    // Cancel takes it back.
+    await page.keyboard.press('Control+z');
+    await meter(page, 'shoes').getByRole('button', { name: 'Add a shoe cabinet' }).click();
+    await page.locator('.storage-add-bar').getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.locator('.storage-add-bar')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^Select/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
   });
 
   test('23: an uploaded model is not counted', async ({ page }) => {
@@ -446,7 +533,7 @@ test.describe('phone', () => {
     ).toBeGreaterThanOrEqual(44);
     // One line for the household, Change to open it.
     await expect(page.getByTestId('storage-household')).toHaveText(
-      '3 people: 1 in Bedroom, 2 in Main bedroom',
+      '3 people (guessed from the beds): 1 in Bedroom, 2 in Main bedroom',
     );
     await page.locator('.storage-oneline').getByRole('button', { name: 'Change' }).tap();
     const bedroom = page.locator('.storage-people[data-room="Bedroom"]');
@@ -486,6 +573,18 @@ test.describe('phone', () => {
     await expect(c).toBeVisible();
     const th = await c.locator('text').evaluate((t) => t.getBoundingClientRect().height);
     expect(th).toBeGreaterThanOrEqual(10);
+
+    // Add a shoe cabinet by finger: the sheet stays, a bar over the plan says what to do.
+    const add = meter(page, 'shoes').getByRole('button', { name: 'Add a shoe cabinet' });
+    await add.scrollIntoViewIfNeeded();
+    await add.tap();
+    await expect(page.locator('.storage-add-bar')).toContainText('Tap where the shoe cabinet goes');
+    await expect(panel(page)).toBeVisible();
+    const spot = await at(page, 9.85, 5.3);
+    await page.touchscreen.tap(spot.x, spot.y);
+    await expect(page.locator('.storage-add-bar')).toHaveCount(0);
+    await expect(panel(page)).toBeVisible();
+    await expect(meter(page, 'shoes')).toContainText('15 of 28 pairs');
 
     // 18. A built-in wardrobe in Bedroom, by finger: the chip turns neutral.
     await place(page, /^Built-in wardrobe/, 4.3, 2.8, true);
