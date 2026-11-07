@@ -22,6 +22,7 @@ import { DeliveryLayer } from '../delivery/delivery';
 import { type Tool, useEditor } from '../editor';
 import { ElectricalLayer } from '../electrical/electrical';
 import { SuggestLayer, ghostKeyOf, toggleGhost } from '../electrical/suggest';
+import { WallViewMarkers } from '../elevation/PlanMarkers';
 import { currentLevel, useLevel, useProject, useStore } from '../store';
 import { Compass, describeNorth } from '../ui/Compass';
 import { uploadPlanImage, usePlanImage, useUploadPicker } from '../ui/PlanImage';
@@ -312,7 +313,8 @@ export function PlanCanvas() {
     // asks for the fit, before the observer has said so: a fit to the old size would stick
     // once its report came over a second later. Measured, this runs again with the new size.
     if (measureSize()) return;
-    let b = levelBounds(level);
+    // The wall view's room, while it is open beside the plan; else the whole plan.
+    let b = useEditor.getState().fitBox ?? levelBounds(level);
     if (!b && underlay && image.status === 'ready') {
       // Frame the drawing, not the whole page around it.
       const box = ink ?? { x0: 0, y0: 0, x1: image.width, y1: image.height };
@@ -953,6 +955,7 @@ export function PlanCanvas() {
           </g>
           <RoomLabels level={level} geom={geom} view={v} size={size} />
           <WallTags level={level} geom={geom} view={v} size={size} />
+          <WallViewMarkers level={level} view={v} size={size} />
           {selection?.kind === 'wall' && (
             <WallDimension level={level} geom={geom} view={v} size={size} wallId={selection.id} />
           )}

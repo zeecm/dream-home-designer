@@ -1,3 +1,4 @@
+import { resolveFace } from '@dhd/core';
 import { useEffect, useState } from 'react';
 import { Viewport } from './Viewport';
 import { keepWithAccount, pullFromAccount, useAccount } from './account';
@@ -10,17 +11,20 @@ import { useDesigner } from './ai/designer/state';
 import { mayComment, useCanComment, useComments } from './comments/store';
 import { CommentsLive, CommentsPanel, useCommentsLink } from './comments/ui';
 import { type Tool, type ViewMode, useEditor } from './editor';
+import { ElevationView } from './elevation/ElevationView';
+import { stepRef } from './elevation/nav';
+import { closeView, openFace, openSelected } from './elevation/open';
 import { absorbLinkKey } from './keys';
 import { useModelSync } from './models';
 import { PlanCanvas } from './plan/PlanCanvas';
-import { initialProjectId, useProject, useStore } from './store';
+import { currentLevel, initialProjectId, useProject, useStore } from './store';
 import { Guide } from './ui/Guide';
 import { Inspector } from './ui/Inspector';
 import { Palette, TOOLS } from './ui/Palette';
 import { RenovationBar } from './ui/Renovation';
 import { TopBar } from './ui/TopBar';
 import { icons } from './ui/icons';
-import { useShownView } from './ui/oneView';
+import { useOneView, useShownView } from './ui/oneView';
 
 const isTyping = (t: EventTarget | null) =>
   // While a dialog is open, keys are the dialog's, not the plan's shortcuts.
@@ -67,10 +71,20 @@ function useShortcuts() {
         ed.setViewMode(VIEW_KEYS[k] as ViewMode);
       } else if (k === 'f') {
         ed.requestFit();
+      } else if (k === 'l') {
+        // "Look at it": the selected wall, room or thing seen straight on.
+        if (!openSelected()) return;
+      } else if ((e.key === '[' || e.key === ']') && ed.elevation) {
+        const level = currentLevel();
+        const ref = level && stepRef(level, ed.elevation.ref, e.key === ']' ? 1 : -1);
+        const face = ref && level && resolveFace(level, ref);
+        if (!face || !level) return;
+        openFace(level, face);
       } else if (e.key === 'Escape') {
         // A tool with work in progress handles Escape itself; otherwise clear the
-        // selection, then return to Select.
+        // selection, then close the wall view, then return to Select.
         if (ed.selection) ed.select(null);
+        else if (ed.elevation) closeView();
         else if (ed.tool !== 'select') ed.setTool('select');
         else return;
       } else {
@@ -281,6 +295,8 @@ export function App() {
   const commentsOpen = useComments((s) => s.panelOpen);
   const designerOpen = useDesigner((s) => s.panel);
   const previewing = useEditor((s) => !!s.preview);
+  const wallView = useEditor((s) => !!s.elevation);
+  const oneView = useOneView();
 
   useEffect(() => {
     // StrictMode runs effects twice in dev; only start once.
@@ -341,11 +357,11 @@ export function App() {
   }, [opened, projectId, hasRooms]);
 
   return (
-    <div className={walking ? 'app app-walking' : 'app'}>
+    <div className={`app${walking ? ' app-walking' : ''}${wallView ? ' app-wall-view' : ''}`}>
       <TopBar />
       <div className={designerOpen && !commentsOpen ? 'workspace workspace-designer' : 'workspace'}>
         <Palette />
-        <main className={`panel stage stage-${viewMode}`}>
+        <main className={`panel stage stage-${wallView ? 'wall' : viewMode}`}>
           <SampleBanner />
           <ViewOnlyBanner />
           {previewing ? null : <RenovationBar />}
@@ -356,8 +372,19 @@ export function App() {
           <Toast />
           <div className="stage-views">
             {/* Another version remounts the plan, so a wall half drawn in one can't land in the other. */}
-            {viewMode !== '3d' && <PlanCanvas key={variant} />}
-            {viewMode !== 'plan' && <Viewport key={projectId} />}
+            {/* The wall view takes the 3D view's place (no GL context kept for it); a phone
+                shows it alone. */}
+            {wallView ? (
+              <>
+                {!oneView && <PlanCanvas key={variant} />}
+                <ElevationView />
+              </>
+            ) : (
+              <>
+                {viewMode !== '3d' && <PlanCanvas key={variant} />}
+                {viewMode !== 'plan' && <Viewport key={projectId} />}
+              </>
+            )}
             <LoadingVeil />
           </div>
           {designerOpen && <DesignerCompare />}

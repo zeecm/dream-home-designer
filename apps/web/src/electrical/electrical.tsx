@@ -31,6 +31,7 @@ import {
 import { memo, useEffect, useId, useMemo } from 'react';
 import { create } from 'zustand';
 import { type Selection, useEditor } from '../editor';
+import { ThingViewEntry } from '../elevation/Entry';
 import { useProject, useStore } from '../store';
 import { LengthField, Segmented, SelectField } from '../ui/fields';
 import { icons } from '../ui/icons';
@@ -395,6 +396,7 @@ export function PointInspector({ level, id }: { level: Level; id: string }) {
           ))}
         </ul>
       )}
+      <ThingViewEntry level={level} selection={{ kind: 'point', id }} />
       <SelectField<ElecKind>
         label="Kind"
         value={p.kind}

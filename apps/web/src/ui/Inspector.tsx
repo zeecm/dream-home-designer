@@ -73,6 +73,7 @@ import { DIAGONAL_FIELD, GettingItIn } from '../delivery/delivery';
 import { useEditor } from '../editor';
 import { ElectricalSummary, PointInspector } from '../electrical/electrical';
 import { SuggestPanel, useSuggest } from '../electrical/suggest';
+import { RoomViewEntry, ThingViewEntry, ViewerWallEntry, WallViewEntry } from '../elevation/Entry';
 import { roomsBeside } from '../plan/keyboard';
 import { OPENING_PRESETS, ROOM_NAMES } from '../presets';
 import { currentLevel, useLevel, useProject, useStore } from '../store';
@@ -281,6 +282,8 @@ export function Inspector() {
       {!selection && !suggestShown && !ageingShown && <ToolPanel />}
       {/* Opened from the older person list: the way back to it, above the details. */}
       {ageingShown && selection && <AgeingBack selection={selection} />}
+      {/* A view link can look at a wall straight on: its way in sits outside the locked fields. */}
+      {viewer && selection && <ViewerWallEntry level={level} selection={selection} />}
       {/* A view-only link shows the details but can't change them. */}
       {ownDisabling ? (
         <div className="inspector-body">{body}</div>
@@ -721,6 +724,7 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
   return (
     <>
       <Header title={boundary ? 'Room boundary' : 'Wall'} onClose={clear} />
+      <WallViewEntry level={level} wallId={id} />
       <Segmented
         label="Kind"
         value={boundary ? 'boundary' : 'wall'}
@@ -1015,6 +1019,7 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
       <Header title={kind?.name ?? 'Furniture'} onClose={clear} />
       {/* First, so a phone's sheet shows it without scrolling. */}
       <ItemClearances level={level} id={id} />
+      <ThingViewEntry level={level} selection={{ kind: 'item', id }} />
       <ItemAgeing level={level} id={id} kind="item" />
       <CarpentryLine item={it} />
       <GettingItIn level={level} id={id} />
@@ -1185,6 +1190,7 @@ function OpeningInspector({ level, id }: { level: Level; id: string }) {
       <Header title={title} onClose={clear} />
       {/* First, so a phone's sheet shows it without scrolling. */}
       <DoorClearances level={level} id={id} />
+      <ThingViewEntry level={level} selection={{ kind: 'opening', id }} />
       <ItemAgeing level={level} id={id} kind="opening" />
       <Segmented
         label="Kind"
@@ -1421,6 +1427,7 @@ function RoomInspector({ level, id }: { level: Level; id: string }) {
         <span>Floor area</span>
         <span className="num total-figure">{formatArea(roomArea(level, room))}</span>
       </p>
+      <RoomViewEntry level={level} roomId={id} />
       <SelectField
         label="Floor"
         value={room.floorMaterial}
