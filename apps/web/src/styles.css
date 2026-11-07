@@ -5797,6 +5797,11 @@ textarea {
   display: grid;
   gap: 4px;
 }
+/* Three choices in the 264 px column: "Walking aid" needs the smaller size. */
+.ageing-check-for .segmented button,
+.ageing-row .segmented button {
+  font-size: var(--fs-small);
+}
 .ageing-summary {
   display: grid;
   gap: 6px;
@@ -5956,6 +5961,7 @@ textarea {
 }
 .ease-table th.num,
 .ease-table td.num {
+  width: 1%;
   text-align: right;
   padding-left: 12px;
   white-space: nowrap;

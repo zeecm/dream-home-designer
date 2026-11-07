@@ -234,6 +234,13 @@ const NOTES: Record<AgeingReport['notes'][number], string> = {
   'name-bathroom': 'Name a room Bath or WC to check the bathroom.',
 };
 
+/** Where each note goes: its group, or above them all. */
+const NOTE_GROUP: Record<AgeingReport['notes'][number], AgeingGroup | null> = {
+  'no-main-door': 'in',
+  'add-toilet': 'bathroom',
+  'name-bathroom': null,
+};
+
 /** "5 to look at for a wheelchair: 2 needed, 3 recommended", or that there is nothing. */
 export function summaryLine(report: AgeingReport): string {
   const n = report.issues.length;
@@ -399,7 +406,11 @@ export function AgeingPanel() {
   const shown = useAgeing((s) => s.shown);
   const heading = useRef<HTMLHeadingElement>(null);
   const [change, setChange] = useState(false);
-  useEffect(() => heading.current?.focus({ preventScroll: true }), []);
+  // Opened: from its top (the plan details may have been scrolled), focus on its heading.
+  useEffect(() => {
+    heading.current?.closest('.inspector')?.scrollTo?.({ top: 0 });
+    heading.current?.focus({ preventScroll: true });
+  }, []);
   // Back from a line: focus returns to it.
   useEffect(() => {
     if (!shown) return;
@@ -457,10 +468,16 @@ export function AgeingPanel() {
     if (!report) return null;
     const lines = report.issues.filter((i) => i.group === g);
     const also = alsoChecked(report, g);
-    if (!lines.length && !also) return null;
+    const notes = report.notes.filter((n) => NOTE_GROUP[n] === g);
+    if (!lines.length && !also && !notes.length) return null;
     return (
       <section key={g} className="ageing-group" aria-label={title}>
         <h3 className="section-title">{title}</h3>
+        {notes.map((n) => (
+          <p key={n} className="ageing-note">
+            {NOTES[n]}
+          </p>
+        ))}
         {lines.length > 0 && <ul className="ageing-lines">{lines.map(line)}</ul>}
         {also && <p className="ageing-also">{also}</p>}
       </section>
@@ -550,11 +567,13 @@ export function AgeingPanel() {
           <p className="ageing-empty">Checking…</p>
         ) : (
           <>
-            {report.notes.map((n) => (
-              <p key={n} className="ageing-note">
-                {NOTES[n]}
-              </p>
-            ))}
+            {report.notes
+              .filter((n) => !NOTE_GROUP[n])
+              .map((n) => (
+                <p key={n} className="ageing-note">
+                  {NOTES[n]}
+                </p>
+              ))}
             {group('in', GROUP_TITLE.in)}
             {group('around', GROUP_TITLE.around)}
             {!report.bedroom && bedrooms.length > 0 && (
@@ -631,7 +650,6 @@ function EasePanel({ level, report }: { level: Level; report: AgeingReport }) {
     bathrooms: report.bathrooms.length,
     doorFails: !!bathDoor,
   });
-  const label = FLAT_TYPES.find((f) => f.value === type)?.label ?? '';
   const because = (w: string): string | null => {
     if (w === 'second-bathroom') return `Because there are ${report.bathrooms.length} bathrooms`;
     if (w === 'door' && bathDoor) {
@@ -669,7 +687,7 @@ function EasePanel({ level, report }: { level: Level; report: AgeingReport }) {
               <tr>
                 <th scope="col">Item</th>
                 <th scope="col" className="num">
-                  You pay ({label})
+                  You pay
                 </th>
               </tr>
             </thead>
