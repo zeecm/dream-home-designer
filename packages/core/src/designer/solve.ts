@@ -239,9 +239,7 @@ export function solveSpace(input: SolveInput): SolveOutcome {
    */
   const apartRows = new Map(intents.map((t) => [t.want.ref, apartOf(t)]));
   /** The roles some dining group keeps apart from (the lounge's). */
-  const lounge = new Set<Role>(
-    [...apartRows.values()].flatMap((a) => (a ? a.from : [])),
-  );
+  const lounge = new Set<Role>([...apartRows.values()].flatMap((a) => (a ? a.from : [])));
   /** A placed dining table's group, worked out once per pose. */
   const groupMemo = new WeakMap<Item, Vec2[]>();
   const groupAt = (t: Intent, item: Item) => {

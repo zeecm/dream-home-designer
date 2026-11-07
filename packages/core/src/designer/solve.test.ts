@@ -3,6 +3,7 @@ import { polygonGap } from '../convex';
 import { withPieces } from '../fixtures/furnishedSample';
 import { furnitureKind, itemFootprint } from '../furniture';
 import { levelBounds, pointInPolygon } from '../geometry';
+import type { Level } from '../schema';
 import { aliasesFor } from './aliases';
 import ownerBedroom from './benchmark/answers/owner-bedroom.json';
 import ownerDiningFix from './benchmark/answers/owner-dining-fix.json';
@@ -15,7 +16,6 @@ import { SAMPLE_KEYS, answer, parsed, sampleDesign, sampleLevel } from './fixtur
 import { roleOf } from './principles';
 import { designResult } from './result';
 import { type SpaceDesign, defaultBrief, parseSpaceDesign } from './schema';
-import type { Level } from '../schema';
 
 /**
  * The solver (answers of version 2): pieces placed from intent, relationships by
@@ -266,7 +266,9 @@ describe('the solver', () => {
       expect(pointInPolygon({ x: table!.position.x, y: table!.position.z }, PASSAGE)).toBe(false);
       const advice = r.checks.find((c) => c.key.startsWith('P2|apart'));
       expect(advice?.hard).toBe(false);
-      expect(advice?.text).toMatch(/^Leave 0\.90 m between the dining table, 4 seats and the .+: 0\.\d\d m now\.$/);
+      expect(advice?.text).toMatch(
+        /^Leave 0\.90 m between the dining table, 4 seats and the .+: 0\.\d\d m now\.$/,
+      );
       expect(r.checks.filter((c) => c.hard && !c.already)).toEqual([]);
     });
   });

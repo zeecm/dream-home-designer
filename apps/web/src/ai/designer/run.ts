@@ -674,12 +674,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
           let fixes = 0;
           let now = first;
           const rounds = fixRoundsFor(ctx.brief.quality);
-          while (
-            now.fixable.length &&
-            fixes < rounds &&
-            fixesLeft > 0 &&
-            (await mayStart())
-          ) {
+          while (now.fixable.length && fixes < rounds && fixesLeft > 0 && (await mayStart())) {
             // Taken from the run's few before the request goes (rooms run side by side).
             fixesLeft--;
             fixes++;

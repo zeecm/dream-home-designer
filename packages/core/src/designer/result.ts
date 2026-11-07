@@ -1062,7 +1062,8 @@ function keepWalkwaysClear(lvl: Level, runs: Run[], repaired: Note[]): WalkwayRe
     }
     for (const run of again) {
       const was = run.outcome;
-      const out = run.solveWith?.(kept.get(run) ?? [], keptFor.get(run));      if (!out || !was || !run.apply || !run.unapply) continue;
+      const out = run.solveWith?.(kept.get(run) ?? [], keptFor.get(run));
+      if (!out || !was || !run.apply || !run.unapply) continue;
       // Taken whole, and only if no worse: nothing more it needs left out, fewer failures.
       const before = changed ? hardCount(lvl) : hardCount(lvl, report);
       run.unapply();
