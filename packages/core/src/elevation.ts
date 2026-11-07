@@ -1,5 +1,6 @@
 import { type Tier, tieredChains } from './chains';
 import { type Carpentry, carpentryOf } from './cost';
+import { roundChain } from './dimensions';
 import {
   ELEC_KINDS,
   type PointWarning,
@@ -606,15 +607,14 @@ export function wallElevation(
       return b.v0 <= 0.15 && b.v1 >= 0 && overlap(b.u0, b.u1, 0, f.length) > 0.05;
     });
   };
-  const items: ElevItem[] =
-    opts.furniture === 'none'
-      ? []
-      : roomItems(level, face.roomId)
-          .flatMap((it) => {
-            const e = projectItem(face, it);
-            return e && inFront(e, L) && (e.facing || !backedElsewhere(it)) ? [e] : [];
-          })
-          .sort((a, b) => a.near - b.near || a.id.localeCompare(b.id));
+  const allItems: ElevItem[] = roomItems(level, face.roomId)
+    .flatMap((it) => {
+      const e = projectItem(face, it);
+      return e && inFront(e, L) && (e.facing || !backedElsewhere(it)) ? [e] : [];
+    })
+    .sort((a, b) => a.near - b.near || a.id.localeCompare(b.id));
+  // Furniture hidden: not drawn or dimensioned, but its notes still count.
+  const items = opts.furniture === 'none' ? [] : allItems;
 
   // Points on this face (this side of its walls), numbered left to right.
   const points: ElevPoint[] = [];
@@ -717,10 +717,37 @@ export function wallElevation(
     else if (it.hung)
       addHeight({ u: it.outline.u1, side: 'right', marks: [it.outline.z0], what: 'hung' });
   }
+  // A column whose line would run through a piece drawn in front (a window's past a cabinet
+  // below it, or into a wardrobe beside it) moves to the right of the drawing, all such
+  // columns together in one.
+  const edgeU = Math.max(L, ...ends.map((e) => e.u1));
+  const blocked = (h: ElevHeight) => {
+    if (h.what === 'ceiling') return false;
+    const x = h.side === 'left' ? h.u - 0.03 : h.u + 0.03;
+    const top = Math.max(...h.marks);
+    return items.some(
+      (it) => it.outline.u0 < x - 1e-6 && it.outline.u1 > x + 1e-6 && it.outline.z0 < top,
+    );
+  };
+  const moved = heights.filter(blocked);
+  if (moved.length) {
+    const marks = [...new Set(moved.flatMap((h) => h.marks.map((z) => Math.round(z * 1000))))]
+      .sort((a, b) => a - b)
+      .map((z) => z / 1000)
+      .filter((z, i, all) => i === 0 || z - (all[i - 1] as number) >= 0.01);
+    const kept = heights.filter((h) => !blocked(h));
+    heights.length = 0;
+    heights.push(...kept, {
+      u: edgeU,
+      side: 'right',
+      marks,
+      what: (moved[0] as ElevHeight).what,
+    });
+  }
 
   // Notes.
   const notes: Omit<ElevNote, 'n'>[] = [];
-  const against = items.filter((it) => it.against);
+  const against = allItems.filter((it) => it.against);
   for (const p of points) {
     const plate: Rect = {
       u0: p.u - p.w / 2,
@@ -801,7 +828,7 @@ export function wallElevation(
       });
     }
   }
-  for (const it of items) {
+  for (const it of allItems) {
     const over = it.outline.z1 - ceiling;
     if (over > 0.01 + 1e-9) {
       notes.push({
@@ -847,7 +874,7 @@ export interface ElevationLabels {
   fontPx: number;
   /** Per chain (as `elev.chains`): shown at all, and which pieces' figures fit. */
   chains: { tier: Tier; show: boolean; figures: boolean[] }[];
-  /** Point tags: "1 · h1150", just "1", or none, so they never overlap. */
+  /** Point tags: "1 · h1150" when none overlap, else just "1" (none: not drawn). */
   tags: 'full' | 'short' | 'none';
   /** Notes riding on a point's tag ("3 · h300 !1"), by point id. */
   tagNotes: Record<string, number[]>;
@@ -874,10 +901,7 @@ export const BADGE_PX = { w: 26, h: 18 };
 
 /** A chain's pieces in mm, rounded to 10 mm so they add up. */
 export function chainFigures(stops: readonly number[]): number[] {
-  const first = stops[0];
-  if (first === undefined) return [];
-  const units = stops.map((s) => Math.round((s - first) * 100));
-  return units.slice(1).map((u, i) => (u - (units[i] as number)) * 10);
+  return roundChain(stops, 0.01).map((x) => Math.round(x * 1000));
 }
 
 /**
@@ -918,8 +942,10 @@ export function elevationLabels(
     });
   const clear = (boxes: Rect[]) =>
     boxes.every((a, i) => boxes.every((b, j) => j <= i || !rectsMeet(a, b)));
-  const tags: ElevationLabels['tags'] =
-    !opts.compact && clear(tagBoxes(true)) ? 'full' : clear(tagBoxes(false)) ? 'short' : 'none';
+  // At least the number: a list row has to be matched to its plate even on a busy wall.
+  const tags = (
+    !opts.compact && clear(tagBoxes(true)) ? 'full' : 'short'
+  ) as ElevationLabels['tags'];
   const placed: Rect[] = tags === 'none' ? [] : tagBoxes(tags === 'full');
   const tagNotes = tags === 'none' ? {} : onPoint;
   // Badges: outside a corner of the outline, the first that is clear.
@@ -969,6 +995,7 @@ export function elevationLabels(
       const rank = (x: ElevHeight) => (x.what === 'ceiling' ? 0 : 1);
       return rank(a.h) - rank(b.h) || a.i - b.i;
     });
+  const figures: number[] = [];
   for (const { h, i } of order) {
     let last = Number.NEGATIVE_INFINITY;
     h.marks.forEach((z, j) => {
@@ -977,10 +1004,14 @@ export function elevationLabels(
       const x0 = h.what === 'ceiling' || h.side === 'left' ? h.u - gap - w : h.u + gap;
       const half = px((fontPx + 2) / 2);
       const box = { u0: x0, u1: x0 + w, z0: z - half, z1: z + half };
-      const ok = (z - last) * pxPerM >= fontPx + 2 && !placed.some((b) => rectsMeet(b, box));
+      // The same height already given (a sill and a counter both at 900): once.
+      const said = figures.some((f) => Math.abs(f - z) < 0.005);
+      const ok =
+        !said && (z - last) * pxPerM >= fontPx + 2 && !placed.some((b) => rectsMeet(b, box));
       if (!ok) return;
       last = z;
       placed.push(box);
+      figures.push(z);
       (heights[i] as boolean[])[j] = true;
     });
   }

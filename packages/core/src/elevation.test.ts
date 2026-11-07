@@ -260,6 +260,42 @@ describe('wallElevation', () => {
     expect(elev(b, 'C').items.map((i) => i.id)).toEqual(['it_b']);
   });
 
+  it('furniture hidden: not drawn, but its notes still count', () => {
+    const s0 = roomR();
+    const s = withItems(
+      apply(s0, socket(right(s0), 1 / 3, 0.3).command),
+      piece('it_w', 'built-in-wardrobe', 3.65, 1.5, Math.PI / 2),
+    );
+    const d = elev(s, 'D', { furniture: 'none' });
+    expect(d.items).toEqual([]);
+    expect(d.notes.map((n) => n.kind)).toEqual(['hidden']);
+    expect(d.chains.find((c) => c.tier === 0)).toBeUndefined();
+  });
+
+  it('a height column that would cross a piece moves to the right of the drawing', () => {
+    const s0 = roomR();
+    const s1 = apply(
+      s0,
+      opening(level(s0), [0, 0], [4, 0], {
+        kind: 'window',
+        t: 0.3,
+        width: 1.0,
+        sill: 0.9,
+        height: 1.2,
+      }),
+    );
+    // A counter under and past the window's right jamb (u 1.6).
+    const s = withItems(s1, piece('it_b', 'built-in-kitchen-base', 1.5, 0.35));
+    const c = elev(s, 'C');
+    const win = c.heights.find((h) => h.marks.some((z) => Math.abs(z - 2.1) < 1e-6));
+    // Past the side wall cut through at the end (100 mm).
+    expect(win?.u).toBeCloseTo(c.width + 0.1, 6);
+    // The sill and the counter, both 900, are figured once.
+    const l = elevationLabels(c, 400);
+    const shown = c.heights.flatMap((h, i) => h.marks.filter((_, j) => l.heights[i]?.[j]));
+    expect(shown.filter((z) => Math.abs(z - 0.9) < 0.005)).toHaveLength(1);
+  });
+
   it('a stub wall standing out from a face is a section band across it', () => {
     const s = roomR([[2, 0, 2, 1]]);
     const l = level(s);
@@ -458,7 +494,8 @@ describe('elevation labels', () => {
     const small = elevationLabels(d, 30);
     expect(small.chains.find((c) => c.tier === 0)?.show).toBe(false);
     expect(small.chains.find((c) => c.tier === 2)?.show).toBe(true);
-    expect(small.tags).toBe('none');
+    // Crowded, a tag is at least its number.
+    expect(small.tags).toBe('short');
     const big = elevationLabels(d, 900);
     expect(big.chains.every((c) => c.show && c.figures.every(Boolean))).toBe(true);
     expect(big.tags).toBe('full');

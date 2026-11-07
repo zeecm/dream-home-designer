@@ -1005,18 +1005,39 @@ export function planDimensions(
 }
 
 /**
- * A chain's pieces rounded to `step` (0.01 for 10 mm) so they add up to its rounded overall:
- * each stop is rounded from the first, and the pieces are the differences.
+ * A chain's pieces rounded to `step` (0.01 for 10 mm) so they add up to its rounded overall.
+ * Each piece is rounded down, then the units still missing go to the pieces that lost the
+ * most (largest remainder): a piece already a whole number of steps (a 900 mm door) stays
+ * exact, and the pieces between such pieces absorb the rounding. (Rounding the stops instead
+ * made a 900 mm door between stops at 0.465 and 1.365 read 910.)
  */
 export function roundChain(stops: readonly number[], step: number): number[] {
   const first = stops[0];
-  if (first === undefined) return [];
-  const units = stops.map((s) => Math.round((s - first) / step));
-  const out: number[] = [];
-  for (let i = 1; i < units.length; i++) {
-    out.push(Number((((units[i] as number) - (units[i - 1] as number)) * step).toFixed(6)));
+  const last = stops[stops.length - 1];
+  if (first === undefined || last === undefined) return [];
+  const units = (x: number) => Math.round((x / step) * 1e6) / 1e6;
+  const total = Math.round(units(last - first));
+  const raw = stops.slice(1).map((s, i) => units(s - (stops[i] as number)));
+  const base = raw.map((r) => Math.floor(r + 1e-6));
+  let left = total - base.reduce((s, x) => s + x, 0);
+  // Largest remainder first (ties: the longer piece).
+  const order = raw
+    .map((r, i) => ({ i, rem: r - (base[i] as number), r }))
+    .sort((a, b) => b.rem - a.rem || b.r - a.r);
+  for (const { i } of order) {
+    if (left <= 0) break;
+    base[i] = (base[i] as number) + 1;
+    left--;
   }
-  return out;
+  // Rounded up too far (can't happen with floors, but a tiny negative piece could): take back
+  // from the smallest remainders.
+  for (const { i } of [...order].reverse()) {
+    if (left >= 0) break;
+    if ((base[i] as number) <= 0) continue;
+    base[i] = (base[i] as number) - 1;
+    left++;
+  }
+  return base.map((u) => Number((u * step).toFixed(6)));
 }
 
 export type Paper = 'A4' | 'A3';

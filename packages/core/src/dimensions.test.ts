@@ -742,6 +742,34 @@ describe('roundChain', () => {
   it('a single stop has no pieces', () => {
     expect(roundChain([1], 0.01)).toEqual([]);
   });
+  it('a 900 mm door between stops that round apart stays 900; pieces add up', () => {
+    // The living room's wall F: the door from 0.465 to 1.365 (as floating point has it).
+    const p = roundChain([0, 0.465, 0.465 + 0.9, 3.495], 0.01);
+    expect(p[1]).toBe(0.9);
+    const sum = Math.round(p.reduce((s, x) => s + x, 0) * 100);
+    expect(sum).toBe(Math.round((roundChain([0, 3.495], 0.01)[0] as number) * 100));
+  });
+  it('the pieces always add up to the overall, rounded alone', () => {
+    let seed = 7;
+    const rnd = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    for (let k = 0; k < 200; k++) {
+      const stops = [rnd() * 2];
+      for (let i = 0; i < 1 + Math.floor(rnd() * 6); i++)
+        stops.push((stops.at(-1) as number) + rnd() * 1.5);
+      const sum = roundChain(stops, 0.01).reduce((s, x) => s + x, 0);
+      const overall = roundChain([stops[0] as number, stops.at(-1) as number], 0.01)[0] as number;
+      expect(Math.round(sum * 100)).toBe(Math.round(overall * 100));
+      // Every piece within 10 mm of its true length.
+      roundChain(stops, 0.01).forEach((x, i) =>
+        expect(Math.abs(x - ((stops[i + 1] as number) - (stops[i] as number)))).toBeLessThan(
+          0.01 + 1e-9,
+        ),
+      );
+    }
+  });
 });
 
 describe('sheetScale', () => {
