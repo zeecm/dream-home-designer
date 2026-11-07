@@ -11,14 +11,22 @@ import { ElecPoint } from '../schema';
 import type { Item, Level, Project, Site, Vec2 } from '../schema';
 import { SHELTER_ROOM } from '../structural';
 import { type Suggestion, roomKind, suggestPoints } from '../suggest';
-import { walkwayReport } from '../walkway';
+import { type WalkwayReport, walkwayReport } from '../walkway';
 import { aspectOf } from './accept';
 import { type AliasMap, resolveAlias } from './aliases';
 import { fixedSize, priorityOf, resolveAsset } from './catalogue';
 import { type DesignCheck, designChecks } from './checks';
 import { bathroomsHeld, heldAspects, wallsHeld } from './handEdits';
 import { WET } from './locks';
-import { type Want, addToIndex, nameOf, placePiece, spaceIndex } from './place';
+import {
+  type SpaceIndex,
+  type Want,
+  addToIndex,
+  keepOutOf,
+  nameOf,
+  placePiece,
+  spaceIndex,
+} from './place';
 import type { Concept, DesignInput, DesignItem, RoomUse, SpaceDesign, SpaceStatus } from './schema';
 import {
   type Face,
@@ -317,6 +325,8 @@ function work(
   const inKitchen = (p: Vec2) => kitchens.some((k) => pointInPolygon(p, k));
 
   const resultSpaces: ResultSpace[] = [];
+  /** Each furnished space's index and pieces, to move a piece off a walkway after. */
+  const runs: { key: string; ix: SpaceIndex; wants: Want[] }[] = [];
   const placedNew = new Set<string>();
   const usedIds = new Set<string>();
   const placedBrought = new Set<string>();
@@ -371,6 +381,7 @@ function work(
       if (kind && inRooms(s.rooms, centreOf(it))) addToIndex(ix, it, kind);
     }
 
+    runs.push({ ix, wants, key: s.key });
     const placedKinds = new Set<string>();
     for (const want of wants) {
       const out = placePiece(ix, want);
@@ -540,6 +551,11 @@ function work(
     });
   }
 
+  // Walkways, once every space is furnished: a piece the version placed that narrows the way
+  // from the main door (or to a bed) is moved off it where it can be, else left for the
+  // checks to say.
+  const walked = keepWalkwaysClear(lvl, runs, repaired);
+
   // 4. Electrical points, worked out locally on the designed level.
   let points: Suggestion[] = [];
   if (brief.electrical) {
@@ -596,7 +612,8 @@ function work(
       ...('itemId' in i ? { itemId: i.itemId } : {}),
     });
   }
-  const walk = walkwayReport(level);
+  // The walkways as last checked (electrical points don't change them).
+  const walk = walked ?? walkwayReport(level);
   if (walk.status === 'no-main-door') {
     problems.push({ kind: 'walkway', text: 'Add the main door to check walkways and deliveries.' });
   }
@@ -676,7 +693,7 @@ function work(
   const designedRooms = new Set(
     resultSpaces.filter((s) => s.storedKey && s.status !== 'missing').flatMap((s) => s.rooms),
   );
-  const baseKeys = new Set(designChecks(start, { brief }).map((c) => c.key));
+  const baseKeys = baseChecks(start, brief);
   const unchanged = (id: string) => {
     const a = level.items[id];
     const b = start.items[id];
@@ -744,6 +761,70 @@ function work(
     points,
     budget,
   };
+}
+
+const baseMemo = new WeakMap<Level, Map<string, Set<string>>>();
+
+/** The checks' keys on the plan a version was made on (kept per plan and brief). */
+function baseChecks(start: Level, brief: DesignInput['brief']): Set<string> {
+  const k = stableJson(brief);
+  const per = baseMemo.get(start) ?? new Map<string, Set<string>>();
+  baseMemo.set(start, per);
+  const hit = per.get(k);
+  if (hit) return hit;
+  const keys = new Set(designChecks(start, { brief }).map((c) => c.key));
+  per.set(k, keys);
+  if (per.size > 4) per.delete(per.keys().next().value as string);
+  return keys;
+}
+
+/** How many times the walkways are checked again after moving pieces off them. */
+const WALK_ROUNDS = 2;
+
+/**
+ * Moves pieces the version placed off the walkways they narrow: each blamed piece is placed
+ * again (on any wall, or near where it was) keeping out of the way around the narrow point.
+ * One that can't be is left where it was. Mutates `lvl`.
+ */
+function keepWalkwaysClear(
+  lvl: Level,
+  runs: { key: string; ix: SpaceIndex; wants: Want[] }[],
+  repaired: Note[],
+): WalkwayReport | null {
+  const moved = new Set<string>();
+  for (let round = 0; round < WALK_ROUNDS; round++) {
+    const report = walkwayReport({ ...lvl, items: { ...lvl.items } });
+    const blamed = report.issues.filter((i) => !moved.has(i.itemId));
+    if (!blamed.length) return report;
+    let changed = false;
+    for (const issue of blamed) {
+      const run = runs.find((r) => r.wants.some((w) => w.id === issue.itemId));
+      const want = run?.wants.find((w) => w.id === issue.itemId);
+      const was = lvl.items[issue.itemId];
+      if (!run || !want || !was) continue;
+      moved.add(issue.itemId);
+      const ix = run.ix;
+      const placed = ix.placed;
+      ix.placed = placed.filter((p) => p.id !== issue.itemId);
+      ix.keepOut = keepOutOf(issue.path, issue.pinch, issue.need);
+      const out = placePiece(ix, want);
+      ix.keepOut = [];
+      if (!out.item) {
+        ix.placed = placed;
+        continue;
+      }
+      lvl.items[out.item.id] = out.item;
+      changed = true;
+      repaired.push({
+        text: `Moved the ${nameOf(want.kind)} out of the way through: it left ${issue.have.toFixed(2)} m where ${issue.need.toFixed(2)} m is needed.`,
+        ref: want.ref,
+        itemId: out.item.id,
+        space: run.key,
+      });
+    }
+    if (!changed) return report;
+  }
+  return null;
 }
 
 /**

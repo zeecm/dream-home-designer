@@ -218,7 +218,39 @@ export const FIT = {
   overlap: 0.02,
   /** Under a window: lower than its sill by this. */
   sill: 0.02,
+  /** How far in front of a window's face nothing taller than its sill may stand. */
+  window: 0.15,
 } as const;
+
+/** Roles that may stand at a window whatever their height (a kitchen counter, a lamp). */
+export const UNDER_WINDOW = new Set<Role>([
+  'kitchen',
+  'decor',
+  'light',
+  'rug',
+  'dining-chair',
+  'stool',
+]);
+
+/** The area in front of a window, both sides of its wall, that is kept clear above its sill. */
+export function windowZones(o: {
+  frame: {
+    a: { x: number; y: number };
+    d: { x: number; y: number };
+    n: { x: number; y: number };
+    half: number;
+  };
+  span: [number, number];
+}): { x: number; y: number }[][] {
+  const f = o.frame;
+  const at = (u: number, v: number) => ({
+    x: f.a.x + f.d.x * u + f.n.x * v,
+    y: f.a.y + f.d.y * u + f.n.y * v,
+  });
+  const reach = f.half + FIT.window;
+  const [u0, u1] = o.span;
+  return [-1, 1].map((k) => [at(u0, 0), at(u1, 0), at(u1, reach * k), at(u0, reach * k)]);
+}
 
 // ----------------------------------------------------------- P1: function per room
 

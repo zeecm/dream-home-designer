@@ -183,7 +183,7 @@ describe('P2: relationships (criteria 3, 4, 8)', () => {
     const coffeeAt = (gap: number) =>
       run(withPieces(base, [sofa, coffee(gap)])).filter((c) => c.key.startsWith('P2|before'));
     expect(coffeeAt(0.4)).toEqual([]);
-    expect(before(0.2)[0]?.text).toBe(
+    expect(coffeeAt(0.2)[0]?.text).toBe(
       'The coffee table is 0.20 m from the sofa; 0.35–0.50 m is in reach.',
     );
     const bedside = (x: number) =>

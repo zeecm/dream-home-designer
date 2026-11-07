@@ -18,6 +18,7 @@ import {
   type ProgrammeUse,
   type Relation,
   type Role,
+  UNDER_WINDOW,
   isDouble,
   peopleOf,
   placesOf,
@@ -25,6 +26,7 @@ import {
   roleOf,
   seatsOf,
   sleepingPlan,
+  windowZones,
 } from './principles';
 import type { DesignBrief, RoomUse } from './schema';
 import { roomsBeside, spacesOf } from './spaces';
@@ -62,8 +64,6 @@ export interface CheckOptions {
   walk?: WalkwayReport;
 }
 
-/** Roles that may stand at a window. */
-const UNDER_WINDOW = new Set<Role>(['kitchen', 'decor', 'light', 'rug', 'dining-chair', 'stool']);
 const CORRIDOR = /corridor|foyer|passage|hallway|\bhall\b|entrance/i;
 const deg = (r: number) => (r * 180) / Math.PI;
 const fwd = (it: Item): Vec2 => ({ x: -Math.sin(it.rotationY), y: Math.cos(it.rotationY) });
@@ -276,16 +276,7 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
       if (!blocks(p.it) || UNDER_WINDOW.has(p.role)) continue;
       const bottom = p.kind.elevation ?? 0;
       if (bottom + p.size.h <= o.opening.sill - FIT.sill) continue;
-      // Within 0.15 m of the window's face, either side of the wall's centre line.
-      const reach = o.frame.half + 0.15;
-      const [u0, u1] = o.span;
-      const zone = [-1, 1].map((k) => [
-        at(o.frame, u0, 0),
-        at(o.frame, u1, 0),
-        at(o.frame, u1, reach * k),
-        at(o.frame, u0, reach * k),
-      ]);
-      if (zone.some((z) => overlapDepth(p.fp, z) > 0.01)) {
+      if (windowZones(o).some((z) => overlapDepth(p.fp, z) > 0.01)) {
         out.push({
           key: `P4|window|${p.it.id}|${o.opening.id}`,
           principle: 'P4',
@@ -678,8 +669,4 @@ function bedNeeds(
     else missing.push(p);
   }
   return missing.map((p) => ({ who: p.key, text: `${p.name} has no bed in ${roomName}.` }));
-}
-
-function at(f: { a: Vec2; d: Vec2; n: Vec2 }, u: number, v: number): Vec2 {
-  return { x: f.a.x + f.d.x * u + f.n.x * v, y: f.a.y + f.d.y * u + f.n.y * v };
 }
