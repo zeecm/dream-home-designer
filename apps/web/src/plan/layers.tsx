@@ -532,7 +532,7 @@ export function roomLabelBoxes(
   level: Level,
   geom: PlanGeometry,
   zoom: number,
-): { at: Vec2; half: Vec2 }[] {
+): { id: string; at: Vec2; half: Vec2; area: string | null }[] {
   return labelsAt(level, geom, labelZoom(zoom));
 }
 

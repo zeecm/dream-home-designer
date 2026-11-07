@@ -6172,3 +6172,394 @@ textarea {
     grid-column: 1 / -1;
   }
 }
+
+/* ---------------------------------------------------------------- checks (plan details) */
+
+/* Clearance, Electrical, Storage, Older person: one row each, a label, a line, a button. */
+.checks {
+  display: grid;
+}
+.checks > .section-title {
+  margin: 0 0 2px;
+}
+.checks > .field {
+  padding: 10px 0;
+  border-top: 1px solid var(--rule);
+}
+.checks > .field:last-child {
+  padding-bottom: 0;
+}
+.check-item {
+  gap: 4px;
+  justify-items: start;
+}
+.check-label,
+.checks .ageing-entry > .section-title {
+  font-weight: 500;
+  color: var(--text);
+}
+.check-line {
+  justify-self: stretch;
+}
+
+/* ---------------------------------------------------------------- storage meter */
+
+.storage {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 100%;
+}
+.storage-head .panel-title:focus {
+  outline: none;
+}
+.storage-head .panel-title:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.storage-finding {
+  margin: 0;
+  font-weight: 500;
+}
+.storage-intro,
+.storage-note,
+.storage-muted {
+  margin: 0;
+  font-size: var(--fs-hint);
+  line-height: 18px;
+  color: var(--muted);
+}
+.storage-note.storage-gain {
+  color: var(--text);
+}
+.storage-who,
+.storage-own,
+.storage-household {
+  display: grid;
+  gap: 8px;
+}
+.storage-oneline {
+  display: flex;
+  margin: 0;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: var(--fs-hint);
+}
+.storage-oneline span {
+  min-width: 0;
+}
+.storage-people {
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rule);
+}
+.storage-people-room {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  margin: 0;
+  font-size: var(--fs-hint);
+  font-weight: 500;
+}
+.storage-tag {
+  font-size: var(--fs-small);
+  font-weight: 400;
+  color: var(--muted);
+}
+/* Stacked: "Adults − 2 +" on one row, "Children − 0 +" on the next, label left. */
+.storage-step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--fs-hint);
+}
+.storage-step .stepper {
+  gap: 8px;
+}
+.storage-step .stepper .btn {
+  min-width: 32px;
+  min-height: 32px;
+  height: 32px;
+  padding: 0;
+}
+.storage-reset {
+  justify-self: start;
+  font-size: var(--fs-hint);
+}
+.storage-own .segmented button {
+  font-size: var(--fs-small);
+}
+.storage-meters {
+  display: grid;
+  gap: 14px;
+}
+.storage-meter {
+  display: grid;
+  gap: 4px;
+}
+.storage-meter-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.storage-meter-label {
+  font-weight: 500;
+}
+.storage-status {
+  font-size: var(--fs-hint);
+  text-align: right;
+}
+/* A 6 px bar filled in ink, with a 1 px tick at the target; amber only when it needs more. */
+.storage-bar {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.storage-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 3px;
+  background: var(--text);
+}
+.storage-bar-short .storage-fill {
+  background: var(--advise);
+}
+.storage-tick {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 1px;
+  margin-left: -1px;
+  background: var(--text);
+}
+.storage-bar-empty {
+  background: none;
+  box-shadow: none;
+  border: 1px dashed var(--control);
+}
+.storage-bar-empty .storage-tick {
+  display: none;
+}
+.storage-figures {
+  margin: 0;
+  font-size: var(--fs-hint);
+  line-height: 18px;
+}
+.storage-figures .link-btn {
+  font-size: var(--fs-hint);
+}
+.storage-aside {
+  color: var(--muted);
+}
+.storage-rooms .section-title {
+  margin: 0 0 4px;
+}
+.storage-cards {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.storage-card {
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+  border-top: 1px solid var(--rule);
+}
+.storage-card-name {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 -8px;
+  padding: 4px 8px;
+  width: calc(100% + 16px);
+  border: 1px solid transparent;
+  border-radius: var(--radius-card);
+  background: none;
+  color: var(--text);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.storage-card-name:hover {
+  border-color: var(--border);
+}
+.storage-card-name .storage-muted {
+  font-weight: 400;
+}
+.storage-card-shown .storage-card-name {
+  background: var(--active);
+}
+.storage-card-plain {
+  cursor: default;
+}
+.storage-card-plain:hover {
+  border-color: transparent;
+}
+.storage-card-line {
+  margin: 0;
+  font-size: var(--fs-hint);
+  line-height: 18px;
+}
+.storage-gap {
+  color: var(--text);
+}
+.storage-pieces {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.storage-piece {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 -8px;
+  padding: 4px 8px;
+  width: calc(100% + 16px);
+  border: 1px solid transparent;
+  border-radius: var(--radius-card);
+  background: none;
+  color: var(--text);
+  font-size: var(--fs-hint);
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+}
+.storage-piece:hover {
+  border-color: var(--border);
+}
+.storage-piece .num {
+  color: var(--muted);
+  text-align: right;
+  white-space: nowrap;
+}
+.storage-notes {
+  display: grid;
+  gap: 8px;
+}
+.storage-foot {
+  position: sticky;
+  bottom: calc(-1 * var(--pad));
+  display: grid;
+  gap: 8px;
+  margin: auto calc(-1 * var(--pad)) calc(-1 * var(--pad));
+  padding: 12px var(--pad) var(--pad);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.inspector-storage .inspector-body {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+.storage-back {
+  justify-self: start;
+  margin-bottom: 8px;
+  font-size: var(--fs-hint);
+}
+.storage-item {
+  margin: 0;
+}
+
+/* On the plan: a neutral pill, amber when the room needs more. Never the clearance red. */
+.storage-chip rect {
+  fill: var(--pill-neutral-bg);
+}
+.storage-chip text {
+  fill: var(--pill-neutral-ink);
+  font-weight: 500;
+}
+.storage-chip-warn rect {
+  fill: var(--pill-warning-bg);
+  stroke: var(--pill-warning-edge);
+  stroke-width: 1px;
+}
+.storage-chip-warn text {
+  fill: var(--pill-warning-ink);
+}
+.storage-highlight {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+
+@media (pointer: coarse) {
+  .storage-step .stepper .btn {
+    min-width: 44px;
+    min-height: 44px;
+    height: 44px;
+  }
+  .storage-card-name,
+  .storage-piece,
+  .storage-foot .btn,
+  .storage-entry .btn,
+  .storage-oneline .link-btn,
+  .storage-reset,
+  .storage-figures .link-btn,
+  .storage-back {
+    min-height: 44px;
+  }
+  .storage-card-name,
+  .storage-piece {
+    align-items: center;
+  }
+  .storage-own .segmented button {
+    height: 40px;
+  }
+  .storage-head .icon-btn {
+    width: 44px;
+    height: 44px;
+    margin-right: -10px;
+  }
+}
+/* A phone held upright: a half-height sheet with the plan refitted above it, its footer pinned. */
+@media (max-width: 720px) {
+  .inspector.inspector-storage {
+    height: 50vh;
+    max-height: 50vh;
+  }
+  .inspector-storage .inspector-toggle {
+    display: none;
+  }
+  .inspector-storage .storage {
+    gap: 10px;
+  }
+  .inspector-storage .storage-head {
+    position: sticky;
+    top: calc(-1 * var(--pad));
+    z-index: 1;
+    margin: calc(-1 * var(--pad)) calc(-1 * var(--pad)) 0;
+    padding: 4px var(--pad) 0;
+    background: var(--surface);
+  }
+  .inspector-storage .storage-intro {
+    display: none;
+  }
+  .inspector-storage .storage-foot {
+    grid-template-columns: 2fr 1fr;
+    gap: 6px;
+    padding-top: 8px;
+  }
+}
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  .inspector-storage .storage-intro,
+  .inspector-storage .inspector-toggle {
+    display: none;
+  }
+  .inspector-storage .storage-foot {
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    padding-top: 8px;
+  }
+}

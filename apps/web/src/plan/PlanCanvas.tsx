@@ -22,6 +22,7 @@ import { DeliveryLayer } from '../delivery/delivery';
 import { type Tool, useEditor } from '../editor';
 import { ElectricalLayer } from '../electrical/electrical';
 import { SuggestLayer, ghostKeyOf, toggleGhost } from '../electrical/suggest';
+import { StorageAnnouncement, StorageChips, StorageHighlight } from '../storage/storage';
 import { currentLevel, useLevel, useProject, useStore } from '../store';
 import { Compass, describeNorth } from '../ui/Compass';
 import { uploadPlanImage, usePlanImage, useUploadPicker } from '../ui/PlanImage';
@@ -932,6 +933,7 @@ export function PlanCanvas() {
             <RenovationMarks />
             <ClearanceLayer level={level} geom={geom} view={v} size={size} />
             <AgeingLayer level={level} geom={geom} view={v} size={size} />
+            <StorageHighlight level={level} />
             <DeliveryLayer level={level} zoom={v.zoom} />
             <ElectricalLayer
               level={level}
@@ -952,6 +954,7 @@ export function PlanCanvas() {
             />
           </g>
           <RoomLabels level={level} geom={geom} view={v} size={size} />
+          <StorageChips level={level} geom={geom} view={v} size={size} />
           <WallTags level={level} geom={geom} view={v} size={size} />
           {selection?.kind === 'wall' && (
             <WallDimension level={level} geom={geom} view={v} size={size} wallId={selection.id} />
@@ -991,6 +994,7 @@ export function PlanCanvas() {
         {describe(level, selection)}
         <ClearanceAnnouncement level={level} selection={selection} />
         <AgeingAnnouncement level={level} selection={selection} />
+        <StorageAnnouncement selection={selection} />
       </p>
 
       {/* Out of the way as soon as a drawing tool is picked, so it never blocks a click. */}

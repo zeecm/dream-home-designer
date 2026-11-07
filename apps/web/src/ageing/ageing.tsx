@@ -28,6 +28,7 @@ import { type Selection, useEditor } from '../editor';
 import { useSuggest } from '../electrical/suggest';
 import { roomLabelBoxes } from '../plan/layers';
 import { type Size, type View, fitBounds } from '../plan/view';
+import { useStorage } from '../storage/store';
 import { useLevel, useProject } from '../store';
 import { Segmented } from '../ui/fields';
 import { icons } from '../ui/icons';
@@ -357,6 +358,7 @@ export function OlderPersonSection() {
               data-ageing-open=""
               onClick={() => {
                 useSuggest.getState().close();
+                useStorage.getState().closePanel();
                 useAgeing.getState().openList();
               }}
             >

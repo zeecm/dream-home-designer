@@ -75,6 +75,8 @@ import { ElectricalSummary, PointInspector } from '../electrical/electrical';
 import { SuggestPanel, useSuggest } from '../electrical/suggest';
 import { roomsBeside } from '../plan/keyboard';
 import { OPENING_PRESETS, ROOM_NAMES } from '../presets';
+import { ItemStorage, StorageBack, StoragePanel, StorageRow } from '../storage/storage';
+import { useStorage } from '../storage/store';
 import { currentLevel, useLevel, useProject, useStore } from '../store';
 import { formatArea, formatLength } from '../units';
 import { COMPASS_POINTS, Compass, describeFacing, northForFacing, planFacing } from './Compass';
@@ -173,6 +175,8 @@ export function Inspector() {
   const suggesting = useSuggest((s) => s.open);
   // The older person list (a view link can look at it too).
   const ageingList = useAgeing((s) => s.listOpen && s.setting.profile !== 'off');
+  // The storage panel (a view link uses it too, with the viewer's own household).
+  const storageList = useStorage((s) => s.open);
   // On a phone the panel folds to one row when there's nothing to edit, so the plan gets
   // the screen; it opens for a selection or a drawing tool, or by hand.
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
@@ -205,6 +209,7 @@ export function Inspector() {
   const open =
     (suggesting && !viewer) ||
     ageingList ||
+    storageList ||
     (userOpen ?? (!running && (!!selection || (tool !== 'select' && tool !== 'comment'))));
   // A tap low on the plan selects as the finger lifts, and the panel opens under it; the
   // click the browser then sends for that tap lands on the toggle now there, and would fold
@@ -233,9 +238,12 @@ export function Inspector() {
   if (!level) return null;
   // Suggested points take the plan details' place (a selection still shows its own).
   const suggestShown = suggesting && !viewer;
-  const ageingShown = ageingList && !suggestShown;
+  const storageShown = storageList && !suggestShown;
+  const ageingShown = ageingList && !suggestShown && !storageShown;
   let body = suggestShown ? (
     <SuggestPanel />
+  ) : storageShown ? (
+    <StoragePanel />
   ) : ageingShown ? (
     <AgeingPanel />
   ) : (
@@ -263,10 +271,18 @@ export function Inspector() {
       </>
     );
   }
+  if (storageShown && selection?.kind === 'item' && body) {
+    body = (
+      <>
+        <StorageBack />
+        {body}
+      </>
+    );
+  }
   return (
     <aside
       ref={panel}
-      className={`panel inspector${open ? '' : ' inspector-folded'}${suggestShown && !selection ? ' inspector-suggest' : ''}${ageingShown && !selection ? ' inspector-ageing' : ''}`}
+      className={`panel inspector${open ? '' : ' inspector-folded'}${suggestShown && !selection ? ' inspector-suggest' : ''}${ageingShown && !selection ? ' inspector-ageing' : ''}${storageShown && !selection ? ' inspector-storage' : ''}`}
       aria-label="Details"
     >
       <button
@@ -284,13 +300,14 @@ export function Inspector() {
         {open ? 'Hide details' : 'Show plan details'}
       </button>
       {/* With something selected (a piece just placed), its details come first. */}
-      {!selection && !suggestShown && !ageingShown && <ToolPanel />}
-      {/* A view-only link shows the details but can't change them. */}
-      <fieldset className="inspector-body" disabled={viewer}>
+      {!selection && !suggestShown && !ageingShown && !storageShown && <ToolPanel />}
+      {/* A view-only link shows the details but can't change them (the household is the
+          viewer's own, so storage's panel can). */}
+      <fieldset className="inspector-body" disabled={viewer && !(storageShown && !selection)}>
         {body}
       </fieldset>
       {/* A way of looking, not a change: a view link can use it too. */}
-      {!selection && !ageingShown && <CommentPinsSwitch />}
+      {!selection && !ageingShown && !storageShown && <CommentPinsSwitch />}
       {selection && !suggestShown && <ToolPanel />}
     </aside>
   );
@@ -381,9 +398,16 @@ function PlanSummary({ level }: { level: Level }) {
         </div>
       </dl>
       <StructuralSuggestion />
-      <ClearanceSummary />
-      <OlderPersonSection />
-      <ElectricalSummary level={level} />
+      {/* The checks: one row each, a line and a way in. */}
+      <section className="checks" aria-labelledby="checks-h">
+        <h3 id="checks-h" className="section-title">
+          Checks
+        </h3>
+        <ClearanceSummary />
+        <ElectricalSummary level={level} />
+        <StorageRow />
+        <OlderPersonSection />
+      </section>
       <RenovationSection />
       <CostSummary />
       <LengthField
@@ -1011,6 +1035,7 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
       {/* First, so a phone's sheet shows it without scrolling. */}
       <ItemClearances level={level} id={id} />
       <ItemAgeing level={level} id={id} kind="item" />
+      <ItemStorage level={level} id={id} />
       <CarpentryLine item={it} />
       <GettingItIn level={level} id={id} />
       <LengthField
