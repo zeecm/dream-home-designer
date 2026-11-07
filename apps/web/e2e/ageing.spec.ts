@@ -73,8 +73,8 @@ test.describe('desktop', () => {
     await expect(list.getByRole('button', { name: /^Main bedroom: / })).toBeVisible();
     await expect(list.getByRole('button', { name: /^Bedroom: / })).toBeVisible();
     await list.getByRole('button', { name: /^Bedroom: / }).click();
-    await expect(list.getByRole('heading', { name: 'Bedroom: Bedroom' })).toBeVisible();
-    await expect(list.getByRole('heading', { name: /^Bathroom: Bath\/WC/ })).toBeVisible();
+    await expect(list.getByRole('heading', { name: 'Bedroom to check: Bedroom' })).toBeVisible();
+    await expect(list.getByRole('heading', { name: /^Bathroom to check: Bath\/WC/ })).toBeVisible();
     await expect(list.getByRole('combobox', { name: 'Bathroom' })).toHaveValue('');
     await expect(
       list.getByRole('combobox', { name: 'Bathroom' }).locator('option').first(),
@@ -91,10 +91,13 @@ test.describe('desktop', () => {
     const count = await lines(page).count();
     expect(count).toBeGreaterThan(1);
     const next = list.getByRole('button', { name: 'Show next' });
-    await next.click();
+    // By keyboard: focus goes to the way back, above the line's reason.
+    await next.focus();
+    await page.keyboard.press('Enter');
     await expect(
       page.getByRole('button', { name: `‹ Back to the list (1 of ${count})` }),
     ).toBeVisible();
+    await expect(page.getByRole('button', { name: /Back to the list/ })).toBeFocused();
     await expect(page.getByRole('heading', { name: 'For a wheelchair' })).toBeVisible();
     await page.getByRole('button', { name: /Back to the list/ }).click();
     for (let k = 2; k <= count; k++) {
@@ -135,6 +138,15 @@ test.describe('desktop', () => {
     await expect(ease.locator('[data-ease="grab-bars-first"]')).toContainText('$65.40');
     await page.locator('.ageing-ease select').selectOption('none');
     await expect(page.locator('.ageing-ease')).toContainText('EASE is for HDB flats.');
+
+    // Show next from the plan details: the same way back to the list.
+    await page.locator('.ageing').getByRole('button', { name: 'Close', exact: true }).click();
+    await section(page).getByRole('button', { name: 'Show next' }).click();
+    await expect(
+      page.getByRole('button', { name: /Back to the list \(\d+ of \d+\)/ }),
+    ).toBeFocused();
+    await page.getByRole('button', { name: /Back to the list/ }).click();
+    await expect(page.locator('.ageing')).toBeVisible();
 
     // 27. Off hides everything; the choice survives a reload.
     await page.locator('.ageing').getByRole('button', { name: 'Off' }).click();
@@ -305,7 +317,7 @@ test.describe('phone', () => {
     const list = page.locator('.ageing');
     await expect(page.locator('.inspector.inspector-ageing')).toBeVisible();
     // The one-line top, and Change for the rows.
-    await expect(list.locator('.ageing-oneline')).toContainText('Wheelchair · Bedroom not chosen');
+    await expect(list.locator('.ageing-oneline')).toContainText('Wheelchair · Which bedroom?');
     await expect(list.getByRole('combobox', { name: 'Bedroom' })).toBeHidden();
     await list.getByRole('button', { name: /^Main bedroom: / }).tap();
     await expect(list.locator('.ageing-oneline')).toContainText(
@@ -354,4 +366,27 @@ test.describe('phone', () => {
     await expect(page.getByTestId('item-ageing')).toContainText('No room to turn a wheelchair');
     expect(await overflows(page)).toBe(false);
   });
+});
+
+test('a view link can look with the older person check', async ({ page, browser }) => {
+  await page.goto('/');
+  await waitSaved(page);
+  await page.keyboard.press('1');
+  await page.getByRole('button', { name: 'Share' }).click();
+  const viewLink = await page.getByLabel('View-only link').inputValue();
+  await page.keyboard.press('Escape');
+  const viewer = await (await browser.newContext()).newPage();
+  await viewer.goto(viewLink);
+  await expect(viewer.getByText('View only.')).toBeVisible();
+  await viewer.keyboard.press('1');
+  // The plan details can't be changed, but the check for an older person can be used.
+  await expect(viewer.getByRole('checkbox', { name: 'Clearance checks' })).toBeDisabled();
+  await wheelchair(viewer);
+  await section(viewer).getByRole('button', { name: 'See the list' }).click();
+  const list = viewer.locator('.ageing');
+  await list.getByRole('button', { name: /^Main bedroom: / }).click();
+  await expect(list.getByRole('heading', { name: 'Bedroom to check: Main bedroom' })).toBeVisible();
+  await expect(viewer.getByTestId('ageing-layer')).toHaveCount(1);
+  await list.getByRole('button', { name: 'Show next' }).click();
+  await expect(viewer.getByRole('button', { name: /Back to the list/ })).toBeEnabled();
 });

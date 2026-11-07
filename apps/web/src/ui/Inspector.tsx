@@ -280,7 +280,7 @@ export function Inspector() {
       {/* With something selected (a piece just placed), its details come first. */}
       {!selection && !suggestShown && !ageingShown && <ToolPanel />}
       {/* Opened from the older person list: the way back to it, above the details. */}
-      {ageingShown && selection && <AgeingBack />}
+      {ageingShown && selection && <AgeingBack selection={selection} />}
       {/* A view-only link shows the details but can't change them. */}
       {ownDisabling ? (
         <div className="inspector-body">{body}</div>

@@ -88,7 +88,8 @@
     --accent-soft: rgba(79, 179, 201, 0.16);
     --negative: #e5566f;
     --clearance: #ff6b5e;
-    --advise: #e3a008;
+    /* Yellower than the comment pins' #fdb022, so the two don't read as one family. */
+    --advise: #eab308;
     --suggest: #b49cf5;
     --suggest-soft: rgba(180, 156, 245, 0.18);
     --suggest-soft-solid: #2e2a3a;
@@ -5843,9 +5844,30 @@ textarea {
 }
 .ageing-oneline span {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+/* The list's top stays in place while its lines scroll. */
+.ageing-top {
+  position: sticky;
+  top: calc(-1 * var(--pad));
+  z-index: 2;
+  display: grid;
+  gap: 10px;
+  margin: calc(-1 * var(--pad)) calc(-1 * var(--pad)) 0;
+  padding: var(--pad) var(--pad) 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+}
+.ageing-top .inspector-head {
+  margin: 0;
+}
+.ageing-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ageing-backed {
+  display: grid;
+  gap: 8px;
 }
 .ageing-rows {
   display: grid;
@@ -5945,13 +5967,12 @@ textarea {
 }
 .ageing-also {
   margin: 0;
-  font-size: var(--fs-small);
-  line-height: 16px;
+  font-size: var(--fs-hint);
+  line-height: 18px;
   color: var(--muted);
 }
 .ageing-back {
   justify-self: start;
-  margin-bottom: 8px;
   font-size: var(--fs-hint);
 }
 .ease-table {
@@ -5962,7 +5983,7 @@ textarea {
 }
 .ease-table th {
   padding: 4px 0;
-  font-size: var(--fs-small);
+  font-size: var(--fs-hint);
   font-weight: 400;
   color: var(--muted);
   text-align: left;
@@ -5981,8 +6002,8 @@ textarea {
 }
 .ease-why {
   display: block;
-  font-size: var(--fs-small);
-  line-height: 16px;
+  font-size: var(--fs-hint);
+  line-height: 18px;
   color: var(--muted);
 }
 .ageing-foot {
@@ -6009,11 +6030,15 @@ textarea {
 .ageing-advise {
   --tone: var(--advise);
 }
+/* Solid outlines; a dash means the flat's own walls only. */
 .ageing-marks polygon,
 .ageing-marks circle {
   fill: color-mix(in srgb, var(--tone, var(--muted)) 14%, transparent);
   stroke: var(--tone, var(--muted));
   stroke-width: 1.5px;
+}
+.ageing-marks .ageing-flat polygon,
+.ageing-marks .ageing-flat > circle {
   stroke-dasharray: 5 3;
 }
 .ageing-marks .ageing-bar line {
@@ -6050,10 +6075,10 @@ textarea {
   fill: color-mix(in srgb, var(--muted) 8%, transparent);
   stroke: var(--muted);
   stroke-width: 1px;
-  stroke-dasharray: 3 3;
 }
-.ageing-fine text {
+.ageing-fine-label {
   fill: var(--muted);
+  font-weight: 600;
 }
 @media (pointer: coarse) {
   .ageing-line,
@@ -6061,9 +6086,22 @@ textarea {
   .ageing-summary .btn {
     min-height: 44px;
   }
+  /* 44 px, and a label that doesn't fit its third of a narrow column takes two lines. */
   .ageing-entry .segmented button,
   .ageing-rows .segmented button {
-    height: 40px;
+    height: auto;
+    min-height: 44px;
+    white-space: normal;
+    line-height: 14px;
+  }
+  .ageing-change,
+  .ageing-oneline .link-btn {
+    min-width: 44px;
+  }
+  .ageing-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
   }
   .ageing-rows .input,
   .ageing-ease .input {
@@ -6092,13 +6130,17 @@ textarea {
   .inspector-ageing .ageing {
     gap: 8px;
   }
-  .inspector-ageing .ageing-head {
-    position: sticky;
-    top: calc(-1 * var(--pad));
-    z-index: 1;
-    margin: calc(-1 * var(--pad)) calc(-1 * var(--pad)) 0;
-    padding: 4px var(--pad) 0;
-    background: var(--surface);
+  .inspector-ageing .ageing-top {
+    gap: 4px;
+    padding: 4px var(--pad) 6px;
+  }
+  /* The rows opened by Change are too tall to stay over a half-height sheet: they scroll. */
+  .inspector-ageing .ageing-top:has(.ageing-rows-open) {
+    position: static;
+  }
+  /* After Show next: the way back and the reason, close together under the sheet's top. */
+  .ageing-backed {
+    gap: 4px;
   }
   .ageing-oneline {
     display: flex;

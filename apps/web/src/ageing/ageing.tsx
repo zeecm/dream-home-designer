@@ -47,8 +47,8 @@ const PROFILES: { value: 'off' | AgeingProfile; label: string }[] = [
   { value: 'wheelchair', label: 'Wheelchair' },
 ];
 
-/** Keeps the check in step with the project open and its setting (call it anywhere, often). */
-export function useAgeingSync() {
+/** Keeps the check in step with the project open and its setting (mounted once: `AgeingSync`). */
+function useAgeingSync() {
   const projectId = useProject().id;
   const load = useAgeing((s) => s.load);
   useEffect(() => load(projectId), [projectId, load]);
@@ -59,9 +59,14 @@ export function useAgeingSync() {
   }, [ready, setting]);
 }
 
+/** Mounted once by the app: loads the project's setting and runs the check with it. */
+export function AgeingSync() {
+  useAgeingSync();
+  return null;
+}
+
 /** The ageing report for the level and version shown (null while off or not yet run). */
 export function useAgeingReport(): AgeingReport | null {
-  useAgeingSync();
   const on = useAgeing((s) => s.setting.profile !== 'off');
   const report = useWalkways((s) => s.ageing);
   const of = useWalkways((s) => s.level);
@@ -73,7 +78,11 @@ export function useAgeingReport(): AgeingReport | null {
 
 // --- words ----------------------------------------------------------------------------------
 
-const who = (p: AgeingProfile) => (p === 'wheelchair' ? 'a wheelchair' : 'a walking aid');
+const who = (p: AgeingProfile) =>
+  p === 'wheelchair' ? 'a wheelchair' : 'someone with a walking aid';
+/** The person, for what a person does (opening a door). */
+const person = (p: AgeingProfile) =>
+  p === 'wheelchair' ? 'someone in a wheelchair' : 'someone with a walking aid';
 const m = (x: number) => formatLength(x);
 const roomName = (level: Level, id?: string) => (id && level.rooms[id]?.name) || 'a room';
 const pieceName = (level: Level, id: string) =>
@@ -123,7 +132,7 @@ export function ageingText(
     case 'entrance-space':
       return `Inside the main door: ${m(i.have)} clear in front; ${who(profile)} needs 1.25 × 1.50 m to turn in.${by.length ? ` ${capital(listed(by))} ${by.length > 1 ? 'are' : 'is'} in the way.` : ''}`;
     case 'latch-side':
-      return `Inside the main door: ${by.length ? listed(by) : 'the wall'} leaves ${m(i.have)} beside the handle; ${who(profile)} needs ${m(i.need)} to reach it.`;
+      return `Inside the main door: ${by.length ? listed(by) : 'the wall'} leaves ${m(i.have)} beside the handle; ${person(profile)} needs ${m(i.need)} there to open it.`;
     case 'route': {
       const to = listed((i.to ?? []).map((id) => roomName(level, id)));
       if (i.flat) return `The corridor itself is ${m(i.have)} wide; ${m(i.need)} needed to ${to}.`;
@@ -145,7 +154,7 @@ export function ageingText(
     case 'bed':
       return `Getting into bed ${profile === 'wheelchair' ? 'from a wheelchair' : 'with a walking aid'} needs ${m(i.need)} along one side; ${m(i.have)} on the better side.`;
     case 'door-in':
-      return `${doorName(level, i)} opens inwards: if they fall against it, it can’t be opened. A folding or sliding door, or one that opens out, is safer.`;
+      return `${doorName(level, i)} opens inwards: if someone falls behind it, it can’t be opened from outside. A folding or sliding door, or one that opens outwards, is safer.`;
     case 'wc-front':
       return profile === 'wheelchair'
         ? `In front of the toilet: ${i.have.toFixed(2)} × ${m(i.have)} clear; 1.00 × 1.00 m needed to pull up beside it.`
@@ -199,14 +208,14 @@ const PASSED: Record<AgeingGroup, Partial<Record<AgeingKind, string>>> = {
     turn: 'room to turn',
   },
   bedroom: {
-    'door-width': 'its door',
+    'door-width': 'its door width',
     'door-space': 'space at its door',
     route: 'the way there',
     turn: 'room to turn',
     bed: 'room beside the bed',
   },
   bathroom: {
-    'door-width': 'its door',
+    'door-width': 'its door width',
     'door-space': 'space at its door',
     'door-in': 'which way the door opens',
     route: 'the way there',
@@ -230,7 +239,7 @@ function alsoChecked(report: AgeingReport, g: AgeingGroup): string | null {
 
 const NOTES: Record<AgeingReport['notes'][number], string> = {
   'no-main-door': 'Add the main door to check the way in.',
-  'add-toilet': 'Add the toilet and basin (Bathroom in the catalogue) to check the bathroom.',
+  'add-toilet': 'Add the toilet and basin from Furniture › Bathroom to check the bathroom.',
   'name-bathroom': 'Name a room Bath or WC to check the bathroom.',
 };
 
@@ -302,10 +311,20 @@ export function showLine(level: Level, i: AgeingIssue) {
   if (i.kind === 'reach') pointSteps.set(i.key, step + 1);
   const sel = targetOf(i, step);
   const c = centreOf(level, i, sel);
-  useAgeing.setState({ shown: i.key });
+  // In the list's context (from the plan details too), so its details lead back to the list.
+  useAgeing.setState({ shown: i.key, listOpen: true });
+  useSuggest.getState().close();
   const ed = useEditor.getState();
   if (c && ed.view) ed.setView({ ...ed.view, cx: c.x, cy: c.y }, true);
   ed.select(sel);
+  // Focus where the reader is: the way back, above the line's details (after they render).
+  if (sel) {
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() =>
+        document.querySelector<HTMLButtonElement>('.ageing-back')?.focus({ preventScroll: true }),
+      ),
+    );
+  }
 }
 
 /** Show next: the line after the last one shown, in report order, wrapping. */
@@ -344,7 +363,6 @@ export function OlderPersonSection() {
           onChange={(v) => set({ profile: v })}
         />
       </div>
-      {on && intro && <p className="field-hint">{INTRO}</p>}
       {on && report && level && (
         <div className="ageing-summary">
           <p className="ageing-summary-text" data-testid="ageing-summary">
@@ -374,6 +392,7 @@ export function OlderPersonSection() {
           </div>
         </div>
       )}
+      {on && intro && <p className="field-hint">{INTRO}</p>}
     </section>
   );
 }
@@ -434,16 +453,12 @@ export function AgeingPanel() {
     useAgeing.getState().closeList();
     returnFocus();
   };
-  const allBedrooms = useBedrooms(level, report);
   if (!level) return null;
   const profile = setting.profile === 'off' ? null : setting.profile;
-  const bedrooms = report
-    ? report.bedrooms.length
-      ? report.bedrooms.map((b) => b.roomId)
-      : report.bedroom
-        ? [report.bedroom]
-        : []
-    : [];
+  const allBedrooms = report?.bedroomIds ?? [];
+  const choosing = !!report && !report.bedroom && report.bedrooms.length > 0;
+  const toChoice = () =>
+    document.querySelector<HTMLButtonElement>('.ageing-choose')?.focus({ preventScroll: false });
   const autoName = report?.bathroom && report.bathroomAuto ? roomName(level, report.bathroom) : '';
   let explained = false;
   const line = (i: AgeingIssue) => {
@@ -483,83 +498,94 @@ export function AgeingPanel() {
       </section>
     );
   };
-  const oneLine = [
-    PROFILES.find((p) => p.value === setting.profile)?.label,
-    report?.bedroom ? roomName(level, report.bedroom) : 'Bedroom not chosen',
-    report?.bathroom ? roomName(level, report.bathroom) : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const profileLabel = PROFILES.find((p) => p.value === setting.profile)?.label;
   return (
     <section className="ageing" aria-labelledby="ageing-h">
-      <div className="inspector-head ageing-head">
-        <h2 id="ageing-h" className="panel-title" ref={heading} tabIndex={-1}>
-          Older person
-        </h2>
-        <button
-          type="button"
-          className="icon-btn"
-          aria-label="Close the older person list"
-          title="Close (Esc)"
-          onClick={close}
-        >
-          {icons.close}
-        </button>
-      </div>
-      <p className="ageing-oneline">
-        <span>{oneLine}</span>
-        <button
-          type="button"
-          className="link-btn"
-          aria-expanded={change}
-          onClick={() => setChange(!change)}
-        >
-          {change ? 'Done' : 'Change'}
-        </button>
-      </p>
-      <div className={`ageing-rows${change ? ' ageing-rows-open' : ''}`}>
-        <div className="ageing-row">
-          <span className="field-label" aria-hidden="true">
-            Check for
-          </span>
-          <Segmented
-            label="Check for"
-            fill
-            value={setting.profile}
-            options={PROFILES}
-            onChange={(v) => set({ profile: v })}
-          />
+      <div className="ageing-top">
+        <div className="inspector-head ageing-head">
+          <h2 id="ageing-h" className="panel-title" ref={heading} tabIndex={-1}>
+            Older person
+          </h2>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Close the older person list"
+            title="Close (Esc)"
+            onClick={close}
+          >
+            {icons.close}
+          </button>
         </div>
-        <label className="ageing-row">
-          <span className="field-label">Bedroom</span>
-          <select
-            className="input"
-            value={report?.bedroom ?? ''}
-            onChange={(e) => set({ bedroomId: e.target.value || undefined })}
+        <p className="ageing-oneline">
+          <span>
+            {profileLabel}
+            {' · '}
+            {report?.bedroom ? (
+              roomName(level, report.bedroom)
+            ) : (
+              <button type="button" className="link-btn" onClick={toChoice}>
+                Which bedroom?
+              </button>
+            )}
+            {report?.bathroom ? ` · ${roomName(level, report.bathroom)}` : ''}
+          </span>
+          <button
+            type="button"
+            className="link-btn ageing-change"
+            aria-expanded={change}
+            aria-label={change ? 'Done' : 'Change who, bedroom and bathroom'}
+            onClick={() => setChange(!change)}
           >
-            <option value="">Choose…</option>
-            {allBedrooms.map((id) => (
-              <option key={id} value={id}>
-                {roomName(level, id)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="ageing-row">
-          <span className="field-label">Bathroom</span>
-          <select
-            className="input"
-            value={report && !report.bathroomAuto ? (report.bathroom ?? '') : ''}
-            onChange={(e) => set({ bathroomId: e.target.value || undefined })}
-          >
-            <option value="">{autoName ? `Auto: ${autoName}` : 'Auto'}</option>
-            {(report?.bathrooms ?? []).map((id) => (
-              <option key={id} value={id}>
-                {roomName(level, id)}
-              </option>
-            ))}
-          </select>
-        </label>
+            {change ? 'Done' : 'Change'}
+          </button>
+        </p>
+        <div className={`ageing-rows${change ? ' ageing-rows-open' : ''}`}>
+          <div className="ageing-row">
+            <span className="field-label" aria-hidden="true">
+              Check for
+            </span>
+            <Segmented
+              label="Check for"
+              fill
+              value={setting.profile}
+              options={PROFILES}
+              onChange={(v) => set({ profile: v })}
+            />
+          </div>
+          {/* Chosen from the rows below until one is: then changed here. */}
+          {report?.bedroom && (
+            <label className="ageing-row">
+              <span className="field-label">Bedroom</span>
+              <select
+                className="input"
+                value={report?.bedroom ?? ''}
+                onChange={(e) => set({ bedroomId: e.target.value || undefined })}
+              >
+                {allBedrooms.length > 1 && <option value="">Choose…</option>}
+                {allBedrooms.map((id) => (
+                  <option key={id} value={id}>
+                    {roomName(level, id)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className="ageing-row">
+            <span className="field-label">Bathroom</span>
+            <select
+              className="input"
+              value={report && !report.bathroomAuto ? (report.bathroom ?? '') : ''}
+              onChange={(e) => set({ bathroomId: e.target.value || undefined })}
+            >
+              <option value="">{autoName ? `Auto: ${autoName}` : 'Auto'}</option>
+              {(report?.bathrooms ?? []).map((id) => (
+                <option key={id} value={id}>
+                  {roomName(level, id)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
       {intro && <p className="ageing-intro">{INTRO}</p>}
       <div className="ageing-body">
@@ -574,9 +600,7 @@ export function AgeingPanel() {
                   {NOTES[n]}
                 </p>
               ))}
-            {group('in', GROUP_TITLE.in)}
-            {group('around', GROUP_TITLE.around)}
-            {!report.bedroom && bedrooms.length > 0 && (
+            {choosing && (
               <section className="ageing-group" aria-labelledby="ageing-which">
                 <h3 id="ageing-which" className="section-title">
                   Which bedroom to check?
@@ -600,8 +624,12 @@ export function AgeingPanel() {
                 </ul>
               </section>
             )}
-            {report.bedroom && group('bedroom', `Bedroom: ${roomName(level, report.bedroom)}`)}
-            {report.bathroom && group('bathroom', `Bathroom: ${roomName(level, report.bathroom)}`)}
+            {group('in', GROUP_TITLE.in)}
+            {group('around', GROUP_TITLE.around)}
+            {report.bedroom &&
+              group('bedroom', `Bedroom to check: ${roomName(level, report.bedroom)}`)}
+            {report.bathroom &&
+              group('bathroom', `Bathroom to check: ${roomName(level, report.bathroom)}`)}
             {group('points', GROUP_TITLE.points)}
             {report.issues.length === 0 && <p className="ageing-empty">{summaryLine(report)}</p>}
             <EasePanel level={level} report={report} />
@@ -624,19 +652,6 @@ export function AgeingPanel() {
       </div>
     </section>
   );
-}
-
-/** The bedrooms to choose from (the report lists them only before one is chosen). */
-function useBedrooms(level: Level | undefined, report: AgeingReport | null): string[] {
-  return useMemo(() => {
-    if (!report || !level) return [];
-    if (report.bedrooms.length) return report.bedrooms.map((b) => b.roomId);
-    const shapes = roomShapes(level);
-    const named = Object.values(level.rooms)
-      .filter((r) => shapes.has(r.id) && /bed|master|guest/i.test(r.name))
-      .map((r) => r.id);
-    return report.bedroom && !named.includes(report.bedroom) ? [report.bedroom, ...named] : named;
-  }, [level, report]);
 }
 
 /** What HDB's EASE can fit here, with the owner's share for the flat type. */
@@ -663,7 +678,7 @@ function EasePanel({ level, report }: { level: Level; report: AgeingReport }) {
   return (
     <section className="ageing-group ageing-ease" aria-labelledby="ease-h">
       <h3 id="ease-h" className="section-title">
-        What HDB’s EASE can fit here
+        What HDB’s Enhancement for Active Seniors (EASE) can fit here
       </h3>
       <label className="ageing-row">
         <span className="field-label">Flat type</span>
@@ -709,7 +724,7 @@ function EasePanel({ level, report }: { level: Level; report: AgeingReport }) {
           </table>
           <p className="ageing-also">
             {EASE_ELIGIBILITY}{' '}
-            <a href={EASE_URL} target="_blank" rel="noreferrer">
+            <a className="ageing-link" href={EASE_URL} target="_blank" rel="noreferrer">
               And more on HDB’s EASE page ↗
             </a>
           </p>
@@ -719,22 +734,59 @@ function EasePanel({ level, report }: { level: Level; report: AgeingReport }) {
   );
 }
 
-/** At the top of a piece's or door's details opened from the list: the way back to it. */
-export function AgeingBack() {
+/**
+ * At the top of the details opened from the list: the way back to it, and straight under it
+ * the lines about what's selected (so the reason shows first on a phone's sheet).
+ */
+export function AgeingBack({ selection }: { selection: Selection }) {
   const level = useLevel();
   const report = useAgeingReport();
   const shown = useAgeing((s) => s.shown);
   if (!level || !report) return null;
   const at = report.issues.findIndex((i) => i.key === shown);
+  const mine = report.issues.filter((i) =>
+    selection.kind === 'item'
+      ? i.itemIds.includes(selection.id)
+      : selection.kind === 'opening'
+        ? i.openingId === selection.id
+        : i.key === shown,
+  );
   return (
-    <button
-      type="button"
-      className="link-btn ageing-back"
-      onClick={() => useEditor.getState().select(null)}
-    >
-      ‹ Back to the list
-      {at >= 0 ? ` (${at + 1} of ${report.issues.length})` : ''}
-    </button>
+    <div className="ageing-backed">
+      <button
+        type="button"
+        className="link-btn ageing-back"
+        onClick={() => useEditor.getState().select(null)}
+      >
+        ‹ Back to the list
+        {at >= 0 ? ` (${at + 1} of ${report.issues.length})` : ''}
+      </button>
+      {mine.length > 0 && <AgeingLines level={level} report={report} lines={mine} />}
+    </div>
+  );
+}
+
+/** "For a wheelchair" and the lines. */
+function AgeingLines({
+  level,
+  report,
+  lines,
+}: { level: Level; report: AgeingReport; lines: AgeingIssue[] }) {
+  const h = useId();
+  return (
+    <section className="stack" aria-labelledby={h} data-testid="item-ageing">
+      <h3 id={h} className="section-title">
+        For {who(report.profile)}
+      </h3>
+      <ul className="ageing-lines ageing-lines-plain">
+        {lines.map((i) => (
+          <li key={i.key}>
+            <Tag level={i.level} />
+            <span>{ageingText(level, i, report.profile)}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -745,27 +797,14 @@ export function ItemAgeing({
   kind,
 }: { level: Level; id: string; kind: 'item' | 'opening' }) {
   const report = useAgeingReport();
-  const h = useId();
-  if (!report) return null;
+  // Opened from the list, the lines are already at the top, under the way back.
+  const fromList = useAgeing((s) => s.listOpen);
+  if (!report || fromList) return null;
   const mine = report.issues.filter((i) =>
     kind === 'item' ? i.itemIds.includes(id) : i.openingId === id,
   );
   if (!mine.length) return null;
-  return (
-    <section className="stack" aria-labelledby={h} data-testid="item-ageing">
-      <h3 id={h} className="section-title">
-        For {who(report.profile)}
-      </h3>
-      <ul className="ageing-lines ageing-lines-plain">
-        {mine.map((i) => (
-          <li key={i.key}>
-            <Tag level={i.level} />
-            <span>{ageingText(level, i, report.profile)}</span>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
+  return <AgeingLines level={level} report={report} lines={mine} />;
 }
 
 /** The live region's addition after a drop or move: the piece's first ageing line. */
@@ -833,7 +872,10 @@ export const AgeingLayer = memo(function AgeingLayer({
   useEffect(() => {
     if (!fitAll || Date.now() - fitAll > 1000 || size.width === 0) return;
     const frame = requestAnimationFrame(() =>
-      useEditor.getState().setView(fitBounds(levelBounds(level), size, 12), true),
+      // Room round the walls for the scale bar and the labels.
+      useEditor
+        .getState()
+        .setView(fitBounds(levelBounds(level), size, 36), true),
     );
     return () => cancelAnimationFrame(frame);
   }, [fitAll, size]);
@@ -879,49 +921,88 @@ export const AgeingLayer = memo(function AgeingLayer({
     }
     return out;
   }, [report]);
-  if (!report) return null;
-  const visible = {
-    x0: view.cx - size.width / 2 / view.zoom,
-    y0: view.cy - size.height / 2 / view.zoom,
-    x1: view.cx + size.width / 2 / view.zoom,
-    y1: view.cy + size.height / 2 / view.zoom,
-  };
   const selected = selection?.kind === 'item' ? level.items[selection.id] : undefined;
-  const labels = placeLabels(
-    specs,
-    view.zoom,
-    visible,
-    roomLabelBoxes(level, geom, view.zoom),
-    selected ? handleBoxes(selected, view.zoom) : [],
-  );
-  const px = 1 / view.zoom;
-  const levelOf = new Map(report.issues.map((i) => [`a-${i.key}`, i]));
-  const tone = (i: AgeingIssue) => (i.level === 'needed' ? 'ageing-needed' : 'ageing-advise');
   // Passes: only for the room selected (or the bathroom whose line was just shown).
-  const fineTurns = report.turns.filter(
-    (t) => t.ok && selectedRoom && t.roomIds.includes(selectedRoom),
+  const fineTurns = useMemo(
+    () =>
+      report?.turns.filter((t) => t.ok && selectedRoom && t.roomIds.includes(selectedRoom)) ?? [],
+    [report, selectedRoom],
   );
+  const { labels, fineLabels } = useMemo(() => {
+    // 8 px in from the plan's edges, so no chip runs to the screen's edge.
+    const inset = 8 / view.zoom;
+    const visible = {
+      x0: view.cx - size.width / 2 / view.zoom + inset,
+      y0: view.cy - size.height / 2 / view.zoom + inset,
+      x1: view.cx + size.width / 2 / view.zoom - inset,
+      y1: view.cy + size.height / 2 / view.zoom - inset,
+    };
+    const names = roomLabelBoxes(level, geom, view.zoom);
+    const handles = selected ? handleBoxes(selected, view.zoom) : [];
+    const labels = placeLabels(specs, view.zoom, visible, names, handles);
+    // A passing circle's size, kept off the room's name: above or below the circle.
+    const fineSpecs: LabelSpec[] = fineTurns.map((t) => ({
+      key: `f-${t.key}`,
+      text: formatLength(t.have),
+      have: t.have,
+      need: t.have,
+      spots: [
+        { at: { x: t.c.x, y: t.c.y + t.have / 2 }, n: { x: 0, y: -1 }, gap: -20 },
+        { at: { x: t.c.x, y: t.c.y - t.have / 2 }, n: { x: 0, y: 1 }, gap: -20 },
+        { at: t.c, n: { x: 0, y: 1 }, gap: 24 },
+      ],
+    }));
+    const fineLabels = placeLabels(fineSpecs, view.zoom, visible, names, handles);
+    return { labels, fineLabels };
+  }, [specs, fineTurns, view, size, level, geom, selected]);
+  const levelOf = useMemo(
+    () => new Map((report?.issues ?? []).map((i) => [`a-${i.key}`, i])),
+    [report],
+  );
+  const drawnPolys = useMemo(
+    () => new Set((report?.issues ?? []).flatMap((i) => (i.draw.poly ? [pts(i.draw.poly)] : []))),
+    [report],
+  );
+  // Recommended first, needed last: a needed mark is never hidden under a recommended one.
+  const drawOrder = useMemo(
+    () =>
+      [...(report?.issues ?? [])].sort(
+        (p, q) => Number(p.level === 'needed') - Number(q.level === 'needed'),
+      ),
+    [report],
+  );
+  if (!report) return null;
+  const px = 1 / view.zoom;
+  const tone = (i: AgeingIssue) => (i.level === 'needed' ? 'ageing-needed' : 'ageing-advise');
   const toiletShown =
     report.toilet &&
     (selectedRoom === report.toilet.roomId ||
       (listOpen && shownIssue?.group === 'bathroom' && shownIssue.roomId === report.toilet.roomId));
-  const drawnPolys = new Set(report.issues.flatMap((i) => (i.draw.poly ? [pts(i.draw.poly)] : [])));
   return (
     <g className="ageing-marks" pointerEvents="none" data-export="skip" data-testid="ageing-layer">
       {fineTurns.map((t) => (
         <g key={t.key} className="ageing-fine" data-testid="ageing-turn-fine">
           <circle cx={t.c.x} cy={t.c.y} r={t.have / 2} />
-          <text className="num" x={t.c.x} y={t.c.y + 4 * px} textAnchor="middle" fontSize={11 * px}>
-            {formatLength(t.have)}
-          </text>
         </g>
+      ))}
+      {fineLabels.map((l) => (
+        <text
+          key={l.key}
+          className="num ageing-fine-label"
+          x={l.x + l.w / 2}
+          y={l.y + l.h / 2 + 4 * px}
+          textAnchor="middle"
+          fontSize={11 * px}
+        >
+          {l.text}
+        </text>
       ))}
       {toiletShown &&
         report.toilet &&
         [report.toilet.front, report.toilet.side]
           .filter((p) => !drawnPolys.has(pts(p)))
           .map((p) => <polygon key={pts(p)} className="ageing-fine-zone" points={pts(p)} />)}
-      {report.issues.map((i) => {
+      {drawOrder.map((i) => {
         const cls = `${tone(i)}${i.flat ? ' ageing-flat' : ''}`;
         const d = i.draw;
         return (
