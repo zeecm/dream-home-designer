@@ -5539,6 +5539,97 @@ textarea {
   vector-effect: non-scaling-stroke;
 }
 
+/* The version's checks (designer v2): pass or fail, fixed, already there, advice. */
+.designer-checks {
+  display: grid;
+  gap: 6px;
+}
+.designer-checks .section-title {
+  margin: 0;
+}
+.designer-checks-line {
+  margin: 0;
+  font-weight: 600;
+}
+.designer-checks-line .muted {
+  font-weight: 400;
+}
+.designer-failing li {
+  color: var(--negative);
+}
+.designer-failing li strong {
+  color: var(--text);
+}
+.designer-check-note {
+  color: var(--muted);
+}
+.designer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+/* This is wrong: a case file to copy. */
+.case-dialog {
+  width: min(480px, calc(100vw - 32px));
+}
+.case-body {
+  display: grid;
+  gap: 12px;
+  padding: 8px 20px 16px;
+}
+
+/* Who sleeps where, in the brief. */
+.sleep-grid {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 0 0;
+  border: 0;
+  border-top: 1px solid var(--rule);
+  min-width: 0;
+}
+.sleep-grid legend {
+  padding: 0;
+}
+.sleep-row {
+  display: grid;
+  grid-template-columns: minmax(96px, 30%) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.sleep-room {
+  font-size: var(--fs-hint);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.sleep-names summary {
+  cursor: pointer;
+  font-size: var(--fs-hint);
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+.sleep-names-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+@media (max-width: 600px) {
+  .sleep-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+}
+.accept-anyway {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+}
+.accept-anyway p {
+  margin: 0;
+}
+
 /* Accept. */
 .accept-dialog {
   width: min(480px, calc(100vw - 32px));

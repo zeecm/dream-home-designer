@@ -16,6 +16,8 @@ import { icons } from '../../ui/icons';
 import { AiSettingsDialog } from '../AiSettingsDialog';
 import { useAi } from '../credentials';
 import { AcceptDialog } from './AcceptDialog';
+import { CaseDialog } from './CaseDialog';
+import { ChecksView, failingChecks } from './Checks';
 import { CostCheck } from './CostCheck';
 import { showPoint, showRoom } from './focus';
 import {
@@ -54,7 +56,7 @@ import {
   useDesigner,
 } from './state';
 import { designerCannotUse } from './stream';
-import { byRoom, fixedNotes, humanize, problemRoom } from './words';
+import { byRoom, fixedNotes } from './words';
 
 /**
  * The Designer panel: the run as it goes (steps, the meter, Stop), then the versions (tabs
@@ -169,6 +171,13 @@ function RunView({ run, live }: { run: Running; live: boolean }) {
                 s ({st.wait.attempt} of 2)
               </span>
             )}
+            {st.fixing && (
+              <span className="step-note">
+                {' '}
+                Checking… fixing {st.fixing.problems}{' '}
+                {st.fixing.problems === 1 ? 'problem' : 'problems'}
+              </span>
+            )}
           </span>
           <span className="step-tokens num">
             {st.tokens ? `${st.estimated ? '~' : ''}${tokens(st.tokens)}` : ''}
@@ -185,7 +194,9 @@ function RunView({ run, live }: { run: Running; live: boolean }) {
         <Glyph
           status={s.phase === 'done' ? 'local' : s.phase === 'running' ? 'waiting' : 'skipped'}
         />
-        <span className="step-label">Checking clearances, walkways, delivery and cost</span>
+        <span className="step-label">
+          Checking beds, seats, walkways, clearances, delivery and cost
+        </span>
       </li>
     </ol>
   );
@@ -683,6 +694,8 @@ const Card = memo(function Card({
   // A paid button waits while a run starts (a double click starts one run).
   const busy = useDesigner((st) => st.starting || !!st.run);
   const [finishing, setFinishing] = useState<{ est: RunEstimate; only?: string[] } | null>(null);
+  const [wrong, setWrong] = useState(false);
+  const failing = failingChecks(r, d).open.length;
   const base = baseOf(project, d.base.variant)?.base;
   const changes = useMemo(
     () =>
@@ -802,8 +815,10 @@ const Card = memo(function Card({
           <dd className="num">{changes}</dd>
         </div>
         <div>
-          <dt>Problems</dt>
-          <dd className="num">{r.problems.length}</dd>
+          <dt>Checks</dt>
+          <dd className={failing ? 'num negative' : 'num'}>
+            {failing ? `${failing} fail` : 'Pass'}
+          </dd>
         </div>
       </dl>
       {r.budget === 'over' && d.brief.budget && (
@@ -869,40 +884,7 @@ const Card = memo(function Card({
           Finish the design{finishEst.usd ? ` · about ${usd(finishEst.usd.typical)}` : ''}
         </button>
       )}
-      {r.problems.length > 0 && (
-        <section aria-labelledby={`p-${d.id}`}>
-          <h4 id={`p-${d.id}`} className="section-title">
-            Problems
-          </h4>
-          <ul className="designer-problems">
-            {r.problems.map((p, i) => {
-              const it = p.itemId ? r.level.items[p.itemId] : undefined;
-              return (
-                // biome-ignore lint/suspicious/noArrayIndexKey: problems have no ids
-                <li key={i}>
-                  <span>
-                    {problemRoom(p, r.level) ? <strong>{problemRoom(p, r.level)}: </strong> : null}
-                    {humanize(p.text, d.aliases, r.level, d.baseLevel)}
-                  </span>
-                  {(it || p.roomId) && (
-                    <button
-                      type="button"
-                      className="link-btn"
-                      onClick={() =>
-                        it
-                          ? showPoint({ x: it.position.x, y: it.position.z })
-                          : p.roomId && showRoom(r.level, [p.roomId])
-                      }
-                    >
-                      Show
-                    </button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      )}
+      <ChecksView d={d} r={r} />
       {notes.map(
         (g) =>
           g.groups.length > 0 && (
@@ -971,11 +953,24 @@ const Card = memo(function Card({
               Accept…
             </button>
           </div>
-          <button type="button" className="link-btn" onClick={() => void deleteDesign(d)}>
-            Delete version
-          </button>
+          <div className="designer-links">
+            <button type="button" className="link-btn" onClick={() => setWrong(true)}>
+              This is wrong
+            </button>
+            <button type="button" className="link-btn" onClick={() => void deleteDesign(d)}>
+              Delete version
+            </button>
+          </div>
           {acceptedNow(d, after) && <p className="field-hint">In your renovation.</p>}
         </div>
+      )}
+      {wrong && (
+        <CaseDialog
+          d={d}
+          r={r}
+          model={d.usage.find((u) => u.step !== 'layout')?.model ?? d.usage[0]?.model ?? null}
+          onClose={() => setWrong(false)}
+        />
       )}
       {finishing && (
         <CostDialog

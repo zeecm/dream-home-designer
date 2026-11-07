@@ -7,6 +7,9 @@ import {
   defaultBrief,
   furnitureKind,
   isDesigned,
+  peopleOf,
+  roomArea,
+  roomKind,
   runPrompts,
   spacesOf,
 } from '@dhd/core';
@@ -97,6 +100,7 @@ function summaryOf(id: SectionId, b: DesignBrief, level: Level): string {
           `${plural(h.elders.length, 'elder')}, ${h.elders.map((e) => ELDER_SHORT[e]).join(', ')}`,
         );
       if (h.helper) parts.push('helper');
+      if (Object.values(b.sleeping ?? {}).some((ps) => ps.length)) parts.push('who sleeps where');
       return parts.join(' · ');
     }
     case 'live':
@@ -240,6 +244,33 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
     setBrief({ ...brief, household: { ...h, ...patch } });
   const items = Object.values(level.items).filter((it) => furnitureKind(it.assetId));
   const designedRooms = Object.values(level.rooms).filter((r) => isDesigned(level, r.id));
+  // Who sleeps where: a row for each room someone can sleep in (bedrooms, largest first, and
+  // the shelter when there is a helper), the household as chips.
+  const people = peopleOf(brief);
+  const sleepRooms = Object.values(level.rooms)
+    .filter((r) => {
+      const use = brief.rooms[r.id]?.use;
+      const bedroom = ['master', 'bedroom', 'kids', 'parents', 'guest'].includes(use ?? '');
+      if (bedroom || (roomKind(r.name) === 'bedroom' && use !== 'keep'))
+        return isDesigned(level, r.id);
+      return h.helper && /shelter|bomb/i.test(r.name);
+    })
+    .sort((p, q) => roomArea(level, q) - roomArea(level, p));
+  const sleeping = brief.sleeping ?? {};
+  const sleepsIn = (key: string) =>
+    Object.entries(sleeping).find(([, ps]) => ps.includes(key))?.[0] ?? null;
+  const toggleSleep = (roomId: string, key: string) => {
+    const here = sleepsIn(key) === roomId;
+    const next = Object.fromEntries(
+      Object.entries(sleeping).map(([id, ps]) => [id, ps.filter((p) => p !== key)]),
+    );
+    if (!here) next[roomId] = [...(next[roomId] ?? []), key];
+    setBrief({
+      ...brief,
+      sleeping: Object.fromEntries(Object.entries(next).filter(([, ps]) => ps.length)),
+    });
+  };
+  const nameOf = (key: string) => brief.names?.[key] ?? '';
 
   const section = (id: SectionId) => {
     switch (id) {
@@ -328,6 +359,65 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
               />
               <span>Live-in helper</span>
             </label>
+            {people.length > 0 && sleepRooms.length > 0 && (
+              <fieldset className="sleep-grid" aria-label="Who sleeps where">
+                <legend className="field-label">Who sleeps where</legend>
+                {sleepRooms.map((r) => (
+                  <div key={r.id} className="sleep-row">
+                    <span className="sleep-room">{r.name}</span>
+                    <span className="chip-row">
+                      {people.map((p) => (
+                        <button
+                          key={p.key}
+                          type="button"
+                          className="chip"
+                          aria-pressed={sleepsIn(p.key) === r.id}
+                          aria-label={`${p.name} sleeps in ${r.name}`}
+                          onClick={() => toggleSleep(r.id, p.key)}
+                        >
+                          {p.name}
+                        </button>
+                      ))}
+                    </span>
+                  </div>
+                ))}
+                <span className="field-hint">
+                  {Object.keys(sleeping).length
+                    ? 'The designer gives each of them a bed there, and the checks make sure.'
+                    : 'Not set: two adults in the largest bedroom and one person in each other room is assumed.'}
+                </span>
+                <details className="sleep-names">
+                  <summary>Names (optional)</summary>
+                  <div className="sleep-names-grid">
+                    {people.map((p) => (
+                      <label key={p.key} className="field">
+                        <span className="field-label">
+                          {p.key.startsWith('adult')
+                            ? `Adult ${p.key.slice(6)}`
+                            : p.key.startsWith('child')
+                              ? `Child ${p.key.slice(6)}`
+                              : p.key.startsWith('elder')
+                                ? `Elder ${p.key.slice(6)}`
+                                : 'Helper'}
+                        </span>
+                        <input
+                          className="input"
+                          maxLength={40}
+                          value={nameOf(p.key)}
+                          placeholder="Name"
+                          onChange={(e) =>
+                            setBrief({
+                              ...brief,
+                              names: { ...(brief.names ?? {}), [p.key]: e.target.value },
+                            })
+                          }
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </details>
+              </fieldset>
+            )}
             <label className="field">
               <span className="field-label">Pets</span>
               <input

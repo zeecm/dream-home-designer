@@ -22,12 +22,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProject } from '../../store';
 import { changeText, placeText } from '../../ui/Renovation';
 import { icons } from '../../ui/icons';
+import { failingChecks } from './Checks';
 import { baseOf, changeFrom, onPlanNow, planChanged, resultFor } from './plan';
-import { acceptVersion, designOpts, useDesigner } from './state';
+import { acceptVersion, designOpts, useDesigner, waiveChecks } from './state';
+import { humanize } from './words';
 
 /**
  * Put a version into the renovation: the walls (all or nothing), then per space its
- * furniture, built-ins, paint and floor, and electrical points. One undo step.
+ * furniture, built-ins, paint and floor, and electrical points. One undo step. A part with a
+ * hard check it fails starts unticked, marked "Doesn't pass"; ticking it asks "Accept
+ * anyway?" and records a waiver. A part failing an HDB rule can't be ticked.
  */
 
 type Aspect = 'furniture' | 'built-ins' | 'finishes' | 'electrical';
@@ -104,6 +108,18 @@ export function AcceptDialog({ design: d, onClose }: { design: Design; onClose: 
   }, [r, now, d]);
   const [ticked, setTicked] = useState<Set<string> | null>(null);
   const [removeHand, setRemoveHand] = useState(false);
+  const [asking, setAsking] = useState<string | null>(null);
+  // The hard checks the version caused that fail, by the part they belong to.
+  const failing = useMemo(() => {
+    const out = new Map<string, NonNullable<typeof r>['checks']>();
+    if (!r) return out;
+    for (const c of failingChecks(r, d).open) {
+      if (!c.part) continue;
+      const k = 'space' in c.part ? `${c.part.space}|${c.part.aspect}` : 'walls';
+      out.set(k, [...(out.get(k) ?? []), c]);
+    }
+    return out;
+  }, [r, d]);
   if (!r || !now || !rows) return null;
   const all: Part[] = [
     ...(rows.changes.length ? [{ aspect: 'walls' } as Part] : []),
@@ -114,7 +130,8 @@ export function AcceptDialog({ design: d, onClose }: { design: Design; onClose: 
     ),
     ...(d.concept?.bathrooms.length ? [{ space: BATHROOMS, aspect: 'finishes' } as Part] : []),
   ];
-  const on = ticked ?? new Set(all.map(key));
+  const on = ticked ?? new Set(all.map(key).filter((k) => !failing.has(k)));
+  const hdb = (k: string) => (failing.get(k) ?? []).some((c) => !c.waivable);
   const chosen = all.filter((p) => on.has(key(p)));
   const allowed = allowedParts(now, r.level, chosen);
   const ok = new Set(allowed.map(key));
@@ -128,9 +145,48 @@ export function AcceptDialog({ design: d, onClose }: { design: Design; onClose: 
   const toggle = (k: string) => {
     const next = new Set(on);
     if (next.has(k)) next.delete(k);
-    else next.add(k);
+    else if (failing.has(k)) {
+      // Not without saying so: Accept anyway records a waiver (never for an HDB rule).
+      if (!hdb(k)) setAsking(k);
+      return;
+    } else next.add(k);
     setTicked(next);
   };
+  const acceptAnyway = (k: string) => {
+    const checks = failing.get(k) ?? [];
+    setAsking(null);
+    setTicked(new Set([...on, k]));
+    void waiveChecks(d, checks);
+  };
+  const why = (k: string) => {
+    const cs = failing.get(k);
+    if (!cs?.length) return null;
+    const first = humanize(cs[0]?.text ?? '', d.aliases, r.level, d.baseLevel);
+    return (
+      <span className="field-hint accept-why negative">
+        {hdb(k) ? 'HDB rule, can’t be accepted: ' : 'Doesn’t pass: '}
+        {first}
+        {cs.length > 1 ? ` (and ${cs.length - 1} more)` : ''}
+      </span>
+    );
+  };
+  const askRow = (k: string) =>
+    asking === k ? (
+      <div className="notice-warning accept-anyway" role="alertdialog" aria-label="Accept anyway?">
+        <p>
+          Accept anyway?{' '}
+          {humanize(failing.get(k)?.[0]?.text ?? '', d.aliases, r.level, d.baseLevel)}
+        </p>
+        <div className="button-row">
+          <button type="button" className="btn btn-small" onClick={() => setAsking(null)}>
+            Keep it out
+          </button>
+          <button type="button" className="btn btn-small" onClick={() => acceptAnyway(k)}>
+            Accept anyway
+          </button>
+        </div>
+      </div>
+    ) : null;
   const changed = planChanged(project, d);
 
   return (
@@ -161,7 +217,12 @@ export function AcceptDialog({ design: d, onClose }: { design: Design; onClose: 
         )}
         {rows.changes.length > 0 && (
           <label className="check-row accept-walls">
-            <input type="checkbox" checked={walls} onChange={() => toggle('walls')} />
+            <input
+              type="checkbox"
+              checked={walls}
+              disabled={!walls && hdb('walls')}
+              onChange={() => toggle('walls')}
+            />
             <span>
               <strong>Walls and doors</strong>
               <span className="field-hint">
@@ -169,9 +230,11 @@ export function AcceptDialog({ design: d, onClose }: { design: Design; onClose: 
                 {plural(rows.changes.length, 'change')} to walls and doors
                 {r.structural.length ? ' (structural changes included)' : ''}
               </span>
+              {why('walls')}
             </span>
           </label>
         )}
+        {askRow('walls')}
         {rows.changes.length > 0 && (
           <ul className="accept-changes">
             {rows.changes.map((c, i) => (
@@ -194,7 +257,7 @@ export function AcceptDialog({ design: d, onClose }: { design: Design; onClose: 
                   <label key={a} className={exists ? 'check-row' : 'check-row accept-none'}>
                     <input
                       type="checkbox"
-                      disabled={!exists || blocked}
+                      disabled={!exists || blocked || (!on.has(k) && hdb(k))}
                       checked={exists && on.has(k) && ok.has(k)}
                       onChange={() => toggle(k)}
                     />
@@ -204,11 +267,15 @@ export function AcceptDialog({ design: d, onClose }: { design: Design; onClose: 
                       {blocked && (
                         <span className="field-hint accept-why">Needs the walls from V{d.n}</span>
                       )}
+                      {exists && why(k)}
                     </span>
                   </label>
                 );
               })}
             </div>
+            {(Object.keys(NAMES) as Aspect[]).map((a) => (
+              <div key={a}>{askRow(`${x.s.key}|${a}`)}</div>
+            ))}
           </fieldset>
         ))}
         {d.concept?.bathrooms.length ? (
