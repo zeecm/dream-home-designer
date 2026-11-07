@@ -300,13 +300,22 @@ export function Inspector() {
         {open ? 'Hide details' : 'Show plan details'}
       </button>
       {/* With something selected (a piece just placed), its details come first. */}
-      {!selection && !suggestShown && !ageingShown && !storageShown && <ToolPanel />}
+      {/* Storage's panel keeps a tool's panel (a phone's catalogue, from Add a wardrobe). */}
+      {!selection && !suggestShown && !ageingShown && (!storageShown || tool !== 'select') && (
+        <ToolPanel />
+      )}
       {/* A view-only link shows the details but can't change them (the household is the
           viewer's own, so storage's panel can). */}
       <fieldset className="inspector-body" disabled={viewer && !(storageShown && !selection)}>
         {body}
       </fieldset>
       {/* A way of looking, not a change: a view link can use it too. */}
+      {/* The storage panel works on a view link, with the viewer's own household. */}
+      {viewer && !selection && !suggestShown && !ageingShown && !storageShown && (
+        <div className="inspector-viewer-checks">
+          <StorageRow />
+        </div>
+      )}
       {!selection && !ageingShown && !storageShown && <CommentPinsSwitch />}
       {selection && !suggestShown && <ToolPanel />}
     </aside>
@@ -344,6 +353,7 @@ function DeleteButton({ label, onClick }: { label: string; onClick: () => void }
 const clear = () => useEditor.getState().select(null);
 
 function PlanSummary({ level }: { level: Level }) {
+  const viewer = useStore((s) => s.role === 'viewer');
   const dispatch = useStore((s) => s.dispatch);
   const select = useEditor((s) => s.select);
   const rooms = Object.values(level.rooms)
@@ -405,7 +415,8 @@ function PlanSummary({ level }: { level: Level }) {
         </h3>
         <ClearanceSummary />
         <ElectricalSummary level={level} />
-        <StorageRow />
+        {/* A view link has it below the details, where it isn't disabled. */}
+        {!viewer && <StorageRow />}
         <OlderPersonSection />
       </section>
       <RenovationSection />

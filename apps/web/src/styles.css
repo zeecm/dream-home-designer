@@ -6201,6 +6201,12 @@ textarea {
 .check-line {
   justify-self: stretch;
 }
+/* A view link: storage's row under the (disabled) details, so it still opens. */
+.inspector-viewer-checks {
+  display: grid;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+}
 
 /* ---------------------------------------------------------------- storage meter */
 
