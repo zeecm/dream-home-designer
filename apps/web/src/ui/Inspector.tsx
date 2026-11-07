@@ -239,7 +239,7 @@ export function Inspector() {
   ) : ageingShown ? (
     <AgeingPanel />
   ) : (
-    <PlanSummary level={level} />
+    <PlanSummary level={level} viewer={viewer} />
   );
   if (selection?.kind === 'wall' && level.walls[selection.id]) {
     body = <WallInspector key={key} level={level} id={selection.id} />;
@@ -254,15 +254,9 @@ export function Inspector() {
   } else if (selection?.kind === 'room' && level.rooms[selection.id]) {
     body = <RoomInspector key={key} level={level} id={selection.id} />;
   }
-  // Opened from the older person list: the way back to it, above the details.
-  if (ageingShown && selection && body) {
-    body = (
-      <>
-        <AgeingBack />
-        {body}
-      </>
-    );
-  }
+  // The plan details and the older person list disable their own editing controls on a view
+  // link: the older person check is a way of looking, which a view link can use too.
+  const ownDisabling = !selection && !suggestShown;
   return (
     <aside
       ref={panel}
@@ -285,10 +279,16 @@ export function Inspector() {
       </button>
       {/* With something selected (a piece just placed), its details come first. */}
       {!selection && !suggestShown && !ageingShown && <ToolPanel />}
+      {/* Opened from the older person list: the way back to it, above the details. */}
+      {ageingShown && selection && <AgeingBack />}
       {/* A view-only link shows the details but can't change them. */}
-      <fieldset className="inspector-body" disabled={viewer}>
-        {body}
-      </fieldset>
+      {ownDisabling ? (
+        <div className="inspector-body">{body}</div>
+      ) : (
+        <fieldset className="inspector-body" disabled={viewer}>
+          {body}
+        </fieldset>
+      )}
       {/* A way of looking, not a change: a view link can use it too. */}
       {!selection && !ageingShown && <CommentPinsSwitch />}
       {selection && !suggestShown && <ToolPanel />}
@@ -326,7 +326,7 @@ function DeleteButton({ label, onClick }: { label: string; onClick: () => void }
 
 const clear = () => useEditor.getState().select(null);
 
-function PlanSummary({ level }: { level: Level }) {
+function PlanSummary({ level, viewer }: { level: Level; viewer: boolean }) {
   const dispatch = useStore((s) => s.dispatch);
   const select = useEditor((s) => s.select);
   const rooms = Object.values(level.rooms)
@@ -340,60 +340,65 @@ function PlanSummary({ level }: { level: Level }) {
 
   return (
     <>
-      <Header title="Plan" />
-      <section aria-labelledby="rooms-h">
-        <h3 id="rooms-h" className="section-title">
-          Rooms
-        </h3>
-        {rooms.length === 0 ? (
-          <p className="empty-line">Rooms appear when walls enclose a space.</p>
-        ) : (
-          <ul className="room-list">
-            {rooms.map(({ room, area }) => (
-              <li key={room.id}>
-                <button type="button" onClick={() => select({ kind: 'room', id: room.id })}>
-                  <span className="room-list-name">{room.name}</span>
-                  <span className="num">{formatArea(area)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="total">
-          <span>Floor area</span>
-          <span className={`num total-figure${rooms.length ? '' : ' muted'}`}>
-            {formatArea(total)}
-          </span>
-        </p>
-      </section>
-      <dl className="facts">
-        <div>
-          <dt>Walls</dt>
-          <dd className="num">{walls}</dd>
-        </div>
-        <div>
-          <dt>Doors</dt>
-          <dd className="num">{count('door')}</dd>
-        </div>
-        <div>
-          <dt>Windows</dt>
-          <dd className="num">{count('window')}</dd>
-        </div>
-      </dl>
-      <StructuralSuggestion />
-      <ClearanceSummary />
+      <fieldset className="inspector-part" disabled={viewer}>
+        <Header title="Plan" />
+        <section aria-labelledby="rooms-h">
+          <h3 id="rooms-h" className="section-title">
+            Rooms
+          </h3>
+          {rooms.length === 0 ? (
+            <p className="empty-line">Rooms appear when walls enclose a space.</p>
+          ) : (
+            <ul className="room-list">
+              {rooms.map(({ room, area }) => (
+                <li key={room.id}>
+                  <button type="button" onClick={() => select({ kind: 'room', id: room.id })}>
+                    <span className="room-list-name">{room.name}</span>
+                    <span className="num">{formatArea(area)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="total">
+            <span>Floor area</span>
+            <span className={`num total-figure${rooms.length ? '' : ' muted'}`}>
+              {formatArea(total)}
+            </span>
+          </p>
+        </section>
+        <dl className="facts">
+          <div>
+            <dt>Walls</dt>
+            <dd className="num">{walls}</dd>
+          </div>
+          <div>
+            <dt>Doors</dt>
+            <dd className="num">{count('door')}</dd>
+          </div>
+          <div>
+            <dt>Windows</dt>
+            <dd className="num">{count('window')}</dd>
+          </div>
+        </dl>
+        <StructuralSuggestion />
+        <ClearanceSummary />
+      </fieldset>
+      {/* A way of looking: a view link can use it. */}
       <OlderPersonSection />
-      <ElectricalSummary level={level} />
-      <RenovationSection />
-      <CostSummary />
-      <LengthField
-        label="Ceiling height"
-        value={level.ceilingHeight}
-        min={1.8}
-        max={6}
-        onCommit={(v) => v !== undefined && dispatch(setCeilingHeight(level.id, v))}
-      />
-      <NorthField />
+      <fieldset className="inspector-part" disabled={viewer}>
+        <ElectricalSummary level={level} />
+        <RenovationSection />
+        <CostSummary />
+        <LengthField
+          label="Ceiling height"
+          value={level.ceilingHeight}
+          min={1.8}
+          max={6}
+          onCommit={(v) => v !== undefined && dispatch(setCeilingHeight(level.id, v))}
+        />
+        <NorthField />
+      </fieldset>
     </>
   );
 }

@@ -1678,6 +1678,14 @@ h3.field-label {
   border: 0;
   min-width: 0;
 }
+/* A run of the plan details a view link can't change: laid out as if it weren't there. */
+.inspector-part {
+  display: contents;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
 .share-menu {
   left: auto;
   right: 0;
