@@ -3304,7 +3304,10 @@ h3.field-label {
 }
 /* By level: a name and its subtotal; the total under them. */
 .estimate-sub {
-  grid-template-columns: 1fr 9.5em;
+  grid-template-columns: 1fr auto;
+}
+.estimate-sub .estimate-cost {
+  white-space: nowrap;
 }
 .estimate-sub-total {
   border-bottom: 0;
@@ -3343,6 +3346,7 @@ h3.field-label {
   .estimate-line {
     grid-template-columns: auto 1fr auto;
     column-gap: 0;
+    row-gap: 2px;
   }
   .estimate-item {
     display: contents;
@@ -3362,9 +3366,6 @@ h3.field-label {
   }
   .estimate-cost {
     padding-left: 8px;
-  }
-  .estimate-sub {
-    grid-template-columns: 1fr auto;
   }
   .rate-row {
     grid-template-columns: 1fr 1fr;

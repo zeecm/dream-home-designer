@@ -242,6 +242,8 @@ test.describe('desktop', () => {
     const sheet = page.frameLocator('iframe[data-print="contractor"]');
     const elec = sheet.locator('.electrical-page');
     await expect(elec).toHaveCount(1);
+    // Depths of notches are page 1's only.
+    await expect(elec.locator('.dim-notch')).toHaveCount(0);
     const moved = elec.locator('.elec-mark[data-change="moved"]');
     await expect(moved).toHaveCount(1);
     await expect(moved.locator('g[stroke="#0f8288"]')).toHaveCount(1);

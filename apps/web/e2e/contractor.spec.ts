@@ -116,6 +116,24 @@ test('9, 10, 13: the sample on A4 at 1:100, with every room, door tags and the v
   await expect(page1.locator('.dim-chain[data-tier="2"][data-side="top"] .dim-text')).toHaveText(
     '10280',
   );
+  // Slice 2s C1: the slot between the air-con ledge and the kitchen has its depth, inside
+  // the outline, and never the word "notch".
+  const notch = page1.locator('.dim-notch[data-notch]');
+  await expect(notch).toHaveCount(1);
+  await expect(page1.locator('.dim-notch[data-depth="1000"]')).toHaveCount(1);
+  await expect(notch.locator('.dim-text')).toHaveText('1000');
+  const inside = await page1.evaluate((svg) => {
+    const walls = (svg.querySelector('.plan .walls') as SVGGraphicsElement).getBBox();
+    const n = (svg.querySelector('.dim-notch') as SVGGraphicsElement).getBBox();
+    return (
+      n.x >= walls.x &&
+      n.y >= walls.y &&
+      n.x + n.width <= walls.x + walls.width &&
+      n.y + n.height <= walls.y + walls.height
+    );
+  });
+  expect(inside).toBe(true);
+  await expect(page1).not.toContainText(/notch/i);
 
   // 10: every room's name and area, and each door's tag at its width.
   const labels = await page1.locator('.room').evaluateAll((gs) =>
