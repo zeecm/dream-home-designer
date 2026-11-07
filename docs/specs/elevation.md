@@ -384,6 +384,17 @@ the points chain (the list gives each point's distance), label leaders (tags hid
 the faint old place of a moved point, the merge rule for rooms joined in After, the phone's key
 plan and its portrait hint. AC7's `furniture: 'room'` check became `furniture: 'none'`.
 
+**After QA.** Chains everywhere (plan, contractor sheet, wall view) round each piece down and
+give the missing 10 mm units to the pieces that lost the most, so a 900 mm door stays 900 and
+the pieces always add up to the overall (rounding the stops had made a door read 910). The
+header's length is to 10 mm, as the overall is. A height column whose line would cross a piece
+moves to the right of the drawing, and a height already figured is figured once. A tag is at
+least its number, however busy the wall. With furniture hidden its notes still count. The saved
+picture is drawn at least 1440 px wide with its title and lines wrapped. Stepping or flipping
+clears a point, opening or piece not on the wall now shown. On a phone a tapped point's sheet is
+short and starts with its height. A glass partition is labelled; a hacked stretch longer than
+shows gives its length.
+
 **Gestures:** a pinch or pan changes only the drawing's transform (the fit and the drawing are
 memoized); a cancelled pointer only ends the gesture; a double tap that fits leaves the
 selection as it was before its first tap.
