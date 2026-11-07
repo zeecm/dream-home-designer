@@ -15,8 +15,19 @@ export {
   type DesignCheck,
   type Principle,
   designChecks,
+  roomNeeds,
   usesOf,
 } from './checks';
+export {
+  CASE_MAX_BYTES,
+  CaseFile,
+  WRONG,
+  WRONG_TEXT,
+  type Wrong,
+  caseText,
+  checkCase,
+  designerCase,
+} from './cases';
 export {
   CIRCULATION,
   FIT,
@@ -67,6 +78,7 @@ export {
 } from './prices';
 export {
   CONCEPT_SCHEMA,
+  type FixRequest,
   SPACE_SCHEMA,
   SYSTEM_PROMPT,
   type StepOptions,
@@ -93,6 +105,7 @@ export {
   BATHROOMS,
   Concept,
   type ConceptRoom,
+  AGAINST,
   Design,
   DesignBrief,
   type DesignInput,
@@ -108,6 +121,8 @@ export {
   SpaceDesign,
   type SpaceKey,
   SpaceStatus,
+  ZONES,
+  type Zone,
   STYLE_NAMES,
   StyleId,
   Usage,

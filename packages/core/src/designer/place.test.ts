@@ -459,7 +459,7 @@ function fortyPieces(): Record<string, SpaceDesign> {
   const answers = sampleAnswers();
   const living = answers[SAMPLE_KEYS.living]!;
   const extra = answer(
-    Array.from({ length: 9 }, (_, i) => ({
+    Array.from({ length: 10 }, (_, i) => ({
       ref: `x${i}`,
       assetId: i % 2 ? 'plant' : 'dining-chair',
       at: { x: 7 + (i % 3) * 0.9, y: 3.6 + Math.floor(i / 3) * 0.6 },

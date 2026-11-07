@@ -8,7 +8,8 @@
   "exports": { ".": "./src/index.ts" },
   "scripts": {
     "test": "vitest run --exclude src/perf.test.ts && vitest run src/perf.test.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "designer:bench": "vitest run src/designer/benchmark --reporter verbose"
   },
   "dependencies": {
     "immer": "^10.1.1",

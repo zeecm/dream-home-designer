@@ -40,25 +40,15 @@
       "why": "Mei Ling's side."
     },
     {
-      "ref": "ward1",
-      "assetId": "built-in-wardrobe",
-      "keep": null,
-      "wall": "W7",
-      "along": 1.25,
-      "at": null,
-      "rotation": null,
-      "width": 2.2,
-      "depth": 0.55,
-      "height": null,
-      "why": "A full-height wardrobe along the side wall, stopping short of the window."
-    },
-    {
       "ref": "light1",
       "assetId": "ceiling-light",
       "keep": null,
       "wall": null,
       "along": null,
-      "at": { "x": 1.7, "y": 1.6 },
+      "at": {
+        "x": 1.7,
+        "y": 1.6
+      },
       "rotation": 0,
       "width": null,
       "depth": null,
@@ -66,6 +56,11 @@
       "why": "Main light."
     }
   ],
-  "faces": [{ "wall": "W5", "finish": "wallpaper-linen" }],
+  "faces": [
+    {
+      "wall": "W5",
+      "finish": "wallpaper-linen"
+    }
+  ],
   "notes": ["A study corner would fit in the alcove by the bathroom if the wardrobe were slimmer."]
 }
