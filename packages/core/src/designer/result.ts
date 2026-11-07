@@ -112,6 +112,8 @@ export interface DesignResult {
    * taken (only ever when strictly better).
    */
   resolves: { space: string; before: number; after: number; taken: boolean }[];
+  /** Smaller pieces tried in a space (right-sizing): how many swaps, and whether one was taken. */
+  swaps: { space: string; tried: number; taken: boolean }[];
   cost: CostEstimate;
   points: Suggestion[];
   budget: 'within' | 'over' | 'unknown';
@@ -341,6 +343,7 @@ function work(
 
   const resultSpaces: ResultSpace[] = [];
   const refs: Record<string, string> = {};
+  const swaps: DesignResult['swaps'] = [];
   /** Each furnished space's index and pieces, to move a piece off a walkway after. */
   const runs: Run[] = [];
   let geomKey: string | null = null;
@@ -468,13 +471,18 @@ function work(
             brief.rooms,
             keepOut.map((k) => k.poly),
             [...(keepOutFor ?? [])].sort(),
+            opts.walkways !== false,
           ]),
         );
         // A space moved off a walkway before is placed as it ended up.
         const hit =
           (keepOut.length ? undefined : settledMemo.get(memoKey)) ?? solveMemo.get(memoKey);
         if (!keepOut.length) firstKey = memoKey;
-        if (hit && !keepOut.length) firstSwap = hit.swap;
+        if (hit && !keepOut.length) {
+          firstSwap = hit.swap;
+          if (hit.swapsTried)
+            swaps.push({ space: s.key, tried: hit.swapsTried, taken: !!hit.swap });
+        }
         if (hit) {
           for (const item of hit.items) {
             const w = wantOf.get(item.id);
@@ -498,7 +506,11 @@ function work(
         });
         ix.keepOut = [];
         const out = keepOut.length && firstSwap ? applySwap(solved, firstSwap) : solved;
-        if (!keepOut.length) firstSwap = out.swap;
+        if (!keepOut.length) {
+          firstSwap = out.swap;
+          if (out.swapsTried)
+            swaps.push({ space: s.key, tried: out.swapsTried, taken: !!out.swap });
+        }
         solveMemo.set(memoKey, out);
         if (solveMemo.size > 48) solveMemo.delete(solveMemo.keys().next().value as string);
         return out;
@@ -931,6 +943,7 @@ function work(
     passes,
     refs,
     resolves,
+    swaps,
     cost,
     points,
     budget,

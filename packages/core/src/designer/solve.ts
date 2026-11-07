@@ -63,6 +63,8 @@ export interface SolveInput {
   budget?: number;
   /** Whether smaller pieces may be swapped in (the first solve of a space, not a re-solve). */
   swaps?: boolean;
+  /** A swap's solve: stop as soon as the dining group can't keep the way (it will be refused). */
+  abortTight?: boolean;
 }
 
 export interface SolveOutcome {
@@ -77,6 +79,10 @@ export interface SolveOutcome {
   broken: number;
   /** Smaller pieces swapped in: a re-solve of the space keeps them (applySwap). */
   swap?: Swap;
+  /** How many swaps were tried (0: none needed, or none could help). */
+  swapsTried?: number;
+  /** Stopped early (abortTight): the dining group couldn't keep the way. */
+  aborted?: boolean;
 }
 
 interface Candidate {
@@ -129,6 +135,13 @@ const ALTS = 8;
  * spaces take 200–8,500.
  */
 export const BUDGET = 12_000;
+/**
+ * The swaps' own budget, apart from the first solve's: each swap looks ahead and goes back
+ * within SWAP_EACH, and swaps stop once SWAP_BUDGET is spent (at least the first one or two
+ * get tried, however crowded the room).
+ */
+const SWAP_BUDGET = 10_000;
+const SWAP_EACH = 5000;
 const GRID = 0.25;
 const ALONG = 0.2;
 /** How far a dining chair reaches past its table's edge, tucked in. */
@@ -185,36 +198,52 @@ export function solveSpace(input: SolveInput): SolveOutcome {
   // Short of the way between the groups, or the dining group left standing on a way through
   // the flat: smaller pieces are tried (on a space's first solve only).
   const bad = (items: Item[]) => tightIn(input, items, mark) || diningOnWay(input, items);
-  if (!bad(first.items) || input.swaps === false) return first;
+  if (input.swaps === false) return first;
   const lost = essentialDrops(first, input.intents, new Set());
   const seats = seatsShort(input, first.items, mark, input.intents);
-  // One budget for the first solve and all its swaps: a swap starts only while some is left,
-  // and looks ahead and goes back only as far as what is left allows.
-  let left = (input.budget ?? BUDGET) - first.tries;
+  const wasBad = bad(first.items);
+  // Swaps are tried only where they could help: the way between the groups not kept, the
+  // household short of places or seats, or something the room needs left out.
+  if (!wasBad && !seats && !lost.size) return first;
+  // The swaps' own budget, so a crowded room's long first solve never leaves none for them.
+  let spent = 0;
   let tries = first.tries;
+  let tried = 0;
   for (const swap of swapsFor(input)) {
-    if (left <= 0) break;
+    // At least two swaps are tried, however long each takes; then until the budget is spent.
+    if (tried >= 2 && spent >= SWAP_BUDGET) break;
+    tried++;
     input.ix.placed.length = mark;
-    const out = solveOnce({ ...input, intents: swap.intents, budget: Math.max(0, left) });
-    left -= out.tries;
+    const out = solveOnce({
+      ...input,
+      intents: swap.intents,
+      budget: Math.min(SWAP_EACH, SWAP_BUDGET - spent),
+      abortTight: true,
+    });
+    spent += out.tries;
     tries += out.tries;
     out.tries = tries;
-    // Taken only if it keeps the way and is no worse otherwise: nothing more the room needs
-    // left out, no more pieces short of room or turned from what they go with, and seats and
-    // places at the table for the household as before.
+    if (out.aborted) continue;
+    const outLost = essentialDrops(out, swap.intents, swap.spare);
+    const outSeats = seatsShort(input, out.items, mark, swap.intents);
+    // Taken only if it keeps the way, is no worse otherwise (nothing more the room needs left
+    // out, no more pieces short of room or turned from what they go with, seats and places at
+    // the table as before) and mends something: the way, a seat or place, a piece left out.
     if (
       bad(out.items) ||
-      [...essentialDrops(out, swap.intents, swap.spare)].some((ref) => !lost.has(ref)) ||
+      [...outLost].some((ref) => !lost.has(ref)) ||
       out.soft > first.soft ||
       out.broken > first.broken ||
-      seatsShort(input, out.items, mark, swap.intents) > seats
+      outSeats > seats ||
+      !(wasBad || outSeats < seats || outLost.size < lost.size)
     ) {
       continue;
     }
-    return applySwap(out, swap);
+    return { ...applySwap(out, swap), swapsTried: tried };
   }
-  // Nothing smaller keeps the way: the first solve stands, and the check fails.
+  // Nothing smaller helps: the first solve stands, and its checks fail.
   first.tries = tries;
+  first.swapsTried = tried;
   input.ix.placed.length = mark;
   const kinds = new Map(input.intents.map((t) => [t.want.id, t.want.kind]));
   for (const item of first.items) {
@@ -378,7 +407,10 @@ function swapsFor(input: SolveInput): Swap[] {
   const household = input.household ?? 0;
   const role = (t: Intent) => roleOf(t.want.kind);
   const table = intents.find((t) => role(t) === 'dining-table' && relationOf(t.want.kind)?.apart);
-  const sofa = intents.find((t) => role(t) === 'sofa' && t.want.kind.id === 'sofa-3');
+  // Any sofa longer than a 2-seat (a 3-seat, a chesterfield) may give way to one.
+  const sofa = intents.find(
+    (t) => role(t) === 'sofa' && t.want.kind.id !== 'sofa-2' && t.want.w > 1.6,
+  );
   const chairsOf = (t: Intent) =>
     intents.filter(
       (c) => role(c) === 'dining-chair' && (c.near === t.want.ref || c.faces === t.want.ref),
@@ -442,7 +474,10 @@ function swapsFor(input: SolveInput): Swap[] {
         sofas.push({
           intents: intents.map((x) => (x === sofa ? s2 : x)),
           notes: [
-            note(sofa, 'Swapped the 3-seat sofa for a 2-seat to keep 0.60 m to the dining table.'),
+            note(
+              sofa,
+              `Swapped the ${sofa.want.kind.name.replace(/^(\d)/, '$1').replace(/^([A-Z])/, (c) => c.toLowerCase())} for a 2-seat to keep 0.60 m to the dining table.`,
+            ),
           ],
           spare: new Set(),
         });
@@ -1254,7 +1289,28 @@ function solveOnce(input: SolveInput): SolveOutcome {
     list.forEach((c, n) => put(j + n, c));
   };
 
+  let aborted = false;
+  /** The pieces in the index before this solve (fixed: kept where they are). */
+  const fixedCount = ix.placed.length;
+  /**
+   * A swap whose dining and lounge pieces, all placed, can't keep the way between them (or
+   * the dining stands on a way through the flat) is refused whatever comes after: the rest
+   * (cabinets, lamps) isn't placed. Checked once, when the last of them is placed.
+   */
+  const lastGroup = order.reduce(
+    (last, t, i) =>
+      apartRows.get(t.want.ref) || lounge.has(roles.get(t.want.ref) as Role) ? i : last,
+    -1,
+  );
+  const doomed = (): boolean => {
+    const items = [...placed.values()];
+    return tightIn(input, items, fixedCount) || diningOnWay(input, items);
+  };
   for (let i = 0; i < order.length; i++) {
+    if (input.abortTight && i > 0 && i - 1 === lastGroup && doomed()) {
+      aborted = true;
+      break;
+    }
     const t = order[i] as Intent;
     const cs = candidates(t, placed);
     const first = cs[0] ?? null;
@@ -1292,7 +1348,9 @@ function solveOnce(input: SolveInput): SolveOutcome {
     if (best.changed) restore(0, best.list);
   }
 
+  if (input.abortTight && !aborted && lastGroup === order.length - 1 && doomed()) aborted = true;
   const items: Item[] = [];
+  if (aborted) return { items, repaired, dropped, tries, soft: 0, broken: 0, aborted };
   order.forEach((t, i) => {
     const c = chosen[i];
     const name = nameOf(t.want.kind);
