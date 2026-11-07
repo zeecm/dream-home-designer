@@ -81,6 +81,7 @@ export {
   CONCEPT_SCHEMA,
   type FixRequest,
   SPACE_SCHEMA,
+  placedWords,
   SYSTEM_PROMPT,
   type StepOptions,
   type StepPrompt,

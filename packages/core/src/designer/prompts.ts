@@ -159,6 +159,46 @@ export interface FixRequest {
   round: number;
   /** Each failure, with the piece's ref when it is about one. */
   failures: { ref: string | null; text: string }[];
+  /** Where the app placed each piece, in words (`placedWords`). */
+  placed?: string[];
+}
+
+/**
+ * Where the app placed a space's pieces, one line each: the wall it backs onto, or its spot,
+ * and which way it faces. So a fix round can say "move the sofa to W12", knowing where it is.
+ */
+export function placedWords(
+  level: Level,
+  space: Space,
+  refs: Record<string, string>,
+  aliases: AliasMap,
+  north = 0,
+): string[] {
+  const of = aliasOf(aliases);
+  const faces = facesOf(level, space.rooms);
+  const out: string[] = [];
+  for (const [id, ref] of Object.entries(refs).sort(([, a], [, b]) => (a < b ? -1 : 1))) {
+    const it = level.items[id];
+    const kind = it && furnitureKind(it.assetId);
+    if (!it || !kind || kind.ceiling) continue;
+    const r = roomIdAt(level, { x: it.position.x, y: it.position.z });
+    if (!r || !space.rooms.includes(r)) continue;
+    const f = { x: -Math.sin(it.rotationY), y: Math.cos(it.rotationY) };
+    const sz = itemSize(it, kind);
+    // Its back's middle: on a face if it lies on the face's line, within its run.
+    const back = { x: it.position.x - (f.x * sz.d) / 2, y: it.position.z - (f.y * sz.d) / 2 };
+    const wall = faces.find((fc) => {
+      const fr = fc.frame;
+      const u = (back.x - fr.a.x) * fr.d.x + (back.y - fr.a.y) * fr.d.y;
+      const v = ((back.x - fr.a.x) * fr.n.x + (back.y - fr.a.y) * fr.n.y) * fc.side;
+      return Math.abs(v - fr.half) < 0.08 && u >= fc.u0 - 0.05 && u <= fc.u1 + 0.05;
+    });
+    const where = wall
+      ? `against ${of.get(wall.wallId) ?? wall.wallId}`
+      : `free at (${r2(it.position.x)}, ${r2(it.position.z)})`;
+    out.push(`${ref} (${clean(kind.name, 40)}): ${where}, facing ${compass(f, north)}`);
+  }
+  return out;
 }
 
 const fixBlock = (fix: FixRequest | undefined) =>
@@ -170,7 +210,7 @@ const fixBlock = (fix: FixRequest | undefined) =>
         )
         .join(
           '\n',
-        )}\nAnswer again for the whole space so that they pass: move, turn, swap or drop the pieces named (a smaller piece, another wall), keep what works, and say in notes what you couldn't fix and why.\n`
+        )}\n${fix.placed?.length ? `Where the app placed your pieces (data):\n${fix.placed.map((l) => `- ${JSON.stringify(clean(l, 120))}`).join('\n')}\n` : ''}Answer again for the whole space so that they pass: move, turn, swap or drop the pieces named (a smaller piece, another wall), keep what works, and say in notes what you couldn't fix and why.\n`
     : '';
 
 const feedbackBlock = (o: StepOptions) =>

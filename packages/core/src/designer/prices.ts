@@ -103,6 +103,8 @@ export const OUTPUT: Record<
 
 /** How many times a room's answer is sent back when it fails a hard check. */
 export const FIX_ROUNDS = 2;
+/** Tokens a fix round's prompt adds for the failures and where the pieces were placed. */
+const FIX_EXTRA = 600;
 
 export interface StepEstimate {
   step: string;
@@ -169,7 +171,13 @@ export function estimateRun(
               }
             : { input, cachedInput: 0, cacheWrite: 0, output: out.typical };
       const high = usdOf({ input, cachedInput: 0, cacheWrite: 0, output: out.max }, price);
-      usd = { typical: usdOf(typical, price), high, fix: high * rounds };
+      // A fix round sends the prompt again with the answer and the failures (about a typical
+      // answer's length more), and may write as much as the first.
+      const fixOne = usdOf(
+        { input: input + out.typical + FIX_EXTRA, cachedInput: 0, cacheWrite: 0, output: out.max },
+        price,
+      );
+      usd = { typical: usdOf(typical, price), high, fix: fixOne * rounds };
     }
     return {
       step: p.step,

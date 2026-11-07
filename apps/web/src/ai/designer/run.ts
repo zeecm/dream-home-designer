@@ -18,6 +18,7 @@ import {
   levelBounds,
   parseConcept,
   parseSpaceDesign,
+  placedWords,
   priceOf,
   resolveAsset,
   roomStep,
@@ -617,21 +618,30 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
 
     const bounds = levelBounds(r.level);
     /** The hard checks a space's answer fails (that the plan didn't already), in the app's words. */
-    const failing = (s: (typeof spaces)[number], answer: SpaceDesign): FixRequest['failures'] => {
+    /**
+     * The hard checks one space's answer fails (that the plan didn't already), in the app's
+     * words, and where it placed each piece: worked out on that space alone. Failures that
+     * furnishing can't fix (a missing window, more people than bedrooms) aren't sent back.
+     */
+    const failing = (s: (typeof spaces)[number], answer: SpaceDesign) => {
       const trial: DraftDesign = {
         ...design,
-        spaces: { ...design.spaces, [s.key]: { name: s.name, status: 'done', design: answer } },
+        spaces: { [s.key]: { name: s.name, status: 'done', design: answer } },
       };
       const res = designResult(ctx.base, ctx.before, trial, o.result);
-      return res.checks
-        .filter(
-          (c) =>
-            c.hard &&
-            !c.already &&
-            ((c.part && 'space' in c.part && c.part.space === s.key) ||
-              (!!c.roomId && s.rooms.includes(c.roomId))),
-        )
-        .map((c) => ({ ref: (c.itemId && res.refs[c.itemId]) || null, text: c.text }));
+      const mine = res.checks.filter(
+        (c) =>
+          c.hard &&
+          !c.already &&
+          ((c.part && 'space' in c.part && c.part.space === s.key) ||
+            (!!c.roomId && s.rooms.includes(c.roomId))),
+      );
+      return {
+        fixable: mine
+          .filter((c) => !c.unfixable)
+          .map((c) => ({ ref: (c.itemId && res.refs[c.itemId]) || null, text: c.text })),
+        placed: placedWords(res.level, s, res.refs, design.aliases, ctx.site?.north ?? 0),
+      };
     };
     // A run-stopping error (a refused key, a quota): set before the first room's gate opens,
     // so no other room is sent after it.
@@ -658,14 +668,15 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
           // Placed and checked: what fails goes back to the designer, at most twice.
           const first = failing(s, current);
           let fixes = 0;
-          let left = first;
-          while (left.length && fixes < FIX_ROUNDS && (await mayStart())) {
+          let now = first;
+          while (now.fixable.length && fixes < FIX_ROUNDS && (await mayStart())) {
             fixes++;
+            const left = now.fixable;
             st.fixing = { round: fixes, problems: left.length };
             st.status = 'running';
             say(`${s.name}: checking… fixing ${plural(left.length, 'problem')}.`);
             update();
-            const fix: FixRequest = { round: fixes, failures: left };
+            const fix: FixRequest = { round: fixes, failures: left, placed: now.placed };
             const again = await step(
               roomStep(ctx, s, r.level, design.aliases, {
                 concept: design.concept,
@@ -684,14 +695,21 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
               st.error = null;
               break;
             }
-            current = merge(again);
-            left = failing(s, current);
+            const next = failing(s, merge(again));
+            // Kept only if it fails less; no better twice running is a room that can't pass,
+            // and the second round isn't spent on it.
+            if (next.fixable.length < left.length) {
+              current = merge(again);
+              now = next;
+            } else break;
           }
           design.spaces[s.key] = {
             name: s.name,
             status: 'done',
             design: current,
-            ...(fixes ? { fixes, fixed: Math.max(0, first.length - left.length) } : {}),
+            ...(fixes
+              ? { fixes, fixed: Math.max(0, first.fixable.length - now.fixable.length) }
+              : {}),
           };
           say(`${s.name} done. ${usdText(spentSoFar())} so far.`);
         } else {

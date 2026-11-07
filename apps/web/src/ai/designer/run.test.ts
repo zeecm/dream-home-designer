@@ -535,16 +535,29 @@ describe('fix rounds: the app checks each answer before it is shown (designer v2
     expect(prov.calls).toHaveLength(6);
   });
 
-  it('11: an answer that fails twice keeps failing after two fix rounds, and is kept', async () => {
+  it('11: an answer the fix doesn’t improve is kept, and the second round isn’t spent', async () => {
     const prov = provider('anthropic', {
       auto: true,
       reply: (c) => (living(c) ? sse(facingWall()) : null),
     });
     const r = start('anthropic', { fetch: prov.fetch });
     const { design } = await r.run;
-    expect(prov.calls.filter(living)).toHaveLength(3);
+    expect(prov.calls.filter(living)).toHaveLength(2);
     const space = Object.values(design.spaces).find((s) => s.name.startsWith('Living'));
-    expect(space).toMatchObject({ status: 'done', fixes: 2, fixed: 0 });
+    expect(space).toMatchObject({ status: 'done', fixes: 1, fixed: 0 });
+  });
+
+  it('the fix round says where the app placed each piece', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => (living(c) && n === 1 ? sse(facingWall()) : null),
+    });
+    await start('anthropic', { fetch: prov.fetch }).run;
+    const body = promptOf(prov.calls.filter(living)[1]?.body);
+    expect(body).toContain('Where the app placed your pieces (data):');
+    expect(body).toMatch(
+      /"sofa1 \(3-seat sofa\): free at \(\d+(\.\d+)?, \d+(\.\d+)?\), facing [NESW]{1,2}"/,
+    );
   });
 });
 
