@@ -6382,6 +6382,11 @@ textarea {
 .elev-walls {
   gap: 2px;
 }
+.elev-menu-label {
+  margin-bottom: -4px;
+  color: var(--muted);
+  font-size: var(--fs-small);
+}
 .elev-wall-choice {
   height: 44px;
   padding: 0 10px;

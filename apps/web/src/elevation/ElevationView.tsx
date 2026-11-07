@@ -232,6 +232,7 @@ export function ElevationView() {
         Show <span aria-hidden="true">{icons.chevronDown}</span>
       </summary>
       <div className="elev-menu-body">
+        <span className="elev-menu-label">Furniture</span>
         <Segmented
           label="Furniture"
           value={prefs.furniture}
@@ -241,11 +242,12 @@ export function ElevationView() {
           ]}
           onChange={(furniture) => setPrefs({ ...prefs, furniture })}
         />
+        <span className="elev-menu-label">Dimensions</span>
         <Segmented
           label="Dimensions"
           value={prefs.dims ? 'on' : 'off'}
           options={[
-            { value: 'on', label: 'Dimensions' },
+            { value: 'on', label: 'Shown' },
             { value: 'off', label: 'None' },
           ]}
           onChange={(v) => setPrefs({ ...prefs, dims: v === 'on' })}
@@ -418,20 +420,22 @@ export function ElevationView() {
               {icons.more}
             </summary>
             <div className="elev-menu-body">
+              <span className="elev-menu-label">Furniture</span>
               <Segmented
                 label="Furniture"
                 value={prefs.furniture}
                 options={[
-                  { value: 'wall', label: 'Furniture' },
+                  { value: 'wall', label: 'Against the wall' },
                   { value: 'none', label: 'None' },
                 ]}
                 onChange={(furniture) => setPrefs({ ...prefs, furniture })}
               />
+              <span className="elev-menu-label">Dimensions</span>
               <Segmented
                 label="Dimensions"
                 value={prefs.dims ? 'on' : 'off'}
                 options={[
-                  { value: 'on', label: 'Dimensions' },
+                  { value: 'on', label: 'Shown' },
                   { value: 'off', label: 'None' },
                 ]}
                 onChange={(v) => setPrefs({ ...prefs, dims: v === 'on' })}
