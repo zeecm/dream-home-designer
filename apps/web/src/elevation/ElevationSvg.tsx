@@ -241,6 +241,33 @@ export function ElevationSvg({
     if (w.glassAbove) out.push(glass);
   }
 
+  // Floor and ceiling, and the side walls cut through at the ends.
+  const left = Math.min(0, ...elev.ends.map((e) => e.u0));
+  const right = Math.max(elev.width, ...elev.ends.map((e) => e.u1));
+  const frame = (
+    <g key="frame">
+      {elev.ends.map((e) => (
+        <g key={`e${e.u0}`}>
+          {rect(
+            { u0: e.u0, u1: e.u1, z0: 0, z1: C },
+            { fill: sectionFill(e.status), stroke: PAPER.ink, strokeWidth: sw },
+          )}
+        </g>
+      ))}
+      <line x1={left} x2={right} y1={Y(C)} y2={Y(C)} stroke={PAPER.ink} strokeWidth={sw} />
+      <line
+        x1={left - px(12)}
+        x2={right + px(12)}
+        y1={Y(0)}
+        y2={Y(0)}
+        stroke={PAPER.ink}
+        strokeWidth={px(2)}
+      />
+    </g>
+  );
+
+  out.push(frame);
+
   // The renovation on this line: hacked and new wall.
   for (const [i, [u0, u1]] of (changes?.hacked ?? []).entries()) {
     out.push(
@@ -404,31 +431,6 @@ export function ElevationSvg({
     );
   }
 
-  // Floor and ceiling, and the side walls cut through at the ends.
-  const left = Math.min(0, ...elev.ends.map((e) => e.u0));
-  const right = Math.max(elev.width, ...elev.ends.map((e) => e.u1));
-  const frame = (
-    <g key="frame">
-      {elev.ends.map((e) => (
-        <g key={`e${e.u0}`}>
-          {rect(
-            { u0: e.u0, u1: e.u1, z0: 0, z1: C },
-            { fill: sectionFill(e.status), stroke: PAPER.ink, strokeWidth: sw },
-          )}
-        </g>
-      ))}
-      <line x1={left} x2={right} y1={Y(C)} y2={Y(C)} stroke={PAPER.ink} strokeWidth={sw} />
-      <line
-        x1={left - px(12)}
-        x2={right + px(12)}
-        y1={Y(0)}
-        y2={Y(0)}
-        stroke={PAPER.ink}
-        strokeWidth={px(2)}
-      />
-    </g>
-  );
-
   // Selected: an accent outline.
   const sel = (() => {
     if (!selected) return null;
@@ -538,7 +540,7 @@ export function ElevationSvg({
       <g key={key}>
         {rect(r, {
           fill: 'transparent',
-          'data-hit': key,
+          'data-elev-hit': key,
           'aria-label': label,
           style: { cursor: 'pointer' },
         })}
@@ -624,7 +626,6 @@ export function ElevationSvg({
         </pattern>
       </defs>
       {out}
-      {frame}
       {sel && rect(sel, { fill: 'none', stroke: PAPER.accent, strokeWidth: px(2.5) })}
       {dimsOut}
       {hits}

@@ -167,6 +167,14 @@ describe('wallElevation', () => {
       piece('it_u', 'kitchen-wall', 2, 0.225),
     );
     expect(elev(s, 'C').notes).toEqual([]);
+    // Over a hob it is 0.55 m from the worktop (not from the hob's glass on it): a note.
+    const h = withItems(
+      roomR(),
+      piece('it_b', 'kitchen-hob', 2, 0.35),
+      piece('it_u', 'kitchen-wall', 2, 0.225),
+    );
+    expect(elev(h, 'C').notes.map((n) => n.text.slice(0, 6))).toEqual(['0.55 m']);
+    expect(elev(h, 'C').heights.find((x) => x.what === 'counter')?.marks).toEqual([0.9]);
   });
 
   it('AC11: a wall run on the shelter wall gets a note; on a structural wall none', () => {

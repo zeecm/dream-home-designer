@@ -150,7 +150,11 @@ export function ElevationView() {
   if (!face || !elev) {
     const gone = variant === 'after' && takenDown;
     return (
-      <section className="elev-pane elev-gone" aria-label="Wall seen straight on">
+      <section
+        className="elev-pane elev-gone"
+        aria-label="Wall seen straight on"
+        data-testid="wall-view"
+      >
         <div className="elev-gone-body">
           <h2 className="panel-title" ref={headRef} tabIndex={-1}>
             {gone ? 'This wall is taken down in the renovation.' : 'That wall is gone.'}
@@ -593,7 +597,9 @@ function Sheet({
       return;
     }
     lastTap.current = now;
-    const hit = (g.target as Element | null)?.closest?.('[data-hit]')?.getAttribute('data-hit');
+    const hit = (g.target as Element | null)
+      ?.closest?.('[data-elev-hit]')
+      ?.getAttribute('data-elev-hit');
     const ed = useEditor.getState();
     if (!hit) {
       ed.select(null);

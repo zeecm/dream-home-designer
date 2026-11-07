@@ -118,6 +118,8 @@ export interface ElevItem {
   lines: number[];
   /** Hung on the wall (a wall cabinet). */
   hung: boolean;
+  /** Its top as made (a counter's worktop), not a hob's glass or a sink's rim on it. */
+  top: number;
 }
 
 export interface ElevPoint {
@@ -357,6 +359,7 @@ function projectItem(face: RoomFace, it: Item): ElevItem | null {
     fronts,
     lines,
     hung: furnitureLayer(kind) === 'high',
+    top: it.position.y + kind.size.h * k.y,
   };
 }
 
@@ -663,7 +666,7 @@ export function wallElevation(
   for (const it of items) {
     if (!it.against) continue;
     if (it.carpentry === 'base')
-      addHeight({ u: it.outline.u0, side: 'left', marks: [it.outline.z1], what: 'counter' });
+      addHeight({ u: it.outline.u0, side: 'left', marks: [it.top], what: 'counter' });
     else if (it.carpentry === 'wall')
       addHeight({
         u: it.outline.u1,
@@ -720,7 +723,7 @@ export function wallElevation(
     let worst: { base: ElevItem; gap: number; hob: boolean } | null = null;
     for (const b of bases) {
       if (overlap(cab.outline.u0, cab.outline.u1, b.outline.u0, b.outline.u1) <= 0.05) continue;
-      const gap = cab.outline.z0 - b.outline.z1;
+      const gap = cab.outline.z0 - b.top;
       if (gap < 0) continue;
       const hob = b.assetId === 'kitchen-hob';
       const short = gap < (hob ? GAP_HOB : GAP_USUAL) - 1e-6;
@@ -735,7 +738,7 @@ export function wallElevation(
         at: {
           u0: Math.max(cab.outline.u0, worst.base.outline.u0),
           u1: Math.min(cab.outline.u1, worst.base.outline.u1),
-          z0: worst.base.outline.z1,
+          z0: worst.base.top,
           z1: cab.outline.z0,
         },
       });

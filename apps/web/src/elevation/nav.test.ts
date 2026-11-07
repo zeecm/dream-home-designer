@@ -82,10 +82,10 @@ describe('the wall view', () => {
 
   it('names the picture after the room and the face', () => {
     expect(imageName('Main bedroom', { letter: 'C', label: 'bed wall' })).toBe(
-      'Main bedroom – C bed wall.png',
+      'Main bedroom - C bed wall.png',
     );
     expect(imageName('Study/office', { letter: 'B', label: null })).toBe(
-      'Study office – Wall B.png',
+      'Study office - Wall B.png',
     );
   });
 });

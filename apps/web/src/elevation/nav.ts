@@ -89,8 +89,11 @@ export function facePlace(level: Level, face: RoomFace): { at: number; of: numbe
   return { at: i + 1, of: list.length };
 }
 
-/** The file name a saved picture of a face gets: "Main bedroom – C bed wall.png". */
+/**
+ * The file name a saved picture of a face gets: "Main bedroom - C bed wall.png" (a plain
+ * hyphen: Chrome drops a download name with an en dash in it for "download").
+ */
 export function imageName(roomName: string, face: Pick<RoomFace, 'letter' | 'label'>): string {
   const what = face.label ? `${face.letter} ${face.label}` : `Wall ${face.letter}`;
-  return `${roomName} – ${what}.png`.replace(/[\\/:*?"<>|]+/g, ' ');
+  return `${roomName} - ${what}.png`.replace(/[\\/:*?"<>|]+/g, ' ');
 }

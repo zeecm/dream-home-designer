@@ -179,7 +179,8 @@ function segsOf(ctx: Ctx, loop: readonly string[]): Seg[] {
     const a = framePoint(f, span[0], k);
     const b = framePoint(f, span[1], k);
     const [p, q] = side === 'left' ? [a, b] : [b, a];
-    if (Math.hypot(q.x - p.x, q.y - p.y) < 1e-6) continue;
+    // A face its mitres use up (a short wall at a corner) is no face.
+    if (Math.hypot(q.x - p.x, q.y - p.y) < 0.005) continue;
     out.push({
       p,
       q,
