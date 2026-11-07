@@ -255,7 +255,10 @@ Decided 7 Nov 2026 (tech-lead and UX review), as the hard line and the softer ad
 | Hinged wardrobe | 0.60 m in front | |
 | Way past a bed to its usable side (P3) | 0.50 m | 0.60 m |
 
-Dining zone and lounge zone keep 0.90 m between them (advice); a TV stands on its console; an
+Dining zone and lounge zone keep 0.90 m between them, measured from the dining group (the table
+and its chairs) to the sofa, armchairs, coffee table and TV console (decided 7 Nov 2026): the
+solver keeps it wherever any clear pose off the ways through the flat does, and only where none
+does is it advice ("Leave 0.90 m … 0.03 m now"); a TV stands on its console; an
 armchair faces the TV or the sofa's front; chairs go evenly round a table; a desk gets a desk
 chair.
 
@@ -479,7 +482,9 @@ designs").
 **Slice 1 (M–L): layouts that pass, before any chat UI.** Inside v1's flow:
 - Core: principles P1–P4 as checks driven by a programme table per room use and relationship rows
   per catalogue kind; hard/soft split; "already in your plan" vs caused; waivers.
-- The tech lead's intent-plus-solver placement; the automatic fix rounds (up to 2) before a
+- The tech lead's intent-plus-solver placement; the automatic fix rounds (a room goes back once on
+  Quick, twice on Thorough, and a run sends 3 fix requests at most; "at most" in the cost check
+  prices those 3 and says "up to 3 fix-ups included") before a
   version is shown; the version card's Checks line and "Doesn't pass" parts unticked in Accept,
   with Accept anyway.
 - The household's "who sleeps where" added to the brief (room rows get people chips).
