@@ -105,14 +105,15 @@ export function resolveAsset(raw: string, models: Project['models'] = {}): Furni
 const BUILT_IN = new Map(FURNITURE.map((k) => [k.id, k]));
 
 /**
- * Which pieces go first when they compete for room: kitchen runs and built-ins, beds,
- * wardrobes and storage, sofas and tables, desks, chairs and side tables, lamps and decor.
+ * Which pieces go first when they compete for room: beds (a bedroom is for sleeping, and a
+ * bed can't be narrowed), kitchen runs and built-ins, wardrobes and storage, sofas and
+ * tables, desks, chairs and side tables, lamps and decor.
  */
 export function priorityOf(k: FurnitureKind): number {
   const id = k.id;
   if (k.category === 'Lighting' || k.category === 'Decor') return 6;
-  if (k.carpentry || id.startsWith('kitchen-') || id === 'fridge' || id === 'washer') return 0;
-  if (id.startsWith('bed-') || k.shape === 'bed') return 1;
+  if (id.startsWith('bed-') || k.shape === 'bed') return 0;
+  if (k.carpentry || id.startsWith('kitchen-') || id === 'fridge' || id === 'washer') return 1;
   if (/chair|stool|side-table|ottoman|bedside|nightstand/.test(id)) return 5;
   if (/desk/.test(id)) return 4;
   if (/wardrobe|drawers|cabinet|shelf|shelves|bookcase|bookshelf/.test(id)) return 2;

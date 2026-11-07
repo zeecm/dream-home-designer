@@ -171,7 +171,21 @@ describe('placing pieces (criteria 7–15)', () => {
     expect(kept).toContain('bed-queen');
     expect(kept).toContain('built-in-wardrobe');
     expect(r.dropped.filter((n) => n.ref === 'bed1')).toEqual([]);
-    expect(r.repaired.find((n) => n.ref === 'bed1')?.text).toMatch(/another wall/);
+  });
+
+  it('beds go before built-ins: the bed keeps its wall and the wardrobe moves', () => {
+    expect(priorityOf(furnitureKind('bed-single')!)).toBeLessThan(
+      priorityOf(furnitureKind('built-in-wardrobe')!),
+    );
+    const r = result(
+      SAMPLE_KEYS.bedroom,
+      answer([
+        { ref: 'ward1', assetId: 'built-in-wardrobe', wall: 'W5', width: 1.8 },
+        { ref: 'bed1', assetId: 'bed-queen', wall: 'W5', along: 1.5 },
+      ]),
+    );
+    expect(r.repaired.filter((n) => n.ref === 'bed1' && /another wall/.test(n.text))).toEqual([]);
+    expect(Object.values(r.level.items).some((i) => i.assetId === 'built-in-wardrobe')).toBe(true);
   });
 
   it('11: a sink cabinet in the living room is left out: the sink stays in the wet area', () => {
