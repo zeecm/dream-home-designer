@@ -16,12 +16,15 @@ vi.hoisted(() => {
       return data.size;
     },
   };
+  // The Older person check is on hold: these tests turn its flag on.
+  data.set('dhd-feature-ageing', '1');
 });
 
 const { flushWalkways, startAgeing, startWalkways, useWalkways } = await import('./walkways');
 const { furnitureKind, newItem } = await import('@dhd/core');
 const { currentLevel } = await import('../store');
 const { useEditor } = await import('../editor');
+const { AGEING_FLAG, resetFeatures } = await import('../features');
 
 describe('the walkway runner', () => {
   it('runs the ageing check with clearance checks off, and stops it when it is off', () => {
@@ -72,5 +75,17 @@ describe('the walkway runner', () => {
     expect(routes.some((i) => i.itemIds.includes('it_runner_sofa'))).toBe(true);
     expect(s.ageing?.passed.some((p) => p.kind === 'route')).toBe(false);
     useEditor.setState({ preview: null });
+  });
+
+  it('with the Older person check on hold (no flag), it never runs, whatever is asked', () => {
+    window.localStorage.removeItem(AGEING_FLAG);
+    resetFeatures();
+    startWalkways(false);
+    startAgeing({ profile: 'wheelchair' });
+    flushWalkways();
+    expect(useWalkways.getState().ageingChoice).toBeNull();
+    expect(useWalkways.getState().ageing).toBeNull();
+    window.localStorage.setItem(AGEING_FLAG, '1');
+    resetFeatures();
   });
 });
