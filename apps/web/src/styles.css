@@ -5842,7 +5842,8 @@ textarea {
   justify-content: space-between;
   font-size: var(--fs-hint);
 }
-.ageing-oneline span {
+.ageing-oneline > span {
+  flex: 1;
   min-width: 0;
 }
 /* The list's top stays in place while its lines scroll. */
