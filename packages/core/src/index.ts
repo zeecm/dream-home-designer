@@ -40,3 +40,6 @@ export * from './sceneFacts';
 export * from './planSketch';
 export * from './lamps';
 export * from './portals';
+export * from './ageing';
+export * from './ageing-zones';
+export * from './ease';

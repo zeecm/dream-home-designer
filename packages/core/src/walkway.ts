@@ -21,7 +21,7 @@ import {
 } from './grid';
 import { type WallFrame, planGeometry } from './plan';
 import { roomArea, roomShapes } from './rooms';
-import type { Level, Vec2 } from './schema';
+import type { Item, Level, Vec2 } from './schema';
 
 /**
  * Walkways: room to walk from the main door to every room (0.90 m), and from a bedroom's door
@@ -48,7 +48,8 @@ const SLACK = 0.1;
 const CAP_MARGIN = 0.02;
 /** How far to look for the obstacles either side of a narrow point. */
 const REFINE_R = 1.6;
-const OUTSIDE = -2;
+/** A raster cell's owner when it is outside the rooms. */
+export const OUTSIDE = -2;
 
 export interface WalkwayRoute {
   route: 'circulation' | 'bed';
@@ -77,7 +78,7 @@ export interface WalkwayReport {
   grid: { cell: number; cells: number };
 }
 
-interface Throat {
+export interface Throat {
   openingId: string;
   f: WallFrame;
   u0: number;
@@ -91,7 +92,7 @@ interface Throat {
 }
 
 /** Everything that doesn't change while furniture moves. */
-interface Bare {
+export interface Bare {
   g: Grid;
   room: Int16Array;
   rooms: { id: string; area: number }[];
@@ -118,6 +119,8 @@ const bareCache = new WeakMap<
 >();
 
 const buffers = new Buffers();
+/** The bare plan's own: a bare raster made between passes never overwrites a pass's `near`. */
+const bareBuffers = new Buffers();
 const mainSearch = new Search(0);
 const auxSearch = new Search(0);
 let solidBuf = new Uint8Array(0);
@@ -244,14 +247,14 @@ function bareOf(level: Level): Bare {
   }
 
   const width = new Float32Array(g.n);
-  buffers.fit(g);
-  distanceField(g, solid, buffers);
+  bareBuffers.fit(g);
+  distanceField(g, solid, bareBuffers);
   for (let k = 0; k < g.n; k++) {
     width[k] = solid[k]
       ? -1
       : throatOf[k] !== -1
         ? WIDE
-        : Math.min(WIDE, 2 * Math.sqrt(buffers.d2[k] as number) * c);
+        : Math.min(WIDE, 2 * Math.sqrt(bareBuffers.d2[k] as number) * c);
   }
 
   // Rooms joined (a door, a passage, a boundary): neighbouring open cells of two rooms.
@@ -341,14 +344,14 @@ function throatWidths(t: Throat, fps: Vec2[][], g: Grid, width: Float32Array) {
 }
 
 /** The obstacles a narrow point is measured against: the bare polygons, then the pieces. */
-interface Obstacles {
+export interface Obstacles {
   polys: Vec2[][];
   nBare: number;
   ids: string[];
 }
 
 /** The raster the polygons were drawn on, to find "outside the rooms", which has none. */
-interface Raster {
+export interface Raster {
   g: Grid;
   solid: Uint8Array;
   owner: Int32Array;
@@ -434,7 +437,7 @@ function barOf(a: Vec2, b: Vec2, have: number): { a: Vec2; b: Vec2 } {
   };
 }
 
-interface Measure {
+export interface Measure {
   have: number;
   /** The need there: a doorway's pinch never needs more than the doorway is wide. */
   need: number;
@@ -557,27 +560,39 @@ function polyline(g: Grid, cells: number[]): Vec2[] {
   return out;
 }
 
-const reports = new WeakMap<Level, WalkwayReport>();
-
 /**
- * Walkways on a level as it is shown: from the main door to every room (each room's widest
- * way), and from a bedroom's door to each usable side of its bed. A short route blames the
- * pieces either side of its narrowest point; one issue per piece and pinch, naming every room
- * or bed side beyond it.
+ * The furniture rastered over the bare plan, its widths and the widest ways from the main
+ * door: shared by walkways and the ageing check. Its arrays are module buffers reused by the
+ * next pass, so it is kept for one level at a time: call this again (it is free for the same
+ * level) rather than holding on to one across levels.
  */
-export function walkwayReport(level: Level): WalkwayReport {
-  const cached = reports.get(level);
-  if (cached) return cached;
+export interface FurnishedPass {
+  level: Level;
+  bare: Bare;
+  pieces: Item[];
+  fps: Vec2[][];
+  solid: Uint8Array;
+  owner: Int32Array;
+  width: Float32Array;
+  /** Each cell's nearest solid cell. */
+  near: Int32Array;
+  /** The first cell reached of each room, on the furnished widest ways (-1: not reached). */
+  first: Int32Array;
+  search: Search;
+  raster: Raster;
+  bareRaster: Raster;
+  obs: Obstacles;
+  bareObs: Obstacles;
+  nBare: number;
+}
+
+let pass: FurnishedPass | null = null;
+
+/** The furnished pass for a level (recomputed whenever the level isn't the last one). */
+export function furnishedPass(level: Level): FurnishedPass {
+  if (pass && pass.level === level && Object.isFrozen(level)) return pass;
   const bare = bareOf(level);
   const { g, room, rooms, throats, throatOf } = bare;
-  const grid = { cell: g.c, cells: g.n };
-  if (!bare.start) {
-    const r: WalkwayReport = { status: 'no-main-door', start: null, routes: [], issues: [], grid };
-    if (Object.isFrozen(level)) reports.set(level, r);
-    return r;
-  }
-
-  // The furniture: blocking pieces, rastered over the bare plan.
   const pieces = Object.values(level.items).filter(blocks);
   const fps = pieces.map((it) => itemFootprint(it));
   if (solidBuf.length < g.n) {
@@ -605,18 +620,139 @@ export function walkwayReport(level: Level): WalkwayReport {
   }
   for (const t of throats) throatWidths(t, fps, g, width);
   const first = new Int32Array(rooms.length).fill(-1);
-  widestWays(g, width, bare.startCells, null, mainSearch, {
-    wide: WIDE,
-    step: STEP,
-    room,
+  if (bare.startCells.length) {
+    widestWays(g, width, bare.startCells, null, mainSearch, {
+      wide: WIDE,
+      step: STEP,
+      room,
+      first,
+      notIn: throatOf,
+    });
+  } else {
+    mainSearch.fit(g.n);
+    mainSearch.id++;
+  }
+  pass = {
+    level,
+    bare,
+    pieces,
+    fps,
+    solid,
+    owner,
+    width,
+    near: buffers.near,
     first,
-    notIn: throatOf,
-  });
-  const bareRaster: Raster = { g, solid: bare.solid, owner: bare.owner };
-  const raster: Raster = { g, solid, owner };
+    search: mainSearch,
+    raster: { g, solid, owner },
+    bareRaster: { g, solid: bare.solid, owner: bare.owner },
+    obs: { polys: [...bare.polys, ...fps], nBare, ids: pieces.map((p) => p.id) },
+    bareObs: { polys: bare.polys, nBare, ids: [] },
+    nBare,
+  };
+  return pass;
+}
 
-  const bareObs: Obstacles = { polys: bare.polys, nBare, ids: [] };
-  const obs: Obstacles = { polys: [...bare.polys, ...fps], nBare, ids: pieces.map((p) => p.id) };
+/**
+ * The narrowest point of a way of cells on the pass's furnished raster (or the bare one),
+ * measured exactly where it comes within 0.10 m of `need`. For the ageing check.
+ */
+export function measureWay(p: FurnishedPass, cells: number[], need: number, bare = false): Measure {
+  const b = p.bare;
+  return bare
+    ? measure(cells, p.bareRaster, b.width, b.throatOf, b.throats, need, p.bareObs)
+    : measure(cells, p.raster, p.width, b.throatOf, b.throats, need, p.obs);
+}
+
+/** The piece a measured obstacle index is, if it is one. */
+export const passPiece = (p: FurnishedPass, polyIdx: number): string | null =>
+  polyIdx >= p.nBare ? (p.obs.ids[polyIdx - p.nBare] ?? null) : null;
+
+/** Pieces narrowing a bare way (where it's now under `need`) or standing in it. */
+export function narrowingPieces(p: FurnishedPass, cells: number[], need: number): string[] {
+  const { solid, owner, width, near, nBare, obs, bare } = p;
+  const c = bare.g.c;
+  const out = new Set<string>();
+  for (const k of cells) {
+    if (solid[k] && (owner[k] as number) >= nBare)
+      out.add(obs.ids[(owner[k] as number) - nBare] as string);
+    else if (
+      !solid[k] &&
+      (width[k] as number) < need &&
+      (width[k] as number) < (bare.width[k] as number) - c
+    ) {
+      const nk = near[k] as number;
+      const o = nk >= 0 ? (owner[nk] as number) : -1;
+      if (o >= nBare) out.add(obs.ids[o - nBare] as string);
+    }
+  }
+  return [...out];
+}
+
+/**
+ * Where a closed way is drawn shut: across the doorway a piece fills (its span on the wall's
+ * centre line), else across the bare way just before the first piece standing in it.
+ */
+export function closedBarOf(p: FurnishedPass, bareWay: number[]): [Vec2, Vec2] {
+  const { solid, owner, nBare, bare } = p;
+  const { g, throatOf, throats } = bare;
+  const blocked = (k: number) => !!solid[k] && (owner[k] as number) >= nBare;
+  const hit = bareWay.findIndex(blocked);
+  if (hit < 0) {
+    const q = cellCentre(g, bareWay[bareWay.length - 1] as number);
+    return [q, q];
+  }
+  for (let i = hit; i < bareWay.length && blocked(bareWay[i] as number); i++) {
+    const t = throatOf[bareWay[i] as number] as number;
+    const th = t >= 0 ? throats[t] : undefined;
+    if (th) {
+      const at = (u: number) => ({ x: th.f.a.x + th.f.d.x * u, y: th.f.a.y + th.f.d.y * u });
+      return [at(th.u0), at(th.u1)];
+    }
+  }
+  const q = cellCentre(g, bareWay[Math.max(0, hit - 1)] as number);
+  const r = across(q, p.bareObs, p.bareRaster);
+  return r ? [r.a, r.b] : [q, q];
+}
+
+/** Pieces standing in a bare way (it is closed). */
+export function standingPieces(p: FurnishedPass, cells: number[]): string[] {
+  const out = new Set<string>();
+  for (const k of cells) {
+    const o = p.owner[k] as number;
+    if (p.solid[k] && o >= p.nBare) out.add(p.obs.ids[o - p.nBare] as string);
+  }
+  return [...out];
+}
+
+/** A way's cells as plan points (at most 60). */
+export const wayPoints = (p: FurnishedPass, cells: number[]): Vec2[] => polyline(p.bare.g, cells);
+
+/** The bare plan rastered (rooms, throats, the bare widest ways from the main door). */
+export type BarePlan = Bare;
+export type { Throat as DoorThroat, Measure as WayMeasure };
+
+const reports = new WeakMap<Level, WalkwayReport>();
+
+/**
+ * Walkways on a level as it is shown: from the main door to every room (each room's widest
+ * way), and from a bedroom's door to each usable side of its bed. A short route blames the
+ * pieces either side of its narrowest point; one issue per piece and pinch, naming every room
+ * or bed side beyond it.
+ */
+export function walkwayReport(level: Level): WalkwayReport {
+  const cached = reports.get(level);
+  if (cached) return cached;
+  const bare = bareOf(level);
+  const { g, room, rooms, throats, throatOf } = bare;
+  const grid = { cell: g.c, cells: g.n };
+  if (!bare.start) {
+    const r: WalkwayReport = { status: 'no-main-door', start: null, routes: [], issues: [], grid };
+    if (Object.isFrozen(level)) reports.set(level, r);
+    return r;
+  }
+
+  const pass = furnishedPass(level);
+  const { solid, owner, width, raster, bareRaster, obs, bareObs, nBare, pieces, first } = pass;
   const pieceOf = (polyIdx: number) =>
     polyIdx >= nBare ? (obs.ids[polyIdx - nBare] ?? null) : null;
 
@@ -632,47 +768,9 @@ export function walkwayReport(level: Level): WalkwayReport {
   };
 
   /** Pieces narrowing the bare way (where it's now under the need) or standing in it. */
-  const narrowing = (cells: number[], need: number) => {
-    const out = new Set<string>();
-    for (const k of cells) {
-      if (solid[k] && (owner[k] as number) >= nBare)
-        out.add(obs.ids[(owner[k] as number) - nBare] as string);
-      else if (
-        !solid[k] &&
-        (width[k] as number) < need &&
-        (width[k] as number) < (bare.width[k] as number) - g.c
-      ) {
-        const nk = buffers.near[k] as number;
-        const o = nk >= 0 ? (owner[nk] as number) : -1;
-        if (o >= nBare) out.add(obs.ids[o - nBare] as string);
-      }
-    }
-    return [...out];
-  };
+  const narrowing = (cells: number[], need: number) => narrowingPieces(pass, cells, need);
 
-  /**
-   * Where a closed way is drawn shut: across the doorway a piece fills (its span on the wall's
-   * centre line), else across the bare way just before the first piece standing in it.
-   */
-  const closedBar = (bareWay: number[]): [Vec2, Vec2] => {
-    const blocked = (k: number) => !!solid[k] && (owner[k] as number) >= nBare;
-    const hit = bareWay.findIndex(blocked);
-    if (hit < 0) {
-      const p = cellCentre(g, bareWay[bareWay.length - 1] as number);
-      return [p, p];
-    }
-    for (let i = hit; i < bareWay.length && blocked(bareWay[i] as number); i++) {
-      const t = throatOf[bareWay[i] as number] as number;
-      const th = t >= 0 ? throats[t] : undefined;
-      if (th) {
-        const at = (u: number) => ({ x: th.f.a.x + th.f.d.x * u, y: th.f.a.y + th.f.d.y * u });
-        return [at(th.u0), at(th.u1)];
-      }
-    }
-    const p = cellCentre(g, bareWay[Math.max(0, hit - 1)] as number);
-    const r = across(p, bareObs, bareRaster);
-    return r ? [r.a, r.b] : [p, p];
-  };
+  const closedBar = (bareWay: number[]) => closedBarOf(pass, bareWay);
 
   const routes: WalkwayRoute[] = [];
   const pinchOf = new Map<WalkwayRoute, Measure>();
@@ -770,7 +868,7 @@ export function walkwayReport(level: Level): WalkwayReport {
       { roomId: r.id },
       'circulation',
       base,
-      { search: mainSearch, cell: first[idx] as number },
+      { search: pass.search, cell: first[idx] as number },
       bare.search.path(bareCell),
       idx,
     );
@@ -837,7 +935,7 @@ export function walkwayReport(level: Level): WalkwayReport {
           to,
           'bed',
           BED_WAY_NEED,
-          { search: mainSearch, cell: best(mainSearch, width) },
+          { search: pass.search, cell: best(pass.search, width) },
           bare.search.path(bc),
         );
       }

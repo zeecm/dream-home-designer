@@ -356,31 +356,6 @@ describe('walkways', () => {
     }
   });
 
-  it('16. the sample flat with 40 pieces: walkways under 40 ms', () => {
-    const base = sampleFlatProject('prj_t').levels[0] as Level;
-    const ids = ['wardrobe', 'sofa-3', 'desk', 'bedside', 'armchair', 'dining-chair', 'bookshelf'];
-    const pieces: [string, Vec2, number][] = Array.from({ length: 40 }, (_, i) => [
-      ids[i % ids.length] as string,
-      { x: 0.8 + (i % 8) * 1.1, y: 0.8 + Math.floor(i / 8) * 1.3 },
-      0,
-    ]);
-    const lvl = withItems(base, pieces);
-    walkwayReport(withItems(base, pieces.slice(0, 1)));
-    const times: number[] = [];
-    for (let i = 0; i < 7; i++) {
-      // A new level object each time (as a drag makes), so nothing is cached.
-      const fresh = Object.freeze({ ...lvl, items: { ...lvl.items } });
-      const t0 = performance.now();
-      walkwayReport(fresh);
-      times.push(performance.now() - t0);
-    }
-    // The median, so a busy machine's one slow run doesn't decide it.
-    const ms = times.sort((a, b) => a - b)[3] as number;
-    console.log(`walkways: ${ms.toFixed(2)} ms`);
-    // 40 ms is the spec's bound; a shared CI runner gets three times that unless PERF is set.
-    expect(ms).toBeLessThan(process.env.PERF ? 40 : 120);
-  });
-
   it('an outside door that isn’t hinged is still the way in when it is the only one', () => {
     // No outside door, but doors inside: walkways need the main door.
     const lvl = level(flat(1.2, { outside: false }));

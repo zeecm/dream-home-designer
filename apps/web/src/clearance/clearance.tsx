@@ -9,6 +9,7 @@ import {
   type Vec2,
   type WalkwayReport,
   type WalkwayTo,
+  ageingSupersedes,
   chairsOf,
   clearanceIssues,
   clearanceZones,
@@ -16,6 +17,7 @@ import {
   furnitureKind,
   issueItem,
   itemFootprint,
+  pinchKey,
   planGeometry,
   pointInPolygon,
   roomShapes,
@@ -429,7 +431,7 @@ export function useClearanceAnnouncement(level: Level, selection: Selection | nu
 const pts = (ps: Vec2[]) => ps.map((p) => `${p.x},${p.y}`).join(' ');
 
 /** A label on the plan: its text, the point it hangs off and the way it goes from there. */
-interface LabelSpec {
+export interface LabelSpec {
   key: string;
   text: string;
   /**
@@ -441,7 +443,7 @@ interface LabelSpec {
   need: number;
 }
 
-const shortLabel = (have: number, need: number) =>
+export const shortLabel = (have: number, need: number) =>
   `${have <= 0 ? 'Closed' : have.toFixed(2)} / ${formatLength(need)}`;
 
 /** A zone's label, off the middle of its far edge (zone: side a, b, then b and a pushed out). */
@@ -472,7 +474,12 @@ function zoneLabel(key: string, zone: Vec2[], have: number, need: number): Label
  * A pinch's label: square to its bar off the middle (above or to the right first, then the
  * other side), else beyond either end of the bar.
  */
-function pinchLabel(key: string, pinch: [Vec2, Vec2], have: number, need: number): LabelSpec {
+export function pinchLabel(
+  key: string,
+  pinch: [Vec2, Vec2],
+  have: number,
+  need: number,
+): LabelSpec {
   const [p, q] = pinch;
   const len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
   let n = { x: -(q.y - p.y) / len, y: (q.x - p.x) / len };
@@ -498,7 +505,7 @@ function pinchLabel(key: string, pinch: [Vec2, Vec2], have: number, need: number
 /** Width of a chip's text at 11 px, 600, tabular figures (about 5.3 px a character, measured). */
 const textWidth = (s: string) => s.length * 5.6;
 
-interface PlacedLabel {
+export interface PlacedLabel {
   key: string;
   text: string;
   x: number;
@@ -511,7 +518,7 @@ interface PlacedLabel {
  * Labels in plan units at this zoom: each chip 10 px off its point, skipped where it would
  * cover one already placed or leave the visible plan.
  */
-function placeLabels(
+export function placeLabels(
   specs: LabelSpec[],
   zoom: number,
   visible: { x0: number; y0: number; x1: number; y1: number },
@@ -562,7 +569,7 @@ function placeLabels(
  * Where a selected piece's handles are drawn (plan units at this zoom): a box round each
  * corner handle, the turn handle 30 px in front and its stem (as plan/tools.tsx draws them).
  */
-function handleBoxes(it: Item, zoom: number): { at: Vec2; half: Vec2 }[] {
+export function handleBoxes(it: Item, zoom: number): { at: Vec2; half: Vec2 }[] {
   const px = 1 / zoom;
   const box = (at: Vec2, h: number) => ({ at, half: { x: h * px, y: h * px } });
   const fp = itemFootprint(it);
@@ -625,11 +632,18 @@ export const ClearanceLayer = memo(function ClearanceLayer({
     }
     return out;
   }, [mine, level, issues]);
-  // Pinch bars, once each however many pieces they're on.
+  // Pinch bars, once each however many pieces they're on; not those the ageing check draws.
+  const walk = useWalkwayReport();
+  const age = useWalkways((s) => s.ageing);
+  const hidden = useMemo(
+    () => (walk && age ? ageingSupersedes(walk, age) : new Set<string>()),
+    [walk, age],
+  );
   const pinches = useMemo(() => {
     const seen = new Map<string, Extract<ClearanceIssue, { kind: 'walkway' }>>();
     for (const i of issues) {
       if (i.kind !== 'walkway') continue;
+      if (hidden.has(`${i.itemId}|${pinchKey(i.pinch)}`)) continue;
       const k = i.pinch
         .map((p) => `${p.x.toFixed(3)},${p.y.toFixed(3)}`)
         .sort()
@@ -637,7 +651,7 @@ export const ClearanceLayer = memo(function ClearanceLayer({
       if (!seen.has(k)) seen.set(k, i);
     }
     return [...seen.entries()].map(([key, i]) => ({ key, i }));
-  }, [issues]);
+  }, [issues, hidden]);
   // Labels: the selected piece's zones, then its pinches, then the others, worst first.
   const specs = useMemo(() => {
     const out: LabelSpec[] = [];

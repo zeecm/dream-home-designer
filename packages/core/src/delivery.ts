@@ -6,7 +6,7 @@ import {
   itemSize,
 } from './furniture';
 import { pointInPolygon } from './geometry';
-import { type PlanGeometry, doorStyle, framePoint, planGeometry } from './plan';
+import { type PlanGeometry, doorPanels, doorStyle, framePoint, planGeometry } from './plan';
 import { roomShapes } from './rooms';
 import type { Level, Lift, LiftPreset, Opening, Vec2 } from './schema';
 import { isBoundary } from './schema';
@@ -133,6 +133,32 @@ export function clearWidth(o: Opening): number {
       return o.width - 0.04 * panels;
     default:
       return o.width - 0.04;
+  }
+}
+
+/**
+ * A doorway's clear width for a person passing (the ageing check), to the millimetre: a swing
+ * door less its leaf (40 mm), one leaf of a double door ((width − 80 mm) / 2: the other stays
+ * shut), a sliding door less its stacked leaves (a single barn door slides clear), a pocket
+ * door or passage its full width, a bi-fold or folding door 40 mm less per panel (its panel
+ * count as drawn). Rounded, so 0.94 − 0.04 is 0.90, not 0.8999….
+ */
+export function accessClearWidth(o: Opening): number {
+  const mm = (x: number) => Math.round(x * 1000) / 1000;
+  if (o.kind !== 'door') return mm(o.width);
+  const n = doorPanels(o);
+  switch (doorStyle(o)) {
+    case 'double':
+      return mm((o.width - 0.08) / 2);
+    case 'sliding':
+      return mm(n <= 1 ? o.width : o.width * (1 - 1 / n));
+    case 'pocket':
+      return mm(o.width);
+    case 'bifold':
+    case 'folding':
+      return mm(o.width - 0.04 * n);
+    default:
+      return mm(o.width - 0.04);
   }
 }
 

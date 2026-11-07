@@ -12,6 +12,7 @@ import {
 } from '@dhd/core';
 import type { Vec2 } from '@dhd/core';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { AgeingAnnouncement, AgeingLayer } from '../ageing/ageing';
 import { TraceDraftLayer } from '../ai/DraftLayer';
 import { DesignFocusLayer } from '../ai/designer/focus';
 import { type PixelBox, inkBounds } from '../assets';
@@ -930,6 +931,7 @@ export function PlanCanvas() {
             />
             <RenovationMarks />
             <ClearanceLayer level={level} geom={geom} view={v} size={size} />
+            <AgeingLayer level={level} geom={geom} view={v} size={size} />
             <DeliveryLayer level={level} zoom={v.zoom} />
             <ElectricalLayer
               level={level}
@@ -988,6 +990,7 @@ export function PlanCanvas() {
       <p className="visually-hidden" aria-live="polite">
         {describe(level, selection)}
         <ClearanceAnnouncement level={level} selection={selection} />
+        <AgeingAnnouncement level={level} selection={selection} />
       </p>
 
       {/* Out of the way as soon as a drawing tool is picked, so it never blocks a click. */}
