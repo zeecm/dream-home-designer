@@ -21,13 +21,16 @@ let loading: Promise<void> | null = null;
 export function loadWallpapers(ids: readonly string[]): Promise<void> {
   const want = ids.filter((id) => id.startsWith('wallpaper-') && !tiles.has(id));
   if (want.length === 0) return Promise.resolve();
-  loading = (loading ?? Promise.resolve()).then(async () => {
-    const { wallpaperCanvas } = await import('@dhd/render');
-    for (const id of want) {
-      const c = wallpaperCanvas(id, 256);
-      if (c) tiles.set(id, c.toDataURL('image/png'));
-    }
-  });
+  loading = (loading ?? Promise.resolve())
+    .then(async () => {
+      const { wallpaperCanvas } = await import('@dhd/render');
+      for (const id of want) {
+        const c = wallpaperCanvas(id, 256);
+        if (c) tiles.set(id, c.toDataURL('image/png'));
+      }
+    })
+    // A failed load (offline, say) leaves the papers in their colour; the next call tries again.
+    .catch(() => {});
   return loading;
 }
 

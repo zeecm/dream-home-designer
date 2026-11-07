@@ -130,7 +130,7 @@ export function ElevationView() {
   const hasReno = !!project.renovation && !previewing;
 
   // Wallpapers are drawn as tiles once, then the drawing uses them.
-  const [, setTiles] = useState(0);
+  const [tiles, setTiles] = useState(0);
   const papers = elev?.walls.map((w) => w.material ?? '').join() ?? '';
   useEffect(() => {
     if (!papers) return;
@@ -362,6 +362,7 @@ export function ElevationView() {
         hitPx={oneView ? 44 : 24}
         openTo={face.openTo ? (level.rooms[face.openTo]?.name ?? null) : null}
         label={`${title}, ${size}`}
+        tiles={tiles}
       />
       <PointList level={level} elev={elev} />
       {oneView && (
@@ -479,6 +480,7 @@ function Sheet({
   hitPx,
   openTo,
   label,
+  tiles,
 }: {
   elev: Elevation;
   changes: ElevationChanges | null;
@@ -487,6 +489,8 @@ function Sheet({
   hitPx: number;
   openTo: string | null;
   label: string;
+  /** Bumped when wallpaper tiles have been drawn. */
+  tiles: number;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -512,12 +516,16 @@ function Sheet({
     return () => clearTimeout(t);
   }, [zoom.k]);
 
-  const maxChains = dims ? elev.chains.length : 0;
-  const base0 = size.w > 0 ? fitScale(elev, size.w, size.h, maxChains) : 50;
-  const shown0 = chainsShown(elevationLabels(elev, base0), dims);
-  const base = size.w > 0 ? fitScale(elev, size.w, size.h, shown0) : 50;
+  // The fit (scale and box) only changes with the drawing, the sheet's size or the dimensions
+  // shown: a pinch or a pan changes only the transform below.
+  const { base, vb } = useMemo(() => {
+    const maxChains = dims ? elev.chains.length : 0;
+    const base0 = size.w > 0 ? fitScale(elev, size.w, size.h, maxChains) : 50;
+    const shown0 = chainsShown(elevationLabels(elev, base0), dims);
+    const base = size.w > 0 ? fitScale(elev, size.w, size.h, shown0) : 50;
+    return { base, vb: drawingBox(elev, base, chainsShown(elevationLabels(elev, base), dims)) };
+  }, [elev, size.w, size.h, dims]);
   const labels = useMemo(() => elevationLabels(elev, base * labelK), [elev, base, labelK]);
-  const vb = drawingBox(elev, base, chainsShown(elevationLabels(elev, base), dims));
   // Centred in the sheet.
   const w = size.w / base;
   const h = size.h / base;
@@ -630,7 +638,32 @@ function Sheet({
     return () => el.removeEventListener('wheel', wheel);
   }, []);
 
+  // A cancelled pointer (the browser took the gesture) only ends it: never a tap.
+  const onCancel = (e: ReactPointerEvent) => {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size === 0) gesture.current = null;
+    else begin(gesture.current?.target ?? null);
+  };
+
   const pxPerM = base * labelK;
+  const selected = selectedId(selection);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: tiles redraws wallpapers once drawn
+  const drawing = useMemo(
+    () => (
+      <ElevationSvg
+        elev={elev}
+        labels={labels}
+        pxPerM={pxPerM}
+        changes={changes}
+        selected={selected}
+        wallpaper={wallpaperUrl}
+        dims={dims}
+        hitPx={hitPx}
+        openTo={openTo}
+      />
+    ),
+    [elev, labels, pxPerM, changes, selected, dims, hitPx, openTo, tiles],
+  );
   return (
     <div className="elev-sheet-wrap">
       <div
@@ -639,7 +672,7 @@ function Sheet({
         onPointerDown={onDown}
         onPointerMove={onMove}
         onPointerUp={onUp}
-        onPointerCancel={onUp}
+        onPointerCancel={onCancel}
         data-zoom={zoom.k.toFixed(2)}
       >
         {size.w > 0 && (
@@ -655,17 +688,7 @@ function Sheet({
             <g
               transform={`translate(${vx + zoom.x / base - vx * zoom.k} ${vy + zoom.y / base - vy * zoom.k}) scale(${zoom.k})`}
             >
-              <ElevationSvg
-                elev={elev}
-                labels={labels}
-                pxPerM={pxPerM}
-                changes={changes}
-                selected={selectedId(selection)}
-                wallpaper={wallpaperUrl}
-                dims={dims}
-                hitPx={hitPx}
-                openTo={openTo}
-              />
+              {drawing}
             </g>
           </svg>
         )}

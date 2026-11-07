@@ -14,9 +14,25 @@ import { faceForSelection } from './nav';
 let opener: HTMLElement | null = null;
 let lastRoom: string | null = null;
 const HISTORY_KEY = 'dhdWallView';
+/** Whether this page added the history entry the open view is on (a phone's). */
+let pushed = false;
+
+/** The room last looked at: a wall's or a thing's side towards it is the one opened. */
+export const lastRoomLooked = () => lastRoom;
+
+// A reload on that entry: the view isn't open any more, so the entry means nothing.
+if (window.history.state?.[HISTORY_KEY] === true) {
+  const { [HISTORY_KEY]: _, ...rest } = window.history.state as Record<string, unknown>;
+  window.history.replaceState(rest, '');
+}
 
 useEditor.subscribe((s, prev) => {
   if (s.selection !== prev.selection && s.selection?.kind === 'room') lastRoom = s.selection.id;
+  // Closed any way but Back (Close, Esc, 1, 2 or 3): its history entry goes too.
+  if (prev.elevation && !s.elevation && pushed) {
+    pushed = false;
+    if (window.history.state?.[HISTORY_KEY] === true) window.history.back();
+  }
 });
 
 const phone = () => !!window.matchMedia?.(ONE_VIEW_QUERY).matches;
@@ -49,8 +65,9 @@ export function openFace(level: Level, face: RoomFace, from?: Element | null) {
   // A phone gives the drawing the stage: the Inspector sheet folds until something in the
   // drawing is tapped.
   if (!wasOpen && phone()) ed.select(null);
-  if (!wasOpen && phone() && window.history.state?.[HISTORY_KEY] !== true) {
+  if (!wasOpen && phone() && !pushed) {
     window.history.pushState({ ...(window.history.state ?? {}), [HISTORY_KEY]: true }, '');
+    pushed = true;
   }
 }
 
@@ -77,14 +94,12 @@ function closed() {
 /** Closes the view (Close, Esc), back to the view it was opened from. */
 export function closeView() {
   if (!useEditor.getState().elevation) return;
-  // A phone's view added a history entry: going back closes it (popstate, below).
-  if (window.history.state?.[HISTORY_KEY] === true) {
-    window.history.back();
-    return;
-  }
   closed();
 }
 
+// Back on a phone: off the view's entry, so the view closes (the entry is already gone).
 window.addEventListener('popstate', () => {
-  if (useEditor.getState().elevation && window.history.state?.[HISTORY_KEY] !== true) closed();
+  if (!pushed || window.history.state?.[HISTORY_KEY] === true) return;
+  pushed = false;
+  if (useEditor.getState().elevation) closed();
 });

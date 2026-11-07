@@ -357,6 +357,20 @@ test.describe('phone', () => {
     await tapCentre(page, bar.getByRole('button', { name: 'Close' }));
     await expect(wallView(page)).toHaveCount(0);
     await expect(page.locator('.palette')).toBeVisible();
+    // Closed by a view key (1, 2, 3), its history entry goes too: Back then leaves nothing
+    // behind, and the plan stays open.
+    const url = page.url();
+    await tapCentre(page, page.getByRole('button', { name: 'See on its wall' }));
+    await expect(wallView(page)).toBeVisible();
+    await page.keyboard.press('1');
+    await expect(wallView(page)).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page.evaluate(() => !!(history.state as { dhdWallView?: boolean } | null)?.dhdWallView),
+      )
+      .toBe(false);
+    expect(page.url()).toBe(url);
+    await expect(page.locator('svg.plan-svg')).toBeVisible();
   });
 
   test('29, slow phone: every tap on › counts with the CPU throttled 4×', async ({ page }) => {

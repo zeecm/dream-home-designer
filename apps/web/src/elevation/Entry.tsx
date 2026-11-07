@@ -2,7 +2,7 @@ import type { Level } from '@dhd/core';
 import type { Selection } from '../editor';
 import { useStore } from '../store';
 import { faceForSelection, roomStart, wallSides } from './nav';
-import { openFace } from './open';
+import { lastRoomLooked, openFace } from './open';
 
 /**
  * The ways into the wall view from the Inspector: a wall's sides (named by the room each looks
@@ -77,7 +77,8 @@ export function ThingViewEntry({
   selection,
   force,
 }: { level: Level; selection: Selection; force?: boolean }) {
-  const face = faceForSelection(level, selection);
+  // An opening's wall: the side towards the room last looked at.
+  const face = faceForSelection(level, selection, lastRoomLooked());
   if (useLocked(force) || !face) return null;
   return (
     <button
