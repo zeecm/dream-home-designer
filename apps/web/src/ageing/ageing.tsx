@@ -16,6 +16,7 @@ import {
   dollars,
   easeItems,
   furnitureKind,
+  itemFootprint,
   levelBounds,
   pointPosition,
   roomShapes,
@@ -149,7 +150,11 @@ export function ageingText(
           : `${name} is ${m(i.have)} across inside, too small for a ${m(i.need)} turn.`;
       }
       const where = by.length > 1 ? `between ${listed(by)}` : `beside ${by[0]}`;
-      return `No room to turn a wheelchair${bath ? ' inside' : ` in ${name}`}: ${m(i.have)} ${where} (${m(i.need)} recommended).`;
+      const honest =
+        bath && (i.empty ?? i.have) < i.need - 0.005
+          ? ` Even empty it is ${m(i.empty ?? i.have)}: many HDB bathrooms can’t. A wheelchair can go in forwards and come out backwards if the door and the 1.00 m way to the toilet are clear.`
+          : '';
+      return `No room to turn a wheelchair${bath ? ' inside' : ` in ${name}`}: ${m(i.have)} ${where} (${m(i.need)} recommended).${honest}`;
     }
     case 'bed':
       return `Getting into bed ${profile === 'wheelchair' ? 'from a wheelchair' : 'with a walking aid'} needs ${m(i.need)} along one side; ${m(i.have)} on the better side.`;
@@ -253,6 +258,13 @@ const NOTE_GROUP: Record<AgeingReport['notes'][number], AgeingGroup | null> = {
 /** "5 to look at for a wheelchair: 2 needed, 3 recommended", or that there is nothing. */
 export function summaryLine(report: AgeingReport): string {
   const n = report.issues.length;
+  // Nothing to check yet (a blank plan): say what to add, not that all is well.
+  if (!n && !report.passed.length) {
+    return 'Add the rooms and the main door to check them for an older person.';
+  }
+  if (!n && report.notes.includes('no-main-door')) {
+    return 'Nothing to change in what’s checked so far. Add the main door to check the way in.';
+  }
   if (!n) {
     return report.profile === 'wheelchair'
       ? 'Nothing to change in what’s checked: doors, the way through, turning, bathroom, switches.'
@@ -844,6 +856,19 @@ export function AgeingAnnouncement({
 // --- on the plan ----------------------------------------------------------------------------
 
 const pts = (ps: Vec2[]) => ps.map((p) => `${p.x},${p.y}`).join(' ');
+/** A footprint as a box to keep labels off. */
+function footprintBox(fp: Vec2[]): { at: Vec2; half: Vec2 } {
+  const xs = fp.map((p) => p.x);
+  const ys = fp.map((p) => p.y);
+  const x0 = Math.min(...xs);
+  const y0 = Math.min(...ys);
+  const x1 = Math.max(...xs);
+  const y1 = Math.max(...ys);
+  return {
+    at: { x: (x0 + x1) / 2, y: (y0 + y1) / 2 },
+    half: { x: (x1 - x0) / 2, y: (y1 - y0) / 2 },
+  };
+}
 const chip = (have: number, need: number, flat?: boolean) =>
   `${have <= 0 ? 'Closed' : have.toFixed(2)} / ${formatLength(need)}${flat ? ' · walls' : ''}`;
 
@@ -907,15 +932,19 @@ export const AgeingLayer = memo(function AgeingLayer({
           x: p.reduce((t, q) => t + q.x, 0) / p.length,
           y: p.reduce((t, q) => t + q.y, 0) / p.length,
         };
+        // The middle, then off each edge's middle, outwards.
+        const edges = p.map((a, k) => {
+          const b = p[(k + 1) % p.length] as Vec2;
+          const at = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+          const len = Math.hypot(at.x - c.x, at.y - c.y) || 1;
+          return { at, n: { x: (at.x - c.x) / len, y: (at.y - c.y) / len } };
+        });
         out.push({
           key: `a-${i.key}`,
           text,
           have: i.have,
           need: i.need,
-          spots: [
-            { at: c, n: { x: 0, y: -1 }, gap: -8 },
-            { at: c, n: { x: 0, y: 1 }, gap: 10 },
-          ],
+          spots: [{ at: c, n: { x: 0, y: -1 }, gap: -8 }, ...edges],
         });
       }
     }
@@ -938,7 +967,10 @@ export const AgeingLayer = memo(function AgeingLayer({
       y1: view.cy + size.height / 2 / view.zoom - inset,
     };
     const names = roomLabelBoxes(level, geom, view.zoom);
-    const handles = selected ? handleBoxes(selected, view.zoom) : [];
+    // The selected piece's handles, and the piece itself: a chip never sits on it.
+    const handles = selected
+      ? [...handleBoxes(selected, view.zoom), footprintBox(itemFootprint(selected))]
+      : [];
     const labels = placeLabels(specs, view.zoom, visible, names, handles);
     // A passing circle's size, kept off the room's name: above or below the circle.
     const fineSpecs: LabelSpec[] = fineTurns.map((t) => ({

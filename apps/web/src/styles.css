@@ -5924,11 +5924,23 @@ textarea {
 .ageing-line-shown {
   background: var(--active);
 }
+/* A bedroom to choose: a button that looks like one. */
 .ageing-choose {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
+  margin: 0;
+  width: 100%;
+  border-color: var(--control);
+  background: var(--surface);
+}
+.ageing-choose:hover {
+  border-color: var(--text);
+}
+.ageing-choose::after {
+  content: "›";
+  color: var(--muted);
 }
 .ageing-choose-name {
   font-weight: 500;
@@ -6176,11 +6188,19 @@ textarea {
   .inspector-ageing .ageing-foot .btn:only-child {
     grid-column: 1 / -1;
   }
+  /* The details' padding here is 8 px by 12 px: the top and foot reach its edges, no further. */
   .inspector-ageing .ageing-top {
+    top: -8px;
     gap: 4px;
-    padding: 4px var(--pad) 6px;
+    margin: -8px -12px 0;
+    padding: 4px 12px 6px;
   }
   .inspector-ageing .ageing-top:has(.ageing-rows-open) {
     position: static;
+  }
+  .inspector-ageing .ageing-foot {
+    bottom: -8px;
+    margin: auto -12px -8px;
+    padding: 8px 12px;
   }
 }

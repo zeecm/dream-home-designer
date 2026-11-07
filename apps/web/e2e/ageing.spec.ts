@@ -390,3 +390,21 @@ test('a view link can look with the older person check', async ({ page, browser 
   await list.getByRole('button', { name: 'Show next' }).click();
   await expect(viewer.getByRole('button', { name: /Back to the list/ })).toBeEnabled();
 });
+
+test.describe('phone on its side', () => {
+  test.use({ viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true });
+
+  test('30: the list in the right-hand column, nothing wider than the panel', async ({ page }) => {
+    await page.goto('/');
+    await waitSaved(page);
+    const toggle = page.getByRole('button', { name: 'Show plan details' });
+    if (await toggle.isVisible()) await toggle.tap();
+    await wheelchair(page, true);
+    await section(page).getByRole('button', { name: 'See the list' }).tap();
+    await expect(page.locator('.inspector.inspector-ageing')).toBeVisible();
+    await expect(page.locator('.ageing-oneline')).toContainText('Wheelchair · Which bedroom?');
+    expect(await overflows(page)).toBe(false);
+    await page.getByRole('button', { name: 'Change who, bedroom and bathroom' }).tap();
+    expect(await overflows(page)).toBe(false);
+  });
+});
