@@ -10,6 +10,7 @@ import { useDesigner } from './ai/designer/state';
 import { mayComment, useCanComment, useComments } from './comments/store';
 import { CommentsLive, CommentsPanel, useCommentsLink } from './comments/ui';
 import { type Tool, type ViewMode, useEditor } from './editor';
+import { ageingEnabled } from './features';
 import { absorbLinkKey } from './keys';
 import { useModelSync } from './models';
 import { PlanCanvas } from './plan/PlanCanvas';
@@ -365,7 +366,8 @@ export function App() {
         {commentsOpen ? <CommentsPanel /> : designerOpen ? <DesignerPanel /> : <Inspector />}
       </div>
       <CommentsLive />
-      <AgeingSync />
+      {/* The Older person check is on hold (owner): it runs only with its flag. */}
+      {ageingEnabled() && <AgeingSync />}
       <DesignerDialogs />
       <h1 className="visually-hidden">{name} · Dream Home Designer</h1>
     </div>

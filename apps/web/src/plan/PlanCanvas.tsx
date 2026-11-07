@@ -22,6 +22,7 @@ import { DeliveryLayer } from '../delivery/delivery';
 import { type Tool, useEditor } from '../editor';
 import { ElectricalLayer } from '../electrical/electrical';
 import { SuggestLayer, ghostKeyOf, toggleGhost } from '../electrical/suggest';
+import { ageingEnabled } from '../features';
 import {
   StorageAddBar,
   StorageAnnouncement,
@@ -940,7 +941,7 @@ export function PlanCanvas() {
             {/* Under the clearance and ageing marks: a safety label wins where both want a spot. */}
             <StorageChips level={level} geom={geom} view={v} size={size} />
             <ClearanceLayer level={level} geom={geom} view={v} size={size} />
-            <AgeingLayer level={level} geom={geom} view={v} size={size} />
+            {ageingEnabled() && <AgeingLayer level={level} geom={geom} view={v} size={size} />}
             <DeliveryLayer level={level} zoom={v.zoom} />
             <ElectricalLayer
               level={level}
@@ -999,7 +1000,7 @@ export function PlanCanvas() {
       <p className="visually-hidden" aria-live="polite">
         {describe(level, selection)}
         <ClearanceAnnouncement level={level} selection={selection} />
-        <AgeingAnnouncement level={level} selection={selection} />
+        {ageingEnabled() && <AgeingAnnouncement level={level} selection={selection} />}
         <StorageAnnouncement selection={selection} />
       </p>
 
