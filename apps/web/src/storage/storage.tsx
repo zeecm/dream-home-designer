@@ -4,6 +4,7 @@ import {
   type Meter,
   type People,
   type PlanGeometry,
+  type Project,
   STORAGE_MEASURES,
   type StorageAmount,
   type StorageMeasure,
@@ -18,9 +19,7 @@ import {
   pieceIn,
   roomShapes,
   storageGain,
-  storageOf,
   storageReport,
-  storageRoomOf,
 } from '@dhd/core';
 import { memo, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useAgeing } from '../ageing/store';
@@ -31,7 +30,7 @@ import { beforeOf } from '../electrical/electrical';
 import { useSuggest } from '../electrical/suggest';
 import { roomLabelBoxes } from '../plan/layers';
 import { type Size, type View, fitBounds, worldToScreen } from '../plan/view';
-import { useLevel, useProject } from '../store';
+import { canEdit, useLevel, useProject, useStore } from '../store';
 import { Segmented } from '../ui/fields';
 import { icons } from '../ui/icons';
 import { useStorage } from './store';
@@ -122,6 +121,19 @@ export interface StorageView {
   /** In the renovation: the flat as it is, and what each room gains. */
   before?: StorageReport;
   gain?: Map<string, Record<StorageMeasure, number>>;
+  /** In the renovation: each room's room in the flat as it is (people are kept under that). */
+  alias?: Map<string, string>;
+  /** Every room id in the project, both versions: people for rooms not here are dropped. */
+  known: Set<string>;
+}
+
+/** Every room in the project, in the flat as it is and the renovation. */
+function roomIds(project: Project): Set<string> {
+  const out = new Set<string>();
+  for (const l of [...project.levels, ...(project.renovation?.levels ?? [])]) {
+    for (const id of Object.keys(l.rooms)) out.add(id);
+  }
+  return out;
 }
 
 /** The report for the level and version shown (the same object for every caller). */
@@ -133,12 +145,13 @@ export function useStorageReport(): StorageView | null {
   const ready = useStorage((s) => s.projectId === project.id);
   return useMemo(() => {
     if (!level || !ready) return null;
+    const known = roomIds(project);
     const flat = beforeOf(project, level);
-    if (flat === level) return { level, report: reportFor(level, setting) };
+    if (flat === level) return { level, report: reportFor(level, setting), known };
     const alias = matchFor(flat, level);
     const report = reportFor(level, setting, alias);
     const before = reportFor(flat, setting);
-    return { level, report, before, gain: storageGain(before, report, alias) };
+    return { level, report, before, gain: storageGain(before, report, alias), alias, known };
   }, [level, project, setting, ready]);
 }
 
@@ -176,9 +189,17 @@ export function openStorage() {
   useStorage.getState().openPanel();
 }
 
-/** Arms the Furniture tool with a piece, to place on the plan. */
+/** Whether pieces can be added here: not on a view link, nor over a designer's preview. */
+function useCanAdd() {
+  const editable = useStore(canEdit);
+  const preview = useEditor((s) => !!s.preview);
+  return editable && !preview;
+}
+
+/** Arms the Furniture tool with a piece, to place on the plan (where pieces can be added). */
 function addPiece(kindId: string) {
   const ed = useEditor.getState();
+  if (!canEdit(useStore.getState()) || ed.preview) return;
   ed.setFurnitureKind(kindId);
   ed.setTool('furniture');
 }
@@ -253,9 +274,11 @@ function Stepper({
   );
 }
 
-function Household({ report }: { report: StorageReport }) {
+function Household({ view }: { view: StorageView }) {
+  const { report } = view;
   const setting = useStorage((s) => s.setting);
-  const setPeople = useStorage((s) => s.setPeople);
+  const setPeople = (roomId: string, people: People) =>
+    useStorage.getState().setPeople(roomId, people, view.alias, view.known);
   const set = useStorage((s) => s.set);
   const edited = Object.keys(setting.people).length > 0 || count(setting.others) > 0;
   const rooms = report.rooms.filter((r) => r.sleeps);
@@ -324,6 +347,7 @@ function MeterRow({
   before?: Meter;
 }) {
   const id = useId();
+  const canAdd = useCanAdd();
   const status = statusWord(m, meter);
   const empty = meter.status === 'none';
   const t = meter.target;
@@ -348,8 +372,8 @@ function MeterRow({
           role="meter"
           aria-labelledby={id}
           aria-valuemin={0}
-          aria-valuemax={t}
-          aria-valuenow={meter.have}
+          aria-valuemax={Math.round(t * 100) / 100}
+          aria-valuenow={Math.round(Math.min(meter.have, t) * 100) / 100}
           aria-valuetext={meterValueText(m, meter)}
           className={`storage-bar${empty ? ' storage-bar-empty' : ''}${meter.status === 'short' ? ' storage-bar-short' : ''}`}
         >
@@ -359,10 +383,19 @@ function MeterRow({
       )}
       {empty ? (
         <p className="storage-figures storage-muted">
-          {emptyText(m, meter)}{' '}
-          <button type="button" className="link-btn" onClick={() => addPiece(ADD_PIECE[m].kindId)}>
-            Add a {ADD_PIECE[m].what}
-          </button>
+          {emptyText(m, meter)}
+          {canAdd && (
+            <>
+              {' '}
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => addPiece(ADD_PIECE[m].kindId)}
+              >
+                Add a {ADD_PIECE[m].what}
+              </button>
+            </>
+          )}
         </p>
       ) : (
         <p className="storage-figures num">
@@ -546,7 +579,7 @@ export function StoragePanel() {
           </button>
         </p>
         {nobody && <p className="storage-note">Add who lives here to compare.</p>}
-        {open && <Household report={report} />}
+        {open && <Household view={view} />}
       </div>
 
       <div className="storage-own">
@@ -660,9 +693,9 @@ function pieceText(view: StorageView | null, level: Level, id: string): string |
   const kind = it && furnitureKind(it.assetId);
   if (!it || !kind) return null;
   if (isUploadedModel(kind)) return NOT_COUNTED;
-  const p =
-    (view?.level === level ? pieceIn(view.report, id) : undefined) ??
-    storageOf(it, { kind: 'other', sleeps: !!storageRoomOf(level, it) });
+  // Until the report for this level is ready, nothing (no guess at the piece's room).
+  if (view?.level !== level) return null;
+  const p = pieceIn(view.report, id);
   return p ? pieceLine(p) : null;
 }
 

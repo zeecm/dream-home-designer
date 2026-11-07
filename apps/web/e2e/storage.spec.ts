@@ -362,6 +362,9 @@ test.describe('desktop', () => {
     await expect(viewer.getByText('View only.')).toBeVisible();
     await viewer.keyboard.press('1');
     await seeStorage(viewer);
+    // Nothing can be added on a view link: no Add link where nothing is drawn.
+    await expect(meter(viewer, 'shoes')).toContainText('No shoe cabinet drawn');
+    await expect(viewer.getByRole('button', { name: 'Add a shoe cabinet' })).toHaveCount(0);
     await viewer
       .locator('.storage-oneline')
       .getByRole('button', { name: /Change|Done/ })

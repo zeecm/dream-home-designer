@@ -36,6 +36,7 @@ import {
   storageRoomOf,
   storageRound,
   storageTargets,
+  withRoomPeople,
 } from './storage';
 
 const BEDROOM: RoomCtx = { kind: 'bedroom', sleeps: true };
@@ -680,6 +681,55 @@ describe('before and after', () => {
     });
     // Without the match, the beds (none).
     expect(storageReport(after, setting({ people })).people).toEqual({ adults: 0, children: 0 });
+  });
+
+  it('people edited in the renovation for a room drawn again are kept under its old id', () => {
+    let s = room(4, 3, 'Bedroom', [[2, 0, 2, 3]]);
+    s = dispatch(s, startRenovation());
+    const before = lvl(s);
+    const afterOf = (d: EditorDoc) => d.doc.renovation?.levels[0] as Level;
+    const A = `${before.id}${AFTER_SUFFIX}`;
+    const wall = Object.values(afterOf(s).walls).find((w) => {
+      const a = afterOf(s).vertices[w.a];
+      const b = afterOf(s).vertices[w.b];
+      return a && b && Math.abs(a.x - 2) < 1e-6 && Math.abs(b.x - 2) < 1e-6;
+    });
+    s = dispatch(s, deleteWall(A, wall?.id as string));
+    s = dispatch(
+      s,
+      drawWall(
+        afterOf(s),
+        { point: { x: 2.5, y: 0 } },
+        { point: { x: 2.5, y: 3 } },
+        { thickness: 0.1 },
+      ).command,
+    );
+    const after = afterOf(s);
+    const match = matchRooms(before, after);
+    const [afterId, beforeId] = [...match].find(([a, b]) => a !== b) as [string, string];
+    // An older entry under the After id goes; one for a room long gone is pruned.
+    const known = new Set([...Object.keys(before.rooms), ...Object.keys(after.rooms)]);
+    const people = withRoomPeople(
+      { [afterId]: { adults: 3, children: 0 }, rm_gone: { adults: 1, children: 0 } },
+      afterId,
+      { adults: 1, children: 2 },
+      match,
+      known,
+    );
+    expect(people).toEqual({ [beforeId]: { adults: 1, children: 2 } });
+    // Before reads it, and so does After through the match.
+    expect(
+      storageReport(before, setting({ people })).rooms.find((r) => r.roomId === beforeId),
+    ).toMatchObject({ people: { adults: 1, children: 2 }, fromBeds: false });
+    expect(
+      storageReport(after, setting({ people }), match).rooms.find((r) => r.roomId === afterId),
+    ).toMatchObject({ people: { adults: 1, children: 2 } });
+    // Back to the beds: the entry goes.
+    expect(withRoomPeople(people, afterId, null, match, known)).toEqual({});
+    // Unmatched rooms keep their own id.
+    expect(withRoomPeople({}, 'rm_x', { adults: 1, children: 0 })).toEqual({
+      rm_x: { adults: 1, children: 0 },
+    });
   });
 
   it('what the renovation adds, room by room', () => {

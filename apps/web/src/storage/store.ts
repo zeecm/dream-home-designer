@@ -4,6 +4,7 @@ import {
   type StorageSetting,
   isDefaultStorage,
   parseStorageSetting,
+  withRoomPeople,
 } from '@dhd/core';
 import { create } from 'zustand';
 
@@ -60,8 +61,16 @@ export interface StorageState {
   fitAll: number;
   load: (projectId: string) => void;
   set: (patch: Partial<StorageSetting>) => void;
-  /** A room's people, or null to go back to its beds. */
-  setPeople: (roomId: string, people: People | null) => void;
+  /**
+   * A room's people, or null to go back to its beds; kept under its room in the flat as it is
+   * when `alias` matches one, dropping rooms not in `known` (`withRoomPeople`).
+   */
+  setPeople: (
+    roomId: string,
+    people: People | null,
+    alias?: ReadonlyMap<string, string>,
+    known?: ReadonlySet<string>,
+  ) => void;
   /** Every room back to its beds, nobody else. */
   resetPeople: () => void;
   openPanel: () => void;
@@ -86,12 +95,8 @@ export const useStorage = create<StorageState>((set, get) => ({
     if (projectId) saveStorage(projectId, next);
     set({ setting: next });
   },
-  setPeople: (roomId, people) => {
-    const all = { ...get().setting.people };
-    if (people) all[roomId] = { ...people };
-    else delete all[roomId];
-    get().set({ people: all });
-  },
+  setPeople: (roomId, people, alias, known) =>
+    get().set({ people: withRoomPeople(get().setting.people, roomId, people, alias, known) }),
   resetPeople: () => get().set({ people: {}, others: { adults: 0, children: 0 } }),
   openPanel: () => set({ open: true, intro: firstVisit(), fitAll: narrow() ? Date.now() : 0 }),
   closePanel: () => set({ open: false, highlight: null }),

@@ -132,6 +132,30 @@ export function parseStorageSetting(raw: string | null | undefined): StorageSett
   }
 }
 
+/**
+ * The household's people with one room's set (null: back to its beds). A room matched to the flat
+ * as it is (`alias`, from `matchRooms`) is kept under that room's id, so the flat as it is reads
+ * it too, and any entry under its own id goes. With `known` (every room id in the project, both
+ * versions), entries for rooms gone are dropped.
+ */
+export function withRoomPeople(
+  all: Record<string, People>,
+  roomId: string,
+  people: People | null,
+  alias?: ReadonlyMap<string, string>,
+  known?: ReadonlySet<string>,
+): Record<string, People> {
+  const key = alias?.get(roomId) ?? roomId;
+  const out: Record<string, People> = {};
+  for (const [id, p] of Object.entries(all)) {
+    if (id === roomId || id === key) continue;
+    if (known && !known.has(id)) continue;
+    out[id] = { ...p };
+  }
+  if (people) out[key] = { ...people };
+  return out;
+}
+
 /** Whether a setting is the default (nothing worth keeping). */
 export const isDefaultStorage = (s: StorageSetting) =>
   Object.keys(s.people).length === 0 &&

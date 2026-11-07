@@ -63,6 +63,15 @@ describe('the storage household, per browser and project', () => {
     expect(useStorage.getState().setting.people).toEqual({});
   });
 
+  it('people edited in the renovation go under the room in the flat as it is; gone rooms drop', () => {
+    useStorage.getState().load('prj_4');
+    useStorage.getState().setPeople('rm_gone', { adults: 1, children: 0 });
+    const alias = new Map([['rm_after', 'rm_before']]);
+    const known = new Set(['rm_before', 'rm_after']);
+    useStorage.getState().setPeople('rm_after', { adults: 2, children: 1 }, alias, known);
+    expect(useStorage.getState().setting.people).toEqual({ rm_before: { adults: 2, children: 1 } });
+  });
+
   it('the intro shows the first time the panel opens in this browser', () => {
     data.delete(STORAGE_SEEN_KEY);
     useStorage.getState().openPanel();
