@@ -53,6 +53,7 @@ import { ElecGlyph } from '../electrical/glyph';
 import { changesAsText } from '../ui/Renovation';
 import { hackedPoints, sheetLevels } from './extent';
 import { printFrame } from './frame';
+import { type Seg, notchDrawings } from './notches';
 
 /**
  * The plan for contractors: a measured drawing on A4 or A3, landscape, one SVG per page in
@@ -994,6 +995,120 @@ function Chains({ dims, sheet }: { dims: PlanDimensions; sheet: Sheet }) {
     // biome-ignore lint/suspicious/noArrayIndexKey: aligned chains in order
     .forEach((c, i) => out.push(<Chain key={`al${i}`} chain={c} sheet={sheet} offset={7} />));
   return <g className="dimensions">{out}</g>;
+}
+
+/**
+ * What the chains draw that a notch's figure keeps off, on paper: their extension lines,
+ * their lines and the rows their figures stand in (as Chains lays them out).
+ */
+function chainSegs(dims: PlanDimensions, sheet: Sheet): Seg[] {
+  const segs: Seg[] = [];
+  for (const side of ['top', 'right', 'bottom', 'left'] as const) {
+    const list = dims.chains.filter((c) => c.side === side).sort((a, b) => a.tier - b.tier);
+    const horizontal = side === 'top' || side === 'bottom';
+    const outSign = side === 'top' || side === 'left' ? -1 : 1;
+    const alongP = (v: number) =>
+      horizontal ? sheet.P({ x: v, y: 0 }).x : sheet.P({ x: 0, y: v }).y;
+    const acrossP = (v: number) =>
+      horizontal ? sheet.P({ x: 0, y: v }).y : sheet.P({ x: v, y: 0 }).x;
+    const pt = (a: number, c: number) => (horizontal ? { x: a, y: c } : { x: c, y: a });
+    list.forEach((c, i) => {
+      const lineAt = acrossP(c.at) + outSign * (7 + i * 7.5);
+      c.stops.forEach((s, j) => {
+        const from = acrossP(c.from[j] ?? c.at) + outSign * 1.5;
+        segs.push([pt(alongP(s), from), pt(alongP(s), lineAt + outSign * 1.2)]);
+      });
+      const a0 = alongP(c.stops[0] ?? 0) - 1.2;
+      const a1 = alongP(c.stops[c.stops.length - 1] ?? 0) + 1.2;
+      for (const row of [0, 1.5, 4.2]) {
+        segs.push([pt(a0, lineAt + outSign * row), pt(a1, lineAt + outSign * row)]);
+      }
+    });
+  }
+  for (const c of dims.chains) {
+    const l = c.line;
+    if (c.side !== 'aligned' || !l) continue;
+    const len = Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y);
+    const at = (s: number, out: number) => {
+      const p = sheet.P({
+        x: l.a.x + ((l.b.x - l.a.x) * s) / len,
+        y: l.a.y + ((l.b.y - l.a.y) * s) / len,
+      });
+      return { x: p.x + l.out.x * out, y: p.y + l.out.y * out };
+    };
+    for (const s of c.stops) segs.push([at(s, 1.5), at(s, 7 + 1.2)]);
+  }
+  return segs;
+}
+
+/**
+ * Notches' depths, like the chains outside: a line with ticks, the figure along it, and a
+ * grey extension line from where the flank turns at the mouth (page 1 only).
+ */
+function Notches({ dims, sheet }: { dims: PlanDimensions; sheet: Sheet }) {
+  const drawings = notchDrawings(dims.notches, sheet.P, sheet.k, chainSegs(dims, sheet));
+  if (!drawings.length) return null;
+  const L = (s: Seg, w: number, color: string, key: string) => (
+    <line
+      key={key}
+      x1={n2(s[0].x)}
+      y1={n2(s[0].y)}
+      x2={n2(s[1].x)}
+      y2={n2(s[1].y)}
+      stroke={color}
+      strokeWidth={w}
+    />
+  );
+  return (
+    <g className="notches">
+      {drawings.map((d, i) => (
+        <g
+          // biome-ignore lint/suspicious/noArrayIndexKey: notches in order
+          key={i}
+          className="dim-notch"
+          data-notch={d.notch}
+          data-depth={d.depths.join(' ')}
+        >
+          {d.ext.map((s, j) => L(s, 0.1, MUTED, `e${j}`))}
+          {d.lines.map((s, j) => L(s, 0.15, INK, `l${j}`))}
+          {d.ticks.map((t, j) =>
+            L(
+              [
+                { x: t.x - 0.6, y: t.y + 0.6 },
+                { x: t.x + 0.6, y: t.y - 0.6 },
+              ],
+              0.22,
+              INK,
+              `t${j}`,
+            ),
+          )}
+          {d.figures.map((f, j) => {
+            // The baseline, below the figure's middle as it reads.
+            const r = (f.deg * Math.PI) / 180;
+            const x = f.at.x - Math.sin(r) * DIM_TEXT * 0.36;
+            const y = f.at.y + Math.cos(r) * DIM_TEXT * 0.36;
+            return (
+              <text
+                // biome-ignore lint/suspicious/noArrayIndexKey: figures in order
+                key={j}
+                className="dim-text"
+                data-place={f.place}
+                x={n2(x)}
+                y={n2(y)}
+                transform={`rotate(${n2(f.deg)} ${n2(x)} ${n2(y)})`}
+                fontSize={DIM_TEXT}
+                textAnchor="middle"
+                fill={INK}
+                {...HALO}
+              >
+                {f.text}
+              </text>
+            );
+          })}
+        </g>
+      ))}
+    </g>
+  );
 }
 
 // ---------------------------------------------------------------------------- the title column
@@ -2059,6 +2174,7 @@ export function contractorPages(
         {diff && <BuiltLengths diff={diff} sheet={sheet} dims={dims} />}
         <Rooms level={level} dims={dims} sheet={sheet} />
         <Chains dims={dims} sheet={sheet} />
+        <Notches dims={dims} sheet={sheet} />
       </g>
       {title(1, legend)}
     </Frame>

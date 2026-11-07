@@ -1,5 +1,4 @@
 import {
-  AFTER_SUFFIX,
   type CostEstimate,
   type CostGroup,
   type CostLine,
@@ -7,23 +6,33 @@ import {
   ELEC_KIND_ORDER,
   type Item,
   type Level,
+  type Project,
   type Rate,
   type Rates,
   TYPICAL_RATES,
   carpentryCost,
-  costEstimate,
   itemSize,
+  projectEstimate,
 } from '@dhd/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { useProject, useStore } from '../store';
 import { icons } from '../ui/icons';
 import { formatLength } from '../units';
+import {
+  DISCLAIMER,
+  byLevel,
+  estimateText,
+  fromFileText,
+  levelsHint,
+  qtyText,
+  range,
+  unpricedText,
+} from './text';
+
+export { DISCLAIMER, estimateText, money, range } from './text';
 
 const KEY = 'dhd-rates';
-
-export const DISCLAIMER =
-  'A rough guide from typical Singapore prices (2025–2026), not a quote. Prices vary with materials, contractor and site. Get itemised quotes from HDB-registered contractors.';
 
 type Loose = Record<string, unknown>;
 const isRate = (v: unknown): v is Rate => {
@@ -109,30 +118,28 @@ export const useRates = create<{
 }));
 
 // One estimate for the summary and the dialog alike: the last one, while nothing changed.
-let last: { before: Level; after?: Level; rates: Rates; est: CostEstimate } | null = null;
+let last: {
+  levels: Level[];
+  renovation: Project['renovation'];
+  rates: Rates;
+  est: CostEstimate;
+} | null = null;
 
-/** The estimate for the first level: its renovation if there is one. */
+/** The estimate for every level, each with its renovation if there is one. */
 export function useEstimate(): CostEstimate | null {
-  const before = useStore((s) => s.editor.doc.levels[0]);
-  const after = useStore((s) =>
-    before
-      ? s.editor.doc.renovation?.levels.find((l) => l.id === `${before.id}${AFTER_SUFFIX}`)
-      : undefined,
-  );
+  // Immer keeps these the same objects through edits that don't touch them.
+  const levels = useStore((s) => s.editor.doc.levels);
+  const renovation = useStore((s) => s.editor.doc.renovation);
   const rates = useRates((s) => s.rates);
   return useMemo(() => {
-    if (!before) return null;
-    if (last && last.before === before && last.after === after && last.rates === rates)
+    if (!levels.length) return null;
+    if (last && last.levels === levels && last.renovation === renovation && last.rates === rates)
       return last.est;
-    const est = costEstimate(before, after, rates);
-    last = { before, after, rates, est };
+    const est = projectEstimate({ levels, renovation }, rates);
+    last = { levels, renovation, rates, est };
     return est;
-  }, [before, after, rates]);
+  }, [levels, renovation, rates]);
 }
-
-export const money = (v: number) => `$${Math.round(v).toLocaleString('en-SG')}`;
-export const range = (low: number, high: number) =>
-  low === high ? money(low) : `${money(low)}–${money(high).slice(1)}`;
 
 const GROUPS: CostGroup[] = [
   'Building',
@@ -143,30 +150,6 @@ const GROUPS: CostGroup[] = [
   'Electrical',
   'Contingency',
 ];
-
-const qtyText = (l: CostLine) =>
-  l.unit === 'lot'
-    ? ''
-    : l.unit === 'each'
-      ? `${l.qty}`
-      : // Trunking is measured to 10 cm, so it reads to one place.
-        `${l.unit === 'ft run' ? l.qty : l.qty.toFixed(l.unit === 'm' && l.group !== 'Electrical' ? 2 : 1)} ${l.unit}`;
-
-/** The estimate as plain text: lines, total and disclaimer (for Copy and Print). */
-export function estimateText(est: CostEstimate, name: string): string {
-  const rows = est.lines.map(
-    (l) => `${l.label}${l.place ? ` · ${l.place}` : ''} · ${qtyText(l)} · ${range(l.low, l.high)}`,
-  );
-  return [
-    `Cost estimate: ${name} (${new Date().toLocaleDateString('en-SG')})`,
-    '',
-    ...rows,
-    '',
-    `Total: about ${range(est.low, est.high)}`,
-    '',
-    DISCLAIMER,
-  ].join('\n');
-}
 
 /** A built-in piece in the details panel: its width, foot runs and price. */
 export function CarpentryLine({ item }: { item: Item }) {
@@ -199,6 +182,8 @@ export function CostSummary() {
         {!est.renovation && (
           <p className="field-hint">Start a renovation to price hacking, walls and floors.</p>
         )}
+        {levelsHint(est) && <p className="field-hint">{levelsHint(est)}</p>}
+        {unpricedText(est) && <p className="field-hint">{unpricedText(est)}</p>}
         <button type="button" className="btn btn-small" onClick={() => setOpen(true)}>
           See estimate
         </button>
@@ -347,7 +332,8 @@ function RateRow({ row }: { row: (typeof RATE_ROWS)[number] }) {
 export function EstimateDialog({ onClose }: { onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   const est = useEstimate();
-  const name = useProject().name;
+  const project = useProject();
+  const name = project.name;
   const { rates, set, reset } = useRates();
   const [copied, setCopied] = useState('');
   useEffect(() => {
@@ -356,6 +342,7 @@ export function EstimateDialog({ onClose }: { onClose: () => void }) {
   }, []);
   const close = () => ref.current?.close();
   if (!est) return null;
+  const levels = byLevel(est);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(estimateText(est, name));
@@ -409,7 +396,30 @@ export function EstimateDialog({ onClose }: { onClose: () => void }) {
               : 'Start a renovation to price hacking, walls and floors.'}
           </p>
         )}
+        {fromFileText(est, project.levels[0]?.id) && (
+          <p className="dialog-note">{fromFileText(est, project.levels[0]?.id)}</p>
+        )}
+        {unpricedText(est) && <p className="dialog-note">{unpricedText(est)}</p>}
         <div className="estimate">
+          {levels.length > 0 && (
+            <section className="estimate-group estimate-by-level" aria-label="By level">
+              <h3 className="estimate-group-head">
+                <span>By level</span>
+              </h3>
+              <ul className="estimate-lines">
+                {levels.map((r) => (
+                  <li key={r.name} className="estimate-line estimate-sub">
+                    <span className="estimate-item">{r.name}</span>
+                    <span className="num estimate-cost">{range(r.low, r.high)}</span>
+                  </li>
+                ))}
+                <li className="estimate-line estimate-sub estimate-sub-total">
+                  <span className="estimate-item">Total</span>
+                  <span className="num estimate-cost">about {range(est.low, est.high)}</span>
+                </li>
+              </ul>
+            </section>
+          )}
           {GROUPS.map((g) => {
             const lines = est.lines.filter((l) => l.group === g);
             if (!lines.length) return null;
@@ -423,11 +433,15 @@ export function EstimateDialog({ onClose }: { onClose: () => void }) {
                 </h3>
                 <ul className="estimate-lines">
                   {lines.map((l, i) => (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: a fixed list, rebuilt whole
-                    <li key={i} className="estimate-line">
+                    <li
+                      // biome-ignore lint/suspicious/noArrayIndexKey: a fixed list, rebuilt whole
+                      key={i}
+                      className={`estimate-line${l.place ? ' has-place' : ''}`}
+                      data-level={l.levelId}
+                    >
                       <span className="estimate-item">
-                        {l.label}
-                        {l.place && <span className="muted"> · {l.place}</span>}
+                        <span className="estimate-label">{l.label}</span>
+                        {l.place && <span className="muted estimate-place">{l.place}</span>}
                       </span>
                       <span className="num estimate-qty">{qtyText(l)}</span>
                       <span className="num estimate-cost">{range(l.low, l.high)}</span>
