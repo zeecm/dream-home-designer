@@ -82,21 +82,23 @@ for any plan.
 - AI interior designer, slice 1c: compare Before and two versions side by side (one at a time
   on a phone), and what you change by hand after accepting is kept by the next version and
   by accepting again. [spec](docs/specs/ai-interior-designer.md#6-compare)
+- Contractor sheet: the depth of each recess in the outside walls (the air-con ledge slot and
+  the like). The estimate covers every level of a multi-level home, with a subtotal for each
+  and a plain note when a level isn't priced. [spec](docs/specs/slice-2s.md#c1-notch-depths-on-the-contractor-sheet-pr-3)
 - Exact render, slice 1: a photo-real picture drawn on your device from the 3D model itself
   (daylight through the windows, lamps, soft shadows), so nothing is added or moved; free, no
   key. [spec](docs/specs/exact-render.md)
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
+- Ageing parents check: doors, routes, room to turn, the bathroom and switch heights for a
+  walking aid or wheelchair, with the HDB EASE items that apply (slice 1 building); grab bars
+  and a shower seat, then steps and ramps, next. [spec](docs/specs/ageing-parents.md)
 
 ### Planned
-1. Slice 2s, the rest: notch depths on the contractor sheet and the estimate on every level.
-   (The lift check and a diagonal you can edit are done.)
-2. Ageing parents check: wheelchair turning space, step-free routes, 850 mm doors, grab bars
-   in the bathroom (HDB EASE items).
-3. Storage meter: wardrobe and cabinet space against the household, room by room.
-4. A wall seen straight on (elevation): carpentry, windows, sockets and switches at height.
-5. Exact render, slice 2: quality settings, real textures, AI polish; daylight bounced up off
+1. Storage meter: wardrobe and cabinet space against the household, room by room.
+2. A wall seen straight on (elevation): carpentry, windows, sockets and switches at height.
+3. Exact render, slice 2: quality settings, real textures, AI polish; daylight bounced up off
    the ground outside (rooms facing away from the sun can read up to a quarter too dark), and
    dark dots seen through a far window.
 
