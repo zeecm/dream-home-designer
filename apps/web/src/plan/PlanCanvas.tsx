@@ -8,7 +8,7 @@ import {
   planGeometry,
   siteOf,
   underlayToWorld,
-  wallStatus,
+  wallStatuses,
 } from '@dhd/core';
 import type { Vec2 } from '@dhd/core';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -272,7 +272,8 @@ export function PlanCanvas() {
     for (const [id, w] of Object.entries(level.walls)) {
       // Glass, or cut down, it is no longer concrete to draw (in the renovation, say).
       if (isGlass(w) || isHalfWall(w, level.ceilingHeight)) continue;
-      const s = before?.walls[id] ? wallStatus(before, id) : wallStatus(level, id);
+      // Kept while walls, corners and rooms stay put, so a drag of furniture doesn't redo it.
+      const s = (before?.walls[id] ? wallStatuses(before) : wallStatuses(level)).get(id);
       if (s === 'structural' || s === 'shelter') out.add(id);
     }
     return out;

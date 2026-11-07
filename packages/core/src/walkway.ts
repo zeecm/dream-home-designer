@@ -8,7 +8,7 @@ import {
 import { box, near as nearBoxes, nearestOnPolygon } from './convex';
 import { entranceDoor } from './delivery';
 import { itemFootprint } from './furniture';
-import { pointInPolygon } from './geometry';
+import { crossingsAt, insideAt, pointInPolygon } from './geometry';
 import {
   Buffers,
   type Grid,
@@ -170,13 +170,17 @@ function rasterBare(level: Level): Bare {
     const j0 = Math.max(0, Math.floor((b.y0 - g.y0) / c));
     const j1 = Math.min(ny - 1, Math.floor((b.y1 - g.y0) / c));
     for (let j = j0; j <= j1; j++) {
+      // A row at a time: where its centre line crosses the room's edges (as pointInPolygon
+      // finds them, so the same cells), rather than every edge for every cell.
+      const y = cellCentre(g, j * nx + i0).y;
+      const outer = crossingsAt(s.outer, y);
+      if (!outer.length) continue;
+      const holes = s.holes.map((h) => crossingsAt(h, y));
       for (let i = i0; i <= i1; i++) {
         const k = j * nx + i;
         if (room[k] !== -1) continue;
-        const p = cellCentre(g, k);
-        if (pointInPolygon(p, s.outer) && !s.holes.some((h) => pointInPolygon(p, h))) {
-          room[k] = idx;
-        }
+        const x = cellCentre(g, k).x;
+        if (insideAt(outer, x) && !holes.some((h) => insideAt(h, x))) room[k] = idx;
       }
     }
   });

@@ -1,7 +1,7 @@
 import { isDraft } from 'immer';
-import { pointInPolygon } from './geometry';
+import { type Bounds, pointInPolygon, polygonBounds } from './geometry';
 import type { Command } from './history';
-import { roomShapes } from './rooms';
+import { type RoomShape, roomShapes } from './rooms';
 import { type Level, isBoundary } from './schema';
 
 /**
@@ -30,14 +30,39 @@ export function sidesOf(level: Level, wallId: string, t = 0.5): (string | null)[
   const n = { x: -(b.y - a.y) / len, y: (b.x - a.x) / len };
   const off = w.thickness / 2 + 0.05;
   const shapes = roomShapes(level);
+  const boxes = boxesOf(shapes);
   return [1, -1].map((k) => {
     const p = { x: mid.x + n.x * off * k, y: mid.y + n.y * off * k };
     const room = Object.values(level.rooms).find((r) => {
       const s = shapes.get(r.id);
-      return s && pointInPolygon(p, s.outer) && !s.holes.some((h) => pointInPolygon(p, h));
+      // Outside a room's box is outside the room (a cheap test first, on a plan of many rooms).
+      const b = boxes.get(r.id);
+      if (!s || !b || p.x < b.min.x || p.x > b.max.x || p.y < b.min.y || p.y > b.max.y) {
+        return false;
+      }
+      return pointInPolygon(p, s.outer) && !s.holes.some((h) => pointInPolygon(p, h));
     });
     return room?.name ?? null;
   });
+}
+
+const boxCache = new WeakMap<Map<string, RoomShape>, Map<string, Bounds>>();
+
+/** Each room's outline's box, a millimetre over (so rounding never leaves a point out). */
+function boxesOf(shapes: Map<string, RoomShape>): Map<string, Bounds> {
+  let out = boxCache.get(shapes);
+  if (!out) {
+    out = new Map();
+    for (const [id, s] of shapes) {
+      const { min, max } = polygonBounds(s.outer);
+      out.set(id, {
+        min: { x: min.x - 1e-3, y: min.y - 1e-3 },
+        max: { x: max.x + 1e-3, y: max.y + 1e-3 },
+      });
+    }
+    boxCache.set(shapes, out);
+  }
+  return out;
 }
 
 /** What a wall of `level` (the flat as it is) is, for hacking. */
@@ -54,18 +79,32 @@ export function wallStatus(level: Level, wallId: string): WallStatus {
   return 'none';
 }
 
-const statusCache = new WeakMap<Level, Map<string, Exclude<WallStatus, 'none'>>>();
+/** Statuses, kept by the walls they were found for with the corners and rooms they saw. */
+const statusCache = new WeakMap<
+  object,
+  { vertices: object; rooms: object; out: Map<string, Exclude<WallStatus, 'none'>> }
+>();
 
-/** Every wall's status, where it isn't 'none' (kept for a frozen level). */
+/**
+ * Every wall's status, where it isn't 'none'. Kept for a frozen level while its walls, corners
+ * and rooms stay the same objects (all a status depends on), so a drag of furniture reuses it.
+ */
 export function wallStatuses(level: Level): Map<string, Exclude<WallStatus, 'none'>> {
-  const cached = statusCache.get(level);
-  if (cached) return cached;
+  const cached = statusCache.get(level.walls);
+  if (cached && cached.vertices === level.vertices && cached.rooms === level.rooms) {
+    return cached.out;
+  }
   const out = new Map<string, Exclude<WallStatus, 'none'>>();
   for (const id of Object.keys(level.walls)) {
     const s = wallStatus(level, id);
     if (s !== 'none') out.set(id, s);
   }
-  if (!isDraft(level) && Object.isFrozen(level)) statusCache.set(level, out);
+  const frozen =
+    !isDraft(level) &&
+    Object.isFrozen(level.walls) &&
+    Object.isFrozen(level.vertices) &&
+    Object.isFrozen(level.rooms);
+  if (frozen) statusCache.set(level.walls, { vertices: level.vertices, rooms: level.rooms, out });
   return out;
 }
 
