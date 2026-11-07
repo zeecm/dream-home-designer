@@ -1002,12 +1002,11 @@ function Chains({ dims, sheet }: { dims: PlanDimensions; sheet: Sheet }) {
       );
     });
   }
-  dims.chains
-    .filter((c) => c.side === 'aligned')
+  const aligned = dims.chains.filter((c) => c.side === 'aligned');
+  aligned.forEach((c, i) => {
     // biome-ignore lint/suspicious/noArrayIndexKey: aligned chains in order
-    .forEach((c, i) =>
-      out.push(<Chain key={`al${i}`} chain={c} sheet={sheet} offset={chainOffset(0)} />),
-    );
+    out.push(<Chain key={`al${i}`} chain={c} sheet={sheet} offset={chainOffset(0)} />);
+  });
   return <g className="dimensions">{out}</g>;
 }
 
