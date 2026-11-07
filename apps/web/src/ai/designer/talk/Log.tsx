@@ -126,7 +126,10 @@ function Questions({ t, latest }: { t: TurnOf<'app-question'>; latest: boolean }
                   brief={conv.brief}
                   level={level}
                   autoFocus={focusNext && k === open[0]}
-                  onDone={(b) => void answer(k, b)}
+                  onDone={(update) => {
+                    const cur = useTalk.getState().conv?.brief ?? conv.brief;
+                    void answer(k, update(cur));
+                  }}
                 />
               )}
             </section>
@@ -280,29 +283,8 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
   }, [open, est, t.estimate, t.id]);
   const cap = capUsd();
   const what = t.scope.all ? 'Designing the whole flat' : `Designing ${t.scope.label}`;
-  if (t.state !== 'open') {
-    return (
-      <article className="talk-turn talk-app" aria-labelledby={`h-${t.id}`}>
-        <h3 id={`h-${t.id}`} className="visually-hidden">
-          App
-        </h3>
-        <p className="talk-app-line">
-          <span className="talk-app-icon">
-            <Mark kind="dot" />
-          </span>
-          <span className="talk-app-text">
-            {what}
-            {t.estimate ? ` · about ${usd(t.estimate.typical)}` : ''}:{' '}
-            {t.state === 'go'
-              ? 'went ahead'
-              : t.state === 'cheaper'
-                ? `just ${first?.label ?? 'one room'}`
-                : 'not now'}
-          </span>
-        </p>
-      </article>
-    );
-  }
+  // Answered: your bubble says it ("Not now"), and the card that follows shows the run.
+  if (t.state !== 'open') return null;
   return (
     <article className="talk-turn talk-app talk-card talk-cost-card" aria-labelledby={`h-${t.id}`}>
       <h3 id={`h-${t.id}`} className="visually-hidden">
@@ -339,6 +321,7 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
             action="Go ahead"
             anyway="Go ahead anyway"
             backLabel="Not now"
+            quiet
             onBack={() => void answerCost(t, 'not-now')}
             onStart={() => void answerCost(t, 'go')}
             onEditPrices={() => useTalk.setState({ settings: 'prices' })}

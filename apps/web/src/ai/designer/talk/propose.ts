@@ -134,10 +134,10 @@ function end() {
  * A priced button was pressed (a scope, Another idea): the person's words go with a new
  * proposal. It runs at once unless a cost rule applies, when a cost card asks first (UX §9.4).
  */
-export async function pressScope(scope: ScopeRef) {
+export async function pressScope(scope: ScopeRef, words?: string) {
   if (!begin()) return;
   try {
-    await askOrRun({ scope, words: typedNow(), finish: null });
+    await askOrRun({ scope, words: words ?? typedNow(), finish: null });
   } finally {
     end();
   }
@@ -430,7 +430,7 @@ async function runOption(
         : x,
     );
   };
-  const { state } = await runDesign({
+  const { state, design } = await runDesign({
     ai,
     ctx: sp.ctx,
     design: sp.draft,
@@ -469,9 +469,19 @@ async function runOption(
         );
       }),
   });
-  const failed = state.phase === 'failed' || state.phase === 'halted';
+  // Nothing designed (every request refused, the layout failed): the card says it didn't work,
+  // never a passing design with nothing in it. Some rooms done: stopped part-way.
+  const designed = Object.values(design.spaces).filter(
+    (x) => x.status === 'done' || x.status === 'copied',
+  ).length;
+  const failedRooms = Object.values(design.spaces).some((x) => x.status === 'failed');
+  const failed = state.phase === 'failed' || state.phase === 'halted' || failedRooms;
   const status: ProposalOption['status'] =
-    state.phase === 'done' ? 'checked' : failed && !state.usage.length ? 'failed' : 'stopped';
+    designed === 0 && state.phase !== 'stopped'
+      ? 'failed'
+      : state.phase === 'done' && !failedRooms
+        ? 'checked'
+        : 'stopped';
   const cutOff = state.steps.reduce((t, s) => t + (s.cutOffHigh ?? 0), 0);
   if (doc().id === projectId) {
     await actProposal(p.id, (x) =>

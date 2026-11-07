@@ -3,6 +3,7 @@ import {
   type DesignResult,
   type ResultCheck,
   type SubsetReport,
+  WARNING_TEXT,
   defaultTicks,
   mergeChanges,
   spentOf,
@@ -12,6 +13,7 @@ import {
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useRates } from '../../../cost/estimate';
 import { useEditor } from '../../../editor';
+import { warningsOf } from '../../../electrical/electrical';
 import { useStore } from '../../../store';
 import { useAi } from '../../credentials';
 import { CaseDialog } from '../CaseDialog';
@@ -23,7 +25,8 @@ import { keepTogether } from '../words';
 import { Mark } from './Mark';
 import { acceptCard, precheckAccept } from './accept';
 import { type CardModel, cardChanges, cardResult, nowOf, planMoved } from './cards';
-import { finishPrice, finishRooms, pressScope, scopePrice, stopTalkRun } from './propose';
+import { finishPrice, finishRooms, pressScope, scopePrice } from './propose';
+import { focusInLog, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { type LiveRun, actProposal, useTalk } from './useTalk';
 import { EMPTY_VIEW, useProposalView } from './view';
@@ -38,6 +41,8 @@ import { EMPTY_VIEW, useProposalView } from './view';
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const k = (v: number) => `${Math.round(v / 1000)}k`;
+/** "3–5k" (one unit for the range). */
+const kRange = (lo: number, hi: number) => `${Math.round(lo / 1000)}–${Math.round(hi / 1000)}k`;
 const sgd = (v: number) => `S$${Math.abs(Math.round(v)).toLocaleString('en-SG')}`;
 
 /** A tri-state checkbox (a group's tick). */
@@ -158,6 +163,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
   const ai = useAi();
   const shown = useTalk((s) => s.shown === card.key);
   const openRow = useTalk((s) => (s.open?.card === card.key ? s.open.change : null));
+  const whyAll = useTalk((s) => s.why === card.key);
   const hover = useTalk((s) => (s.hover?.card === card.key ? s.hover.change : null));
   const planHover = useEditor((s) => (shown && s.hover?.kind === 'item' ? s.hover.id : null));
   const busy = useDesigner((s) => s.starting || !!s.run);
@@ -199,6 +205,20 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
     ticked,
     waive.map((w) => w.key),
   );
+  // The electrical layer's notes on the points this proposal adds (surface trunking on a
+  // structural wall, an aircon with no compressor): notes, not failures, so amber.
+  const elecNotes = useMemo(() => {
+    const b = nowOf(project);
+    if (!merged || !b) return [] as string[];
+    return timed(() => {
+      const out: string[] = [];
+      for (const [id, ws] of warningsOf(merged, b.before)) {
+        if (b.now.points?.[id]) continue;
+        for (const w of ws) out.push(WARNING_TEXT[w]);
+      }
+      return out;
+    });
+  }, [merged, project]);
   const checkText = useMemo(() => new Map((r?.checks ?? []).map((c) => [c.key, c])), [r]);
   const accepted = card.accepted.filter((a) => !a.out);
   const allIn = !running && changes.length === 0 && accepted.length > 0;
@@ -282,9 +302,10 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
       if (c) {
         useTalk.setState({ open: { card: card.key, change: c.id } });
         requestAnimationFrame(() =>
-          rowsRef.current
-            ?.querySelector(`[data-change-id="${CSS.escape(c.id)}"]`)
-            ?.scrollIntoView({ block: 'nearest' }),
+          scrollInLog(
+            rowsRef.current?.querySelector(`[data-change-id="${CSS.escape(c.id)}"]`),
+            'nearest',
+          ),
         );
       } else {
         useStore.setState({ toast: { text: `Not changed in V${card.n}`, at: Date.now() } });
@@ -329,9 +350,10 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
   const accept = async (w: { key: string; text: string }[]) => {
     const line = await acceptCard(card, ticked, w);
     setWaive([]);
+    if (line) setTicks([]);
     if (line) {
       requestAnimationFrame(() =>
-        document.querySelector<HTMLButtonElement>(`[data-undo-line="${line}"]`)?.focus(),
+        focusInLog(document.querySelector<HTMLButtonElement>(`[data-undo-line="${line}"]`)),
       );
     }
   };
@@ -435,7 +457,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
                 ? 'Placed and checked'
                 : st.status === 'running'
                   ? st.wait
-                    ? `${st.wait.net ? 'Connection dropped; trying again' : 'Busy; trying again'} in ${st.wait.seconds} s (${st.wait.attempt} of 2)`
+                    ? `${st.wait.net ? 'Connection dropped; trying again' : st.wait.server ? 'The provider had a problem; trying again' : 'Busy; trying again'} in ${st.wait.seconds} s (${st.wait.attempt} of ${st.wait.server ? 1 : 2})`
                     : st.fixing
                       ? `Checking… fixing ${plural(st.fixing.problems, 'problem')}`
                       : 'Placing…'
@@ -468,9 +490,30 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
         </div>
       )}
       {card.status === 'failed' && (
-        <p className="talk-card-note negative">
-          {card.note ?? 'The design didn’t work.'} Nothing was designed yet.
-        </p>
+        <div className="talk-failed" role="alert">
+          <p className="talk-card-note negative">
+            {card.note ?? 'The design didn’t work.'} Nothing was designed.
+          </p>
+          <p className="talk-card-note">
+            {spentOf(card.usage).usd
+              ? `About ${usd(spentOf(card.usage).usd ?? 0)} may have been billed for it.`
+              : 'Nothing was billed for it.'}
+          </p>
+          {card.proposal && another && (
+            <button
+              type="button"
+              className="btn btn-small"
+              disabled={busy}
+              data-spends=""
+              onClick={() => card.proposal && void pressScope(card.proposal.scope)}
+            >
+              Try again{another.usd ? ` · about ${usd(another.usd.typical)}` : ''}
+            </button>
+          )}
+        </div>
+      )}
+      {!running && card.status !== 'failed' && changes.length === 0 && !accepted.length && (
+        <p className="talk-card-note">No changes from your plan as it is.</p>
       )}
       {card.status === 'stopped' && missing.length > 0 && (
         <div className="talk-stopped">
@@ -557,7 +600,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
                     const fail = c.checks
                       .map((key) => checkText.get(key))
                       .filter((x): x is ResultCheck => !!x);
-                    const opened = openRow === c.id;
+                    const opened = openRow === c.id || whyAll;
                     const lit =
                       hover === c.id ||
                       (!!planHover && [...c.items.target, ...c.items.now].includes(planHover));
@@ -686,7 +729,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
           })}
         </div>
       )}
-      {!running && card.status !== 'failed' && (
+      {!running && card.status !== 'failed' && (changes.length > 0 || accepted.length > 0) && (
         <dl className="talk-lens">
           {fixed > 0 && (
             <div className="talk-lens-line">
@@ -730,12 +773,29 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
               )}
             </dd>
           </div>
+          {elecNotes.length > 0 && (
+            <div>
+              <dt>Electrical</dt>
+              <dd className="advise">
+                <details className="talk-already">
+                  <summary>{plural(elecNotes.length, 'note')} on new points</summary>
+                  <ul>
+                    {[...new Set(elecNotes)].map((n) => (
+                      <li key={n}>{n}</li>
+                    ))}
+                  </ul>
+                </details>
+              </dd>
+            </div>
+          )}
           {report && (
             <div>
               <dt>Cost</dt>
               <dd className={report.budget === 'over' ? 'num negative' : 'num'}>
-                {report.delta >= 0 ? '+' : '−'}
-                {sgd(report.delta)} · about S${k(report.cost.low)}–{k(report.cost.high)} in total
+                {report.delta === 0
+                  ? 'No renovation work in what is ticked (furniture isn’t priced)'
+                  : `${report.delta > 0 ? '+' : '−'}${sgd(report.delta)} renovation work`}
+                {` · about S$${kRange(report.cost.low, report.cost.high)} in total`}
                 {card.input.brief.budget
                   ? report.budget === 'over'
                     ? ` · over your S$${k(card.input.brief.budget.high)}`
@@ -746,7 +806,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
           )}
         </dl>
       )}
-      {!allIn && card.status !== 'failed' && (
+      {!allIn && card.status !== 'failed' && (changes.length > 0 || running) && (
         <div className="talk-actions">
           <button
             ref={acceptBtn}
@@ -815,16 +875,6 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
                 ? 'Tick the changes you want'
                 : ''}
           </span>
-          {running && (
-            <button
-              type="button"
-              className="btn btn-small"
-              onClick={stopTalkRun}
-              title="Stop (Esc)"
-            >
-              Stop
-            </button>
-          )}
         </div>
       )}
       {!running && (

@@ -8421,3 +8421,153 @@ textarea {
     height: 44px;
   }
 }
+
+/* Slice 2, review fixes: the sheet never scrolls itself (only its log does). */
+.talk {
+  overflow: clip;
+}
+.talk-failed {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+.talk-failed p {
+  margin: 0;
+}
+/* A proposal's electrical notes read amber: notes, not failures. */
+html[data-proposal] .elec-warn circle {
+  fill: var(--advise);
+}
+.pv-sw-note {
+  display: inline-grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--advise);
+  color: #ffffff;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+}
+.pv-key {
+  position: absolute;
+  left: 12px;
+  bottom: 44px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+.pv-legend-open {
+  pointer-events: auto;
+  max-width: 220px;
+  flex-direction: column;
+  align-items: flex-start;
+  border: 1px solid var(--border);
+  text-align: left;
+  font: inherit;
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+.sample-banner-short span {
+  font-size: var(--fs-small);
+}
+.talk-spend-short {
+  font-size: var(--fs-small);
+  color: var(--muted);
+  padding: 0 4px;
+}
+/* The sheet's chrome on a phone: the handle drawn at the top edge over the header's padding,
+   one header row, no quick replies at peek. */
+@media (max-width: 900px) {
+  .talk-sheet {
+    position: relative;
+  }
+  .talk-sheet .talk-handle {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    z-index: 2;
+    width: 120px;
+    height: 24px;
+    margin: 0;
+    transform: translateX(-50%);
+  }
+  .talk-sheet .talk-handle::before {
+    margin-top: 6px;
+  }
+  .talk-sheet .talk-head {
+    padding-top: 12px;
+    padding-bottom: 0;
+  }
+  .talk-sheet .talk-table {
+    min-height: 40px;
+  }
+  .talk-sheet .talk-composer {
+    gap: 6px;
+    padding-top: 6px;
+    padding-bottom: 8px;
+  }
+  .talk-sheet .talk-send-row {
+    min-height: 0;
+  }
+  .talk-sheet .talk-send-row .field-hint {
+    font-size: var(--fs-small);
+    line-height: 16px;
+  }
+  .talk-peek .talk-quick,
+  .talk-peek .talk-send-row .field-hint {
+    display: none;
+  }
+}
+/* A phone on its side: the preview bar keeps to one row (the On the table bar says the rest),
+   and the column folds to its tab with the conversation kept underneath. */
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  .reno-bar.designer-bar {
+    flex-wrap: nowrap;
+  }
+  .designer-bar .designer-bar-text {
+    display: none;
+  }
+}
+.talk-folded > :not(.talk-side-tab) {
+  display: none;
+}
+.talk-folded {
+  padding: 0;
+}
+@media (pointer: coarse) {
+  .talk .link-btn {
+    min-width: 44px;
+    justify-content: center;
+  }
+  .talk summary,
+  .talk-names summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+  .talk-cost-card .segmented button {
+    min-height: 44px;
+  }
+  .talk-sheet .talk-handle {
+    height: 44px;
+  }
+  /* An app line's Undo on a line of its own. */
+  .talk-app-text .link-btn {
+    display: flex;
+    margin-left: 0;
+  }
+  .talk-spend-short {
+    min-height: 44px;
+  }
+}
+
+/* While a proposal is shown, the plan's own problem marks step back: red means the proposal. */
+html[data-proposal] .plan-svg g.clearance {
+  opacity: 0.4;
+}

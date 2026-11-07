@@ -61,10 +61,22 @@ describe('changeSet', () => {
 
   it('lists walls first, then each designed space in plan order, every row in words', () => {
     expect(changes[0]?.id).toBe('walls');
-    expect(changes[0]?.rows.length).toBeGreaterThan(0);
+    expect(changes[0]?.text).toBe(
+      'Make the wall between Kitchen and Dry kitchen a glass partition',
+    );
+    // Room names are rows of their own, taken or left one by one.
+    expect(changes.filter((c) => c.group === 'names').map((c) => c.text)).toEqual([
+      "Call Bedroom “Mdm Lim's room”",
+      'Call Main bedroom “Master bedroom”',
+    ]);
     const groups = [...new Set(changes.map((c) => c.group))];
     const order = spacesOf(r.level).map((s) => s.key);
-    const spaceGroups = groups.filter((g) => g !== 'walls' && g !== BATHROOMS);
+    const spaceGroups = groups.filter((g) => !['walls', 'names', BATHROOMS].includes(g));
+    // The walls without a rename keep the room's name.
+    const kept = mergeChanges(lvl, r.level, changes, ['walls']);
+    expect(kept.rooms.rm_bedroom?.name).toBe('Bedroom');
+    const named = mergeChanges(lvl, r.level, changes, ['walls', 'rename:rm_bedroom']);
+    expect(named.rooms.rm_bedroom?.name).toBe("Mdm Lim's room");
     expect(spaceGroups).toEqual(order.filter((k) => spaceGroups.includes(k)));
     for (const c of changes) {
       expect(c.text).not.toMatch(/\b[WRDP]\d+\b/); // no aliases

@@ -61,6 +61,8 @@ interface TalkState {
   typed: string | null;
   /** Bumped when what was typed went with a design: the composer empties. */
   cleared: number;
+  /** "Why this layout?": every reason of this card shown. */
+  why: string | null;
   /** AI settings open over the panel, and where. */
   settings: null | 'key' | 'prices' | 'spending';
 }
@@ -82,6 +84,7 @@ export const useTalk = create<TalkState>(() => ({
   settings: null,
   typed: null,
   cleared: 0,
+  why: null,
 }));
 
 /** What the person has typed, now. */

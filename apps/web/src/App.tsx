@@ -210,11 +210,17 @@ function ViewOnlyBanner() {
 function SampleBanner() {
   const name = useProject().name;
   const role = useStore((s) => s.role);
+  // While the designer is open the plan needs the room: one short line.
+  const designer = useDesigner((s) => s.panel);
   const { createProject } = useStore.getState();
   if (!name.endsWith('(sample)') || role === 'viewer') return null;
   return (
-    <div className="sample-banner">
-      <span>You’re exploring a sample flat. Edits are saved to your own copy.</span>
+    <div className={designer ? 'sample-banner sample-banner-short' : 'sample-banner'}>
+      <span>
+        {designer
+          ? 'Sample flat'
+          : 'You’re exploring a sample flat. Edits are saved to your own copy.'}
+      </span>
       <button
         type="button"
         className="btn btn-small btn-primary"

@@ -16,6 +16,7 @@ import { Decisions, WhatIKnow } from './Views';
 import { lineState, undoLine } from './accept';
 import { cardChanges, cardResult, optionCard } from './cards';
 import { stopTalkRun } from './propose';
+import { focusInLog, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { act, ensureConversation, newId, nowIso, talkLevel, useTalk } from './useTalk';
 import { useProposalView } from './view';
@@ -81,8 +82,8 @@ function OnTheTable() {
   if (!last || !r) return null;
   const go = (accept: boolean) => {
     const el = document.querySelector(`[data-card="${CSS.escape(last.key)}"]`);
-    el?.scrollIntoView({ block: accept ? 'end' : 'start' });
-    if (accept) el?.querySelector<HTMLButtonElement>('[data-accept-selected]')?.focus();
+    if (accept) focusInLog(el?.querySelector<HTMLButtonElement>('[data-accept-selected]'));
+    else scrollInLog(el, 'start');
   };
   const other = shown && shown !== last.key ? shown : null;
   const otherN = other ? proposals.find((p) => other.startsWith(`${p.id}:`))?.n : null;
@@ -94,10 +95,12 @@ function OnTheTable() {
     last.status === 'running'
       ? 'Checking…'
       : last.status === 'failed'
-        ? 'Didn’t work'
-        : open
-          ? `${open} ${open === 1 ? 'doesn’t' : 'don’t'} pass`
-          : 'Passes all checks';
+        ? 'Didn’t finish'
+        : accepted.length
+          ? `${accepted.length} of ${accepted.length + remaining} in your renovation`
+          : open
+            ? `${open} ${open === 1 ? 'doesn’t' : 'don’t'} pass`
+            : 'Passes all checks';
   return (
     <section className="talk-table" aria-label="On the table">
       {other && otherN ? (
@@ -273,6 +276,15 @@ export function TalkPanel() {
     if (wantSide) useDesigner.setState({ wantSide: null });
     ed.setPreview({ level: pv.merged, before, label: pv.label, side });
   }, [previewing, shown, pv, project.levels, wantSide]);
+  // While a proposal is on the plan its electrical notes read amber (notes, not failures).
+  const previewOn = useEditor((s) => !!s.preview && s.preview.side === 'version');
+  useEffect(() => {
+    if (previewOn) document.documentElement.dataset.proposal = '';
+    else delete document.documentElement.dataset.proposal;
+    return () => {
+      delete document.documentElement.dataset.proposal;
+    };
+  }, [previewOn]);
   useEffect(() => () => useEditor.getState().setPreview(null), []);
   // The plan refits to the card when a new one goes on it.
   useEffect(() => {
@@ -350,26 +362,24 @@ export function TalkPanel() {
       ? `This conversation ${tokens(totals.tokens)} tokens`
       : `This conversation ${totals.estimated || live ? '~' : ''}${usd(totals.usd)} · this tab ${usd(spend.usd)}${cap !== null ? ` of ${usd(cap)}` : ''}`;
 
-  if (side && folded) {
-    return (
-      <aside className="panel designer talk talk-side talk-folded" aria-labelledby="designer-h">
+  // Folded to its tab (a phone on its side), the conversation stays mounted, hidden, so the
+  // proposal stays on the plan, bigger.
+  const isFolded = side && folded;
+  return (
+    <aside
+      className={`panel designer talk${sheet ? ` talk-sheet talk-${size}` : ''}${side ? ' talk-side' : ''}${isFolded ? ' talk-folded' : ''}`}
+      aria-labelledby="designer-h"
+    >
+      {isFolded && (
         <button
           type="button"
           className="talk-side-tab"
           aria-expanded={false}
           onClick={() => setFolded(false)}
         >
-          <span id="designer-h">Designer</span>
+          Designer
         </button>
-      </aside>
-    );
-  }
-
-  return (
-    <aside
-      className={`panel designer talk${sheet ? ` talk-sheet talk-${size}` : ''}${side ? ' talk-side' : ''}`}
-      aria-labelledby="designer-h"
-    >
+      )}
       {sheet && (
         <>
           <button
@@ -415,6 +425,16 @@ export function TalkPanel() {
           <h2 id="designer-h" className="panel-title" ref={heading} tabIndex={-1}>
             Designer
           </h2>
+          {sheet && (
+            <button
+              type="button"
+              className="talk-spend-short link-plain num"
+              aria-label={spendLine}
+              onClick={() => useTalk.setState({ settings: 'spending' })}
+            >
+              {totals.usd === null ? `${tokens(totals.tokens)} t` : usd(totals.usd)}
+            </button>
+          )}
           <Menu />
           {side && (
             <button
@@ -436,13 +456,15 @@ export function TalkPanel() {
             {icons.close}
           </button>
         </div>
-        <button
-          type="button"
-          className="talk-spend link-plain num"
-          onClick={() => useTalk.setState({ settings: 'spending' })}
-        >
-          {spendLine}
-        </button>
+        {!sheet && (
+          <button
+            type="button"
+            className="talk-spend link-plain num"
+            onClick={() => useTalk.setState({ settings: 'spending' })}
+          >
+            {spendLine}
+          </button>
+        )}
       </header>
       {memory && (
         <p className="field-hint talk-memory">

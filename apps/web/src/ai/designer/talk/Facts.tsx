@@ -10,13 +10,15 @@ import {
   WALL_CHOICES,
   WFH_CHOICES,
   bedroomsOf,
+  guessSleeping,
   peopleOf,
-  sleepingPlan,
+  personLabel,
 } from '@dhd/core';
 import { useState } from 'react';
 import { icons } from '../../../ui/icons';
 import { SWATCHES } from '../BriefDialog';
 import { Mark } from './Mark';
+import { focusInLog } from './scroll';
 
 /**
  * The app's own questions as widgets (UX §6.5): steppers for who lives here, people chips per
@@ -28,8 +30,11 @@ export interface FactProps {
   k: QuestionKey;
   brief: DesignBrief;
   level: Level;
-  /** Answered: the brief as it now is. */
-  onDone: (b: DesignBrief) => void;
+  /**
+   * Answered: how the brief changes. Applied to the brief as it is when it is recorded, so a
+   * widget never writes back what another answer changed meanwhile.
+   */
+  onDone: (update: (b: DesignBrief) => DesignBrief) => void;
   /** Its Done button's words ("Done", "Save"). */
   doneLabel?: string;
   /** The first control gets focus (the next question of the same message). */
@@ -101,7 +106,7 @@ function OneOf<T extends string | number>({
         const all = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
         const i = all.indexOf(document.activeElement as HTMLButtonElement);
         const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1;
-        all[(i + step + all.length) % all.length]?.focus();
+        focusInLog(all[(i + step + all.length) % all.length]);
         e.preventDefault();
       }}
     >
@@ -179,7 +184,9 @@ function Who({ brief, onDone, doneLabel = 'Done', autoFocus }: FactProps) {
           <div className="talk-names-grid">
             {people.map((p) => (
               <label key={p.key} className="field">
-                <span className="field-label">{labelOf(p.key)}</span>
+                <span className="field-label">
+                  {personLabel({ ...p, name: '' }, { ...b, names: {} })}
+                </span>
                 <input
                   className="input"
                   maxLength={40}
@@ -197,16 +204,23 @@ function Who({ brief, onDone, doneLabel = 'Done', autoFocus }: FactProps) {
           className="btn btn-small"
           // biome-ignore lint/a11y/noAutofocus: the next question of the message
           autoFocus={autoFocus}
-          onClick={() =>
-            onDone({
-              ...b,
-              names: Object.fromEntries(
-                Object.entries(b.names ?? {})
-                  .map(([k, v]) => [k, v.trim()] as const)
-                  .filter(([, v]) => v),
-              ),
-            })
-          }
+          onClick={() => {
+            const names = Object.fromEntries(
+              Object.entries(b.names ?? {})
+                .map(([k, v]) => [k, v.trim()] as const)
+                .filter(([, v]) => v),
+            );
+            onDone((cur) => {
+              // Who sleeps where keeps only people still in the household.
+              const keys = new Set(peopleOf({ ...cur, household: b.household }).map((x) => x.key));
+              const sleeping = Object.fromEntries(
+                Object.entries(cur.sleeping ?? {})
+                  .map(([id, ps]) => [id, ps.filter((k) => keys.has(k))] as const)
+                  .filter(([, ps]) => ps.length),
+              );
+              return { ...cur, household: b.household, names, sleeping };
+            });
+          }}
         >
           {doneLabel}
         </button>
@@ -215,44 +229,28 @@ function Who({ brief, onDone, doneLabel = 'Done', autoFocus }: FactProps) {
   );
 }
 
-const labelOf = (key: string) =>
-  key.startsWith('adult')
-    ? `Adult ${key.slice(6)}`
-    : key.startsWith('child')
-      ? `Child ${key.slice(6)}`
-      : key.startsWith('elder')
-        ? `Older parent ${key.slice(6)}`
-        : 'Helper';
-
 function Sleeping({ brief, level, onDone, doneLabel = 'Done', autoFocus }: FactProps) {
-  const [b, setB] = useState(brief);
+  const b = brief;
   const rooms = bedroomsOf(level, b);
   const shelter = (id: string) => /shelter|bomb/i.test(level.rooms[id]?.name ?? '');
   const people = peopleOf(b);
-  const plan = sleepingPlan(
-    b,
-    rooms.filter((r) => !shelter(r.id)),
+  // What was said, else a guess that places everyone (shown dashed until tapped or Done).
+  const said0 = Object.values(b.sleeping ?? {}).some((ps) => ps.length);
+  const [mine, setMine] = useState<Record<string, string[]> | null>(
+    said0 ? (b.sleeping ?? {}) : null,
   );
-  const sleeping = b.sleeping ?? {};
-  const said = Object.values(sleeping).some((ps) => ps.length);
+  const said = mine !== null;
+  const sleeping = mine ?? guessSleeping(b, level);
   const inRoom = (key: string) =>
-    said
-      ? (Object.entries(sleeping).find(([, ps]) => ps.includes(key))?.[0] ?? null)
-      : ([...plan.rooms].find(([, ps]) => ps.some((p) => p.key === key))?.[0] ?? null);
+    Object.entries(sleeping).find(([, ps]) => ps.includes(key))?.[0] ?? null;
   const toggle = (roomId: string, key: string) => {
     // Starting from the guess, so a tap changes one person, not everyone.
-    const from: Record<string, string[]> = said
-      ? sleeping
-      : Object.fromEntries([...plan.rooms].map(([id, ps]) => [id, ps.map((p) => p.key)]));
-    const here = from[roomId]?.includes(key);
+    const here = sleeping[roomId]?.includes(key);
     const next = Object.fromEntries(
-      Object.entries(from).map(([id, ps]) => [id, ps.filter((p) => p !== key)]),
+      Object.entries(sleeping).map(([id, ps]) => [id, ps.filter((p) => p !== key)]),
     );
     if (!here) next[roomId] = [...(next[roomId] ?? []), key];
-    setB({
-      ...b,
-      sleeping: Object.fromEntries(Object.entries(next).filter(([, ps]) => ps.length)),
-    });
+    setMine(Object.fromEntries(Object.entries(next).filter(([, ps]) => ps.length)));
   };
   const unplaced = people.filter((p) => p.kind !== 'helper' && !inRoom(p.key));
   return (
@@ -278,7 +276,7 @@ function Sleeping({ brief, level, onDone, doneLabel = 'Done', autoFocus }: FactP
                   onClick={() => toggle(r.id, p.key)}
                 >
                   {inRoom(p.key) === r.id && <Mark kind="check" />}
-                  {p.name}
+                  {personLabel(p, b)}
                 </button>
               ))}
           </span>
@@ -286,7 +284,7 @@ function Sleeping({ brief, level, onDone, doneLabel = 'Done', autoFocus }: FactP
       ))}
       <p className={unplaced.length ? 'field-hint negative' : 'field-hint'}>
         {unplaced.length
-          ? `${unplaced.map((p) => p.name).join(' and ')} would have no bed. Tap where each of them sleeps: two can share a room, a bunk bed sleeps two.`
+          ? `${unplaced.map((p) => personLabel(p, b)).join(' and ')} would have no bed. Tap where each of them sleeps: two can share a room, a bunk bed sleeps two.`
           : said
             ? 'Each of them gets a bed there, and the checks make sure.'
             : 'Dashed means my guess. Tap to change.'}
@@ -297,15 +295,8 @@ function Sleeping({ brief, level, onDone, doneLabel = 'Done', autoFocus }: FactP
           className="btn btn-small"
           onClick={() => {
             // Done on the guess keeps the guess, said.
-            const keep = said
-              ? b
-              : {
-                  ...b,
-                  sleeping: Object.fromEntries(
-                    [...plan.rooms].map(([id, ps]) => [id, ps.map((p) => p.key)]),
-                  ),
-                };
-            onDone(keep);
+            const final = sleeping;
+            onDone((cur) => ({ ...cur, sleeping: final }));
           }}
         >
           {doneLabel}
@@ -323,16 +314,18 @@ function Mobility({ brief, onDone, doneLabel = 'Done', autoFocus }: FactProps) {
       ...b,
       household: { ...b.household, elders: b.household.elders.map((e, j) => (j === i ? v : e)) },
     };
-    if (elders.length === 1) onDone(next);
-    else setB(next);
+    const elderList = next.household.elders;
+    if (elders.length === 1) {
+      onDone((cur) => ({ ...cur, household: { ...cur.household, elders: elderList } }));
+    } else setB(next);
   };
   return (
     <div className="talk-widget">
       {elders.map((p, i) => (
         <div key={p.key} className="talk-field">
-          {elders.length > 1 && <span className="field-label">{p.name}</span>}
+          {elders.length > 1 && <span className="field-label">{personLabel(p, b)}</span>}
           <OneOf
-            label={`How ${p.name} gets about`}
+            label={`How ${personLabel(p, b)} gets about`}
             choices={MOBILITY_CHOICES}
             value={b.household.elders[i] ?? null}
             onPick={(v) => pick(i, v)}
@@ -342,7 +335,16 @@ function Mobility({ brief, onDone, doneLabel = 'Done', autoFocus }: FactProps) {
       ))}
       {elders.length > 1 && (
         <div className="talk-widget-foot">
-          <button type="button" className="btn btn-small" onClick={() => onDone(b)}>
+          <button
+            type="button"
+            className="btn btn-small"
+            onClick={() =>
+              onDone((cur) => ({
+                ...cur,
+                household: { ...cur.household, elders: b.household.elders },
+              }))
+            }
+          >
             {doneLabel}
           </button>
         </div>
@@ -364,7 +366,7 @@ function Style({ brief, onDone, autoFocus }: FactProps) {
           className={brief.style === s ? 'talk-style on' : 'talk-style'}
           // biome-ignore lint/a11y/noAutofocus: the next question of the message
           autoFocus={autoFocus && i === 0}
-          onClick={() => onDone({ ...brief, style: s })}
+          onClick={() => onDone((cur) => ({ ...cur, style: s }))}
         >
           <span className="style-swatches" aria-hidden="true">
             {SWATCHES[s].map((c) => (
@@ -399,7 +401,7 @@ function Anything({ brief, onDone, doneLabel = 'Done', autoFocus }: FactProps) {
           className="chip"
           // biome-ignore lint/a11y/noAutofocus: the next question of the message
           autoFocus={autoFocus}
-          onClick={() => onDone({ ...brief, household: { ...brief.household, text: '' } })}
+          onClick={() => onDone((cur) => ({ ...cur, household: { ...cur.household, text: '' } }))}
         >
           Nothing to add
         </button>
@@ -407,7 +409,10 @@ function Anything({ brief, onDone, doneLabel = 'Done', autoFocus }: FactProps) {
           type="button"
           className="btn btn-small"
           disabled={!text.trim()}
-          onClick={() => onDone({ ...brief, household: { ...brief.household, text: text.trim() } })}
+          onClick={() => {
+            const t = text.trim();
+            onDone((cur) => ({ ...cur, household: { ...cur.household, text: t } }));
+          }}
         >
           {doneLabel}
         </button>
@@ -432,7 +437,7 @@ export function FactEditor(p: FactProps) {
           label="How you cook"
           choices={COOKING_CHOICES}
           value={b.lifestyle.cooking}
-          onPick={(v) => p.onDone({ ...b, lifestyle: { ...b.lifestyle, cooking: v } })}
+          onPick={(v) => p.onDone((c) => ({ ...c, lifestyle: { ...c.lifestyle, cooking: v } }))}
           autoFocus={p.autoFocus}
         />
       );
@@ -442,7 +447,7 @@ export function FactEditor(p: FactProps) {
           label="Working from home"
           choices={WFH_CHOICES}
           value={b.lifestyle.wfh}
-          onPick={(v) => p.onDone({ ...b, lifestyle: { ...b.lifestyle, wfh: v } })}
+          onPick={(v) => p.onDone((c) => ({ ...c, lifestyle: { ...c.lifestyle, wfh: v } }))}
           autoFocus={p.autoFocus}
         />
       );
@@ -459,7 +464,7 @@ export function FactEditor(p: FactProps) {
             )?.id ?? null
           }
           onPick={(id) =>
-            p.onDone({ ...b, budget: BUDGET_CHOICES.find((c) => c.id === id)?.v ?? null })
+            p.onDone((c) => ({ ...c, budget: BUDGET_CHOICES.find((x) => x.id === id)?.v ?? null }))
           }
           autoFocus={p.autoFocus}
         />
@@ -471,7 +476,7 @@ export function FactEditor(p: FactProps) {
           stacked
           choices={WALL_CHOICES}
           value={b.walls}
-          onPick={(v) => p.onDone({ ...b, walls: v })}
+          onPick={(v) => p.onDone((c) => ({ ...c, walls: v }))}
           autoFocus={p.autoFocus}
         />
       );

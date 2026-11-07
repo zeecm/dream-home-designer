@@ -1,5 +1,5 @@
 import { type Item, type Vec2, furnitureKind, itemFootprint } from '@dhd/core';
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { useTalk } from '../ai/designer/talk/useTalk';
 import { useProposalView } from '../ai/designer/talk/view';
 import { useEditor } from '../editor';
@@ -136,9 +136,25 @@ export function ProposalLegend() {
   const card = useProposalView((s) => s.card);
   const ghost = useProposalView((s) => s.ghost);
   const side = useEditor((s) => s.preview?.side);
+  // On a touch screen or a short stage, a small Key in the corner, opened on a tap.
+  const [compact] = useState(
+    () => !!window.matchMedia?.('(pointer: coarse), (max-height: 600px)').matches,
+  );
+  const [open, setOpen] = useState(false);
   if (!card || side !== 'version') return null;
+  if (compact && !open) {
+    return (
+      <button type="button" className="pv-key" aria-expanded={false} onClick={() => setOpen(true)}>
+        Key
+      </button>
+    );
+  }
   return (
-    <div className="pv-legend" aria-hidden="true">
+    <div
+      className={compact ? 'pv-legend pv-legend-open' : 'pv-legend'}
+      aria-hidden={!compact}
+      {...(compact ? { onClick: () => setOpen(false), role: 'button', tabIndex: 0 } : {})}
+    >
       {ghost ? (
         <span>
           <i className="pv-sw pv-sw-ghost" /> Being placed
@@ -156,6 +172,9 @@ export function ProposalLegend() {
           </span>
           <span>
             <i className="pv-sw pv-sw-fail" /> Doesn’t pass
+          </span>
+          <span>
+            <i className="pv-sw pv-sw-note">!</i> Electrical note
           </span>
         </>
       )}

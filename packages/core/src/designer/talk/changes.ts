@@ -32,6 +32,7 @@ export type ChangeVerb =
   | 'swap'
   | 'remove'
   | 'walls'
+  | 'rename'
   | 'finish'
   | 'electrical';
 
@@ -198,25 +199,46 @@ export function changeSet(
     const n = now.rooms[t.id];
     return n && n.name !== t.name;
   });
-  if (walls || renamed.length) {
-    const rows = [
-      ...r.applied.map((n) => n.text),
-      ...renamed.map((t) => `Call ${now.rooms[t.id]?.name} “${t.name}”`),
-    ];
+  if (walls) {
+    // One change in this slice (the walls go in together), said by what it does.
+    const rows = r.applied.map((n) => n.text);
     const cs = hard.filter((c) => c.part && !('space' in c.part));
+    const one = rows.length === 1 ? rows[0] : null;
     out.push({
       id: 'walls',
       group: 'walls',
       groupName: 'Walls and doors',
       verb: 'walls',
-      text: 'Walls and doors',
+      text:
+        one ??
+        (rows.length
+          ? `${rows.length} changes to walls and doors`
+          : 'Change the walls and doors as drawn'),
       why: null,
       items: { now: [], target: [] },
-      rows: rows.length ? rows : ['Change the walls and doors as drawn'],
+      rows: one ? [] : rows,
       needsWalls: false,
       checks: cs.map((c) => c.key),
       waivable: cs.every((c) => c.waivable),
-      name: 'the walls and doors',
+      name: one ? `the ${one[0]?.toLowerCase()}${one.slice(1)}` : 'the walls and doors',
+    });
+  }
+  // A room the proposal names anew: a row each, taken or left on its own.
+  for (const t of renamed) {
+    const was = now.rooms[t.id]?.name ?? 'a room';
+    out.push({
+      id: `rename:${t.id}`,
+      group: 'names',
+      groupName: 'Room names',
+      verb: 'rename',
+      text: `Call ${was} “${t.name}”`,
+      why: null,
+      items: { now: [], target: [] },
+      rows: [],
+      needsWalls: false,
+      checks: [],
+      waivable: true,
+      name: `the name “${t.name}”`,
     });
   }
   const designed = r.spaces.filter((s) => s.storedKey && ['done', 'copied'].includes(s.status));
@@ -375,7 +397,7 @@ export function changeSet(
         ),
       );
     }
-    out.push(...foldBelongs(mine, now, target));
+    out.push(...stableOrder(foldBelongs(mine, now, target), now, target));
 
     // Paint and floors.
     const rooms = new Set(s.rooms);
@@ -466,6 +488,23 @@ export function changeSet(
   return out;
 }
 
+/** Big furniture first, then storage, the rest, lighting; a steady order run to run. */
+function stableOrder(changes: Change[], now: Level, target: Level): Change[] {
+  const rank = (c: Change) => {
+    const id = c.items.target[0] ?? c.items.now[0];
+    const it = id ? (target.items[id] ?? now.items[id]) : undefined;
+    const kind = it ? furnitureKind(it.assetId) : undefined;
+    if (!kind) return 5;
+    if (kind.category === 'Lighting' || kind.ceiling) return 4;
+    if (kind.carpentry || /storage|wardrobe|cabinet|shelf/i.test(`${kind.category} ${kind.name}`))
+      return 2;
+    const r = roleOfIt(it);
+    if (['bed', 'sofa', 'dining-table', 'desk', 'tv', 'tv-console'].includes(r)) return 1;
+    return 3;
+  };
+  return [...changes].sort((a, b) => rank(a) - rank(b) || a.text.localeCompare(b.text));
+}
+
 /** Chairs into their table, bedside tables into their bed: one row each. */
 function foldBelongs(changes: Change[], now: Level, target: Level): Change[] {
   const itemOf = (c: Change) => {
@@ -536,7 +575,24 @@ export function mergeChanges(
 ): Level {
   const ok = allowedChanges(changes, ids);
   const out: Level = structuredClone(now);
-  if (ok.some((c) => c.verb === 'walls')) takeWalls(out, now, target);
+  if (ok.some((c) => c.verb === 'walls')) {
+    takeWalls(out, now, target);
+    // The walls bring the rooms; their names only as the rename rows say.
+    for (const c of changes) {
+      if (c.verb !== 'rename' || ok.includes(c)) continue;
+      const id = c.id.slice('rename:'.length);
+      const room = out.rooms[id];
+      const was = now.rooms[id];
+      if (room && was) room.name = was.name;
+    }
+  }
+  for (const c of ok) {
+    if (c.verb !== 'rename') continue;
+    const id = c.id.slice('rename:'.length);
+    const room = out.rooms[id];
+    const name = target.rooms[id]?.name;
+    if (room && name) room.name = name;
+  }
   for (const c of ok) {
     for (const id of c.items.now) delete out.items[id];
     for (const id of c.items.target) {
@@ -585,7 +641,7 @@ export function partsOf(changes: Change[], ids: readonly string[]) {
     parts.push(p);
   };
   for (const c of ok) {
-    if (c.verb === 'walls') add({ aspect: 'walls' });
+    if (c.verb === 'walls' || c.verb === 'rename') add({ aspect: 'walls' });
     else if (c.verb === 'finish') add({ space: c.group, aspect: 'finishes' });
     else if (c.verb === 'electrical') add({ space: c.group, aspect: 'electrical' });
     else {

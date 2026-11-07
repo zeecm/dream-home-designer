@@ -20,6 +20,7 @@ import { useStore } from '../../../store';
 import { loadDesigns, useDesigner } from '../state';
 import { designStore } from '../storage';
 import { type CardModel, cardChanges, cardResult, nowOf } from './cards';
+import { focusInLog } from './scroll';
 import { talkStore } from './talkStore';
 import { act, actProposal, newId, nowIso, say, useTalk } from './useTalk';
 
@@ -148,7 +149,8 @@ export async function acceptCard(
                 ? {
                     ...o,
                     accepted: [...o.accepted, ...rows],
-                    ticks: null,
+                    // What was left out stays out: nothing is ticked again for you.
+                    ticks: [],
                     waivers,
                     version: o.version ?? o.designId,
                   }
@@ -297,12 +299,22 @@ export function undoLine(eventId: string) {
   useEditor.getState().setPreview(null);
   useDesigner.setState({ previewing: false });
   useStore.getState().undo();
+  // Focus goes to the line's Redo once it shows (never to the page).
+  focusWhenThere(`[data-redo-line="${eventId}"]`);
 }
 export function redoLine(eventId: string) {
   if (lineState(eventId) !== 'redo') return;
   useEditor.getState().setPreview(null);
   useDesigner.setState({ previewing: false });
   useStore.getState().redo();
+  focusWhenThere(`[data-undo-line="${eventId}"]`);
+}
+
+/** Focuses what `selector` finds as soon as it is drawn (a few frames at most). */
+function focusWhenThere(selector: string, tries = 20) {
+  const el = document.querySelector<HTMLElement>(selector);
+  if (el) focusInLog(el);
+  else if (tries > 0) requestAnimationFrame(() => focusWhenThere(selector, tries - 1));
 }
 
 // The toolbar's Undo and Redo (and Ctrl+Z) move a line's accept too: the line follows. A

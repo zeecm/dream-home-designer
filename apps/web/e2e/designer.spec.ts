@@ -235,21 +235,31 @@ test.describe('desktop', () => {
     );
     await expect(sleep.getByRole('group', { name: 'Main bedroom' })).toBeVisible();
     await expect(sleep.getByRole('group', { name: 'Bedroom', exact: true })).toBeVisible();
-    await expect(sleep.getByRole('button', { name: 'Child 1' })).toHaveCount(2);
+    await expect(sleep.getByRole('button', { name: 'Child' })).toHaveCount(2);
     await expect(panel(page).getByRole('button', { name: 'Skip' })).toHaveCount(0);
-    // A tap moves one person; Done keeps the rest of the guess.
+    // The guess places everyone (no red line before anything is tapped); a tap moves one person.
+    await expect(sleep.locator('.negative')).toHaveCount(0);
+    await sleep
+      .getByRole('group', { name: 'Main bedroom' })
+      .getByRole('button', { name: 'Child' })
+      .click();
     await sleep
       .getByRole('group', { name: 'Bedroom', exact: true })
-      .getByRole('button', { name: 'Child 1' })
+      .getByRole('button', { name: 'Child' })
       .click();
+    // Answered top to bottom: who sleeps where, then how the parent gets about (the order that
+    // once wiped the first answer).
     await sleep.getByRole('button', { name: 'Done' }).click();
     await expect(log(page)).toContainText(
-      'Adult 1 and Adult 2 in Main bedroom; Elder 1 and Child 1 in Bedroom',
+      'You and Partner in Main bedroom; Parent and Child in Bedroom',
     );
     await panel(page)
-      .getByRole('region', { name: /How does Elder 1 get about/ })
+      .getByRole('region', { name: 'How does your parent get about?' })
       .getByRole('radio', { name: 'Uses a stick' })
       .click();
+    await expect(log(page)).toContainText(
+      'You and Partner in Main bedroom; Parent and Child in Bedroom',
+    );
     await shot(page, 'questions');
     // 22: Just design it: the assumptions said, and marked in What I know.
     await justDesign(page);
@@ -267,12 +277,16 @@ test.describe('desktop', () => {
     await expect(know.locator('[data-fact="budget"]')).toContainText('S$30–50k');
     await know.getByRole('button', { name: '‹ Conversation' }).click();
     await expect(log(page)).toContainText('You changed: budget Not sure → S$30–50k.');
-    await expect(
-      panel(page).getByRole('button', { name: /^Living and dining · about US\$0\.\d\d$/ }),
-    ).toBeVisible();
     await shot(page, 'scope-offer');
     // Nothing so far asked a provider for anything.
     expect(m.calls).toHaveLength(0);
+    // The priced buttons work: no "answer who sleeps where first" left behind.
+    await expect(panel(page).getByText('Answer who sleeps where first.')).toHaveCount(0);
+    await design(page, /^Living and dining · about US\$0\.\d\d$/);
+    await expect(card(page, 1).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    expect(m.calls.map((c) => c.step)).toEqual(['furnish "Living']);
   });
 
   test('a scope button: the cost card, ghosts while placed, Why, 2 of 5 accepted as one step, Undo exact (23, 26, 29, 31)', async ({
@@ -298,7 +312,7 @@ test.describe('desktop', () => {
       .click();
     await expect(log(page)).toContainText('More storage, please');
     await expect(log(page)).toContainText(
-      /Designing Living and dining takes about US\$0\.\d\d \(at most US\$\d\.\d\d, up to 3 fix-ups included\)\. Go ahead\?/,
+      /Designing Living and dining takes about US\$0\.\d\d \(at most US\$\d\.\d\d, up to \d fix-ups? included\)\. Go ahead\?/,
     );
     await shot(page, 'cost-card');
     expect(m.calls).toHaveLength(0);
@@ -355,6 +369,11 @@ test.describe('desktop', () => {
     await expect(line).toBeVisible();
     await expect(panel(page).getByRole('button', { name: 'Undo' }).first()).toBeFocused();
     await expect(v1.getByText(`2 of ${names.length} changes in your renovation`)).toBeVisible();
+    // What was left out stays out: nothing is ticked again.
+    await expect(v1.getByRole('button', { name: 'Accept selected (0)' })).toBeDisabled();
+    await expect(panel(page).getByRole('region', { name: 'On the table' })).toContainText(
+      `V1 · 2 of ${names.length} in your renovation`,
+    );
     await shot(page, 'accepted');
     const after = await saved(page);
     const items = Object.keys(after.renovation.levels[0].items);
@@ -366,12 +385,58 @@ test.describe('desktop', () => {
     await expect(
       log(page).getByText(/^Undone: the 2 changes from V1 are out of your renovation\.$/),
     ).toBeVisible();
-    await expect(panel(page).getByRole('button', { name: 'Redo' })).toBeVisible();
+    // Focus goes to the line's Redo, never to the page.
+    await expect(panel(page).getByRole('button', { name: 'Redo' })).toBeFocused();
     const back = await saved(page);
     expect(back.levels).toEqual(before.levels);
     expect(back.renovation).toBeUndefined();
-    // A version was made by the accept, numbered as the proposal.
     expect(m.calls).toHaveLength(1);
+    // Cheaper is a priced Another idea: a new proposal for the same room, with those words.
+    await panel(page)
+      .getByRole('button', { name: /^Cheaper · about US\$\d\.\d\d$/ })
+      .click();
+    await expect(card(page, 2).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    expect(m.calls).toHaveLength(2);
+    expect(m.calls[1]?.body).toContain('Cheaper.');
+    // Why this layout? opens every stored reason, free.
+    await panel(page).getByRole('button', { name: 'Why this layout?' }).click();
+    await expect(card(page, 2).locator('.talk-reason').first()).toBeVisible();
+    expect(m.calls).toHaveLength(2);
+  });
+
+  test('a run whose every request fails says so: nothing designed, nothing billed, Try again', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    const m = await mock(page, {
+      reply: () => ({
+        status: 500,
+        body: JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Down' } }),
+      }),
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^Kitchen · about US\$/);
+    const v1 = card(page, 1);
+    await expect(
+      v1.getByText(/The provider had a problem; trying again in \d+ s \(1 of 1\)/),
+    ).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(v1.getByText(/Nothing was designed\.$/)).toBeVisible({ timeout: 40_000 });
+    await expect(v1.getByText('Nothing was billed for it.')).toBeVisible();
+    await expect(v1.getByRole('button', { name: /^Try again · about US\$/ })).toBeVisible();
+    // Never a passing card with nothing in it.
+    await expect(v1.getByText('Passes all checks')).toHaveCount(0);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toHaveCount(0);
+    await expect(panel(page).getByRole('region', { name: 'On the table' })).toContainText(
+      'Didn’t finish',
+    );
+    expect(m.calls.length).toBeGreaterThan(0);
   });
 
   test('the whole flat: Stop mid-run keeps the rooms done; Design … too asks for the rest (31)', async ({
@@ -403,6 +468,15 @@ test.describe('desktop', () => {
     await expect(
       v1.getByRole('button', { name: /^Design .+ too · about US\$/ }).first(),
     ).toBeVisible();
+    // Its price is the kitchen's, not the whole flat's.
+    const too = await v1
+      .getByRole('button', { name: /^Design Kitchen too · about US\$/ })
+      .innerText();
+    const flat = await panel(page)
+      .getByRole('button', { name: /^The whole flat · about US\$/ })
+      .innerText();
+    const price = (t: string) => Number(/US\$(\d+\.\d\d)/.exec(t)?.[1] ?? 'NaN');
+    expect(price(too)).toBeLessThan(price(flat) / 2);
     for (const r of held) r();
     const n = m.calls.length;
     await v1.getByRole('button', { name: /^Design Kitchen too · about US\$/ }).click();
@@ -610,6 +684,45 @@ test.describe('desktop', () => {
     expect(dump).toContain('"from":{"conversationId"');
     expect(dump).not.toContain(KEY);
     expect(dump).not.toContain('not-a-real-key');
+  });
+
+  test('dragging a piece with the designer open and a card: under 5 ms a frame of designer work', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    await mock(page);
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^Living and dining · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    await v1.getByRole('button', { name: /^Accept selected/ }).click();
+    await expect(log(page).getByText(/^You accepted \d+ changes from V1\.$/)).toBeVisible();
+    // The accepted sofa, dragged across the plan in 30 steps.
+    const sofa = page.locator('[data-hit^="item:"]').first();
+    const box = await sofa.boundingBox();
+    if (!box) throw new Error('no piece to drag');
+    await page.waitForTimeout(600);
+    await page.evaluate(() => {
+      (window as unknown as { __dhdDesignerPerf: unknown }).__dhdDesignerPerf = { ms: 0, calls: 0 };
+    });
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    const frames = 30;
+    for (let i = 1; i <= frames; i++) await page.mouse.move(x + i * 2, y + i);
+    const perf = await page.evaluate(
+      () =>
+        (window as unknown as { __dhdDesignerPerf: { ms: number; calls: number } })
+          .__dhdDesignerPerf,
+    );
+    await page.mouse.up();
+    expect(perf.ms / frames).toBeLessThan(5);
   });
 
   test('opening another plan mid-run asks first; Stop and open keeps the rooms done', async ({

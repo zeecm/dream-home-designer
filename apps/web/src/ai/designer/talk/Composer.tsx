@@ -1,20 +1,47 @@
-import { DRAFT_CHARS, meetingOver } from '@dhd/core';
-import { useEffect, useRef, useState } from 'react';
-import { stopTalkRun } from './propose';
-import { act, newId, nowIso, talkLevel, useTalk } from './useTalk';
+import { DRAFT_CHARS, type ScopeRef, meetingOver } from '@dhd/core';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { usd, useSpend } from '../spend';
+import { useDesigner } from '../state';
+import { pressScope, scopePrice, stopTalkRun } from './propose';
+import { scrollInLog } from './scroll';
+import { timed, useSettledProject } from './settle';
+import { act, newId, nowIso, talkLevel, typedNow, useTalk } from './useTalk';
 
 /**
- * The composer (UX §5.4): quick replies that fill it, the textarea (kept per plan across
- * closes and reloads), and Stop while a design runs. What is typed here goes with the next
- * design asked for, as the household's words; the free-form reply comes in the next slice.
+ * The composer (UX §5.4): quick replies, the textarea (kept per plan across closes and
+ * reloads), and Stop while a design runs. What is typed here goes with the next design asked
+ * for, as the household's words; the free-form reply comes in the next slice. Until then a
+ * quick reply that would need the designer is a priced Another idea ("Cheaper · about
+ * US$0.13"), and "Why this layout?" opens the reasons stored with the newest proposal, free.
  */
 
-const AFTER = ['Cheaper', 'More storage', 'Next room', 'Why this layout?'];
+/** The newest proposal's card and scope. */
+function useNewest(): { key: string; scope: ScopeRef } | null {
+  const id = useTalk((s) => {
+    const turns = s.conv?.turns ?? [];
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const t = turns[i];
+      if (t?.kind === 'proposal') return t.proposalId;
+    }
+    return null;
+  });
+  const p = useTalk((s) => s.proposals.find((x) => x.id === id));
+  return useMemo(() => (p ? { key: `${p.id}:A`, scope: p.scope } : null), [p]);
+}
 
 export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: () => void }) {
   const conv = useTalk((s) => s.conv);
   const running = useTalk((s) => !!s.live);
   const [text, setText] = useState(conv?.draft ?? '');
+  const newest = useNewest();
+  const project = useSettledProject();
+  const { prices } = useSpend();
+  const busy = useDesigner((s) => s.starting || !!s.run);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on what the price reads
+  const price = useMemo(
+    () => (newest ? timed(() => scopePrice(newest.scope)) : null),
+    [newest, project, prices],
+  );
   const area = useRef<HTMLTextAreaElement>(null);
   const saved = conv?.draft ?? '';
   // The stored draft wins when it changes underneath (another tab), unless this composer is
@@ -69,7 +96,7 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
       area.current?.setSelectionRange(next.length, next.length);
     });
   };
-  const chips: { label: string; act: () => void }[] = first
+  const chips: { label: string; act: () => void; spends?: boolean }[] = first
     ? [
         {
           label: 'Just design it',
@@ -85,9 +112,27 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
         },
         { label: 'Fill in a form instead', act: () => useTalk.setState({ formOpen: true }) },
       ]
-    : proposed
+    : proposed && newest
       ? [
-          ...AFTER.map((s) => ({ label: s, act: () => fill(`${s}.`) })),
+          ...(price
+            ? ['Cheaper', 'More storage'].map((s) => ({
+                label: `${s}${price.usd ? ` · about ${usd(price.usd.typical)}` : ''}`,
+                spends: true,
+                act: () => void pressScope(newest.scope, `${typedNow()} ${s}.`.trim()),
+              }))
+            : []),
+          {
+            label: 'Why this layout?',
+            act: () => {
+              useTalk.setState({ why: newest.key });
+              requestAnimationFrame(() =>
+                scrollInLog(
+                  document.querySelector(`[data-card="${CSS.escape(newest.key)}"]`),
+                  'start',
+                ),
+              );
+            },
+          },
           ...left.map((name) => ({
             label: `I left out ${name} because…`,
             act: () => fill(`I left out ${name} because `),
@@ -103,7 +148,14 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
       {chips.length > 0 && (
         <div className="chip-row chip-scroll talk-quick">
           {chips.map((c) => (
-            <button key={c.label} type="button" className="chip" onClick={c.act}>
+            <button
+              key={c.label}
+              type="button"
+              className="chip"
+              disabled={c.spends && busy}
+              {...(c.spends ? { 'data-spends': '' } : {})}
+              onClick={c.act}
+            >
               {c.label}
             </button>
           ))}
@@ -129,7 +181,7 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
         <span id="talk-hint" className="field-hint">
           {text.length >= 1800
             ? `${text.length.toLocaleString('en-US')} of ${DRAFT_CHARS.toLocaleString('en-US')}`
-            : 'Your words go with the next design you ask for.'}
+            : 'Goes with the next design: a room above, or Another idea.'}
         </span>
         {running && (
           <button

@@ -133,7 +133,8 @@ export function SpendSettings({
       <p className="field-hint">
         The designer warns before a run that could pass the limit, and pauses at it. A button that
         shows its price asks again only for the tab’s first design, one that may cost US$0.50 or
-        more, or one past the limit. Renders aren’t counted.
+        more, or one past the limit. The per-reply figure is used once you can message the designer.
+        Renders aren’t counted.
       </p>
       <fieldset ref={ref} className="price-table" id="ai-prices">
         <legend className="field-label">Prices per million tokens for {model} (US$)</legend>

@@ -67,7 +67,7 @@ export function WhatIKnow() {
                     level={level}
                     doneLabel="Save"
                     autoFocus
-                    onDone={(nb) => save(k, nb)}
+                    onDone={(update) => save(k, update(useTalk.getState().conv?.brief ?? b))}
                   />
                 ) : (
                   <>

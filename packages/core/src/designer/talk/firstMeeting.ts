@@ -147,8 +147,9 @@ export function questionText(key: QuestionKey, brief: DesignBrief): string {
       return 'Who sleeps where?';
     case 'mobility': {
       const elders = peopleOf(brief).filter((p) => p.kind === 'elder');
+      const named = elders.length === 1 ? brief.names?.[elders[0]?.key ?? '']?.trim() : null;
       return elders.length === 1
-        ? `How does ${elders[0]?.name ?? 'your parent'} get about?`
+        ? `How does ${named || 'your parent'} get about?`
         : 'How do your parents get about?';
     }
     case 'cooking':
@@ -212,13 +213,53 @@ export const MOBILITY_CHOICES: { id: DesignBrief['household']['elders'][number];
 const budgetWords = (b: DesignBrief['budget']) =>
   b ? `S$${Math.round(b.low / 1000)}–${Math.round(b.high / 1000)}k` : 'not set';
 
+/**
+ * What to call a person when the household gave no name: "You", "Partner", "Parent", "Child"
+ * (numbered only when there are several), never "Adult 1" or "Elder 1".
+ */
+export function personLabel(p: Person, brief: DesignBrief): string {
+  const named = brief.names?.[p.key]?.trim();
+  if (named) return named;
+  const h = brief.household;
+  const n = Number(p.key.split('-')[1] ?? '1');
+  switch (p.kind) {
+    case 'adult':
+      return n === 1 ? 'You' : n === 2 ? 'Partner' : `Adult ${n}`;
+    case 'child':
+      return h.children.length > 1 ? `Child ${n}` : 'Child';
+    case 'elder':
+      return h.elders.length > 1 ? `Parent ${n}` : 'Parent';
+    default:
+      return 'Helper';
+  }
+}
+
+/**
+ * Who sleeps where when nobody said: the checks' own guess, with anyone it leaves out sharing
+ * the smallest bedroom (two single beds), so the guess places everyone.
+ */
+export function guessSleeping(brief: DesignBrief, level: Level): Record<string, string[]> {
+  const rooms = sleepRooms(level, brief);
+  const plan = sleepingPlan(brief, rooms);
+  const sleeping: Record<string, string[]> = {};
+  for (const [id, ps] of plan.rooms) sleeping[id] = ps.map((p) => p.key);
+  const last = rooms[rooms.length - 1];
+  if (plan.unplaced.length && last) {
+    sleeping[last.id] = [...(sleeping[last.id] ?? []), ...plan.unplaced.map((p) => p.key)];
+  }
+  return sleeping;
+}
+
 /** Who is in which room, in words: "Rachel and Daniel in Main bedroom; Sophie in Bedroom". */
 export function sleepingWords(brief: DesignBrief, level: Level): string {
   const plan = sleepingPlan(brief, sleepRooms(level, brief), (id) => !!level.rooms[id]);
   const lines = [...plan.rooms].map(
-    ([id, ps]) => `${andList(ps.map((p) => p.name))} in ${level.rooms[id]?.name ?? 'a room'}`,
+    ([id, ps]) =>
+      `${andList(ps.map((p) => personLabel(p, brief)))} in ${level.rooms[id]?.name ?? 'a room'}`,
   );
-  if (plan.unplaced.length) lines.push(`${andList(plan.unplaced.map((p) => p.name))}: no room yet`);
+  if (plan.unplaced.length) {
+    lines.push(`${andList(plan.unplaced.map((p) => personLabel(p, brief)))}: no room yet`);
+  }
   return lines.join('; ') || 'Not said';
 }
 
@@ -229,7 +270,7 @@ function whoWords(brief: DesignBrief): string {
     p.kind === 'elder' && p.detail && p.detail !== 'walks'
       ? ` (${MOBILITY_CHOICES.find((m) => m.id === p.detail)?.label.toLowerCase()})`
       : '';
-  return andList(ps.map((p) => `${p.name}${detail(p)}`));
+  return andList(ps.map((p) => `${personLabel(p, brief)}${detail(p)}`));
 }
 
 /** A fact as What I know shows it, and as the person's answer reads in the log. */
@@ -252,7 +293,7 @@ export function factText(key: QuestionKey, brief: DesignBrief, level: Level): st
           .filter((p) => p.kind === 'elder')
           .map(
             (p) =>
-              `${p.name}: ${MOBILITY_CHOICES.find((m) => m.id === p.detail)?.label.toLowerCase() ?? 'walks unaided'}`,
+              `${personLabel(p, brief)} ${MOBILITY_CHOICES.find((m) => m.id === p.detail)?.label.toLowerCase() ?? 'walks unaided'}`,
           )
           .join('; ') || 'No older parents'
       );
@@ -301,16 +342,7 @@ export function assume(
   const lines: string[] = [];
   const open = (k: QuestionKey) => !done.has(k) && applies(k, next, level);
   if (open('sleeping')) {
-    const rooms = sleepRooms(level, next);
-    const plan = sleepingPlan(next, rooms);
-    // Anyone left out shares the smallest bedroom (two single beds).
-    const sleeping: Record<string, string[]> = {};
-    for (const [id, ps] of plan.rooms) sleeping[id] = ps.map((p) => p.key);
-    const last = rooms[rooms.length - 1];
-    if (plan.unplaced.length && last) {
-      sleeping[last.id] = [...(sleeping[last.id] ?? []), ...plan.unplaced.map((p) => p.key)];
-    }
-    next = { ...next, sleeping };
+    next = { ...next, sleeping: guessSleeping(next, level) };
     keys.push('sleeping');
     lines.push(sleepingWords(next, level));
   }
@@ -331,7 +363,12 @@ export function assume(
   for (const k of ['who', 'mobility', 'cooking', 'wfh'] as const) {
     if (!open(k)) continue;
     keys.push(k);
-    lines.push(`${FACT_LABELS[k]}: ${factText(k, next, level).toLowerCase()}.`);
+    const fact = factText(k, next, level);
+    // "Cooking: every day." (a sentence of its own, the fact's first letter lowered only when
+    // it is no name).
+    const said =
+      k === 'who' || k === 'mobility' ? fact : `${fact[0]?.toLowerCase()}${fact.slice(1)}`;
+    lines.push(`${FACT_LABELS[k]}: ${said}.`);
   }
   return { brief: next, keys, lines };
 }

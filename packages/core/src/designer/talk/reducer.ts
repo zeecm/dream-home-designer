@@ -278,7 +278,12 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
       const turns = conv.turns.map((t) => {
         if (t.kind !== 'app-question' || t.keys.every((k) => t.done[k])) return t;
         const d = { ...t.done };
-        for (const k of t.keys) if (!d[k]) d[k] = { state: 'assumed' as const, words: 'Assumed' };
+        for (const k of t.keys) {
+          if (!d[k]) {
+            const fact = factText(k, made.brief, a.level);
+            d[k] = { state: 'assumed' as const, words: cut(`Assumed: ${fact}`, L.words) };
+          }
+        }
         return { ...t, done: d };
       });
       const said: Turn = {
