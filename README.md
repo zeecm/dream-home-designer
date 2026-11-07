@@ -88,12 +88,15 @@ for any plan.
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
+- Ageing parents check (the "Older person" check), slice 1 built: doors, the way through, room
+  to turn, their bathroom and switch heights for a walking aid or a wheelchair, and what HDB's
+  EASE fits; next grab bars (1b) and steps (2). [spec](docs/specs/ageing-parents.md)
 
 ### Planned
 1. Slice 2s, the rest: notch depths on the contractor sheet and the estimate on every level.
    (The lift check and a diagonal you can edit are done.)
-2. Ageing parents check: wheelchair turning space, step-free routes, 850 mm doors, grab bars
-   in the bathroom (HDB EASE items).
+2. Ageing parents check, the rest: grab bars, shower and seat pieces with "Suggest grab bars"
+   (slice 1b); steps, kerbs and ramps, and the choices saved in the project (slice 2).
 3. Storage meter: wardrobe and cabinet space against the household, room by room.
 4. A wall seen straight on (elevation): carpentry, windows, sockets and switches at height.
 5. Exact render, slice 2: quality settings, real textures, AI polish; daylight bounced up off
