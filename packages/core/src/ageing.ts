@@ -4,18 +4,17 @@ import { CLEARANCE_RULES, fixedParts, ruleSide } from './clearance';
 import { type Side, box, clipHalf, nearestOnPolygon, overlapDepth, sideOf, zoneOf } from './convex';
 import { accessClearWidth } from './delivery';
 import { ELEC_KINDS, latchEnd, pointPosition } from './electrical';
-import { itemFootprint, itemSize } from './furniture';
+import { furnitureKind, itemFootprint, itemSize } from './furniture';
 import { Buffers, type Grid, Search, cellAt, cellCentre, distanceField, widestWays } from './grid';
 import { framePoint } from './plan';
 import { roomShapes } from './rooms';
-import { type Item, type Level, type Vec2, isBoundary } from './schema';
+import { type Item, type Level, type Vec2, isBoundary, wallFaces } from './schema';
 import { type RoomKind, roomKind } from './suggest';
 import {
   type Bare,
   type FurnishedPass,
   OUTSIDE,
   type Throat,
-  WALKWAY_NEED,
   type WalkwayReport,
   type WayMeasure,
   closedBarOf,
@@ -260,11 +259,15 @@ const turnBuffers = new Buffers();
 
 /** A room someone could sleep in: not a bathroom, kitchen, yard, shelter, ledge or outside. */
 const habitable = (r: { kind: RoomKind; name: string }) =>
-  r.kind !== 'bathroom' && r.kind !== 'kitchen' && r.kind !== 'none' && !/yard/i.test(r.name);
+  r.kind !== 'bathroom' &&
+  r.kind !== 'kitchen' &&
+  r.kind !== 'none' &&
+  !/yard|corridor|foyer|store|utility/i.test(r.name);
 
+/** A bed: a catalogue bed, or one of the person's own made in the bed shape. */
 const BED = (it: Item) => {
   const r = CLEARANCE_RULES[it.assetId];
-  return !!r && r.side !== 'front';
+  return (!!r && r.side !== 'front') || furnitureKind(it.assetId)?.shape === 'bed';
 };
 
 /** The groups of rooms open to each other across room boundaries (not doors or passages). */
@@ -336,7 +339,11 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
   // can be chosen as theirs (not a bathroom, kitchen, yard, shelter or ledge).
   const withBed = new Set(pass.pieces.filter(BED).map(pieceRoom));
   const bedrooms = rooms
-    .filter((r) => big(r) && (r.kind === 'bedroom' || (withBed.has(r.idx) && habitable(r))))
+    .filter(
+      (r) =>
+        big(r) &&
+        (r.kind === 'bedroom' || (withBed.has(r.idx) && habitable(r) && r.kind !== 'living')),
+    )
     .map((r) => r.id);
   const choosable = rooms
     .filter((r) => big(r) && habitable(r))
@@ -626,9 +633,7 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
     } else {
       const path = pass.search.path(cell);
       const m = measureWay(pass, path, need);
-      // At the walkways' own 0.90 it is their line already: only what's stricter is added.
-      const stricter = need > WALKWAY_NEED + 1e-9;
-      if (stricter && m.have < m.need - SLACK && m.have < bareHave - 0.02 && m.pinch) {
+      if (m.have < m.need - SLACK && m.have < bareHave - 0.02 && m.pinch) {
         let blamed = m.by.map((i) => passPiece(pass, i)).filter((id): id is string => !!id);
         if (!blamed.length) blamed = narrowingPieces(pass, barePath, need);
         if (blamed.length) {
@@ -770,6 +775,8 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
           return dp - dq || (p.id < q.id ? -1 : 1);
         })[0];
     const toilet = nearest('toilet');
+    // The room's clear faces (its outline is the walls' centre lines), to draw zones inside.
+    const inner = roomInner(level, id);
     const basin = nearest('vanity');
     let zones: BathFact['toilet'];
     if (toilet) {
@@ -793,7 +800,7 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
           N.wcFront,
           [0, 0.025, -0.025, 0.05, -0.05],
         );
-        frontPoly = clipToRoom(squareAt(sq.at, along, front.n, N.wcFront), shapes.get(id)?.outer);
+        frontPoly = clipToRoom(squareAt(sq.at, along, front.n, N.wcFront), inner);
         if (sq.have < N.wcFront - SLACK) {
           issues.push({
             key: `wc-front:${toilet.id}`,
@@ -809,7 +816,7 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
         }
       } else {
         const r0 = depthOff(front, N.wcFront, obs, -0.005);
-        frontPoly = zoneOf(front, N.wcFront);
+        frontPoly = clipToRoom(zoneOf(front, N.wcFront), inner);
         if (r0.have < N.wcFront - SLACK) {
           issues.push({
             key: `wc-front:${toilet.id}`,
@@ -848,7 +855,7 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
       };
       const sides = [measureSide(left), measureSide(right)];
       const better = sides[0] && sides[1] && sides[1].have > sides[0].have ? sides[1] : sides[0];
-      const sidePoly = zoneOf((better as { s: Side }).s, N.wcSide);
+      const sidePoly = clipToRoom(zoneOf((better as { s: Side }).s, N.wcSide), inner);
       if (better && better.have < N.wcSide - SLACK) {
         issues.push({
           key: `wc-side:${toilet.id}`,
@@ -1326,6 +1333,63 @@ function wayIn(
 }
 const waySearch = new Search(0);
 
+/**
+ * A room's floor inside its walls: its outline (wall centre lines) moved in by the face of each
+ * wall on the room's side (none for a room boundary). Undefined when a side has no wall.
+ */
+function roomInner(level: Level, roomId: string): Vec2[] | undefined {
+  const room = level.rooms[roomId];
+  if (!room) return undefined;
+  const pts = room.loop.map((v) => level.vertices[v]);
+  if (pts.some((p) => !p)) return undefined;
+  const loop = pts as Vec2[];
+  let area = 0;
+  for (let i = 0; i < loop.length; i++) {
+    const a = loop[i] as Vec2;
+    const b = loop[(i + 1) % loop.length] as Vec2;
+    area += a.x * b.y - b.x * a.y;
+  }
+  const sign = area > 0 ? 1 : -1;
+  const lines: { p: Vec2; d: Vec2 }[] = [];
+  for (let i = 0; i < loop.length; i++) {
+    const va = room.loop[i] as string;
+    const vb = room.loop[(i + 1) % loop.length] as string;
+    const a = loop[i] as Vec2;
+    const b = loop[(i + 1) % loop.length] as Vec2;
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const d = { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
+    // Into the room: the left normal for a counter-clockwise loop (in these axes).
+    const nIn = { x: -d.y * sign, y: d.x * sign };
+    const w = Object.values(level.walls).find(
+      (x) => (x.a === va && x.b === vb) || (x.a === vb && x.b === va),
+    );
+    let off = 0;
+    if (w) {
+      const f = wallFaces(w);
+      const wa = level.vertices[w.a] as Vec2;
+      const wb = level.vertices[w.b] as Vec2;
+      // The wall's left (+n) side, as the wall runs, is the room's side?
+      const wn = { x: -(wb.y - wa.y), y: wb.x - wa.x };
+      off = wn.x * nIn.x + wn.y * nIn.y > 0 ? f.left : f.right;
+    }
+    lines.push({ p: { x: a.x + nIn.x * off, y: a.y + nIn.y * off }, d });
+  }
+  // Corners where the moved lines meet.
+  const out: Vec2[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const l1 = lines[(i + lines.length - 1) % lines.length] as { p: Vec2; d: Vec2 };
+    const l2 = lines[i] as { p: Vec2; d: Vec2 };
+    const den = l1.d.x * l2.d.y - l1.d.y * l2.d.x;
+    if (Math.abs(den) < 1e-9) {
+      out.push(l2.p);
+      continue;
+    }
+    const t = ((l2.p.x - l1.p.x) * l2.d.y - (l2.p.y - l1.p.y) * l2.d.x) / den;
+    out.push({ x: l1.p.x + l1.d.x * t, y: l1.p.y + l1.d.y * t });
+  }
+  return out;
+}
+
 /** A shape clipped to a room's outline, when the room is convex (else as it is). */
 function clipToRoom(poly: Vec2[], outer: Vec2[] | undefined): Vec2[] {
   if (!outer || outer.length < 3) return poly;
@@ -1387,7 +1451,8 @@ export function ageingReport(level: Level, choice: AgeingChoice): AgeingReport {
   const r = compose(facts, choice, bedroom);
   // Each bedroom's count, as if chosen.
   if (!bedroom) {
-    r.bedrooms = facts.bedrooms.map((id) => ({
+    const offer = facts.bedrooms.length ? facts.bedrooms : facts.choosable;
+    r.bedrooms = offer.map((id) => ({
       roomId: id,
       count: compose(facts, { ...choice, bedroomId: id }, id).issues.filter(
         (i) => i.group === 'bedroom',
@@ -1419,7 +1484,8 @@ function compose(facts: Facts, choice: AgeingChoice, bedroom: string | undefined
   };
   const isBedroom = (id: string | undefined) => !!id && facts.bedrooms.includes(id);
   /** Unchosen bedrooms: their own lines are counted, not listed. */
-  const hidden = (id: string | undefined) => !bedroom && isBedroom(id) && id !== bathroom;
+  const hidden = (id: string | undefined) =>
+    !bedroom && isBedroom(id) && id !== bathroom && !facts.common.includes(id ?? '');
   const groupOf = (into: string | undefined): AgeingGroup | null => {
     if (into && into === bathroom) return 'bathroom';
     if (into && into === bedroom) return 'bedroom';
@@ -1438,6 +1504,8 @@ function compose(facts: Facts, choice: AgeingChoice, bedroom: string | undefined
     ...(bedroom ? [bedroom] : facts.bedrooms),
   ].filter((id, i, all) => all.indexOf(id) === i);
   const routeIssues = new Map<string, AgeingIssue>();
+  /** Groups with a short way to one of their rooms: their route is never "also checked". */
+  const routeShort = new Set<AgeingGroup>();
   const doorSeen = new Map<string, AgeingIssue[]>();
   const bathDoors = new Set<string>();
   for (const id of targets) {
@@ -1446,6 +1514,7 @@ function compose(facts: Facts, choice: AgeingChoice, bedroom: string | undefined
     if (!f) continue;
     const g = groupOf(id);
     if (g) check(g, 'route');
+    if (f.issues.length) routeShort.add(g ?? 'around');
     for (const i of f.issues) {
       const k = i.key;
       const was = routeIssues.get(k);
@@ -1563,6 +1632,9 @@ function compose(facts: Facts, choice: AgeingChoice, bedroom: string | undefined
     for (const k of KIND_ORDER) {
       if (!checked.get(g)?.has(k)) continue;
       if (issues.some((i) => i.group === g && i.kind === k)) continue;
+      if (k === 'route' && (routeShort.has(g) || issues.some((i) => i.kind === 'route'))) {
+        continue;
+      }
       passed.push({ group: g, kind: k });
     }
   }

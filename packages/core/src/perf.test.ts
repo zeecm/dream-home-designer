@@ -61,6 +61,7 @@ describe('timing (sample flat, 40 pieces, dragging)', () => {
     ageingReport(lvl, { profile: 'wheelchair', bedroomId: bedroom });
     const walk: number[] = [];
     const both: number[] = [];
+    const alone: number[] = [];
     // Interleaved, so a slow patch of the machine falls on both alike.
     for (let k = 1; k <= 9; k++) {
       const a = moved(2 * k);
@@ -72,14 +73,24 @@ describe('timing (sample flat, 40 pieces, dragging)', () => {
       walkwayReport(b);
       ageingReport(b, { profile: 'wheelchair', bedroomId: bedroom });
       both.push(performance.now() - t0);
+      // Clearance checks off: ageing alone, building the furnished pass itself.
+      const c = moved(100 + k);
+      t0 = performance.now();
+      ageingReport(c, { profile: 'wheelchair', bedroomId: bedroom });
+      alone.push(performance.now() - t0);
     }
     const w = median(walk);
     const added = median(both) - w;
-    console.log(`walkways ${w.toFixed(2)} ms; ageing adds ${added.toFixed(2)} ms`);
+    const a = median(alone);
+    console.log(
+      `walkways ${w.toFixed(2)} ms; ageing adds ${added.toFixed(2)} ms; ageing alone ${a.toFixed(2)} ms`,
+    );
     // Walkways: the spec's 40 ms on a laptop; otherwise only a sanity bound (CI varies).
     expect(w).toBeLessThan(PERF ? 40 : 400);
     // Ageing on top of walkways: at most 15 ms, or the walkways' own time on a slow machine,
     // three times that off a laptop.
     expect(added).toBeLessThan(Math.max(15, w) * (PERF ? 1 : 3));
+    // Ageing alone (clearance off) builds the pass walkways would have: at most the pair's time.
+    expect(a).toBeLessThan((w + Math.max(15, w)) * (PERF ? 1 : 3));
   });
 });
