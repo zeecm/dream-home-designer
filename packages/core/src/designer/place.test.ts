@@ -159,6 +159,21 @@ describe('placing pieces (criteria 7–15)', () => {
     );
   });
 
+  it('a bed whose wall a wardrobe takes goes on another wall, not out (owner, 7 Nov)', () => {
+    const r = result(
+      SAMPLE_KEYS.bedroom,
+      answer([
+        { ref: 'ward1', assetId: 'built-in-wardrobe', wall: 'W5', width: 1.8 },
+        { ref: 'bed1', assetId: 'bed-queen', wall: 'W5', along: 1.5 },
+      ]),
+    );
+    const kept = Object.values(r.level.items).map((i) => i.assetId);
+    expect(kept).toContain('bed-queen');
+    expect(kept).toContain('built-in-wardrobe');
+    expect(r.dropped.filter((n) => n.ref === 'bed1')).toEqual([]);
+    expect(r.repaired.find((n) => n.ref === 'bed1')?.text).toMatch(/another wall/);
+  });
+
   it('11: a sink cabinet in the living room is left out: the sink stays in the wet area', () => {
     const r = result(
       SAMPLE_KEYS.living,

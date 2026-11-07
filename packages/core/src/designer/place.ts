@@ -294,12 +294,15 @@ export function placePiece(ix: SpaceIndex, want: Want): PlaceOutcome {
   const builtIn = !!want.kind.carpentry;
 
   if (want.face || (want.at === null && want.faces.length)) {
-    // Against a wall: the face asked for, else the next longest that fits.
+    // Against a wall: the face asked for, else every other face, longest first, before the
+    // piece is left out (the first reason it failed is the one said).
     const { bottom, top } = vertical(want);
     const faces = want.face
       ? [want.face, ...want.faces.filter((f) => f !== want.face)]
       : want.faces;
+    let firstWhy: string | null = null;
     for (const [i, face] of faces.entries()) {
+      const before = repaired.length;
       const stretches = clearStretches(face, bottom, top);
       if (!stretches.length) continue;
       let w = want.w;
@@ -350,9 +353,11 @@ export function placePiece(ix: SpaceIndex, want: Want): PlaceOutcome {
         addToIndex(ix, result.item, want.kind);
         return { item: result.item, repaired, dropped, tries };
       }
-      return drop(result.why);
+      // This wall has no room for it: its notes go, and the next wall is tried.
+      repaired.length = before;
+      firstWhy ??= result.why;
     }
-    return drop('no wall in the room is long enough');
+    return drop(firstWhy ?? 'no wall in the room is long enough');
   }
 
   if (!want.at) return drop('it had no place');
