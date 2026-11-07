@@ -156,10 +156,12 @@ describe('wallElevation', () => {
       return elev(withItems(roomR(), b, w), 'C').notes.filter((x) => x.kind === 'lowCabinet');
     };
     expect(at(0.45).map((n) => n.text)).toEqual([
-      '0.45 m between the counter and the wall cabinets: 0.55 m or more is usual, and at least 0.65 m over the hob for the hood.',
+      '0.45 m between the counter and the wall cabinets: 0.55 m or more is usual.',
     ]);
     expect(at(0.6)).toEqual([]);
-    expect(at(0.6, 'kitchen-hob')).toHaveLength(1);
+    expect(at(0.6, 'kitchen-hob').map((n) => n.text)).toEqual([
+      '0.60 m between the hob and the wall cabinets: at least 0.65 m is usual over a hob, for the hood.',
+    ]);
     // The catalogue's own wall cabinet (at 1.45) over a base cabinet: no note.
     const s = withItems(
       roomR(),
@@ -288,6 +290,69 @@ describe('wallElevation', () => {
     expect(e.items[0]?.square).toBe(true);
     expect(e.items[0]?.outline.u0).toBeCloseTo(0.05, 6);
     expect(e.items[0]?.outline.u1).toBeCloseTo(1.85, 6);
+  });
+});
+
+describe('columns and outside corners', () => {
+  /** A 0.4 m square column of 100 mm walls, its corner at (x, y). */
+  const column = (x: number, y: number): [number, number, number, number][] => [
+    [x, y, x + 0.4, y],
+    [x + 0.4, y, x + 0.4, y + 0.4],
+    [x + 0.4, y + 0.4, x, y + 0.4],
+    [x, y + 0.4, x, y],
+  ];
+  const holeFaces = (l: Level) => faces(l).filter((f) => f.kind === 'hole');
+
+  it('a column: no cut bands on its faces, and nothing behind it drawn on them', () => {
+    const s = withItems(
+      walls([...R_SEGS, ...column(1.5, 1.2)]),
+      // Against the right wall, behind the column as seen on its west face.
+      piece('it_b', 'bookshelf', 3.8, 1.4, Math.PI / 2),
+    );
+    const l = level(s);
+    const hs = holeFaces(l);
+    expect(hs).toHaveLength(4);
+    for (const f of hs) {
+      const e = wallElevation(l, f);
+      expect(e.ends).toEqual([]);
+      expect(e.items.map((i) => i.id)).toEqual([]);
+    }
+    // The right wall, facing the bookshelf, still has it, and both its corners cut.
+    const d = faces(l).find((f) => f.kind === 'wall' && f.normal.x < -0.9) as RoomFace;
+    const e = wallElevation(l, d);
+    expect(e.items.map((i) => i.id)).toEqual(['it_b']);
+    expect(e.ends).toHaveLength(2);
+  });
+
+  it('two columns: each a loop of its own, neither linked to the other', () => {
+    const l = level(walls([...R_SEGS, ...column(1.0, 1.2), ...column(2.5, 1.2)]));
+    const hs = holeFaces(l);
+    expect(hs).toHaveLength(8);
+    expect(new Set(hs.map((f) => f.loop)).size).toBe(2);
+    for (const f of hs) expect(wallElevation(l, f).ends).toEqual([]);
+  });
+
+  it('an L-shaped room: no cut band at its outside corner', () => {
+    const l = level(
+      walls([
+        [0, 0, 4, 0],
+        [4, 0, 4, 3],
+        [4, 3, 2, 3],
+        [2, 3, 2, 1.5],
+        [2, 1.5, 0, 1.5],
+        [0, 1.5, 0, 0],
+      ]),
+    );
+    const inner = faceAt(l, wallAlong(l, [2, 3], [2, 1.5]), 'left') as RoomFace;
+    const step = faceAt(l, wallAlong(l, [2, 1.5], [0, 1.5]), 'left') as RoomFace;
+    expect(inner && step).toBeTruthy();
+    for (const f of [inner, step]) {
+      const e = wallElevation(l, f);
+      expect(e.ends).toHaveLength(1);
+    }
+    // The inside corner's band is at the far end of each, away from the outside corner.
+    expect(wallElevation(l, inner).ends[0]?.u0).toBeLessThan(0);
+    expect(wallElevation(l, step).ends[0]?.u0).toBeGreaterThan(0);
   });
 });
 

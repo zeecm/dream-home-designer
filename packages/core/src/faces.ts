@@ -53,6 +53,8 @@ export interface RoomFace {
   /** A friendly name ("bed wall"), or null. */
   label: string | null;
   kind: FaceKind;
+  /** Which loop of the room it is on: 0 the outline, 1… each enclosure standing in it. */
+  loop: number;
   /** May be empty (a return). */
   stretches: FaceStretch[];
   /** The face's ends, inside corner to inside corner, as you look at it. */
@@ -124,6 +126,13 @@ interface Ctx {
 
 const ctxCache = new WeakMap<object, Ctx>();
 
+/**
+ * The level's context. Only a frozen level (the store's, Immer's output) is cached: an
+ * unfrozen one (a draft, a test's, one built by hand) may still change, so it gets a fresh
+ * context on every call, measured afresh. That is correct but slow: `faceAt` or
+ * `resolveFace` on an unfrozen level works out every room's faces each time. Freeze a level
+ * (`freeze(level, true)`) before asking many questions of it.
+ */
 function ctxOf(level: Level): Ctx {
   const cacheable = !isDraft(level) && Object.isFrozen(level);
   const cached = cacheable && ctxCache.get(level);
@@ -212,6 +221,7 @@ type Draft = Omit<RoomFace, 'index' | 'letter' | 'label' | 'steppable'>;
 function faceOf(
   roomId: string,
   kind: FaceKind,
+  loop: number,
   segs: Seg[],
   ceiling: number,
   ends?: [Vec2, Vec2],
@@ -238,6 +248,7 @@ function faceOf(
   return {
     roomId,
     kind,
+    loop,
     stretches,
     left,
     right,
@@ -250,7 +261,8 @@ function faceOf(
 }
 
 /** A loop's faces: runs in line merged, a return wherever two runs in line step apart. */
-function loopFaces(ctx: Ctx, roomId: string, loop: readonly string[], hole: boolean): Draft[] {
+function loopFaces(ctx: Ctx, roomId: string, loop: readonly string[], index: number): Draft[] {
+  const hole = index > 0;
   const segs = segsOf(ctx, loop);
   if (segs.length === 0) return [];
   const groups: Seg[][] = [];
@@ -273,7 +285,7 @@ function loopFaces(ctx: Ctx, roomId: string, loop: readonly string[], hole: bool
   const kind: FaceKind = hole ? 'hole' : 'wall';
   const out: Draft[] = [];
   groups.forEach((g, i) => {
-    out.push(faceOf(roomId, kind, g, ceiling));
+    out.push(faceOf(roomId, kind, index, g, ceiling));
     const next = groups[(i + 1) % groups.length] as Seg[];
     if (groups.length < 2) return;
     const end = (g[g.length - 1] as Seg).q;
@@ -288,7 +300,7 @@ function loopFaces(ctx: Ctx, roomId: string, loop: readonly string[], hole: bool
       parallel &&
       Math.hypot(start.x - end.x, start.y - end.y) > 0.001
     ) {
-      out.push(faceOf(roomId, hole ? 'hole' : 'return', [], ceiling, [end, start]));
+      out.push(faceOf(roomId, hole ? 'hole' : 'return', index, [], ceiling, [end, start]));
     }
   });
   return out;
@@ -412,8 +424,8 @@ export function roomFaces(level: Level, roomId: string): RoomFace[] {
   const room = level.rooms[roomId];
   const shape = ctx.shapes.get(roomId);
   if (!room || !shape) return [];
-  const outline = loopFaces(ctx, roomId, room.loop, false);
-  const holes = shape.holeLoops.flatMap((h) => loopFaces(ctx, roomId, h, true));
+  const outline = loopFaces(ctx, roomId, room.loop, 0);
+  const holes = shape.holeLoops.flatMap((h, i) => loopFaces(ctx, roomId, h, i + 1));
   for (const f of [...outline, ...holes]) {
     if (f.stretches.length && f.stretches.every((s) => s.boundary)) {
       const mid = { x: (f.left.x + f.right.x) / 2, y: (f.left.y + f.right.y) / 2 };

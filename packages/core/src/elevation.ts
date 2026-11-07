@@ -107,8 +107,9 @@ export interface ElevItem {
   square: boolean;
   /** Its back within AGAINST of the face. */
   against: boolean;
-  /** How far its nearest point is from the face. */
+  /** How far its nearest and furthest points are from the face (negative: behind it). */
   near: number;
+  far: number;
   /** A real model: drawn as its outline with its name. */
   model: boolean;
   carpentry: Carpentry | null;
@@ -306,6 +307,7 @@ function projectItem(face: RoomFace, it: Item): ElevItem | null {
     .sort((a, b) => a.v - b.v);
   const foot = itemFootprint(it, kind).map((p) => faceUV(face, p));
   const near = Math.min(...foot.map((p) => p.v));
+  const far = Math.max(...foot.map((p) => p.v));
   const outline: Rect = {
     u0: Math.min(...parts.map((p) => p.u0)),
     u1: Math.max(...parts.map((p) => p.u1)),
@@ -354,6 +356,7 @@ function projectItem(face: RoomFace, it: Item): ElevItem | null {
     square,
     against: near <= AGAINST + 1e-9,
     near,
+    far,
     model: !!kind.model,
     carpentry,
     fronts,
@@ -365,6 +368,13 @@ function projectItem(face: RoomFace, it: Item): ElevItem | null {
 
 const overlap = (a0: number, a1: number, b0: number, b1: number) =>
   Math.min(a1, b1) - Math.max(a0, b0);
+
+/**
+ * A piece in front of a face of length L: within DEPTH of it, not wholly behind it (beyond a
+ * column, or past a notch's side), and across some of its length.
+ */
+const inFront = (e: ElevItem, L: number) =>
+  e.near <= DEPTH + 1e-9 && e.far >= -0.05 && overlap(e.outline.u0, e.outline.u1, 0, L) > 1e-3;
 const rectsMeet = (a: Rect, b: Rect) =>
   overlap(a.u0, a.u1, b.u0, b.u1) > 1e-6 && overlap(a.z0, a.z1, b.z0, b.z1) > 1e-6;
 
@@ -517,8 +527,9 @@ export function wallElevation(
 
   // The side walls at the ends, and dead-end walls standing out from the face.
   const faces = roomFaces(level, face.roomId);
-  const sameLoop = faces.filter((f) => (f.kind === 'hole') === (face.kind === 'hole'));
+  const sameLoop = faces.filter((f) => f.loop === face.loop);
   const at = sameLoop.findIndex((f) => f.index === face.index);
+  const turnsIn = (d: Vec2) => d.x * face.normal.x + d.y * face.normal.y;
   const ends: Elevation['ends'] = [];
   const endOf = (f: RoomFace | undefined, last: boolean, u: number) => {
     const s = f && (last ? f.stretches[f.stretches.length - 1] : f.stretches[0]);
@@ -532,8 +543,13 @@ export function wallElevation(
     });
   };
   if (at >= 0 && sameLoop.length > 1) {
-    endOf(sameLoop[(at - 1 + sameLoop.length) % sameLoop.length], true, 0);
-    endOf(sameLoop[(at + 1) % sameLoop.length], false, 1);
+    // A side wall is cut through only at an inside corner: where the wall before comes
+    // towards you, or the wall after goes away from the face into the room. An outside
+    // corner (an L's, a column's) has none.
+    const prev = sameLoop[(at - 1 + sameLoop.length) % sameLoop.length] as RoomFace;
+    const next = sameLoop[(at + 1) % sameLoop.length] as RoomFace;
+    if (turnsIn(prev.dir) < -1e-6) endOf(prev, true, 0);
+    if (turnsIn(next.dir) > 1e-6) endOf(next, false, 1);
   }
   const fins: Elevation['fins'] = [];
   const inRoom = new Set(faces.flatMap((f) => f.stretches.map((s) => s.wallId)));
@@ -570,10 +586,7 @@ export function wallElevation(
       ? []
       : roomItems(level, face.roomId)
           .map((it) => projectItem(face, it))
-          .filter(
-            (e): e is ElevItem =>
-              !!e && e.near <= DEPTH + 1e-9 && overlap(e.outline.u0, e.outline.u1, 0, L) > 1e-3,
-          )
+          .filter((e): e is ElevItem => !!e && inFront(e, L))
           .sort((a, b) => a.near - b.near || a.id.localeCompare(b.id));
 
   // Points on this face (this side of its walls), numbered left to right.
@@ -734,7 +747,9 @@ export function wallElevation(
       notes.push({
         kind: 'lowCabinet',
         ids: [cab.id, worst.base.id],
-        text: `${mm10(worst.gap).toFixed(2)} m between the counter and the wall cabinets: ${GAP_USUAL.toFixed(2)} m or more is usual, and at least ${GAP_HOB.toFixed(2)} m over the hob for the hood.`,
+        text: worst.hob
+          ? `${mm10(worst.gap).toFixed(2)} m between the hob and the wall cabinets: at least ${GAP_HOB.toFixed(2)} m is usual over a hob, for the hood.`
+          : `${mm10(worst.gap).toFixed(2)} m between the counter and the wall cabinets: ${GAP_USUAL.toFixed(2)} m or more is usual.`,
         at: {
           u0: Math.max(cab.outline.u0, worst.base.outline.u0),
           u1: Math.min(cab.outline.u1, worst.base.outline.u1),
@@ -989,8 +1004,7 @@ export function elevationChanges(before: Level, after: Level, face: RoomFace): E
   for (const it of Object.values(before.items)) {
     if (after.items[it.id]) continue;
     const e = projectItem(face, it);
-    if (!e || e.near > DEPTH || e.near < -0.05 || overlap(e.outline.u0, e.outline.u1, 0, L) <= 1e-3)
-      continue;
+    if (!e || !inFront(e, L)) continue;
     removed.push({ kind: 'item', id: it.id, at: e.outline });
   }
   const moved: ElevationChanges['moved'] = [];
