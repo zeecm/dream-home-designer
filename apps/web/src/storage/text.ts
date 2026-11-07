@@ -52,9 +52,13 @@ export function amount(m: StorageMeasure, v: number, unit = true): string {
   }
 }
 
-/** A target, rounded as a target reads ("8 m³", "12.0 m"). */
-const target = (m: StorageMeasure, v: number) =>
-  m === 'other' ? `${Math.round(v * 10) / 10} m³` : amount(m, v);
+/** A target, rounded as a target reads, no trailing ".0" ("8 m³", "12 m", "15.5 m", "2.00 m"). */
+export const target = (m: StorageMeasure, v: number) =>
+  m === 'other'
+    ? `${Math.round(v * 10) / 10} m³`
+    : m === 'kitchen'
+      ? `${Math.round(v * 10) / 10} m`
+      : amount(m, v);
 
 /** "1.20 of 3.00 m (4 of 10 ft)", "15 of 28 pairs", "4.8 of 12.0 m", "3.7 of 8 m³". */
 export function figures(m: StorageMeasure, meter: Meter): string {
@@ -70,7 +74,7 @@ export function figures(m: StorageMeasure, meter: Meter): string {
     case 'shoes':
       return `${amount(m, meter.have, false)} of ${amount(m, t)}`;
     case 'kitchen':
-      return `${amount(m, meter.have, false)} of ${amount(m, t)}`;
+      return `${amount(m, meter.have, false)} of ${target(m, t)}`;
     case 'other':
       return `${amount(m, meter.have, false)} of ${target(m, t)}`;
   }
@@ -140,15 +144,19 @@ export function peopleText(p: People): string {
 
 const count = (p: People) => p.adults + p.children;
 
-/** "3 people: 2 in Main bedroom, 1 in Bedroom" (and "1 more without a bed"). */
+/**
+ * "3 people (guessed from the beds): 1 in Bedroom, 2 in Main bedroom", "… 1 without a bed";
+ * "guessed" while nobody has been changed by hand.
+ */
 export function householdLine(report: StorageReport): string {
   const n = count(report.people);
-  if (!n) return 'Nobody yet';
+  if (!n) return 'Nobody counted yet';
   const rooms = report.rooms.filter((r) => count(r.people) > 0);
   const where = rooms.map((r) => `${count(r.people)} in ${r.name}`);
   const without = n - rooms.reduce((t, r) => t + count(r.people), 0);
   if (without > 0) where.push(`${without} without a bed`);
-  return `${plural(n, 'person', 'people')}: ${where.join(', ')}`;
+  const guessed = without === 0 && report.rooms.every((r) => r.fromBeds);
+  return `${plural(n, 'person', 'people')}${guessed ? ' (guessed from the beds)' : ''}: ${where.join(', ')}`;
 }
 
 const listed = (xs: string[]) =>
@@ -163,12 +171,23 @@ export function summaryLine(report: StorageReport | null, rooms: number): string
       ? `You have ${amount('clothes', c)} of wardrobe. Add who lives here to compare.`
       : 'Add who lives here to compare.';
   }
-  const more = (['clothes', 'shoes', 'kitchen', 'other'] as const).filter(
-    (m) => report.home[m].status !== 'enough',
+  // What's short or nearly first; nothing drawn is not "could use more", only not drawn yet.
+  const all = ['clothes', 'shoes', 'kitchen', 'other'] as const;
+  const more = all.filter(
+    (m) => report.home[m].status === 'short' || report.home[m].status === 'nearly',
   );
-  if (!more.length) return `Enough for ${plural(count(report.people), 'person', 'people')}.`;
-  const words = more.map((m, i) => (i === 0 ? MEASURE_LABEL[m] : MEASURE_LABEL[m].toLowerCase()));
-  return `${listed(words)} could use more.`;
+  const none = all.filter((m) => report.home[m].status === 'none');
+  const out: string[] = [];
+  if (more.length) {
+    const words = more.map((m, i) => (i === 0 ? MEASURE_LABEL[m] : MEASURE_LABEL[m].toLowerCase()));
+    out.push(`${listed(words)} could use more.`);
+  }
+  if (none.length)
+    out.push(
+      `No ${listed(none.map((m) => ADD_PIECE[m].what)).replace(/ and /, ' or ')} drawn yet.`,
+    );
+  if (!out.length) return `Enough for ${plural(count(report.people), 'person', 'people')}.`;
+  return out.join(' ');
 }
 
 /** The meter's words for a screen reader (the bar's aria-valuetext). */
@@ -194,21 +213,31 @@ export function clothesLines(
   named = true,
 ): { line: string; more?: string; warn?: boolean } | null {
   const c = room.clothes;
+  const cap = (t: string) => `${t.slice(0, 1).toUpperCase()}${t.slice(1)}`;
   if (!c || c.target === undefined) {
-    return room.totals.clothes > 0
-      ? {
-          line: `Nobody sleeps here: ${amount('clothes', room.totals.clothes)}, counted for the home.`,
-        }
-      : null;
+    if (room.totals.clothes <= 0) return null;
+    const nobody = `nobody sleeps here; its ${amount('clothes', room.totals.clothes)} of wardrobe counts for the whole home.`;
+    return { line: named ? `${room.name}: ${nobody}` : cap(nobody) };
   }
-  const have = c.have > 0 ? `${amount('clothes', c.have)} of wardrobe` : 'no wardrobe';
-  const usual = `${have}; about ${amount('clothes', c.target)} is usual.`;
-  const line = named
-    ? `${room.name}, ${peopleText(room.people)}: ${usual}`
-    : `${usual.slice(0, 1).toUpperCase()}${usual.slice(1)}`;
-  if (c.status === 'enough') return { line, more: 'Enough.' };
   const gap = c.gap ?? 0;
-  if (report.home.clothes.status === 'enough') {
+  const price = shortfallPrice(gap, rates);
+  const homeEnough = report.home.clothes.status === 'enough';
+  const usual = (end: string) => {
+    const have = c.have > 0 ? `${amount('clothes', c.have)} of wardrobe` : 'no wardrobe yet';
+    const t = `${have}; about ${amount('clothes', c.target as number)} is usual${end}`;
+    return named ? `${room.name}, ${peopleText(room.people)}: ${t}` : cap(t);
+  };
+  if (c.status === 'enough') return { line: usual('.'), more: 'Enough.' };
+  // None yet: what it would take is the same sentence ("…is usual: a 3 ft run, about $…").
+  if (c.status === 'none' && !homeEnough) {
+    return {
+      line: usual(
+        price ? `: a ${price.feet} ft run, about ${range(price.low, price.high)} built in.` : '.',
+      ),
+    };
+  }
+  const line = usual('.');
+  if (homeEnough) {
     const spare = report.spareClothes[0];
     return {
       line,
@@ -217,13 +246,12 @@ export function clothesLines(
         : 'Enough for the whole home.',
     };
   }
-  const price = shortfallPrice(gap, rates);
   return {
     line,
     more: price
       ? `Needs about ${amount('clothes', gap)} more: a ${price.feet} ft run, about ${range(price.low, price.high)} built in.`
       : `Needs about ${amount('clothes', gap)} more.`,
-    warn: c.status === 'short' || c.status === 'none',
+    warn: c.status === 'short',
   };
 }
 
@@ -239,7 +267,8 @@ export function pieceShare(p: PieceStorage): string {
       ? `${amount('clothes', p.clothes)} · top cabinets ${amount('other', p.top)}`
       : amount('clothes', p.clothes);
   }
-  if (p.kitchen > 0 || p.cabinets > 0) return `${amount('kitchen', p.kitchen)} of fronts`;
+  if (p.kitchen > 0 || p.cabinets > 0)
+    return `${amount('kitchen', p.kitchen)} of shelves and drawers`;
   if (p.other > 0) return amount('other', p.other);
   return amount('shoes', p.shoes);
 }
@@ -260,6 +289,42 @@ export function pieceLine(p: PieceStorage): string {
   return p.shoes > 0
     ? `Storage: about ${amount('shoes', p.shoes)} of shoes`
     : 'Storage: 0 pairs of shoes (too narrow)';
+}
+
+/**
+ * A chip on the plan: "Wardrobe 1.20 of 2.00 m" (short: "1.2 of 2.0 m"); with nothing drawn,
+ * "No wardrobe · about 1.00 m usual" (short: "No wardrobe"), dashed and never amber. Amber only
+ * when something is drawn and it needs more.
+ */
+export function chipText(
+  m: 'clothes' | 'kitchen',
+  meter: Meter,
+  small: boolean,
+): { text: string; warn: boolean; empty: boolean } {
+  const empty = meter.have <= 0;
+  const t = meter.target;
+  if (empty) {
+    const what = m === 'clothes' ? 'No wardrobe' : 'No kitchen cabinets';
+    return {
+      text: small || t === undefined ? what : `${what} · about ${target(m, t)} usual`,
+      warn: false,
+      empty,
+    };
+  }
+  const warn = meter.status === 'short';
+  if (m === 'clothes') {
+    const of =
+      t === undefined
+        ? amount(m, meter.have)
+        : `${amount(m, meter.have, false)} of ${amount(m, t)}`;
+    const short =
+      t === undefined
+        ? `${meter.have.toFixed(1)} m`
+        : `${meter.have.toFixed(1)} of ${t.toFixed(1)} m`;
+    return { text: small ? short : `Wardrobe ${of}`, warn, empty };
+  }
+  const of = `${amount(m, meter.have, false)}${t !== undefined ? ` of ${target(m, t)}` : ' m'}`;
+  return { text: small ? of : `Shelves ${of}`, warn, empty };
 }
 
 export const NOT_COUNTED = 'Not counted as storage.';
@@ -298,7 +363,7 @@ export function copyText(
     const meter = report.home[m];
     const s = statusWord(m, meter);
     const what =
-      meter.status === 'none'
+      meter.status === 'none' || meter.have <= 0
         ? emptyText(m, meter)
         : m === 'kitchen'
           ? `${figures(m, meter)} of shelves and drawers (${amount('kitchen', report.cabinets)} of cabinets)`

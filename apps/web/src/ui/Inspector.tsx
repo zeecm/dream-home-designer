@@ -177,6 +177,8 @@ export function Inspector() {
   const ageingList = useAgeing((s) => s.listOpen && s.setting.profile !== 'off');
   // The storage panel (a view link uses it too, with the viewer's own household).
   const storageList = useStorage((s) => s.open);
+  // A piece armed from storage's Add link: the panel stays, with a bar over the plan.
+  const adding = useStorage((s) => !!s.adding);
   // On a phone the panel folds to one row when there's nothing to edit, so the plan gets
   // the screen; it opens for a selection or a drawing tool, or by hand.
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
@@ -287,9 +289,10 @@ export function Inspector() {
       </button>
       {/* With something selected (a piece just placed), its details come first. */}
       {/* Storage's panel keeps a tool's panel (a phone's catalogue, from Add a wardrobe). */}
-      {!selection && !suggestShown && !ageingShown && (!storageShown || tool !== 'select') && (
-        <ToolPanel />
-      )}
+      {!selection &&
+        !suggestShown &&
+        !ageingShown &&
+        (!storageShown || (tool !== 'select' && !adding)) && <ToolPanel />}
       {/* Opened from the older person list: the way back to it, above the details. */}
       {ageingShown && selection && <AgeingBack selection={selection} />}
       {/* Opened from a storage card: the way back to it. */}
@@ -617,8 +620,13 @@ function ClearanceSummary() {
   return (
     <div className="field">
       <label className="check-row">
-        <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} />
-        <span>Clearance checks</span>
+        <input
+          type="checkbox"
+          aria-label="Clearance checks"
+          checked={on}
+          onChange={(e) => set(e.target.checked)}
+        />
+        <span>Clearance</span>
       </label>
       {on && stops.length > 0 && (
         <div className="note structural-guess">

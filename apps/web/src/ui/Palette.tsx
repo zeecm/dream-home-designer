@@ -7,6 +7,8 @@ import { KindPalette } from '../electrical/electrical';
 import { addModelFile } from '../models';
 import { TOOL_HINTS } from '../plan/tools';
 import { OPENING_PRESETS, type Preset, THICKNESS_PRESETS } from '../presets';
+import { useAddingHint } from '../storage/storage';
+import { useStorage } from '../storage/store';
 import { useStore } from '../store';
 import { PlanImagePanel } from './PlanImage';
 import { icons } from './icons';
@@ -116,6 +118,15 @@ export function ToolOptions({ tool, idPrefix = '' }: { tool: Tool; idPrefix?: st
 /** The furniture to place, by room, with a filter. */
 function Catalogue({ idPrefix }: { idPrefix: string }) {
   const picked = useEditor((s) => s.furnitureKind);
+  // Armed from elsewhere (the storage meter's Add link): the piece scrolled into view.
+  const armedFrom = useStorage((s) => s.adding);
+  const list = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!armedFrom) return;
+    list.current
+      ?.querySelector<HTMLElement>('[aria-pressed="true"]')
+      ?.scrollIntoView({ block: 'center' });
+  }, [armedFrom]);
   const pick = useEditor.getState().setFurnitureKind;
   const [filter, setFilter] = useState('');
   const q = filter.trim().toLowerCase();
@@ -157,7 +168,7 @@ function Catalogue({ idPrefix }: { idPrefix: string }) {
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
       />
-      <div className="catalogue-list">
+      <div className="catalogue-list" ref={list}>
         <div className="catalogue-group">
           <p className="catalogue-heading">Your furniture</p>
           <ul className="choice-list">
@@ -269,6 +280,7 @@ function CubeIcon() {
  */
 export function ToolPanel() {
   const tool = useEditor((s) => s.tool);
+  const adding = useAddingHint();
   const only3d = useShownView() === '3d';
   const viewer = useStore((s) => s.role === 'viewer');
   if (tool === 'select' || only3d || (viewer && tool !== 'comment')) return null;
@@ -278,7 +290,7 @@ export function ToolPanel() {
       <p className="tool-panel-title">{def?.label}</p>
       {/* Options first: on a phone the panel is short, and the hint can wait below. */}
       <ToolOptions tool={tool} idPrefix="panel-" />
-      <p className="tool-panel-hint">{TOOL_HINTS[tool]}</p>
+      <p className="tool-panel-hint">{adding ?? TOOL_HINTS[tool]}</p>
       {tool === 'calibrate' && <PlanImagePanel />}
     </section>
   );
@@ -286,6 +298,8 @@ export function ToolPanel() {
 
 export function Palette() {
   const tool = useEditor((s) => s.tool);
+  // A piece armed from the storage meter's Add link: what to do next.
+  const adding = useAddingHint();
   const setTool = useEditor((s) => s.setTool);
   const only3d = useShownView() === '3d';
   // A designer's version on show is read-only: look and measure, nothing else.
@@ -334,7 +348,7 @@ export function Palette() {
             : 'This is a view-only link. Make your own copy to change the plan.'
           : only3d
             ? 'Switch to Plan or Split to draw and edit.'
-            : TOOL_HINTS[tool]}
+            : (adding ?? TOOL_HINTS[tool])}
       </p>
     </nav>
   );

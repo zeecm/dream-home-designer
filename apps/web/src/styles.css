@@ -6395,6 +6395,10 @@ textarea {
   font-size: var(--fs-hint);
   text-align: right;
 }
+/* Storage's one amber (the warning pill's ink), apart from clearance's rust. */
+.storage-status-warn {
+  color: var(--pill-warning-ink);
+}
 /* A 6 px bar filled in ink, with a 1 px tick at the target; amber only when it needs more. */
 .storage-bar {
   position: relative;
@@ -6410,7 +6414,13 @@ textarea {
   background: var(--text);
 }
 .storage-bar-short .storage-fill {
-  background: var(--advise);
+  background: var(--pill-warning-ink);
+}
+@media (prefers-color-scheme: dark) {
+  /* The track's edge, readable on the dark sheet. */
+  :root:not([data-theme="light"]) .storage-bar:not(.storage-bar-empty) {
+    box-shadow: inset 0 0 0 1px var(--control);
+  }
 }
 .storage-tick {
   position: absolute;
@@ -6552,9 +6562,13 @@ textarea {
   margin: 0;
 }
 
-/* On the plan: a neutral pill, amber when the room needs more. Never the clearance red. */
+/* On the plan (in metres, strokes in screen pixels): a neutral pill, amber when something drawn
+   needs more, dashed when nothing is drawn. Never the clearance red. */
 .storage-chip rect {
   fill: var(--pill-neutral-bg);
+  stroke: none;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
 }
 .storage-chip text {
   fill: var(--pill-neutral-ink);
@@ -6563,10 +6577,51 @@ textarea {
 .storage-chip-warn rect {
   fill: var(--pill-warning-bg);
   stroke: var(--pill-warning-edge);
-  stroke-width: 1px;
 }
 .storage-chip-warn text {
   fill: var(--pill-warning-ink);
+}
+.storage-chip-empty rect {
+  fill: var(--surface);
+  stroke: var(--control);
+  stroke-dasharray: 4 3;
+}
+.storage-chip-empty text {
+  fill: var(--muted);
+  font-weight: 400;
+}
+/* A piece armed from an Add link: what to do, over the plan's top edge. */
+.storage-add-bar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - 24px);
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-hint);
+  white-space: nowrap;
+}
+.storage-add-bar span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.storage-copy-failed {
+  font-size: var(--fs-hint);
+  color: var(--pill-warning-ink);
+}
+.storage-foot .label-short {
+  display: none;
+}
+.storage-head[data-scrolled] {
+  box-shadow: 0 1px 0 var(--border);
 }
 .storage-highlight {
   fill: var(--accent-soft);
@@ -6596,7 +6651,12 @@ textarea {
     align-items: center;
   }
   .storage-own .segmented button {
-    height: 40px;
+    height: 44px;
+  }
+  .storage-oneline .link-btn,
+  .storage-add-bar .link-btn {
+    min-width: 44px;
+    min-height: 44px;
   }
   .storage-head .icon-btn {
     width: 44px;
@@ -6620,8 +6680,9 @@ textarea {
     position: sticky;
     top: calc(-1 * var(--pad));
     z-index: 1;
+    min-height: 0;
     margin: calc(-1 * var(--pad)) calc(-1 * var(--pad)) 0;
-    padding: 4px var(--pad) 0;
+    padding: 0 var(--pad);
     background: var(--surface);
   }
   .inspector-storage .storage-intro {
@@ -6637,6 +6698,20 @@ textarea {
   .inspector-storage .storage-intro,
   .inspector-storage .inspector-toggle {
     display: none;
+  }
+  .inspector-storage .storage-head {
+    position: sticky;
+    top: calc(-1 * var(--pad));
+    z-index: 1;
+    margin: calc(-1 * var(--pad)) calc(-1 * var(--pad)) 0;
+    padding: 0 var(--pad);
+    background: var(--surface);
+  }
+  .storage-foot .label-long {
+    display: none;
+  }
+  .storage-foot .label-short {
+    display: inline;
   }
   .inspector-storage .storage-foot {
     grid-template-columns: 1fr 1fr;

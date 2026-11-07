@@ -45,8 +45,10 @@ function firstVisit(): boolean {
   }
 }
 
-const narrow = () =>
-  typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 720px)').matches;
+/** A phone, upright or on its side: the panel is a sheet over (or beside) the plan. */
+export const narrow = () =>
+  typeof window !== 'undefined' &&
+  !!window.matchMedia?.('(max-width: 720px), (max-height: 500px) and (pointer: coarse)').matches;
 
 export interface StorageState {
   projectId: string | null;
@@ -59,6 +61,10 @@ export interface StorageState {
   highlight: string | null;
   /** When the panel opened on a phone: the plan refits above the sheet. */
   fitAll: number;
+  /** A piece armed from an Add link, to place on the plan; the panel comes back after. */
+  adding: { kindId: string; what: string } | null;
+  /** A piece opened from a card: where the panel was, to go back to. */
+  returnTo: { scroll: number; roomId: string | null } | null;
   load: (projectId: string) => void;
   set: (patch: Partial<StorageSetting>) => void;
   /**
@@ -76,6 +82,8 @@ export interface StorageState {
   openPanel: () => void;
   closePanel: () => void;
   setHighlight: (roomId: string | null) => void;
+  setAdding: (adding: StorageState['adding']) => void;
+  setReturnTo: (returnTo: StorageState['returnTo']) => void;
 }
 
 export const useStorage = create<StorageState>((set, get) => ({
@@ -85,6 +93,8 @@ export const useStorage = create<StorageState>((set, get) => ({
   intro: false,
   highlight: null,
   fitAll: 0,
+  adding: null,
+  returnTo: null,
   load: (projectId) => {
     if (get().projectId === projectId) return;
     set({ projectId, setting: loadStorage(projectId), open: false, highlight: null });
@@ -98,7 +108,16 @@ export const useStorage = create<StorageState>((set, get) => ({
   setPeople: (roomId, people, alias, known) =>
     get().set({ people: withRoomPeople(get().setting.people, roomId, people, alias, known) }),
   resetPeople: () => get().set({ people: {}, others: { adults: 0, children: 0 } }),
-  openPanel: () => set({ open: true, intro: firstVisit(), fitAll: narrow() ? Date.now() : 0 }),
-  closePanel: () => set({ open: false, highlight: null }),
+  openPanel: () =>
+    set({
+      open: true,
+      intro: firstVisit(),
+      fitAll: narrow() ? Date.now() : 0,
+      returnTo: null,
+      adding: null,
+    }),
+  closePanel: () => set({ open: false, highlight: null, adding: null, returnTo: null }),
   setHighlight: (highlight) => set({ highlight }),
+  setAdding: (adding) => set({ adding }),
+  setReturnTo: (returnTo) => set({ returnTo }),
 }));

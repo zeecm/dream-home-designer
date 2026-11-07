@@ -17,6 +17,7 @@ import {
   levelBounds,
   matchRooms,
   pieceIn,
+  roomKind,
   roomShapes,
   storageGain,
   storageReport,
@@ -29,7 +30,7 @@ import { type Selection, useEditor } from '../editor';
 import { beforeOf } from '../electrical/electrical';
 import { useSuggest } from '../electrical/suggest';
 import { roomLabelBoxes } from '../plan/layers';
-import { type Size, type View, fitBounds, worldToScreen } from '../plan/view';
+import { type Size, type View, fitBounds } from '../plan/view';
 import { canEdit, useLevel, useProject, useStore } from '../store';
 import { Segmented } from '../ui/fields';
 import { icons } from '../ui/icons';
@@ -47,6 +48,7 @@ import {
   amount,
   aside,
   cabinetsText,
+  chipText,
   clothesLines,
   copyText,
   cupboardText,
@@ -173,9 +175,6 @@ function panTo(c: Vec2 | null) {
   if (c && ed.view) ed.setView({ ...ed.view, cx: c.x, cy: c.y }, true);
 }
 
-const narrow = () =>
-  typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 720px)').matches;
-
 const returnFocus = () =>
   requestAnimationFrame(() =>
     document.querySelector<HTMLButtonElement>('[data-storage-open]')?.focus(),
@@ -196,12 +195,28 @@ function useCanAdd() {
   return editable && !preview;
 }
 
-/** Arms the Furniture tool with a piece, to place on the plan (where pieces can be added). */
-function addPiece(kindId: string) {
+/**
+ * Arms the Furniture tool with a piece to place on the plan (where pieces can be added); the
+ * panel stays, says what to do, and comes back once it's placed.
+ */
+function addPiece(m: StorageMeasure) {
   const ed = useEditor.getState();
   if (!canEdit(useStore.getState()) || ed.preview) return;
+  const { kindId, what } = ADD_PIECE[m];
+  ed.select(null);
   ed.setFurnitureKind(kindId);
   ed.setTool('furniture');
+  useStorage.getState().setAdding({ kindId, what });
+}
+
+/** The words for a piece armed from an Add link, in the tool's hint (null: none armed). */
+export function useAddingHint(): string | null {
+  const adding = useStorage((s) => s.adding);
+  const tool = useEditor((s) => s.tool);
+  const kind = useEditor((s) => s.furnitureKind);
+  if (!adding || tool !== 'furniture' || kind !== adding.kindId) return null;
+  const name = `${adding.what.slice(0, 1).toUpperCase()}${adding.what.slice(1)}`;
+  return `${name} chosen. Click the plan where it goes; Esc to cancel.`;
 }
 
 // --- the plan details' row ------------------------------------------------------------------
@@ -257,9 +272,7 @@ function Stepper({
         >
           −
         </button>
-        <span className="num" aria-live="polite">
-          {value}
-        </span>
+        <span className="num">{value}</span>
         <button
           type="button"
           className="btn"
@@ -277,9 +290,17 @@ function Stepper({
 function Household({ view }: { view: StorageView }) {
   const { report } = view;
   const setting = useStorage((s) => s.setting);
-  const setPeople = (roomId: string, people: People) =>
-    useStorage.getState().setPeople(roomId, people, view.alias, view.known);
   const set = useStorage((s) => s.set);
+  // One line read per change: "Bedroom: 1 adult and 1 child".
+  const [said, setSaid] = useState('');
+  const setPeople = (roomId: string, name: string, people: People) => {
+    useStorage.getState().setPeople(roomId, people, view.alias, view.known);
+    setSaid(`${name}: ${peopleText(people)}`);
+  };
+  const setOthers = (people: People) => {
+    set({ others: people });
+    setSaid(`Without a bed: ${peopleText(people)}`);
+  };
   const edited = Object.keys(setting.people).length > 0 || count(setting.others) > 0;
   const rooms = report.rooms.filter((r) => r.sleeps);
   return (
@@ -296,13 +317,13 @@ function Household({ view }: { view: StorageView }) {
             label="Adults"
             where={`in ${r.name}`}
             value={r.people.adults}
-            onChange={(adults) => setPeople(r.roomId, { ...r.people, adults })}
+            onChange={(adults) => setPeople(r.roomId, r.name, { ...r.people, adults })}
           />
           <Stepper
             label="Children"
             where={`in ${r.name}`}
             value={r.people.children}
-            onChange={(children) => setPeople(r.roomId, { ...r.people, children })}
+            onChange={(children) => setPeople(r.roomId, r.name, { ...r.people, children })}
           />
         </div>
       ))}
@@ -312,24 +333,30 @@ function Household({ view }: { view: StorageView }) {
           label="Adults"
           where="without a bed"
           value={setting.others.adults}
-          onChange={(adults) => set({ others: { ...setting.others, adults } })}
+          onChange={(adults) => setOthers({ ...setting.others, adults })}
         />
         <Stepper
           label="Children"
           where="without a bed"
           value={setting.others.children}
-          onChange={(children) => set({ others: { ...setting.others, children } })}
+          onChange={(children) => setOthers({ ...setting.others, children })}
         />
       </div>
       {edited && (
         <button
           type="button"
           className="link-btn storage-reset"
-          onClick={() => useStorage.getState().resetPeople()}
+          onClick={() => {
+            useStorage.getState().resetPeople();
+            setSaid('Back to the beds');
+          }}
         >
           Reset to the beds
         </button>
       )}
+      <p className="visually-hidden" aria-live="polite">
+        {said}
+      </p>
     </div>
   );
 }
@@ -349,7 +376,8 @@ function MeterRow({
   const id = useId();
   const canAdd = useCanAdd();
   const status = statusWord(m, meter);
-  const empty = meter.status === 'none';
+  // Nothing drawn (with or without people to compare with): the empty state, never a shortfall.
+  const empty = meter.have <= 0;
   const t = meter.target;
   const top = Math.max(meter.have, t ?? 0) || 1;
   const pct = (v: number) => `${Math.min(100, (v / top) * 100)}%`;
@@ -362,7 +390,7 @@ function MeterRow({
           {MEASURE_LABEL[m]}
         </span>
         {status && (
-          <span className={`storage-status${status.warn ? ' warning-text' : ''}`}>
+          <span className={`storage-status${status.warn ? ' storage-status-warn' : ''}`}>
             {status.text}
           </span>
         )}
@@ -387,11 +415,7 @@ function MeterRow({
           {canAdd && (
             <>
               {' '}
-              <button
-                type="button"
-                className="link-btn"
-                onClick={() => addPiece(ADD_PIECE[m].kindId)}
-              >
+              <button type="button" className="link-btn" onClick={() => addPiece(m)}>
                 Add a {ADD_PIECE[m].what}
               </button>
             </>
@@ -470,7 +494,7 @@ function RoomCard({
             : 'Not counted: “Use the shelter for storage” is off.'}
         </p>
       )}
-      {room.pieces.length > 0 && <Pieces level={level} pieces={room.pieces} />}
+      {room.pieces.length > 0 && <Pieces level={level} pieces={room.pieces} roomId={room.roomId} />}
       {gains.length > 0 && (
         <p className="storage-note storage-gain">{gains.join(', ')} in the renovation</p>
       )}
@@ -478,7 +502,15 @@ function RoomCard({
   );
 }
 
-function Pieces({ level, pieces }: { level: Level; pieces: StorageRoom['pieces'] }) {
+function Pieces({
+  level,
+  pieces,
+  roomId,
+}: {
+  level: Level;
+  pieces: StorageRoom['pieces'];
+  roomId: string | null;
+}) {
   return (
     <ul className="storage-pieces">
       {pieces.map((p) => {
@@ -489,7 +521,10 @@ function Pieces({ level, pieces }: { level: Level; pieces: StorageRoom['pieces']
             <button
               type="button"
               className="storage-piece"
-              onClick={() => {
+              onClick={(e) => {
+                // Back to storage comes back here: this card, scrolled as it was.
+                const scroll = e.currentTarget.closest('.inspector')?.scrollTop ?? 0;
+                useStorage.getState().setReturnTo({ scroll, roomId });
                 if (it) panTo({ x: it.position.x, y: it.position.z });
                 useEditor.getState().select({ kind: 'item', id: p.itemId });
               }}
@@ -504,7 +539,7 @@ function Pieces({ level, pieces }: { level: Level; pieces: StorageRoom['pieces']
   );
 }
 
-/** The panel: who lives here, how much they own, four meters, room by room, notes. */
+/** The panel: the finding, who lives here, four meters, how much you own, room by room, notes. */
 export function StoragePanel() {
   const view = useStorageReport();
   const setting = useStorage((s) => s.setting);
@@ -512,14 +547,46 @@ export function StoragePanel() {
   const intro = useStorage((s) => s.intro);
   const rates = useRates((s) => s.rates);
   const heading = useRef<HTMLHeadingElement>(null);
+  const head = useRef<HTMLDivElement>(null);
   const nobody = !!view && count(view.report.people) === 0;
   const [change, setChange] = useState<boolean | null>(null);
-  const [copied, setCopied] = useState('');
-  // Opened: from its top, focus on its heading.
+  const [copied, setCopied] = useState<'' | 'done' | 'failed'>('');
+  // A fresh open starts at the top, focus on its heading; back from a piece, where it was, focus
+  // on that piece's card.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on mounting only
   useEffect(() => {
-    heading.current?.closest('.inspector')?.scrollTo?.({ top: 0 });
+    const sheet = heading.current?.closest('.inspector');
+    const back = useStorage.getState().returnTo;
+    useStorage.getState().setReturnTo(null);
+    if (back) {
+      if (sheet) sheet.scrollTop = back.scroll;
+      const name = back.roomId
+        ? document.querySelector<HTMLButtonElement>(
+            `.storage-card[data-room="${CSS.escape(
+              view?.report.rooms.find((r) => r.roomId === back.roomId)?.name ?? '',
+            )}"] .storage-card-name`,
+          )
+        : null;
+      (name ?? heading.current)?.focus({ preventScroll: true });
+      return;
+    }
+    sheet?.scrollTo?.({ top: 0 });
     heading.current?.focus({ preventScroll: true });
   }, []);
+  // A rule under the sheet's header once its body scrolls under it.
+  useEffect(() => {
+    const sheet = heading.current?.closest('.inspector');
+    if (!sheet) return;
+    const on = () => head.current?.toggleAttribute('data-scrolled', sheet.scrollTop > 4);
+    on();
+    sheet.addEventListener('scroll', on, { passive: true });
+    return () => sheet.removeEventListener('scroll', on);
+  }, []);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(''), 2000);
+    return () => clearTimeout(t);
+  }, [copied]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
@@ -533,21 +600,21 @@ export function StoragePanel() {
   }, []);
   if (!view) return null;
   const { level, report } = view;
-  // Unfolded the first time, or with nobody to count; on a phone one line with Change.
-  const open = change ?? (nobody || (intro && !narrow()));
+  // Folded to one line, with Change; open while nobody is counted (it's what to do first).
+  const open = change ?? nobody;
   const shelter = report.rooms.find((r) => r.store?.kind === 'shelter');
   const copy = async () => {
     const name = AMOUNTS.find((a) => a.value === setting.amount)?.label ?? '';
     try {
       await navigator.clipboard.writeText(copyText(level, report, rates, name));
-      setCopied('Copied: paste it into a chat.');
+      setCopied('done');
     } catch {
-      setCopied('Couldn’t copy here.');
+      setCopied('failed');
     }
   };
   return (
     <section className="storage" aria-labelledby="storage-h">
-      <div className="inspector-head storage-head">
+      <div className="inspector-head storage-head" ref={head}>
         <h2 id="storage-h" className="panel-title" ref={heading} tabIndex={-1}>
           Storage
         </h2>
@@ -578,16 +645,27 @@ export function StoragePanel() {
             {open ? 'Done' : 'Change'}
           </button>
         </p>
-        {nobody && <p className="storage-note">Add who lives here to compare.</p>}
         {open && <Household view={view} />}
+      </div>
+
+      <div className="storage-meters">
+        {STORAGE_MEASURES.map((m) => (
+          <MeterRow
+            key={m}
+            m={m}
+            meter={report.home[m]}
+            report={report}
+            {...(view.before ? { before: view.before.home[m] } : {})}
+          />
+        ))}
       </div>
 
       <div className="storage-own">
         <span className="field-label" aria-hidden="true">
-          How much we own
+          How much you own
         </span>
         <Segmented
-          label="How much we own"
+          label="How much you own"
           fill
           value={setting.amount}
           options={AMOUNTS}
@@ -606,18 +684,6 @@ export function StoragePanel() {
         )}
       </div>
 
-      <div className="storage-meters">
-        {STORAGE_MEASURES.map((m) => (
-          <MeterRow
-            key={m}
-            m={m}
-            meter={report.home[m]}
-            report={report}
-            {...(view.before ? { before: view.before.home[m] } : {})}
-          />
-        ))}
-      </div>
-
       <section className="storage-rooms" aria-labelledby="storage-rooms-h">
         <h3 id="storage-rooms-h" className="section-title">
           Room by room
@@ -634,7 +700,7 @@ export function StoragePanel() {
           {report.outside.length > 0 && (
             <li className="storage-card" data-testid="storage-room" data-room="">
               <p className="storage-card-name storage-card-plain">Not in a room</p>
-              <Pieces level={level} pieces={report.outside} />
+              <Pieces level={level} pieces={report.outside} roomId={null} />
             </li>
           )}
         </ul>
@@ -653,14 +719,26 @@ export function StoragePanel() {
       </div>
 
       <div className="storage-foot">
+        {copied === 'failed' && (
+          <output className="storage-copy-failed">Couldn’t copy here.</output>
+        )}
         <button type="button" className="btn btn-primary btn-block" onClick={copy}>
-          Copy summary
+          {copied === 'done' ? (
+            'Copied'
+          ) : (
+            <>
+              <span className="label-long">Copy summary</span>
+              <span className="label-short" aria-hidden="true">
+                Copy
+              </span>
+            </>
+          )}
         </button>
         <button type="button" className="btn btn-block" onClick={close}>
           Close
         </button>
         <p className="visually-hidden" aria-live="polite">
-          {copied}
+          {copied === 'done' ? 'Copied: paste it into a chat.' : ''}
         </p>
       </div>
     </section>
@@ -682,6 +760,53 @@ export function StorageBack() {
     >
       ‹ Back to storage
     </button>
+  );
+}
+
+// --- adding a piece from an Add link ----------------------------------------------------------
+
+/**
+ * Over the plan while a piece armed from an Add link waits to be placed: what to do, and Cancel.
+ * Once it's placed, the panel comes back (the piece let go) so the meter shows it counted.
+ */
+export function StorageAddBar() {
+  const adding = useStorage((s) => s.adding);
+  const tool = useEditor((s) => s.tool);
+  const kind = useEditor((s) => s.furnitureKind);
+  const selection = useEditor((s) => s.selection);
+  const level = useLevel();
+  const armed = !!adding && tool === 'furniture' && kind === adding.kindId;
+  // Another tool or piece picked: no longer adding.
+  useEffect(() => {
+    if (adding && !armed) useStorage.getState().setAdding(null);
+  }, [adding, armed]);
+  // Placed: back to Select and the panel.
+  useEffect(() => {
+    if (!armed || selection?.kind !== 'item') return;
+    if (level?.items[selection.id]?.assetId !== adding?.kindId) return;
+    useStorage.getState().setAdding(null);
+    const ed = useEditor.getState();
+    ed.select(null);
+    ed.setTool('select');
+  }, [armed, selection, level, adding]);
+  if (!armed || !adding) return null;
+  const touch = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
+  return (
+    <output className="storage-add-bar">
+      <span>
+        {touch ? 'Tap' : 'Click'} where the {adding.what} goes
+      </span>
+      <button
+        type="button"
+        className="link-btn"
+        onClick={() => {
+          useStorage.getState().setAdding(null);
+          useEditor.getState().setTool('select');
+        }}
+      >
+        Cancel
+      </button>
+    </output>
   );
 }
 
@@ -770,7 +895,88 @@ export function StorageHighlight({ level }: { level: Level }) {
   );
 }
 
-/** "Wardrobe 1.20 of 2.00 m" at each bedroom's label, "Shelves 4.8 of 12 m" at the kitchen. */
+/** A chip under a room's label, in plan metres: its box and words. */
+interface PlacedChip {
+  roomId: string;
+  text: string;
+  warn: boolean;
+  empty: boolean;
+  /** The box's top-left and size, in metres; the font in metres. */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  font: number;
+}
+
+/** A plan narrower than this gets the short chips, at 11 px. */
+const SMALL_PLAN = 560;
+
+/**
+ * The chips for the panel's report at this zoom: each bedroom's clothes under its label, the
+ * kitchen's shelves under the kitchen's (a kitchen room with nothing drawn: "No kitchen
+ * cabinets"). Placed in plan metres, so clearance labels can keep off them.
+ */
+function placeChips(
+  level: Level,
+  geom: PlanGeometry,
+  zoom: number,
+  report: StorageReport,
+  small: boolean,
+): PlacedChip[] {
+  const wanted: { roomId: string; text: string; warn: boolean; empty: boolean }[] = [];
+  for (const r of report.rooms) {
+    if (!r.clothes || r.clothes.target === undefined) continue;
+    wanted.push({ roomId: r.roomId, ...chipText('clothes', r.clothes, small) });
+  }
+  const kitchenRoom =
+    report.kitchenRoomId ??
+    Object.values(level.rooms)
+      .filter((r) => roomKind(r.name) === 'kitchen')
+      .sort((a, b) => a.name.localeCompare(b.name))[0]?.id;
+  const k = report.home.kitchen;
+  if (kitchenRoom && (k.have > 0 || k.target !== undefined)) {
+    if (!wanted.some((c) => c.roomId === kitchenRoom)) {
+      wanted.push({ roomId: kitchenRoom, ...chipText('kitchen', k, small) });
+    }
+  }
+  const labels = new Map(roomLabelBoxes(level, geom, zoom).map((l) => [l.id, l]));
+  const px = 1 / zoom;
+  const font = (small ? 11 : 12) * px;
+  const out: PlacedChip[] = [];
+  for (const c of wanted) {
+    const l = labels.get(c.roomId);
+    if (!l) continue;
+    const w = (c.text.length * (small ? 11 : 12) * 0.56 + 12) * px;
+    const h = font + 8 * px;
+    out.push({ ...c, x: l.at.x - w / 2, y: l.at.y + (l.area ? 22 : 12) * px, w, h, font });
+  }
+  return out;
+}
+
+/** The chips' boxes while the panel is open, for other labels to keep off (none when shut). */
+export function useStorageChipBoxes(
+  level: Level,
+  geom: PlanGeometry,
+  zoom: number,
+  width: number,
+): { at: Vec2; half: Vec2 }[] {
+  const open = useStorage((s) => s.open);
+  const sv = useStorageReport();
+  return useMemo(() => {
+    if (!open || !sv || sv.level !== level) return [];
+    return placeChips(level, geom, zoom, sv.report, width < SMALL_PLAN).map((c) => ({
+      at: { x: c.x + c.w / 2, y: c.y + c.h / 2 },
+      half: { x: c.w / 2, y: c.h / 2 },
+    }));
+  }, [open, sv, level, geom, zoom, width]);
+}
+
+/**
+ * "Wardrobe 1.20 of 2.00 m" under each bedroom's label, "Shelves 4.8 of 12 m" at the kitchen:
+ * neutral, amber when something drawn needs more, dashed when nothing is drawn. In plan metres,
+ * drawn under the clearance marks (a safety label wins). Left out of pictures.
+ */
 export const StorageChips = memo(function StorageChips({
   level,
   geom,
@@ -795,33 +1001,15 @@ export const StorageChips = memo(function StorageChips({
     );
     return () => cancelAnimationFrame(frame);
   }, [fitAll, size]);
-  if (!open || !sv || sv.level !== level) return null;
-  const { report } = sv;
-  const small = size.width < 560;
-  const chips: { roomId: string; text: string; warn: boolean }[] = [];
-  for (const r of report.rooms) {
-    const c = r.clothes;
-    if (!c || c.target === undefined) continue;
-    const of = `${amount('clothes', c.have, false)} of ${amount('clothes', c.target)}`;
-    const short = `${c.have.toFixed(1)} of ${c.target.toFixed(1)} m`;
-    chips.push({
-      roomId: r.roomId,
-      text: small ? short : `Wardrobe ${of}`,
-      warn: c.status === 'short' || c.status === 'none',
-    });
-  }
-  const k = report.home.kitchen;
-  if (report.kitchenRoomId && !chips.some((c) => c.roomId === report.kitchenRoomId)) {
-    const t = k.target !== undefined ? ` of ${Math.round(k.target * 10) / 10} m` : ' m';
-    const text = `${amount('kitchen', k.have, false)}${t}`;
-    chips.push({
-      roomId: report.kitchenRoomId,
-      text: small ? text : `Shelves ${text}`,
-      warn: k.status === 'short' || k.status === 'none',
-    });
-  }
-  const labels = new Map(roomLabelBoxes(level, geom, view.zoom).map((l) => [l.id, l]));
-  const font = small ? 11 : 12;
+  const chips = useMemo(
+    () =>
+      open && sv && sv.level === level
+        ? placeChips(level, geom, view.zoom, sv.report, size.width < SMALL_PLAN)
+        : [],
+    [open, sv, level, geom, view.zoom, size.width],
+  );
+  if (!chips.length) return null;
+  const px = 1 / view.zoom;
   return (
     <g
       className="storage-chips"
@@ -829,27 +1017,24 @@ export const StorageChips = memo(function StorageChips({
       data-export="skip"
       data-testid="storage-chips"
     >
-      {chips.map((c) => {
-        const l = labels.get(c.roomId);
-        if (!l) return null;
-        const p = worldToScreen(view, size, l.at);
-        const w = c.text.length * font * 0.56 + 12;
-        const h = font + 8;
-        const y = p.y + (l.area ? 22 : 12);
-        return (
-          <g
-            key={c.roomId}
-            className={`storage-chip${c.warn ? ' storage-chip-warn' : ''}`}
-            data-testid="storage-chip"
-            transform={`translate(${p.x} ${y})`}
+      {chips.map((c) => (
+        <g
+          key={c.roomId}
+          className={`storage-chip${c.warn ? ' storage-chip-warn' : ''}${c.empty ? ' storage-chip-empty' : ''}`}
+          data-testid="storage-chip"
+        >
+          <rect x={c.x} y={c.y} width={c.w} height={c.h} rx={c.h / 2} strokeWidth={px} />
+          <text
+            className="num"
+            x={c.x + c.w / 2}
+            y={c.y + c.h / 2 + c.font * 0.35}
+            textAnchor="middle"
+            fontSize={c.font}
           >
-            <rect x={-w / 2} y={0} width={w} height={h} rx={h / 2} />
-            <text className="num" x={0} y={h / 2 + font * 0.35} textAnchor="middle" fontSize={font}>
-              {c.text}
-            </text>
-          </g>
-        );
-      })}
+            {c.text}
+          </text>
+        </g>
+      ))}
     </g>
   );
 });
