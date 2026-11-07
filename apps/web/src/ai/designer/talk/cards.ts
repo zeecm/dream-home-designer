@@ -114,13 +114,61 @@ const changesMemo = new Map<string, Change[]>();
 export function cardChanges(project: Project, card: CardModel, r: DesignResult): Change[] {
   const b = nowOf(project);
   if (!b) return [];
-  const key = `${card.key}|${levelFingerprint(b.now)}|${levelFingerprint(r.level)}`;
+  const inAlready = card.accepted.filter((a) => !a.out).map((a) => a.id);
+  const key = `${card.key}|${levelFingerprint(b.now)}|${levelFingerprint(r.level)}|${inAlready.join(',')}`;
   const hit = changesMemo.get(key);
   if (hit) return hit;
-  const out = changeSet(b.now, r, card.input);
+  const out = cardScope(changeSet(b.now, r, card.input), card, inAlready);
   changesMemo.set(key, out);
   if (changesMemo.size > 12) changesMemo.delete(changesMemo.keys().next().value as string);
   return out;
+}
+
+/**
+ * A card's changes, from the plan as it is now: only in the scope it was asked for (a Kitchen
+ * proposal never re-proposes the living room it copied from the version before), and never
+ * one already accepted from it (another tab's accept, a stale plan).
+ */
+export function cardScope(
+  changes: Change[],
+  card: CardModel,
+  accepted: readonly string[],
+): Change[] {
+  const scope = card.proposal?.scope;
+  // Walls and room names belong to the proposal whatever its scope; furniture and finishes only
+  // to the spaces it was asked about.
+  const inScope = (c: Change) =>
+    !scope ||
+    scope.all ||
+    c.group === 'walls' ||
+    c.group === 'names' ||
+    scope.spaces.includes(c.group);
+  const done = new Set(accepted);
+  return changes.filter((c) => inScope(c) && !done.has(c.id));
+}
+
+/**
+ * The card's one verdict (the Checks line, On the table, the folded line): every hard check the
+ * proposal fails that isn't waived, whether its row is ticked or not, and any the ticked
+ * changes fail together; then those accepted anyway.
+ */
+export function cardVerdict(
+  open: readonly { key: string }[],
+  subset: readonly { key: string }[],
+  waived: readonly string[],
+): { failing: string[]; waived: number; text: string; tone: 'pass' | 'waived' | 'fail' } {
+  const w = new Set(waived);
+  const failing = [...new Set([...open, ...subset].map((c) => c.key))].filter((k) => !w.has(k));
+  const n = failing.length;
+  if (n)
+    return {
+      failing,
+      waived: w.size,
+      text: `${n} ${n === 1 ? 'doesn’t' : 'don’t'} pass`,
+      tone: 'fail',
+    };
+  if (w.size) return { failing, waived: w.size, text: `${w.size} accepted anyway`, tone: 'waived' };
+  return { failing, waived: 0, text: 'Passes all checks', tone: 'pass' };
 }
 
 /** Whether the plan the card would go on has changed since it was made. */

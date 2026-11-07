@@ -263,7 +263,14 @@ useStore.subscribe((s, prev) => {
 // Another tab wrote this plan's conversation: read it again.
 onOtherTab((projectId) => {
   if (projectId === useTalk.getState().projectId && !useTalk.getState().live) {
-    void loadTalk(projectId);
+    void loadTalk(projectId).then(() => {
+      useTalk.setState({ note: 'Updated with messages from another tab.' });
+      setTimeout(() => {
+        if (useTalk.getState().note === 'Updated with messages from another tab.') {
+          useTalk.setState({ note: null });
+        }
+      }, 6000);
+    });
   }
 });
 if (typeof window !== 'undefined') {

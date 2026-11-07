@@ -24,7 +24,7 @@ import { designerCannotUse } from '../stream';
 import { keepTogether } from '../words';
 import { Mark } from './Mark';
 import { acceptCard, precheckAccept } from './accept';
-import { type CardModel, cardChanges, cardResult, nowOf, planMoved } from './cards';
+import { type CardModel, cardChanges, cardResult, cardVerdict, nowOf, planMoved } from './cards';
 import { finishPrice, finishRooms, pressScope, scopePrice } from './propose';
 import { focusInLog, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
@@ -164,6 +164,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
   const shown = useTalk((s) => s.shown === card.key);
   const openRow = useTalk((s) => (s.open?.card === card.key ? s.open.change : null));
   const whyAll = useTalk((s) => s.why === card.key);
+  const onPlan = useEditor((s) => shown && !!s.preview && s.preview.side === 'version');
   const hover = useTalk((s) => (s.hover?.card === card.key ? s.hover.change : null));
   const planHover = useEditor((s) => (shown && s.hover?.kind === 'item' ? s.hover.id : null));
   const busy = useDesigner((s) => s.starting || !!s.run);
@@ -364,16 +365,18 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
     changes.find((c) => c.group === g)?.groupName ??
     accepted.find((a) => a.group === g)?.groupName ??
     g;
-  const failingLine = report
-    ? report.failing.length
-      ? {
-          text: `${report.failing.length} ${report.failing.length === 1 ? 'doesn’t' : 'don’t'} pass`,
-          tone: 'fail',
-        }
-      : report.waived.length
-        ? { text: `${report.waived.length} accepted anyway`, tone: 'waived' }
-        : { text: 'Passes all checks', tone: 'pass' }
-    : null;
+  // One verdict for the card: what the proposal fails (ticked or not, in its scope) and what
+  // the ticked changes fail together, less what is accepted anyway.
+  const inCard = (c: { itemId?: string }) =>
+    !c.itemId ||
+    changes.some(
+      (x) => x.items.target.includes(c.itemId ?? '') || x.items.now.includes(c.itemId ?? ''),
+    );
+  const one = cardVerdict(fails.open.filter(inCard), report?.failing ?? [], [
+    ...fails.waived.map((c) => c.key),
+    ...waive.map((w) => w.key),
+  ]);
+  const failingLine = report || !running ? { text: one.text, tone: one.tone } : null;
   const verdict = running ? 'Checking…' : (failingLine?.text ?? 'Checking…');
   const title =
     card.input.concept?.summary ||
@@ -389,15 +392,21 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
       </h3>
       <button
         type="button"
-        className={shown ? 'btn btn-small talk-onplan on' : 'btn btn-small talk-onplan'}
-        aria-pressed={shown}
+        className={onPlan ? 'btn btn-small talk-onplan on' : 'btn btn-small talk-onplan'}
+        aria-pressed={onPlan}
         aria-label={`Show V${card.n} on the plan`}
         onClick={() => {
-          useTalk.setState({ shown: shown ? null : card.key });
-          useDesigner.setState({ previewing: !shown });
+          // Pressed only while the plan really shows it (Esc or a walk may have ended it).
+          if (onPlan) {
+            useTalk.setState({ shown: null });
+            useDesigner.setState({ previewing: false });
+          } else {
+            useTalk.setState({ shown: card.key });
+            useDesigner.setState({ previewing: true });
+          }
         }}
       >
-        {shown ? 'On the plan' : 'Show on plan'}
+        {onPlan ? 'On the plan' : 'Show on plan'}
       </button>
     </div>
   );

@@ -302,7 +302,9 @@ async function run(
   await actProposal(proposalId, () => proposal);
   await act({ type: 'propose', at: nowIso(), ids, proposalId, scope, words });
   if (ids.person) await clearTyped();
-  useTalk.setState({ shown: `${proposalId}:A`, open: null });
+  // Every new proposal goes on the plan (after an accept the stage had gone back to After).
+  useTalk.setState({ shown: `${proposalId}:A`, open: null, why: null });
+  useDesigner.setState({ previewing: true });
   say(`Designing V${proposal.n}, ${option.name}.`);
   void runOption(proposal, 'A', sp, made.est, approved);
 }

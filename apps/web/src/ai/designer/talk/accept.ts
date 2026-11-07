@@ -87,7 +87,19 @@ export async function acceptCard(
   const r = cardResult(project, card);
   if (!b || !r) return null;
   const changes = cardChanges(project, card, r);
-  const ok = allowedChanges(changes, ticked);
+  let ok = allowedChanges(changes, ticked);
+  // Never twice: rows another tab (or an earlier click) already put in, as the record has them.
+  if (card.proposal && card.option) {
+    const pid = card.proposal.id;
+    const letter = card.option.letter;
+    const stored = (await (await talkStore()).proposals(project.id)).find((x) => x.id === pid);
+    const already = new Set(
+      (stored?.options.find((o) => o.letter === letter)?.accepted ?? [])
+        .filter((a) => !a.out)
+        .map((a) => a.id),
+    );
+    ok = ok.filter((c) => !already.has(c.id));
+  }
   if (!ok.length) return null;
   const ids = ok.map((c) => c.id);
   // The waivers the accepted changes need: their own checks, or what they fail together.

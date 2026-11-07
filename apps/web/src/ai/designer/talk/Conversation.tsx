@@ -14,7 +14,7 @@ import { Composer } from './Composer';
 import { Log } from './Log';
 import { Decisions, WhatIKnow } from './Views';
 import { lineState, undoLine } from './accept';
-import { cardChanges, cardResult, optionCard } from './cards';
+import { cardChanges, cardResult, cardVerdict, optionCard } from './cards';
 import { stopTalkRun } from './propose';
 import { focusInLog, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
@@ -75,10 +75,21 @@ function OnTheTable() {
     () => (last && r ? timed(() => cardChanges(project, last, r)).length : 0),
     [project, last, r],
   );
-  const open = useMemo(
-    () => (r && last ? failingChecks(r, { waivers: last.waivers }).open.length : 0),
-    [r, last],
-  );
+  const open = useMemo(() => {
+    if (!r || !last) return 0;
+    const f = failingChecks(r, { waivers: last.waivers });
+    const changes = timed(() => cardChanges(project, last, r));
+    const inCard = (c: { itemId?: string }) =>
+      !c.itemId ||
+      changes.some(
+        (x) => x.items.target.includes(c.itemId ?? '') || x.items.now.includes(c.itemId ?? ''),
+      );
+    return cardVerdict(
+      f.open.filter(inCard),
+      [],
+      f.waived.map((c) => c.key),
+    ).failing.length;
+  }, [r, last, project]);
   if (!last || !r) return null;
   const go = (accept: boolean) => {
     const el = document.querySelector(`[data-card="${CSS.escape(last.key)}"]`);
