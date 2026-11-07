@@ -73,6 +73,7 @@ import { DIAGONAL_FIELD, GettingItIn } from '../delivery/delivery';
 import { useEditor } from '../editor';
 import { ElectricalSummary, PointInspector } from '../electrical/electrical';
 import { SuggestPanel, useSuggest } from '../electrical/suggest';
+import { RoomViewEntry, ThingViewEntry, ViewerWallEntry, WallViewEntry } from '../elevation/Entry';
 import { ageingEnabled } from '../features';
 import { roomsBeside } from '../plan/keyboard';
 import { OPENING_PRESETS, ROOM_NAMES } from '../presets';
@@ -85,6 +86,7 @@ import { ToolPanel } from './Palette';
 import { RenovationSection } from './Renovation';
 import { LengthField, Segmented, SelectField, TextField } from './fields';
 import { icons } from './icons';
+import { useOneView } from './oneView';
 
 const FLOORS = FLOOR_FINISHES.map((f) => ({ value: f.id, label: f.name }));
 
@@ -190,6 +192,16 @@ export function Inspector() {
   // its room on a phone.
   // biome-ignore lint/correctness/useExhaustiveDependencies: another object decides afresh
   useEffect(() => setUserOpen(null), [key]);
+  // A phone's wall view gets the stage: the sheet folds as it opens (what's selected stays
+  // selected) and opens again as it closes.
+  const wallView = useEditor((s) => !!s.elevation);
+  const oneView = useOneView();
+  const hadWallView = useRef(false);
+  useEffect(() => {
+    if (wallView && !hadWallView.current && oneView) setUserOpen(false);
+    if (!wallView && hadWallView.current) setUserOpen(null);
+    hadWallView.current = wallView;
+  }, [wallView, oneView]);
   // Another tool or object starts the panel at its top, with its toggle in view.
   const panel = useRef<HTMLElement>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: on another object or tool
@@ -286,7 +298,13 @@ export function Inspector() {
           setUserOpen(!open);
         }}
       >
-        {open ? 'Hide details' : 'Show plan details'}
+        {open
+          ? 'Hide details'
+          : wallView && selection
+            ? selection.kind === 'wall'
+              ? 'Show wall details'
+              : 'Show details'
+            : 'Show plan details'}
       </button>
       {/* With something selected (a piece just placed), its details come first. */}
       {/* Storage's panel keeps a tool's panel (a phone's catalogue, from Add a wardrobe). */}
@@ -296,6 +314,8 @@ export function Inspector() {
         (!storageShown || (tool !== 'select' && !adding)) && <ToolPanel />}
       {/* Opened from the older person list: the way back to it, above the details. */}
       {ageingShown && selection && <AgeingBack selection={selection} />}
+      {/* A view link can look at a wall straight on: its way in sits outside the locked fields. */}
+      {viewer && selection && <ViewerWallEntry level={level} selection={selection} />}
       {/* Opened from a storage card: the way back to it. */}
       {storageShown && selection?.kind === 'item' && <StorageBack />}
       {/* A view-only link shows the details but can't change them. */}
@@ -753,6 +773,7 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
   return (
     <>
       <Header title={boundary ? 'Room boundary' : 'Wall'} onClose={clear} />
+      <WallViewEntry level={level} wallId={id} />
       <Segmented
         label="Kind"
         value={boundary ? 'boundary' : 'wall'}
@@ -1047,6 +1068,7 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
       <Header title={kind?.name ?? 'Furniture'} onClose={clear} />
       {/* First, so a phone's sheet shows it without scrolling. */}
       <ItemClearances level={level} id={id} />
+      <ThingViewEntry level={level} selection={{ kind: 'item', id }} />
       {ageingEnabled() && <ItemAgeing level={level} id={id} kind="item" />}
       <ItemStorage level={level} id={id} />
       <CarpentryLine item={it} />
@@ -1218,6 +1240,7 @@ function OpeningInspector({ level, id }: { level: Level; id: string }) {
       <Header title={title} onClose={clear} />
       {/* First, so a phone's sheet shows it without scrolling. */}
       <DoorClearances level={level} id={id} />
+      <ThingViewEntry level={level} selection={{ kind: 'opening', id }} />
       {ageingEnabled() && <ItemAgeing level={level} id={id} kind="opening" />}
       <Segmented
         label="Kind"
@@ -1454,6 +1477,7 @@ function RoomInspector({ level, id }: { level: Level; id: string }) {
         <span>Floor area</span>
         <span className="num total-figure">{formatArea(roomArea(level, room))}</span>
       </p>
+      <RoomViewEntry level={level} roomId={id} />
       <SelectField
         label="Floor"
         value={room.floorMaterial}

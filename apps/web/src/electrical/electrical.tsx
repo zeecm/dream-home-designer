@@ -31,6 +31,7 @@ import {
 import { memo, useEffect, useId, useMemo } from 'react';
 import { create } from 'zustand';
 import { type Selection, useEditor } from '../editor';
+import { ThingViewEntry } from '../elevation/Entry';
 import { useProject, useStore } from '../store';
 import { LengthField, Segmented, SelectField } from '../ui/fields';
 import { icons } from '../ui/icons';
@@ -327,6 +328,7 @@ export function PointInspector({ level, id }: { level: Level; id: string }) {
   const dispatch = useStore((s) => s.dispatch);
   const project = useProject();
   const trunking = useEditor((s) => s.trunking);
+  const wallView = useEditor((s) => !!s.elevation);
   const h = useId();
   // Another selection (or none) takes down a "No inside route…" note about this one.
   // biome-ignore lint/correctness/useExhaustiveDependencies: on another point
@@ -375,6 +377,43 @@ export function PointInspector({ level, id }: { level: Level; id: string }) {
     dispatch(routed.command);
     clearRouteNotice();
   };
+  const kindField = (
+    <>
+      <SelectField<ElecKind>
+        label="Kind"
+        value={p.kind}
+        options={(p.wall ? WALL_KINDS : PLAN_KINDS)
+          .filter((k) => !!p.wall || ELEC_KINDS[k].place === ELEC_KINDS[p.kind].place)
+          .map((k) => ({ value: k, label: ELEC_KINDS[k].name }))}
+        onChange={(kind) => {
+          // Placed again for the new kind (its usual height, clear of doors); an aircon unit
+          // made something else takes its trunking and compressor with it.
+          try {
+            dispatch(setPointKind(level, id, kind));
+            if (kind !== 'aircon' && trunking?.id === id) useEditor.getState().setTrunking(null);
+          } catch (e) {
+            useStore.setState({ notice: (e as Error).message });
+          }
+        }}
+      />
+    </>
+  );
+  const heightField = (
+    <>
+      {p.wall && (
+        <LengthField
+          label={p.kind === 'aircon' ? 'Top above the floor' : 'Height'}
+          unit="mm"
+          value={p.wall.height}
+          min={minHeight(p.kind)}
+          max={maxHeight(level, p)}
+          revertInvalid
+          hint={usual !== null ? `Usual: ${Math.round(usual * 1000)} mm` : undefined}
+          onCommit={(v) => v !== undefined && p.wall && set({ wall: { ...p.wall, height: v } })}
+        />
+      )}
+    </>
+  );
   // The run squared to the walls, if that changes it.
   return (
     <>
@@ -397,35 +436,11 @@ export function PointInspector({ level, id }: { level: Level; id: string }) {
           ))}
         </ul>
       )}
-      <SelectField<ElecKind>
-        label="Kind"
-        value={p.kind}
-        options={(p.wall ? WALL_KINDS : PLAN_KINDS)
-          .filter((k) => !!p.wall || ELEC_KINDS[k].place === ELEC_KINDS[p.kind].place)
-          .map((k) => ({ value: k, label: ELEC_KINDS[k].name }))}
-        onChange={(kind) => {
-          // Placed again for the new kind (its usual height, clear of doors); an aircon unit
-          // made something else takes its trunking and compressor with it.
-          try {
-            dispatch(setPointKind(level, id, kind));
-            if (kind !== 'aircon' && trunking?.id === id) useEditor.getState().setTrunking(null);
-          } catch (e) {
-            useStore.setState({ notice: (e as Error).message });
-          }
-        }}
-      />
-      {p.wall && (
-        <LengthField
-          label={p.kind === 'aircon' ? 'Top above the floor' : 'Height'}
-          unit="mm"
-          value={p.wall.height}
-          min={minHeight(p.kind)}
-          max={maxHeight(level, p)}
-          revertInvalid
-          hint={usual !== null ? `Usual: ${Math.round(usual * 1000)} mm` : undefined}
-          onCommit={(v) => v !== undefined && p.wall && set({ wall: { ...p.wall, height: v } })}
-        />
-      )}
+      <ThingViewEntry level={level} selection={{ kind: 'point', id }} />
+      {/* In the wall view the height comes first: it's what the drawing shows. */}
+      {wallView && heightField}
+      {kindField}
+      {!wallView && heightField}
       {p.kind === 'switch' && (
         <div className="field">
           <span className="field-label" id={`${h}-gang`}>

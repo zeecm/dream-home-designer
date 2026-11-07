@@ -1,5 +1,9 @@
+import { freeze } from 'immer';
 import { describe, expect, it } from 'vitest';
 import { ageingReport } from './ageing';
+import { wallElevation } from './elevation';
+import { roomFaces } from './faces';
+import { furnishedSample } from './fixtures/furnishedSample';
 import { sampleFlatProject } from './fixtures/sampleFlat';
 import { furnitureKind, newItem } from './furniture';
 import type { Level, Vec2 } from './schema';
@@ -92,5 +96,32 @@ describe('timing (sample flat, 40 pieces, dragging)', () => {
     expect(added).toBeLessThan(Math.max(15, w) * (PERF ? 1 : 3));
     // Ageing alone (clearance off) builds the pass walkways would have: at most the pair's time.
     expect(a).toBeLessThan((w + Math.max(15, w)) * (PERF ? 1 : 3));
+  });
+});
+
+describe('timing (the furnished sample, every wall seen straight on)', () => {
+  it('AC17: all faces of every room within 20 ms with caches cold, and less warm', () => {
+    const base = furnishedSample();
+    const all = (l: Level) => {
+      for (const id of Object.keys(l.rooms)) for (const f of roomFaces(l, id)) wallElevation(l, f);
+    };
+    all(freeze(structuredClone(base), true) as Level);
+    const cold: number[] = [];
+    const warm: number[] = [];
+    for (let k = 0; k < 7; k++) {
+      // A fresh frozen level each time, as every edit makes: nothing cached.
+      const l = freeze(structuredClone(base), true) as Level;
+      let t0 = performance.now();
+      all(l);
+      cold.push(performance.now() - t0);
+      t0 = performance.now();
+      all(l);
+      warm.push(performance.now() - t0);
+    }
+    console.log(
+      `elevations: cold ${median(cold).toFixed(2)} ms, warm ${median(warm).toFixed(2)} ms`,
+    );
+    expect(median(cold)).toBeLessThan(20 * (PERF ? 1 : 3));
+    expect(median(warm)).toBeLessThan(median(cold) + 1);
   });
 });

@@ -259,6 +259,149 @@ it prints. The drawing is dark on a white sheet in both themes (it shows real co
   with a leader line; the schedule always lists them all.
 - **Multi-level homes:** the level shown.
 
+## Slice 1 as built (PR 1)
+
+Built 7 Nov 2026 from this spec, the tech-lead's design review and the ux-reviewer's
+interaction design. Where they differ from the sections above, this section wins. On screen it
+is the **wall view**: the word "elevation" is never shown.
+
+**Core** (`packages/core`, Vitest beside each file):
+- `chains.ts`: the plan's dimension chains moved out of `dimensions.ts` (stops merged within 5 mm,
+  pieces under 20 mm joined, `tieredChains`), shared by the plan and the wall view.
+- `faces.ts`: `roomFaces`, `faceAt`, `resolveFace`, `faceRef`, `stepFace`, `otherSide`,
+  `itemFace`, `roomItems`. A face is `RoomFace` (designer code already exports a `Face`), with
+  `kind` `'wall' | 'return' | 'hole'`, `dir`, `steppable` and possibly no stretches. A
+  `FaceRef` `{ roomId, wallId, side, mid, normal }` replaces the string `key`: wall and side
+  first, then the same line (10 mm, 1°) facing the same way, so a wall split by a T, an undo or
+  the switch to After keeps the face. `roomShapes` keeps hole loops as vertex ids. Cached per
+  frozen level (geometry, faces, items, entries). Faces under 5 mm (a wall side its mitres use
+  up) are dropped.
+- **Face A** is the face holding the door you come into the room by: the *last* door on the
+  fewest-doors route from the main door (`roomEntries`, exported and cached in `delivery.ts`;
+  Suggest uses it too), or for a room reached across a boundary, that boundary; then the
+  room's widest door; then the face nearest the top, then the leftmost.
+- `elevation.ts`: `wallElevation(level, face, { furniture, statusOf })` with one projection,
+  `u` along and `v` into the room. A point's `z` is its plate's centre and `tagHeight` what its
+  tag says (an aircon unit's top). Pieces are drawn far from you first (nearest the wall first,
+  so a piece further into the room covers one behind it). A counter's height is its worktop
+  (`top`), not a hob's glass on it. `elevationLabels(elev, pxPerM)` decides what fits:
+  tier 0 only when all its figures fit at 11 px, tiers 1 and 2 always with the figures that
+  fit, tags full ("1 · h1150"), short ("1") or none, and height figures that keep clear of
+  each other across columns. `elevationChanges` uses `renovationDiff` and
+  `electricalChanges`, cached per pair of levels.
+- Shelter and structural checks use the flat as it is (`statusOf`, Before's status in After).
+  A 'likely' structural wall is hatched like a structural one.
+
+**Spec defects fixed:**
+1. **AC3** is built the flush-face way: the top wall in three, all `side: 'left'`, 0.10 / 0.15 /
+   0.10 thick, so the inside face steps 50 mm and the outside stays flush. Faces 0.95, 0.05,
+   2.00, 0.05, 0.95; the 0.05 m steps are `kind: 'return'` (a junction's edge, no wall side),
+   skipped when stepping; `faceAt` on the middle wall gives the 2.00 m face. A real 50 mm
+   return wall is a `wall` face `faceAt` finds.
+2. **Face A** as above (the last door on the route, or the boundary).
+3. **The face key** is a `FaceRef` (above).
+4. **Wall cabinet gap:** the note keeps its 0.55 m and 0.65 m thresholds, with one text for
+   each: "0.45 m between the counter and the wall cabinets: 0.55 m or more is usual." and, over
+   a hob (`assetId` `kitchen-hob`), "0.55 m from the hob to the wall cabinet above: a cooker
+   hood needs at least 0.65 m." The catalogue's wall cabinet at 1.45 m over a 0.90 m counter
+   (0.55 m, measured from the worktop) gets no note except over a hob. Windows are numbered left
+   to right on the face ("Window 1").
+5. **Stub walls** (dead ends pruned from room loops) draw as a section band across the face;
+   points on them have no wall view.
+6. **Wall status in After:** Before's (`statusOf`).
+
+**Faces and pieces as built (after review).** Letters go only to the faces stepping stops at
+(A, B, C… with none skipped); a tiny empty face between takes the letter before it, primed
+("C′"). A side wall is cut through (a section band) only at an inside corner, its neighbours
+taken from the face's own loop, so a column's faces and an L's outside corner have none. A
+piece wholly behind a face (beyond a column, past a notch's side) isn't drawn on it. Only a
+piece backed onto a wall names it ("wardrobe wall"); a piece in a corner backed onto the other
+wall isn't drawn side-on (a bed still is, its length running along the wall).
+
+**Notes as built.** "Hidden" counts a bed, or a piece at least 1.5 m tall in Bedroom, Living,
+Dining, Storage or Built-in (so not a fridge, a lamp, a plant or a person). "Covers" leaves out
+lamps, plants and people. Names mid-sentence are in lower case ("behind the built-in
+wardrobe"). Each note is numbered with a "!" badge on its red outline, placed clear of the
+tags; a note about a point rides on its tag instead ("3 · h300 !1"). The header's "N to check"
+counts the notes and the points with their own warnings (shelter, structural, wet room), which
+are listed with a ring and ringed on the drawing: a quieter kind than a note.
+
+**The viewer** (`apps/web/src/elevation/`):
+- `ElevationSvg.tsx` is pure (elevation, labels, scale), drawn in metres on paper colours, so
+  slice 2 can `renderToStaticMarkup` it. `ElevationView.tsx` holds the header, the sheet and the
+  list; `nav.ts` stepping and flipping; `open.ts` opening and closing; `PlanMarkers.tsx` the
+  letters on the plan; `Entry.tsx` the Inspector's buttons; `saveImage.ts` the PNG.
+- Editor state `elevation: { ref, returnTo }` (and `fitBox`, the room the plan fits to). Nothing
+  goes in the undo history or the save. The 3D view is unmounted while the wall view is open.
+- **Ways in:** a wall's Inspector row "See it straight on", right under its title, one button
+  per side that faces a room, named by the room ("Main bedroom side"); a room's "See its walls"
+  under its floor area; a point, door, window or piece on or against a wall: "See on its wall".
+  **L** opens the selected wall (the side facing the room last selected, else its left side),
+  room or thing. On a view link the way in sits above the locked Inspector fields.
+- **Desktop:** the wall view takes the 3D half, about 60% of the stage, the plan beside it
+  (fitted to the room) and the Inspector stay. Header line 1: "Main bedroom · D · wardrobe
+  wall", then "2 916 × 2 600 mm · Plain paint" in grey and "2 to check". Line 2: [‹] D of 6
+  [›] (also `[` and `]`), [See from Bedroom] (not "Other side", which the wall Inspector already
+  uses; only when a room is on the other side), [Show ▾] (Furniture: Against the wall · None;
+  Dimensions: Shown · None), [Save image]; Close is a × in the title row. With a renovation the
+  app's own Before | After switch is the one (a phone shows the view's own and hides the app's),
+  and in After a key: New · Moved · Removed · Hacked. Stepping or flipping with a wall selected
+  moves the selection to the wall shown; the way in to the wall already open is hidden.
+  Menus close on Esc (which goes no further), a press outside, and after choosing.
+- **On the plan:** every steppable wall of the room gets its letter in a faint marker (24 px)
+  pointing at it, the open one filled in the accent colour; clicking a letter opens that wall.
+  A marker moves along its wall clear of the selected wall's length tag and the room names.
+  The plan frames the room closely. Not in a saved picture of the plan.
+- **Esc:** the first press clears the selection, the next closes, and focus goes back to the
+  button the view was opened from. 1, 2 and 3 close it and show that view.
+- **The drawing** is on a framed white sheet (white in both themes). Wheel or pinch to zoom,
+  drag to pan, double tap to fit; labels are laid out again when a zoom ends. Tapping a point,
+  opening, piece or the wall selects it (targets at least 24 px, 44 px on a phone).
+- **The list** under the drawing is real text: what to check, then each point ("1 · 13A double
+  socket — 1150 from floor · 450 from left corner", and its warnings), each row selecting its
+  thing; "Nothing on this wall yet." for an empty face; "Doors are indicative…" when fronts are
+  drawn; the heights note.
+- **Phone:** the wall view fills the stage and its bar takes the tool bar's place: [‹] [D of 6]
+  (a menu of the room's walls, which replaces the key plan) [›] [See from / room name] (two
+  lines; its place kept empty when no room is behind) [⋯] (furniture, dimensions, Save image,
+  and on its side Hide list / Show list) [Close], 44 px targets. Opening folds the details sheet
+  (the selection is kept; its handle reads "Show wall details"), and with nothing selected the
+  handle goes; tapping something opens the sheet. Upright, the view is one scrolling column:
+  the sheet full width and as tall as the drawing needs, the list under it. On its side the
+  list is a panel beside the drawing. Labels are compact there: short tags, every height in one
+  column at the right. Back closes the view; the history entry goes however it closes, and a
+  reload strips it.
+- **Save image:** a PNG of the drawing (white, its dimensions) with its title, the notes and
+  the points drawn in, named "Main bedroom - D wardrobe wall.png" (a plain hyphen: Chrome
+  drops a download name with an en dash). A phone shares it where the browser can.
+- **That wall is gone.** with [Close]; Undo brings the view back. In After, a wall the
+  renovation takes down: "This wall is taken down in the renovation." [See it as it is]; in
+  Before its header adds "Taken down in the renovation".
+
+**Cut from slice 1** (ux-reviewer): Furniture "Whole room", the Colour toggle (the drawing is
+always in colour on screen; black-and-white comes with slice 2), side-on pieces at the edges,
+the points chain (the list gives each point's distance), label leaders (tags hide instead),
+the faint old place of a moved point, the merge rule for rooms joined in After, the phone's key
+plan and its portrait hint. AC7's `furniture: 'room'` check became `furniture: 'none'`.
+
+**After QA.** Chains everywhere (plan, contractor sheet, wall view) round each piece down and
+give the missing 10 mm units to the pieces that lost the most, so a 900 mm door stays 900 and
+the pieces always add up to the overall (rounding the stops had made a door read 910). The
+header's length is to 10 mm, as the overall is. A height column whose line would cross a piece
+moves to the right of the drawing, and a height already figured is figured once. A tag is at
+least its number, however busy the wall. With furniture hidden its notes still count. The saved
+picture is drawn at least 1440 px wide with its title and lines wrapped. Stepping or flipping
+clears a point, opening or piece not on the wall now shown. On a phone a tapped point's sheet is
+short and starts with its height. A glass partition is labelled; a hacked stretch longer than
+shows gives its length.
+
+**Gestures:** a pinch or pan changes only the drawing's transform (the fit and the drawing are
+memoized); a cancelled pointer only ends the gesture; a double tap that fits leaves the
+selection as it was before its first tap.
+
+**Performance:** every face of the furnished sample in about 12 ms with caches cold (a fresh
+frozen level, as each edit makes), 3–6 ms warm (`PERF=1` bound 20 ms).
+
 ## Slice 1b: dragging in the elevation (PR 2)
 - **A point:** drag up and down for its height, left and right along the face (and past the
   face's end onto the next face, which the view then follows). A live label beside the finger
@@ -368,8 +511,9 @@ Core (Vitest):
    lengths 3.90, 2.90, 3.90, 2.90 (± 1 mm); A's label "door wall".
 2. The top wall split at x = 2 by a wall meeting it from above (outside R): still one face C,
    3.90 m, two stretches.
-3. The top wall's inside face stepped 50 mm for x 1–3: faces of 0.95, 0.05, 2.00, 0.05, 0.95 m;
-   stepping skips the two 0.05 m faces; `faceAt` returns them.
+3. The top wall's inside face stepped 50 mm for x 1–3 (as built: the flush-face way, see "Slice
+   1 as built"): faces of 0.95, 0.05, 2.00, 0.05, 0.95 m; stepping skips the two 0.05 m
+   returns; `faceAt` on the middle wall returns the 2.00 m face.
 4. A wall at 45° across R's corner (a cut corner): its own face, length its true face length.
 5. Orientation: a double socket at t 0.25 on the top wall's left side, 0.30 high: in C at
    u 0.95, z 0.30. The door on the bottom wall in A: u 1.50–2.40; A's tier-1 chain 1500 / 900
