@@ -45,7 +45,7 @@ export interface FaceStretch {
  */
 export type FaceKind = 'wall' | 'return' | 'hole';
 
-export interface Face {
+export interface RoomFace {
   roomId: string;
   /** Its place in `roomFaces`. */
   index: number;
@@ -92,7 +92,7 @@ const unit = (p: Vec2): Vec2 => {
 
 /** A point's place seen on a face: along it from its left end, and out into the room. */
 export function faceUV(
-  face: Pick<Face, 'left' | 'dir' | 'normal'>,
+  face: Pick<RoomFace, 'left' | 'dir' | 'normal'>,
   p: Vec2,
 ): { u: number; v: number } {
   const d = sub(p, face.left);
@@ -106,7 +106,7 @@ export function faceLetter(i: number): string {
 }
 
 /** What a face is called on screen: its letter and name, "C · bed wall", or "Wall C". */
-export function faceTitle(face: Pick<Face, 'letter' | 'label'>): string {
+export function faceTitle(face: Pick<RoomFace, 'letter' | 'label'>): string {
   return face.label ? `${face.letter} · ${face.label}` : `Wall ${face.letter}`;
 }
 
@@ -116,8 +116,9 @@ interface Ctx {
   geom: PlanGeometry;
   shapes: Map<string, RoomShape>;
   wallByPair: Map<string, string>;
-  faces: Map<string, Face[]>;
-  bySide: Map<string, Face> | null;
+  faces: Map<string, RoomFace[]>;
+  items: Map<string, Item[]>;
+  bySide: Map<string, RoomFace> | null;
   entries: Map<string, RoomEntry> | null;
 }
 
@@ -139,6 +140,7 @@ function ctxOf(level: Level): Ctx {
     shapes: roomShapes(level),
     wallByPair,
     faces: new Map(),
+    items: new Map(),
     bySide: null,
     entries: null,
   };
@@ -204,7 +206,7 @@ function inLine(group: Seg[], s: Seg): boolean {
   );
 }
 
-type Draft = Omit<Face, 'index' | 'letter' | 'label' | 'steppable'>;
+type Draft = Omit<RoomFace, 'index' | 'letter' | 'label' | 'steppable'>;
 
 function faceOf(
   roomId: string,
@@ -300,19 +302,25 @@ function roomAt(ctx: Ctx, p: Vec2): string | null {
   return null;
 }
 
-/** The rooms' items: those whose centre is in the room. */
-function itemsOf(ctx: Ctx, roomId: string): Item[] {
+/** A room's items: those whose centre is in the room (not in an enclosure in it). Cached. */
+export function roomItems(level: Level, roomId: string): Item[] {
+  const ctx = ctxOf(level);
+  const hit = ctx.items.get(roomId);
+  if (hit) return hit;
   const s = ctx.shapes.get(roomId);
-  if (!s) return [];
-  return Object.values(ctx.level.items).filter((it) => {
-    const c = { x: it.position.x, y: it.position.z };
-    return pointInPolygon(c, s.outer) && !s.holes.some((h) => pointInPolygon(c, h));
-  });
+  const out = s
+    ? Object.values(level.items).filter((it) => {
+        const c = { x: it.position.x, y: it.position.z };
+        return pointInPolygon(c, s.outer) && !s.holes.some((h) => pointInPolygon(c, h));
+      })
+    : [];
+  ctx.items.set(roomId, out);
+  return out;
 }
 
 /** A piece's footprint seen on a face: its spans along it and out from it. */
 export function itemBand(
-  face: Pick<Face, 'left' | 'dir' | 'normal'>,
+  face: Pick<RoomFace, 'left' | 'dir' | 'normal'>,
   item: Item,
 ): { u0: number; u1: number; v0: number; v1: number } {
   const uv = itemFootprint(item).map((p) => faceUV(face, p));
@@ -396,7 +404,7 @@ function entriesOf(ctx: Ctx): Map<string, RoomEntry> {
  * then the faces of each enclosure standing in it. Each with its ends, length, normal into the
  * room, the room's ceiling and a friendly name. Cached per frozen level.
  */
-export function roomFaces(level: Level, roomId: string): Face[] {
+export function roomFaces(level: Level, roomId: string): RoomFace[] {
   const ctx = ctxOf(level);
   const hit = ctx.faces.get(roomId);
   if (hit) return hit;
@@ -431,7 +439,7 @@ export function roomFaces(level: Level, roomId: string): Face[] {
     start = top?.i ?? 0;
   }
   const ordered = [...outline.slice(start), ...outline.slice(0, start), ...holes];
-  const items = itemsOf(ctx, roomId);
+  const items = roomItems(level, roomId);
   const names = (f: Draft): { label: string | null; holds: boolean } => {
     const c = contents(ctx, f, items);
     const isDoor = !!door && f.stretches.some((s) => s.wallId === door.wallId);
@@ -455,7 +463,7 @@ export function roomFaces(level: Level, roomId: string): Face[] {
                     : null;
     return { label, holds: c.holds || isDoor };
   };
-  const faces = ordered.map((f, i): Face => {
+  const faces = ordered.map((f, i): RoomFace => {
     const { label, holds } = names(f);
     return {
       ...f,
@@ -470,9 +478,9 @@ export function roomFaces(level: Level, roomId: string): Face[] {
 }
 
 /** Every room's faces, by wall side (`wallId|side`). */
-function bySide(ctx: Ctx): Map<string, Face> {
+function bySide(ctx: Ctx): Map<string, RoomFace> {
   if (ctx.bySide) return ctx.bySide;
-  const out = new Map<string, Face>();
+  const out = new Map<string, RoomFace>();
   for (const id of Object.keys(ctx.level.rooms)) {
     for (const f of roomFaces(ctx.level, id)) {
       for (const s of f.stretches) {
@@ -486,23 +494,23 @@ function bySide(ctx: Ctx): Map<string, Face> {
 }
 
 /** The face a wall side belongs to, or null if no room faces it (an outside face). */
-export function faceAt(level: Level, wallId: string, side: 'left' | 'right'): Face | null {
+export function faceAt(level: Level, wallId: string, side: 'left' | 'right'): RoomFace | null {
   return bySide(ctxOf(level)).get(`${wallId}|${side}`) ?? null;
 }
 
 /** The wall sides of a wall that face a room: [left, right], null where none does. */
-export function wallFaceSides(level: Level, wallId: string): [Face | null, Face | null] {
+export function wallFaceSides(level: Level, wallId: string): [RoomFace | null, RoomFace | null] {
   return [faceAt(level, wallId, 'left'), faceAt(level, wallId, 'right')];
 }
 
 /** A face's middle. */
-export const faceMid = (f: Pick<Face, 'left' | 'right'>): Vec2 => ({
+export const faceMid = (f: Pick<RoomFace, 'left' | 'right'>): Vec2 => ({
   x: (f.left.x + f.right.x) / 2,
   y: (f.left.y + f.right.y) / 2,
 });
 
 /** What a viewer keeps to find this face again. */
-export function faceRef(face: Face): FaceRef {
+export function faceRef(face: RoomFace): FaceRef {
   const solid = face.stretches.filter((s) => !s.boundary);
   const pick = [...(solid.length ? solid : face.stretches)].sort(
     (a, b) => b.u1 - b.u0 - (a.u1 - a.u0),
@@ -522,12 +530,12 @@ export function faceRef(face: Face): FaceRef {
  * 10 mm and 1°) that faces the same way and runs past the ref's middle, the same room first.
  * Null if there is none ("That wall is gone").
  */
-export function resolveFace(level: Level, ref: FaceRef): Face | null {
+export function resolveFace(level: Level, ref: FaceRef): RoomFace | null {
   if (ref.wallId && ref.side) {
     const f = faceAt(level, ref.wallId, ref.side);
     if (f) return f;
   }
-  let best: { f: Face; score: number } | null = null;
+  let best: { f: RoomFace; score: number } | null = null;
   const rooms = Object.keys(level.rooms);
   for (const id of rooms) {
     for (const f of roomFaces(level, id)) {
@@ -543,20 +551,21 @@ export function resolveFace(level: Level, ref: FaceRef): Face | null {
 }
 
 /** The next face round the room that stepping stops at (`by` +1 or -1), wrapping round. */
-export function stepFace(faces: readonly Face[], from: Face, by: 1 | -1): Face {
+export function stepFace(faces: readonly RoomFace[], from: RoomFace, by: 1 | -1): RoomFace {
   const n = faces.length;
   for (let k = 1; k <= n; k++) {
-    const f = faces[(((from.index + by * k) % n) + n) % n] as Face;
+    const f = faces[(((from.index + by * k) % n) + n) % n] as RoomFace;
     if (f.steppable) return f;
   }
   return from;
 }
 
 /** The faces stepping stops at, in order. */
-export const steppableFaces = (faces: readonly Face[]): Face[] => faces.filter((f) => f.steppable);
+export const steppableFaces = (faces: readonly RoomFace[]): RoomFace[] =>
+  faces.filter((f) => f.steppable);
 
 /** The other side of a face's wall, when a room faces it: the same wall seen from that room. */
-export function otherSide(level: Level, face: Face): Face | null {
+export function otherSide(level: Level, face: RoomFace): RoomFace | null {
   for (const s of face.stretches) {
     if (s.boundary) continue;
     const f = faceAt(level, s.wallId, s.side === 'left' ? 'right' : 'left');

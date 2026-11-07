@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { splitWall } from './commands';
 import {
-  type Face,
+  type RoomFace,
   faceAt,
   faceRef,
   faceUV,
@@ -24,8 +24,8 @@ import {
 import { redo, undo } from './history';
 import type { Level } from './schema';
 
-const lengths = (fs: Face[]) => fs.map((f) => Number(f.length.toFixed(3)));
-const roomNamed = (l: Level, test: (f: Face[]) => boolean) =>
+const lengths = (fs: RoomFace[]) => fs.map((f) => Number(f.length.toFixed(3)));
+const roomNamed = (l: Level, test: (f: RoomFace[]) => boolean) =>
   Object.keys(l.rooms).find((id) => test(roomFaces(l, id))) as string;
 
 describe('roomFaces', () => {
@@ -76,9 +76,9 @@ describe('roomFaces', () => {
       'wall',
     ]);
     // Stepping skips the two returns.
-    const c1 = fs[2] as Face;
+    const c1 = fs[2] as RoomFace;
     expect(stepFace(fs, c1, 1).index).toBe(4);
-    expect(stepFace(fs, fs[4] as Face, -1).index).toBe(2);
+    expect(stepFace(fs, fs[4] as RoomFace, -1).index).toBe(2);
     // faceAt on the middle wall gives the 2.00 m face; the returns have no wall side.
     const mid = wallAlong(l, [1, 0], [3, 0]);
     expect(faceAt(l, mid, 'left')?.length).toBeCloseTo(2, 6);
@@ -110,7 +110,7 @@ describe('roomFaces', () => {
     const l = level(roomR([[0, 1, 1, 0]]));
     const r = roomNamed(l, (fs) => fs.length === 5);
     const fs = roomFaces(l, r);
-    const cut = fs.find((f) => Math.abs(f.dir.x) > 0.1 && Math.abs(f.dir.y) > 0.1) as Face;
+    const cut = fs.find((f) => Math.abs(f.dir.x) > 0.1 && Math.abs(f.dir.y) > 0.1) as RoomFace;
     // Between the inside faces of the left and top walls, 50 mm into the room from its line.
     const t = Math.SQRT2 * (1 + 0.05 * Math.SQRT2 - 0.05 - 0.05);
     expect(cut.length).toBeCloseTo(t, 3);
@@ -125,8 +125,8 @@ describe('roomFaces', () => {
     );
     const l = level(s);
     const mid = wallAlong(l, [2, 0], [2, 3]);
-    const left = faceAt(l, mid, 'left') as Face;
-    const right = faceAt(l, mid, 'right') as Face;
+    const left = faceAt(l, mid, 'left') as RoomFace;
+    const right = faceAt(l, mid, 'right') as RoomFace;
     expect(left.roomId).not.toBe(right.roomId);
     expect(left.length).toBeCloseTo(right.length, 6);
     expect(otherSide(l, left)?.roomId).toBe(right.roomId);
@@ -157,7 +157,7 @@ describe('roomFaces', () => {
     const s = roomR();
     const l = level(s);
     const top = wallAlong(l, [0, 0], [4, 0]);
-    const c = faceAt(l, top, 'left') as Face;
+    const c = faceAt(l, top, 'left') as RoomFace;
     const ref = faceRef(c);
     const split = splitWall(LID, top, { x: 1, y: 0 }, l);
     const s2 = apply(s, split.command);
@@ -166,7 +166,7 @@ describe('roomFaces', () => {
     expect(again?.length).toBeCloseTo(3.9, 6);
     expect(again?.stretches).toHaveLength(2);
     // A ref from the split plan, kept through undo (its wall id may be the new half's).
-    const ref2 = faceRef(again as Face);
+    const ref2 = faceRef(again as RoomFace);
     const s3 = undo(s2);
     expect(resolveFace(level(s3), ref2)?.length).toBeCloseTo(3.9, 6);
     expect(resolveFace(level(redo(s3)), ref)?.length).toBeCloseTo(3.9, 6);
