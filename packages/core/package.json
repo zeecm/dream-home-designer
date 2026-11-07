@@ -7,7 +7,7 @@
   "types": "./src/index.ts",
   "exports": { ".": "./src/index.ts" },
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --exclude src/perf.test.ts && vitest run src/perf.test.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {

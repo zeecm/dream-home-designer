@@ -5,6 +5,7 @@ import {
   type AgeingReport,
   ageingReport,
   ageingSupersedes,
+  parseAgeingSetting,
   pinchKey,
   table7,
 } from './ageing';
@@ -275,6 +276,26 @@ describe('doors and their squares (A)', () => {
     expect(accessClearWidth(o({ width: 0.9, style: 'sliding' }))).toBe(0.9);
     expect(accessClearWidth(o({ width: 1.6, style: 'sliding' }))).toBe(0.8);
     expect(accessClearWidth(o({ width: 0.9, kind: 'passage' }))).toBe(0.9);
+  });
+
+  it('a door short of its square suggests the smallest wider door that would do', () => {
+    // A 0.84 door (0.80 clear) needs 1.20; a 1.15 corridor would do for a 0.85 clear door.
+    const h = home({ clear: 1.15, dA: { width: 0.84 } });
+    const ds = kinds(ageingReport(frozen(h.lvl()), wheel()), 'door-space').find(
+      (i) => i.openingId === h.dA,
+    );
+    expect(ds?.need).toBeCloseTo(1.2, 5);
+    expect(ds?.alt).toEqual({ clear: 0.85, need: 1.1 });
+  });
+
+  it('the setting: one unreadable field drops only itself', () => {
+    expect(parseAgeingSetting(JSON.stringify({ profile: 'wheelchair', bedroomId: 7 }))).toEqual({
+      profile: 'wheelchair',
+    });
+    expect(
+      parseAgeingSetting(JSON.stringify({ profile: 'walking', flatType: '9', extra: true })),
+    ).toEqual({ profile: 'walking' });
+    expect(parseAgeingSetting('nonsense')).toEqual({ profile: 'off' });
   });
 
   it('a 0.94 door off a 1.05 corridor needs only 1.00 (the 0.90 row)', () => {
@@ -845,55 +866,5 @@ describe('the sample flat', () => {
     expect(a.issues.some((i) => i.kind === 'bed')).toBe(false);
     expect(b.bedroom).toBe(main);
     expect(b.issues.map((i) => i.key)).not.toEqual(a.issues.map((i) => i.key));
-  });
-
-  it('20. 40 pieces: ageing, and walkways with ageing, within their bounds while dragging', () => {
-    const plain = sampleFlatProject('prj_t').levels[0] as Level;
-    // Frozen all through, as the store's levels are (the bare plan is then kept).
-    const base = Object.freeze({
-      ...plain,
-      vertices: Object.freeze(plain.vertices),
-      walls: Object.freeze(plain.walls),
-      openings: Object.freeze(plain.openings),
-      rooms: Object.freeze(plain.rooms),
-    });
-    const ids = ['wardrobe', 'sofa-3', 'desk', 'bedside', 'armchair', 'dining-chair', 'bookshelf'];
-    const pieces: [string, Vec2, number][] = Array.from({ length: 40 }, (_, i) => [
-      ids[i % ids.length] as string,
-      { x: 0.8 + (i % 8) * 1.1, y: 0.8 + Math.floor(i / 8) * 1.3 },
-      0,
-    ]);
-    const lvl = withItems(base, pieces);
-    const sofa = Object.values(lvl.items).find((it) => it.assetId === 'sofa-3');
-    if (!sofa) throw new Error('no sofa');
-    ageingReport(withItems(base, pieces.slice(0, 1)), wheel());
-    const bedroom = Object.values(base.rooms).find((r) => r.name === 'Main bedroom')?.id;
-    let step = 0;
-    /** The median of 7 runs, each with the sofa dragged a centimetre on (nothing cached). */
-    const time = (f: (l: Level) => void) => {
-      const times: number[] = [];
-      for (let i = 0; i < 7; i++) {
-        step++;
-        const moved = { ...sofa, position: { ...sofa.position, x: sofa.position.x + step * 0.01 } };
-        const fresh = Object.freeze({ ...lvl, items: { ...lvl.items, [sofa.id]: moved } });
-        const t0 = performance.now();
-        f(fresh);
-        times.push(performance.now() - t0);
-      }
-      return times.sort((a, b) => a - b)[3] as number;
-    };
-    const walk = time((l) => walkwayReport(l));
-    const age = time((l) => ageingReport(l, wheel({ bedroomId: bedroom })));
-    const both = time((l) => {
-      walkwayReport(l);
-      ageingReport(l, wheel({ bedroomId: bedroom }));
-    });
-    console.log(
-      `walkways ${walk.toFixed(2)} ms; ageing ${age.toFixed(2)} ms; both ${both.toFixed(2)} ms`,
-    );
-    // The spec's bound for ageing (30 ms on a laptop, 60 in CI); the pair at most the
-    // walkways' 40 ms and 15 more for ageing on a laptop, three times that unless PERF is set.
-    expect(age).toBeLessThan(process.env.PERF ? 30 : 60);
-    expect(both).toBeLessThan(process.env.PERF ? 55 : 165);
   });
 });

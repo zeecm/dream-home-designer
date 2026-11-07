@@ -125,6 +125,8 @@ export interface AgeingReport {
   bathroomAuto: boolean;
   /** Before a bedroom is chosen: each bedroom with what choosing it would add. */
   bedrooms: { roomId: string; count: number }[];
+  /** Every bedroom that can be chosen (their bedroom, by core's rule). */
+  bedroomIds: string[];
   bathrooms: string[];
   issues: AgeingIssue[];
   /** The checks run in each group and found fine ("Also checked"). */
@@ -512,11 +514,12 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
         const sq = largestSquare(c, f.d, n, obstacles, need, [0], outside);
         if (sq.have < need - SLACK) {
           const poly = squareAt(c, f.d, n, need);
+          // The smallest wider door the space here would do for.
           const alt =
-            sq.have >= 1.0 - SLACK
-              ? { clear: 0.9, need: 1.0 }
-              : sq.have >= 1.1 - SLACK
-                ? { clear: 0.85, need: 1.1 }
+            sq.have >= 1.1 - SLACK
+              ? { clear: 0.85, need: 1.1 }
+              : sq.have >= 1.0 - SLACK
+                ? { clear: 0.9, need: 1.0 }
                 : undefined;
           out.push({
             key: `door-space:${o.id}`,
@@ -597,7 +600,7 @@ function buildFacts(level: Level, profile: AgeingProfile, pass: FurnishedPass): 
       const standing = standingPieces(pass, barePath);
       const blamed = standing.length ? standing : narrowingPieces(pass, barePath, need);
       issues.push({
-        key: `route:${[...blamed].sort().join(',')}:${cm}`,
+        key: `route-closed:${[...blamed].sort().join(',')}:${cm}`,
         group: 'around',
         level: 'needed',
         kind: 'route',
@@ -1123,7 +1126,10 @@ function turnIn(
   const d2 = turnBuffers.d2;
   let max = -1;
   for (let k = 0; k < sub.n; k++) if (!solid[k] && (d2[k] as number) > max) max = d2[k] as number;
-  if (max < 0) return { c: cellCentre(sub, 0), have: 0, blamed: [] };
+  // No free floor at all (filled with furniture): the circle is drawn at the room's middle.
+  if (max < 0) {
+    return { c: { x: sub.x0 + (nx * g.c) / 2, y: sub.y0 + (ny * g.c) / 2 }, have: 0, blamed: [] };
+  }
   // Only cells near the best are candidates (sorting a whole living room is slow).
   const floor = Math.max(0, Math.sqrt(max) - 2) ** 2;
   const order: number[] = [];
@@ -1323,8 +1329,13 @@ export function ageingReport(level: Level, choice: AgeingChoice): AgeingReport {
   let byChoice = reportCache.get(facts);
   const hit = byChoice?.get(ck);
   if (hit) return hit;
+  // Chosen, or the only one there is.
   const bedroom =
-    choice.bedroomId && facts.bedrooms.includes(choice.bedroomId) ? choice.bedroomId : undefined;
+    choice.bedroomId && facts.bedrooms.includes(choice.bedroomId)
+      ? choice.bedroomId
+      : facts.bedrooms.length === 1
+        ? facts.bedrooms[0]
+        : undefined;
   const r = compose(facts, choice, bedroom);
   // Each bedroom's count, as if chosen.
   if (!bedroom) {
@@ -1515,6 +1526,7 @@ function compose(facts: Facts, choice: AgeingChoice, bedroom: string | undefined
     ...(bathroom ? { bathroom } : {}),
     bathroomAuto: !chosenBath,
     bedrooms: [],
+    bedroomIds: facts.bedrooms,
     bathrooms: facts.bathrooms,
     issues,
     passed,
@@ -1546,10 +1558,11 @@ export function ageingSupersedes(walk: WalkwayReport, age: AgeingReport): Set<st
  * the project): the profile (off by default), the rooms chosen, the flat type for EASE.
  */
 export const AgeingSetting = z.object({
-  profile: z.enum(['off', 'walking', 'wheelchair']),
-  bedroomId: z.string().optional(),
-  bathroomId: z.string().optional(),
-  flatType: z.enum(['1-3', '4', '5', 'exec', 'none']).optional(),
+  // Field by field: one unreadable value drops only itself.
+  profile: z.enum(['off', 'walking', 'wheelchair']).catch('off'),
+  bedroomId: z.string().optional().catch(undefined),
+  bathroomId: z.string().optional().catch(undefined),
+  flatType: z.enum(['1-3', '4', '5', 'exec', 'none']).optional().catch(undefined),
 });
 export type AgeingSetting = z.infer<typeof AgeingSetting>;
 
