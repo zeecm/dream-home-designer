@@ -852,14 +852,31 @@ export function elevationLabels(elev: Elevation, pxPerM: number, fontPx = 11): E
     return boxes.every((a, i) => boxes.every((b, j) => j <= i || !rectsMeet(a, b)));
   };
   const tags = clear(true) ? 'full' : clear(false) ? 'short' : 'none';
-  const heights = elev.heights.map((h) => {
-    let last = Number.NEGATIVE_INFINITY;
-    return h.marks.map((z) => {
-      const ok = (z - last) * pxPerM >= fontPx + 2;
-      if (ok) last = z;
-      return ok;
+  // Height figures: each clear of the one below it in its column, and of every figure
+  // already placed in other columns (the ceiling's first), else left out.
+  const placed: Rect[] = [];
+  const order = elev.heights
+    .map((h, i) => ({ h, i }))
+    .sort((a, b) => {
+      const rank = (x: ElevHeight) => (x.what === 'ceiling' ? 0 : 1);
+      return rank(a.h) - rank(b.h) || a.i - b.i;
     });
-  });
+  const heights: boolean[][] = elev.heights.map((h) => h.marks.map(() => false));
+  for (const { h, i } of order) {
+    let last = Number.NEGATIVE_INFINITY;
+    h.marks.forEach((z, j) => {
+      const w = labelWidth(String(Math.round(z * 1000)), fontPx) / pxPerM;
+      const gap = 14 / pxPerM;
+      const x0 = h.what === 'ceiling' || h.side === 'left' ? h.u - gap - w : h.u + gap;
+      const half = (fontPx + 2) / 2 / pxPerM;
+      const box = { u0: x0, u1: x0 + w, z0: z - half, z1: z + half };
+      const ok = (z - last) * pxPerM >= fontPx + 2 && !placed.some((b) => rectsMeet(b, box));
+      if (!ok) return;
+      last = z;
+      placed.push(box);
+      (heights[i] as boolean[])[j] = true;
+    });
+  }
   return { fontPx, chains, tags, heights };
 }
 

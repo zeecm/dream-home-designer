@@ -72,7 +72,7 @@ export interface ElevationSvgProps {
 }
 
 /** Room round the drawing for dimensions, heights and tags (px). */
-export const MARGIN_PX = { left: 72, right: 72, top: 40, chain: 22, below: 18 };
+export const MARGIN_PX = { left: 58, right: 48, top: 32, chain: 22, below: 16 };
 
 /** How many chains are drawn below the floor. */
 export const chainsShown = (labels: ElevationLabels, dims: boolean) =>
@@ -495,7 +495,7 @@ export function ElevationSvg({
       const shown = labels.heights[hi] ?? [];
       const top = Math.max(...h.marks);
       const x =
-        h.what === 'ceiling' ? left - px(28) : h.side === 'left' ? h.u - px(10) : h.u + px(10);
+        h.what === 'ceiling' ? left - px(16) : h.side === 'left' ? h.u - px(10) : h.u + px(10);
       const tx = h.side === 'left' ? x - px(4) : x + px(4);
       dimsOut.push(
         <g key={`ht${h.what}${h.u}${h.marks.join()}`} data-height={h.what}>

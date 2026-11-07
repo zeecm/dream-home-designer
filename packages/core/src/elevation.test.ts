@@ -385,6 +385,22 @@ describe('elevation labels', () => {
     expect(big.heights.every((h) => h.every(Boolean))).toBe(true);
   });
 
+  it('keeps height figures in neighbouring columns from overlapping', () => {
+    const s0 = roomR();
+    const s1 = apply(
+      s0,
+      opening(level(s0), [0, 0], [4, 0], { kind: 'window', width: 1.2, sill: 0.9, height: 1.2 }),
+    );
+    // A wall cabinet just right of the window: its top (2.20) beside the window's head (2.10).
+    const cab = piece('it_u', 'built-in-kitchen-wall', 3.2, 0.225);
+    cab.scale = { x: 0.5, y: 1, z: 1 };
+    const c = elev(withItems(s1, cab), 'C');
+    const shown = (px: number) => elevationLabels(c, px).heights.flat().filter(Boolean).length;
+    const all = c.heights.flatMap((h) => h.marks).length;
+    expect(shown(600)).toBe(all);
+    expect(shown(15)).toBeLessThan(all);
+  });
+
   it('a name mid-sentence', () => {
     expect(midSentence('Built-in wardrobe')).toBe('built-in wardrobe');
     expect(midSentence('TV console')).toBe('TV console');

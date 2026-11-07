@@ -46,6 +46,9 @@ export function openFace(level: Level, face: RoomFace, from?: Element | null) {
       useEditor.getState().requestFit(48);
     }
   }
+  // A phone gives the drawing the stage: the Inspector sheet folds until something in the
+  // drawing is tapped.
+  if (!wasOpen && phone()) ed.select(null);
   if (!wasOpen && phone() && window.history.state?.[HISTORY_KEY] !== true) {
     window.history.pushState({ ...(window.history.state ?? {}), [HISTORY_KEY]: true }, '');
   }

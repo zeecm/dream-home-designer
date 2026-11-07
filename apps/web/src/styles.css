@@ -6596,8 +6596,7 @@ textarea {
   text-overflow: ellipsis;
   cursor: pointer;
 }
-.elev-bar-btn:first-child,
-.elev-bar > .elev-bar-btn:nth-child(3) {
+.elev-bar-arrow {
   font-size: 22px;
 }
 .elev-bar-wide {
@@ -6650,6 +6649,12 @@ textarea {
   .elev-phone .elev-sub {
     display: none;
   }
+  /* The tool bar's column, folded away, goes to the wall view. */
+  .app-wall-view .stage {
+    grid-column: 1 / 3;
+  }
+}
+
 /* ---------------------------------------------------------------- checks (plan details) */
 
 /* Clearance, Electrical, Storage, Older person: one row each, a label, a line, a button. */

@@ -366,7 +366,7 @@ export function ElevationView() {
         <nav className="elev-bar" aria-label="Walls">
           <button
             type="button"
-            className="elev-bar-btn"
+            className="elev-bar-btn elev-bar-arrow"
             aria-label="Previous wall"
             onClick={() => step(-1)}
           >
@@ -398,7 +398,7 @@ export function ElevationView() {
           </details>
           <button
             type="button"
-            className="elev-bar-btn"
+            className="elev-bar-btn elev-bar-arrow"
             aria-label="Next wall"
             onClick={() => step(1)}
           >
