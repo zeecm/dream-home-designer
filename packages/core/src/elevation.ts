@@ -9,7 +9,16 @@ import {
   pointWarnings,
   trunkingPath,
 } from './electrical';
-import { AGAINST, DEPTH, type RoomFace, faceGeometry, faceUV, roomFaces, roomItems } from './faces';
+import {
+  AGAINST,
+  DEPTH,
+  type RoomFace,
+  faceGeometry,
+  faceUV,
+  itemBand,
+  roomFaces,
+  roomItems,
+} from './faces';
 import { finish } from './finishes';
 import { type FurnitureMaterial, furnitureKind, furnitureLayer, itemFootprint } from './furniture';
 import { glassPartition, openingsOnWall } from './geometry';
@@ -119,6 +128,8 @@ export interface ElevItem {
   lines: number[];
   /** Hung on the wall (a wall cabinet). */
   hung: boolean;
+  /** Backed onto this face: its front faces you. */
+  facing: boolean;
   /** Its top as made (a counter's worktop), not a hob's glass or a sink's rim on it. */
   top: number;
 }
@@ -362,6 +373,7 @@ function projectItem(face: RoomFace, it: Item): ElevItem | null {
     fronts,
     lines,
     hung: furnitureLayer(kind) === 'high',
+    facing,
     top: it.position.y + kind.size.h * k.y,
   };
 }
@@ -580,13 +592,28 @@ export function wallElevation(
     });
   }
 
-  // Pieces in front of the face.
+  // Pieces in front of the face. One backed onto another wall of the room, seen side-on
+  // from here (a wardrobe in the corner), belongs to that wall's view and is left out; a bed
+  // is kept, as its length runs along a wall.
+  const others = faces.filter((f) => f.index !== face.index && f.stretches.length > 0);
+  const backedElsewhere = (it: Item) => {
+    const k = furnitureKind(it.assetId);
+    if (!k || k.comesFlat === 'bed' || k.shape === 'bed') return false;
+    const front = { x: -Math.sin(it.rotationY), y: Math.cos(it.rotationY) };
+    return others.some((f) => {
+      if (front.x * f.normal.x + front.y * f.normal.y < Math.cos((5 * Math.PI) / 180)) return false;
+      const b = itemBand(f, it);
+      return b.v0 <= 0.15 && b.v1 >= 0 && overlap(b.u0, b.u1, 0, f.length) > 0.05;
+    });
+  };
   const items: ElevItem[] =
     opts.furniture === 'none'
       ? []
       : roomItems(level, face.roomId)
-          .map((it) => projectItem(face, it))
-          .filter((e): e is ElevItem => !!e && inFront(e, L))
+          .flatMap((it) => {
+            const e = projectItem(face, it);
+            return e && inFront(e, L) && (e.facing || !backedElsewhere(it)) ? [e] : [];
+          })
           .sort((a, b) => a.near - b.near || a.id.localeCompare(b.id));
 
   // Points on this face (this side of its walls), numbered left to right.
@@ -748,7 +775,7 @@ export function wallElevation(
         kind: 'lowCabinet',
         ids: [cab.id, worst.base.id],
         text: worst.hob
-          ? `${mm10(worst.gap).toFixed(2)} m between the hob and the wall cabinets: at least ${GAP_HOB.toFixed(2)} m is usual over a hob, for the hood.`
+          ? `${mm10(worst.gap).toFixed(2)} m from the hob to the wall cabinet above: a cooker hood needs at least ${GAP_HOB.toFixed(2)} m.`
           : `${mm10(worst.gap).toFixed(2)} m between the counter and the wall cabinets: ${GAP_USUAL.toFixed(2)} m or more is usual.`,
         at: {
           u0: Math.max(cab.outline.u0, worst.base.outline.u0),
@@ -822,16 +849,28 @@ export interface ElevationLabels {
   chains: { tier: Tier; show: boolean; figures: boolean[] }[];
   /** Point tags: "1 · h1150", just "1", or none, so they never overlap. */
   tags: 'full' | 'short' | 'none';
+  /** Notes riding on a point's tag ("3 · h300 !1"), by point id. */
+  tagNotes: Record<string, number[]>;
+  /** Each other note's "!" badge: its centre (metres), clear of tags and other badges. */
+  badges: { n: number; u: number; z: number }[];
   /** Per height column (as `elev.heights`): which marks' figures are shown. */
   heights: boolean[][];
+  /**
+   * Compact (a phone at fit): every height figure in one column at the right of the drawing,
+   * with which are shown; the per-column `heights` are then all off.
+   */
+  merged: { marks: number[]; shown: boolean[] } | null;
 }
 
 /** A label's width at `fontPx` (figures about 0.6 em, a little padding). */
 export const labelWidth = (text: string, fontPx: number) => text.length * 0.6 * fontPx + 4;
 
-/** A point's tag, as the drawing and the list show it. */
-export const tagText = (p: Pick<ElevPoint, 'n' | 'tagHeight'>, full = true) =>
-  full ? `${p.n} · h${Math.round(p.tagHeight * 1000)}` : `${p.n}`;
+/** A point's tag, as the drawing and the list show it, with any notes riding on it. */
+export const tagText = (p: Pick<ElevPoint, 'n' | 'tagHeight'>, full = true, notes: number[] = []) =>
+  `${full ? `${p.n} · h${Math.round(p.tagHeight * 1000)}` : `${p.n}`}${notes.map((n) => ` !${n}`).join('')}`;
+
+/** A note's badge size, in px. */
+export const BADGE_PX = { w: 26, h: 18 };
 
 /** A chain's pieces in mm, rounded to 10 mm so they add up. */
 export function chainFigures(stops: readonly number[]): number[] {
@@ -844,10 +883,18 @@ export function chainFigures(stops: readonly number[]): number[] {
 /**
  * Which labels to draw at a scale (`pxPerM` screen pixels a metre), so figures stay `fontPx`
  * (11) or larger and never overlap: tier 0 only when all its figures fit, tiers 1 and 2 always
- * with the figures that fit; point tags full, short or none; each height column's figures that
- * clear the one below.
+ * with the figures that fit; point tags full, short or none (at most short when `compact`);
+ * a note about a point rides on its tag, others get a badge placed clear of the tags; each
+ * height figure clear of the one below and of every tag, badge and figure placed before it
+ * (when `compact`, all of them in one column at the right).
  */
-export function elevationLabels(elev: Elevation, pxPerM: number, fontPx = 11): ElevationLabels {
+export function elevationLabels(
+  elev: Elevation,
+  pxPerM: number,
+  fontPx = 11,
+  opts: { compact?: boolean } = {},
+): ElevationLabels {
+  const px = (n: number) => n / pxPerM;
   const chains = elev.chains.map((c) => {
     const figs = chainFigures(c.stops);
     const fits = figs.map(
@@ -857,33 +904,78 @@ export function elevationLabels(elev: Elevation, pxPerM: number, fontPx = 11): E
     );
     return { tier: c.tier, show: c.tier !== 0 || fits.every(Boolean), figures: fits };
   });
-  const clear = (full: boolean) => {
-    const boxes = elev.points.map((p) => {
-      const w = labelWidth(tagText(p, full), fontPx) / pxPerM;
-      const h = (fontPx + 4) / pxPerM;
-      const z = p.z + p.h / 2;
-      return { u0: p.u - w / 2, u1: p.u + w / 2, z0: z, z1: z + h };
+  // Notes about a point ride on its tag.
+  const onPoint: Record<string, number[]> = {};
+  for (const n of elev.notes) {
+    const id = n.ids[0];
+    if (id && elev.points.some((p) => p.id === id)) onPoint[id] = [...(onPoint[id] ?? []), n.n];
+  }
+  const tagBoxes = (full: boolean): Rect[] =>
+    elev.points.map((p) => {
+      const w = px(labelWidth(tagText(p, full, onPoint[p.id]), fontPx));
+      const z = p.z + p.h / 2 + px(2);
+      return { u0: p.u - w / 2, u1: p.u + w / 2, z0: z, z1: z + px(fontPx + 4) };
     });
-    return boxes.every((a, i) => boxes.every((b, j) => j <= i || !rectsMeet(a, b)));
-  };
-  const tags = clear(true) ? 'full' : clear(false) ? 'short' : 'none';
-  // Height figures: each clear of the one below it in its column, and of every figure
-  // already placed in other columns (the ceiling's first), else left out.
-  const placed: Rect[] = [];
+  const clear = (boxes: Rect[]) =>
+    boxes.every((a, i) => boxes.every((b, j) => j <= i || !rectsMeet(a, b)));
+  const tags: ElevationLabels['tags'] =
+    !opts.compact && clear(tagBoxes(true)) ? 'full' : clear(tagBoxes(false)) ? 'short' : 'none';
+  const placed: Rect[] = tags === 'none' ? [] : tagBoxes(tags === 'full');
+  const tagNotes = tags === 'none' ? {} : onPoint;
+  // Badges: outside a corner of the outline, the first that is clear.
+  const badges: ElevationLabels['badges'] = [];
+  const bw = px(BADGE_PX.w);
+  const bh = px(BADGE_PX.h);
+  for (const n of elev.notes) {
+    if (tags !== 'none' && n.ids[0] && onPoint[n.ids[0]]) continue;
+    const a = n.at;
+    const spots = [
+      { u: a.u1 + bw / 2, z: a.z1 + bh / 2 },
+      { u: a.u0 - bw / 2, z: a.z1 + bh / 2 },
+      { u: a.u1 + bw / 2, z: a.z0 - bh / 2 },
+      { u: a.u0 - bw / 2, z: a.z0 - bh / 2 },
+      { u: a.u1 - bw / 2, z: a.z1 - bh / 2 },
+    ].map((s) => ({ ...s, z: Math.min(s.z, elev.ceiling - bh / 2) }));
+    const box = (s: { u: number; z: number }) => ({
+      u0: s.u - bw / 2,
+      u1: s.u + bw / 2,
+      z0: s.z - bh / 2,
+      z1: s.z + bh / 2,
+    });
+    const spot = spots.find((s) => !placed.some((b) => rectsMeet(b, box(s)))) ?? spots[0];
+    if (!spot) continue;
+    placed.push(box(spot));
+    badges.push({ n: n.n, ...spot });
+  }
+  const heights: boolean[][] = elev.heights.map((h) => h.marks.map(() => false));
+  if (opts.compact) {
+    // One column at the right: every height once, each clear of the one below.
+    const marks = [...new Set(elev.heights.flatMap((h) => h.marks.map((z) => Math.round(z * 100))))]
+      .sort((a, b) => a - b)
+      .map((z) => z / 100);
+    let last = Number.NEGATIVE_INFINITY;
+    const shown = marks.map((z) => {
+      const ok = (z - last) * pxPerM >= fontPx + 2;
+      if (ok) last = z;
+      return ok;
+    });
+    return { fontPx, chains, tags, tagNotes, badges, heights, merged: { marks, shown } };
+  }
+  // Height figures: each clear of the one below it in its column, and of everything placed
+  // (tags, badges, the ceiling's figures first, then other columns'), else left out.
   const order = elev.heights
     .map((h, i) => ({ h, i }))
     .sort((a, b) => {
       const rank = (x: ElevHeight) => (x.what === 'ceiling' ? 0 : 1);
       return rank(a.h) - rank(b.h) || a.i - b.i;
     });
-  const heights: boolean[][] = elev.heights.map((h) => h.marks.map(() => false));
   for (const { h, i } of order) {
     let last = Number.NEGATIVE_INFINITY;
     h.marks.forEach((z, j) => {
-      const w = labelWidth(String(Math.round(z * 1000)), fontPx) / pxPerM;
-      const gap = 14 / pxPerM;
+      const w = px(labelWidth(String(Math.round(z * 1000)), fontPx));
+      const gap = px(14);
       const x0 = h.what === 'ceiling' || h.side === 'left' ? h.u - gap - w : h.u + gap;
-      const half = (fontPx + 2) / 2 / pxPerM;
+      const half = px((fontPx + 2) / 2);
       const box = { u0: x0, u1: x0 + w, z0: z - half, z1: z + half };
       const ok = (z - last) * pxPerM >= fontPx + 2 && !placed.some((b) => rectsMeet(b, box));
       if (!ok) return;
@@ -892,7 +984,7 @@ export function elevationLabels(elev: Elevation, pxPerM: number, fontPx = 11): E
       (heights[i] as boolean[])[j] = true;
     });
   }
-  return { fontPx, chains, tags, heights };
+  return { fontPx, chains, tags, tagNotes, badges, heights, merged: null };
 }
 
 // ------------------------------------------------------------------------------ changes

@@ -391,11 +391,11 @@ function contents(
     if (band.v0 > NAMES_WALL) continue;
     const kind = furnitureKind(it.assetId);
     if (!kind) continue;
-    if (kind.comesFlat === 'bed' || kind.shape === 'bed') {
-      // Its head (back) against the face: it faces out into the room.
-      const facing = { x: -Math.sin(it.rotationY), y: Math.cos(it.rotationY) };
-      if (dot(facing, face.normal) > Math.cos(FACE_ANGLE * 5)) found.bed = true;
-    }
+    // Only a piece backed onto the face names it (a bed by its head): not one whose side
+    // touches it.
+    const facing = { x: -Math.sin(it.rotationY), y: Math.cos(it.rotationY) };
+    if (dot(facing, face.normal) < Math.cos(FACE_ANGLE * 5)) continue;
+    if (kind.comesFlat === 'bed' || kind.shape === 'bed') found.bed = true;
     if (TV.test(it.assetId)) found.tv = true;
     if (it.assetId === 'kitchen-sink') found.sink = true;
     if (it.assetId === 'kitchen-hob') found.hob = true;
@@ -476,14 +476,19 @@ export function roomFaces(level: Level, roomId: string): RoomFace[] {
                     : null;
     return { label, holds: c.holds || isDoor };
   };
+  // Letters go to the faces stepping stops at (A, B, C… with none skipped); a tiny empty
+  // face between them takes the letter before it with a prime (C′).
+  let n = -1;
   const faces = ordered.map((f, i): RoomFace => {
     const { label, holds } = names(f);
+    const steppable = f.length >= MIN_STEP_FACE - 1e-9 || holds;
+    if (steppable) n++;
     return {
       ...f,
       index: i,
-      letter: faceLetter(i),
+      letter: steppable ? faceLetter(n) : `${faceLetter(Math.max(n, 0))}′`,
       label,
-      steppable: f.length >= MIN_STEP_FACE - 1e-9 || holds,
+      steppable,
     };
   });
   ctx.faces.set(roomId, faces);

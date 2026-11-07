@@ -78,6 +78,8 @@ describe('roomFaces', () => {
       'wall',
       'wall',
     ]);
+    // Letters only for the faces stepping stops at; a return takes the one before, primed.
+    expect(fs.map((f) => f.letter)).toEqual(['A', 'B', 'C', 'C′', 'D', 'D′', 'E', 'F']);
     // Stepping skips the two returns.
     const c1 = fs[2] as RoomFace;
     expect(stepFace(fs, c1, 1).index).toBe(4);

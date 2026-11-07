@@ -4,11 +4,13 @@ import { addOpening, deleteWall, renameRoom, splitWall, updateRoom, updateWall }
 import { roundChain } from './dimensions';
 import { addPoint, updatePoint } from './electrical';
 import {
+  type ElevPoint,
   type Elevation,
   chainFigures,
   elevationChanges,
   elevationLabels,
   midSentence,
+  tagText,
   wallElevation,
 } from './elevation';
 import { type RoomFace, faceAt, faceRef, resolveFace, roomFaces } from './faces';
@@ -160,7 +162,7 @@ describe('wallElevation', () => {
     ]);
     expect(at(0.6)).toEqual([]);
     expect(at(0.6, 'kitchen-hob').map((n) => n.text)).toEqual([
-      '0.60 m between the hob and the wall cabinets: at least 0.65 m is usual over a hob, for the hood.',
+      '0.60 m from the hob to the wall cabinet above: a cooker hood needs at least 0.65 m.',
     ]);
     // The catalogue's own wall cabinet (at 1.45) over a base cabinet: no note.
     const s = withItems(
@@ -243,6 +245,19 @@ describe('wallElevation', () => {
     // An aircon unit's tag is its top; its plate centre half its height lower.
     expect(c.points[0]?.tagHeight).toBe(2.4);
     expect(c.points[0]?.z).toBeCloseTo(2.4 - 0.145, 6);
+  });
+
+  it('a piece in the corner, backed onto one wall, neither names nor draws on the other', () => {
+    // Against the right wall (D), its side touching the top wall (C).
+    const s = withItems(roomR(), piece('it_w', 'built-in-wardrobe', 3.65, 0.95, Math.PI / 2));
+    const fs = faces(level(s));
+    expect(fs.find((f) => f.letter === 'D')?.label).toBe('wardrobe wall');
+    expect(fs.find((f) => f.letter === 'C')?.label).toBeNull();
+    expect(elev(s, 'C').items).toEqual([]);
+    expect(elev(s, 'D').items.map((i) => i.id)).toEqual(['it_w']);
+    // A bed along the top wall, its head against the right wall, still shows on the top wall.
+    const b = withItems(roomR(), piece('it_b', 'bed-single', 2.95, 0.51, Math.PI / 2));
+    expect(elev(b, 'C').items.map((i) => i.id)).toEqual(['it_b']);
   });
 
   it('a stub wall standing out from a face is a section band across it', () => {
@@ -444,10 +459,52 @@ describe('elevation labels', () => {
     expect(small.chains.find((c) => c.tier === 0)?.show).toBe(false);
     expect(small.chains.find((c) => c.tier === 2)?.show).toBe(true);
     expect(small.tags).toBe('none');
-    const big = elevationLabels(d, 600);
+    const big = elevationLabels(d, 900);
     expect(big.chains.every((c) => c.show && c.figures.every(Boolean))).toBe(true);
     expect(big.tags).toBe('full');
     expect(big.heights.every((h) => h.every(Boolean))).toBe(true);
+  });
+
+  it('a note about a point rides on its tag; other badges keep clear of the tags', () => {
+    const s0 = roomR();
+    const s1 = apply(
+      s0,
+      socket(right(s0), 1 / 3, 0.3).command,
+      opening(level(s0), [4, 0], [4, 3], {
+        kind: 'window',
+        t: 0.75,
+        width: 0.6,
+        sill: 0.9,
+        height: 1.2,
+      }),
+    );
+    // The wardrobe hides the socket and covers the window.
+    const d = elev(withItems(s1, piece('it_w', 'built-in-wardrobe', 3.65, 1.8, Math.PI / 2)), 'D');
+    expect(d.notes.map((n) => n.kind).sort()).toEqual(['covers', 'hidden']);
+    const l = elevationLabels(d, 300);
+    const hidden = d.notes.find((n) => n.kind === 'hidden');
+    expect(l.tagNotes[d.points[0]?.id ?? '']).toEqual([hidden?.n]);
+    expect(tagText(d.points[0] as ElevPoint, true, l.tagNotes[d.points[0]?.id ?? ''])).toMatch(
+      /^1 · h300 !\d$/,
+    );
+    expect(l.badges.map((b) => b.n)).toEqual([d.notes.find((n) => n.kind === 'covers')?.n]);
+    // The badge is clear of the tag.
+    const tag = elevationLabels(d, 300);
+    expect(tag.badges.length + Object.keys(tag.tagNotes).length).toBe(2);
+  });
+
+  it('compact (a phone at fit): short tags at most, the heights in one column', () => {
+    const s0 = roomR();
+    const s = apply(
+      s0,
+      socket(top(s0), 0.25, 0.3).command,
+      opening(level(s0), [0, 0], [4, 0], { kind: 'window', width: 1.2, sill: 0.9, height: 1.2 }),
+    );
+    const c = elev(s, 'C');
+    const l = elevationLabels(c, 600, 11, { compact: true });
+    expect(l.tags).toBe('short');
+    expect(l.merged?.marks).toEqual([0.9, 2.1, 2.6]);
+    expect(l.heights.flat().some(Boolean)).toBe(false);
   });
 
   it('keeps height figures in neighbouring columns from overlapping', () => {
