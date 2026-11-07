@@ -32,7 +32,7 @@ test('clearances: a wardrobe with room, then a chair in front of it; the count a
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: /^Select/ }).click();
   await expect(page.locator('.clearance-short')).toHaveCount(1);
-  const summary = page.locator('.inspector .field', { hasText: 'Clearance checks' });
+  const summary = page.locator('.inspector .field', { has: page.getByLabel('Clearance checks') });
   await expect(summary).toContainText('1 piece is short of room or in the way.');
   await summary.getByRole('button', { name: 'Show next' }).click();
   await expect(page.getByRole('heading', { name: 'Wardrobe' })).toBeVisible();

@@ -26,6 +26,7 @@ import {
   isGlass,
   isHalfWall,
 } from './schema';
+import { TOP_CABINET_FROM } from './storage';
 import { type WallStatus, wallStatus } from './structural';
 
 /**
@@ -41,8 +42,7 @@ export const DOOR_MAX = 0.6;
 export const GAP_USUAL = 0.55;
 /** …and less than this over a hob (the hood). */
 export const GAP_HOB = 0.65;
-/** A wardrobe over 2.2 m tall has a top cabinet from this height (the storage meter's rule). */
-export const TOP_CABINET_FROM = 2.1;
+/** A wardrobe over 2.2 m tall has a top cabinet from TOP_CABINET_FROM (the storage meter's). */
 const TOP_CABINET_OVER = 2.2;
 /** A kitchen base run's plinth. */
 const PLINTH = 0.1;

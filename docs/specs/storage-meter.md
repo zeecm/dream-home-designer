@@ -48,7 +48,9 @@ sizes they already use (metres and foot runs, pairs of shoes).
 
 **Where the household lives (slice 1).** Per browser, per project: localStorage
 `dhd-storage-<projectId>` = `{ people: { [roomId]: { adults, children } }, others: { adults,
-children }, amount: 'few' | 'average' | 'lots', shelter: boolean }`. A separate key from
+children }, amount: 'few' | 'typical' | 'lots', shelter: boolean }` (core `StorageSetting`, read
+leniently by `parseStorageSetting`: counts clamped to 0–6, junk back to the default; the key is
+removed when the value is the default). A separate key from
 `dhd-ageing-<projectId>`, so the ageing check (being built now) isn't touched. They share an
 object only when both move into the project (slice 2): `Project.household` gains `people`,
 `others`, `amount` and `shelter` beside `check`, `bedroomId`, `bathroomId` and the flat type.
@@ -78,15 +80,25 @@ middle, and a manufacturer's guide for "lots". The panel says so in one line.
 
 ## How storage is measured
 
-Core `storageOf(item, roomKind)` gives each piece's contribution to four measures. A piece
-is in the room that holds its footprint's centre (`roomAt`, as clearances do).
+Core `storageOf(item, ctx)` gives each piece's contribution to four measures, from a
+`storage` class on its catalogue kind (`hanging`, `folded`, `shoes`, `base`, `base-run`, `sink`,
+`wall`, `volume`; the models' set in `tools/models/catalogue.json`; a guard test fails for a
+Storage, Built-in or Kitchen piece without one). `ctx` is `{ kind: RoomKind, sleeps }`. A piece is
+in the room that holds its footprint's centre; if that is in a wall or a doorway, the room just
+in front of it (centre + front × (d/2 + 0.1)); only then "Not in a room". Rooms are traced once
+per change to the walls, corners or rooms (a drag shares them), and each item's room is kept by
+the item object.
 
 | Measure | Unit | What counts | How |
 |---|---|---|---|
-| **Clothes** | metres of wardrobe front (and ft run) | `wardrobe`, `built-in-wardrobe`; `chest-of-drawers`; a My-furniture `cabinet` shape at least 1.5 m tall and 0.5 m deep **in a bedroom** | Wardrobe: its width, if at least 1.5 m tall. Under 0.5 m deep (hangers can't hang across): half its width. Under 1.5 m tall: not clothes, goes to Everything else. Chest of drawers: half its width (folded clothes). |
+| **Clothes** | metres of wardrobe front (and ft run) | `wardrobe`, `built-in-wardrobe`; `chest-of-drawers`; a My-furniture `cabinet` shape at least 1.5 m tall and 0.5 m deep **in a room someone sleeps
+in** (a bedroom, or a room with a bed or people: a studio) | Wardrobe: its width, if at least 1.5 m tall. Under 0.5 m deep (hangers can't hang across): half its width. Under 1.5 m tall: not clothes, goes to Everything else. Chest of drawers: half its width (folded clothes). |
 | **Shoes** | pairs | `shoe-cabinet`, `built-in-shoe-cabinet` (not in a kitchen) | `floor(width / 0.22)` pairs per shelf × `floor((height − 0.10) / 0.18)` shelves. 0.22 m per pair is the middle of BW's 0.18–0.25; the 0.10 m plinth and 0.18 m shelf pitch are **PM**. So the 0.8 × 1.0 m cabinet holds 15 pairs and the full-height 0.9 × 2.6 m one 52. |
-| **Kitchen** | metres of shelf and drawer front (NKBA's measure) | `kitchen-base`, `kitchen-hob`: width × 2. `kitchen-sink`: width × 1 (the pipes take the rest). `built-in-kitchen-base`: width × 2, less 0.8 m (one level over the sink) when its room has no `kitchen-sink`. `kitchen-wall`, `built-in-kitchen-wall`: width × `max(1, round(h / 0.35))` (0.7 m → 2). A `built-in-shoe-cabinet` in a room of kind kitchen is a **pantry**: width × `max(1, round((h − 0.10) / 0.35))` (2.6 m → 7). | Levels per cabinet are **PM** (NKBA counts each shelf and drawer; our level counts are typical HDB carpentry). Kitchen pieces count wherever they stand (an open kitchen in "Living and dining" still counts). The fridge is not counted. |
-| **Everything else** | m³ (luggage, toys, bulk buys, the vacuum, books) | Top cabinets of any wardrobe over 2.2 m tall: w × d × (h − 2.1). `bookshelf`, `cube-bookcase`, `steel-shelves`, `steel-shelves-narrow`, `shelf-with-drawers`, `chinese-cabinet`, `tv-console`, `tv-console-slatted`, `built-in-tv-console`. A wardrobe under 1.5 m tall. A My-furniture `cabinet` not counted as clothes. The household shelter and any store room. | Pieces: outer w × d × h. Shelter (`SHELTER_ROOM`) and store rooms (name matches `\bstore`): **1 m³ per m² of floor** (racks on half the floor, 2 m high; **PM**), the shelter only while "Count the shelter" is on (default on). |
+| **Kitchen** | metres of shelf and drawer front (NKBA's measure) | `kitchen-base`, `kitchen-hob`: width × 2. `kitchen-sink`: width × 1 (the pipes take the rest). `built-in-kitchen-base`: width × 2; when the level has no `kitchen-sink`, the widest run loses
+0.8 m (one level over the sink), once per level and never below 0. `kitchen-wall`, `built-in-kitchen-wall`: width × `max(1, round(h / 0.35))` (0.7 m → 2). A `built-in-shoe-cabinet` in a room of kind kitchen is a **pantry**: width × `max(1, round((h − 0.10) / 0.35))` (2.6 m → 7). | Levels per cabinet are **PM** (NKBA counts each shelf and drawer; our level counts are typical HDB carpentry). Kitchen pieces count wherever they stand (an open kitchen in "Living and dining" still counts). The fridge is not counted. |
+| **Everything else** | m³ (luggage, toys, bulk buys, the vacuum, books) | Top cabinets of any wardrobe over 2.2 m tall: w × d × (h − 2.1). `bookshelf`, `cube-bookcase`, `steel-shelves`, `steel-shelves-narrow`, `shelf-with-drawers`, `chinese-cabinet`, `tv-console`, `tv-console-slatted`, `built-in-tv-console`. A wardrobe under 1.5 m tall. A My-furniture `cabinet` not counted as clothes. The household shelter and any store room. | Pieces: outer w × d × h. Shelter (`SHELTER_ROOM`) and store rooms (name matches `/\bstor(e|age)\b|storeroom/i`: "Store",
+"Storage room", "Storeroom"): **1 m³ per m² of floor** (the room's area to wall centre lines, a
+PM figure that overstates a thick-walled shelter a little; racks on half the floor, 2 m high, **PM**), the shelter only while "Use the shelter for storage" is on (default on). |
 
 **Not counted:** beds, bedside tables, nightstands, desks (even with drawers), consoles and
 side tables, the vanity, fridge, washer, sofas, rugs, decor, lamps, people, My-furniture
@@ -94,35 +106,44 @@ side tables, the vanity, fridge, washer, sofas, rugs, decor, lamps, people, My-f
 are). Uploaded models are listed: "Not counted: Ikea Pax (your model). Storage can't be
 told from a model."
 
-**Rounding.** Clothes and kitchen to 0.05 m (ft run with `footRun`), pairs whole, volume to
-0.1 m³. Sums use unrounded values.
+**Rounding.** A shortfall's foot run rounds **up**, so the run covers it (1.00 m: 4 ft; the
+estimate's own runs still round to the nearest foot). Clothes and kitchen to 0.05 m (ft run with `footRun`), pairs whole, volume to
+0.1 m³. Sums use unrounded values. Divisions before a `floor` or `round` add 1e-9.
 
 ## Targets (the benchmarks)
 
-The household picks how much it owns: **Few things · Average (default) · Lots**.
+The household picks how much it owns: **Few things · Typical (default) · Lots** ("Average" in
+the first draft; UX: "Typical" reads as what most families have, not a grade).
 
-| Measure | Few things | Average | Lots | Basis |
+| Measure | Few things | Typical | Lots | Basis |
 |---|---|---|---|---|
-| Clothes, per adult | 0.60 m | **1.00 m** | 1.80 m | Few: NDSS sets 0.36 m² of a single bedroom's built-in wardrobe and 0.72 m² of a double's aside as the wardrobe allowance, i.e. 0.60 m of a 0.60 m deep wardrobe per bed space (the reading is ours). Average: SG, a couple's 1.8–2.4 m master wardrobe. Lots: BW, 1800 mm per person. |
+| Clothes, per adult | 0.60 m | **1.00 m** | 1.80 m | Few: NDSS sets 0.36 m² of a single bedroom's built-in wardrobe and 0.72 m² of a double's aside as the wardrobe allowance, i.e. 0.60 m of a 0.60 m deep wardrobe per bed space (the reading is ours). Typical: SG, a couple's 1.8–2.4 m master wardrobe. Lots: BW, 1800 mm per person. |
 | Clothes, per child (up to about 12) | 0.45 m | 0.60 m | 0.90 m | **PM** (Few: NDSS's single-bed allowance less a quarter) |
 | Shoes at the door, per adult | 5 pairs | 8 | 15 | **PM** |
 | Shoes, per child | 3 | 5 | 8 | **PM** |
 | Shoes, for the household (slippers, guests) | 4 | 4 | 6 | **PM**. Shoes come off at the door in most Singapore homes. |
 | Kitchen front, household | 4 m + 1.5 m per person | **6 m + 2 m per person** | 8 m + 2.5 m per person | **PM**, checked against a typical 4-room BTO kitchen (an L of base cabinets about 3.6 m with sink and hob, 2.1 m of wall cabinets beside the hood: about 10.6 m, short for four at 76%, enough for two). NKBA's 35.6 m for a small US kitchen is shown as a reference, not a target: US households stock more. |
-| Everything else, by people 1 / 2 / 3–4 / 5+ | 2 / 3 / 4 / 5 m³ | **4 / 6 / 8 / 10 m³** | 5 / 8 / 10 / 12 m³ | Average: ADG 4G (studio / 1 / 2 / 3+ bed, mapped to people by us). Few: ADG's half that must be inside the home. Lots: **PM**. ADG excludes bedroom wardrobes; we count wardrobe top cabinets here, since that is where HDB families put luggage. |
+| Everything else, by people 1 / 2 / 3–4 / 5+ | 2 / 3 / 4 / 5 m³ | **4 / 6 / 8 / 10 m³** | 5 / 8 / 10 / 12 m³ | Typical: ADG 4G (studio / 1 / 2 / 3+ bed, mapped to people by us). Few: ADG's half that must be inside the home. Lots: **PM**. ADG excludes bedroom wardrobes; we count wardrobe top cabinets here, since that is where HDB families put luggage. |
 
-**Status** of each line: **Enough** at 100% or more; **Tight** at 80–99%; **Short** under 80%.
-No people: no target and no status, only what is there.
+**Status** of each line: **Enough** at 100% or more; **Nearly** at 80–99%; under 80% the status
+reads **"Needs 0.80 m more"** (the only words in amber). Compared with a 1e-6 tolerance, so 1.2 m
+× 1.5 (1.7999…) against 1.80 m is Enough. ("Tight" and "Short" in the first draft: the walkway
+line already says "tight", and clearances say "short of room".) **Nothing drawn** for a measure is
+not a shortfall: no status word, a dashed empty bar, "No shoe cabinet drawn · about 28 pairs is
+usual" and an [Add a shoe cabinet] link that arms the Furniture tool with it. No people: no
+target and no status, only what is there.
 
 **Where targets apply.**
 - **Clothes:** per room with people, usually a bedroom (that room's people against that
   room's clothes), and for the home (everyone against all clothes, wherever they stand).
 - **Shoes, kitchen, everything else:** for the home only. The panel lists each room's share.
 
-**Example (furnished sample, Average, from the beds: 2 adults in Main bedroom, 1 in Bedroom).**
-Main bedroom 1.20 / 2.00 m, Short. Bedroom 0 / 1.00 m, Short, "No wardrobe". Shoes 0 / 28
-pairs. Kitchen 4.80 / 12.00 m, Short. Everything else: the TV console 0.4 m³ plus the shelter,
-of 8 m³.
+**Example (furnished sample, Typical, from the beds: 2 adults in Main bedroom, 1 in Bedroom).**
+Main bedroom 1.20 of 2.00 m, needs 0.80 m more. Bedroom: no wardrobe, about 1.00 m is usual.
+Shoes: none drawn, about 28 pairs is usual. Kitchen 4.8 of 12.0 m (2.8 m of cabinets), needs
+7.2 m more. Everything else 3.7 of 8 m³ (the TV console 0.36 plus the shelter's 3.39), needs
+4.3 m³ more. The kitchen chip goes on the Kitchen (the kitchen room with the most front; the
+sample also has a Dry kitchen).
 
 ## The household
 
@@ -131,45 +152,77 @@ of 8 m³.
 - `bed-single`, `bed-super-single`, or a narrower `bed`: 1 adult;
 - no bed: nobody.
 
-Single beds guess adults (the larger target) and the intro says to change them. Rooms with
-people show "From the beds" until edited.
+Beds count by shape and width, not by id (`comesFlat === 'bed'` or a My-furniture `bed`), so a
+queen made 0.9 m wide sleeps one and slice 1b's storage beds count for free. Single beds guess
+adults (the larger target) and the intro says to change them. Rooms with people show "Guessed
+from the beds" until edited.
 
 **Edited** per room with people or of kind bedroom: "Adults [−] 2 [+]  Children [−] 0 [+]",
 0–6 each. Below them, "Also living here, without a bed drawn" (adults and children, 0–6), for
 someone on a sofa bed or a mattress in the study. [Reset to the beds] clears the edits.
 
-**How much we own:** a three-way segmented control, Few things · Average · Lots, with one
-muted line under it: "Average is a typical Singapore family. Choose Lots if your wardrobe
-is full today."
+**How much you own:** a three-way segmented control, Few things · Typical · Lots, with one
+muted line under it: "Typical is what most Singapore families own. Choose Lots if your wardrobe
+is full today." Below it, where the plan has a shelter, "Use the shelter for storage" (on).
 
 ## Behaviour
 
 **Entry.**
-- Plan details: a new row **Storage** with a one-line summary of the worst lines, e.g.
-  "Clothes tight, kitchen short" or "Enough for 3 people", and [See storage].
+- Plan details: one **Checks** heading holds Clearance, Electrical, Storage and Older person,
+  one row each (a label, one line, one small button; the clearance row reads "Clearance", and
+  Electrical has a line, "No points yet." or "12 points on the plan."). Storage's line names
+  what is short or nearly, then what isn't drawn yet, e.g. "Clothes, kitchen and everything else
+  could use more. No shoe cabinet drawn yet.", or "Enough for 3 people."; then [See storage], which
+  replaces the plan details as Suggested points does (× and Esc close it; focus moves to its
+  heading and back to the button). On a view link the row and the panel work (the viewer's own
+  household); the rest of the details stay disabled.
 - With no rooms: "Draw rooms first." With rooms but nobody: "You have 1.20 m of wardrobe.
-  Add who lives here to compare."
+  Add who lives here to compare." (said once; the meters keep their empty states).
 - Intro (first open, muted): "Do you have room for everything? We add up wardrobes, shoe
   cabinets, kitchen cabinets and cupboards, and compare them with what a household like yours
   usually needs. We guessed who lives here from the beds; change it below."
 
-**Panel** (desktop: right-hand panel, as the ageing report; phone: bottom sheet at half
-height, plan above, drag up for full).
-1. **Who lives here** (collapsed to "3 people: 2 in Main bedroom, 1 in Bedroom [Change]"
-   after the first visit) and **How much we own**.
-2. **Four meters** for the home: Clothes, Shoes, Kitchen, Everything else. Each: a bar, "have
-   / target" ("1.20 / 3.00 m"), the status word, and for clothes the ft run. Short uses the
-   `--warn` token; Tight and Enough are ink (colour on data only; ux-reviewer to confirm).
+**Panel** (desktop: in the right-hand panel's place; phone: the Suggested points half-height
+sheet with the plan refitted above it, its footer pinned: [Copy summary] [Close], 44 px; on a
+phone on its side [Copy] [Close]; the sheet's header gets a rule once its body scrolls). Order:
+the finding (the summary line), the intro (first open), who lives here, the meters, how much you
+own, the room cards, the notes, the disclaimer. Copy summary reads "Copied" for 2 s; a failure
+says "Couldn't copy here." in sight.
+1. **Who lives here**: one line, "3 people (guessed from the beds): 1 in Bedroom, 2 in Main
+   bedroom [Change]", folded everywhere (unfolded only while nobody is counted). Unfolded, each
+   room someone sleeps in (a bedroom, a room with a bed, or one whose people were edited, even to
+   none) has stacked steppers, "Adults − 2 +" over "Children − 0 +" (32 px buttons, 44 px on a
+   touch screen, labelled "More children in Bedroom"); one live line per change ("Bedroom: 1
+   adult and 1 child"). People edited in the renovation for a room matched to the flat as it is
+   are kept under that room's id; entries for rooms gone from the project are dropped, and a
+   stored entry that isn't two numbers falls back to the room's beds. "Add people to a room" lets
+   any other room (not a bathroom, ledge or the shelter) take people; with no beds at all the intro
+   says "Add who lives here below."
+2. **Four meters** for the home: Clothes, Shoes, Kitchen, Everything else. Each: the label and
+   status word; a 6 px bar filled in ink with a 1 px tick at the target (`role="meter"`, its
+   `aria-valuetext` the same words); "1.20 of 3.00 m (4 of 10 ft)", "15 of 28 pairs", "4.8 of
+   12.0 m of shelves and drawers" with "From 2.8 m of cabinets", "3.7 of 8 m³". Enough adds
+   "+0.40 m spare"; Nearly "0.20 m more is usual". Only a gap is amber (the fill and "Needs …
+   more", `.warning-text`); never red, which means a physical clash. Everything else adds "About
+   3 m of full-height cupboard would hold it." when it needs more, and "Most HDB flats have little
+   room for bulky things. Wardrobe top cabinets, a storage bed or the shelter help."
 3. **Room by room**, cards in this order: bedrooms (plan order), kitchen rooms, living rooms,
    shelter and store rooms, other rooms, then "Not in a room". Each card lists its counted
    pieces with their contribution ("Built-in wardrobe 1.80 m · top cabinets 0.5 m³") and, for
    bedrooms, its clothes line:
-   - "Main bedroom, 2 adults: 1.20 m of wardrobe; about 2.00 m is usual. 0.80 m short:
-     a 3 ft run, about $600–1,050 as a built-in." (The price is `footRun(shortfall)` × the
-     wardrobe rate from the viewer's estimate rates, `dhd-rates`.)
-   - "Bedroom, 1 adult: no wardrobe; about 1.00 m is usual."
-   - Short in the room but enough in the home: "Enough for the whole home: 1.20 m more
-     stands in the Living room."
+   - "1.20 m of wardrobe; about 2.00 m is usual. Needs about 0.80 m more: a 3 ft run, about
+     $600–1,050 built in." (The card's heading names the room and its people; Copy writes "Main
+     bedroom, 2 adults: …". The price is core `carpentryPrice('wardrobe', shortfall, rates)`,
+     pulled out of `carpentryCost`, at the viewer's estimate rates, `dhd-rates`; in ink. Under
+     0.15 m, no price: a foot run's minimum would overstate it.)
+   - "No wardrobe yet; about 1.00 m is usual: a 3 ft run, about $600–1,050 built in." Enough:
+     "… Enough." A room with clothes and nobody: "Nobody sleeps here; its 1.20 m of wardrobe
+     counts for the whole home." (Copy names the room.) Kitchen pieces: "1.2 m of shelves and
+     drawers". Targets drop a trailing ".0" ("12 m", "8 m³").
+   - Tapping a piece opens its details with "‹ Back to storage", which returns to the panel where
+     it was, focus on that card.
+   - Short in the room but enough in the home: "Enough for the whole home: 1.20 m more stands
+     in Living and dining."
    - A room with clothes but nobody: "Nobody sleeps here: 1.20 m, counted for the home."
 4. **Notes** (muted): pieces not counted; "The shelter is counted as storage: keep it clear
    enough to use in an emergency, with no fixings in its walls." (MHA); kitchen: "For
@@ -177,20 +230,34 @@ height, plan above, drag up for full).
 5. **Disclaimer:** "A rough guide from UK and Australian housing standards, a wardrobe
    maker's guide and Singapore practice. No Singapore rule sets storage. Count your own clothes
    and shoes if you can."
-6. [Copy] gives a plain-text summary (household, four meters, room lines, disclaimer) for a
+6. [Copy] gives a plain-text summary (in a renovation: "After the renovation: …" or "As it is
+   now: …", each meter with "(Before: 1.20 m; +1.80 m)") (household, four meters, room lines, disclaimer) for a
    chat. No Print in slice 1.
 
-Tapping a room card pans to the room and highlights it; tapping a piece line selects the
-piece.
+Tapping a room card's name pans to the room and outlines it on the plan (left out of
+exports); tapping a piece line selects the piece, whose details start "‹ Back to storage".
 
 **Before and After.** The panel reports the version shown. With a renovation, each meter adds
 a muted "Before: 1.20 m", and a room card adds "+1.80 m in the renovation". The household is
 by room id; a room new in After gets its people from the beds until edited.
 
 **Plan** (desktop and phone), only while the panel or sheet is open:
-- **Room chips** at each bedroom's label: "Wardrobe 1.20 / 2.00 m"; at the kitchen: "Cabinets
-  4.80 / 12.00 m". Short in `--warn`, others muted. 11 px on phones.
-- The selected piece's contribution as a small label beside it.
+- **Room chips** under the label of each room with people: "Wardrobe 1.20 of 2.00 m"; at the
+  kitchen: "Shelves 4.8 of 12 m" (not "Cabinets": the fronts outnumber the run). A neutral pill,
+  amber (`--pill-warning-*`) only when something drawn needs more; with nothing drawn, a dashed
+  neutral pill, "No wardrobe · about 1.00 m usual" ("No kitchen cabinets"). Never the clearance
+  red. On a narrow plan, 11 px and short: "1.2 of 2.0 m", "No wardrobe". Chips are drawn under
+  the clearance and ageing marks, and their labels keep off the chips (as off room names).
+- A chip stays inside its room across (the short words where the long ones don't fit) and off
+  the clearance and ageing bars (below them, or above the room's name); a studio's clothes and
+  kitchen chips stack.
+- **Add a shoe cabinet** (and the others, where nothing is drawn; not on a view link or over a
+  designer's preview) arms the piece, scrolls it into view in the catalogue, says "Shoe cabinet
+  chosen. Click the plan where it goes; Esc to cancel.", and puts a bar over the plan, "Click
+  (Tap) where the shoe cabinet goes · Cancel". The panel stays; once placed, it's back in Select
+  with the piece counted; if the piece has a clearance problem where it was put, its details
+  open first (with "‹ Back to storage"), and the panel comes back where it was.
+- (The selected piece's contribution beside it on the plan: left out; its details say it.)
 - All `data-export="skip"`: not in the PNG, print, contractor sheet, 3D or walk.
 
 **Live.** Adding, deleting, resizing or turning a piece updates the meters in the same frame
@@ -204,14 +271,21 @@ storage." Hidden for pieces that never count (a bed, a sofa).
 
 **View links.** The panel works, with the viewer's own household and rates (per browser).
 
-**Phone.** The sheet holds the household steppers (44 px targets), meters and cards stacked;
-nothing scrolls sideways; tapping a card pans the plan above the sheet.
+**Phone.** The sheet holds the household line and [Change], the steppers (44 px targets),
+meters and cards stacked; nothing scrolls sideways; tapping a card pans the plan above the
+sheet. With a tool picked (from an Add link), the catalogue shows at the top of the sheet.
 
-## Core API (shape; tech-lead may refine)
+## Core API (as built, `packages/core/src/storage.ts`)
+
+The first draft's shape, kept for reference; as built: `storageOf(item, ctx: RoomCtx)`,
+`StorageSetting` (zod) for the household, `meter`/`meterStatus` with status
+`'enough' | 'nearly' | 'short' | 'none'` and a `gap`, `shortfallPrice`, `pieceIn`,
+`storageRoomOf`, `storageReport(level, setting, alias?)` (alias: `matchRooms` for After, so a
+room hacked and drawn again keeps its people) and `storageGain(before, after, match)`.
 
 ```ts
 type StorageMeasure = 'clothes' | 'shoes' | 'kitchen' | 'other';
-type Amount = 'few' | 'average' | 'lots';
+type Amount = 'few' | 'typical' | 'lots';
 interface People { adults: number; children: number }
 interface Household {
   people: Record<string, People>;          // by room id; missing rooms use the beds
@@ -261,7 +335,10 @@ Constants (one place, for the unverified numbers): `PAIR_WIDTH` 0.22, `SHOE_PITC
 - **The shelter in After:** it can't change in a renovation; same volume.
 - **Many people** (up to 6 per room, 6 others): targets grow linearly; Everything else stops
   at the 5+ row.
-- **Very small pieces** (a 0.2 m shoe cabinet): 0 pairs, shown as "0 pairs (too narrow)".
+- **Very small pieces** (a 0.2 m shoe cabinet, or one 0.27 m tall): 0 pairs, "too narrow" or
+  "too low" for a pair. It is drawn, so the meter reads "0 of 28 pairs · too narrow for a pair"
+  and needs more; "No shoe cabinet drawn" means no piece at all (core counts each meter's
+  `pieces`).
 - **Multi-level homes:** the level shown, as the ageing check. Maisonettes later.
 
 ## Out of scope
@@ -301,6 +378,11 @@ Constants (one place, for the unverified numbers): `PAIR_WIDTH` 0.22, `SHOE_PITC
 
 ## Acceptance criteria
 
+As built: core in `storage.test.ts` (AC 1–16 table-driven, plus the tech-lead's cases and a
+50-piece timing test), words in `apps/web/src/storage/text.test.ts`, e2e in
+`apps/web/e2e/storage.spec.ts` on `e2e/furnished.dreamhome.json` (core's furnished sample,
+kept in step by a unit test).
+
 ### Slice 1 (PR 1)
 
 Core (Vitest):
@@ -308,7 +390,7 @@ Core (Vitest):
    Free-standing `wardrobe` 1.20 × 0.60 × 2.10: clothes 1.20, other 0.
 2. That wardrobe resized to 0.45 m deep: clothes 0.60. Resized to 1.20 m tall: clothes 0,
    other 0.864 m³.
-3. `chest-of-drawers` 1.20 m wide: clothes 0.60.
+3. `chest-of-drawers` (1.201 m wide): clothes 0.6005 (`toBeCloseTo`).
 4. `shoe-cabinet` 0.8 × 0.35 × 1.0: 15 pairs. `built-in-shoe-cabinet` 0.9 × 2.6: 52 pairs.
    The same built-in in a room named Kitchen: 0 pairs, kitchen 6.30 m.
 5. The sample's run (base 0.6, sink 0.8, base 0.6, hob 0.8): kitchen 4.80 m. A 2.4 m
@@ -322,10 +404,11 @@ Core (Vitest):
    clothes 1.00; in a living room: other 1.2 m³. A My-furniture box: `null`.
 9. `householdFromBeds`: queen or king → 2 adults; single or super single → 1; a custom bed
    1.52 wide → 2, 1.07 → 1; two singles in one room → 2; no bed → none.
-10. `storageTargets` for 2 adults and 1 child, Average: clothes 2.60, shoes 25 (16 + 5 + 4),
+10. `storageTargets` for 2 adults and 1 child, Typical: clothes 2.60, shoes 25 (16 + 5 + 4),
     kitchen 12.00, other 8. Few things and Lots match the targets table for the same people.
-11. Status at 100% enough, 80% tight, 79.9% short. No people: no `target`, no `status`.
-12. Main bedroom, queen bed, 1.20 m wardrobe, Average: clothes `{have 1.2, target 2.0,
+11. Status at 100% enough, 80% nearly, 79.9% short; nothing drawn `none`. No people: no
+    `target`, no `status`.
+12. Main bedroom, queen bed, 1.20 m wardrobe, Typical: clothes `{have 1.2, target 2.0,
     status 'short'}`, `shortfall` 0.80; 3 ft priced at the default wardrobe rate is
     $600–1,050.
 13. A 1.20 m wardrobe in the living room and nobody there: the living room has no clothes
@@ -334,22 +417,23 @@ Core (Vitest):
 14. A piece whose centre is in no room goes to `outside` and the home totals only.
 15. Edited people override the beds for that room only; `others` add to the home targets
     only.
-16. Furnished sample, Average, from the beds: matches the example in "Targets" (a reviewed
+16. Furnished sample, Typical, from the beds: matches the example in "Targets" (a reviewed
     snapshot). Same level twice: identical report, same order.
 
 E2e (desktop, and a 390 px phone by finger):
 17. Plan details shows the Storage row with a summary; [See storage] opens the panel with the
-    intro, "From the beds" on Main bedroom (2 adults) and Bedroom (1 adult), four meters and
+    intro, "Guessed from the beds" on Main bedroom (2 adults) and Bedroom (1 adult), four meters and
     room cards.
-18. Add a Built-in wardrobe to Bedroom: its line goes from Short "no wardrobe" to Enough
-    "1.80 / 1.00 m" and the room chip updates, without a reload. Undo restores both.
-19. Resize the Main bedroom wardrobe to 2.40 m by its handle: the meter and chip show 2.40 /
+18. Add a Built-in wardrobe to Bedroom: its line goes from "No wardrobe" to "1.80 m of
+    wardrobe; about 1.00 m is usual. Enough." and the room chip to a neutral "Wardrobe 1.80 of
+    1.00 m", without a reload. Undo restores both.
+19. Resize the Main bedroom wardrobe to 2.40 m by its handle: the card and chip show 2.40 of
     2.00 m, Enough, when the drag ends; the Inspector reads "Storage: 2.40 m of wardrobe
     (8 ft)".
-20. Add a child to Bedroom with the stepper: the target rises by 0.60 m; the tag "From the
-    beds" goes; the choice survives a reload; [Reset to the beds] restores it.
+20. Add a child to Bedroom with the stepper: the target rises by 0.60 m; the tag "Guessed from
+    the beds" goes; the choice survives a reload; [Reset to the beds] restores it.
 21. Choose Lots: every target changes to the Lots row and the choice survives a reload.
-22. Turn "Count the shelter" off: Everything else drops by the shelter's area; the shelter
+22. Turn "Use the shelter for storage" off: Everything else drops by the shelter's area; the shelter
     note goes.
 23. Inspector Storage lines for a wardrobe, a shoe cabinet, a base cabinet and a bookshelf; an
     uploaded model says "Not counted as storage"; a sofa shows no line.

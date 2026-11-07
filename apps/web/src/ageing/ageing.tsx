@@ -29,6 +29,8 @@ import { type Selection, useEditor } from '../editor';
 import { useSuggest } from '../electrical/suggest';
 import { roomLabelBoxes } from '../plan/layers';
 import { type Size, type View, fitBounds } from '../plan/view';
+import { useStorageChipBoxes } from '../storage/storage';
+import { useStorage } from '../storage/store';
 import { useLevel, useProject, useStore } from '../store';
 import { Segmented } from '../ui/fields';
 import { icons } from '../ui/icons';
@@ -394,6 +396,7 @@ export function OlderPersonSection() {
               data-ageing-open=""
               onClick={() => {
                 useSuggest.getState().close();
+                useStorage.getState().closePanel();
                 useAgeing.getState().openList();
               }}
             >
@@ -909,6 +912,8 @@ export const AgeingLayer = memo(function AgeingLayer({
 }) {
   const report = useAgeingReport();
   const selection = useEditor((s) => s.selection);
+  // The storage meter's chips, while its panel is open: chips here keep off them.
+  const chips = useStorageChipBoxes(level, geom, view.zoom, size.width);
   const shown = useAgeing((s) => s.shown);
   const listOpen = useAgeing((s) => s.listOpen);
   const fitAll = useAgeing((s) => s.fitAll);
@@ -985,7 +990,7 @@ export const AgeingLayer = memo(function AgeingLayer({
       x1: view.cx + size.width / 2 / view.zoom - inset,
       y1: view.cy + size.height / 2 / view.zoom - inset,
     };
-    const names = roomLabelBoxes(level, geom, view.zoom);
+    const names = [...roomLabelBoxes(level, geom, view.zoom), ...chips];
     // The selected piece's handles, and the piece itself: a chip never sits on it.
     const handles = selected
       ? [...handleBoxes(selected, view.zoom), footprintBox(itemFootprint(selected))]
@@ -1005,7 +1010,7 @@ export const AgeingLayer = memo(function AgeingLayer({
     }));
     const fineLabels = placeLabels(fineSpecs, view.zoom, visible, names, handles);
     return { labels, fineLabels };
-  }, [specs, fineTurns, view, size, level, geom, selected]);
+  }, [specs, fineTurns, view, size, level, geom, selected, chips]);
   const levelOf = useMemo(
     () => new Map((report?.issues ?? []).map((i) => [`a-${i.key}`, i])),
     [report],

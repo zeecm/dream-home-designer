@@ -305,8 +305,10 @@ export function ElectricalSummary({ level }: { level: Level }) {
           <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} />
           <span>Electrical</span>
         </label>
-        {n > 0 && <span className="muted num">{n === 1 ? '1 point' : `${n} points`}</span>}
       </div>
+      <p className="field-hint check-line" data-testid="electrical-line">
+        {n === 0 ? 'No points yet.' : n === 1 ? '1 point on the plan.' : `${n} points on the plan.`}
+      </p>
       <SuggestButton small />
       {on && warnings.size > 0 && (
         <p className="field-hint warning-text">

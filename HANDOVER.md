@@ -1431,7 +1431,7 @@ the version shown; issues and the walkway line list rooms worst first (a room be
 en-suite); bed sides name their room when there are several beds; door names and plan geometry
 are cached by walls/openings/rooms. Drag p95 on 21 pieces: 16.7 ms on, 16.8 off.
 
-**Ageing parents check, slice 1 (7 Nov, spec `docs/specs/ageing-parents.md`, "Slice 1 as
+**On hold (owner, 7 Nov): no more ageing work (slices 1b and 2) until the owner says.** **Ageing parents check, slice 1 (7 Nov, spec `docs/specs/ageing-parents.md`, "Slice 1 as
 built"):** no schema change. Core `ageing.ts`: `ageingFacts(level, profile)` (choice-free, cached
 per frozen level) and `ageingReport(level, choice)` → issues by group (in, around, bedroom,
 bathroom, points) with Needed/Recommended, `passed`, `notes`, `turns`, bedroom counts, the

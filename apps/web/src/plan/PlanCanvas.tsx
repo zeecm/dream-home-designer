@@ -23,6 +23,12 @@ import { type Tool, useEditor } from '../editor';
 import { ElectricalLayer } from '../electrical/electrical';
 import { SuggestLayer, ghostKeyOf, toggleGhost } from '../electrical/suggest';
 import { WallViewMarkers } from '../elevation/PlanMarkers';
+import {
+  StorageAddBar,
+  StorageAnnouncement,
+  StorageChips,
+  StorageHighlight,
+} from '../storage/storage';
 import { currentLevel, useLevel, useProject, useStore } from '../store';
 import { Compass, describeNorth } from '../ui/Compass';
 import { uploadPlanImage, usePlanImage, useUploadPicker } from '../ui/PlanImage';
@@ -932,6 +938,9 @@ export function PlanCanvas() {
               }
             />
             <RenovationMarks />
+            <StorageHighlight level={level} />
+            {/* Under the clearance and ageing marks: a safety label wins where both want a spot. */}
+            <StorageChips level={level} geom={geom} view={v} size={size} />
             <ClearanceLayer level={level} geom={geom} view={v} size={size} />
             <AgeingLayer level={level} geom={geom} view={v} size={size} />
             <DeliveryLayer level={level} zoom={v.zoom} />
@@ -994,9 +1003,11 @@ export function PlanCanvas() {
         {describe(level, selection)}
         <ClearanceAnnouncement level={level} selection={selection} />
         <AgeingAnnouncement level={level} selection={selection} />
+        <StorageAnnouncement selection={selection} />
       </p>
 
       {/* Out of the way as soon as a drawing tool is picked, so it never blocks a click. */}
+      <StorageAddBar />
       {empty && !underlay && (tool === 'select' || tool === 'measure') && (
         <div className="plan-empty">
           <p className="plan-empty-title">Start your plan</p>

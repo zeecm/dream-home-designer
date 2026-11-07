@@ -66,6 +66,16 @@ export const CATEGORIES: FurnitureCategory[] = [
   'Built-in',
 ];
 
+export type StorageClass =
+  | 'hanging'
+  | 'folded'
+  | 'shoes'
+  | 'base'
+  | 'base-run'
+  | 'sink'
+  | 'wall'
+  | 'volume';
+
 export interface FurnitureKind {
   id: string;
   name: string;
@@ -95,6 +105,12 @@ export interface FurnitureKind {
    * cabinet, a kitchen base run (with its countertop) or a wall cabinet run.
    */
   carpentry?: 'wardrobe' | 'tall' | 'low' | 'base' | 'wall';
+  /**
+   * What it stores, for the storage meter (`storageOf`): clothes on a rail (`hanging`) or
+   * folded in drawers, shoes, a kitchen cabinet (a base, the sink's, a whole base run, a wall
+   * cabinet), or its volume (shelves, a TV console). Absent: it holds nothing we count.
+   */
+  storage?: StorageClass;
   /** Where the model comes from (its licence page). */
   source?: string;
   /** A piece of the person's own added by its size: the shape it is (a bed, a sofa). */
@@ -218,6 +234,7 @@ const builtIns: FurnitureKind[] = [
       'white',
     ),
     carpentry: 'wardrobe',
+    storage: 'hanging',
   },
   {
     ...cabinet(
@@ -230,10 +247,13 @@ const builtIns: FurnitureKind[] = [
       'white',
     ),
     carpentry: 'tall',
+    // In a kitchen, a tall cabinet like this is a pantry (`storageOf`).
+    storage: 'shoes',
   },
   {
     ...cabinet('built-in-tv-console', 'Built-in TV console', 'Built-in', 2.4, 0.4, 0.45, 'wood'),
     carpentry: 'low',
+    storage: 'volume',
   },
   {
     ...cabinet(
@@ -247,12 +267,14 @@ const builtIns: FurnitureKind[] = [
       'charcoal',
     ),
     carpentry: 'base',
+    storage: 'base-run',
   },
   {
     ...cabinet('built-in-kitchen-wall', 'Kitchen wall run', 'Built-in', 2.4, 0.35, 0.7, 'white'),
     elevation: 1.5,
     walkThrough: true,
     carpentry: 'wall',
+    storage: 'wall',
     parts: [box(-1.2, 1.2, -0.175, 0.175, 0, 0.7, 'white')],
   },
 ];
@@ -263,7 +285,7 @@ export const FURNITURE: FurnitureKind[] = [
   bed('bed-super-single', 'Super single bed', 1.07),
   bed('bed-queen', 'Queen bed', 1.52),
   bed('bed-king', 'King bed', 1.83),
-  cabinet('wardrobe', 'Wardrobe', 'Bedroom', 1.2, 0.6, 2.1, 'white'),
+  { ...cabinet('wardrobe', 'Wardrobe', 'Bedroom', 1.2, 0.6, 2.1, 'white'), storage: 'hanging' },
   cabinet('bedside', 'Bedside table', 'Bedroom', 0.45, 0.4, 0.5, 'wood'),
   {
     id: 'desk',
@@ -311,7 +333,10 @@ export const FURNITURE: FurnitureKind[] = [
     ...table('coffee-table', 'Coffee table', 1.1, 0.6, 0.4),
     category: 'Living',
   },
-  cabinet('tv-console', 'TV console', 'Living', 1.8, 0.4, 0.5, 'wood-dark'),
+  {
+    ...cabinet('tv-console', 'TV console', 'Living', 1.8, 0.4, 0.5, 'wood-dark'),
+    storage: 'volume',
+  },
   {
     id: 'tv',
     name: 'TV, 55 inch',
@@ -351,10 +376,12 @@ export const FURNITURE: FurnitureKind[] = [
   {
     ...cabinet('kitchen-base', 'Base cabinet', 'Kitchen', 0.6, 0.6, 0.9, 'white', 'charcoal'),
     carpentry: 'base',
+    storage: 'base',
   },
   {
     ...cabinet('kitchen-sink', 'Sink cabinet', 'Kitchen', 0.8, 0.6, 0.9, 'white', 'charcoal'),
     carpentry: 'base',
+    storage: 'sink',
     parts: [
       ...cabinet('x', 'x', 'Kitchen', 0.8, 0.6, 0.9, 'white', 'charcoal').parts,
       box(-0.25, 0.25, -0.2, 0.2, 0.88, 0.905, 'metal'),
@@ -363,6 +390,7 @@ export const FURNITURE: FurnitureKind[] = [
   {
     ...cabinet('kitchen-hob', 'Hob cabinet', 'Kitchen', 0.8, 0.6, 0.9, 'white', 'charcoal'),
     carpentry: 'base',
+    storage: 'base',
     parts: [
       ...cabinet('x', 'x', 'Kitchen', 0.8, 0.6, 0.9, 'white', 'charcoal').parts,
       box(-0.3, 0.3, -0.22, 0.22, 0.9, 0.91, 'glass'),
@@ -373,6 +401,7 @@ export const FURNITURE: FurnitureKind[] = [
     elevation: 1.45,
     walkThrough: true,
     carpentry: 'wall',
+    storage: 'wall',
     parts: [box(-0.3, 0.3, -0.175, 0.175, 0, 0.7, 'white')],
   },
   cabinet('fridge', 'Fridge', 'Kitchen', 0.7, 0.7, 1.8, 'metal'),
@@ -407,13 +436,17 @@ export const FURNITURE: FurnitureKind[] = [
     ],
   },
   // Storage
-  cabinet('shoe-cabinet', 'Shoe cabinet', 'Storage', 0.8, 0.35, 1.0, 'wood'),
+  {
+    ...cabinet('shoe-cabinet', 'Shoe cabinet', 'Storage', 0.8, 0.35, 1.0, 'wood'),
+    storage: 'shoes',
+  },
   {
     id: 'bookshelf',
     name: 'Bookshelf',
     category: 'Storage',
     size: { w: 0.8, d: 0.3, h: 1.8 },
     againstWall: true,
+    storage: 'volume',
     parts: [
       box(-0.4, -0.38, -0.15, 0.15, 0, 1.8, 'wood'),
       box(0.38, 0.4, -0.15, 0.15, 0, 1.8, 'wood'),
