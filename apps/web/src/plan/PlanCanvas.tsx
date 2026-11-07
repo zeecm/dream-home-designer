@@ -10,7 +10,7 @@ import {
   underlayToWorld,
   wallStatuses,
 } from '@dhd/core';
-import type { Vec2 } from '@dhd/core';
+import type { Level, Vec2 } from '@dhd/core';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AgeingAnnouncement, AgeingLayer } from '../ageing/ageing';
 import { TraceDraftLayer } from '../ai/DraftLayer';
@@ -269,11 +269,21 @@ export function PlanCanvas() {
   const guarded = useMemo(() => {
     const out = new Set<string>();
     if (!level) return out;
+    // Each worked out once (and only if needed); kept while walls, corners and rooms stay
+    // put, so a drag of furniture doesn't redo them.
+    const once = (l: Level) => {
+      let m: ReturnType<typeof wallStatuses> | undefined;
+      return () => {
+        if (!m) m = wallStatuses(l);
+        return m;
+      };
+    };
+    const asIs = before ? once(before) : null;
+    const shown = once(level);
     for (const [id, w] of Object.entries(level.walls)) {
       // Glass, or cut down, it is no longer concrete to draw (in the renovation, say).
       if (isGlass(w) || isHalfWall(w, level.ceilingHeight)) continue;
-      // Kept while walls, corners and rooms stay put, so a drag of furniture doesn't redo it.
-      const s = (before?.walls[id] ? wallStatuses(before) : wallStatuses(level)).get(id);
+      const s = (asIs && before?.walls[id] ? asIs() : shown()).get(id);
       if (s === 'structural' || s === 'shelter') out.add(id);
     }
     return out;
