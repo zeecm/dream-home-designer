@@ -160,7 +160,7 @@ from the beds" until edited.
 0–6 each. Below them, "Also living here, without a bed drawn" (adults and children, 0–6), for
 someone on a sofa bed or a mattress in the study. [Reset to the beds] clears the edits.
 
-**How much we own:** a three-way segmented control, Few things · Typical · Lots, with one
+**How much you own:** a three-way segmented control, Few things · Typical · Lots, with one
 muted line under it: "Typical is what most Singapore families own. Choose Lots if your wardrobe
 is full today." Below it, where the plan has a shelter, "Use the shelter for storage" (on).
 
@@ -168,25 +168,32 @@ is full today." Below it, where the plan has a shelter, "Use the shelter for sto
 
 **Entry.**
 - Plan details: one **Checks** heading holds Clearance, Electrical, Storage and Older person,
-  one row each (a label, one line, one small button). Storage's line names what could use more,
-  e.g. "Clothes and kitchen could use more", or "Enough for 3 people"; then [See storage], which
+  one row each (a label, one line, one small button; the clearance row reads "Clearance", and
+  Electrical has a line, "No points yet." or "12 points on the plan."). Storage's line names
+  what is short or nearly, then what isn't drawn yet, e.g. "Clothes, kitchen and everything else
+  could use more. No shoe cabinet drawn yet.", or "Enough for 3 people."; then [See storage], which
   replaces the plan details as Suggested points does (× and Esc close it; focus moves to its
   heading and back to the button). On a view link the row and the panel work (the viewer's own
   household); the rest of the details stay disabled.
 - With no rooms: "Draw rooms first." With rooms but nobody: "You have 1.20 m of wardrobe.
-  Add who lives here to compare."
+  Add who lives here to compare." (said once; the meters keep their empty states).
 - Intro (first open, muted): "Do you have room for everything? We add up wardrobes, shoe
   cabinets, kitchen cabinets and cupboards, and compare them with what a household like yours
   usually needs. We guessed who lives here from the beds; change it below."
 
 **Panel** (desktop: in the right-hand panel's place; phone: the Suggested points half-height
-sheet with the plan refitted above it, its footer pinned: [Copy summary] [Close], 44 px). Order:
-the finding (the summary line), the intro (first open, desktop), who lives here, how much we own,
-the meters, the room cards, the notes, the disclaimer.
-1. **Who lives here**: one line, "3 people: 1 in Bedroom, 2 in Main bedroom [Change]"; unfolded
-   on the first visit on a desktop, or while nobody is counted. Unfolded, each room someone
-   sleeps in has stacked steppers, "Adults − 2 +" over "Children − 0 +" (32 px buttons, 44 px
-   on a touch screen, labelled "More children in Bedroom"), then **How much we own**.
+sheet with the plan refitted above it, its footer pinned: [Copy summary] [Close], 44 px; on a
+phone on its side [Copy] [Close]; the sheet's header gets a rule once its body scrolls). Order:
+the finding (the summary line), the intro (first open), who lives here, the meters, how much you
+own, the room cards, the notes, the disclaimer. Copy summary reads "Copied" for 2 s; a failure
+says "Couldn't copy here." in sight.
+1. **Who lives here**: one line, "3 people (guessed from the beds): 1 in Bedroom, 2 in Main
+   bedroom [Change]", folded everywhere (unfolded only while nobody is counted). Unfolded, each
+   room someone sleeps in (a bedroom, a room with a bed, or one whose people were edited, even to
+   none) has stacked steppers, "Adults − 2 +" over "Children − 0 +" (32 px buttons, 44 px on a
+   touch screen, labelled "More children in Bedroom"); one live line per change ("Bedroom: 1
+   adult and 1 child"). People edited in the renovation for a room matched to the flat as it is
+   are kept under that room's id; entries for rooms gone from the project are dropped.
 2. **Four meters** for the home: Clothes, Shoes, Kitchen, Everything else. Each: the label and
    status word; a 6 px bar filled in ink with a 1 px tick at the target (`role="meter"`, its
    `aria-valuetext` the same words); "1.20 of 3.00 m (4 of 10 ft)", "15 of 28 pairs", "4.8 of
@@ -204,7 +211,12 @@ the meters, the room cards, the notes, the disclaimer.
      bedroom, 2 adults: …". The price is core `carpentryPrice('wardrobe', shortfall, rates)`,
      pulled out of `carpentryCost`, at the viewer's estimate rates, `dhd-rates`; in ink. Under
      0.15 m, no price: a foot run's minimum would overstate it.)
-   - "No wardrobe; about 1.00 m is usual." Enough: "… Enough."
+   - "No wardrobe yet; about 1.00 m is usual: a 3 ft run, about $600–1,050 built in." Enough:
+     "… Enough." A room with clothes and nobody: "Nobody sleeps here; its 1.20 m of wardrobe
+     counts for the whole home." (Copy names the room.) Kitchen pieces: "1.2 m of shelves and
+     drawers". Targets drop a trailing ".0" ("12 m", "8 m³").
+   - Tapping a piece opens its details with "‹ Back to storage", which returns to the panel where
+     it was, focus on that card.
    - Short in the room but enough in the home: "Enough for the whole home: 1.20 m more stands
      in Living and dining."
    - A room with clothes but nobody: "Nobody sleeps here: 1.20 m, counted for the home."
@@ -227,8 +239,15 @@ by room id; a room new in After gets its people from the beds until edited.
 **Plan** (desktop and phone), only while the panel or sheet is open:
 - **Room chips** under the label of each room with people: "Wardrobe 1.20 of 2.00 m"; at the
   kitchen: "Shelves 4.8 of 12 m" (not "Cabinets": the fronts outnumber the run). A neutral pill,
-  amber (`--pill-warning-*`) when it needs more or has none; never the clearance red. On a narrow
-  plan, 11 px and short: "1.2 of 2.0 m".
+  amber (`--pill-warning-*`) only when something drawn needs more; with nothing drawn, a dashed
+  neutral pill, "No wardrobe · about 1.00 m usual" ("No kitchen cabinets"). Never the clearance
+  red. On a narrow plan, 11 px and short: "1.2 of 2.0 m", "No wardrobe". Chips are drawn under
+  the clearance and ageing marks, and their labels keep off the chips (as off room names).
+- **Add a shoe cabinet** (and the others, where nothing is drawn; not on a view link or over a
+  designer's preview) arms the piece, scrolls it into view in the catalogue, says "Shoe cabinet
+  chosen. Click the plan where it goes; Esc to cancel.", and puts a bar over the plan, "Click
+  (Tap) where the shoe cabinet goes · Cancel". The panel stays; once placed, it's back in Select
+  with the piece counted.
 - (The selected piece's contribution beside it on the plan: left out; its details say it.)
 - All `data-export="skip"`: not in the PNG, print, contractor sheet, 3D or walk.
 
