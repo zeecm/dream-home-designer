@@ -1,19 +1,29 @@
 import { describe, expect, it } from 'vitest';
+import { furnishedSample } from './fixtures/furnishedSample';
 import { hdb4RoomLevel, hdb4RoomProject } from './fixtures/hdb4room';
+import { tiledLevel } from './fixtures/tiled';
+import { itemSize } from './furniture';
 import {
+  type Circle,
   GLASS_FRAME,
+  circlesNear,
+  crossingsAt,
   glassPartition,
+  insideAt,
+  labelClearance,
   labelPoint,
   levelBounds,
   placeLabel,
   pointInPolygon,
+  polygonBounds,
   polygonCentroid,
   signedArea,
   wallLine,
   wallPieces,
 } from './geometry';
-import { roomArea } from './rooms';
-import type { Opening } from './schema';
+import { doorSwing, planGeometry, swingZone } from './plan';
+import { roomArea, roomShapes } from './rooms';
+import type { Opening, Vec2 } from './schema';
 import { Project } from './schema';
 
 const op = (o: Partial<Opening>): Opening => ({
@@ -201,6 +211,160 @@ describe('placeLabel', () => {
     const tiny = square.map((v) => ({ x: v.x / 4, y: v.y / 4 }));
     const p = placeLabel(tiny, half);
     expect(pointInPolygon(p, tiny)).toBe(true);
+  });
+});
+
+describe('circlesNear', () => {
+  // Door swings and furniture over a terrace of four furnished flats, plus circles scattered
+  // round each room (some just past its box, some across its walls), as the plan passes them.
+  const level = tiledLevel(furnishedSample(), 2, 2);
+  const plan: Circle[] = [
+    ...planGeometry(level)
+      .openings.filter((o) => o.kind === 'door')
+      .map((o) => swingZone(doorSwing(o.frame, o.opening))),
+    ...Object.values(level.items).map((it) => {
+      const { w, d } = itemSize(it);
+      return { c: { x: it.position.x, y: it.position.z }, r: Math.hypot(w, d) / 2 };
+    }),
+  ];
+  let seed = 7;
+  const rand = () => {
+    seed = (seed * 16807) % 2147483647;
+    return seed / 2147483647;
+  };
+  const shapes = [...roomShapes(level).values()];
+  const scattered = shapes.flatMap((s) => {
+    const { min, max } = polygonBounds(s.outer);
+    return Array.from({ length: 12 }, () => ({
+      c: {
+        x: min.x - 1.5 + rand() * (max.x - min.x + 3),
+        y: min.y - 1.5 + rand() * (max.y - min.y + 3),
+      },
+      r: 0.05 + rand() * 0.8,
+    }));
+  });
+  const all = [...plan, ...scattered];
+
+  it('crossingsAt and insideAt find the points pointInPolygon finds, a row at a time', () => {
+    for (const s of shapes) {
+      const { min, max } = polygonBounds(s.outer);
+      // A raster's rows, and rows through the corners (where an edge test can go either way).
+      const ys = [
+        ...Array.from({ length: 30 }, (_, j) => min.y - 0.1 + ((max.y - min.y + 0.2) * j) / 29),
+        ...s.outer.map((p) => p.y),
+      ];
+      const xsOf = [...s.outer.map((p) => p.x)];
+      for (const y of ys) {
+        const row = crossingsAt(s.outer, y);
+        const xs = [
+          ...Array.from({ length: 40 }, (_, i) => min.x - 0.1 + ((max.x - min.x + 0.2) * i) / 39),
+          ...xsOf,
+        ];
+        for (const x of xs) {
+          expect(insideAt(row, x)).toBe(pointInPolygon({ x, y }, s.outer));
+        }
+      }
+    }
+  });
+
+  it('keeps only the circles near the room', () => {
+    const s = shapes[0] as (typeof shapes)[number];
+    const near = circlesNear(s.outer, { x: 0.5, y: 0.3 }, all);
+    expect(near.length).toBeGreaterThan(0);
+    expect(near.length).toBeLessThan(all.length / 4);
+  });
+
+  it('leaves every clearance placeLabel samples the same, to the bit', () => {
+    for (const s of shapes) {
+      const { min, max } = polygonBounds(s.outer);
+      for (const half of [
+        { x: 0, y: 0 },
+        { x: 0.05, y: 0.05 },
+        { x: 0.6, y: 0.25 },
+        { x: 1.4, y: 0.6 },
+      ]) {
+        const near = circlesNear(s.outer, half, all);
+        const points = [labelPoint(s.outer)];
+        for (let i = 0; i <= 20; i++) {
+          for (let j = 0; j <= 20; j++) {
+            points.push({
+              x: min.x + ((max.x - min.x) * i) / 20,
+              y: min.y + ((max.y - min.y) * j) / 20,
+            });
+          }
+        }
+        for (const p of points) {
+          const a = labelClearance(p, half, s.outer, all, s.holes);
+          const b = labelClearance(p, half, s.outer, near, s.holes);
+          if (!Object.is(a, b)) expect({ p, half, b }).toEqual({ p, half, b: a });
+        }
+      }
+    }
+  });
+
+  /** placeLabel as it was: every grid spot measured in row order, against every circle. */
+  function placeLabelPlain(
+    poly: Vec2[],
+    half: Vec2,
+    avoid: readonly Circle[],
+    holes: Vec2[][],
+    steps = 20,
+  ): Vec2 {
+    const home = labelPoint(poly);
+    if (poly.length < 3 || labelClearance(home, half, poly, avoid, holes) >= 0) return home;
+    const xs = poly.map((p) => p.x);
+    const ys = poly.map((p) => p.y);
+    const x0 = Math.min(...xs);
+    const y0 = Math.min(...ys);
+    const w = Math.max(...xs) - x0;
+    const h = Math.max(...ys) - y0;
+    let best = home;
+    let bestScore = Number.NEGATIVE_INFINITY;
+    for (let i = 0; i <= steps; i++) {
+      for (let j = 0; j <= steps; j++) {
+        const p = { x: x0 + (w * i) / steps, y: y0 + (h * j) / steps };
+        if (!pointInPolygon(p, poly)) continue;
+        const clear = labelClearance(p, half, poly, avoid, holes);
+        const score = (clear >= 0 ? 1000 : clear) - 0.1 * Math.hypot(p.x - home.x, p.y - home.y);
+        if (score > bestScore) {
+          bestScore = score;
+          best = p;
+        }
+      }
+    }
+    return best;
+  }
+
+  it('leaves placeLabel where measuring every spot against every circle puts it', () => {
+    // Crowded too: more circles inside each room, so few spots fit or none do.
+    const crowded = [
+      ...all,
+      ...shapes.flatMap((s) => {
+        const { min, max } = polygonBounds(s.outer);
+        return Array.from({ length: 6 }, () => ({
+          c: { x: min.x + rand() * (max.x - min.x), y: min.y + rand() * (max.y - min.y) },
+          r: 0.2 + rand() * 0.6,
+        }));
+      }),
+    ];
+    let moved = 0;
+    for (const avoid of [[], all, crowded]) {
+      for (const s of shapes) {
+        for (const half of [
+          { x: 0.05, y: 0.05 },
+          { x: 0.6, y: 0.25 },
+          { x: 0.9, y: 0.6 },
+          { x: 2.5, y: 1.5 },
+        ]) {
+          const a = placeLabelPlain(s.outer, half, avoid, s.holes);
+          const b = placeLabel(s.outer, half, avoid, s.holes);
+          expect(Object.is(a.x, b.x) && Object.is(a.y, b.y)).toBe(true);
+          if (a.x !== labelPoint(s.outer).x || a.y !== labelPoint(s.outer).y) moved++;
+        }
+      }
+    }
+    // The grid search ran, not only the room's own label point.
+    expect(moved).toBeGreaterThan(20);
   });
 });
 
