@@ -379,7 +379,7 @@ function Event({ t }: { t: TurnOf<'event'> }) {
           <Mark kind={icon} />
         </span>
         <span className="talk-app-text">
-          {text}
+          <span>{text}</span>
           {st === 'undo' && (
             <button
               type="button"
