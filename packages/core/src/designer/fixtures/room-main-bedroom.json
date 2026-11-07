@@ -4,40 +4,40 @@
       "ref": "bed1",
       "assetId": "bed-queen",
       "keep": null,
-      "wall": "W5",
-      "along": 1.4,
+      "wall": "W1",
+      "along": 2.3,
       "at": null,
       "rotation": null,
       "width": null,
       "depth": null,
       "height": null,
-      "why": "The bed faces the window, headboard on the quiet inside wall."
+      "why": "The bed under the window, one side against the inside wall, so the long wall is free for a wardrobe."
     },
     {
       "ref": "side1",
       "assetId": "bedside",
       "keep": null,
-      "wall": "W5",
-      "along": 0.37,
+      "wall": "W1",
+      "along": 1.2,
       "at": null,
       "rotation": null,
       "width": null,
       "depth": null,
       "height": null,
-      "why": "Kevin's side."
+      "why": "On the side you get in from."
     },
     {
-      "ref": "side2",
-      "assetId": "bedside",
+      "ref": "ward1",
+      "assetId": "built-in-wardrobe",
       "keep": null,
-      "wall": "W5",
-      "along": 2.43,
+      "wall": "W7",
+      "along": 1.4,
       "at": null,
       "rotation": null,
-      "width": null,
+      "width": 1.8,
       "depth": null,
       "height": null,
-      "why": "Mei Ling's side."
+      "why": "A full-height sliding-door wardrobe along the side wall, stopping short of the window."
     },
     {
       "ref": "light1",
@@ -62,5 +62,5 @@
       "finish": "wallpaper-linen"
     }
   ],
-  "notes": ["A study corner would fit in the alcove by the bathroom if the wardrobe were slimmer."]
+  "notes": ["A queen bed with a way in on one side suits a room this size; a king would not fit."]
 }
