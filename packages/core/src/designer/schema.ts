@@ -84,6 +84,14 @@ export const DesignBrief = z.object({
       wish: z.string().max(200),
     }),
   ),
+  /**
+   * Who sleeps where: room id of the starting level to the people sleeping there (person
+   * keys, `peopleOf`). Empty: not said (the checks assume, and say so). Absent in briefs
+   * saved before.
+   */
+  sleeping: z.record(z.array(z.string().max(20)).max(12)).default({}),
+  /** What to call each person (by person key), for the checks' lines. */
+  names: z.record(z.string().max(40)).default({}),
   electrical: z.boolean(),
   start: z.enum(['after', 'before']),
   quality: z.enum(['thorough', 'quick']),
@@ -101,6 +109,8 @@ export const defaultBrief = (): DesignBrief => ({
   walls: 'allowed',
   keep: { items: {}, text: '' },
   rooms: {},
+  sleeping: {},
+  names: {},
   electrical: true,
   start: 'after',
   quality: 'thorough',
@@ -129,7 +139,7 @@ export const LIMITS = {
 } as const;
 
 /** Enum fields matched in any case (a model may answer "Remove_Wall" or "SWING"). */
-const ENUM_KEYS = new Set(['op', 'style', 'use']);
+const ENUM_KEYS = new Set(['op', 'style', 'use', 'against', 'zone']);
 
 /** Enum values lower-cased (and trimmed) wherever their key appears. */
 function lowerEnums(raw: unknown): unknown {
@@ -291,6 +301,17 @@ export type ConceptRoom = Concept['rooms'][number];
 
 // ------------------------------------------------------------------------------ a space
 
+/**
+ * Where a piece stands, by intent (answers of version 2): against a wall (any, the one with
+ * a window, or one without a door), or free-standing.
+ */
+export const AGAINST = ['wall', 'window-wall', 'not-door-wall', 'free'] as const;
+/** The part of a room a piece belongs to. */
+export const ZONES = ['sleep', 'lounge', 'dine', 'work', 'entry', 'cook', 'store'] as const;
+export type Zone = (typeof ZONES)[number];
+/** What a piece faces besides another piece of the answer (by its ref). */
+export const FACES = ['room', 'window', 'door'] as const;
+
 const spaceSchemas = (ctx: Ctx) => {
   const Item = z.object({
     ref: text(ctx, LIMITS.ref),
@@ -312,9 +333,21 @@ const spaceSchemas = (ctx: Ctx) => {
     depth: finite.positive().max(10).nullable(),
     height: finite.positive().max(4).nullable(),
     why: text(ctx, LIMITS.why),
+    // Version 2: intent. "wall", "along", "at" and "rotation" are then only preferences.
+    against: z.enum(AGAINST).nullable().optional(),
+    /** Another piece's ref, or 'room', 'window', 'door'. */
+    faces: text(ctx, LIMITS.ref).nullable().optional(),
+    /** Another piece's ref it goes beside (a bedside table by its bed, chairs at a table). */
+    near: text(ctx, LIMITS.ref).nullable().optional(),
+    zone: z.enum(ZONES).nullable().optional(),
   });
   const Face = z.object({ wall: alias(ctx), finish: text(ctx, LIMITS.id) });
   const SpaceDesign = z.object({
+    /** 2: pieces by intent, placed by the solver; absent: by position (the first answers). */
+    v: z
+      .unknown()
+      .transform((x) => (Number(x) === 2 ? (2 as const) : undefined))
+      .optional(),
     items: list(ctx, Item, LIMITS.items, 'pieces'),
     faces: list(ctx, Face, LIMITS.faces, 'wall finishes'),
     notes: list(ctx, text(ctx, LIMITS.note), LIMITS.roomNotes, 'notes'),
@@ -440,9 +473,17 @@ export const Design = z.object({
       status: SpaceStatus,
       design: SpaceDesign.optional(),
       error: z.string().optional(),
+      /** Fix rounds its answer took (sent back with the checks it failed), and what they fixed. */
+      fixes: z.number().int().min(0).optional(),
+      fixed: z.number().int().min(0).optional(),
     }),
   ),
   usage: z.array(Usage),
+  /**
+   * Checks the person chose to accept anyway (by check key), with the line they were shown.
+   * Never an HDB rule. Absent in versions kept before.
+   */
+  waivers: z.array(z.object({ key: z.string(), text: z.string(), at: z.string() })).default([]),
   /**
    * After as accepted (`level`), and as it was just before (`prior`: what the accept itself
    * changed is the difference; records from before it was kept have none).

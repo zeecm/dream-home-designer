@@ -10,6 +10,39 @@ export {
   resolveAlias,
 } from './aliases';
 export { categoriesFor, catalogueText, priorityOf, resolveAsset } from './catalogue';
+export {
+  type CheckOptions,
+  type DesignCheck,
+  type Principle,
+  designChecks,
+  roomNeeds,
+  usesOf,
+} from './checks';
+export {
+  CASE_MAX_BYTES,
+  CaseFile,
+  WRONG,
+  WRONG_TEXT,
+  type Wrong,
+  caseText,
+  checkCase,
+  designerCase,
+} from './cases';
+export {
+  CIRCULATION,
+  FIT,
+  PROGRAMMES,
+  RELATIONS,
+  type Person,
+  type Programme,
+  type Relation,
+  type Role,
+  type SleepingPlan,
+  peopleOf,
+  relationOf,
+  roleOf,
+  sleepingPlan,
+} from './principles';
 export { briefData, compass, designContext, planForDesign, type ContextInput } from './describe';
 export { type WallLock, designLocks, wallLocks } from './locks';
 export {
@@ -32,6 +65,8 @@ export {
 } from './place';
 export {
   CHARS_PER_TOKEN,
+  FIX_PER_RUN,
+  FIX_ROUNDS,
   OUTPUT,
   PRICES,
   PRICES_AS_OF,
@@ -39,13 +74,16 @@ export {
   type RunEstimate,
   type StepEstimate,
   estimateRun,
+  fixRoundsFor,
   priceOf,
   tokensOf,
   usdOf,
 } from './prices';
 export {
   CONCEPT_SCHEMA,
+  type FixRequest,
   SPACE_SCHEMA,
+  placedWords,
   SYSTEM_PROMPT,
   type StepOptions,
   type StepPrompt,
@@ -59,6 +97,7 @@ export {
   type DesignOptions,
   type DesignProblem,
   type DesignResult,
+  type ResultCheck,
   type ResultSpace,
   designResult,
   isFloorFinish,
@@ -85,6 +124,8 @@ export {
   SpaceDesign,
   type SpaceKey,
   SpaceStatus,
+  ZONES,
+  type Zone,
   STYLE_NAMES,
   StyleId,
   Usage,

@@ -16,6 +16,8 @@ import { icons } from '../../ui/icons';
 import { AiSettingsDialog } from '../AiSettingsDialog';
 import { useAi } from '../credentials';
 import { AcceptDialog } from './AcceptDialog';
+import { CaseDialog } from './CaseDialog';
+import { ChecksView, checksShort, failingChecks } from './Checks';
 import { CostCheck } from './CostCheck';
 import { showPoint, showRoom } from './focus';
 import {
@@ -54,7 +56,7 @@ import {
   useDesigner,
 } from './state';
 import { designerCannotUse } from './stream';
-import { byRoom, fixedNotes, humanize, problemRoom } from './words';
+import { byRoom, fixedNotes } from './words';
 
 /**
  * The Designer panel: the run as it goes (steps, the meter, Stop), then the versions (tabs
@@ -147,7 +149,7 @@ function RunView({ run, live }: { run: Running; live: boolean }) {
   const cutOff = cut.reduce((t, x) => t + (x.cutOffHigh ?? 0), 0);
   const phaseLine =
     live && running
-      ? `Step ${progressOf(s).step} of ${progressOf(s).of}: ${running.label}…`
+      ? `Step ${progressOf(s).step} of ${progressOf(s).of}: ${running.label}${running.fixing ? ', checking and fixing' : ''}…`
       : s.phase === 'paused'
         ? 'Paused at your limit for this tab.'
         : null;
@@ -169,6 +171,13 @@ function RunView({ run, live }: { run: Running; live: boolean }) {
                 s ({st.wait.attempt} of 2)
               </span>
             )}
+            {st.fixing && (
+              <span className="step-note">
+                {' '}
+                Checking… fixing {st.fixing.problems}{' '}
+                {st.fixing.problems === 1 ? 'problem' : 'problems'}
+              </span>
+            )}
           </span>
           <span className="step-tokens num">
             {st.tokens ? `${st.estimated ? '~' : ''}${tokens(st.tokens)}` : ''}
@@ -185,7 +194,9 @@ function RunView({ run, live }: { run: Running; live: boolean }) {
         <Glyph
           status={s.phase === 'done' ? 'local' : s.phase === 'running' ? 'waiting' : 'skipped'}
         />
-        <span className="step-label">Checking clearances, walkways, delivery and cost</span>
+        <span className="step-label">
+          Checking beds, seats, walkways, clearances, delivery and cost
+        </span>
       </li>
     </ol>
   );
@@ -610,6 +621,17 @@ function ChangeSomething({ d, next }: { d: Design; next: number }) {
           </ul>
         </section>
       )}
+      <p className="field-hint">
+        Who lives here or sleeps where changed?{' '}
+        <button
+          type="button"
+          className="link-btn"
+          onClick={() => useDesigner.setState({ briefOpen: true })}
+        >
+          Edit the brief
+        </button>{' '}
+        (it makes a new version; these stay).
+      </p>
       <label className="field">
         <span className="field-label">What would you like different?</span>
         <textarea
@@ -667,6 +689,16 @@ function ChangeSomething({ d, next }: { d: Design; next: number }) {
   );
 }
 
+/** Whether an accept took only some of a version's parts. */
+function partly(d: Design): boolean {
+  const parts = d.accepted?.parts ?? [];
+  const spaces = Object.entries(d.spaces)
+    .filter(([, s]) => s.design)
+    .map(([k]) => k);
+  const took = new Set(parts.flatMap((p) => ('space' in p ? [p.space] : [])));
+  return spaces.some((k) => !took.has(k)) || parts.length === 0;
+}
+
 /** The version's card: kept as it is while a run's steps tick (its props don't change). */
 const Card = memo(function Card({
   d,
@@ -683,6 +715,21 @@ const Card = memo(function Card({
   // A paid button waits while a run starts (a double click starts one run).
   const busy = useDesigner((st) => st.starting || !!st.run);
   const [finishing, setFinishing] = useState<{ est: RunEstimate; only?: string[] } | null>(null);
+  const [wrong, setWrong] = useState(false);
+  const failing = failingChecks(r, d).open.length;
+  const short = checksShort(r, d);
+  // While a run goes on, rooms not done yet (or being fixed) have no results to show.
+  const pending = useMemo(
+    () =>
+      new Set(
+        running
+          ? r.spaces
+              .filter((s) => !['done', 'copied', 'locked'].includes(s.status))
+              .flatMap((s) => s.rooms)
+          : [],
+      ),
+    [running, r],
+  );
   const base = baseOf(project, d.base.variant)?.base;
   const changes = useMemo(
     () =>
@@ -743,7 +790,7 @@ const Card = memo(function Card({
   const notes = useMemo(
     () => [
       {
-        title: 'Fixed for you',
+        title: 'Adjusted to fit',
         cls: 'designer-fixed',
         groups: byRoom(fixedNotes(r), r, d.aliases, d.baseLevel),
       },
@@ -802,8 +849,10 @@ const Card = memo(function Card({
           <dd className="num">{changes}</dd>
         </div>
         <div>
-          <dt>Problems</dt>
-          <dd className="num">{r.problems.length}</dd>
+          <dt>Checks</dt>
+          <dd className={failing ? 'num negative' : short === 'Pass' ? 'num' : 'num advise'}>
+            {short}
+          </dd>
         </div>
       </dl>
       {r.budget === 'over' && d.brief.budget && (
@@ -869,40 +918,7 @@ const Card = memo(function Card({
           Finish the design{finishEst.usd ? ` · about ${usd(finishEst.usd.typical)}` : ''}
         </button>
       )}
-      {r.problems.length > 0 && (
-        <section aria-labelledby={`p-${d.id}`}>
-          <h4 id={`p-${d.id}`} className="section-title">
-            Problems
-          </h4>
-          <ul className="designer-problems">
-            {r.problems.map((p, i) => {
-              const it = p.itemId ? r.level.items[p.itemId] : undefined;
-              return (
-                // biome-ignore lint/suspicious/noArrayIndexKey: problems have no ids
-                <li key={i}>
-                  <span>
-                    {problemRoom(p, r.level) ? <strong>{problemRoom(p, r.level)}: </strong> : null}
-                    {humanize(p.text, d.aliases, r.level, d.baseLevel)}
-                  </span>
-                  {(it || p.roomId) && (
-                    <button
-                      type="button"
-                      className="link-btn"
-                      onClick={() =>
-                        it
-                          ? showPoint({ x: it.position.x, y: it.position.z })
-                          : p.roomId && showRoom(r.level, [p.roomId])
-                      }
-                    >
-                      Show
-                    </button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      )}
+      <ChecksView d={d} r={r} pending={pending} />
       {notes.map(
         (g) =>
           g.groups.length > 0 && (
@@ -971,11 +987,28 @@ const Card = memo(function Card({
               Accept…
             </button>
           </div>
-          <button type="button" className="link-btn" onClick={() => void deleteDesign(d)}>
-            Delete version
-          </button>
-          {acceptedNow(d, after) && <p className="field-hint">In your renovation.</p>}
+          <div className="designer-links">
+            <button type="button" className="link-btn" onClick={() => setWrong(true)}>
+              This is wrong
+            </button>
+            <button type="button" className="link-btn" onClick={() => void deleteDesign(d)}>
+              Delete version
+            </button>
+          </div>
+          {acceptedNow(d, after) && (
+            <p className="field-hint">
+              {partly(d) ? 'Partly in your renovation.' : 'In your renovation.'}
+            </p>
+          )}
         </div>
+      )}
+      {wrong && (
+        <CaseDialog
+          d={d}
+          r={r}
+          model={d.usage.find((u) => u.step !== 'layout')?.model ?? d.usage[0]?.model ?? null}
+          onClose={() => setWrong(false)}
+        />
       )}
       {finishing && (
         <CostDialog

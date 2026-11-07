@@ -1,0 +1,58 @@
+{
+  "v": 2,
+  "items": [
+    {
+      "ref": "ward1",
+      "assetId": "built-in-wardrobe",
+      "keep": null,
+      "wall": "W5",
+      "along": null,
+      "at": null,
+      "rotation": null,
+      "width": 1.8,
+      "depth": null,
+      "height": null,
+      "why": "Full-height storage.",
+      "against": "wall",
+      "faces": null,
+      "near": null,
+      "zone": "store"
+    },
+    {
+      "ref": "bed1",
+      "assetId": "bed-super-single",
+      "keep": null,
+      "wall": "W5",
+      "along": 1.5,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "The bed on the inside wall.",
+      "against": "wall",
+      "faces": "room",
+      "near": null,
+      "zone": "sleep"
+    },
+    {
+      "ref": "side1",
+      "assetId": "bedside",
+      "keep": null,
+      "wall": null,
+      "along": null,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "",
+      "against": "wall",
+      "faces": null,
+      "near": "bed1",
+      "zone": "sleep"
+    }
+  ],
+  "faces": [],
+  "notes": []
+}

@@ -286,6 +286,7 @@ async function beginRun(b: Begin, started: () => void) {
     name: d.concept?.name ?? 'Design',
     parent: b.parent?.id ?? null,
     createdAt: new Date().toISOString(),
+    waivers: [],
     base: { variant: ctx.variant, fingerprint: levelFingerprint(startedOn) },
     baseLevel: startedOn,
     brief: b.brief,
@@ -528,6 +529,28 @@ export async function deleteDesign(d: Design) {
 }
 
 export { acceptedNow };
+
+/** Records that the person accepts these failing checks anyway (never an HDB rule). */
+export async function waiveChecks(
+  d: Design,
+  checks: { key: string; text: string; waivable: boolean }[],
+) {
+  const at = new Date().toISOString();
+  const had = d.waivers ?? [];
+  const known = new Set(had.map((w) => w.key));
+  const next: Design = {
+    ...d,
+    waivers: [
+      ...had,
+      ...checks
+        .filter((c) => c.waivable && !known.has(c.key))
+        .map((c) => ({ key: c.key, text: c.text, at })),
+    ],
+  };
+  upsert(next);
+  await (await store()).put(next);
+  return next;
+}
 
 /** Puts the ticked parts of `d` into the renovation: one undo step. */
 export async function acceptVersion(d: Design, parts: Part[], removeHandPlaced: boolean) {

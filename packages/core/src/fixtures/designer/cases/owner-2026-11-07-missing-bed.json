@@ -1,0 +1,1700 @@
+{
+ "kind": "dhd-designer-case",
+ "v": 1,
+ "title": "The design missed the beds",
+ "what": "missing",
+ "words": "There is no bed in the second bedroom.",
+ "pointer": {
+  "roomId": "rm_bedroom"
+ },
+ "brief": {
+  "household": {
+   "adults": 2,
+   "children": [
+    "primary"
+   ],
+   "elders": [],
+   "helper": false,
+   "pets": "",
+   "text": ""
+  },
+  "lifestyle": {
+   "wfh": 0,
+   "cooking": "daily",
+   "guests": false
+  },
+  "wishes": [],
+  "style": "designer",
+  "colours": "",
+  "ideas": "",
+  "budget": null,
+  "walls": "allowed",
+  "keep": {
+   "items": {},
+   "text": ""
+  },
+  "rooms": {},
+  "sleeping": {},
+  "names": {},
+  "electrical": true,
+  "start": "after",
+  "quality": "thorough"
+ },
+ "before": {
+  "id": "lvl_ground",
+  "name": "Ground",
+  "elevation": 0,
+  "ceilingHeight": 2.6,
+  "vertices": {
+   "v_0p15_0p075": {
+    "id": "v_0p15_0p075",
+    "x": 0.15,
+    "y": 0.075
+   },
+   "v_6p495_0p075": {
+    "id": "v_6p495_0p075",
+    "x": 6.495,
+    "y": 0.075
+   },
+   "v_6p495_2p156": {
+    "id": "v_6p495_2p156",
+    "x": 6.495,
+    "y": 2.156
+   },
+   "v_6p495_3p098": {
+    "id": "v_6p495_3p098",
+    "x": 6.495,
+    "y": 3.098
+   },
+   "v_6p495_1p574": {
+    "id": "v_6p495_1p574",
+    "x": 6.495,
+    "y": 1.574
+   },
+   "v_10p152_1p574": {
+    "id": "v_10p152_1p574",
+    "x": 10.152,
+    "y": 1.574
+   },
+   "v_10p152_6p044": {
+    "id": "v_10p152_6p044",
+    "x": 10.152,
+    "y": 6.044
+   },
+   "v_8p12_6p044": {
+    "id": "v_8p12_6p044",
+    "x": 8.12,
+    "y": 6.044
+   },
+   "v_6p291_6p044": {
+    "id": "v_6p291_6p044",
+    "x": 6.291,
+    "y": 6.044
+   },
+   "v_8p12_7p897": {
+    "id": "v_8p12_7p897",
+    "x": 8.12,
+    "y": 7.897
+   },
+   "v_6p291_7p897": {
+    "id": "v_6p291_7p897",
+    "x": 6.291,
+    "y": 7.897
+   },
+   "v_6p291_8p875": {
+    "id": "v_6p291_8p875",
+    "x": 6.291,
+    "y": 8.875
+   },
+   "v_3p266_8p875": {
+    "id": "v_3p266_8p875",
+    "x": 3.266,
+    "y": 8.875
+   },
+   "v_3p266_6p171": {
+    "id": "v_3p266_6p171",
+    "x": 3.266,
+    "y": 6.171
+   },
+   "v_0p15_7p17": {
+    "id": "v_0p15_7p17",
+    "x": 0.15,
+    "y": 7.17
+   },
+   "v_2p491_7p17": {
+    "id": "v_2p491_7p17",
+    "x": 2.491,
+    "y": 7.17
+   },
+   "v_2p491_6p171": {
+    "id": "v_2p491_6p171",
+    "x": 2.491,
+    "y": 6.171
+   },
+   "v_0p15_6p171": {
+    "id": "v_0p15_6p171",
+    "x": 0.15,
+    "y": 6.171
+   },
+   "v_6p291_6p171": {
+    "id": "v_6p291_6p171",
+    "x": 6.291,
+    "y": 6.171
+   },
+   "v_0p15_4p322": {
+    "id": "v_0p15_4p322",
+    "x": 0.15,
+    "y": 4.322
+   },
+   "v_4p532_4p322": {
+    "id": "v_4p532_4p322",
+    "x": 4.532,
+    "y": 4.322
+   },
+   "v_4p532_6p171": {
+    "id": "v_4p532_6p171",
+    "x": 4.532,
+    "y": 6.171
+   },
+   "v_2p396999999999999_4p322": {
+    "id": "v_2p396999999999999_4p322",
+    "x": 2.396999999999999,
+    "y": 4.322
+   },
+   "v_2p397_6p171": {
+    "id": "v_2p397_6p171",
+    "x": 2.397,
+    "y": 6.171
+   },
+   "v_3p266000000000001_0p075": {
+    "id": "v_3p266000000000001_0p075",
+    "x": 3.266000000000001,
+    "y": 0.075
+   },
+   "v_3p266_3p098": {
+    "id": "v_3p266_3p098",
+    "x": 3.266,
+    "y": 3.098
+   },
+   "v_2p95_4p322": {
+    "id": "v_2p95_4p322",
+    "x": 2.95,
+    "y": 4.322
+   },
+   "v_2p95_3p098": {
+    "id": "v_2p95_3p098",
+    "x": 2.95,
+    "y": 3.098
+   },
+   "v_6p291_4p322": {
+    "id": "v_6p291_4p322",
+    "x": 6.291,
+    "y": 4.322
+   }
+  },
+  "walls": {
+   "w_main-bedroom_outside": {
+    "id": "w_main-bedroom_outside",
+    "a": "v_0p15_0p075",
+    "b": "v_3p266000000000001_0p075",
+    "thickness": 0.15,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bedroom_outside": {
+    "id": "w_bedroom_outside",
+    "a": "v_6p495_0p075",
+    "b": "v_6p495_1p574",
+    "thickness": 0.3,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "side": "left",
+    "structural": true
+   },
+   "w_bedroom_living-and-dining": {
+    "id": "w_bedroom_living-and-dining",
+    "a": "v_6p495_2p156",
+    "b": "v_6p495_3p098",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "side": "left",
+    "structural": false
+   },
+   "w_bedroom_living-and-dining-2": {
+    "id": "w_bedroom_living-and-dining-2",
+    "a": "v_6p495_1p574",
+    "b": "v_6p495_2p156",
+    "thickness": 0.3,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "side": "left",
+    "structural": true
+   },
+   "w_living-and-dining_outside": {
+    "id": "w_living-and-dining_outside",
+    "a": "v_6p495_1p574",
+    "b": "v_10p152_1p574",
+    "thickness": 0.15,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_living-and-dining_outside-2": {
+    "id": "w_living-and-dining_outside-2",
+    "a": "v_10p152_1p574",
+    "b": "v_10p152_6p044",
+    "thickness": 0.254,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_living-and-dining_outside-3": {
+    "id": "w_living-and-dining_outside-3",
+    "a": "v_10p152_6p044",
+    "b": "v_8p12_6p044",
+    "thickness": 0.255,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_household-shelter_living-and-dining": {
+    "id": "w_household-shelter_living-and-dining",
+    "a": "v_8p12_6p044",
+    "b": "v_6p291_6p044",
+    "thickness": 0.255,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_household-shelter_outside": {
+    "id": "w_household-shelter_outside",
+    "a": "v_8p12_6p044",
+    "b": "v_8p12_7p897",
+    "thickness": 0.255,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_household-shelter_outside-2": {
+    "id": "w_household-shelter_outside-2",
+    "a": "v_8p12_7p897",
+    "b": "v_6p291_7p897",
+    "thickness": 0.255,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_dry-kitchen_household-shelter": {
+    "id": "w_dry-kitchen_household-shelter",
+    "a": "v_6p291_6p044",
+    "b": "v_6p291_6p171",
+    "thickness": 0.255,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "side": "right",
+    "structural": true
+   },
+   "w_kitchen_outside": {
+    "id": "w_kitchen_outside",
+    "a": "v_6p291_7p897",
+    "b": "v_6p291_8p875",
+    "thickness": 0.125,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "side": "right",
+    "structural": false
+   },
+   "w_kitchen_outside-2": {
+    "id": "w_kitchen_outside-2",
+    "a": "v_6p291_8p875",
+    "b": "v_3p266_8p875",
+    "thickness": 0.3,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_kitchen_outside-3": {
+    "id": "w_kitchen_outside-3",
+    "a": "v_3p266_8p875",
+    "b": "v_3p266_6p171",
+    "thickness": 0.15,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_main-bedroom_outside-2": {
+    "id": "w_main-bedroom_outside-2",
+    "a": "v_0p15_0p075",
+    "b": "v_0p15_4p322",
+    "thickness": 0.3,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_air-con-ledge_outside": {
+    "id": "w_air-con-ledge_outside",
+    "a": "v_0p15_7p17",
+    "b": "v_2p491_7p17",
+    "thickness": 0.105,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_air-con-ledge_outside-2": {
+    "id": "w_air-con-ledge_outside-2",
+    "a": "v_2p491_7p17",
+    "b": "v_2p491_6p171",
+    "thickness": 0.105,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_air-con-ledge_outside-3": {
+    "id": "w_air-con-ledge_outside-3",
+    "a": "v_0p15_6p171",
+    "b": "v_0p15_7p17",
+    "thickness": 0.3,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_household-shelter_kitchen": {
+    "id": "w_household-shelter_kitchen",
+    "a": "v_6p291_6p171",
+    "b": "v_6p291_7p897",
+    "thickness": 0.255,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "side": "right",
+    "structural": true
+   },
+   "w_air-con-ledge_bath-wc-1": {
+    "id": "w_air-con-ledge_bath-wc-1",
+    "a": "v_0p15_6p171",
+    "b": "v_2p397_6p171",
+    "thickness": 0.106,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bath-wc-2_outside": {
+    "id": "w_bath-wc-2_outside",
+    "a": "v_2p491_6p171",
+    "b": "v_3p266_6p171",
+    "thickness": 0.106,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bath-wc-2_kitchen": {
+    "id": "w_bath-wc-2_kitchen",
+    "a": "v_3p266_6p171",
+    "b": "v_4p532_6p171",
+    "thickness": 0.106,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bath-wc-1_outside": {
+    "id": "w_bath-wc-1_outside",
+    "a": "v_0p15_4p322",
+    "b": "v_0p15_6p171",
+    "thickness": 0.3,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_bath-wc-1_main-bedroom": {
+    "id": "w_bath-wc-1_main-bedroom",
+    "a": "v_0p15_4p322",
+    "b": "v_2p396999999999999_4p322",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_dry-kitchen_kitchen": {
+    "id": "w_dry-kitchen_kitchen",
+    "a": "v_4p532_6p171",
+    "b": "v_6p291_6p171",
+    "thickness": 0.106,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bath-wc-2_dry-kitchen": {
+    "id": "w_bath-wc-2_dry-kitchen",
+    "a": "v_4p532_4p322",
+    "b": "v_4p532_6p171",
+    "thickness": 0.3,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_bath-wc-2_main-bedroom": {
+    "id": "w_bath-wc-2_main-bedroom",
+    "a": "v_2p396999999999999_4p322",
+    "b": "v_2p95_4p322",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_air-con-ledge_bath-wc-2": {
+    "id": "w_air-con-ledge_bath-wc-2",
+    "a": "v_2p397_6p171",
+    "b": "v_2p491_6p171",
+    "thickness": 0.106,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bath-wc-1_bath-wc-2": {
+    "id": "w_bath-wc-1_bath-wc-2",
+    "a": "v_2p396999999999999_4p322",
+    "b": "v_2p397_6p171",
+    "thickness": 0.09,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bedroom_outside-2": {
+    "id": "w_bedroom_outside-2",
+    "a": "v_3p266000000000001_0p075",
+    "b": "v_6p495_0p075",
+    "thickness": 0.15,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bedroom_main-bedroom": {
+    "id": "w_bedroom_main-bedroom",
+    "a": "v_3p266000000000001_0p075",
+    "b": "v_3p266_3p098",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bath-wc-2_living-and-dining": {
+    "id": "w_bath-wc-2_living-and-dining",
+    "a": "v_2p95_4p322",
+    "b": "v_4p532_4p322",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_living-and-dining_main-bedroom": {
+    "id": "w_living-and-dining_main-bedroom",
+    "a": "v_2p95_4p322",
+    "b": "v_2p95_3p098",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_living-and-dining_main-bedroom-2": {
+    "id": "w_living-and-dining_main-bedroom-2",
+    "a": "v_2p95_3p098",
+    "b": "v_3p266_3p098",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bedroom_living-and-dining-3": {
+    "id": "w_bedroom_living-and-dining-3",
+    "a": "v_3p266_3p098",
+    "b": "v_6p495_3p098",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_dry-kitchen_living-and-dining": {
+    "id": "w_dry-kitchen_living-and-dining",
+    "a": "v_4p532_4p322",
+    "b": "v_6p291_4p322",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "kind": "boundary"
+   },
+   "w_dry-kitchen_living-and-dining-2": {
+    "id": "w_dry-kitchen_living-and-dining-2",
+    "a": "v_6p291_4p322",
+    "b": "v_6p291_6p044",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "kind": "boundary"
+   }
+  },
+  "openings": {
+   "op_door_living-and-dining_outside-3": {
+    "id": "op_door_living-and-dining_outside-3",
+    "wallId": "w_living-and-dining_outside-3",
+    "kind": "door",
+    "t": 0.5132874015748028,
+    "width": 1,
+    "height": 2.1,
+    "sill": 0,
+    "swing": "rightIn"
+   },
+   "op_door_living-and-dining_main-bedroom": {
+    "id": "op_door_living-and-dining_main-bedroom",
+    "wallId": "w_living-and-dining_main-bedroom",
+    "kind": "door",
+    "t": 0.5040849673202614,
+    "width": 0.9,
+    "height": 2.1,
+    "sill": 0,
+    "swing": "rightOut"
+   },
+   "op_door_bedroom_living-and-dining-3": {
+    "id": "op_door_bedroom_living-and-dining-3",
+    "wallId": "w_bedroom_living-and-dining-3",
+    "kind": "door",
+    "t": 0.2009910188912976,
+    "width": 0.9,
+    "height": 2.1,
+    "sill": 0,
+    "swing": "leftOut"
+   },
+   "op_door_bath-wc-1_main-bedroom": {
+    "id": "op_door_bath-wc-1_main-bedroom",
+    "wallId": "w_bath-wc-1_main-bedroom",
+    "kind": "door",
+    "t": 0.6123720516243885,
+    "width": 0.9,
+    "height": 2.1,
+    "sill": 0,
+    "swing": "rightIn"
+   },
+   "op_door_bath-wc-2_living-and-dining": {
+    "id": "op_door_bath-wc-2_living-and-dining",
+    "wallId": "w_bath-wc-2_living-and-dining",
+    "kind": "door",
+    "t": 0.49936788874841975,
+    "width": 0.9,
+    "height": 2.1,
+    "sill": 0,
+    "swing": "leftIn"
+   },
+   "op_door_household-shelter_kitchen": {
+    "id": "op_door_household-shelter_kitchen",
+    "wallId": "w_household-shelter_kitchen",
+    "kind": "door",
+    "t": 0.6071842410196987,
+    "width": 0.8,
+    "height": 2.1,
+    "sill": 0,
+    "swing": "rightIn"
+   },
+   "op_passage_dry-kitchen_kitchen": {
+    "id": "op_passage_dry-kitchen_kitchen",
+    "wallId": "w_dry-kitchen_kitchen",
+    "kind": "passage",
+    "t": 0.6850483229107446,
+    "width": 1.1,
+    "height": 2.1,
+    "sill": 0
+   },
+   "op_window_main-bedroom_outside": {
+    "id": "op_window_main-bedroom_outside",
+    "wallId": "w_main-bedroom_outside",
+    "kind": "window",
+    "t": 0.53594351732991,
+    "width": 1.8,
+    "height": 1.2,
+    "sill": 0.9
+   },
+   "op_window_main-bedroom_outside-2": {
+    "id": "op_window_main-bedroom_outside-2",
+    "wallId": "w_main-bedroom_outside-2",
+    "kind": "window",
+    "t": 0.780080056510478,
+    "width": 1.75,
+    "height": 1.2,
+    "sill": 0.9
+   },
+   "op_window_bedroom_outside-2": {
+    "id": "op_window_bedroom_outside-2",
+    "wallId": "w_bedroom_outside-2",
+    "kind": "window",
+    "t": 0.43542892536388944,
+    "width": 1.8,
+    "height": 1.2,
+    "sill": 0.9
+   },
+   "op_window_living-and-dining_outside": {
+    "id": "op_window_living-and-dining_outside",
+    "wallId": "w_living-and-dining_outside",
+    "kind": "window",
+    "t": 0.45529122231337177,
+    "width": 2.4,
+    "height": 1.2,
+    "sill": 0.9
+   },
+   "op_window_air-con-ledge_bath-wc-1": {
+    "id": "op_window_air-con-ledge_bath-wc-1",
+    "wallId": "w_air-con-ledge_bath-wc-1",
+    "kind": "window",
+    "t": 0.4005340453938585,
+    "width": 0.8,
+    "height": 1.2,
+    "sill": 0.9
+   },
+   "op_window_bath-wc-2_outside": {
+    "id": "op_window_bath-wc-2_outside",
+    "wallId": "w_bath-wc-2_outside",
+    "kind": "window",
+    "t": 0.39870967741935454,
+    "width": 0.5,
+    "height": 1.2,
+    "sill": 0.9
+   },
+   "op_window_kitchen_outside-3": {
+    "id": "op_window_kitchen_outside-3",
+    "wallId": "w_kitchen_outside-3",
+    "kind": "window",
+    "t": 0.5192307692307692,
+    "width": 1.8,
+    "height": 1.2,
+    "sill": 0.9
+   },
+   "op_window_kitchen_outside-2": {
+    "id": "op_window_kitchen_outside-2",
+    "wallId": "w_kitchen_outside-2",
+    "kind": "window",
+    "t": 0.23966942148760326,
+    "width": 1.45,
+    "height": 1.2,
+    "sill": 0.9
+   }
+  },
+  "rooms": {
+   "rm_household-shelter": {
+    "id": "rm_household-shelter",
+    "name": "Household shelter",
+    "loop": [
+     "v_8p12_6p044",
+     "v_8p12_7p897",
+     "v_6p291_7p897",
+     "v_6p291_6p171",
+     "v_6p291_6p044"
+    ],
+    "floorMaterial": "paint-white",
+    "ceilingMaterial": "paint-white"
+   },
+   "rm_bedroom": {
+    "id": "rm_bedroom",
+    "name": "Bedroom",
+    "loop": [
+     "v_3p266000000000001_0p075",
+     "v_6p495_0p075",
+     "v_6p495_1p574",
+     "v_6p495_2p156",
+     "v_6p495_3p098",
+     "v_3p266_3p098"
+    ],
+    "floorMaterial": "wood-oak",
+    "ceilingMaterial": "paint-white"
+   },
+   "rm_kitchen": {
+    "id": "rm_kitchen",
+    "name": "Kitchen",
+    "loop": [
+     "v_6p291_7p897",
+     "v_6p291_8p875",
+     "v_3p266_8p875",
+     "v_3p266_6p171",
+     "v_4p532_6p171",
+     "v_6p291_6p171"
+    ],
+    "floorMaterial": "tile-grey",
+    "ceilingMaterial": "paint-white"
+   },
+   "rm_air-con-ledge": {
+    "id": "rm_air-con-ledge",
+    "name": "Air-con ledge",
+    "loop": [
+     "v_0p15_6p171",
+     "v_2p397_6p171",
+     "v_2p491_6p171",
+     "v_2p491_7p17",
+     "v_0p15_7p17"
+    ],
+    "floorMaterial": "paint-white",
+    "ceilingMaterial": "paint-white"
+   },
+   "rm_bath-wc-1": {
+    "id": "rm_bath-wc-1",
+    "name": "Bath/WC 1",
+    "loop": [
+     "v_0p15_4p322",
+     "v_2p396999999999999_4p322",
+     "v_2p397_6p171",
+     "v_0p15_6p171"
+    ],
+    "floorMaterial": "tile-grey",
+    "ceilingMaterial": "paint-white"
+   },
+   "rm_bath-wc-2": {
+    "id": "rm_bath-wc-2",
+    "name": "Bath/WC 2",
+    "loop": [
+     "v_3p266_6p171",
+     "v_2p491_6p171",
+     "v_2p397_6p171",
+     "v_2p396999999999999_4p322",
+     "v_2p95_4p322",
+     "v_4p532_4p322",
+     "v_4p532_6p171"
+    ],
+    "floorMaterial": "tile-grey",
+    "ceilingMaterial": "paint-white"
+   },
+   "rm_main-bedroom": {
+    "id": "rm_main-bedroom",
+    "name": "Main bedroom",
+    "loop": [
+     "v_0p15_0p075",
+     "v_3p266000000000001_0p075",
+     "v_3p266_3p098",
+     "v_2p95_3p098",
+     "v_2p95_4p322",
+     "v_2p396999999999999_4p322",
+     "v_0p15_4p322"
+    ],
+    "floorMaterial": "wood-walnut",
+    "ceilingMaterial": "paint-white"
+   },
+   "rm_living-and-dining": {
+    "id": "rm_living-and-dining",
+    "name": "Living and dining",
+    "loop": [
+     "v_6p495_1p574",
+     "v_10p152_1p574",
+     "v_10p152_6p044",
+     "v_8p12_6p044",
+     "v_6p291_6p044",
+     "v_6p291_4p322",
+     "v_4p532_4p322",
+     "v_2p95_4p322",
+     "v_2p95_3p098",
+     "v_3p266_3p098",
+     "v_6p495_3p098",
+     "v_6p495_2p156"
+    ],
+    "floorMaterial": "wood-oak",
+    "ceilingMaterial": "paint-white"
+   },
+   "rm_dry-kitchen": {
+    "id": "rm_dry-kitchen",
+    "name": "Dry kitchen",
+    "loop": [
+     "v_6p291_6p044",
+     "v_6p291_6p171",
+     "v_4p532_6p171",
+     "v_4p532_4p322",
+     "v_6p291_4p322"
+    ],
+    "floorMaterial": "tile-grey",
+    "ceilingMaterial": "paint-white"
+   }
+  },
+  "items": {},
+  "lights": {},
+  "points": {}
+ },
+ "proposal": {
+  "id": "lvl_ground",
+  "name": "Ground",
+  "elevation": 0,
+  "ceilingHeight": 2.6,
+  "vertices": {
+   "v_0p15_0p075": {
+    "id": "v_0p15_0p075",
+    "x": 0.15,
+    "y": 0.075
+   },
+   "v_6p495_0p075": {
+    "id": "v_6p495_0p075",
+    "x": 6.495,
+    "y": 0.075
+   },
+   "v_6p495_2p156": {
+    "id": "v_6p495_2p156",
+    "x": 6.495,
+    "y": 2.156
+   },
+   "v_6p495_3p098": {
+    "id": "v_6p495_3p098",
+    "x": 6.495,
+    "y": 3.098
+   },
+   "v_6p495_1p574": {
+    "id": "v_6p495_1p574",
+    "x": 6.495,
+    "y": 1.574
+   },
+   "v_10p152_1p574": {
+    "id": "v_10p152_1p574",
+    "x": 10.152,
+    "y": 1.574
+   },
+   "v_10p152_6p044": {
+    "id": "v_10p152_6p044",
+    "x": 10.152,
+    "y": 6.044
+   },
+   "v_8p12_6p044": {
+    "id": "v_8p12_6p044",
+    "x": 8.12,
+    "y": 6.044
+   },
+   "v_6p291_6p044": {
+    "id": "v_6p291_6p044",
+    "x": 6.291,
+    "y": 6.044
+   },
+   "v_8p12_7p897": {
+    "id": "v_8p12_7p897",
+    "x": 8.12,
+    "y": 7.897
+   },
+   "v_6p291_7p897": {
+    "id": "v_6p291_7p897",
+    "x": 6.291,
+    "y": 7.897
+   },
+   "v_6p291_8p875": {
+    "id": "v_6p291_8p875",
+    "x": 6.291,
+    "y": 8.875
+   },
+   "v_3p266_8p875": {
+    "id": "v_3p266_8p875",
+    "x": 3.266,
+    "y": 8.875
+   },
+   "v_3p266_6p171": {
+    "id": "v_3p266_6p171",
+    "x": 3.266,
+    "y": 6.171
+   },
+   "v_0p15_7p17": {
+    "id": "v_0p15_7p17",
+    "x": 0.15,
+    "y": 7.17
+   },
+   "v_2p491_7p17": {
+    "id": "v_2p491_7p17",
+    "x": 2.491,
+    "y": 7.17
+   },
+   "v_2p491_6p171": {
+    "id": "v_2p491_6p171",
+    "x": 2.491,
+    "y": 6.171
+   },
+   "v_0p15_6p171": {
+    "id": "v_0p15_6p171",
+    "x": 0.15,
+    "y": 6.171
+   },
+   "v_6p291_6p171": {
+    "id": "v_6p291_6p171",
+    "x": 6.291,
+    "y": 6.171
+   },
+   "v_0p15_4p322": {
+    "id": "v_0p15_4p322",
+    "x": 0.15,
+    "y": 4.322
+   },
+   "v_4p532_4p322": {
+    "id": "v_4p532_4p322",
+    "x": 4.532,
+    "y": 4.322
+   },
+   "v_4p532_6p171": {
+    "id": "v_4p532_6p171",
+    "x": 4.532,
+    "y": 6.171
+   },
+   "v_2p396999999999999_4p322": {
+    "id": "v_2p396999999999999_4p322",
+    "x": 2.396999999999999,
+    "y": 4.322
+   },
+   "v_2p397_6p171": {
+    "id": "v_2p397_6p171",
+    "x": 2.397,
+    "y": 6.171
+   },
+   "v_3p266000000000001_0p075": {
+    "id": "v_3p266000000000001_0p075",
+    "x": 3.266000000000001,
+    "y": 0.075
+   },
+   "v_3p266_3p098": {
+    "id": "v_3p266_3p098",
+    "x": 3.266,
+    "y": 3.098
+   },
+   "v_2p95_4p322": {
+    "id": "v_2p95_4p322",
+    "x": 2.95,
+    "y": 4.322
+   },
+   "v_2p95_3p098": {
+    "id": "v_2p95_3p098",
+    "x": 2.95,
+    "y": 3.098
+   },
+   "v_6p291_4p322": {
+    "id": "v_6p291_4p322",
+    "x": 6.291,
+    "y": 4.322
+   }
+  },
+  "walls": {
+   "w_main-bedroom_outside": {
+    "id": "w_main-bedroom_outside",
+    "a": "v_0p15_0p075",
+    "b": "v_3p266000000000001_0p075",
+    "thickness": 0.15,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bedroom_outside": {
+    "id": "w_bedroom_outside",
+    "a": "v_6p495_0p075",
+    "b": "v_6p495_1p574",
+    "thickness": 0.3,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "side": "left",
+    "structural": true
+   },
+   "w_bedroom_living-and-dining": {
+    "id": "w_bedroom_living-and-dining",
+    "a": "v_6p495_2p156",
+    "b": "v_6p495_3p098",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "side": "left",
+    "structural": false
+   },
+   "w_bedroom_living-and-dining-2": {
+    "id": "w_bedroom_living-and-dining-2",
+    "a": "v_6p495_1p574",
+    "b": "v_6p495_2p156",
+    "thickness": 0.3,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "side": "left",
+    "structural": true
+   },
+   "w_living-and-dining_outside": {
+    "id": "w_living-and-dining_outside",
+    "a": "v_6p495_1p574",
+    "b": "v_10p152_1p574",
+    "thickness": 0.15,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_living-and-dining_outside-2": {
+    "id": "w_living-and-dining_outside-2",
+    "a": "v_10p152_1p574",
+    "b": "v_10p152_6p044",
+    "thickness": 0.254,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_living-and-dining_outside-3": {
+    "id": "w_living-and-dining_outside-3",
+    "a": "v_10p152_6p044",
+    "b": "v_8p12_6p044",
+    "thickness": 0.255,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_household-shelter_living-and-dining": {
+    "id": "w_household-shelter_living-and-dining",
+    "a": "v_8p12_6p044",
+    "b": "v_6p291_6p044",
+    "thickness": 0.255,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_household-shelter_outside": {
+    "id": "w_household-shelter_outside",
+    "a": "v_8p12_6p044",
+    "b": "v_8p12_7p897",
+    "thickness": 0.255,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_household-shelter_outside-2": {
+    "id": "w_household-shelter_outside-2",
+    "a": "v_8p12_7p897",
+    "b": "v_6p291_7p897",
+    "thickness": 0.255,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_dry-kitchen_household-shelter": {
+    "id": "w_dry-kitchen_household-shelter",
+    "a": "v_6p291_6p044",
+    "b": "v_6p291_6p171",
+    "thickness": 0.255,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "side": "right",
+    "structural": true
+   },
+   "w_kitchen_outside": {
+    "id": "w_kitchen_outside",
+    "a": "v_6p291_7p897",
+    "b": "v_6p291_8p875",
+    "thickness": 0.125,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "side": "right",
+    "structural": false
+   },
+   "w_kitchen_outside-2": {
+    "id": "w_kitchen_outside-2",
+    "a": "v_6p291_8p875",
+    "b": "v_3p266_8p875",
+    "thickness": 0.3,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_kitchen_outside-3": {
+    "id": "w_kitchen_outside-3",
+    "a": "v_3p266_8p875",
+    "b": "v_3p266_6p171",
+    "thickness": 0.15,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_main-bedroom_outside-2": {
+    "id": "w_main-bedroom_outside-2",
+    "a": "v_0p15_0p075",
+    "b": "v_0p15_4p322",
+    "thickness": 0.3,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_air-con-ledge_outside": {
+    "id": "w_air-con-ledge_outside",
+    "a": "v_0p15_7p17",
+    "b": "v_2p491_7p17",
+    "thickness": 0.105,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_air-con-ledge_outside-2": {
+    "id": "w_air-con-ledge_outside-2",
+    "a": "v_2p491_7p17",
+    "b": "v_2p491_6p171",
+    "thickness": 0.105,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_air-con-ledge_outside-3": {
+    "id": "w_air-con-ledge_outside-3",
+    "a": "v_0p15_6p171",
+    "b": "v_0p15_7p17",
+    "thickness": 0.3,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_household-shelter_kitchen": {
+    "id": "w_household-shelter_kitchen",
+    "a": "v_6p291_6p171",
+    "b": "v_6p291_7p897",
+    "thickness": 0.255,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "side": "right",
+    "structural": true
+   },
+   "w_air-con-ledge_bath-wc-1": {
+    "id": "w_air-con-ledge_bath-wc-1",
+    "a": "v_0p15_6p171",
+    "b": "v_2p397_6p171",
+    "thickness": 0.106,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bath-wc-2_outside": {
+    "id": "w_bath-wc-2_outside",
+    "a": "v_2p491_6p171",
+    "b": "v_3p266_6p171",
+    "thickness": 0.106,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bath-wc-2_kitchen": {
+    "id": "w_bath-wc-2_kitchen",
+    "a": "v_3p266_6p171",
+    "b": "v_4p532_6p171",
+    "thickness": 0.106,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bath-wc-1_outside": {
+    "id": "w_bath-wc-1_outside",
+    "a": "v_0p15_4p322",
+    "b": "v_0p15_6p171",
+    "thickness": 0.3,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_bath-wc-1_main-bedroom": {
+    "id": "w_bath-wc-1_main-bedroom",
+    "a": "v_0p15_4p322",
+    "b": "v_2p396999999999999_4p322",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_dry-kitchen_kitchen": {
+    "id": "w_dry-kitchen_kitchen",
+    "a": "v_4p532_6p171",
+    "b": "v_6p291_6p171",
+    "thickness": 0.106,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bath-wc-2_dry-kitchen": {
+    "id": "w_bath-wc-2_dry-kitchen",
+    "a": "v_4p532_4p322",
+    "b": "v_4p532_6p171",
+    "thickness": 0.3,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": true
+   },
+   "w_bath-wc-2_main-bedroom": {
+    "id": "w_bath-wc-2_main-bedroom",
+    "a": "v_2p396999999999999_4p322",
+    "b": "v_2p95_4p322",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_air-con-ledge_bath-wc-2": {
+    "id": "w_air-con-ledge_bath-wc-2",
+    "a": "v_2p397_6p171",
+    "b": "v_2p491_6p171",
+    "thickness": 0.106,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bath-wc-1_bath-wc-2": {
+    "id": "w_bath-wc-1_bath-wc-2",
+    "a": "v_2p396999999999999_4p322",
+    "b": "v_2p397_6p171",
+    "thickness": 0.09,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bedroom_outside-2": {
+    "id": "w_bedroom_outside-2",
+    "a": "v_3p266000000000001_0p075",
+    "b": "v_6p495_0p075",
+    "thickness": 0.15,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bedroom_main-bedroom": {
+    "id": "w_bedroom_main-bedroom",
+    "a": "v_3p266000000000001_0p075",
+    "b": "v_3p266_3p098",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bath-wc-2_living-and-dining": {
+    "id": "w_bath-wc-2_living-and-dining",
+    "a": "v_2p95_4p322",
+    "b": "v_4p532_4p322",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_living-and-dining_main-bedroom": {
+    "id": "w_living-and-dining_main-bedroom",
+    "a": "v_2p95_4p322",
+    "b": "v_2p95_3p098",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_living-and-dining_main-bedroom-2": {
+    "id": "w_living-and-dining_main-bedroom-2",
+    "a": "v_2p95_3p098",
+    "b": "v_3p266_3p098",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_bedroom_living-and-dining-3": {
+    "id": "w_bedroom_living-and-dining-3",
+    "a": "v_3p266_3p098",
+    "b": "v_6p495_3p098",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "structural": false
+   },
+   "w_dry-kitchen_living-and-dining": {
+    "id": "w_dry-kitchen_living-and-dining",
+    "a": "v_4p532_4p322",
+    "b": "v_6p291_4p322",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "kind": "boundary"
+   },
+   "w_dry-kitchen_living-and-dining-2": {
+    "id": "w_dry-kitchen_living-and-dining-2",
+    "a": "v_6p291_4p322",
+    "b": "v_6p291_6p044",
+    "thickness": 0.1,
+    "materialLeft": "paint-white",
+    "materialRight": "paint-white",
+    "kind": "boundary"
+   }
+  },
+  "openings": {
+   "op_door_living-and-dining_outside-3": {
+    "id": "op_door_living-and-dining_outside-3",
+    "wallId": "w_living-and-dining_outside-3",
+    "kind": "door",
+    "t": 0.5132874015748028,
+    "width": 1,
+    "height": 2.1,
+    "sill": 0,
+    "swing": "rightIn"
+   },
+   "op_door_living-and-dining_main-bedroom": {
+    "id": "op_door_living-and-dining_main-bedroom",
+    "wallId": "w_living-and-dining_main-bedroom",
+    "kind": "door",
+    "t": 0.5040849673202614,
+    "width": 0.9,
+    "height": 2.1,
+    "sill": 0,
+    "swing": "rightOut"
+   },
+   "op_door_bedroom_living-and-dining-3": {
+    "id": "op_door_bedroom_living-and-dining-3",
+    "wallId": "w_bedroom_living-and-dining-3",
+    "kind": "door",
+    "t": 0.2009910188912976,
+    "width": 0.9,
+    "height": 2.1,
+    "sill": 0,
+    "swing": "leftOut"
+   },
+   "op_door_bath-wc-1_main-bedroom": {
+    "id": "op_door_bath-wc-1_main-bedroom",
+    "wallId": "w_bath-wc-1_main-bedroom",
+    "kind": "door",
+    "t": 0.6123720516243885,
+    "width": 0.9,
+    "height": 2.1,
+    "sill": 0,
+    "swing": "rightIn"
+   },
+   "op_door_bath-wc-2_living-and-dining": {
+    "id": "op_door_bath-wc-2_living-and-dining",
+    "wallId": "w_bath-wc-2_living-and-dining",
+    "kind": "door",
+    "t": 0.49936788874841975,
+    "width": 0.9,
+    "height": 2.1,
+    "sill": 0,
+    "swing": "leftIn"
+   },
+   "op_door_household-shelter_kitchen": {
+    "id": "op_door_household-shelter_kitchen",
+    "wallId": "w_household-shelter_kitchen",
+    "kind": "door",
+    "t": 0.6071842410196987,
+    "width": 0.8,
+    "height": 2.1,
+    "sill": 0,
+    "swing": "rightIn"
+   },
+   "op_passage_dry-kitchen_kitchen": {
+    "id": "op_passage_dry-kitchen_kitchen",
+    "wallId": "w_dry-kitchen_kitchen",
+    "kind": "passage",
+    "t": 0.6850483229107446,
+    "width": 1.1,
+    "height": 2.1,
+    "sill": 0
+   },
+   "op_window_main-bedroom_outside": {
+    "id": "op_window_main-bedroom_outside",
+    "wallId": "w_main-bedroom_outside",
+    "kind": "window",
+    "t": 0.53594351732991,
+    "width": 1.8,
+    "height": 1.2,
+    "sill": 0.9
+   },
+   "op_window_main-bedroom_outside-2": {
+    "id": "op_window_main-bedroom_outside-2",
+    "wallId": "w_main-bedroom_outside-2",
+    "kind": "window",
+    "t": 0.780080056510478,
+    "width": 1.75,
+    "height": 1.2,
+    "sill": 0.9
+   },
+   "op_window_bedroom_outside-2": {
+    "id": "op_window_bedroom_outside-2",
+    "wallId": "w_bedroom_outside-2",
+    "kind": "window",
+    "t": 0.43542892536388944,
+    "width": 1.8,
+    "height": 1.2,
+    "sill": 0.9
+   },
+   "op_window_living-and-dining_outside": {
+    "id": "op_window_living-and-dining_outside",
+    "wallId": "w_living-and-dining_outside",
+    "kind": "window",
+    "t": 0.45529122231337177,
+    "width": 2.4,
+    "height": 1.2,
+    "sill": 0.9
+   },
+   "op_window_air-con-ledge_bath-wc-1": {
+    "id": "op_window_air-con-ledge_bath-wc-1",
+    "wallId": "w_air-con-ledge_bath-wc-1",
+    "kind": "window",
+    "t": 0.4005340453938585,
+    "width": 0.8,
+    "height": 1.2,
+    "sill": 0.9
+   },
+   "op_window_bath-wc-2_outside": {
+    "id": "op_window_bath-wc-2_outside",
+    "wallId": "w_bath-wc-2_outside",
+    "kind": "window",
+    "t": 0.39870967741935454,
+    "width": 0.5,
+    "height": 1.2,
+    "sill": 0.9
+   },
+   "op_window_kitchen_outside-3": {
+    "id": "op_window_kitchen_outside-3",
+    "wallId": "w_kitchen_outside-3",
+    "kind": "window",
+    "t": 0.5192307692307692,
+    "width": 1.8,
+    "height": 1.2,
+    "sill": 0.9
+   },
+   "op_window_kitchen_outside-2": {
+    "id": "op_window_kitchen_outside-2",
+    "wallId": "w_kitchen_outside-2",
+    "kind": "window",
+    "t": 0.23966942148760326,
+    "width": 1.45,
+    "height": 1.2,
+    "sill": 0.9
+   }
+  },
+  "rooms": {
+   "rm_household-shelter": {
+    "id": "rm_household-shelter",
+    "name": "Household shelter",
+    "loop": [
+     "v_8p12_6p044",
+     "v_8p12_7p897",
+     "v_6p291_7p897",
+     "v_6p291_6p171",
+     "v_6p291_6p044"
+    ],
+    "floorMaterial": "paint-white",
+    "ceilingMaterial": "paint-white"
+   },
+   "rm_bedroom": {
+    "id": "rm_bedroom",
+    "name": "Bedroom",
+    "loop": [
+     "v_3p266000000000001_0p075",
+     "v_6p495_0p075",
+     "v_6p495_1p574",
+     "v_6p495_2p156",
+     "v_6p495_3p098",
+     "v_3p266_3p098"
+    ],
+    "floorMaterial": "wood-oak",
+    "ceilingMaterial": "paint-white"
+   },
+   "rm_kitchen": {
+    "id": "rm_kitchen",
+    "name": "Kitchen",
+    "loop": [
+     "v_6p291_7p897",
+     "v_6p291_8p875",
+     "v_3p266_8p875",
+     "v_3p266_6p171",
+     "v_4p532_6p171",
+     "v_6p291_6p171"
+    ],
+    "floorMaterial": "tile-grey",
+    "ceilingMaterial": "paint-white"
+   },
+   "rm_air-con-ledge": {
+    "id": "rm_air-con-ledge",
+    "name": "Air-con ledge",
+    "loop": [
+     "v_0p15_6p171",
+     "v_2p397_6p171",
+     "v_2p491_6p171",
+     "v_2p491_7p17",
+     "v_0p15_7p17"
+    ],
+    "floorMaterial": "paint-white",
+    "ceilingMaterial": "paint-white"
+   },
+   "rm_bath-wc-1": {
+    "id": "rm_bath-wc-1",
+    "name": "Bath/WC 1",
+    "loop": [
+     "v_0p15_4p322",
+     "v_2p396999999999999_4p322",
+     "v_2p397_6p171",
+     "v_0p15_6p171"
+    ],
+    "floorMaterial": "tile-grey",
+    "ceilingMaterial": "paint-white"
+   },
+   "rm_bath-wc-2": {
+    "id": "rm_bath-wc-2",
+    "name": "Bath/WC 2",
+    "loop": [
+     "v_3p266_6p171",
+     "v_2p491_6p171",
+     "v_2p397_6p171",
+     "v_2p396999999999999_4p322",
+     "v_2p95_4p322",
+     "v_4p532_4p322",
+     "v_4p532_6p171"
+    ],
+    "floorMaterial": "tile-grey",
+    "ceilingMaterial": "paint-white"
+   },
+   "rm_main-bedroom": {
+    "id": "rm_main-bedroom",
+    "name": "Main bedroom",
+    "loop": [
+     "v_0p15_0p075",
+     "v_3p266000000000001_0p075",
+     "v_3p266_3p098",
+     "v_2p95_3p098",
+     "v_2p95_4p322",
+     "v_2p396999999999999_4p322",
+     "v_0p15_4p322"
+    ],
+    "floorMaterial": "wood-walnut",
+    "ceilingMaterial": "paint-white"
+   },
+   "rm_living-and-dining": {
+    "id": "rm_living-and-dining",
+    "name": "Living and dining",
+    "loop": [
+     "v_6p495_1p574",
+     "v_10p152_1p574",
+     "v_10p152_6p044",
+     "v_8p12_6p044",
+     "v_6p291_6p044",
+     "v_6p291_4p322",
+     "v_4p532_4p322",
+     "v_2p95_4p322",
+     "v_2p95_3p098",
+     "v_3p266_3p098",
+     "v_6p495_3p098",
+     "v_6p495_2p156"
+    ],
+    "floorMaterial": "wood-oak",
+    "ceilingMaterial": "paint-white"
+   },
+   "rm_dry-kitchen": {
+    "id": "rm_dry-kitchen",
+    "name": "Dry kitchen",
+    "loop": [
+     "v_6p291_6p044",
+     "v_6p291_6p171",
+     "v_4p532_6p171",
+     "v_4p532_4p322",
+     "v_6p291_4p322"
+    ],
+    "floorMaterial": "tile-grey",
+    "ceilingMaterial": "paint-white"
+   }
+  },
+  "items": {
+   "it_v1_000": {
+    "id": "it_v1_000",
+    "assetId": "bed-queen",
+    "position": {
+     "x": 2.216,
+     "y": 0,
+     "z": 1.2
+    },
+    "rotationY": 1.5707963267948966,
+    "scale": {
+     "x": 1,
+     "y": 1,
+     "z": 1
+    },
+    "flags": {
+     "snapWall": true,
+     "collidable": true
+    }
+   },
+   "it_v1_001": {
+    "id": "it_v1_001",
+    "assetId": "built-in-wardrobe",
+    "position": {
+     "x": 3.6159999999999997,
+     "y": 0,
+     "z": 1.05
+    },
+    "rotationY": -1.5707963267948966,
+    "scale": {
+     "x": 1,
+     "y": 1,
+     "z": 1
+    },
+    "flags": {
+     "snapWall": true,
+     "collidable": true
+    }
+   },
+   "it_v1_002": {
+    "id": "it_v1_002",
+    "assetId": "bedside",
+    "position": {
+     "x": 3.516,
+     "y": 0,
+     "z": 2.3
+    },
+    "rotationY": -1.5707963267948966,
+    "scale": {
+     "x": 1,
+     "y": 1,
+     "z": 1
+    },
+    "flags": {
+     "snapWall": true,
+     "collidable": true
+    }
+   }
+  },
+  "lights": {},
+  "points": {}
+ },
+ "checks": [
+  {
+   "key": "P4|zone|it_v1_000|left",
+   "text": "Getting into bed needs 0.60 m; there is 0.29 m.",
+   "hard": true
+  },
+  {
+   "key": "P3|door|it_v1_002|op_door_bedroom_living-and-dining-3",
+   "text": "The bedside table is in a door’s swing.",
+   "hard": true
+  },
+  {
+   "key": "P4|window|it_v1_001|op_window_bedroom_outside-2",
+   "text": "The built-in wardrobe stands in front of a window, higher than its sill.",
+   "hard": true
+  },
+  {
+   "key": "P2|near|it_v1_002",
+   "text": "The bedside table isn’t beside a bed’s head.",
+   "hard": true
+  },
+  {
+   "key": "P1|bed|rm_bedroom|child-1",
+   "text": "Child 1 has no bed in Bedroom.",
+   "hard": true
+  },
+  {
+   "key": "P1|seats|rm_living-and-dining",
+   "text": "Living and dining seats 0; the household needs at least 3 on a sofa or chairs.",
+   "hard": true
+  },
+  {
+   "key": "P1|focus|rm_living-and-dining",
+   "text": "Living and dining’s seats have no TV or feature to face.",
+   "hard": false
+  },
+  {
+   "key": "P1|dining|rm_living-and-dining",
+   "text": "Living and dining has no dining table for the household.",
+   "hard": true
+  },
+  {
+   "key": "P1|clothes|rm_main-bedroom",
+   "text": "Main bedroom has nowhere for clothes.",
+   "hard": false
+  },
+  {
+   "key": "P1|assumed",
+   "text": "Who sleeps where was assumed: say so in the brief to check beds for each person.",
+   "hard": false
+  }
+ ],
+ "rules": [],
+ "app": "designer-checks-1",
+ "schemaVersion": 10,
+ "model": null,
+ "expect": "P1|bed|rm_bedroom"
+}

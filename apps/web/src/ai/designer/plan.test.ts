@@ -47,6 +47,7 @@ function record(level: Level, id: string, n: number): Design {
     levelId: level.id,
     name: d.concept?.name ?? 'Design',
     parent: null,
+    waivers: [],
     createdAt: '2026-11-06T10:00:00.000Z',
     base: { variant: 'before', fingerprint: levelFingerprint(level) },
     baseLevel: level,

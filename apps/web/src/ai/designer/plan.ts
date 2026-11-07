@@ -151,7 +151,8 @@ export function needsCostCheck(
   if (spend.runs === 0) return true;
   if (!est.usd) return true;
   if (est.usd.high >= 0.5) return true;
-  return cap !== null && spend.usd + est.usd.high > cap;
+  // The limit against the most it may cost, fix rounds included.
+  return cap !== null && spend.usd + est.usd.high + (est.usd.fix ?? 0) > cap;
 }
 
 /** Over this many input tokens in one step, a run is refused. */

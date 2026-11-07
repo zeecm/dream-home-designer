@@ -82,8 +82,8 @@ describe('prompts (criterion 23)', () => {
     expect(new Set(rooms.map((p) => p.tail)).size).toBe(rooms.length);
     expect(layout.schema).toBe(CONCEPT_SCHEMA);
     expect(rooms[0]?.schema).toBe(SPACE_SCHEMA);
-    expect([layout.maxTokens, rooms[0]?.maxTokens]).toEqual([24_000, 12_000]);
-    expect([layout.effort, rooms[0]?.effort]).toEqual(['high', 'medium']);
+    expect([layout.maxTokens, rooms[0]?.maxTokens]).toEqual([24_000, 16_000]);
+    expect([layout.effort, rooms[0]?.effort]).toEqual(['high', 'high']);
   });
 
   it('a room-only iteration has that space’s faces, the feedback and its locks, and no other space’s faces', () => {
@@ -138,5 +138,48 @@ describe('the household’s own ideas', () => {
     // A brief saved before there were ideas still reads, with none.
     const { ideas: _, ...old } = defaultBrief();
     expect(DesignBrief.parse(old).ideas).toBe('');
+  });
+});
+
+describe('version 2: intent, needs and walkways in the room step (designer v2)', () => {
+  const brief = {
+    ...tanBrief(),
+    names: { 'adult-1': 'Kevin', 'adult-2': 'Mei', 'elder-1': 'Mdm Lim' },
+    sleeping: { 'rm_main-bedroom': ['adult-1', 'adult-2'], rm_bedroom: ['elder-1'] },
+  };
+  const c = { ...ctx, brief };
+  const spaces = spacesOf(level);
+
+  it('says what each room must have, for the people who sleep there, and where people walk', () => {
+    const main = spaces.find((s) => s.key === SAMPLE_KEYS.main)!;
+    const p = roomStep(c, main, level, aliases);
+    expect(p.tail).toContain(
+      'Kevin and Mei: one bed at least 1.52 m wide, or two singles; a window; somewhere for clothes',
+    );
+    expect(p.tail).toMatch(/Walkways \(the app keeps them clear, 0\.9 m\): to and from D\d+/);
+    expect(p.tail).toContain('"against"');
+    expect(p.tail).toMatch(/"looks":"[NESW]{1,2}"/);
+    const living = spaces.find((s) => s.key === SAMPLE_KEYS.living)!;
+    const l = roomStep(c, living, level, aliases);
+    expect(l.tail).toMatch(/in from the main door D\d+/);
+    expect(l.tail).toContain('seats for at least 3');
+    expect(l.tail).toContain('a dining table with a chair for each of the 5');
+  });
+
+  it('a fix round names each failure and the piece, after the stable prefix', () => {
+    const main = spaces.find((s) => s.key === SAMPLE_KEYS.main)!;
+    const p = roomStep(c, main, level, aliases, {
+      fix: { round: 1, failures: [{ ref: 'sofa1', text: 'The 3-seat sofa faces the wall.' }] },
+    });
+    expect(p.prefix).toBe(roomStep(c, main, level, aliases).prefix);
+    expect(p.tail).toContain('## Fix round 1');
+    expect(p.tail).toContain('- ["sofa1"] "The 3-seat sofa faces the wall."');
+  });
+
+  it('who sleeps where goes in the brief the model reads', async () => {
+    const { briefData } = await import('./describe');
+    const d = briefData(brief, aliases);
+    expect(d.people.map((x) => x.name)).toEqual(['Kevin', 'Mei', 'Child 1', 'Child 2', 'Mdm Lim']);
+    expect(d.whoSleepsWhere).toContainEqual({ room: expect.any(String), people: ['elder-1'] });
   });
 });

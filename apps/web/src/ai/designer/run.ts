@@ -4,6 +4,8 @@ import {
   type ContextInput,
   type DesignInput,
   type DesignOptions,
+  FIX_PER_RUN,
+  type FixRequest,
   type Lock,
   type ParseResult,
   type Price,
@@ -12,10 +14,12 @@ import {
   type Usage,
   aliasesFor,
   designResult,
+  fixRoundsFor,
   layoutStep,
   levelBounds,
   parseConcept,
   parseSpaceDesign,
+  placedWords,
   priceOf,
   resolveAsset,
   roomStep,
@@ -33,6 +37,9 @@ import { type Effort, HttpFail, type StepSink, newSink, streamStep } from './str
  * starts (so the others read the prompt cache it wrote), then two more at a time, one at a
  * time after a rate limit. Each step is kept as it finishes; Stop aborts every request in
  * flight and keeps what's done. Every request's tokens are metered, a cut-off one estimated.
+ * Each room's answer is placed and checked as it arrives: hard checks it fails go back to the
+ * designer (once a room on Quick, twice on Thorough, FIX_PER_RUN requests in a run at most,
+ * with the app's own lines) before the version is shown.
  */
 
 export type StepStatus = 'waiting' | 'running' | 'done' | 'failed' | 'cancelled' | 'skipped';
@@ -59,6 +66,8 @@ export interface StepState {
   retries: number;
   /** Cut off by Stop: the most it may still be billed (its prompt, and output to its limit). */
   cutOffHigh: number | null;
+  /** Sent back to be fixed: which round, and how many checks it failed. */
+  fixing: { round: number; problems: number } | null;
 }
 
 export interface Halt {
@@ -235,6 +244,7 @@ export function mergeAnswer(
   if (!previous || !keep.length) return next;
   const kept = (a: string) => keep.includes(aspectOfAnswer(a, o));
   return {
+    ...(next.v ? { v: next.v } : {}),
     items: [
       ...previous.items.filter((i) => kept(i.assetId)),
       ...next.items.filter((i) => !kept(i.assetId)),
@@ -265,9 +275,11 @@ export const blankStep = (key: string, label: string, kind: StepState['kind']): 
   wait: null,
   retries: 0,
   cutOffHigh: null,
+  fixing: null,
 });
 
 const usdText = (v: number) => (v < 10 ? `US$${v.toFixed(2)}` : `US$${Math.round(v)}`);
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
 export async function runDesign(o: RunOptions): Promise<{ state: RunState; design: DraftDesign }> {
   const { ai, ctx, plan } = o;
@@ -607,9 +619,37 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     update();
 
     const bounds = levelBounds(r.level);
+    /** The hard checks a space's answer fails (that the plan didn't already), in the app's words. */
+    /**
+     * The hard checks one space's answer fails (that the plan didn't already), in the app's
+     * words, and where it placed each piece: worked out on that space alone. Failures that
+     * furnishing can't fix (a missing window, more people than bedrooms) aren't sent back.
+     */
+    const failing = (s: (typeof spaces)[number], answer: SpaceDesign) => {
+      const trial: DraftDesign = {
+        ...design,
+        spaces: { [s.key]: { name: s.name, status: 'done', design: answer } },
+      };
+      const res = designResult(ctx.base, ctx.before, trial, o.result);
+      const mine = res.checks.filter(
+        (c) =>
+          c.hard &&
+          !c.already &&
+          ((c.part && 'space' in c.part && c.part.space === s.key) ||
+            (!!c.roomId && s.rooms.includes(c.roomId))),
+      );
+      return {
+        fixable: mine
+          .filter((c) => !c.unfixable)
+          .map((c) => ({ ref: (c.itemId && res.refs[c.itemId]) || null, text: c.text })),
+        placed: placedWords(res.level, s, res.refs, design.aliases, ctx.site?.north ?? 0),
+      };
+    };
     // A run-stopping error (a refused key, a quota): set before the first room's gate opens,
     // so no other room is sent after it.
     let runError: unknown = null;
+    /** Fix requests the run may still send (the estimate counts this many at most). */
+    let fixesLeft = FIX_PER_RUN;
     const room = async (s: (typeof spaces)[number], onStart?: () => void) => {
       const st = state.steps.find((x) => x.key === s.key) as StepState;
       if (!(await mayStart())) {
@@ -623,12 +663,60 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
         previous: plan.previous?.[s.key] ?? null,
       });
       try {
-        const answer = await step(prompt, st, (raw) => parseSpaceDesign(raw, bounds), onStart);
+        const parse = (raw: unknown) => parseSpaceDesign(raw, bounds);
+        const answer = await step(prompt, st, parse, onStart);
         if (answer) {
+          const merge = (a: SpaceDesign) =>
+            mergeAnswer(plan.previous?.[s.key], a, plan.keep?.[s.key] ?? [], o.result);
+          let current = merge(answer);
+          // Placed and checked: what fails goes back to the designer, at most twice.
+          const first = failing(s, current);
+          let fixes = 0;
+          let now = first;
+          const rounds = fixRoundsFor(ctx.brief.quality);
+          while (now.fixable.length && fixes < rounds && fixesLeft > 0 && (await mayStart())) {
+            // Taken from the run's few before the request goes (rooms run side by side).
+            fixesLeft--;
+            fixes++;
+            const left = now.fixable;
+            st.fixing = { round: fixes, problems: left.length };
+            st.status = 'running';
+            say(`${s.name}: checking… fixing ${plural(left.length, 'problem')}.`);
+            update();
+            const fix: FixRequest = { round: fixes, failures: left, placed: now.placed };
+            const again = await step(
+              roomStep(ctx, s, r.level, design.aliases, {
+                concept: design.concept,
+                ...(plan.feedback ? { feedback: plan.feedback } : {}),
+                locks: plan.locks ?? [],
+                previous: current,
+                fix,
+              }),
+              st,
+              parse,
+            );
+            st.fixing = null;
+            if (!again) {
+              // The fix didn't come: the answer before it stands, checked as it is.
+              st.status = 'done';
+              st.error = null;
+              break;
+            }
+            const next = failing(s, merge(again));
+            // Kept only if it fails less; no better twice running is a room that can't pass,
+            // and the second round isn't spent on it.
+            if (next.fixable.length < left.length) {
+              current = merge(again);
+              now = next;
+            } else break;
+          }
           design.spaces[s.key] = {
             name: s.name,
             status: 'done',
-            design: mergeAnswer(plan.previous?.[s.key], answer, plan.keep?.[s.key] ?? [], o.result),
+            design: current,
+            ...(fixes
+              ? { fixes, fixed: Math.max(0, first.fixable.length - now.fixable.length) }
+              : {}),
           };
           say(`${s.name} done. ${usdText(spentSoFar())} so far.`);
         } else {

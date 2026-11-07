@@ -285,6 +285,24 @@ export const FURNITURE: FurnitureKind[] = [
   bed('bed-super-single', 'Super single bed', 1.07),
   bed('bed-queen', 'Queen bed', 1.52),
   bed('bed-king', 'King bed', 1.83),
+  {
+    // Two children in a small room: two single places, one above the other.
+    id: 'bed-bunk',
+    name: 'Bunk bed, two singles',
+    category: 'Bedroom',
+    size: { w: 0.97, d: 2.0, h: 1.6 },
+    againstWall: true,
+    comesFlat: 'bed',
+    parts: [
+      ...legs(0.97, 2.0, 1.6, 0.05, 'wood'),
+      box(-0.485, 0.485, -1.0, 1.0, 0.25, 0.3, 'wood'),
+      box(-0.455, 0.455, -0.95, 0.97, 0.3, 0.45, 'fabric-light'),
+      box(-0.485, 0.485, -1.0, 1.0, 1.1, 1.15, 'wood'),
+      box(-0.455, 0.455, -0.95, 0.97, 1.15, 1.3, 'fabric-light'),
+      box(-0.485, 0.485, -1.0, -0.95, 1.3, 1.6, 'wood'),
+      box(0.3, 0.45, 0.95, 1.0, 0.3, 1.45, 'wood'),
+    ],
+  },
   { ...cabinet('wardrobe', 'Wardrobe', 'Bedroom', 1.2, 0.6, 2.1, 'white'), storage: 'hanging' },
   cabinet('bedside', 'Bedside table', 'Bedroom', 0.45, 0.4, 0.5, 'wood'),
   {
@@ -298,6 +316,18 @@ export const FURNITURE: FurnitureKind[] = [
       box(-0.6, -0.56, -0.3, 0.3, 0, 0.72, 'white'),
       box(0.56, 0.6, -0.3, 0.3, 0, 0.72, 'white'),
       box(0.1, 0.56, -0.28, 0.28, 0.55, 0.72, 'white'),
+    ],
+  },
+  {
+    id: 'desk-chair',
+    name: 'Desk chair',
+    category: 'Bedroom',
+    size: { w: 0.55, d: 0.55, h: 0.95 },
+    parts: [
+      box(-0.03, 0.03, -0.03, 0.03, 0.05, 0.42, 'charcoal'),
+      box(-0.27, 0.27, -0.27, 0.27, 0, 0.05, 'charcoal'),
+      box(-0.24, 0.24, -0.24, 0.22, 0.42, 0.5, 'fabric'),
+      box(-0.22, 0.22, -0.27, -0.21, 0.5, 0.95, 'fabric'),
     ],
   },
   // Living
@@ -314,6 +344,21 @@ export const FURNITURE: FurnitureKind[] = [
       box(0.9, 1.05, -0.25, 0.45, 0.42, 0.62, 'fabric'),
       box(-0.9, 0.9, -0.25, 0.43, 0.42, 0.5, 'fabric-light'),
       ...legs(2.1, 0.9, 0.08, 0.04, 'wood-dark'),
+    ],
+  },
+  {
+    id: 'sofa-2',
+    name: '2-seat sofa',
+    category: 'Living',
+    size: { w: 1.5, d: 0.85, h: 0.85 },
+    againstWall: true,
+    parts: [
+      box(-0.75, 0.75, -0.425, 0.425, 0.08, 0.42, 'fabric'),
+      box(-0.75, 0.75, -0.425, -0.25, 0.42, 0.85, 'fabric'),
+      box(-0.75, -0.6, -0.25, 0.425, 0.42, 0.62, 'fabric'),
+      box(0.6, 0.75, -0.25, 0.425, 0.42, 0.62, 'fabric'),
+      box(-0.6, 0.6, -0.25, 0.405, 0.42, 0.5, 'fabric-light'),
+      ...legs(1.5, 0.85, 0.08, 0.04, 'wood-dark'),
     ],
   },
   {
@@ -361,6 +406,25 @@ export const FURNITURE: FurnitureKind[] = [
   // Dining
   table('dining-4', 'Dining table, 4 seats', 1.4, 0.8, 0.75),
   table('dining-6', 'Dining table, 6 seats', 1.8, 0.9, 0.75),
+  // An extendable table: four at 1.4 m, six with its leaf pulled out.
+  table('dining-extendable', 'Extendable dining table, 4–6 seats', 1.4, 0.85, 0.75),
+  {
+    // A small table against a wall with a bench along its open side: two places.
+    id: 'dining-bench-2',
+    name: 'Wall-side table with bench, 2 seats',
+    category: 'Dining',
+    size: { w: 1.1, d: 0.95, h: 0.75 },
+    parts: [
+      box(-0.55, 0.55, -0.475, 0.125, 0.71, 0.75, 'wood'),
+      box(-0.55, -0.5, -0.475, -0.425, 0, 0.71, 'wood-dark'),
+      box(0.5, 0.55, -0.475, -0.425, 0, 0.71, 'wood-dark'),
+      box(-0.55, -0.5, 0.075, 0.125, 0, 0.71, 'wood-dark'),
+      box(0.5, 0.55, 0.075, 0.125, 0, 0.71, 'wood-dark'),
+      box(-0.5, 0.5, 0.125, 0.475, 0.42, 0.46, 'wood'),
+      box(-0.45, -0.4, 0.15, 0.45, 0, 0.42, 'wood-dark'),
+      box(0.4, 0.45, 0.15, 0.45, 0, 0.42, 'wood-dark'),
+    ],
+  },
   {
     id: 'dining-chair',
     name: 'Dining chair',

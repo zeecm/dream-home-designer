@@ -202,6 +202,15 @@ least 0.92 m (single), 1.07 m (super single) suggested; a child, a single or one
 baby, a cot or a note "baby in the parents' room". An elder: their own bed, getting-in side towards
 the door (the Older person check's bed rules where they use a stick, frame or wheelchair).
 
+Who sleeps where (decided 7 Nov 2026): the brief may say it, naming household members only (a
+stale entry naming nobody falls back to the default). Not said: the couple in the largest bedroom,
+then elders and children one per room, two children sharing where rooms run out. Anyone left
+without a room or bed is a hard P1 line on the person ("Sophie has no bed: …"), never "already in
+your plan", never waivable into a pass, shown first, and the card never says "Passes all checks"
+while it stands; it names the way out where there is one ("a bunk bed sleeps two children in the
+space of one"). A bunk bed counts as two single places. The household shelter takes only the
+helper.
+
 **P2. Relationships between pieces.** A small vocabulary the catalogue uses: `backs onto` (a wall,
 gap at most 50 mm), `faces` (another piece or the room; within an angle, a distance band, nothing
 taller than a set height between), `near` (within a distance), `clear of` (a zone kept free),
@@ -233,6 +242,32 @@ inside its room; v1's front zones (wardrobe 0.60, drawers 0.75, fridge and kitch
 0.80, bed sides 0.60); windows: nothing taller than the sill less 20 mm in front of one, built-ins
 never cover one; every room with a bed keeps a window. HDB rules (v1: shelter, outside, wet,
 windows, structural by the walls choice) stay as they are.
+
+Decided 7 Nov 2026 (tech-lead and UX review), as the hard line and the softer advice:
+
+| What | Hard (fails) | Soft (advice) |
+|---|---|---|
+| Bed in front of a window | measured at mattress height, 0.52 m | a headboard above the sill: "rises 0.10 m above the window sill" |
+| Wardrobe, shelf, fridge or other tall piece in front of a window | its full height against the sill less 20 mm | |
+| Getting into a single, super single or bunk bed | 0.50 m beside it | 0.60 m |
+| A double, queen or king bed | 0.50 m on one long side | the other side against a wall: a note, fine in a small room |
+| Sliding-door wardrobe (a built-in counts as sliding) | 0.50 m in front | 0.60 m |
+| Hinged wardrobe | 0.60 m in front | |
+| Way past a bed to its usable side (P3) | 0.50 m | 0.60 m |
+
+Dining zone and lounge zone (owner's decision, 7 Nov 2026), measured from the dining group (the
+table and its chairs) to the sofa, armchairs, coffee table and TV console: **0.60 m is hard**
+("Not enough room to walk between the dining table, 4 seats and the 3-seat sofa: 0.60 m needed,
+0.03 m left."), **0.90 m is advised**. The solver keeps 0.90 m wherever a clear pose off the ways
+through the flat does, else 0.60 m. Where even 0.60 m can't be kept, it right-sizes as a
+designer would, keeping the designer's intent, and says each swap in a line ("Swapped the 3-seat
+sofa for a 2-seat to keep 0.60 m to the dining table."): a round table for four (or a wall-side
+table with a bench, for a household of two); for a table for six, an extendable table ("it fits
+4, and 6 with the table pulled out"); a 2-seat sofa where armchairs still seat the household;
+then both. Only if nothing fits does the check fail, so it goes to a fix round or "can't be
+met"; never a silent 3 cm. A TV stands on its console; an
+armchair faces the TV or the sofa's front; chairs go evenly round a table; a desk gets a desk
+chair.
 
 ### 2. Hard and soft
 
@@ -316,6 +351,11 @@ feels empty or crowded, a focal point that's off, pieces out of proportion, dayl
   priced before it runs) designs each one and reports, per flat: hard failures shown to the person
   (must be 0), failures caught before showing, fix rounds used, second-look findings, cost. Good
   answers it records become fixtures.
+  *Built in slice 1:* the sample 3-room (full household, Sophie in the Bedroom) and the 4-room
+  fixture, plus the owner's 7 Nov cases, in `packages/core/src/designer/benchmark/`
+  (`pnpm --filter @dhd/core designer:bench` prints the report from recorded answers). The 5-room,
+  2-room flexi, executive and BTO flats have no traced plan in the repository yet; each joins the
+  set when one is added. The live run with a key is not built yet.
 
 ## Cost and streaming (BYO key)
 
@@ -449,7 +489,9 @@ designs").
 **Slice 1 (M–L): layouts that pass, before any chat UI.** Inside v1's flow:
 - Core: principles P1–P4 as checks driven by a programme table per room use and relationship rows
   per catalogue kind; hard/soft split; "already in your plan" vs caused; waivers.
-- The tech lead's intent-plus-solver placement; the automatic fix rounds (up to 2) before a
+- The tech lead's intent-plus-solver placement; the automatic fix rounds (a room goes back once on
+  Quick, twice on Thorough, and a run sends 3 fix requests at most; "at most" in the cost check
+  prices those 3 and says "up to 3 fix-ups included") before a
   version is shown; the version card's Checks line and "Doesn't pass" parts unticked in Accept,
   with Accept anyway.
 - The household's "who sleeps where" added to the brief (room rows get people chips).

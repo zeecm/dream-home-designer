@@ -11,14 +11,29 @@ import { ElecPoint } from '../schema';
 import type { Item, Level, Project, Site, Vec2 } from '../schema';
 import { SHELTER_ROOM } from '../structural';
 import { type Suggestion, roomKind, suggestPoints } from '../suggest';
-import { walkwayReport } from '../walkway';
+import { type WalkwayReport, walkwayReport } from '../walkway';
 import { aspectOf } from './accept';
 import { type AliasMap, resolveAlias } from './aliases';
 import { fixedSize, priorityOf, resolveAsset } from './catalogue';
+import { type DesignCheck, designChecks } from './checks';
+import { usesOf } from './checks';
+import { BED_ACCESS } from './checks';
 import { bathroomsHeld, heldAspects, wallsHeld } from './handEdits';
 import { WET } from './locks';
-import { type Want, addToIndex, nameOf, placePiece, spaceIndex } from './place';
+import {
+  type SpaceIndex,
+  type Want,
+  addToIndex,
+  keepOutOf,
+  nameOf,
+  placePiece,
+  spaceIndex,
+} from './place';
+import { ACCESS, peopleOf } from './principles';
+import { acceptResolve, piecesNoWorse } from './resolve';
 import type { Concept, DesignInput, DesignItem, RoomUse, SpaceDesign, SpaceStatus } from './schema';
+import type { Zone } from './schema';
+import { type Intent, type SolveOutcome, applySwap, solveSpace } from './solve';
 import {
   type Face,
   type Space,
@@ -50,6 +65,14 @@ export interface DesignProblem {
   openingId?: string;
 }
 
+/** A check on the version's level: caused by it, or already in the plan it was made on. */
+export interface ResultCheck extends DesignCheck {
+  /** In the plan before, and not touched by the version: never blocks it. */
+  already: boolean;
+  /** The part of the version it belongs to, for Accept (null: the whole plan's). */
+  part: { space: string; aspect: 'furniture' | 'built-ins' } | { aspect: 'walls' } | null;
+}
+
 export interface ResultSpace extends Space {
   /** How its step went; 'missing' when the version has no answer for it. */
   status: SpaceStatus | 'missing';
@@ -78,6 +101,19 @@ export interface DesignResult {
   /** Structural walls the version changes (the brief allowed it). */
   structural: string[];
   problems: DesignProblem[];
+  /** The design checks (P1–P4 and HDB rules), each caused by the version or already there. */
+  checks: ResultCheck[];
+  /** No hard check the version caused fails (waivers aside). */
+  passes: boolean;
+  /** The answer's ref of each piece placed (by item id), to name it to the designer. */
+  refs: Record<string, string>;
+  /**
+   * Walkway re-solves tried: the space, its hard checks before and after, and whether it was
+   * taken (only ever when strictly better).
+   */
+  resolves: { space: string; before: number; after: number; taken: boolean }[];
+  /** Smaller pieces tried in a space (right-sizing): how many swaps, and whether one was taken. */
+  swaps: { space: string; tried: number; taken: boolean }[];
   cost: CostEstimate;
   points: Suggestion[];
   budget: 'within' | 'over' | 'unknown';
@@ -88,6 +124,8 @@ export interface DesignOptions {
   site?: Site;
   /** The project's own furniture models. */
   models?: Project['models'];
+  /** false: pieces are left where first placed, not moved off the walkways (for tests). */
+  walkways?: boolean;
 }
 
 const BEDROOM_USES = new Set<RoomUse>(['master', 'bedroom', 'kids', 'parents', 'guest']);
@@ -304,6 +342,13 @@ function work(
   const inKitchen = (p: Vec2) => kitchens.some((k) => pointInPolygon(p, k));
 
   const resultSpaces: ResultSpace[] = [];
+  const refs: Record<string, string> = {};
+  const swaps: DesignResult['swaps'] = [];
+  /** Each furnished space's index and pieces, to move a piece off a walkway after. */
+  const runs: Run[] = [];
+  let geomKey: string | null = null;
+  /** The ways through the bare plan (for the solver to keep free). */
+  let bareWays: ReturnType<typeof keepOutOf> | null = null;
   const placedNew = new Set<string>();
   const usedIds = new Set<string>();
   const placedBrought = new Set<string>();
@@ -331,8 +376,9 @@ function work(
     const faces = facesOf(named, s.rooms, geom);
     const longest = (f: Face) => Math.max(0, ...clearStretches(f, 0, 1).map(([a, b]) => b - a));
     const byLength = [...faces].sort((p, q) => longest(q) - longest(p));
+    const v2 = answer.v === 2;
     const wants = answer.items
-      .map((a) => resolveWant(a, { s, key, faces, byLength }))
+      .map((a) => resolveWant(a, { s, key, faces, byLength, v2 }))
       .filter((w): w is Want & { priority: number } => !!w)
       // What is held stays as the plan has it: the answer's pieces of that part aren't placed.
       .filter((w) => !keepAs.includes(w.kind.carpentry ? 'built-ins' : 'furniture'))
@@ -359,23 +405,172 @@ function work(
     }
 
     const placedKinds = new Set<string>();
-    for (const want of wants) {
-      const out = placePiece(ix, want);
-      repaired.push(...out.repaired.map((n) => ({ ...n, space: s.key })));
-      dropped.push(...out.dropped.map((n) => ({ ...n, space: s.key })));
-      const item = out.item;
-      if (!item) continue;
-      // Wherever repair moved it, a sink or a hob stands wholly in the kitchen's wet area.
+    /** Takes a placed piece into the level (a sink or a hob only in the kitchen's wet area). */
+    const take = (want: Want, item: Item) => {
       if (WET_PIECES.has(want.kind.id) && !inset(itemFootprint(item, want.kind)).every(inKitchen)) {
         ix.placed = ix.placed.filter((p) => p.id !== item.id);
         dropped.push({ text: wetText(want.kind.id), ref: want.ref, space: s.key });
-        continue;
+        return;
       }
       lvl.items[item.id] = item;
       rs.items.push(item.id);
+      refs[item.id] = want.ref;
       placedKinds.add(want.kind.id);
       if (want.brought) placedBrought.add(item.id);
       else placedNew.add(item.id);
+    };
+    if (v2) {
+      // By intent: the solver places the space's pieces together.
+      const byRef = new Map(answer.items.map((a) => [a.ref, a]));
+      const intents: Intent[] = wants.map((w) => {
+        const a = byRef.get(w.ref);
+        const wall = !!w.kind.againstWall || !!w.kind.carpentry;
+        return {
+          want: w,
+          against: a?.against ?? (wall ? 'wall' : 'free'),
+          faces: a?.faces ?? null,
+          near: a?.near ?? null,
+          zone: a?.zone ?? null,
+        };
+      });
+      const zoneArea = zoneAreaOf(named, s.rooms, uses, brief);
+      // Solved spaces are kept by what they depend on: the version, the answer, the plan's
+      // walls, the pieces that stay in the space, and what is being kept clear.
+      geomKey ??= hash(
+        stableJson([named.vertices, named.walls, named.openings, named.rooms, named.ceilingHeight]),
+      );
+      // The ways through the bare plan, worked out once for the same walls and doors.
+      bareWays ??=
+        waysMemo.get(geomKey) ??
+        remember(
+          waysMemo,
+          geomKey,
+          walkwayReport({ ...named, items: {} })
+            .routes.filter((r) => r.route === 'circulation')
+            .flatMap((r) => keepOutOf(r.path, null, r.need)),
+        );
+      const ways = bareWays;
+      const base = ix.placed.length;
+      const wantOf = new Map(wants.map((w) => [w.id, w]));
+      let firstKey = '';
+      /** What the first solve swapped in (smaller pieces), kept by re-solves. */
+      let firstSwap: SolveOutcome['swap'];
+      const fixedKey = ix.placed.map(
+        (p) => `${p.id}:${p.fp.map((q) => q.x.toFixed(3) + q.y.toFixed(3)).join()}`,
+      );
+      const solveWith = (keepOut: SpaceIndex['keepOut'], keepOutFor?: Set<string>) => {
+        ix.placed.length = base;
+        const memoKey = hash(
+          stableJson([
+            design.id,
+            s.key,
+            answer,
+            geomKey,
+            fixedKey,
+            s.rooms.map((id) => uses[id] ?? null),
+            brief.rooms,
+            keepOut.map((k) => k.poly),
+            [...(keepOutFor ?? [])].sort(),
+            opts.walkways !== false,
+          ]),
+        );
+        // A space moved off a walkway before is placed as it ended up.
+        const hit =
+          (keepOut.length ? undefined : settledMemo.get(memoKey)) ?? solveMemo.get(memoKey);
+        if (!keepOut.length) firstKey = memoKey;
+        if (hit && !keepOut.length) {
+          firstSwap = hit.swap;
+          if (hit.swapsTried)
+            swaps.push({ space: s.key, tried: hit.swapsTried, taken: !!hit.swap });
+        }
+        if (hit) {
+          for (const item of hit.items) {
+            const w = wantOf.get(item.id);
+            // A piece swapped for a smaller one is indexed as the kind it became.
+            if (w) addToIndex(ix, item, furnitureKind(item.assetId) ?? w.kind);
+          }
+          return hit;
+        }
+        ix.keepOut = keepOut;
+        const solved = solveSpace({
+          ix,
+          faces,
+          // A re-solve keeps what the first solve swapped in.
+          intents: (keepOut.length && firstSwap?.intents) || intents,
+          zoneArea,
+          ways,
+          household: peopleOf(brief).filter((p) => p.kind !== 'helper').length,
+          // A walkway re-solve looks less far, and keeps the pieces the first solve chose.
+          ...(keepOut.length ? { budget: RESOLVE_BUDGET, swaps: false } : {}),
+          ...(keepOutFor ? { keepOutFor } : {}),
+        });
+        ix.keepOut = [];
+        const out = keepOut.length && firstSwap ? applySwap(solved, firstSwap) : solved;
+        if (!keepOut.length) {
+          firstSwap = out.swap;
+          if (out.swapsTried)
+            swaps.push({ space: s.key, tried: out.swapsTried, taken: !!out.swap });
+        }
+        solveMemo.set(memoKey, out);
+        if (solveMemo.size > 48) solveMemo.delete(solveMemo.keys().next().value as string);
+        return out;
+      };
+      const out = solveWith([]);
+      const taken: string[] = [];
+      const apply = (o: SolveOutcome) => {
+        for (const item of o.items) {
+          const want = wantOf.get(item.id);
+          if (!want) continue;
+          take(want, item);
+          if (lvl.items[item.id] === item) taken.push(item.id);
+        }
+      };
+      const unapply = () => {
+        for (const id of taken.splice(0)) {
+          delete lvl.items[id];
+          delete refs[id];
+          placedNew.delete(id);
+          placedBrought.delete(id);
+          rs.items = rs.items.filter((x) => x !== id);
+        }
+      };
+      apply(out);
+      const free = new Set(
+        intents.filter((t) => t.against === 'free' && !t.want.kind.carpentry).map((t) => t.want.id),
+      );
+      runs.push({
+        ix,
+        wants,
+        key: s.key,
+        solveWith,
+        free,
+        outcome: out,
+        apply,
+        unapply,
+        settle: (o) => {
+          settledMemo.set(firstKey, o);
+          if (settledMemo.size > 48) settledMemo.delete(settledMemo.keys().next().value as string);
+        },
+        // The hard checks with only this space furnished (the rest of the plan as it is).
+        spaceHard: (l: Level) => {
+          const items = Object.fromEntries(
+            Object.entries(l.items).filter(([, it]) => inRooms(s.rooms, centreOf(it))),
+          );
+          return new Set(
+            designChecks({ ...l, items }, { brief, uses })
+              .filter((c) => c.hard)
+              .map((c) => c.key),
+          );
+        },
+      });
+    } else {
+      runs.push({ ix, wants, key: s.key });
+      for (const want of wants) {
+        const out = placePiece(ix, want);
+        repaired.push(...out.repaired.map((n) => ({ ...n, space: s.key })));
+        dropped.push(...out.dropped.map((n) => ({ ...n, space: s.key })));
+        if (out.item) take(want, out.item);
+      }
     }
     for (const it of takenOut) {
       if (placedKinds.has(it.assetId)) continue;
@@ -409,7 +604,7 @@ function work(
   /** One answer's piece, resolved to a kind, a size and a place; null (and a note) if it can't be. */
   function resolveWant(
     a: DesignItem,
-    ctx: { s: Space; key: string; faces: Face[]; byLength: Face[] },
+    ctx: { s: Space; key: string; faces: Face[]; byLength: Face[]; v2: boolean },
   ): (Want & { priority: number }) | null {
     const leftOut = (text: string) => {
       dropped.push({ text, ref: a.ref, space: ctx.s.key });
@@ -454,7 +649,7 @@ function work(
     }
     const wallId = resolveAlias(aliases, a.wall);
     let face = wallId ? (ctx.faces.find((f) => f.wallId === wallId) ?? null) : null;
-    if (a.wall && !face) {
+    if (a.wall && !face && !ctx.v2) {
       if (!k.againstWall && !k.carpentry && a.at === null) {
         return leftOut(`The ${nameOf(k)}: ${a.wall} isn’t a wall of ${ctx.s.name}.`);
       }
@@ -466,7 +661,7 @@ function work(
       face = null;
     }
     const free = !face && a.at !== null;
-    if (!face && !free && !k.againstWall && !k.carpentry) {
+    if (!face && !free && !k.againstWall && !k.carpentry && !ctx.v2) {
       return leftOut(`The ${nameOf(k)}: the designer didn’t say where it goes.`);
     }
     // The sink and the hob stay in the kitchen's wet area.
@@ -506,9 +701,9 @@ function work(
       d,
       h,
       face,
-      faces: free ? [] : ctx.byLength,
+      faces: free && !ctx.v2 ? [] : ctx.byLength,
       along: a.along,
-      at: free ? a.at : null,
+      at: free || ctx.v2 ? a.at : null,
       rotation: rotationOf(a.rotation ?? 0),
       ceiling: lvl.ceilingHeight,
       brought,
@@ -525,6 +720,18 @@ function work(
       text: `Your ${kind ? nameOf(kind) : 'piece'} isn’t in the design: the designer didn’t place it.`,
       itemId: id,
     });
+  }
+
+  // Walkways, once every space is furnished: a piece the version placed that narrows the way
+  // from the main door (or to a bed) is moved off it where it can be, else left for the
+  // checks to say.
+  const resolves: DesignResult['resolves'] = [];
+  const walked = opts.walkways === false ? null : keepWalkwaysClear(lvl, runs, repaired, resolves);
+  // The notes of each space solved by intent, as finally placed.
+  for (const run of runs) {
+    if (!run.outcome) continue;
+    repaired.push(...run.outcome.repaired.map((n) => ({ ...n, space: run.key })));
+    dropped.push(...run.outcome.dropped.map((n) => ({ ...n, space: run.key })));
   }
 
   // 4. Electrical points, worked out locally on the designed level.
@@ -583,7 +790,8 @@ function work(
       ...('itemId' in i ? { itemId: i.itemId } : {}),
     });
   }
-  const walk = walkwayReport(level);
+  // The walkways as last checked (electrical points don't change them).
+  const walk = walked ?? walkwayReport(level);
   if (walk.status === 'no-main-door') {
     problems.push({ kind: 'walkway', text: 'Add the main door to check walkways and deliveries.' });
   }
@@ -659,6 +867,56 @@ function work(
     });
   }
 
+  // The design checks, and which of them the plan already had before this version.
+  const designedRooms = new Set(
+    resultSpaces.filter((s) => s.storedKey && s.status !== 'missing').flatMap((s) => s.rooms),
+  );
+  const baseKeys = baseChecks(start, brief, uses);
+  const unchanged = (id: string) => {
+    const a = level.items[id];
+    const b = start.items[id];
+    return (
+      !!a &&
+      !!b &&
+      a.assetId === b.assetId &&
+      Math.abs(a.position.x - b.position.x) < 1e-3 &&
+      Math.abs(a.position.z - b.position.z) < 1e-3 &&
+      Math.abs(a.rotationY - b.rotationY) < 1e-3
+    );
+  };
+  const spaceKeyOf = (roomId: string | null) =>
+    roomId ? (resultSpaces.find((s) => s.rooms.includes(roomId))?.key ?? null) : null;
+  const checks: ResultCheck[] = designChecks(level, {
+    brief,
+    uses,
+    clearance: issues,
+    walk,
+  }).map((c) => {
+    // In the plan before and not the version's doing: a piece it didn't touch, a room it
+    // didn't furnish, or what furnishing can't change (a window, the bedroom count).
+    // Someone with nowhere to sleep is always the version's to answer for.
+    const already =
+      !c.key.startsWith('P1|unplaced') &&
+      baseKeys.has(c.key) &&
+      (c.itemId
+        ? unchanged(c.itemId)
+        : c.roomId
+          ? !designedRooms.has(c.roomId) || !!c.unfixable
+          : true);
+    const it = c.itemId ? level.items[c.itemId] : undefined;
+    let part: ResultCheck['part'] = null;
+    if (it) {
+      const key = spaceKeyOf(roomIdAt(level, centreOf(it)));
+      const aspect = aspectOf(it);
+      if (key && (aspect === 'furniture' || aspect === 'built-ins')) part = { space: key, aspect };
+    } else if (c.key.startsWith('P1|window')) {
+      part = { aspect: 'walls' };
+    }
+    // A missing piece (a bed, a seat) is the room's: the pieces that are there stay ticked.
+    return { ...c, already, part };
+  });
+  const passes = !checks.some((c) => c.hard && !c.already);
+
   // 6. Cost, against the brief's budget.
   const cost = costEstimate(before, level, opts.rates ?? TYPICAL_RATES);
   const budget = !brief.budget ? 'unknown' : cost.low > brief.budget.high ? 'over' : 'within';
@@ -681,10 +939,238 @@ function work(
     notes,
     structural: walls.structural,
     problems,
+    checks,
+    passes,
+    refs,
+    resolves,
+    swaps,
     cost,
     points,
     budget,
   };
+}
+
+/** Where each zone of a space is: the outlines of its rooms of that use (all of them for none). */
+function zoneAreaOf(
+  level: Level,
+  rooms: string[],
+  uses: Record<string, RoomUse>,
+  brief: DesignInput['brief'],
+): (z: Zone | null) => Vec2[][] {
+  const shapes = roomShapes(level);
+  const all = rooms.flatMap((id) => {
+    const sh = shapes.get(id);
+    return sh ? [sh.outer] : [];
+  });
+  const of = new Map<Zone, Vec2[][]>();
+  for (const id of rooms) {
+    const sh = shapes.get(id);
+    if (!sh) continue;
+    const name = level.rooms[id]?.name ?? '';
+    const us = usesOf(level, id, { brief, uses });
+    const zones = new Set<Zone>(['store']);
+    if (us.some((u) => BEDROOM_USES.has(u as RoomUse))) zones.add('sleep');
+    if (us.includes('living')) zones.add('lounge');
+    if (us.includes('dining') || /dry kitchen|dining/i.test(name)) zones.add('dine');
+    if (us.includes('study')) zones.add('work');
+    if (us.includes('kitchen')) zones.add('cook');
+    for (const z of zones) of.set(z, [...(of.get(z) ?? []), sh.outer]);
+  }
+  return (z) => (z ? (of.get(z) ?? all) : all);
+}
+
+const solveMemo = new Map<string, SolveOutcome>();
+/** Poses a walkway re-solve may try before it stops looking ahead and going back. */
+const RESOLVE_BUDGET = 3000;
+/** The bare plan's ways by its walls, doors and rooms (geomKey). */
+const waysMemo = new Map<string, ReturnType<typeof keepOutOf>>();
+const WAYS_KEEP = 8;
+
+/** Keeps a value in a small memo, the oldest going first. */
+function remember<T>(memo: Map<string, T>, key: string, value: T): T {
+  if (memo.size >= WAYS_KEEP) {
+    const oldest = memo.keys().next().value;
+    if (oldest !== undefined) memo.delete(oldest);
+  }
+  memo.set(key, value);
+  return value;
+}
+const settledMemo = new Map<string, SolveOutcome>();
+
+/** The hard failures on a level the walkway step can change: walkways, clearances. */
+function hardCount(level: Level, walk?: WalkwayReport): number {
+  const w = (walk ?? walkwayReport({ ...level, items: { ...level.items } })).issues.filter(
+    (i) => i.route !== 'bed' || i.have < BED_ACCESS - 0.005,
+  ).length;
+  const c = clearanceIssues(level).filter((i) => {
+    if (i.kind === 'zone') {
+      const it = level.items[i.itemId];
+      const need = (it && ACCESS[it.assetId]?.hard) ?? i.need;
+      return i.have < need - 0.005;
+    }
+    return (
+      i.kind === 'overlap' || i.kind === 'wall' || i.kind === 'door' || i.kind === 'door-front'
+    );
+  }).length;
+  return w + c;
+}
+
+const baseMemo = new WeakMap<Level, Map<string, Set<string>>>();
+
+/** The checks' keys on the plan a version was made on (kept per plan and brief). */
+function baseChecks(
+  start: Level,
+  brief: DesignInput['brief'],
+  uses: Record<string, RoomUse>,
+): Set<string> {
+  const k = stableJson([brief, uses]);
+  const per = baseMemo.get(start) ?? new Map<string, Set<string>>();
+  baseMemo.set(start, per);
+  const hit = per.get(k);
+  if (hit) return hit;
+  // The version's room uses, so the same failure has the same key on both.
+  const keys = new Set(designChecks(start, { brief, uses }).map((c) => c.key));
+  per.set(k, keys);
+  if (per.size > 4) per.delete(per.keys().next().value as string);
+  return keys;
+}
+
+/** How many times the walkways are checked again after moving pieces off them. */
+const WALK_ROUNDS = 3;
+
+/**
+ * Moves pieces the version placed off the walkways they narrow: each blamed piece is placed
+ * again (on any wall, or near where it was) keeping out of the way around the narrow point.
+ * One that can't be is left where it was. Mutates `lvl`.
+ */
+/** A furnished space: its index and pieces, and (by intent) how to solve it again. */
+interface Run {
+  key: string;
+  ix: SpaceIndex;
+  wants: Want[];
+  solveWith?: (keepOut: SpaceIndex['keepOut'], keepOutFor?: Set<string>) => SolveOutcome;
+  /** By id: pieces that stand free (moved off a walkway before the wall pieces). */
+  free?: Set<string>;
+  /** The solve in the level now, and how to put a solve in or take it out. */
+  outcome?: SolveOutcome;
+  apply?: (o: SolveOutcome) => void;
+  unapply?: () => void;
+  /** Remembers a re-solve taken, so the same space is placed so next time at once. */
+  settle?: (o: SolveOutcome) => void;
+  /** The space's hard checks (their keys) on a level, the space alone furnished. */
+  spaceHard?: (l: Level) => Set<string>;
+}
+
+function keepWalkwaysClear(
+  lvl: Level,
+  runs: Run[],
+  repaired: Note[],
+  resolves: DesignResult['resolves'],
+): WalkwayReport | null {
+  const moved = new Set<string>();
+  const kept = new Map<Run, SpaceIndex['keepOut']>();
+  const keptFor = new Map<Run, Set<string>>();
+  /** Spaces whose re-solve was no better: not tried again. */
+  const rejected = new Set<Run>();
+  for (let round = 0; round < WALK_ROUNDS; round++) {
+    const report = walkwayReport({ ...lvl, items: { ...lvl.items } });
+    // Hard ones only: 0.50 m to a bed side is enough to get in.
+    const blamed = report.issues.filter(
+      (i) =>
+        (i.route !== 'bed' || i.have < BED_ACCESS - 0.005) &&
+        (!moved.has(i.itemId) ||
+          runs.some((r) => r.solveWith && r.wants.some((w) => w.id === i.itemId))),
+    );
+    if (!blamed.length) return report;
+    let changed = false;
+    // Spaces placed by intent are solved again, keeping out of every way they narrowed.
+    const again = new Set<Run>();
+    // Of the pieces narrowing one way, those standing free move; the wall pieces only if none do.
+    const byPinch = new Map<string, typeof blamed>();
+    for (const issue of blamed) {
+      const k = JSON.stringify(issue.pinch);
+      byPinch.set(k, [...(byPinch.get(k) ?? []), issue]);
+    }
+    for (const group of byPinch.values()) {
+      const run = runs.find(
+        (r) => r.solveWith && group.some((i) => r.wants.some((w) => w.id === i.itemId)),
+      );
+      if (!run || rejected.has(run)) continue;
+      const ids = group.map((i) => i.itemId).filter((id) => run.wants.some((w) => w.id === id));
+      const free = ids.filter((id) => run.free?.has(id));
+      const issue = group[0] as (typeof group)[number];
+      for (const id of ids) moved.add(id);
+      kept.set(run, [...(kept.get(run) ?? []), ...keepOutOf(issue.path, issue.pinch, issue.need)]);
+      keptFor.set(run, new Set([...(keptFor.get(run) ?? []), ...(free.length ? free : ids)]));
+      again.add(run);
+    }
+    for (const run of again) {
+      const was = run.outcome;
+      const out = run.solveWith?.(kept.get(run) ?? [], keptFor.get(run));
+      if (!out || !was || !run.apply || !run.unapply) continue;
+      // Taken whole, and only if strictly better and no worse in any way (acceptResolve).
+      const pieces = (o: SolveOutcome) => ({
+        dropped: o.dropped.length,
+        soft: o.soft,
+        broken: o.broken,
+      });
+      if (!piecesNoWorse(pieces(was), pieces(out)) || !run.spaceHard) {
+        rejected.add(run);
+        continue;
+      }
+      const before = {
+        keys: run.spaceHard(lvl),
+        plan: changed ? hardCount(lvl) : hardCount(lvl, report),
+        ...pieces(was),
+      };
+      run.unapply();
+      run.apply(out);
+      const after = { keys: run.spaceHard(lvl), plan: hardCount(lvl), ...pieces(out) };
+      const better = acceptResolve(before, after);
+      resolves.push({
+        space: run.key,
+        before: before.keys.size,
+        after: after.keys.size,
+        taken: better,
+      });
+      if (better) {
+        run.outcome = out;
+        run.settle?.(out);
+        changed = true;
+      } else {
+        run.unapply();
+        run.apply(was);
+        rejected.add(run);
+      }
+    }
+    for (const issue of blamed) {
+      const run = runs.find((r) => !r.solveWith && r.wants.some((w) => w.id === issue.itemId));
+      const want = run?.wants.find((w) => w.id === issue.itemId);
+      const was = lvl.items[issue.itemId];
+      if (!run || !want || !was) continue;
+      moved.add(issue.itemId);
+      const ix = run.ix;
+      const placed = ix.placed;
+      ix.placed = placed.filter((p) => p.id !== issue.itemId);
+      ix.keepOut = keepOutOf(issue.path, issue.pinch, issue.need);
+      const out = placePiece(ix, want);
+      ix.keepOut = [];
+      if (!out.item) {
+        ix.placed = placed;
+        continue;
+      }
+      lvl.items[out.item.id] = out.item;
+      changed = true;
+      repaired.push({
+        text: `Moved the ${nameOf(want.kind)} out of the way through: it left ${issue.have.toFixed(2)} m where ${issue.need.toFixed(2)} m is needed.`,
+        ref: want.ref,
+        itemId: out.item.id,
+        space: run.key,
+      });
+    }
+    if (!changed) return report;
+  }
+  return null;
 }
 
 /**

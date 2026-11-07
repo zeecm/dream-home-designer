@@ -1,0 +1,58 @@
+{
+  "v": 2,
+  "items": [
+    {
+      "ref": "bed1",
+      "assetId": "bed-single",
+      "keep": null,
+      "wall": null,
+      "along": null,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "",
+      "against": "wall",
+      "faces": "room",
+      "near": null,
+      "zone": "sleep"
+    },
+    {
+      "ref": "side1",
+      "assetId": "bedside",
+      "keep": null,
+      "wall": null,
+      "along": null,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "",
+      "against": "wall",
+      "faces": null,
+      "near": "bed1",
+      "zone": "sleep"
+    },
+    {
+      "ref": "ward1",
+      "assetId": "wardrobe",
+      "keep": null,
+      "wall": null,
+      "along": null,
+      "at": null,
+      "rotation": null,
+      "width": null,
+      "depth": null,
+      "height": null,
+      "why": "",
+      "against": "wall",
+      "faces": null,
+      "near": null,
+      "zone": "store"
+    }
+  ],
+  "faces": [],
+  "notes": []
+}

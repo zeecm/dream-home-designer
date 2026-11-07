@@ -7,7 +7,11 @@ import {
   defaultBrief,
   furnitureKind,
   isDesigned,
+  peopleOf,
+  roomArea,
+  roomKind,
   runPrompts,
+  sleepingPlan,
   spacesOf,
 } from '@dhd/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -97,6 +101,15 @@ function summaryOf(id: SectionId, b: DesignBrief, level: Level): string {
           `${plural(h.elders.length, 'elder')}, ${h.elders.map((e) => ELDER_SHORT[e]).join(', ')}`,
         );
       if (h.helper) parts.push('helper');
+      const named = new Map(peopleOf(b).map((p) => [p.key, p.name]));
+      const said = Object.entries(b.sleeping ?? {})
+        .map(([id, ps]) => [id, ps.filter((k) => named.has(k))] as const)
+        .filter(([, ps]) => ps.length);
+      const lines = said.map(
+        ([id, ps]) =>
+          `${ps.map((k) => named.get(k)).join(', ')} in ${level.rooms[id]?.name ?? 'a room'}`,
+      );
+      if (lines.length) parts.push(lines.slice(0, 2).join(' · ') + (lines.length > 2 ? ' …' : ''));
       return parts.join(' · ');
     }
     case 'live':
@@ -236,10 +249,59 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
 
   if (!level) return null;
   const h = brief.household;
-  const setHousehold = (patch: Partial<DesignBrief['household']>) =>
-    setBrief({ ...brief, household: { ...h, ...patch } });
+  // Someone taken off the household is taken out of who sleeps where (and their name).
+  const setHousehold = (patch: Partial<DesignBrief['household']>) => {
+    const next = { ...brief, household: { ...h, ...patch } };
+    const keys = new Set(peopleOf(next).map((p) => p.key));
+    const sleeping = Object.fromEntries(
+      Object.entries(next.sleeping ?? {})
+        .map(([id, ps]) => [id, ps.filter((k) => keys.has(k))] as const)
+        .filter(([, ps]) => ps.length),
+    );
+    const names = Object.fromEntries(Object.entries(next.names ?? {}).filter(([k]) => keys.has(k)));
+    setBrief({ ...next, sleeping, names });
+  };
   const items = Object.values(level.items).filter((it) => furnitureKind(it.assetId));
   const designedRooms = Object.values(level.rooms).filter((r) => isDesigned(level, r.id));
+  // Who sleeps where: a row for each room someone can sleep in (bedrooms, largest first, and
+  // the shelter when there is a helper), the household as chips.
+  const people = peopleOf(brief);
+  const sleepRooms = Object.values(level.rooms)
+    .filter((r) => {
+      const use = brief.rooms[r.id]?.use;
+      const bedroom = ['master', 'bedroom', 'kids', 'parents', 'guest'].includes(use ?? '');
+      if (bedroom || (roomKind(r.name) === 'bedroom' && use !== 'keep'))
+        return isDesigned(level, r.id);
+      return h.helper && /shelter|bomb/i.test(r.name);
+    })
+    .sort((p, q) => roomArea(level, q) - roomArea(level, p));
+  const sleeping = brief.sleeping ?? {};
+  const shelterRoom = (id: string) => /shelter|bomb/i.test(level.rooms[id]?.name ?? '');
+  // Not said: what the checks assume, shown on the chips (dashed) and in the hint.
+  const plan = sleepingPlan(
+    brief,
+    sleepRooms
+      .filter((r) => !shelterRoom(r.id))
+      .map((r) => ({ id: r.id, area: roomArea(level, r) })),
+  );
+  const assumedIn = (key: string) =>
+    plan.assumed
+      ? ([...plan.rooms].find(([, ps]) => ps.some((p) => p.key === key))?.[0] ?? null)
+      : null;
+  const sleepsIn = (key: string) =>
+    Object.entries(sleeping).find(([, ps]) => ps.includes(key))?.[0] ?? null;
+  const toggleSleep = (roomId: string, key: string) => {
+    const here = sleepsIn(key) === roomId;
+    const next = Object.fromEntries(
+      Object.entries(sleeping).map(([id, ps]) => [id, ps.filter((p) => p !== key)]),
+    );
+    if (!here) next[roomId] = [...(next[roomId] ?? []), key];
+    setBrief({
+      ...brief,
+      sleeping: Object.fromEntries(Object.entries(next).filter(([, ps]) => ps.length)),
+    });
+  };
+  const nameOf = (key: string) => brief.names?.[key] ?? '';
 
   const section = (id: SectionId) => {
     switch (id) {
@@ -328,6 +390,74 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
               />
               <span>Live-in helper</span>
             </label>
+            {people.length > 0 && sleepRooms.length > 0 && (
+              <fieldset className="sleep-grid" aria-label="Who sleeps where">
+                <legend className="field-label">Who sleeps where</legend>
+                {sleepRooms.map((r) => (
+                  // biome-ignore lint/a11y/useSemanticElements: a row of toggles named by its room
+                  <div key={r.id} className="sleep-row" role="group" aria-label={r.name}>
+                    <span className="sleep-room" aria-hidden="true">
+                      {r.name}
+                    </span>
+                    <span className="chip-row">
+                      {/* The shelter takes only the helper. */}
+                      {people
+                        .filter((p) => !shelterRoom(r.id) || p.kind === 'helper')
+                        .map((p) => (
+                          <button
+                            key={p.key}
+                            type="button"
+                            className="chip"
+                            aria-pressed={sleepsIn(p.key) === r.id}
+                            {...(assumedIn(p.key) === r.id ? { 'data-assumed': '' } : {})}
+                            onClick={() => toggleSleep(r.id, p.key)}
+                          >
+                            {p.name}
+                          </button>
+                        ))}
+                    </span>
+                  </div>
+                ))}
+                <span className={plan.unplaced.length ? 'field-hint negative' : 'field-hint'}>
+                  {plan.unplaced.length
+                    ? `${people.filter((p) => p.kind !== 'helper').length} people, ${plural(sleepRooms.filter((r) => !shelterRoom(r.id)).length, 'bedroom')}: ${plan.unplaced.map((p) => p.name).join(' and ')} would have no bed. Tap where each of them sleeps (two children can share, a bunk bed sleeps two).`
+                    : plan.assumed
+                      ? 'Not set: the dashed chips are what’s assumed. Tap to say who sleeps where.'
+                      : 'The designer gives each of them a bed there, and the checks make sure.'}
+                </span>
+                <details className="sleep-names">
+                  <summary>Names (optional)</summary>
+                  <div className="sleep-names-grid">
+                    {people.map((p, n) => (
+                      <div key={p.key} className="field">
+                        <span className="field-label" aria-hidden="true">
+                          {p.key.startsWith('adult')
+                            ? `Adult ${p.key.slice(6)}`
+                            : p.key.startsWith('child')
+                              ? `Child ${p.key.slice(6)}`
+                              : p.key.startsWith('elder')
+                                ? `Elder ${p.key.slice(6)}`
+                                : 'Helper'}
+                        </span>
+                        <input
+                          className="input"
+                          maxLength={40}
+                          aria-label={`Name ${n + 1}`}
+                          value={nameOf(p.key)}
+                          placeholder="Name"
+                          onChange={(e) =>
+                            setBrief({
+                              ...brief,
+                              names: { ...(brief.names ?? {}), [p.key]: e.target.value },
+                            })
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              </fieldset>
+            )}
             <label className="field">
               <span className="field-label">Pets</span>
               <input

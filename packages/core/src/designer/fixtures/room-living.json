@@ -5,7 +5,7 @@
       "assetId": "sofa-3",
       "keep": null,
       "wall": "W4",
-      "along": 1.66,
+      "along": 1.05,
       "at": null,
       "rotation": null,
       "width": null,
@@ -19,7 +19,10 @@
       "keep": null,
       "wall": null,
       "along": null,
-      "at": { "x": 8.16, "y": 3.15 },
+      "at": {
+        "x": 7.34,
+        "y": 3.27
+      },
       "rotation": 0,
       "width": null,
       "depth": null,
@@ -32,7 +35,10 @@
       "keep": null,
       "wall": null,
       "along": null,
-      "at": { "x": 8.16, "y": 3.1 },
+      "at": {
+        "x": 7.5,
+        "y": 3.27
+      },
       "rotation": 0,
       "width": null,
       "depth": null,
@@ -71,7 +77,10 @@
       "keep": null,
       "wall": null,
       "along": null,
-      "at": { "x": 9.2, "y": 4.0 },
+      "at": {
+        "x": 9.62,
+        "y": 4.15
+      },
       "rotation": 90,
       "width": null,
       "depth": null,
@@ -84,7 +93,10 @@
       "keep": null,
       "wall": null,
       "along": null,
-      "at": { "x": 8.55, "y": 3.7 },
+      "at": {
+        "x": 9.12,
+        "y": 3.8
+      },
       "rotation": 270,
       "width": null,
       "depth": null,
@@ -97,7 +109,10 @@
       "keep": null,
       "wall": null,
       "along": null,
-      "at": { "x": 8.55, "y": 4.3 },
+      "at": {
+        "x": 9.12,
+        "y": 4.5
+      },
       "rotation": 270,
       "width": null,
       "depth": null,
@@ -110,7 +125,10 @@
       "keep": null,
       "wall": null,
       "along": null,
-      "at": { "x": 9.2, "y": 4.95 },
+      "at": {
+        "x": 9.62,
+        "y": 4.95
+      },
       "rotation": 180,
       "width": null,
       "depth": null,
@@ -123,7 +141,10 @@
       "keep": null,
       "wall": null,
       "along": null,
-      "at": { "x": 9.2, "y": 3.05 },
+      "at": {
+        "x": 9.62,
+        "y": 3.35
+      },
       "rotation": 0,
       "width": null,
       "depth": null,
@@ -136,7 +157,10 @@
       "keep": null,
       "wall": null,
       "along": null,
-      "at": { "x": 9.2, "y": 4.0 },
+      "at": {
+        "x": 9.62,
+        "y": 4.15
+      },
       "rotation": 0,
       "width": null,
       "depth": null,
@@ -148,7 +172,7 @@
       "assetId": "built-in-shoe-cabinet",
       "keep": null,
       "wall": "W12",
-      "along": 4.0,
+      "along": 0.55,
       "at": null,
       "rotation": null,
       "width": null,
@@ -170,25 +194,15 @@
       "why": "The fridge in the dry kitchen, near the dining table."
     },
     {
-      "ref": "plant1",
-      "assetId": "potted-ficus",
-      "keep": null,
-      "wall": null,
-      "along": null,
-      "at": { "x": 6.8, "y": 2.0 },
-      "rotation": 0,
-      "width": null,
-      "depth": null,
-      "height": null,
-      "why": "Green by the window."
-    },
-    {
       "ref": "lamp1",
       "assetId": "floor-lamp",
       "keep": null,
       "wall": null,
       "along": null,
-      "at": { "x": 9.6, "y": 1.95 },
+      "at": {
+        "x": 8.87,
+        "y": 2.67
+      },
       "rotation": 0,
       "width": null,
       "depth": null,
@@ -196,6 +210,11 @@
       "why": "Reading light at the sofa's end."
     }
   ],
-  "faces": [{ "wall": "W21", "finish": "wallpaper-fluted" }],
+  "faces": [
+    {
+      "wall": "W21",
+      "finish": "wallpaper-fluted"
+    }
+  ],
   "notes": []
 }
