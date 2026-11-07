@@ -228,8 +228,19 @@ export function carpentryCost(
   rates: Rates,
 ): { feet: number; low: number; high: number } | null {
   const c = carpentryOf(item);
-  if (!c) return null;
-  const feet = footRun(itemSize(item).w);
+  return c ? carpentryPrice(c, itemSize(item).w, rates) : null;
+}
+
+/**
+ * A run of built-in carpentry `width` metres wide, priced: its foot runs and low–high cost
+ * (with the countertop, for a base run). Also prices a shortfall ("a 3 ft run").
+ */
+export function carpentryPrice(
+  c: Carpentry,
+  width: number,
+  rates: Rates,
+): { feet: number; low: number; high: number } {
+  const feet = footRun(width);
   const rate = rates.carpentry[c];
   const top = c === 'base' ? rates.countertop : { low: 0, high: 0 };
   return {

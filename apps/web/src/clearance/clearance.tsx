@@ -29,6 +29,7 @@ import { useWayShown, wayIsOwn } from '../delivery/delivery';
 import { type Selection, useEditor } from '../editor';
 import { roomLabelBoxes } from '../plan/layers';
 import type { Size, View } from '../plan/view';
+import { useStorageChipBoxes } from '../storage/storage';
 import { useLevel, useProject } from '../store';
 import { formatLength } from '../units';
 import { pointerHeld, startWalkways, useWalkways } from './walkways';
@@ -610,6 +611,8 @@ export const ClearanceLayer = memo(function ClearanceLayer({
 }) {
   const issues = useClearanceIssues();
   const selection = useEditor((s) => s.selection);
+  // The storage meter's chips, while its panel is open: a clearance label keeps off them.
+  const chips = useStorageChipBoxes(level, geom, view.zoom, size.width);
   const selected = selection?.kind === 'item' ? level.items[selection.id] : undefined;
   const wayAsked = useWayShown((s) => (selected ? s.ids.has(selected.id) : false));
   // The selected piece, and a dining table's chairs with it.
@@ -702,7 +705,7 @@ export const ClearanceLayer = memo(function ClearanceLayer({
     x1: view.cx + size.width / 2 / view.zoom,
     y1: view.cy + size.height / 2 / view.zoom,
   };
-  const names = roomLabelBoxes(level, geom, view.zoom);
+  const names = [...roomLabelBoxes(level, geom, view.zoom), ...chips];
   const handles = selected ? handleBoxes(selected, view.zoom) : [];
   const labels = placeLabels(specs, view.zoom, visible, names, handles);
   // The selected piece's narrowed way, unless its way in (Show the way) is drawn.

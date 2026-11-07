@@ -42,6 +42,7 @@
     "id": "tv-console-slatted",
     "name": "TV console, slatted",
     "category": "Living",
+    "storage": "volume",
     "againstWall": true
   },
   {
@@ -102,6 +103,7 @@
     "id": "shelf-with-drawers",
     "name": "Shelf with drawers",
     "category": "Storage",
+    "storage": "volume",
     "againstWall": true
   },
   {
@@ -109,6 +111,7 @@
     "id": "cube-bookcase",
     "name": "Cube bookcase",
     "category": "Storage",
+    "storage": "volume",
     "againstWall": true,
     "turn": -90
   },
@@ -117,6 +120,7 @@
     "id": "steel-shelves",
     "name": "Steel-frame shelves",
     "category": "Storage",
+    "storage": "volume",
     "againstWall": true,
     "scale": [0.6, 0.85, 0.6]
   },
@@ -244,6 +248,7 @@
     "id": "chinese-cabinet",
     "name": "Chinese display cabinet",
     "category": "Storage",
+    "storage": "volume",
     "againstWall": true,
     "scale": 0.65
   },
@@ -288,6 +293,7 @@
     "id": "chest-of-drawers",
     "name": "Chest of drawers",
     "category": "Bedroom",
+    "storage": "folded",
     "againstWall": true,
     "scale": [0.7, 0.85, 0.5]
   },
@@ -296,6 +302,7 @@
     "id": "steel-shelves-narrow",
     "name": "Steel-frame shelves, narrow",
     "category": "Storage",
+    "storage": "volume",
     "againstWall": true,
     "scale": 0.85
   },

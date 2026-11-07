@@ -19,6 +19,7 @@ import { useAgeing } from '../ageing/store';
 import { range, useRates } from '../cost/estimate';
 import { useEditor } from '../editor';
 import { MAX_ZOOM, MIN_ZOOM, type Size, fitBounds } from '../plan/view';
+import { useStorage } from '../storage/store';
 import { currentLevel, useLevel, useStore } from '../store';
 import { icons } from '../ui/icons';
 import { KindIcon, glyphRadius, useElectricalOn } from './electrical';
@@ -81,6 +82,7 @@ export const useSuggest = create<SuggestState>((set, get) => ({
     useElectricalOn.getState().set(true);
     // One list in the details at a time.
     useAgeing.getState().closeList();
+    useStorage.getState().closePanel();
     const ed = useEditor.getState();
     ed.select(null);
     ed.setTrunking(null);
