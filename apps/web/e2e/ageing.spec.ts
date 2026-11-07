@@ -404,7 +404,7 @@ test.describe('phone on its side', () => {
     await expect(page.locator('.inspector.inspector-ageing')).toBeVisible();
     await expect(page.locator('.ageing-oneline')).toContainText('Wheelchair · Which bedroom?');
     expect(await overflows(page)).toBe(false);
-    await page.getByRole('button', { name: 'Change who, bedroom and bathroom' }).tap();
+    await page.getByRole('button', { name: /^Change who/ }).tap();
     expect(await overflows(page)).toBe(false);
   });
 });

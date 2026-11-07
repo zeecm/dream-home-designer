@@ -31,7 +31,7 @@ import { roomLabelBoxes } from '../plan/layers';
 import { type Size, type View, fitBounds } from '../plan/view';
 import { useStorageChipBoxes } from '../storage/storage';
 import { useStorage } from '../storage/store';
-import { useLevel, useProject } from '../store';
+import { useLevel, useProject, useStore } from '../store';
 import { Segmented } from '../ui/fields';
 import { icons } from '../ui/icons';
 import { formatLength } from '../units';
@@ -65,6 +65,13 @@ function useAgeingSync() {
 /** Mounted once by the app: loads the project's setting and runs the check with it. */
 export function AgeingSync() {
   useAgeingSync();
+  // A bedroom found for them (the only one) is kept once shown, so a bed dragged into the study
+  // later doesn't quietly switch whose room is checked.
+  const report = useAgeingReport();
+  const chosen = useAgeing((s) => s.setting.bedroomId);
+  useEffect(() => {
+    if (report?.bedroom && !chosen) useAgeing.getState().set({ bedroomId: report.bedroom });
+  }, [report, chosen]);
   return null;
 }
 
@@ -472,6 +479,9 @@ export function AgeingPanel() {
   const profile = setting.profile === 'off' ? null : setting.profile;
   const allBedrooms = report?.bedroomIds ?? [];
   const choosing = !!report && !report.bedroom && report.bedrooms.length > 0;
+  // The select once a bedroom is chosen; before, the rows below choose (or the select, if
+  // there were no rows to choose from).
+  const showBedroom = !!report?.bedroom || (!choosing && (report?.bedroomIds.length ?? 0) > 0);
   const toChoice = () =>
     document.querySelector<HTMLButtonElement>('.ageing-choose')?.focus({ preventScroll: false });
   const autoName = report?.bathroom && report.bathroomAuto ? roomName(level, report.bathroom) : '';
@@ -548,7 +558,13 @@ export function AgeingPanel() {
             type="button"
             className="link-btn ageing-change"
             aria-expanded={change}
-            aria-label={change ? 'Done' : 'Change who, bedroom and bathroom'}
+            aria-label={
+              change
+                ? 'Done'
+                : showBedroom
+                  ? 'Change who, bedroom and bathroom'
+                  : 'Change who and bathroom'
+            }
             onClick={() => setChange(!change)}
           >
             {change ? 'Done' : 'Change'}
@@ -568,7 +584,7 @@ export function AgeingPanel() {
             />
           </div>
           {/* Chosen from the rows below until one is: then changed here. */}
-          {report?.bedroom && (
+          {showBedroom && (
             <label className="ageing-row">
               <span className="field-label">Bedroom</span>
               <select
@@ -813,7 +829,10 @@ export function ItemAgeing({
 }: { level: Level; id: string; kind: 'item' | 'opening' }) {
   const report = useAgeingReport();
   // Opened from the list, the lines are already at the top, under the way back.
-  const fromList = useAgeing((s) => s.listOpen);
+  // As the Inspector decides to show the way back (the list open, Suggested points not).
+  const viewer = useStore((s) => s.role === 'viewer');
+  const suggesting = useSuggest((s) => s.open) && !viewer;
+  const fromList = useAgeing((s) => s.listOpen && s.setting.profile !== 'off') && !suggesting;
   if (!report || fromList) return null;
   const mine = report.issues.filter((i) =>
     kind === 'item' ? i.itemIds.includes(id) : i.openingId === id,

@@ -95,12 +95,17 @@ export function useClearanceIssues(): ClearanceIssue[] {
   const on = useClearanceOn((s) => s.on);
   const level = useLevel();
   const report = useWalkwayReport();
+  // The ageing check's own line for the same pinch replaces the walkway's (one line, not two).
+  const age = useWalkways((s) => s.ageing);
   return useMemo(() => {
     if (!on || !level) return [];
     const quick = issuesOf(level);
-    const ways = (report?.issues ?? []).filter((i) => level.items[i.itemId]);
+    const hidden = report && age ? ageingSupersedes(report, age) : null;
+    const ways = (report?.issues ?? []).filter(
+      (i) => level.items[i.itemId] && !hidden?.has(`${i.itemId}|${pinchKey(i.pinch)}`),
+    );
     return ways.length ? [...quick, ...ways] : quick;
-  }, [on, level, report]);
+  }, [on, level, report, age]);
 }
 
 const name = (level: Level, itemId: string) =>

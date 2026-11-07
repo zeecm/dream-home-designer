@@ -656,8 +656,9 @@ Core (`packages/core`):
 - `ageing-zones.ts`: `depthOff`, `largestSquare` (Table 7 squares, the toilet's front),
   `squareAt`. `delivery.ts`: `accessClearWidth`. `clearance.ts` exports `fixedParts`,
   `ruleSide`. `ease.ts`: prices in cents, `defaultFlatType`, `easeItems`, the copy.
-- Timing (sample, 40 pieces, a drag): walkways about 8 ms, ageing alone 13 ms, both 13 ms on a
-  laptop. CI bounds: ageing 60 ms, walkways and ageing together 165 ms (55 under `PERF=1`).
+- Timing (sample, 40 pieces, a drag): walkways about 8 ms, ageing on top of them about 6 ms,
+  ageing alone (clearance checks off) about 15 ms on a laptop. The bounds are in the timing
+  note below.
 
 Web (`apps/web/src/ageing/`):
 - `store.ts`: per browser and project (`dhd-ageing-<projectId>`: profile, bedroom, bathroom,
@@ -683,9 +684,17 @@ Review fixes (tech lead, UX, QA; 7 Nov):
   shelter or ledge) can be chosen, so a renamed room stays chosen. With one bedroom it is
   chosen already. Until one is chosen the phone's top reads "Wheelchair · Which bedroom? ·
   Bath/WC 2", the choice comes first in the list, and the desktop's Bedroom select is hidden.
-- **Only what's stricter:** a route held up by furniture at the walkways' own 0.90 m is the
-  walkway line, not repeated; the 1.00 m way to their bathroom and the flat's own narrow
-  corridors (which walkways cap away) are added.
+- **One line per pinch:** the ageing list keeps every route line, 0.90 m ones included (a
+  walking aid's routes are all 0.90 m, and clearance checks may be off). Where the walkways
+  have the same pinch (the same pieces, on the way to the same rooms), the clearance list and
+  its bar leave theirs out (`ageingSupersedes`). A route is never "also checked" while a way
+  to one of the group's rooms is short.
+- **Bedrooms, again:** a living room with a bed in it isn't a bedroom (it can still be chosen,
+  and its own lines stay in the list). Corridors, foyers, stores and utility rooms are never
+  offered. With no bedroom found (rooms still "Room 1", no beds), every room that can be chosen
+  is offered in "Which bedroom to check?". A bedroom found for them is saved once shown, so a
+  bed dragged into another room later doesn't switch it. A bed made by size in the bed shape
+  counts as a bed. The toilet's zones are drawn inside the room's wall faces.
 - **The bathroom line** says the room is too small even empty ("many HDB bathrooms can't")
   whenever it is, furniture or not (`empty` on a `turn`).
 - **Show next** (from the plan details too) opens the line's details with "‹ Back to the list
