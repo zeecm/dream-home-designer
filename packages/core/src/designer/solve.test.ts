@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import { withPieces } from '../fixtures/furnishedSample';
 import { furnitureKind } from '../furniture';
 import { levelBounds, pointInPolygon } from '../geometry';
 import { aliasesFor } from './aliases';
 import ownerBedroom from './benchmark/answers/owner-bedroom.json';
 import ownerDiningFix from './benchmark/answers/owner-dining-fix.json';
+import sampleBedroom from './benchmark/answers/sample-bedroom.json';
+import sampleKitchen from './benchmark/answers/sample-kitchen.json';
 import sampleLiving from './benchmark/answers/sample-living.json';
+import sampleMain from './benchmark/answers/sample-main-bedroom.json';
 import { ONGS } from './benchmark/benchmark';
 import { SAMPLE_KEYS, answer, parsed, sampleDesign, sampleLevel } from './fixtures/sample';
 import { roleOf } from './principles';
@@ -102,5 +106,116 @@ describe('the solver', () => {
     expect(sofa?.position.x).toBeCloseTo(8.3);
     // It faces the wall, as asked: the checks say so (and a fix round sends it back).
     expect(r.checks.find((c) => c.key.startsWith('P2|faces'))?.text).toMatch(/faces the wall/);
+  });
+
+  describe('review fixes (tech-lead, 7 Nov)', () => {
+    /** A version-2 answer from refs, kinds and what they are against. */
+    const intent = (
+      items: { ref: string; assetId: string; against?: string; near?: string; width?: number }[],
+    ) =>
+      v2({
+        v: 2,
+        items: answer(
+          items.map(({ ref, assetId, width }) => ({ ref, assetId, width: width ?? null })),
+        ).items.map((i, n) => ({
+          ...i,
+          against: items[n]?.against ?? 'wall',
+          faces: null,
+          near: items[n]?.near ?? null,
+          zone: null,
+        })),
+        faces: [],
+        notes: [],
+      });
+    const hardIn = (r: ReturnType<typeof run>) =>
+      r.checks.filter((c) => c.hard && !c.already).map((c) => c.text);
+
+    it('A: no piece is left standing where another moves (Main bedroom, six pieces)', () => {
+      const r = run(
+        SAMPLE_KEYS.main,
+        intent([
+          { ref: 'bed1', assetId: 'bed-single' },
+          { ref: 'ward1', assetId: 'wardrobe' },
+          { ref: 'desk1', assetId: 'desk', against: 'window-wall' },
+          { ref: 'shelf1', assetId: 'bookshelf' },
+          { ref: 'side1', assetId: 'bedside', near: 'bed1' },
+          { ref: 'side2', assetId: 'bedside', near: 'bed1' },
+        ]),
+      );
+      expect(r.checks.filter((c) => c.key.startsWith('P4|overlap'))).toEqual([]);
+      expect(byRole(r, 'bed')).toHaveLength(1);
+    });
+
+    it('B: a queen bed and a built-in wardrobe pass; with bedside tables the wardrobe stays', () => {
+      const two = run(
+        SAMPLE_KEYS.main,
+        intent([
+          { ref: 'bed1', assetId: 'bed-queen' },
+          { ref: 'ward1', assetId: 'built-in-wardrobe', width: 1.8 },
+        ]),
+      );
+      expect(hardIn(two)).toEqual([]);
+      expect(byRole(two, 'wardrobe')).toHaveLength(1);
+      const four = run(
+        SAMPLE_KEYS.main,
+        intent([
+          { ref: 'bed1', assetId: 'bed-queen' },
+          { ref: 'ward1', assetId: 'built-in-wardrobe', width: 1.8 },
+          { ref: 'side1', assetId: 'bedside', near: 'bed1' },
+          { ref: 'side2', assetId: 'bedside', near: 'bed1' },
+        ]),
+      );
+      expect(byRole(four, 'wardrobe')).toHaveLength(1);
+      expect(hardIn(four)).toEqual([]);
+    });
+
+    it('C: two single beds both find a place with room to get in (Mdm Koh and Sophie)', () => {
+      const r = run(
+        SAMPLE_KEYS.bedroom,
+        intent([
+          { ref: 'bed1', assetId: 'bed-single' },
+          { ref: 'bed2', assetId: 'bed-single' },
+        ]),
+      );
+      expect(byRole(r, 'bed')).toHaveLength(2);
+      expect(hardIn(r)).toEqual([]);
+    });
+  });
+
+  it('PERF: the sample by intent (every space) within its bound', () => {
+    const answers = {
+      [SAMPLE_KEYS.living]: v2(sampleLiving),
+      [SAMPLE_KEYS.main]: v2(sampleMain),
+      [SAMPLE_KEYS.bedroom]: v2(sampleBedroom),
+      [SAMPLE_KEYS.kitchen]: v2(sampleKitchen),
+    };
+    const make = (id: string) =>
+      designResult(level, level, {
+        ...sampleDesign({ answers, brief: ONGS, concept: null, id }),
+        aliases: aliasesFor(level),
+      });
+    make('dsn_perf_warm');
+    const times: number[] = [];
+    for (let i = 0; i < 7; i++) {
+      const t0 = performance.now();
+      // Another version each time: nothing remembered from the time before.
+      make(`dsn_perf_${i}`);
+      times.push(performance.now() - t0);
+    }
+    const cold = [...times].sort((a, b) => a - b)[3] as number;
+    // The same version again on a plan edited elsewhere: its solved spaces are remembered.
+    // A plant added in Bath/WC 1, a room the version doesn't furnish.
+    const edited = withPieces(level, [['plant', { x: 1.2, y: 5.2 }, 0]], 'it_edit');
+    const t0 = performance.now();
+    designResult(edited, edited, {
+      ...sampleDesign({ answers, brief: ONGS, concept: null, id: 'dsn_perf_0' }),
+      aliases: aliasesFor(level),
+    });
+    const warm = performance.now() - t0;
+    console.log(
+      `v2 designResult: ${cold.toFixed(0)} ms (median of 7), again ${warm.toFixed(0)} ms`,
+    );
+    expect(cold).toBeLessThan(process.env.PERF ? 400 : 1200);
+    expect(warm).toBeLessThan(process.env.PERF ? 150 : 450);
   });
 });

@@ -74,7 +74,7 @@ interface Candidate {
 }
 
 /** What a room can't do without: placed short of room rather than left out. */
-const ESSENTIAL = new Set<Role>([
+export const ESSENTIAL = new Set<Role>([
   'bed',
   'sofa',
   'dining-table',

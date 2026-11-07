@@ -17,6 +17,7 @@ import { type AliasMap, resolveAlias } from './aliases';
 import { fixedSize, priorityOf, resolveAsset } from './catalogue';
 import { type DesignCheck, designChecks } from './checks';
 import { usesOf } from './checks';
+import { BED_ACCESS } from './checks';
 import { bathroomsHeld, heldAspects, wallsHeld } from './handEdits';
 import { WET } from './locks';
 import {
@@ -28,9 +29,10 @@ import {
   placePiece,
   spaceIndex,
 } from './place';
+import { ACCESS, roleOf } from './principles';
 import type { Concept, DesignInput, DesignItem, RoomUse, SpaceDesign, SpaceStatus } from './schema';
 import type { Zone } from './schema';
-import { type Intent, type SolveOutcome, solveSpace } from './solve';
+import { ESSENTIAL, type Intent, type SolveOutcome, solveSpace } from './solve';
 import {
   type Face,
   type Space,
@@ -333,6 +335,7 @@ function work(
   const refs: Record<string, string> = {};
   /** Each furnished space's index and pieces, to move a piece off a walkway after. */
   const runs: Run[] = [];
+  let geomKey: string | null = null;
   /** The ways through the bare plan (for the solver to keep free). */
   let bareWays: ReturnType<typeof keepOutOf> | null = null;
   const placedNew = new Set<string>();
@@ -425,8 +428,42 @@ function work(
         .flatMap((r) => keepOutOf(r.path, null, r.need));
       const ways = bareWays;
       const base = ix.placed.length;
+      const wantOf = new Map(wants.map((w) => [w.id, w]));
+      let firstKey = '';
+      // Solved spaces are kept by what they depend on: the version, the answer, the plan's
+      // walls, the pieces that stay in the space, and what is being kept clear.
+      geomKey ??= hash(
+        stableJson([named.vertices, named.walls, named.openings, named.rooms, named.ceilingHeight]),
+      );
+      const fixedKey = ix.placed.map(
+        (p) => `${p.id}:${p.fp.map((q) => q.x.toFixed(3) + q.y.toFixed(3)).join()}`,
+      );
       const solveWith = (keepOut: SpaceIndex['keepOut'], keepOutFor?: Set<string>) => {
         ix.placed.length = base;
+        const memoKey = hash(
+          stableJson([
+            design.id,
+            s.key,
+            answer,
+            geomKey,
+            fixedKey,
+            s.rooms.map((id) => uses[id] ?? null),
+            brief.rooms,
+            keepOut.map((k) => k.poly),
+            [...(keepOutFor ?? [])].sort(),
+          ]),
+        );
+        // A space moved off a walkway before is placed as it ended up.
+        const hit =
+          (keepOut.length ? undefined : settledMemo.get(memoKey)) ?? solveMemo.get(memoKey);
+        if (!keepOut.length) firstKey = memoKey;
+        if (hit) {
+          for (const item of hit.items) {
+            const w = wantOf.get(item.id);
+            if (w) addToIndex(ix, item, w.kind);
+          }
+          return hit;
+        }
         ix.keepOut = keepOut;
         const out = solveSpace({
           ix,
@@ -437,20 +474,47 @@ function work(
           ...(keepOutFor ? { keepOutFor } : {}),
         });
         ix.keepOut = [];
+        solveMemo.set(memoKey, out);
+        if (solveMemo.size > 48) solveMemo.delete(solveMemo.keys().next().value as string);
         return out;
       };
       const out = solveWith([]);
-      repaired.push(...out.repaired.map((n) => ({ ...n, space: s.key })));
-      dropped.push(...out.dropped.map((n) => ({ ...n, space: s.key })));
-      const wantOf = new Map(wants.map((w) => [w.id, w]));
-      for (const item of out.items) {
-        const want = wantOf.get(item.id);
-        if (want) take(want, item);
-      }
+      const taken: string[] = [];
+      const apply = (o: SolveOutcome) => {
+        for (const item of o.items) {
+          const want = wantOf.get(item.id);
+          if (!want) continue;
+          take(want, item);
+          if (lvl.items[item.id] === item) taken.push(item.id);
+        }
+      };
+      const unapply = () => {
+        for (const id of taken.splice(0)) {
+          delete lvl.items[id];
+          delete refs[id];
+          placedNew.delete(id);
+          placedBrought.delete(id);
+          rs.items = rs.items.filter((x) => x !== id);
+        }
+      };
+      apply(out);
       const free = new Set(
         intents.filter((t) => t.against === 'free' && !t.want.kind.carpentry).map((t) => t.want.id),
       );
-      runs.push({ ix, wants, key: s.key, solveWith, free });
+      runs.push({
+        ix,
+        wants,
+        key: s.key,
+        solveWith,
+        free,
+        outcome: out,
+        apply,
+        unapply,
+        settle: (o) => {
+          settledMemo.set(firstKey, o);
+          if (settledMemo.size > 48) settledMemo.delete(settledMemo.keys().next().value as string);
+        },
+      });
     } else {
       runs.push({ ix, wants, key: s.key });
       for (const want of wants) {
@@ -614,6 +678,12 @@ function work(
   // from the main door (or to a bed) is moved off it where it can be, else left for the
   // checks to say.
   const walked = keepWalkwaysClear(lvl, runs, repaired);
+  // The notes of each space solved by intent, as finally placed.
+  for (const run of runs) {
+    if (!run.outcome) continue;
+    repaired.push(...run.outcome.repaired.map((n) => ({ ...n, space: run.key })));
+    dropped.push(...run.outcome.dropped.map((n) => ({ ...n, space: run.key })));
+  }
 
   // 4. Electrical points, worked out locally on the designed level.
   let points: Suggestion[] = [];
@@ -858,6 +928,36 @@ function zoneAreaOf(
   return (z) => (z ? (of.get(z) ?? all) : all);
 }
 
+const solveMemo = new Map<string, SolveOutcome>();
+const settledMemo = new Map<string, SolveOutcome>();
+
+/** The hard failures on a level the walkway step can change: walkways, clearances. */
+function hardCount(level: Level, walk?: WalkwayReport): number {
+  const w = (walk ?? walkwayReport({ ...level, items: { ...level.items } })).issues.filter(
+    (i) => i.route !== 'bed' || i.have < BED_ACCESS - 0.005,
+  ).length;
+  const c = clearanceIssues(level).filter((i) => {
+    if (i.kind === 'zone') {
+      const it = level.items[i.itemId];
+      const need = (it && ACCESS[it.assetId]?.hard) ?? i.need;
+      return i.have < need - 0.005;
+    }
+    return (
+      i.kind === 'overlap' || i.kind === 'wall' || i.kind === 'door' || i.kind === 'door-front'
+    );
+  }).length;
+  return w + c;
+}
+
+/** Pieces a solve left out that the room needs (beds, seats, the table and its chairs). */
+function neededDrops(run: Run, o: SolveOutcome): number {
+  const kinds = new Map(run.wants.map((w) => [w.ref, w.kind]));
+  return o.dropped.filter((n) => {
+    const k = n.ref ? kinds.get(n.ref) : undefined;
+    return !!k && ESSENTIAL.has(roleOf(k));
+  }).length;
+}
+
 const baseMemo = new WeakMap<Level, Map<string, Set<string>>>();
 
 /** The checks' keys on the plan a version was made on (kept per plan and brief). */
@@ -894,18 +994,28 @@ interface Run {
   solveWith?: (keepOut: SpaceIndex['keepOut'], keepOutFor?: Set<string>) => SolveOutcome;
   /** By id: pieces that stand free (moved off a walkway before the wall pieces). */
   free?: Set<string>;
+  /** The solve in the level now, and how to put a solve in or take it out. */
+  outcome?: SolveOutcome;
+  apply?: (o: SolveOutcome) => void;
+  unapply?: () => void;
+  /** Remembers a re-solve taken, so the same space is placed so next time at once. */
+  settle?: (o: SolveOutcome) => void;
 }
 
 function keepWalkwaysClear(lvl: Level, runs: Run[], repaired: Note[]): WalkwayReport | null {
   const moved = new Set<string>();
   const kept = new Map<Run, SpaceIndex['keepOut']>();
   const keptFor = new Map<Run, Set<string>>();
+  /** Spaces whose re-solve was no better: not tried again. */
+  const rejected = new Set<Run>();
   for (let round = 0; round < WALK_ROUNDS; round++) {
     const report = walkwayReport({ ...lvl, items: { ...lvl.items } });
+    // Hard ones only: 0.50 m to a bed side is enough to get in.
     const blamed = report.issues.filter(
       (i) =>
-        !moved.has(i.itemId) ||
-        runs.some((r) => r.solveWith && r.wants.some((w) => w.id === i.itemId)),
+        (i.route !== 'bed' || i.have < BED_ACCESS - 0.005) &&
+        (!moved.has(i.itemId) ||
+          runs.some((r) => r.solveWith && r.wants.some((w) => w.id === i.itemId))),
     );
     if (!blamed.length) return report;
     let changed = false;
@@ -921,7 +1031,7 @@ function keepWalkwaysClear(lvl: Level, runs: Run[], repaired: Note[]): WalkwayRe
       const run = runs.find(
         (r) => r.solveWith && group.some((i) => r.wants.some((w) => w.id === i.itemId)),
       );
-      if (!run) continue;
+      if (!run || rejected.has(run)) continue;
       const ids = group.map((i) => i.itemId).filter((id) => run.wants.some((w) => w.id === id));
       const free = ids.filter((id) => run.free?.has(id));
       const issue = group[0] as (typeof group)[number];
@@ -931,16 +1041,23 @@ function keepWalkwaysClear(lvl: Level, runs: Run[], repaired: Note[]): WalkwayRe
       again.add(run);
     }
     for (const run of again) {
+      const was = run.outcome;
       const out = run.solveWith?.(kept.get(run) ?? [], keptFor.get(run));
-      if (!out) continue;
-      const ids = new Set(run.wants.map((w) => w.id));
-      const now = new Map(out.items.map((it) => [it.id, it]));
-      // Only pieces that were placed before are moved; one with nowhere else stays.
-      for (const id of ids) {
-        const it = now.get(id);
-        if (it && lvl.items[id]) lvl.items[id] = it;
+      if (!out || !was || !run.apply || !run.unapply) continue;
+      // Taken whole, and only if no worse: nothing more it needs left out, fewer failures.
+      const before = changed ? hardCount(lvl) : hardCount(lvl, report);
+      run.unapply();
+      run.apply(out);
+      const after = hardCount(lvl);
+      if (neededDrops(run, out) <= neededDrops(run, was) && after < before) {
+        run.outcome = out;
+        run.settle?.(out);
+        changed = true;
+      } else {
+        run.unapply();
+        run.apply(was);
+        rejected.add(run);
       }
-      changed = true;
     }
     for (const issue of blamed) {
       const run = runs.find((r) => !r.solveWith && r.wants.some((w) => w.id === issue.itemId));
