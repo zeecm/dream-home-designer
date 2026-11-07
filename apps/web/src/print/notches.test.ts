@@ -34,7 +34,14 @@ describe('notchFigure', () => {
     const f = notchFigure(line, 6.5, '1000', { blockers: [ext] });
     expect(f.place).toBe('beside');
     expect(f.at.x).toBeLessThan(50);
-    const g = notchFigure(line, 6.5, '1000', { blockers: [[{ x: 48.6, y: 30 }, { x: 48.6, y: 60 }]] });
+    const g = notchFigure(line, 6.5, '1000', {
+      blockers: [
+        [
+          { x: 48.6, y: 30 },
+          { x: 48.6, y: 60 },
+        ],
+      ],
+    });
     expect(g.at.x).toBeGreaterThan(50);
   });
 
