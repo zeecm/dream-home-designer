@@ -65,6 +65,7 @@ export {
 } from './place';
 export {
   CHARS_PER_TOKEN,
+  FIX_PER_RUN,
   FIX_ROUNDS,
   OUTPUT,
   PRICES,
@@ -73,6 +74,7 @@ export {
   type RunEstimate,
   type StepEstimate,
   estimateRun,
+  fixRoundsFor,
   priceOf,
   tokensOf,
   usdOf,

@@ -71,7 +71,16 @@ interface Candidate {
   score: number;
   soft: boolean;
   narrowed: boolean;
+  /** How far short of the way kept between the dining and the lounge groups (0: clear). */
+  short: number;
+  /** Short of that way, or the dining group standing on a way through the flat. */
+  apart: boolean;
+  /** The dining group standing on a way through the flat. */
+  way: boolean;
 }
+
+/** A set of placements' cost, worst first: short of room, left out, -score. */
+type Cost = [number, number, number];
 
 /** What a room can't do without: placed short of room rather than left out. */
 export const ESSENTIAL = new Set<Role>([
@@ -89,11 +98,15 @@ export const ESSENTIAL = new Set<Role>([
 /** How many of the best candidates a piece keeps (for going back). */
 const KEEP = 16;
 /** How many of a piece's best candidates are tried with the pieces that go with it. */
-const LOOK = 8;
+const LOOK = 6;
 /** Going back: how many other places each piece tried. */
 const ALTS = 8;
 const GRID = 0.25;
 const ALONG = 0.2;
+/** How far a dining chair reaches past its table's edge, tucked in. */
+const CHAIR_REACH = 0.4;
+/** Short of a way by less than this counts as clear. */
+const EPS = 0.005;
 const deg = (r: number) => (r * 180) / Math.PI;
 const fwd = (r: number): Vec2 => ({ x: -Math.sin(r), y: Math.cos(r) });
 /** The rotation that faces direction v. */
@@ -141,6 +154,8 @@ export function solveSpace(input: SolveInput): SolveOutcome {
   const solids = ix.solid.map((x) => x.poly);
   /** Set false by `score` when a pose breaks one of the piece's relationships. */
   let related = true;
+  /** Each free piece's poses in its zone (they don't depend on what is placed). */
+  const zoneMemo = new Map<string, { at: Vec2; r: number }[]>();
 
   // Each piece's anchor: the ref it names (faces or near), else the first piece of a role its
   // row goes with (a sofa the TV, chairs their table, a bedside table its bed).
@@ -180,6 +195,104 @@ export function solveSpace(input: SolveInput): SolveOutcome {
     const a = anchorOf.get(t.want.ref);
     if (a) dependents.set(a, [...(dependents.get(a) ?? []), t]);
   }
+
+  /**
+   * A dining table's group as it will stand: the table and the reach of its chairs, along its
+   * long sides (and its ends when more chairs come than the long sides seat).
+   */
+  const groupOf = (t: Intent, item: Item): Vec2[] => {
+    const chairs = (dependents.get(t.want.ref) ?? []).filter(
+      (d) => roles.get(d.want.ref) === 'dining-chair',
+    ).length;
+    const { w, d } = itemSize(item, t.want.kind);
+    if (!chairs) return itemFootprint(item, t.want.kind);
+    const per = Math.max(1, Math.min(3, Math.floor(Math.max(w, d) / 0.58)));
+    const ends = chairs > 2 * per;
+    const gw = w + (w >= d ? (ends ? 2 * CHAIR_REACH : 0) : 2 * CHAIR_REACH);
+    const gd = d + (w >= d ? 2 * CHAIR_REACH : ends ? 2 * CHAIR_REACH : 0);
+    const c = Math.cos(item.rotationY);
+    const sn = Math.sin(item.rotationY);
+    return [
+      [-gw / 2, -gd / 2],
+      [gw / 2, -gd / 2],
+      [gw / 2, gd / 2],
+      [-gw / 2, gd / 2],
+    ].map(([x, y]) => ({
+      x: item.position.x + (x as number) * c - (y as number) * sn,
+      y: item.position.z + (x as number) * sn + (y as number) * c,
+    }));
+  };
+  /** The `apart` row that keeps a piece's group (the dining table's, for a chair at it). */
+  const apartOf = (t: Intent): Relation['apart'] => {
+    const own = relationOf(t.want.kind)?.apart;
+    if (own) return own;
+    const a = anchorOf.get(t.want.ref);
+    const at = a ? byRef.get(a) : undefined;
+    return roles.get(t.want.ref) === 'dining-chair' && at
+      ? relationOf(at.want.kind)?.apart
+      : undefined;
+  };
+  /**
+   * How far a pose is short of the way kept between the dining group and the lounge group
+   * (P2 apart, 0.9 m): a dining table (with its chairs' reach) or a chair against the lounge
+   * pieces placed, a lounge piece against the dining groups placed. 0: clear.
+   */
+  const apartRows = new Map(intents.map((t) => [t.want.ref, apartOf(t)]));
+  /** The roles some dining group keeps apart from (the lounge's). */
+  const lounge = new Set<Role>(
+    [...apartRows.values()].flatMap((a) => (a ? a.from : [])),
+  );
+  /** A placed dining table's group, worked out once per pose. */
+  const groupMemo = new WeakMap<Item, Vec2[]>();
+  const groupAt = (t: Intent, item: Item) => {
+    let g = groupMemo.get(item);
+    if (!g) {
+      g = groupOf(t, item);
+      groupMemo.set(item, g);
+    }
+    return g;
+  };
+  const shortOf = (
+    t: Intent,
+    item: Item,
+    placed: Map<string, Item>,
+  ): { short: number; dining: boolean } => {
+    const role = roles.get(t.want.ref) as Role;
+    let short = 0;
+    const mine = apartRows.get(t.want.ref);
+    if (!mine && !lounge.has(role)) return { short: 0, dining: false };
+    if (mine) {
+      const fp = relationOf(t.want.kind)?.apart
+        ? groupOf(t, item)
+        : itemFootprint(item, t.want.kind);
+      for (const [ref, q] of placed) {
+        if (!mine.from.includes(roles.get(ref) as Role)) continue;
+        short = Math.max(short, mine.gap - polygonGap(fp, itemFootprint(q)).d);
+      }
+      return { short, dining: true };
+    }
+    let fp: Vec2[] | null = null;
+    for (const [ref, q] of placed) {
+      const qt = byRef.get(ref);
+      if (!qt) continue;
+      const theirs = apartRows.get(ref);
+      if (!theirs?.from.includes(role)) continue;
+      fp ??= itemFootprint(item, t.want.kind);
+      const other = relationOf(qt.want.kind)?.apart ? groupAt(qt, q) : itemFootprint(q);
+      short = Math.max(short, theirs.gap - polygonGap(fp, other).d);
+    }
+    return { short, dining: false };
+  };
+  /** Whether a footprint stands on one of the ways through the flat. */
+  const onWay = (fp: Vec2[]): boolean => {
+    if (!input.ways?.length) return false;
+    const fb = boxOf(fp);
+    return input.ways.some(
+      (x) =>
+        !(x.box.x1 < fb.x0 || fb.x1 < x.box.x0 || x.box.y1 < fb.y0 || fb.y1 < x.box.y0) &&
+        overlapDepth(fp, x.poly) > 0.02,
+    );
+  };
 
   // Order: by priority, an anchor before what goes with it; then the most constrained first
   // (fewest places in the empty space), then the largest.
@@ -255,7 +368,20 @@ export function solveSpace(input: SolveInput): SolveOutcome {
       related = true;
       const s = score(t, item, soft, anchor, anchorRole, placed, wish !== 0 || !onWall);
       if (!related && !essential) return;
-      out.push({ item, soft, narrowed, score: wish + s });
+      // Short of the way between dining and lounge: the less short the better. The dining
+      // group kept apart by standing on a way through the flat doesn't count as apart.
+      const sh = shortOf(t, item, placed);
+      const short = Math.max(0, sh.short);
+      const way = sh.dining && !k.walkThrough && onWay(itemFootprint(item, k));
+      out.push({
+        item,
+        soft,
+        narrowed,
+        short,
+        apart: short > EPS || way,
+        way,
+        score: wish + s - (short > EPS ? 3 + short * 4 : 0),
+      });
     };
 
     if (onWall) {
@@ -372,6 +498,9 @@ export function solveSpace(input: SolveInput): SolveOutcome {
         }
       }
       const zonePoses = (): { at: Vec2; r: number }[] => {
+        // The same for a piece however often it is tried (going back, looking ahead).
+        const was = zoneMemo.get(w.ref);
+        if (was) return was;
         const out: { at: Vec2; r: number }[] = [];
         // In its zone (or near where the designer would have it).
         const turns = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2];
@@ -382,25 +511,36 @@ export function solveSpace(input: SolveInput): SolveOutcome {
           for (let x = b.x0 + GRID / 2; x < b.x1; x += GRID) {
             for (let y = b.y0 + GRID / 2; y < b.y1; y += GRID) {
               const at = { x, y };
-              if (!pointInPolygon(at, poly)) continue;
+              if (!pointInPolygon(at, poly) || !inRooms(ix, at)) continue;
               for (const r of rs) out.push({ at, r });
             }
           }
         }
+        zoneMemo.set(w.ref, out);
         return out;
       };
-      const tryPoses = (list: { at: Vec2; r: number }[]) => {
+      const tryPoses = (list: { at: Vec2; r: number }[], checked = false) => {
         for (const p of list) {
-          if (!inRooms(ix, p.at)) continue;
+          if (!checked && !inRooms(ix, p.at)) continue;
           const item = itemAt(w, p.at, p.r, w.w);
           add(item, hitsOf(ix, item, k), false, wish);
         }
       };
-      tryPoses(poses.length && anchor ? poses : zonePoses());
+      if (poses.length && anchor) tryPoses(poses);
+      else tryPoses(zonePoses(), true);
       // Nothing by its anchor: anywhere in its zone.
-      if (!out.length && poses.length && anchor && !rel?.belongs) tryPoses(zonePoses());
+      if (!out.length && poses.length && anchor && !rel?.belongs) tryPoses(zonePoses(), true);
     }
     ix.keepOut = keepOut;
+    // The way between the dining and the lounge groups is kept wherever any clear pose keeps
+    // it: the poses short of it are dropped (advice only when none keeps it).
+    const drop = (bad: (c: Candidate) => boolean) => {
+      if (!out.some(bad) || !out.some((c) => !c.soft && !bad(c))) return;
+      for (let n = out.length - 1; n >= 0; n--) if (bad(out[n] as Candidate)) out.splice(n, 1);
+    };
+    drop((c) => c.apart);
+    // Short of it everywhere: the dining group still keeps off the ways through the flat.
+    drop((c) => c.way);
     out.sort((p, q) => q.score - p.score);
     // Going back looks at every clear place, not just the best few.
     if (all) return out;
@@ -543,15 +683,6 @@ export function solveSpace(input: SolveInput): SolveOutcome {
       const opp = seats.filter((q) => sideOf2(centre(q)) === opposite[mine]).length;
       if (same > opp) s -= 1.5 * (same - opp);
     }
-    // Dining apart from the lounge, with a way between.
-    if (rel?.apart) {
-      const ap = rel.apart;
-      for (const q of placed.values()) {
-        if (!ap.from.includes(roleOf(furnitureKind(q.assetId)))) continue;
-        const d = polygonGap(fp, itemFootprint(q)).d;
-        if (d < ap.gap) s -= 1.5 + (ap.gap - d) * 2;
-      }
-    }
     // A bed's long side against a wall, or a proper way beside it: not a gap pillows fall into.
     if (role === 'bed') {
       for (const side of ['left', 'right'] as const) {
@@ -679,7 +810,7 @@ export function solveSpace(input: SolveInput): SolveOutcome {
    * How good the placements up to `i` are, worst first: pieces short of the room they need
    * (they fail a hard check), then what is left out (by priority), then the score.
    */
-  const costOf = (i: number): [number, number, number] => {
+  const costOf = (i: number): Cost => {
     let soft = 0;
     let drops = 0;
     let score = 0;
@@ -693,7 +824,7 @@ export function solveSpace(input: SolveInput): SolveOutcome {
     }
     return [soft, drops, -score];
   };
-  const better = (p: [number, number, number], q: [number, number, number]) =>
+  const better = (p: Cost, q: Cost) =>
     p[0] < q[0] || (p[0] === q[0] && (p[1] < q[1] || (p[1] === q[1] && p[2] < q[2] - 1e-6)));
   /** Puts back a whole set of placements from `j` on. */
   const restore = (j: number, list: (Candidate | null)[]) => {

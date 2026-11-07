@@ -127,17 +127,8 @@ let solidBuf = new Uint8Array(0);
 let ownerBuf = new Int32Array(0);
 let widthBuf = new Float32Array(0);
 
-/** The level's walls, doors and rooms, rastered once (kept while only furniture changes). */
-function bareOf(level: Level): Bare {
-  const hit = bareCache.get(level.walls);
-  if (
-    hit &&
-    hit.vertices === level.vertices &&
-    hit.openings === level.openings &&
-    hit.rooms === level.rooms
-  ) {
-    return hit.bare;
-  }
+/** The level's walls, doors and rooms, rastered (kept while only furniture changes). */
+function rasterBare(level: Level): Bare {
   const geom = planGeometry(level);
   const shapes = roomShapes(level);
   const rooms = Object.values(level.rooms)
@@ -311,6 +302,39 @@ function bareOf(level: Level): Bare {
     caps: new Map(),
     roomSearches: new Map(),
   };
+  return bare;
+}
+
+/**
+ * The same walls, doors and rooms in other objects (another version of a design, a plan
+ * rebuilt with the same walls) share one raster: the last few by their content.
+ */
+const bareByContent = new Map<string, Bare>();
+const BARE_KEEP = 6;
+
+function bareOf(level: Level): Bare {
+  const hit = bareCache.get(level.walls);
+  if (
+    hit &&
+    hit.vertices === level.vertices &&
+    hit.openings === level.openings &&
+    hit.rooms === level.rooms
+  ) {
+    return hit.bare;
+  }
+  const key = JSON.stringify([level.walls, level.vertices, level.openings, level.rooms]);
+  let bare = bareByContent.get(key);
+  if (bare) {
+    // Most recently used last.
+    bareByContent.delete(key);
+  } else {
+    bare = rasterBare(level);
+    if (bareByContent.size >= BARE_KEEP) {
+      const oldest = bareByContent.keys().next().value;
+      if (oldest !== undefined) bareByContent.delete(oldest);
+    }
+  }
+  bareByContent.set(key, bare);
   if (Object.isFrozen(level.walls)) {
     bareCache.set(level.walls, {
       vertices: level.vertices,

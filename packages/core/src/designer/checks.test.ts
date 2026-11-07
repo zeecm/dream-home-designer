@@ -206,6 +206,21 @@ describe('P2: relationships (criteria 3, 4, 8)', () => {
   const TV: [string, Vec2, number] = ['tv', at(6.62, 2.5), -PI / 2];
   const faces = (lvl: Level) => run(lvl).filter((c) => c.key.startsWith('P2|faces'));
 
+  it('dining apart from the lounge: measured from the dining group, its chairs included', () => {
+    // The sofa under the window (y 1.65–2.55); the table 1.05 m below it, a chair between.
+    const sofa: [string, Vec2, number] = ['sofa-3', at(7.6, 2.099), 0];
+    const table: [string, Vec2, number] = ['dining-4', at(9.3, 4.0), 0];
+    const apart = (lvl: Level) => run(lvl).filter((c) => c.key.startsWith('P2|apart'));
+    expect(apart(withPieces(base, [sofa, table]))).toEqual([]);
+    const withChair = apart(withPieces(base, [sofa, table, ['dining-chair', at(8.9, 3.35), 0]]));
+    expect(withChair.map((c) => [c.hard, c.text])).toEqual([
+      [
+        false,
+        'Leave 0.90 m between the dining table, 4 seats and the 3-seat sofa to walk between them: 0.55 m now.',
+      ],
+    ]);
+  });
+
   it('3: a sofa whose front is 0.5 m from a wall faces the wall; turned with its back to it, passes', () => {
     const facing = run(withPieces(base, [['sofa-3', at(8.3, 2.599), PI]]));
     expect(facing.find((c) => c.key.startsWith('P2|faces'))?.text).toBe(

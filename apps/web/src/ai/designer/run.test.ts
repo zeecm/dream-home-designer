@@ -547,6 +547,55 @@ describe('fix rounds: the app checks each answer before it is shown (designer v2
     expect(space).toMatchObject({ status: 'done', fixes: 1, fixed: 0 });
   });
 
+  it('a run sends three fix requests at most, however many rooms fail', async () => {
+    // Living fails three checks, then two, then passes (two rounds wanted); a child without a
+    // bed in each bedroom fails every answer (a round each): four wanted, three sent.
+    const fewer = () => {
+      const a = facingWall();
+      a.items = a.items.filter((i) => i.ref !== 'coffee1' && i.ref !== 'rug1');
+      return a;
+    };
+    const twoKids: DesignBrief = {
+      ...brief,
+      household: { ...brief.household, children: ['primary', 'primary'] },
+      sleeping: {
+        'rm_main-bedroom': ['adult-1', 'adult-2', 'child-1'],
+        rm_bedroom: ['elder-1', 'child-2'],
+      },
+    };
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) =>
+        living(c) && n === 1 ? sse(facingWall()) : living(c) && n === 2 ? sse(fewer()) : null,
+    });
+    const r = start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: twoKids },
+      design: { ...fresh(), brief: twoKids },
+    });
+    const { state, design } = await r.run;
+    expect(state.phase).toBe('done');
+    const fixes = Object.values(design.spaces).reduce((t, s) => t + (s.fixes ?? 0), 0);
+    expect(fixes).toBe(3);
+    expect(prov.calls).toHaveLength(5 + 3);
+  });
+
+  it('on Quick, a room goes back once at most', async () => {
+    const quick: DesignBrief = { ...brief, quality: 'quick' };
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (living(c) ? sse(facingWall()) : null),
+    });
+    const { design } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: quick },
+      design: { ...fresh(), brief: quick },
+    }).run;
+    expect(prov.calls.filter(living)).toHaveLength(2);
+    const space = Object.values(design.spaces).find((s) => s.name.startsWith('Living'));
+    expect(space?.fixes).toBe(1);
+  });
+
   it('the fix round says where the app placed each piece', async () => {
     const prov = provider('anthropic', {
       auto: true,

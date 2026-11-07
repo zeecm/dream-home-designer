@@ -423,18 +423,25 @@ function work(
         };
       });
       const zoneArea = zoneAreaOf(named, s.rooms, uses, brief);
-      bareWays ??= walkwayReport({ ...named, items: {} })
-        .routes.filter((r) => r.route === 'circulation')
-        .flatMap((r) => keepOutOf(r.path, null, r.need));
-      const ways = bareWays;
-      const base = ix.placed.length;
-      const wantOf = new Map(wants.map((w) => [w.id, w]));
-      let firstKey = '';
       // Solved spaces are kept by what they depend on: the version, the answer, the plan's
       // walls, the pieces that stay in the space, and what is being kept clear.
       geomKey ??= hash(
         stableJson([named.vertices, named.walls, named.openings, named.rooms, named.ceilingHeight]),
       );
+      // The ways through the bare plan, worked out once for the same walls and doors.
+      bareWays ??=
+        waysMemo.get(geomKey) ??
+        remember(
+          waysMemo,
+          geomKey,
+          walkwayReport({ ...named, items: {} })
+            .routes.filter((r) => r.route === 'circulation')
+            .flatMap((r) => keepOutOf(r.path, null, r.need)),
+        );
+      const ways = bareWays;
+      const base = ix.placed.length;
+      const wantOf = new Map(wants.map((w) => [w.id, w]));
+      let firstKey = '';
       const fixedKey = ix.placed.map(
         (p) => `${p.id}:${p.fp.map((q) => q.x.toFixed(3) + q.y.toFixed(3)).join()}`,
       );
@@ -929,6 +936,19 @@ function zoneAreaOf(
 }
 
 const solveMemo = new Map<string, SolveOutcome>();
+/** The bare plan's ways by its walls, doors and rooms (geomKey). */
+const waysMemo = new Map<string, ReturnType<typeof keepOutOf>>();
+const WAYS_KEEP = 8;
+
+/** Keeps a value in a small memo, the oldest going first. */
+function remember<T>(memo: Map<string, T>, key: string, value: T): T {
+  if (memo.size >= WAYS_KEEP) {
+    const oldest = memo.keys().next().value;
+    if (oldest !== undefined) memo.delete(oldest);
+  }
+  memo.set(key, value);
+  return value;
+}
 const settledMemo = new Map<string, SolveOutcome>();
 
 /** The hard failures on a level the walkway step can change: walkways, clearances. */
@@ -1042,8 +1062,7 @@ function keepWalkwaysClear(lvl: Level, runs: Run[], repaired: Note[]): WalkwayRe
     }
     for (const run of again) {
       const was = run.outcome;
-      const out = run.solveWith?.(kept.get(run) ?? [], keptFor.get(run));
-      if (!out || !was || !run.apply || !run.unapply) continue;
+      const out = run.solveWith?.(kept.get(run) ?? [], keptFor.get(run));      if (!out || !was || !run.apply || !run.unapply) continue;
       // Taken whole, and only if no worse: nothing more it needs left out, fewer failures.
       const before = changed ? hardCount(lvl) : hardCount(lvl, report);
       run.unapply();

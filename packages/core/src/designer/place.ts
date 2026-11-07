@@ -198,14 +198,14 @@ export interface OnFace {
 export function hitsOf(ix: SpaceIndex, item: Item, kind: FurnitureKind, on?: OnFace): Hit[] {
   const fp = itemFootprint(item, kind);
   const out: Hit[] = [];
-  if (!inset(fp).every((p) => inRooms(ix, p))) out.push({ kind: 'outside' });
+  // What blocks it outright: the first reason is enough (it is the one said).
+  if (!inset(fp).every((p) => inRooms(ix, p))) return [{ kind: 'outside' }];
   if (on) {
     for (const o of on.face.openings) {
       const vertical =
         o.kind === 'window' ? on.top > o.sill - 0.02 && on.bottom < o.top : on.bottom < o.top;
       if (vertical && on.u0 < o.u1 - 1e-6 && o.u0 < on.u1 - 1e-6) {
-        out.push({ kind: 'opening', window: o.kind === 'window' });
-        break;
+        return [{ kind: 'opening', window: o.kind === 'window' }];
       }
     }
   }
@@ -213,14 +213,14 @@ export function hitsOf(ix: SpaceIndex, item: Item, kind: FurnitureKind, on?: OnF
   const box = boxOf(fp);
   const hit = (shapes: Shape[], depth: number) =>
     shapes.some((s) => !apart(s.box, box) && overlapDepth(fp, s.poly) > depth);
-  if (hit(ix.solid, 0.01)) out.push({ kind: 'wall' });
-  if (hit(ix.doorways, 0.01)) out.push({ kind: 'doorway' });
-  if (hit(ix.sweeps, 0.005)) out.push({ kind: 'door' });
-  if (hit(ix.keepOut, 0.01)) out.push({ kind: 'keep-out' });
+  if (hit(ix.solid, 0.01)) return [{ kind: 'wall' }];
+  if (hit(ix.doorways, 0.01)) return [{ kind: 'doorway' }];
+  if (hit(ix.sweeps, 0.005)) return [{ kind: 'door' }];
+  if (hit(ix.keepOut, 0.01)) return [{ kind: 'keep-out' }];
   if (!UNDER_WINDOW.has(roleOf(kind))) {
     const top = sillTop(kind, itemSize(item, kind).h);
     const high = ix.windows.filter((w) => top > w.sill - FIT.sill);
-    if (hit(high, 0.01)) out.push({ kind: 'opening', window: true });
+    if (hit(high, 0.01)) return [{ kind: 'opening', window: true }];
   }
   const tuckedWith = (p: Placed) =>
     (SEAT.test(item.assetId) && TABLE.test(p.assetId)) ||
@@ -228,11 +228,9 @@ export function hitsOf(ix: SpaceIndex, item: Item, kind: FurnitureKind, on?: OnF
   for (const p of ix.placed) {
     if (apart(p.box, box) || tuckedWith(p)) continue;
     if (overlapDepth(fp, p.fp) > 0.04) {
-      out.push({ kind: 'overlap', otherId: p.id, otherName: p.name });
-      break;
+      return [{ kind: 'overlap', otherId: p.id, otherName: p.name }];
     }
   }
-  if (out.length) return out;
   // Room to use it: its own zones clear of walls and pieces, and clear of others' zones.
   const rule = CLEARANCE_RULES[kind.id];
   if (rule) {

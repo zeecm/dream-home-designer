@@ -198,7 +198,7 @@ test.describe('desktop', () => {
     ).toBeFocused();
     await expect(check).toContainText('5 requests to Claude (claude-opus-5-5)');
     await expect(check).toContainText(/About US\$\d+\.\d\d/);
-    await expect(check).toContainText(/at most US\$\d+\.\d\d/);
+    await expect(check).toContainText(/at most US\$\d+\.\d\d, up to 3 fix-ups included/);
     const start = check.getByRole('button', { name: /^Design my flat · about US\$/ });
     await expect(start).not.toBeFocused();
     await check.getByRole('button', { name: 'Back' }).click();

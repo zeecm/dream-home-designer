@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { polygonGap } from '../convex';
 import { withPieces } from '../fixtures/furnishedSample';
-import { furnitureKind } from '../furniture';
+import { furnitureKind, itemFootprint } from '../furniture';
 import { levelBounds, pointInPolygon } from '../geometry';
 import { aliasesFor } from './aliases';
 import ownerBedroom from './benchmark/answers/owner-bedroom.json';
@@ -14,6 +15,7 @@ import { SAMPLE_KEYS, answer, parsed, sampleDesign, sampleLevel } from './fixtur
 import { roleOf } from './principles';
 import { designResult } from './result';
 import { type SpaceDesign, defaultBrief, parseSpaceDesign } from './schema';
+import type { Level } from '../schema';
 
 /**
  * The solver (answers of version 2): pieces placed from intent, relationships by
@@ -215,7 +217,57 @@ describe('the solver', () => {
     console.log(
       `v2 designResult: ${cold.toFixed(0)} ms (median of 7), again ${warm.toFixed(0)} ms`,
     );
-    expect(cold).toBeLessThan(process.env.PERF ? 400 : 2000);
+    expect(cold).toBeLessThan(process.env.PERF ? 350 : 2000);
     expect(warm).toBeLessThan(process.env.PERF ? 150 : 600);
+  });
+
+  describe('owner 7 Nov: the dining jammed against the sofa (P2 apart, 0.90 m)', () => {
+    /** The gap between the dining group (table and chairs) and the lounge pieces. */
+    const zoneGap = (r: ReturnType<typeof run>) => {
+      const [table] = byRole(r, 'dining-table');
+      if (!table) return -1;
+      const group = [table, ...byRole(r, 'dining-chair')].map((it) => itemFootprint(it));
+      const lounge = ['sofa', 'armchair', 'coffee-table', 'tv-console']
+        .flatMap((role) => byRole(r, role))
+        .map((it) => itemFootprint(it));
+      return Math.min(...group.flatMap((g) => lounge.map((l) => polygonGap(g, l).d)));
+    };
+
+    it('kept wherever a pose keeps it: in a living room 1.25 m wider, the dining is on open floor', () => {
+      // The sample with the living room's east wall moved out from x 10.15 to 11.40.
+      const vertices = Object.fromEntries(
+        Object.entries(level.vertices).map(([k, v]) => [
+          k,
+          Math.abs(v.x - 10.152) < 0.01 ? { ...v, x: 11.4 } : v,
+        ]),
+      );
+      const wide: Level = { ...level, vertices };
+      const a = parsed(parseSpaceDesign(sampleLiving, levelBounds(wide)));
+      const r = designResult(wide, wide, {
+        ...sampleDesign({
+          level: wide,
+          answers: { [SAMPLE_KEYS.living]: a },
+          brief: ONGS,
+          concept: null,
+          id: 'dsn_apart_wide',
+        }),
+        aliases: aliasesFor(wide),
+      });
+      expect(byRole(r, 'dining-chair')).toHaveLength(4);
+      expect(zoneGap(r)).toBeGreaterThanOrEqual(0.9 - 0.005);
+      expect(r.checks.filter((c) => c.key.startsWith('P2|apart'))).toEqual([]);
+      expect(r.checks.filter((c) => c.hard && !c.already)).toEqual([]);
+    });
+
+    it('where no pose keeps it (the sample), it is advice and the dining stays off the passage', () => {
+      const r = run(SAMPLE_KEYS.living, v2(sampleLiving), ONGS, 'dsn_apart_tight');
+      const [table] = byRole(r, 'dining-table');
+      expect(table).toBeDefined();
+      expect(pointInPolygon({ x: table!.position.x, y: table!.position.z }, PASSAGE)).toBe(false);
+      const advice = r.checks.find((c) => c.key.startsWith('P2|apart'));
+      expect(advice?.hard).toBe(false);
+      expect(advice?.text).toMatch(/^Leave 0\.90 m between the dining table, 4 seats and the .+: 0\.\d\d m now\.$/);
+      expect(r.checks.filter((c) => c.hard && !c.already)).toEqual([]);
+    });
   });
 });

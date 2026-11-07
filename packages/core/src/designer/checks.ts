@@ -482,9 +482,16 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
     }
     if (rel.apart) {
       const ap = rel.apart;
+      // The dining group: the table and the chairs at it, pulled out or not.
+      const group = [
+        p.fp,
+        ...others
+          .filter((q) => q.role === 'dining-chair' && polygonGap(q.fp, p.fp).d < 0.4)
+          .map((q) => q.fp),
+      ];
       const close = others
         .filter((q) => ap.from.includes(q.role) && blocks(q.it))
-        .map((q) => ({ q, d: polygonGap(p.fp, q.fp).d }))
+        .map((q) => ({ q, d: Math.min(...group.map((g) => polygonGap(g, q.fp).d)) }))
         .sort((a, b) => a.d - b.d)[0];
       if (close && close.d < ap.gap - 0.005) {
         out.push({

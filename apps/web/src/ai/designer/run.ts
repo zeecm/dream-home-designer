@@ -4,7 +4,7 @@ import {
   type ContextInput,
   type DesignInput,
   type DesignOptions,
-  FIX_ROUNDS,
+  FIX_PER_RUN,
   type FixRequest,
   type Lock,
   type ParseResult,
@@ -14,6 +14,7 @@ import {
   type Usage,
   aliasesFor,
   designResult,
+  fixRoundsFor,
   layoutStep,
   levelBounds,
   parseConcept,
@@ -37,7 +38,8 @@ import { type Effort, HttpFail, type StepSink, newSink, streamStep } from './str
  * time after a rate limit. Each step is kept as it finishes; Stop aborts every request in
  * flight and keeps what's done. Every request's tokens are metered, a cut-off one estimated.
  * Each room's answer is placed and checked as it arrives: hard checks it fails go back to the
- * designer (up to FIX_ROUNDS times, with the app's own lines) before the version is shown.
+ * designer (once a room on Quick, twice on Thorough, FIX_PER_RUN requests in a run at most,
+ * with the app's own lines) before the version is shown.
  */
 
 export type StepStatus = 'waiting' | 'running' | 'done' | 'failed' | 'cancelled' | 'skipped';
@@ -646,6 +648,8 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     // A run-stopping error (a refused key, a quota): set before the first room's gate opens,
     // so no other room is sent after it.
     let runError: unknown = null;
+    /** Fix requests the run may still send (the estimate counts this many at most). */
+    let fixesLeft = FIX_PER_RUN;
     const room = async (s: (typeof spaces)[number], onStart?: () => void) => {
       const st = state.steps.find((x) => x.key === s.key) as StepState;
       if (!(await mayStart())) {
@@ -669,7 +673,15 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
           const first = failing(s, current);
           let fixes = 0;
           let now = first;
-          while (now.fixable.length && fixes < FIX_ROUNDS && (await mayStart())) {
+          const rounds = fixRoundsFor(ctx.brief.quality);
+          while (
+            now.fixable.length &&
+            fixes < rounds &&
+            fixesLeft > 0 &&
+            (await mayStart())
+          ) {
+            // Taken from the run's few before the request goes (rooms run side by side).
+            fixesLeft--;
             fixes++;
             const left = now.fixable;
             st.fixing = { round: fixes, problems: left.length };

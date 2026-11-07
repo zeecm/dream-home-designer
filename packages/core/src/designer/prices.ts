@@ -101,8 +101,13 @@ export const OUTPUT: Record<
   quick: { layout: { typical: 4000, max: 12_000 }, room: { typical: 2500, max: 8000 } },
 };
 
-/** How many times a room's answer is sent back when it fails a hard check. */
+/** How many times a room's answer is sent back when it fails a hard check, at most. */
 export const FIX_ROUNDS = 2;
+/** How many fix requests a whole run sends, at most (whatever the rooms). */
+export const FIX_PER_RUN = 3;
+/** How many times one room's answer may be sent back: once on Quick, twice on Thorough. */
+export const fixRoundsFor = (quality: DesignBrief['quality']) =>
+  quality === 'quick' ? 1 : FIX_ROUNDS;
 /** Tokens a fix round's prompt adds for the failures and where the pieces were placed. */
 const FIX_EXTRA = 600;
 
@@ -113,7 +118,7 @@ export interface StepEstimate {
   /** Of `input`, the stable part a provider can cache. */
   cacheable: number;
   output: { typical: number; high: number };
-  /** `fix`: what its fix rounds may add on top of high. */
+  /** `fix`: what its fix rounds may add on top of high (the run's cap aside). */
   usd: { typical: number; high: number; fix: number } | null;
 }
 
@@ -122,8 +127,13 @@ export interface RunEstimate {
   steps: StepEstimate[];
   input: number;
   tokens: { typical: number; high: number };
-  /** Null when the model has no price. `fix`: what fix rounds may add on top of high. */
+  /**
+   * Null when the model has no price. `fix`: what fix rounds may add on top of high, at most
+   * FIX_PER_RUN requests in the run.
+   */
   usd: { typical: number; high: number; fix: number } | null;
+  /** The fix requests a run may send, at most. */
+  fixes: number;
   /** The largest prompt of any step, in tokens. */
   largestInput: number;
 }
@@ -133,8 +143,9 @@ export interface RunEstimate {
  * characters ÷ 3.2; typical output from the table, high its max_tokens. Typical reads the
  * stable prefix from cache from the second room step on, where the provider caches (Claude
  * writes it on the first room step, at the cache-write rate); high assumes no cache at all.
- * `fix` is what the fix rounds may add on top of high: up to `FIX_ROUNDS` more requests for a
- * room whose answer the app's checks send back. Retries aren't in it.
+ * `fix` is what the fix rounds may add on top of high: a room whose answer the app's checks send
+ * back goes again up to once (Quick) or twice (Thorough), and a run sends at most FIX_PER_RUN
+ * fix requests in all, so the dearest three are counted. Retries aren't in it.
  */
 export function estimateRun(
   prompts: StepPrompt[],
@@ -147,6 +158,8 @@ export function estimateRun(
 ): RunEstimate {
   const price = priceOf(opts.model, opts.prices);
   let room = 0;
+  /** Each fix request the rooms may send, priced. */
+  const fixOnes: number[] = [];
   const steps = prompts.map((p): StepEstimate => {
     const input = tokensOf(p.system.length + p.prefix.length + p.shared.length + p.tail.length);
     const cacheable = Math.min(
@@ -155,8 +168,8 @@ export function estimateRun(
     );
     const out = OUTPUT[opts.quality][p.kind];
     const n = p.kind === 'room' ? ++room : 0;
-    // A room step may be sent back to be fixed, at most FIX_ROUNDS times.
-    const rounds = p.kind === 'room' ? FIX_ROUNDS : 0;
+    // A room step may be sent back to be fixed, once or twice by quality.
+    const rounds = p.kind === 'room' ? fixRoundsFor(opts.quality) : 0;
     let usd: StepEstimate['usd'] = null;
     if (price) {
       const typical: Counts =
@@ -178,6 +191,7 @@ export function estimateRun(
         price,
       );
       usd = { typical: usdOf(typical, price), high, fix: fixOne * rounds };
+      for (let k = 0; k < rounds; k++) fixOnes.push(fixOne);
     }
     return {
       step: p.step,
@@ -189,6 +203,8 @@ export function estimateRun(
     };
   });
   const sum = (f: (s: StepEstimate) => number) => steps.reduce((t, s) => t + f(s), 0);
+  const roomFixes = steps.filter((s) => s.kind === 'room').length * fixRoundsFor(opts.quality);
+  const fixes = Math.min(FIX_PER_RUN, roomFixes);
   return {
     requests: steps.length,
     steps,
@@ -201,9 +217,13 @@ export function estimateRun(
       ? {
           typical: sum((s) => s.usd?.typical ?? 0),
           high: sum((s) => s.usd?.high ?? 0),
-          fix: sum((s) => s.usd?.fix ?? 0),
+          fix: [...fixOnes]
+            .sort((a, b) => b - a)
+            .slice(0, FIX_PER_RUN)
+            .reduce((t, v) => t + v, 0),
         }
       : null,
+    fixes,
     largestInput: Math.max(0, ...steps.map((s) => s.input)),
   };
 }
