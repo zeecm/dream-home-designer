@@ -499,7 +499,10 @@ const MOVE = 0.4;
 const STEP = 0.05;
 const NARROW = [0.95, 0.9, 0.85, 0.8];
 
-/** The item for a piece at a pose. */
+/**
+ * The item for a piece at a pose. Items made here are cached with their pose and reused across
+ * solves, then deep-frozen in results: never mutate one after it is made.
+ */
 export function itemAt(want: Want, at: Vec2, rotation: number, w: number): Item {
   const k = want.kind;
   const base = want.brought
