@@ -91,6 +91,12 @@ export function CostCheck(p: CostCheckProps) {
             <p className="cost-sub num">
               {tokens(p.est.tokens.typical)} tokens · at most {usd(high)}
             </p>
+            {(p.est.usd?.fix ?? 0) > 0 && (
+              <p className="cost-sub num">
+                If the app sends a room back to fix what fails its checks, up to{' '}
+                {usd(p.est.usd?.fix ?? 0)} more.
+              </p>
+            )}
             <SpendMeter run={typical} high={high} />
           </>
         ) : (

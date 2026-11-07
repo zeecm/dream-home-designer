@@ -111,7 +111,8 @@ export interface StepEstimate {
   /** Of `input`, the stable part a provider can cache. */
   cacheable: number;
   output: { typical: number; high: number };
-  usd: { typical: number; high: number } | null;
+  /** `fix`: what its fix rounds may add on top of high. */
+  usd: { typical: number; high: number; fix: number } | null;
 }
 
 export interface RunEstimate {
@@ -119,8 +120,8 @@ export interface RunEstimate {
   steps: StepEstimate[];
   input: number;
   tokens: { typical: number; high: number };
-  /** Null when the model has no price. */
-  usd: { typical: number; high: number } | null;
+  /** Null when the model has no price. `fix`: what fix rounds may add on top of high. */
+  usd: { typical: number; high: number; fix: number } | null;
   /** The largest prompt of any step, in tokens. */
   largestInput: number;
 }
@@ -129,9 +130,9 @@ export interface RunEstimate {
  * What a run will cost, from the prompts actually built. Each step's input is its prompt's
  * characters ÷ 3.2; typical output from the table, high its max_tokens. Typical reads the
  * stable prefix from cache from the second room step on, where the provider caches (Claude
- * writes it on the first room step, at the cache-write rate); high assumes no cache at all,
- * and each room step's fix rounds (up to `FIX_ROUNDS` more requests, when the app's checks
- * send its answer back). Retries aren't in it.
+ * writes it on the first room step, at the cache-write rate); high assumes no cache at all.
+ * `fix` is what the fix rounds may add on top of high: up to `FIX_ROUNDS` more requests for a
+ * room whose answer the app's checks send back. Retries aren't in it.
  */
 export function estimateRun(
   prompts: StepPrompt[],
@@ -152,8 +153,8 @@ export function estimateRun(
     );
     const out = OUTPUT[opts.quality][p.kind];
     const n = p.kind === 'room' ? ++room : 0;
-    // A room step may be sent back to be fixed: the high figure has its fix rounds.
-    const rounds = p.kind === 'room' ? 1 + FIX_ROUNDS : 1;
+    // A room step may be sent back to be fixed, at most FIX_ROUNDS times.
+    const rounds = p.kind === 'room' ? FIX_ROUNDS : 0;
     let usd: StepEstimate['usd'] = null;
     if (price) {
       const typical: Counts =
@@ -167,17 +168,15 @@ export function estimateRun(
                 output: out.typical,
               }
             : { input, cachedInput: 0, cacheWrite: 0, output: out.typical };
-      usd = {
-        typical: usdOf(typical, price),
-        high: usdOf({ input, cachedInput: 0, cacheWrite: 0, output: out.max }, price) * rounds,
-      };
+      const high = usdOf({ input, cachedInput: 0, cacheWrite: 0, output: out.max }, price);
+      usd = { typical: usdOf(typical, price), high, fix: high * rounds };
     }
     return {
       step: p.step,
       kind: p.kind,
-      input: input,
+      input,
       cacheable,
-      output: { typical: out.typical, high: out.max * rounds + input * (rounds - 1) },
+      output: { typical: out.typical, high: out.max },
       usd,
     };
   });
@@ -191,7 +190,11 @@ export function estimateRun(
       high: sum((s) => s.input + s.output.high),
     },
     usd: price
-      ? { typical: sum((s) => s.usd?.typical ?? 0), high: sum((s) => s.usd?.high ?? 0) }
+      ? {
+          typical: sum((s) => s.usd?.typical ?? 0),
+          high: sum((s) => s.usd?.high ?? 0),
+          fix: sum((s) => s.usd?.fix ?? 0),
+        }
       : null,
     largestInput: Math.max(0, ...steps.map((s) => s.input)),
   };

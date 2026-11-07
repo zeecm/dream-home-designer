@@ -363,8 +363,11 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
               <fieldset className="sleep-grid" aria-label="Who sleeps where">
                 <legend className="field-label">Who sleeps where</legend>
                 {sleepRooms.map((r) => (
-                  <div key={r.id} className="sleep-row">
-                    <span className="sleep-room">{r.name}</span>
+                  // biome-ignore lint/a11y/useSemanticElements: a row of toggles named by its room
+                  <div key={r.id} className="sleep-row" role="group" aria-label={r.name}>
+                    <span className="sleep-room" aria-hidden="true">
+                      {r.name}
+                    </span>
                     <span className="chip-row">
                       {people.map((p) => (
                         <button
@@ -372,7 +375,6 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
                           type="button"
                           className="chip"
                           aria-pressed={sleepsIn(p.key) === r.id}
-                          aria-label={`${p.name} sleeps in ${r.name}`}
                           onClick={() => toggleSleep(r.id, p.key)}
                         >
                           {p.name}
@@ -389,9 +391,9 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
                 <details className="sleep-names">
                   <summary>Names (optional)</summary>
                   <div className="sleep-names-grid">
-                    {people.map((p) => (
-                      <label key={p.key} className="field">
-                        <span className="field-label">
+                    {people.map((p, n) => (
+                      <div key={p.key} className="field">
+                        <span className="field-label" aria-hidden="true">
                           {p.key.startsWith('adult')
                             ? `Adult ${p.key.slice(6)}`
                             : p.key.startsWith('child')
@@ -403,6 +405,7 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
                         <input
                           className="input"
                           maxLength={40}
+                          aria-label={`Name ${n + 1}`}
                           value={nameOf(p.key)}
                           placeholder="Name"
                           onChange={(e) =>
@@ -412,7 +415,7 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
                             })
                           }
                         />
-                      </label>
+                      </div>
                     ))}
                   </div>
                 </details>
