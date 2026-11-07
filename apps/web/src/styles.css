@@ -7725,18 +7725,21 @@ textarea {
 }
 
 .talk-app-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 6px;
   margin: 0;
   font-size: var(--fs-hint);
   color: var(--muted);
 }
 .talk-app-icon {
-  width: 14px;
-  flex: none;
-  text-align: center;
+  display: flex;
+  height: 18px;
+  align-items: center;
+}
+.talk-app-text .link-btn {
+  margin-left: 6px;
 }
 
 .talk-card {
@@ -7906,6 +7909,11 @@ textarea {
   font-size: var(--fs-body);
   line-height: 20px;
   cursor: pointer;
+}
+.talk-row-text,
+.talk-card-fold,
+.talk-scope {
+  -webkit-tap-highlight-color: transparent;
 }
 .talk-row-why {
   flex: none;
@@ -8172,6 +8180,23 @@ textarea {
   flex: none;
 }
 
+.talk-mark {
+  display: inline-block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.chip .talk-mark,
+.talk-lens .talk-mark {
+  margin-right: 4px;
+}
+
 /* The proposal on the plan. */
 .pv-new {
   fill: none;
@@ -8387,6 +8412,10 @@ textarea {
   .talk-row-text {
     min-height: 44px;
     align-items: center;
+  }
+  .pv-legend {
+    bottom: 80px;
+    max-width: calc(100% - 32px);
   }
   .talk-sheet .talk-handle {
     height: 44px;

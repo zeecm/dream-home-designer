@@ -381,7 +381,8 @@ test.describe('desktop', () => {
     await setup(page);
     const held: (() => void)[] = [];
     const m = await mock(page, {
-      reply: (c) => (/Kitchen/.test(c.step) ? new Promise<void>((r) => held.push(r)) : null),
+      reply: (c, n) =>
+        /Kitchen/.test(c.step) && n === 1 ? new Promise<void>((r) => held.push(r)) : null,
     });
     await openSample(page);
     await talk(page);
@@ -405,9 +406,11 @@ test.describe('desktop', () => {
     for (const r of held) r();
     const n = m.calls.length;
     await v1.getByRole('button', { name: /^Design Kitchen too · about US\$/ }).click();
+    await expect.poll(() => m.calls.length, { timeout: 30_000 }).toBeGreaterThan(n);
     await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
       timeout: 30_000,
     });
+    await expect(v1.getByText(/^Stopped before/)).toHaveCount(0);
     expect(m.calls.slice(n).map((c) => c.step)).toEqual(['furnish "Kitchen"']);
   });
 

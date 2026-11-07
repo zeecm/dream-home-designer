@@ -20,6 +20,7 @@ import { tokens, usd } from '../spend';
 import { openCompare, useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
 import { keepTogether } from '../words';
+import { Mark } from './Mark';
 import { acceptCard } from './accept';
 import { type CardModel, cardChanges, cardResult, nowOf, planMoved } from './cards';
 import { finishOption, finishPrice, pressScope, scopePrice, stopTalkRun } from './propose';
@@ -355,13 +356,13 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
           {progress.map((st) => (
             <li key={st.key} className={`talk-progress-${st.status}`}>
               <span className="talk-progress-mark" aria-hidden="true">
-                {st.status === 'done'
-                  ? '✓'
-                  : st.status === 'failed'
-                    ? '!'
-                    : st.status === 'running'
-                      ? '·'
-                      : ''}
+                {st.status === 'done' ? (
+                  <Mark kind="check" />
+                ) : st.status === 'failed' ? (
+                  <Mark kind="warn" />
+                ) : st.status === 'running' ? (
+                  <Mark kind="dot" />
+                ) : null}
               </span>
               {st.label} ·{' '}
               {st.status === 'done'
@@ -604,8 +605,8 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
                   })}
                   {done.map((a) => (
                     <li key={a.id} className="talk-row talk-row-in">
-                      <span className="talk-tick-cell talk-in-mark" aria-hidden="true">
-                        ✓
+                      <span className="talk-tick-cell talk-in-mark">
+                        <Mark kind="check" />
                       </span>
                       <div className="talk-row-body">
                         <span className="talk-row-done">{keepTogether(a.text)}</span>
@@ -623,7 +624,10 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
         <dl className="talk-lens">
           {fixed > 0 && (
             <div className="talk-lens-line">
-              <dd>✓ Checked and fixed {plural(fixed, 'problem')} before showing you this.</dd>
+              <dd>
+                <Mark kind="check" /> Checked and fixed {plural(fixed, 'problem')} before showing
+                you this.
+              </dd>
             </div>
           )}
           <div>
@@ -637,7 +641,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
                     : ''
               }
             >
-              {failingLine?.tone === 'pass' && <span aria-hidden="true">✓ </span>}
+              {failingLine?.tone === 'pass' && <Mark kind="check" />}
               {verdict}
               {fails.already.length > 0 && (
                 <details className="talk-already">

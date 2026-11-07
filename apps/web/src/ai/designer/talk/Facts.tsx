@@ -16,6 +16,7 @@ import {
 import { useState } from 'react';
 import { icons } from '../../../ui/icons';
 import { SWATCHES } from '../BriefDialog';
+import { Mark } from './Mark';
 
 /**
  * The app's own questions as widgets (UX §6.5): steppers for who lives here, people chips per
@@ -276,7 +277,7 @@ function Sleeping({ brief, level, onDone, doneLabel = 'Done', autoFocus }: FactP
                   autoFocus={autoFocus && i === 0 && j === 0}
                   onClick={() => toggle(r.id, p.key)}
                 >
-                  {inRoom(p.key) === r.id && <span aria-hidden="true">✓ </span>}
+                  {inRoom(p.key) === r.id && <Mark kind="check" />}
                   {p.name}
                 </button>
               ))}

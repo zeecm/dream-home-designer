@@ -19,6 +19,7 @@ import { capUsd, usd, useSpend } from '../spend';
 import { useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
 import { FactEditor } from './Facts';
+import { Mark, type MarkKind } from './Mark';
 import { ProposalCard } from './ProposalCard';
 import { lineState, redoLine, undoLine } from './accept';
 import { type CardModel, designCard, optionCard } from './cards';
@@ -256,13 +257,18 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
           App
         </h3>
         <p className="talk-app-line">
-          {what}
-          {t.estimate ? ` · about ${usd(t.estimate.typical)}` : ''}:{' '}
-          {t.state === 'go'
-            ? 'went ahead'
-            : t.state === 'cheaper'
-              ? `just ${first?.label ?? 'one room'}`
-              : 'not now'}
+          <span className="talk-app-icon">
+            <Mark kind="dot" />
+          </span>
+          <span className="talk-app-text">
+            {what}
+            {t.estimate ? ` · about ${usd(t.estimate.typical)}` : ''}:{' '}
+            {t.state === 'go'
+              ? 'went ahead'
+              : t.state === 'cheaper'
+                ? `just ${first?.label ?? 'one room'}`
+                : 'not now'}
+          </span>
         </p>
       </article>
     );
@@ -344,11 +350,11 @@ function Event({ t }: { t: TurnOf<'event'> }) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again as the history moves
   const st = useMemo(() => (e.type === 'accepted' ? lineState(t.id) : null), [e, t.id, history]);
   let text: string;
-  let icon = '✓';
+  let icon: MarkKind = 'check';
   if (e.type === 'accepted') {
     const n = e.changes.length;
     if (e.undone) {
-      icon = '↶';
+      icon = 'undo';
       text = `Undone: the ${plural(n, 'change')} from V${e.n} ${n === 1 ? 'is' : 'are'} out of your renovation.`;
     } else {
       text =
@@ -357,10 +363,10 @@ function Event({ t }: { t: TurnOf<'event'> }) {
           : `You accepted ${n} of ${e.total} changes from V${e.n}.${e.left.length ? ` Left out: ${e.left.slice(0, 3).join(', ')}${e.left.length > 3 ? ` and ${e.left.length - 3} more` : ''}.` : ''}`;
     }
   } else if (e.type === 'stopped') {
-    icon = '■';
+    icon = 'stop';
     text = `Stopped. What’s done is kept.${e.usd ? ` Up to about ${usd(e.usd)} may still be billed.` : ''}`;
   } else {
-    icon = e.type === 'fact' ? '✎' : '·';
+    icon = e.type === 'fact' ? 'edit' : /^Couldn’t/.test(e.text) ? 'warn' : 'dot';
     text = e.text;
   }
   return (
@@ -369,30 +375,32 @@ function Event({ t }: { t: TurnOf<'event'> }) {
         App
       </h3>
       <p className="talk-app-line">
-        <span className="talk-app-icon" aria-hidden="true">
-          {icon}
+        <span className="talk-app-icon">
+          <Mark kind={icon} />
         </span>
-        <span>{text}</span>
-        {st === 'undo' && (
-          <button
-            type="button"
-            className="link-btn"
-            data-undo-line={t.id}
-            onClick={() => undoLine(t.id)}
-          >
-            Undo
-          </button>
-        )}
-        {st === 'redo' && (
-          <button
-            type="button"
-            className="link-btn"
-            data-redo-line={t.id}
-            onClick={() => redoLine(t.id)}
-          >
-            Redo
-          </button>
-        )}
+        <span className="talk-app-text">
+          {text}
+          {st === 'undo' && (
+            <button
+              type="button"
+              className="link-btn"
+              data-undo-line={t.id}
+              onClick={() => undoLine(t.id)}
+            >
+              Undo
+            </button>
+          )}
+          {st === 'redo' && (
+            <button
+              type="button"
+              className="link-btn"
+              data-redo-line={t.id}
+              onClick={() => redoLine(t.id)}
+            >
+              Redo
+            </button>
+          )}
+        </span>
       </p>
     </article>
   );
@@ -462,14 +470,23 @@ export function Log() {
     const el = list.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, []);
-  // New turns: follow them only if the log was at its foot.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: on a new turn or a run's progress
+  // A new turn follows something the person did: the log goes to it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on a new turn
   useLayoutEffect(() => {
     const el = list.current;
     if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    pinned.current = true;
+    setBehind(false);
+  }, [turns.length]);
+  // A run's progress: followed only if the log was at its foot.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on a run's progress
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (!el || !live) return;
     if (pinned.current) el.scrollTop = el.scrollHeight;
     else setBehind(true);
-  }, [turns.length, live?.state.steps.length, proposals]);
+  }, [live?.state.steps, proposals]);
   useEffect(() => {
     const el = list.current;
     if (!el) return;

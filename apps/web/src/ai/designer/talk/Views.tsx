@@ -1,6 +1,7 @@
 import { FACT_LABELS, QUESTION_KEYS, type QuestionKey, bedroomsOf, factText } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { FactEditor } from './Facts';
+import { Mark } from './Mark';
 import { act, newId, nowIso, talkLevel, useTalk } from './useTalk';
 
 /**
@@ -156,17 +157,22 @@ export function Decisions() {
       </form>
       {gone && (
         <output className="talk-app-line">
-          Deleted.{' '}
-          <button
-            type="button"
-            className="link-btn"
-            onClick={() => {
-              void act({ type: 'decisionRestore', id: gone });
-              setGone(null);
-            }}
-          >
-            Undo
-          </button>
+          <span className="talk-app-icon">
+            <Mark kind="check" />
+          </span>
+          <span className="talk-app-text">
+            Deleted.{' '}
+            <button
+              type="button"
+              className="link-btn"
+              onClick={() => {
+                void act({ type: 'decisionRestore', id: gone });
+                setGone(null);
+              }}
+            >
+              Undo
+            </button>
+          </span>
         </output>
       )}
       {list.length === 0 ? (
