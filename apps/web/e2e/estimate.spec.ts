@@ -161,5 +161,11 @@ test.describe('phone', () => {
     expect(Math.abs(place.y - qty.y)).toBeLessThan(4);
     expect(place.y).toBeGreaterThan(label.y + label.height - 2);
     await expect(line.locator('.estimate-place')).toHaveText(/^Ground · /);
+    // With no place or quantity (contingency), the price stays on the label's row.
+    const bare = dialog.locator('.estimate-line', { hasText: 'Contingency (10%)' });
+    const name = await bare.locator('.estimate-label').boundingBox();
+    const price = await bare.locator('.estimate-cost').boundingBox();
+    if (!name || !price) throw new Error('contingency not laid out');
+    expect(Math.abs(name.y - price.y)).toBeLessThan(4);
   });
 });
