@@ -541,17 +541,32 @@ rests while Exact renders. Tests set `window.__DHD_EXACT_TEST__` (size box, samp
   second surface): it removes the specks but **the room loses 15–50% of its light** (a cap of
   1,000 cd/m²: specks 0.05–0.3%, room −20 to −50%; 4,000: 0.06–0.6%, −14 to −40%), since that
   light is real, found only by such paths. So the shown picture spreads them instead
-  (`SplitPass`, `SpreadPass` in `pathtracer.ts`, before exposure and the denoiser): a pixel
-  more than `SPECK` (2.5) times the median of the eight around it keeps 2.5 times that, and
-  its excess is spread over the pixels about it by a Gaussian (σ 1/40 of the picture's width,
-  at most 12 px) weighted by how alike each looks to the speck's own pixel (what stays: colour,
-  and loosely brightness), so a floor's light stays on the floor and doesn't tint the sofa on
-  it (a plain spread failed the pixel test's grey sofa: saturation 0.22). Each speck's share
-  is divided by the weights it hands out before it is gathered, so the picture keeps all its
-  light. Specks in the shown picture: 0.03–0.35% in every scene below (from 1–5%), the room's
-  light as before (within the 64-sample noise). Early on the walls show soft, low mottling
-  where the specks were; it fades as samples add up. The tracer's own sample stays as it
-  was, so the metering and the spike's raw numbers (`raw=1`) are unchanged.
+  (`KeepPass`, `ExcessPass`, `SpreadPass` in `pathtracer.ts`, before exposure and the
+  denoiser; `specks.ts` is the same kernel in TypeScript, with tests): a pixel more than
+  `speckLimit` times the median of the eight around it (2.5 up to Good's 256 samples, then
+  loosening with the square of the samples: 10 at 512, 40 at 1024) keeps that much, and its
+  excess is spread over the pixels about it by a Gaussian (σ 1/40 of the picture's width:
+  **12 px on a real 480-px picture, at most 12**; the spike's 120-px measurements used 3 px)
+  weighted by how alike each looks to the speck's own pixel (colour, and loosely brightness),
+  so a floor's light stays on the floor and doesn't tint the sofa on it (a plain spread
+  failed the pixel test's grey sofa: saturation 0.22). Each speck's share is divided by the
+  weights it hands out before it is gathered, and taps off the picture are mirrored back in
+  at its edge, so the picture keeps all its light and an even picture stays even to its edges
+  (clamped taps, as at 78ac7b0, smeared a corner and didn't keep the light; skipped ones keep
+  it but darken the edges, a uniform field to 0.69 at the edge). A pixel that isn't a finite
+  number counts as black. The passes run once a whole sample (the picture shown between is
+  the last whole sample's; drawing it every tile step cost as much as tracing on SwiftShader),
+  each pixel's look is written once, and `speck = 0` skips them. At 1280 × 720 in headless
+  Chromium (SwiftShader) a whole sample took 11.3 s of tracing (82%), 1.4 s of speck spread
+  (10%) and 1.1 s of display (8%); 15.3 s a sample in all, 12.5 s without the spread, against
+  30.1 and 26.7 s at 78ac7b0 (which drew every tile step). The tiles adapt on the tracer's step
+  alone (the fence goes in before the picture is drawn): 3 4 4 4 4 4 a side over six samples
+  with the spread and without. `release()` shrinks its targets to 1 × 1. Specks as shown:
+  0.04% at 256 samples where the raw picture has 2.1% (the sample flat's living room at 4 pm,
+  160 × 120), 0.10% at 1024 (raw 0.05%): there, a window's corner, 6 times its neighbours,
+  stands at its full 841 cd/m² (cut to 346 at the 2.5 limit). Early on the walls show soft,
+  low mottling where the specks were; it fades as samples add up. The tracer's own sample
+  stays as it was, so the metering and the spike's raw numbers (`raw=1`) are unchanged.
 - **Measured (7 Nov; spike on SwiftShader, 120 × 90, 6 Nov sun):** black = pixels with no light
   at all, specks = over 4× their 5 × 5 neighbourhood's median, of the raw samples or of the
   picture as shown (specks spread; both linear, before the denoiser); room = the mean over the reference's room pixels (under 5× its median, so not
@@ -562,20 +577,21 @@ rests while Exact renders. Tests set `window.__DHD_EXACT_TEST__` (size box, samp
 
   | scene | before, 32 / 64 samples: black; specks (raw) | 34e204a at 64: specks (raw); room vs reference | now, 32 / 64: black; specks (shown) | now, room at 64 vs reference |
   |---|---|---|---|---|
-  | sample flat, living, noon | 28 / 10%; 23 / 13% | 1.3%; −1% | 0 / 0%; 0.08 / 0.07% | 156 vs 166 (−7%) |
-  | sample flat, living, 4 pm | 26 / 10%; 19 / 10% | 1.7%; +4% | 0 / 0%; 0.06 / 0.03% | 121 vs 113 (+8%) |
-  | sample flat, walk (8.16, 4.6) north, noon | 28 / 10%; 24 / 11% | 1.1%; −12% | 0 / 0%; 0.04 / 0.05% | 192 vs 198 (−3%) |
-  | *held out:* 4-room, living (west window), 10 am | 41 / 18%; 29 / 15% | 0.5%; −13% | 0 / 0%; 0.25 / 0.34% | 67 vs 77 (−12%) |
-  | *held out:* 4-room, master bedroom, 3 pm | 29 / 11%; 23 / 14% | 2.7%; −30% | 0 / 0%; 0.07 / 0.07% | 126 vs 168 (**−25%**) |
-  | *held out:* furnished sample, living, 9 am | 35 / 17%; 26 / 15% | 1.6%; −1% | 0 / 0%; 0.18 / 0.35% | 85 vs 88 (−3%) |
-  | *held out:* furnished sample, living, 4 pm | 32 / 13%; 26 / 13% | 4.9%; +6% | 0 / 0%; 0.26 / 0.27% | 108 vs 108 (0%) |
+  | sample flat, living, noon | 28 / 10%; 23 / 13% | 1.3%; −1% | 0 / 0%; 0.06 / 0.06% | 158 vs 166 (−5%) |
+  | sample flat, living, 4 pm | 26 / 10%; 19 / 10% | 1.7%; +4% | 0 / 0%; 0.06 / 0.03% | 120 vs 113 (+7%) |
+  | sample flat, walk (8.16, 4.6) north, noon | 28 / 10%; 24 / 11% | 1.1%; −12% | 0 / 0%; 0.06 / 0.06% | 181 vs 198 (−9%) |
+  | *held out:* 4-room, living (west window), 10 am | 41 / 18%; 29 / 15% | 0.5%; −13% | 0 / 0%; 0.14 / 0.08% | 67 vs 77 (−13%) |
+  | *held out:* 4-room, master bedroom, 3 pm | 29 / 11%; 23 / 14% | 2.7%; −30% | 0 / 0%; 0.30 / 0.03% | 128 vs 168 (**−24%**) |
+  | *held out:* furnished sample, living, 9 am | 35 / 17%; 26 / 15% | 1.6%; −1% | 0 / 0%; 0.13 / 0.09% | 73 vs 88 (−18%; again: 88, 0%) |
+  | *held out:* furnished sample, living, 4 pm | 32 / 13%; 26 / 13% | 4.9%; +6% | 0 / 0%; 0.33 / 0.11% | 128 vs 108 (+18%; again: 100, −7%) |
 
   **This table is the regression baseline** (`phase3.sh`-style runs: the spike's `portals=1`,
   `clamp=auto`, its default speck spread, against `portals=0` at 1024). Room numbers at 64
-  samples move by about ±10% from run to run (the room's light partly found by chance), so
-  compare a few runs. So: no black pixels; specks, as shown, 0.03–0.35% (from 10–15% before
-  the portals, 1–5% at 34e204a); the room's light within 12% of the reference in six scenes
-  of seven, held-out ones included. **Accepted slice-1 limit: the 4-room master bedroom at
+  samples move by up to ±20% from run to run in the furnished scenes (the sun's patches on
+  the furniture light the room by chance), about ±10% in the others, so compare a few runs
+  (the furnished ones were run twice here). So: no black pixels; specks, as shown,
+  0.03–0.33% (from 10–15% before the portals, 1–5% at 34e204a); the room's light within the
+  64-sample noise of the reference in six scenes of seven, held-out ones included. **Accepted slice-1 limit: the 4-room master bedroom at
   3 pm is 23–30% dark** (its own fit would be about 1.0, against 0.37): the ground's share is
   the weak part. An even light in the window sends the ground's light down onto the floor as
   much as up to the ceiling, where the real light goes up, so how much reaches the camera's
@@ -586,9 +602,9 @@ rests while Exact renders. Tests set `window.__DHD_EXACT_TEST__` (size box, samp
   `flat=hdb4`, `room=`, `pose=`, `clamp=auto`, `speck=`, `raw=1`, `gk=`, `nosun=1`, `mis=0`,
   `glow=0`, `darkground=1`; it writes each pixel's luminance for comparing. The app's own
   picture (the walk at 4 pm, 48 samples, 480 × 420): specks 1.55% at 34e204a, 0.01% now
-  (390 × 844 phone, 32 samples: 0.63% and 0.03%; display values, over 1.6× their 5 × 5
-  median). The spread is five more full-size passes each time the picture is drawn: nothing
-  on a GPU, but on SwiftShader the desktop dialog's 48 samples took 4:14 against 3:01.
+  (390 × 844 phone, 32 samples: 0.63% and 0.02%; display values, over 1.6× their 5 × 5
+  median). That dialog's 48 samples took 3:24 on SwiftShader, against 4:14 at 78ac7b0 (the
+  spread every tile step) and 3:01 at 34e204a (no spread).
 - **Tests:** `e2e/exact.spec.ts` (about 3 min under SwiftShader: one dialog flow (stop, carry
   on, switch and back with the frame and focus kept, kept renders per camera, a context reset,
   close and reopen; the picture kept after a reset is a metered one, not mostly black: the

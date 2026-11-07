@@ -386,7 +386,15 @@ async function main() {
         }
         if (!tAt32 && engine.samples >= 32) tAt32 = performance.now();
         const whole = Math.floor(engine.samples);
-        if ((whole === 32 || whole === 64 || whole === TARGET) && !measured.has(whole)) {
+        // `costs=1`: the tiles a side at each whole sample (they adapt to the step's time).
+        if (q.get('costs') === '1' && Number.isInteger(engine.samples) && !tiled.has(whole)) {
+          tiled.add(whole);
+          tileLog.push((engine as unknown as { tiles: number }).tiles);
+        }
+        if (
+          (whole === 32 || whole === 64 || whole === 256 || whole === TARGET) &&
+          !measured.has(whole)
+        ) {
           measured.add(whole);
           const inner = engine as unknown as {
             renderer: { readRenderTargetPixels: (...a: unknown[]) => void };
@@ -394,7 +402,8 @@ async function main() {
             spread: { width: number; height: number };
           };
           // The traced light as shown (specks spread), or with `raw=1` as traced.
-          const t = q.get('raw') === '1' ? inner.inner._pathTracer.target : inner.spread;
+          const raw = q.get('raw') === '1' || q.get('speck') === '0';
+          const t = raw ? inner.inner._pathTracer.target : inner.spread;
           const px = new Float32Array(t.width * t.height * 4);
           inner.renderer.readRenderTargetPixels(t, 0, 0, t.width, t.height, px);
           const st = stats(px, t.width, t.height);
@@ -420,8 +429,57 @@ async function main() {
       };
       requestAnimationFrame(frame);
     });
+  const tiled = new Set<number>();
+  const tileLog: number[] = [];
   await loop();
   const done = performance.now();
+  if (q.get('costs') === '1') {
+    log(`tiles a side at each whole sample: ${tileLog.join(' ')}`);
+    // What a whole sample costs the tracer, and what the speck spread and the display cost,
+    // each to the GPU's end (finish).
+    const e = engine as unknown as {
+      renderer: { getContext(): WebGL2RenderingContext };
+      inner: { _pathTracer: { update(): void; samples: number } };
+      spreadAt: number;
+      show(): void;
+    };
+    const gl = e.renderer.getContext();
+    // A pixel read back waits for everything drawn before it.
+    const px = new Uint8Array(4);
+    const sync = () => gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const time = (f: () => void) => {
+      sync();
+      const t = performance.now();
+      f();
+      sync();
+      return performance.now() - t;
+    };
+    const full = e.inner._pathTracer;
+    let steps = 0;
+    const start = full.samples;
+    const trace = time(() => {
+      while (full.samples < start + 1 - 1e-9) {
+        full.update();
+        steps++;
+      }
+    });
+    const showOnly: number[] = [];
+    const withSpread: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      showOnly.push(time(() => e.show()));
+      e.spreadAt = -1;
+      withSpread.push(time(() => e.show()));
+    }
+    const mid = (a: number[]) => [...a].sort((x, y) => x - y)[1] ?? 0;
+    const shown = mid(showOnly);
+    const spread = mid(withSpread) - shown;
+    // Each drawn once a whole sample (spread, then tone mapped and denoised).
+    const frame = trace + spread + shown;
+    const pc = (v: number) => ((100 * v) / frame).toFixed(1);
+    log(
+      `costs at ${W}x${H}, a whole sample: tracing ${trace.toFixed(0)} ms in ${steps} steps (${pc(trace)}%), the speck spread ${spread.toFixed(0)} ms (${pc(spread)}%), the display ${shown.toFixed(0)} ms (${pc(shown)}%)`,
+    );
+  }
   const spp = (TARGET - 1) / ((done - firstFull) / 1000);
   log(
     `${TARGET} samples: ${(done - t0).toFixed(0)} ms total; ${spp.toFixed(2)} samples/s after the first`,

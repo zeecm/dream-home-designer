@@ -188,6 +188,14 @@ export function sampleClamp(daylight: Daylight): number {
 }
 
 /**
+ * The cap on one sample (cd/m²): the cap for each light (`sampleClamp`) times the lights the
+ * tracer picks among (`lightChoices`), since it scales what one light gives by their count.
+ */
+export function sampleCap(each: number, choices: number): number {
+  return each * Math.max(1, choices);
+}
+
+/**
  * How many lights the tracer picks among for each sample, by its own rule (three-gpu-pathtracer
  * 0.0.23, `getLights` and the shader's `lightsDenom`): every visible rect area, spot, point and
  * directional light, whatever its intensity, and the sky if it lights the scene. It picks one

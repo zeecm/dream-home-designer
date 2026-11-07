@@ -22,6 +22,7 @@ export {
   groundRadiance,
   GLASS_PASSES,
   sampleClamp,
+  sampleCap,
   skyRadiance,
   skyTexture,
 } from './exactScene';

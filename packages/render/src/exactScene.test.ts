@@ -36,6 +36,7 @@ import {
   portalLight,
   portalLights,
   portalRadiance,
+  sampleCap,
   sampleClamp,
   skyOnGround,
   sunOnGround,
@@ -510,11 +511,14 @@ describe('portals: the sky’s light through its openings', () => {
     const sun = noon.sun;
     if (!sun) throw new Error('no sun');
     // The tracer picks one light of n and scales its find by n: a white floor square to the
-    // sun, its one direct sample.
-    const direct = n * (1 / Math.PI) * sun.intensity;
-    expect(direct).toBeLessThan(n * sampleClamp(noon));
-    // Without the sky's scale, it would be cut (the bug this guards against).
-    expect(direct).toBeGreaterThan(sampleClamp(noon));
+    // sun (in full, no glass), its one direct sample, for any count of lights.
+    for (const k of [1, 2, 8, n, 40]) {
+      const direct = k * (1 / Math.PI) * sun.intensity;
+      expect(direct, `${k} lights`).toBeLessThan(sampleCap(sampleClamp(noon), k));
+      // Not scaled by the count, the cap would cut it (the bug this guards against).
+      if (k >= 2) expect(direct).toBeGreaterThan(sampleCap(sampleClamp(noon), 1));
+    }
+    expect(sampleCap(100, 0)).toBe(100);
     lit.dispose();
     const open = buildExactScene(level, { ceilings: false, daylight: noon, lamps: false });
     expect(lightChoices(open.scene)).toBe(2);
