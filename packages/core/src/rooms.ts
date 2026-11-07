@@ -126,6 +126,8 @@ export interface RoomShape {
   outer: Vec2[];
   /** Free-standing enclosures inside the room, which are not part of its floor. */
   holes: Vec2[][];
+  /** The holes as loops of vertex ids, as `holes` (the room on the left going round). */
+  holeLoops: string[][];
 }
 
 const shapeCache = new WeakMap<object, Map<string, RoomShape>>();
@@ -153,7 +155,12 @@ export function roomShapes(level: Level): Map<string, RoomShape> {
   );
   const out = new Map<string, RoomShape>();
   rooms.forEach((r, i) => {
-    out.set(r.id, { outer: r.loop.map(pos), holes: (holes.get(i) ?? []).map((h) => h.map(pos)) });
+    const loops = holes.get(i) ?? [];
+    out.set(r.id, {
+      outer: r.loop.map(pos),
+      holes: loops.map((h) => h.map(pos)),
+      holeLoops: loops,
+    });
   });
   if (cacheable) shapeCache.set(level, out);
   return out;
@@ -161,7 +168,7 @@ export function roomShapes(level: Level): Map<string, RoomShape> {
 
 /** The room's outline and holes; an empty shape if its loop references a missing corner. */
 export function roomShape(level: Level, room: Room): RoomShape {
-  return roomShapes(level).get(room.id) ?? { outer: [], holes: [] };
+  return roomShapes(level).get(room.id) ?? { outer: [], holes: [], holeLoops: [] };
 }
 
 /** Floor area in m², measured to wall centre lines, less any free-standing enclosures. */

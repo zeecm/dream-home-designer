@@ -1,3 +1,4 @@
+import { isDraft } from 'immer';
 import {
   type FurnitureKind,
   furnitureKind,
@@ -625,6 +626,70 @@ export function mainDoors(level: Level, geom = planGeometry(level)): string[] {
 export function entranceDoor(level: Level, geom = planGeometry(level)): string | null {
   const first = mainDoors(level, geom)[0];
   return first && outsideOpenings(level, geom).has(first) ? first : null;
+}
+
+/** How a room is entered: by a door (or passage), or across a room boundary from `openTo`. */
+export interface RoomEntry {
+  door: RouteDoor | null;
+  /** Reached without a door, across a boundary: the room the way came from. */
+  openTo?: string;
+}
+
+const entriesCache = new WeakMap<object, { graph: DoorGraph; entries: Map<string, RoomEntry> }>();
+
+/**
+ * How each room is entered from the flat's main door: the last door on the fewest-doors route
+ * (the one you come into the room by), or, for a room reached across a boundary, the room it is
+ * open to; with no route, the room's widest door, or none. The main door's own room enters by
+ * it. Also returns the door graph, its doors sorted by id. Cached per frozen level.
+ */
+export function roomEntries(
+  level: Level,
+  geom: PlanGeometry = planGeometry(level),
+): { graph: DoorGraph; entries: Map<string, RoomEntry> } {
+  const cacheable = !isDraft(level) && Object.isFrozen(level);
+  const cached = cacheable && entriesCache.get(level);
+  if (cached) return cached;
+  const graph = doorGraph(level, geom);
+  graph.doors.sort((a, b) => (a.o.id < b.o.id ? -1 : a.o.id > b.o.id ? 1 : 0));
+  const main = entranceDoor(level, geom);
+  const start = graph.doors.find((d) => d.o.id === main);
+  const startRoom = start ? (start.sides[0] ?? start.sides[1]) : null;
+  const prev: Map<string, RouteStep> =
+    start && startRoom ? doorSearch(graph, startRoom, { skip: start }) : new Map();
+  const entries = new Map<string, RoomEntry>();
+  const shapes = roomShapes(level);
+  const rooms = Object.values(level.rooms)
+    .filter((r) => shapes.has(r.id))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  for (const r of rooms) {
+    if (start && r.id === startRoom) {
+      entries.set(r.id, { door: start });
+      continue;
+    }
+    const route = routeTo(prev, r.id);
+    if (route) {
+      const last = route.at(-1);
+      if (last && last.into === r.id) {
+        entries.set(r.id, { door: last.door });
+        continue;
+      }
+      // Across a boundary: open to the room the way came from.
+      let at = r.id;
+      for (let step = prev.get(at); step && !step.door; step = prev.get(at)) at = step.room;
+      if (at !== r.id) {
+        entries.set(r.id, { door: null, openTo: at });
+        continue;
+      }
+    }
+    const own = graph.doors
+      .filter((d) => d.sides.includes(r.id))
+      .sort((a, b) => clearWidth(b.o) - clearWidth(a.o));
+    entries.set(r.id, { door: own[0] ?? null });
+  }
+  const out = { graph, entries };
+  if (cacheable) entriesCache.set(level, out);
+  return out;
 }
 
 /**
