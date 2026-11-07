@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { depthOff, largestSquare, sideAt, squareAt } from './ageing-zones';
 import { CLEARANCE_RULES, fixedParts, ruleSide } from './clearance';
 import { type Side, box, nearestOnPolygon, overlapDepth, sideOf, zoneOf } from './convex';
@@ -1538,4 +1539,27 @@ export function ageingSupersedes(walk: WalkwayReport, age: AgeingReport): Set<st
     }
   }
   return out;
+}
+
+/**
+ * What a browser remembers of the check for a project (slice 1 keeps it per browser, not in
+ * the project): the profile (off by default), the rooms chosen, the flat type for EASE.
+ */
+export const AgeingSetting = z.object({
+  profile: z.enum(['off', 'walking', 'wheelchair']),
+  bedroomId: z.string().optional(),
+  bathroomId: z.string().optional(),
+  flatType: z.enum(['1-3', '4', '5', 'exec', 'none']).optional(),
+});
+export type AgeingSetting = z.infer<typeof AgeingSetting>;
+
+/** A stored setting, or Off for anything missing or unreadable. */
+export function parseAgeingSetting(raw: string | null | undefined): AgeingSetting {
+  if (!raw) return { profile: 'off' };
+  try {
+    const r = AgeingSetting.safeParse(JSON.parse(raw));
+    return r.success ? r.data : { profile: 'off' };
+  } catch {
+    return { profile: 'off' };
+  }
 }
