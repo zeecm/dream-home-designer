@@ -84,6 +84,14 @@ export const DesignBrief = z.object({
       wish: z.string().max(200),
     }),
   ),
+  /**
+   * Who sleeps where: room id of the starting level to the people sleeping there (person
+   * keys, `peopleOf`). Empty: not said (the checks assume, and say so). Absent in briefs
+   * saved before.
+   */
+  sleeping: z.record(z.array(z.string().max(20)).max(12)).default({}),
+  /** What to call each person (by person key), for the checks' lines. */
+  names: z.record(z.string().max(40)).default({}),
   electrical: z.boolean(),
   start: z.enum(['after', 'before']),
   quality: z.enum(['thorough', 'quick']),
@@ -101,6 +109,8 @@ export const defaultBrief = (): DesignBrief => ({
   walls: 'allowed',
   keep: { items: {}, text: '' },
   rooms: {},
+  sleeping: {},
+  names: {},
   electrical: true,
   start: 'after',
   quality: 'thorough',

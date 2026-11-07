@@ -15,6 +15,7 @@ import { walkwayReport } from '../walkway';
 import { aspectOf } from './accept';
 import { type AliasMap, resolveAlias } from './aliases';
 import { fixedSize, priorityOf, resolveAsset } from './catalogue';
+import { type DesignCheck, designChecks } from './checks';
 import { bathroomsHeld, heldAspects, wallsHeld } from './handEdits';
 import { WET } from './locks';
 import { type Want, addToIndex, nameOf, placePiece, spaceIndex } from './place';
@@ -50,6 +51,14 @@ export interface DesignProblem {
   openingId?: string;
 }
 
+/** A check on the version's level: caused by it, or already in the plan it was made on. */
+export interface ResultCheck extends DesignCheck {
+  /** In the plan before, and not touched by the version: never blocks it. */
+  already: boolean;
+  /** The part of the version it belongs to, for Accept (null: the whole plan's). */
+  part: { space: string; aspect: 'furniture' | 'built-ins' } | { aspect: 'walls' } | null;
+}
+
 export interface ResultSpace extends Space {
   /** How its step went; 'missing' when the version has no answer for it. */
   status: SpaceStatus | 'missing';
@@ -78,6 +87,10 @@ export interface DesignResult {
   /** Structural walls the version changes (the brief allowed it). */
   structural: string[];
   problems: DesignProblem[];
+  /** The design checks (P1–P4 and HDB rules), each caused by the version or already there. */
+  checks: ResultCheck[];
+  /** No hard check the version caused fails (waivers aside). */
+  passes: boolean;
   cost: CostEstimate;
   points: Suggestion[];
   budget: 'within' | 'over' | 'unknown';
@@ -659,6 +672,50 @@ function work(
     });
   }
 
+  // The design checks, and which of them the plan already had before this version.
+  const designedRooms = new Set(
+    resultSpaces.filter((s) => s.storedKey && s.status !== 'missing').flatMap((s) => s.rooms),
+  );
+  const baseKeys = new Set(designChecks(start, { brief }).map((c) => c.key));
+  const unchanged = (id: string) => {
+    const a = level.items[id];
+    const b = start.items[id];
+    return (
+      !!a &&
+      !!b &&
+      a.assetId === b.assetId &&
+      Math.abs(a.position.x - b.position.x) < 1e-3 &&
+      Math.abs(a.position.z - b.position.z) < 1e-3 &&
+      Math.abs(a.rotationY - b.rotationY) < 1e-3
+    );
+  };
+  const spaceKeyOf = (roomId: string | null) =>
+    roomId ? (resultSpaces.find((s) => s.rooms.includes(roomId))?.key ?? null) : null;
+  const checks: ResultCheck[] = designChecks(level, {
+    brief,
+    uses,
+    clearance: issues,
+    walk,
+  }).map((c) => {
+    const already =
+      baseKeys.has(c.key) &&
+      (c.itemId ? unchanged(c.itemId) : c.roomId ? !designedRooms.has(c.roomId) : true);
+    const it = c.itemId ? level.items[c.itemId] : undefined;
+    let part: ResultCheck['part'] = null;
+    if (it) {
+      const key = spaceKeyOf(roomIdAt(level, centreOf(it)));
+      const aspect = aspectOf(it);
+      if (key && (aspect === 'furniture' || aspect === 'built-ins')) part = { space: key, aspect };
+    } else if (c.key.startsWith('P1|window')) {
+      part = { aspect: 'walls' };
+    } else if (c.roomId) {
+      const key = spaceKeyOf(c.roomId);
+      if (key) part = { space: key, aspect: 'furniture' };
+    }
+    return { ...c, already, part };
+  });
+  const passes = !checks.some((c) => c.hard && !c.already);
+
   // 6. Cost, against the brief's budget.
   const cost = costEstimate(before, level, opts.rates ?? TYPICAL_RATES);
   const budget = !brief.budget ? 'unknown' : cost.low > brief.budget.high ? 'over' : 'within';
@@ -681,6 +738,8 @@ function work(
     notes,
     structural: walls.structural,
     problems,
+    checks,
+    passes,
     cost,
     points,
     budget,

@@ -10,6 +10,28 @@ export {
   resolveAlias,
 } from './aliases';
 export { categoriesFor, catalogueText, priorityOf, resolveAsset } from './catalogue';
+export {
+  type CheckOptions,
+  type DesignCheck,
+  type Principle,
+  designChecks,
+  usesOf,
+} from './checks';
+export {
+  CIRCULATION,
+  FIT,
+  PROGRAMMES,
+  RELATIONS,
+  type Person,
+  type Programme,
+  type Relation,
+  type Role,
+  type SleepingPlan,
+  peopleOf,
+  relationOf,
+  roleOf,
+  sleepingPlan,
+} from './principles';
 export { briefData, compass, designContext, planForDesign, type ContextInput } from './describe';
 export { type WallLock, designLocks, wallLocks } from './locks';
 export {
@@ -59,6 +81,7 @@ export {
   type DesignOptions,
   type DesignProblem,
   type DesignResult,
+  type ResultCheck,
   type ResultSpace,
   designResult,
   isFloorFinish,
