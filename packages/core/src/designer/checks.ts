@@ -493,7 +493,16 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
         .filter((q) => ap.from.includes(q.role) && blocks(q.it))
         .map((q) => ({ q, d: Math.min(...group.map((g) => polygonGap(g, q.fp).d)) }))
         .sort((a, b) => a.d - b.d)[0];
-      if (close && close.d < ap.gap - 0.005) {
+      if (close && close.d < ap.hard - 0.005) {
+        out.push({
+          key: `P2|apart|${p.it.id}`,
+          principle: 'P2',
+          hard: true,
+          waivable: true,
+          text: `Not enough room to walk between the ${name} and the ${nameOf(close.q.kind)}: ${m(ap.hard)} needed, ${m(close.d)} left.`,
+          itemId: p.it.id,
+        });
+      } else if (close && close.d < ap.gap - 0.005) {
         out.push({
           key: `P2|apart|${p.it.id}`,
           principle: 'P2',
@@ -628,7 +637,9 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
             for (const t of tables) {
               const at = chairs.filter((c) => polygonGap(c.fp, t.fp).d <= 0.3).length;
               places +=
-                t.kind.id === 'bistro-set' ? 2 : Math.min(placesOf(t.kind, t.size.w, t.size.d), at);
+                t.kind.id === 'bistro-set' || t.kind.id === 'dining-bench-2'
+                  ? 2
+                  : Math.min(placesOf(t.kind, t.size.w, t.size.d), at);
             }
             if (want > 0 && !tables.length) {
               need('dining', r.id, `${r.name} has no dining table for the household.`, hard);

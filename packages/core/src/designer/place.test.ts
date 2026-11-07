@@ -454,12 +454,12 @@ describe('determinism (criterion 17)', () => {
   });
 });
 
-/** 40 pieces for the sample: the fixtures' 30 and 10 more chairs and plants in the living room. */
+/** 40 pieces for the sample: the fixtures' 29 and 11 more chairs and plants in the living room. */
 function fortyPieces(): Record<string, SpaceDesign> {
   const answers = sampleAnswers();
   const living = answers[SAMPLE_KEYS.living]!;
   const extra = answer(
-    Array.from({ length: 10 }, (_, i) => ({
+    Array.from({ length: 11 }, (_, i) => ({
       ref: `x${i}`,
       assetId: i % 2 ? 'plant' : 'dining-chair',
       at: { x: 7 + (i % 3) * 0.9, y: 3.6 + Math.floor(i / 3) * 0.6 },

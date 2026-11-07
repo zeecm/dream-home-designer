@@ -64,6 +64,7 @@ export const CLEARANCE_RULES: Record<string, ClearanceRule> = {
 export const DINING_TABLES = new Set([
   'dining-4',
   'dining-6',
+  'dining-extendable',
   'wooden-table',
   'pedestal-table-round',
 ]);
@@ -123,7 +124,7 @@ export const issueItem = (i: ClearanceIssue): string | null => ('itemId' in i ? 
 
 /** Pieces that sit under a table or desk, and the tables and desks they sit under. */
 const SEAT = /dining-chair|desk-chair|stool|plastic-chair/;
-const TABLE = /table|desk|dining-\d/;
+const TABLE = /table|desk|dining-(\d|extendable|bench)/;
 /** Pieces of a kitchen run: cabinets, and the fridge and washer that stand in line with them. */
 const isKitchen = (id: string) =>
   id.startsWith('kitchen-') || id === 'built-in-kitchen-base' || id === 'fridge' || id === 'washer';

@@ -528,7 +528,7 @@ describe('fix rounds: the app checks each answer before it is shown (designer v2
       /- \["sofa1"\] "The 3-seat sofa faces the wall, 0\.\d\d m away: it needs 1\.20 m clear in front\."/,
     );
     const space = Object.values(design.spaces).find((s) => s.name.startsWith('Living'));
-    expect(space).toMatchObject({ status: 'done', fixes: 1, fixed: 3 });
+    expect(space).toMatchObject({ status: 'done', fixes: 1, fixed: 5 });
     // Both requests are metered, under the room's step.
     const key = Object.keys(design.spaces).find((k) => design.spaces[k] === space);
     expect(state.usage.filter((u) => u.step === key)).toHaveLength(2);

@@ -7,6 +7,7 @@ import type { Level } from '../schema';
 import { aliasesFor } from './aliases';
 import ownerBedroom from './benchmark/answers/owner-bedroom.json';
 import ownerDiningFix from './benchmark/answers/owner-dining-fix.json';
+import ownerDining from './benchmark/answers/owner-dining.json';
 import sampleBedroom from './benchmark/answers/sample-bedroom.json';
 import sampleKitchen from './benchmark/answers/sample-kitchen.json';
 import sampleLiving from './benchmark/answers/sample-living.json';
@@ -221,7 +222,7 @@ describe('the solver', () => {
     expect(warm).toBeLessThan(process.env.PERF ? 150 : 600);
   });
 
-  describe('owner 7 Nov: the dining jammed against the sofa (P2 apart, 0.90 m)', () => {
+  describe('owner 7 Nov: the dining jammed against the sofa (P2 apart: 0.60 m, 0.90 m advised)', () => {
     /** The gap between the dining group (table and chairs) and the lounge pieces. */
     const zoneGap = (r: ReturnType<typeof run>) => {
       const [table] = byRole(r, 'dining-table');
@@ -232,44 +233,95 @@ describe('the solver', () => {
         .map((it) => itemFootprint(it));
       return Math.min(...group.flatMap((g) => lounge.map((l) => polygonGap(g, l).d)));
     };
-
-    it('kept wherever a pose keeps it: in a living room 1.25 m wider, the dining is on open floor', () => {
-      // The sample with the living room's east wall moved out from x 10.15 to 11.40.
-      const vertices = Object.fromEntries(
+    /** The sample with the living room's east wall at x (10.15 as drawn). */
+    const withEastWall = (x: number): Level => ({
+      ...level,
+      vertices: Object.fromEntries(
         Object.entries(level.vertices).map(([k, v]) => [
           k,
-          Math.abs(v.x - 10.152) < 0.01 ? { ...v, x: 11.4 } : v,
+          Math.abs(v.x - 10.152) < 0.01 ? { ...v, x } : v,
         ]),
-      );
-      const wide: Level = { ...level, vertices };
-      const a = parsed(parseSpaceDesign(sampleLiving, levelBounds(wide)));
-      const r = designResult(wide, wide, {
+      ),
+    });
+    const runOn = (lvl: Level, raw: unknown, brief: typeof ONGS, id: string) =>
+      designResult(lvl, lvl, {
         ...sampleDesign({
-          level: wide,
-          answers: { [SAMPLE_KEYS.living]: a },
-          brief: ONGS,
+          level: lvl,
+          answers: { [SAMPLE_KEYS.living]: parsed(parseSpaceDesign(raw, levelBounds(lvl))) },
+          brief,
           concept: null,
-          id: 'dsn_apart_wide',
+          id,
         }),
-        aliases: aliasesFor(wide),
+        aliases: aliasesFor(lvl),
       });
+    const couple = {
+      ...defaultBrief(),
+      household: { ...defaultBrief().household, adults: 2, children: [] },
+    };
+    const swaps = (r: ReturnType<typeof run>) =>
+      r.repaired.filter((n) => n.text.startsWith('Swapped')).map((n) => n.text);
+
+    it('the sample: the dining group keeps 0.60 m from the lounge, all four chairs, no swap', () => {
+      const r = run(SAMPLE_KEYS.living, v2(sampleLiving), ONGS, 'dsn_apart_sample');
+      expect(byRole(r, 'dining-chair')).toHaveLength(4);
+      expect(zoneGap(r)).toBeGreaterThanOrEqual(0.6 - 0.005);
+      const [table] = byRole(r, 'dining-table');
+      expect(pointInPolygon({ x: table!.position.x, y: table!.position.z }, PASSAGE)).toBe(false);
+      expect(swaps(r)).toEqual([]);
+      expect(r.checks.filter((c) => c.hard && !c.already)).toEqual([]);
+    });
+
+    it('the owner’s table for six: swapped for an extendable table, said in a line, 0.60 m kept', () => {
+      const r = run(SAMPLE_KEYS.living, v2(ownerDining), {
+        ...defaultBrief(),
+        household: { ...defaultBrief().household, adults: 2, children: ['primary', 'teen'] },
+      });
+      const [table] = byRole(r, 'dining-table');
+      expect(table?.assetId).toBe('dining-extendable');
+      expect(swaps(r)).toEqual([
+        'Swapped the dining table, 6 seats for an extendable table to keep 0.60 m to the sofa: it fits 4, and 6 with the table pulled out.',
+      ]);
+      expect(zoneGap(r)).toBeGreaterThanOrEqual(0.6 - 0.005);
+      expect(r.checks.filter((c) => c.hard && !c.already)).toEqual([]);
+    });
+
+    it('in a living room 1.25 m wider, the dining is on open floor, 0.90 m from the lounge', () => {
+      const r = runOn(withEastWall(11.4), sampleLiving, ONGS, 'dsn_apart_wide');
       expect(byRole(r, 'dining-chair')).toHaveLength(4);
       expect(zoneGap(r)).toBeGreaterThanOrEqual(0.9 - 0.005);
       expect(r.checks.filter((c) => c.key.startsWith('P2|apart'))).toEqual([]);
       expect(r.checks.filter((c) => c.hard && !c.already)).toEqual([]);
     });
 
-    it('where no pose keeps it (the sample), it is advice and the dining stays off the passage', () => {
-      const r = run(SAMPLE_KEYS.living, v2(sampleLiving), ONGS, 'dsn_apart_tight');
-      const [table] = byRole(r, 'dining-table');
-      expect(table).toBeDefined();
-      expect(pointInPolygon({ x: table!.position.x, y: table!.position.z }, PASSAGE)).toBe(false);
-      const advice = r.checks.find((c) => c.key.startsWith('P2|apart'));
-      expect(advice?.hard).toBe(false);
-      expect(advice?.text).toMatch(
-        /^Leave 0\.90 m between the dining table, 4 seats and the .+: 0\.\d\d m now\.$/,
+    it('0.35 m narrower, for a couple: a wall-side table with a bench takes the table’s place', () => {
+      const r = runOn(withEastWall(9.8), sampleLiving, couple, 'dsn_apart_couple');
+      expect(swaps(r)).toEqual([
+        'Swapped the dining table, 4 seats for a wall-side table with a bench for two to keep 0.60 m to the sofa.',
+      ]);
+      expect(byRole(r, 'dining-table')[0]?.assetId).toBe('dining-bench-2');
+      expect(zoneGap(r)).toBeGreaterThanOrEqual(0.6 - 0.005);
+      expect(r.checks.filter((c) => c.key.startsWith('P2|apart') && c.hard)).toEqual([]);
+    });
+
+    it('0.65 m narrower, for a couple: the 2-seat sofa as well', () => {
+      const r = runOn(withEastWall(9.5), sampleLiving, couple, 'dsn_apart_couple2');
+      expect(swaps(r)).toEqual([
+        'Swapped the dining table, 4 seats for a wall-side table with a bench for two to keep 0.60 m to the sofa.',
+        'Swapped the 3-seat sofa for a 2-seat to keep 0.60 m to the dining table.',
+      ]);
+      expect(byRole(r, 'sofa')[0]?.assetId).toBe('sofa-2');
+      expect(r.checks.filter((c) => c.key.startsWith('P2|apart') && c.hard)).toEqual([]);
+    });
+
+    it('0.35 m narrower, for four: nothing smaller seats them, so the check fails (never a silent gap)', () => {
+      const r = runOn(withEastWall(9.8), sampleLiving, ONGS, 'dsn_apart_four');
+      expect(swaps(r)).toEqual([]);
+      const failing = r.checks.find((c) => c.key.startsWith('P2|apart'));
+      expect(failing?.hard).toBe(true);
+      expect(failing?.text).toMatch(
+        /^Not enough room to walk between the dining table, 4 seats and the .+: 0\.60 m needed, 0\.\d\d m left\.$/,
       );
-      expect(r.checks.filter((c) => c.hard && !c.already)).toEqual([]);
+      expect(r.passes).toBe(false);
     });
   });
 });

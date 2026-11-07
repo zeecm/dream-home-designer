@@ -85,6 +85,9 @@ const ROLE_OF: Record<string, Role> = {
   rug: 'rug',
   'dining-4': 'dining-table',
   'dining-6': 'dining-table',
+  'dining-extendable': 'dining-table',
+  'dining-bench-2': 'dining-table',
+  'sofa-2': 'sofa',
   'wooden-table': 'dining-table',
   'pedestal-table-round': 'dining-table',
   'bistro-set': 'dining-table',
@@ -151,7 +154,7 @@ export const roleOfItem = (it: Item, kind = furnitureKind(it.assetId)): Role => 
  * - near: within `within` of a piece of `of` (by its head end, with `head`).
  * - belongs: within `within` of a piece of `of`, facing it within `angle`.
  * - before: its nearest edge `min`–`max` from the front of a piece of `of`.
- * - apart: at least `gap` from every piece of `from` (advice, never a block).
+ * - apart: at least `hard` from every piece of `from` (a way between two zones), `gap` better.
  * Facing a seat (an armchair to the sofa) means from in front of it, never its arm.
  */
 export interface Relation {
@@ -160,8 +163,8 @@ export interface Relation {
   near?: { of: Role[]; within: number; head?: boolean };
   belongs?: { of: Role[]; within: number; angle: number };
   before?: { of: Role[]; min: number; max: number };
-  /** At least `gap` from any piece of `from` (advice: a way between two zones). */
-  apart?: { from: Role[]; gap: number };
+  /** At least `hard` from any piece of `from` (a way between two zones); `gap` is advised. */
+  apart?: { from: Role[]; gap: number; hard: number };
 }
 
 /** Each role's relationships (spec table P2). A new kind needs only its row. */
@@ -200,8 +203,10 @@ export const RELATIONS: Partial<Record<Role, Relation>> = {
   desk: { backs: { gap: 0.05, free: 0.8 } },
   bedside: { near: { of: ['bed'], within: 0.15, head: true } },
   'coffee-table': { before: { of: ['sofa'], min: 0.35, max: 0.5 } },
-  // Dining apart from the lounge: a walkway between the zones (advice).
-  'dining-table': { apart: { from: ['sofa', 'armchair', 'coffee-table', 'tv-console'], gap: 0.9 } },
+  // Dining apart from the lounge, the chairs included: 0.60 m to walk between, 0.90 m advised.
+  'dining-table': {
+    apart: { from: ['sofa', 'armchair', 'coffee-table', 'tv-console'], gap: 0.9, hard: 0.6 },
+  },
 };
 
 /** The relationships of a kind: its own row (`extra`, by kind id, for a new kind) or its role's. */
@@ -350,7 +355,8 @@ export function seatsOf(kind: FurnitureKind, width = kind.size.w): number {
 /** Places at a dining table. */
 export function placesOf(kind: FurnitureKind, width = kind.size.w, depth = kind.size.d): number {
   if (roleOf(kind) !== 'dining-table') return 0;
-  if (kind.id === 'bistro-set') return 2;
+  if (kind.id === 'bistro-set' || kind.id === 'dining-bench-2') return 2;
+  if (kind.id === 'dining-extendable') return 6;
   const long = Math.max(width, depth);
   return long >= 1.75 ? 6 : 4;
 }

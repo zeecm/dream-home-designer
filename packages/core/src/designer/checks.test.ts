@@ -212,11 +212,22 @@ describe('P2: relationships (criteria 3, 4, 8)', () => {
     const table: [string, Vec2, number] = ['dining-4', at(9.3, 4.0), 0];
     const apart = (lvl: Level) => run(lvl).filter((c) => c.key.startsWith('P2|apart'));
     expect(apart(withPieces(base, [sofa, table]))).toEqual([]);
+    // A chair 0.55 m from the sofa: under 0.60 m, a hard check.
     const withChair = apart(withPieces(base, [sofa, table, ['dining-chair', at(8.9, 3.35), 0]]));
     expect(withChair.map((c) => [c.hard, c.text])).toEqual([
       [
+        true,
+        'Not enough room to walk between the dining table, 4 seats and the 3-seat sofa: 0.60 m needed, 0.55 m left.',
+      ],
+    ]);
+    // 0.75 m: enough to walk, 0.90 m advised.
+    const advice = apart(
+      withPieces(base, [sofa, ['dining-4', at(9.3, 4.2), 0], ['dining-chair', at(8.9, 3.55), 0]]),
+    );
+    expect(advice.map((c) => [c.hard, c.text])).toEqual([
+      [
         false,
-        'Leave 0.90 m between the dining table, 4 seats and the 3-seat sofa to walk between them: 0.55 m now.',
+        'Leave 0.90 m between the dining table, 4 seats and the 3-seat sofa to walk between them: 0.75 m now.',
       ],
     ]);
   });

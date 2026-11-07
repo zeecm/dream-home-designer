@@ -29,7 +29,7 @@ import {
   placePiece,
   spaceIndex,
 } from './place';
-import { ACCESS, roleOf } from './principles';
+import { ACCESS, peopleOf, roleOf } from './principles';
 import type { Concept, DesignInput, DesignItem, RoomUse, SpaceDesign, SpaceStatus } from './schema';
 import type { Zone } from './schema';
 import { ESSENTIAL, type Intent, type SolveOutcome, solveSpace } from './solve';
@@ -467,7 +467,8 @@ function work(
         if (hit) {
           for (const item of hit.items) {
             const w = wantOf.get(item.id);
-            if (w) addToIndex(ix, item, w.kind);
+            // A piece swapped for a smaller one is indexed as the kind it became.
+            if (w) addToIndex(ix, item, furnitureKind(item.assetId) ?? w.kind);
           }
           return hit;
         }
@@ -478,6 +479,7 @@ function work(
           intents,
           zoneArea,
           ways,
+          household: peopleOf(brief).filter((p) => p.kind !== 'helper').length,
           ...(keepOutFor ? { keepOutFor } : {}),
         });
         ix.keepOut = [];
