@@ -462,6 +462,10 @@ export class PathTracerEngine implements ExactEngine {
   private fence: WebGLSync | null = null;
   private issued = 0;
   private quick = 0;
+  /** The picture was drawn since the last step went in (the next step waits behind it). */
+  private displayed = false;
+  /** Whether the step in flight is timed for `adapt`. */
+  private timed = true;
   private claims = 0;
   /** The whole sample the snapshot was last taken at (-1: none yet). */
   private kept = -1;
@@ -677,7 +681,7 @@ export class PathTracerEngine implements ExactEngine {
     if (gl.getSyncParameter(this.fence, gl.SYNC_STATUS) !== gl.SIGNALED) return false;
     gl.deleteSync(this.fence);
     this.fence = null;
-    this.adapt(performance.now() - this.issued);
+    if (this.timed) this.adapt(performance.now() - this.issued);
     return true;
   }
 
@@ -706,6 +710,10 @@ export class PathTracerEngine implements ExactEngine {
     if (this.lost || this.stopped || !this.done()) return false;
     // A tile of the next sample; the picture shown is only ever of whole samples' worth
     // (covered until the first is metered).
+    // A step issued after the picture was drawn waits behind those passes on the GPU, so it
+    // isn't timed: a slow display would otherwise hold the tiles small or grow them.
+    this.timed = !this.displayed;
+    this.displayed = false;
     this.inner._pathTracer.update();
     // Timed (`adapt`) on the tracer's step alone: the fence goes in before the picture is
     // drawn, so the passes that show it don't make the tiles smaller.
@@ -747,6 +755,7 @@ export class PathTracerEngine implements ExactEngine {
 
   show(): void {
     if (this.lost) return;
+    this.displayed = true;
     const full = this.inner._pathTracer;
     this.draw(full.target, full.samples);
   }
