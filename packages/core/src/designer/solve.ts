@@ -1,4 +1,4 @@
-import { overlapDepth, polygonGap, roomOff, sideOf } from '../convex';
+import { type Side, overlapDepth, polygonGap, roomOff, sideOf } from '../convex';
 import { type FurnitureKind, furnitureKind, itemFootprint, itemSize } from '../furniture';
 import { pointInPolygon } from '../geometry';
 import type { Item, Vec2 } from '../schema';
@@ -183,6 +183,37 @@ interface Pose {
   ko?: boolean;
   /** Its key among a piece's candidates (two poses this close are the same place). */
   seen?: string;
+  /** What its score takes from the room alone (score), worked out when first needed. */
+  room?: PoseRoom;
+}
+
+/**
+ * The parts of a pose's score that depend on the room alone (its walls, doorways, windows and
+ * ways, its zones), not on the pieces placed: each the same however often the pose is scored.
+ * The room off a side is the nearer of the walls' and the pieces' (roomOff takes the nearest
+ * obstacle), so the walls' part is kept and the pieces' worked out each time.
+ */
+interface PoseRoom {
+  narrow?: boolean;
+  /** The designer's wall: what it adds (null: not on it). */
+  onFace?: number | null;
+  /** The designer's spot: what it takes off. */
+  fromAt?: number;
+  inZone?: boolean;
+  /** Behind it: the room to a wall (backs.gap + 0.3 deep), and to a wall within backs.free. */
+  backGap?: number;
+  backFree?: number;
+  /** A bed's left and right: the room to a wall. */
+  bedSides?: [number, number];
+  window?: boolean;
+  onWay?: boolean;
+  /** Ahead of it: the room to a wall (3.5 m deep). */
+  ahead?: number;
+  /** A dining table's front, left, right and back: the room to a wall (1.0 m deep). */
+  sides?: [number, number, number, number];
+  /** How far its centre is from the nearest doorway (9 at most: the dining table's). */
+  door9?: number;
+  door?: number;
 }
 
 /** A piece's poses (by its intent, in one space), as candidates() lists them. */
@@ -822,7 +853,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
       const essential = ESSENTIAL.has(roleOf(k));
       if (soft && !essential) return;
       related = true;
-      const s = score(t, item, soft, anchor, anchorRole, placed, wish !== 0 || !onWall);
+      const s = score(t, p, soft, anchor, anchorRole, placed, wish !== 0 || !onWall);
       if (!related && !essential) return;
       // Short of the way between dining and lounge: the less short the better. The dining
       // group kept apart by standing on a way through the flat doesn't count as apart.
@@ -1111,7 +1142,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
   /** Higher is better: relationships, room to use it, the ways people walk, the designer's wishes. */
   function score(
     t: Intent,
-    item: Item,
+    p: Pose,
     soft: boolean,
     anchor: Item | undefined,
     anchorRole: Role | undefined,
@@ -1119,33 +1150,52 @@ function solveOnce(input: SolveInput): SolveOutcome {
     free = false,
   ): number {
     const w = t.want;
+    const item = p.item;
     const at = centre(item);
     const r = item.rotationY;
     const rel = relationOf(w.kind);
     const role = roleOf(w.kind);
-    const fp = fpOf(item, w.kind);
+    const fp = p.fp;
+    p.room ??= {};
+    const room = p.room;
     let s = soft ? -6 : 0;
     // Made to a narrower width than asked: only if nothing full-width fits.
-    if (Math.abs(itemSize(item, w.kind).w - w.w) > 0.01) s -= 1.5;
+    room.narrow ??= Math.abs(itemSize(item, w.kind).w - w.w) > 0.01;
+    if (room.narrow) s -= 1.5;
     // The designer's wishes: their wall, along it, or their spot.
     if (w.face) {
-      const fr = w.face.frame;
-      const u = (at.x - fr.a.x) * fr.d.x + (at.y - fr.a.y) * fr.d.y;
-      const v = ((at.x - fr.a.x) * fr.n.x + (at.y - fr.a.y) * fr.n.y) * w.face.side;
-      const on = u >= w.face.u0 - 1e-6 && u <= w.face.u1 + 1e-6;
-      if (on && v > 0 && v < w.d + fr.half + 0.05) {
-        s += 1.5 - (w.along === null ? 0 : Math.min(1, Math.abs(u - w.along) * 0.3));
+      if (room.onFace === undefined) {
+        const fr = w.face.frame;
+        const u = (at.x - fr.a.x) * fr.d.x + (at.y - fr.a.y) * fr.d.y;
+        const v = ((at.x - fr.a.x) * fr.n.x + (at.y - fr.a.y) * fr.n.y) * w.face.side;
+        const on = u >= w.face.u0 - 1e-6 && u <= w.face.u1 + 1e-6;
+        room.onFace =
+          on && v > 0 && v < w.d + fr.half + 0.05
+            ? 1.5 - (w.along === null ? 0 : Math.min(1, Math.abs(u - w.along) * 0.3))
+            : null;
       }
+      if (room.onFace !== null) s += room.onFace;
     }
-    if (w.at) s -= Math.min(2, Math.hypot(at.x - w.at.x, at.y - w.at.y) * 0.4);
-    if (t.zone && input.zoneArea(t.zone).some((p) => pointInPolygon(at, p))) s += 2;
+    if (w.at) {
+      room.fromAt ??= Math.min(2, Math.hypot(at.x - w.at.x, at.y - w.at.y) * 0.4);
+      s -= room.fromAt;
+    }
+    if (t.zone) {
+      room.inZone ??= input.zoneArea(t.zone).some((z) => pointInPolygon(at, z));
+      if (room.inZone) s += 2;
+    }
     // Its relationships (P2), as the checks will judge them.
     if (rel?.backs) {
       const back = backSide(fp);
-      const gap = roomOff(back, rel.backs.gap + 0.3, solids);
+      room.backGap ??= roomOff(back, rel.backs.gap + 0.3, solids);
+      const gap = room.backGap;
       if (gap > rel.backs.gap + 1e-6) {
-        const others = [...placed.values()].map((p) => fpOf(p));
-        const behind = rel.backs.free ? roomOff(back, rel.backs.free, [...solids, ...others]) : 0;
+        let behind = 0;
+        if (rel.backs.free) {
+          room.backFree ??= roomOff(back, rel.backs.free, solids);
+          const others = [...placed.values()].map((q) => fpOf(q));
+          behind = Math.min(room.backFree, roomOff(back, rel.backs.free, others));
+        }
         // Floating is allowed with room behind, but a wall is better in a small room.
         if (!rel.backs.free || behind < rel.backs.free - 0.005) {
           s -= 8;
@@ -1207,10 +1257,11 @@ function solveOnce(input: SolveInput): SolveOutcome {
     }
     // A bed's long side against a wall, or a proper way beside it: not a gap pillows fall into.
     if (role === 'bed') {
-      for (const side of ['left', 'right'] as const) {
-        const g = roomOff(sideOf(fp, side), 0.35, solids);
-        if (g > 0.03 && g < 0.3) s -= 2;
-      }
+      room.bedSides ??= [
+        roomOff(sideOf(fp, 'left'), 0.35, solids),
+        roomOff(sideOf(fp, 'right'), 0.35, solids),
+      ];
+      for (const g of room.bedSides) if (g > 0.03 && g < 0.3) s -= 2;
     }
     if (anchor && rel?.before) {
       const gap = roomOff(sideOf(fpOf(anchor), 'front'), rel.before.max + 1, [fp]);
@@ -1245,37 +1296,49 @@ function solveOnce(input: SolveInput): SolveOutcome {
       }
     }
     if (t.faces === 'window') {
-      const win = ix.windows.find(
+      room.window ??= ix.windows.some(
         (z) => offAngle(at, r, polyCentre(z.poly)) < 50 && distTo(at, z.poly) < 3,
       );
-      if (win) s += 2;
+      if (room.window) s += 2;
     }
-    const fb = boxOf(fp);
-    const near = (x: { box: { x0: number; y0: number; x1: number; y1: number } }) =>
-      !(x.box.x1 < fb.x0 || fb.x1 < x.box.x0 || x.box.y1 < fb.y0 || fb.y1 < x.box.y0);
     // Off the ways people walk, where it can be: a free piece standing on one costs.
     if (free && !w.kind.walkThrough && input.ways?.length) {
-      if (input.ways.some((x) => near(x) && overlapDepth(fp, x.poly) > 0.02)) s -= 2.5;
+      room.onWay ??= onWay(fp);
+      if (room.onWay) s -= 2.5;
     }
     // A TV or a sofa with no TV wants room in front of it.
     if (role === 'tv' || role === 'tv-console' || (role === 'sofa' && !anchor)) {
-      const ahead = roomOff(sideOf(fp, 'front'), 3.5, solids);
-      s += Math.min(ahead, 3.5) * 0.6;
+      room.ahead ??= roomOff(sideOf(fp, 'front'), 3.5, solids);
+      s += Math.min(room.ahead, 3.5) * 0.6;
     }
     // A dining table with room on each side for its chairs to be pulled out, off the doorways.
     if (role === 'dining-table') {
-      const obstacles = [...solids, ...ix.placed.map((p) => p.fp)];
-      for (const side of ['front', 'left', 'right'] as const) {
-        s += Math.min(roomOff(sideOf(fp, side), 1.0, obstacles), 1.0) * 0.8;
+      const sides = [sideOf(fp, 'front'), sideOf(fp, 'left'), sideOf(fp, 'right'), backSide(fp)];
+      room.sides ??= sides.map((sd) => roomOff(sd, 1.0, solids)) as PoseRoom['sides'];
+      // The pieces near enough to matter (roomOff passes over the rest).
+      const fb = boxOf(fp);
+      const pieces: Vec2[][] = [];
+      for (const q of ix.placed) {
+        const b = q.box;
+        if (b.x1 < fb.x0 - 1.001 || fb.x1 + 1.001 < b.x0) continue;
+        if (b.y1 < fb.y0 - 1.001 || fb.y1 + 1.001 < b.y0) continue;
+        pieces.push(q.fp);
       }
-      s += Math.min(roomOff(backSide(fp), 1.0, obstacles), 1.0) * 0.8;
-      const d = Math.min(9, ...ix.doorways.map((x) => distTo(at, x.poly)));
+      for (let n = 0; n < 4; n++) {
+        const walls = (room.sides as number[])[n] as number;
+        const have = pieces.length
+          ? Math.min(walls, roomOff(sides[n] as Side, 1.0, pieces))
+          : walls;
+        s += Math.min(have, 1.0) * 0.8;
+      }
+      room.door9 ??= Math.min(9, ...ix.doorways.map((x) => distTo(at, x.poly)));
+      const d = room.door9;
       if (d < 1.4) s -= (1.4 - d) * 2;
     }
     // Beds and desks away from the door.
     if ((role === 'bed' || role === 'desk') && ix.doorways.length) {
-      const d = Math.min(...ix.doorways.map((x) => distTo(at, x.poly)));
-      s += Math.min(d, 2) * 0.3;
+      room.door ??= Math.min(...ix.doorways.map((x) => distTo(at, x.poly)));
+      s += Math.min(room.door, 2) * 0.3;
     }
     return s;
   }
