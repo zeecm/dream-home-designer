@@ -1,12 +1,12 @@
 import type { Level } from '@dhd/core';
 import type * as THREE from 'three';
 import { LevelMeshes } from './levelMeshes';
-import type { MaterialCache } from './materials';
+import type { MaterialSource } from './materials';
 
 export { extrudePolygon } from './extrude';
 
 export interface BuildOptions {
-  materials: MaterialCache;
+  materials: MaterialSource;
   /** Hide ceilings in orbit view so the camera can see in. */
   ceilings?: boolean;
 }

@@ -1,4 +1,5 @@
 import { addModel, customModelFile, newId } from '@dhd/core';
+import { ModelLibrary } from '@dhd/render';
 import { useEffect } from 'react';
 import * as THREE from 'three';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
@@ -166,3 +167,9 @@ export function useModelSync() {
     if (ready && models && backend?.putModel) void syncModels();
   }, [id, models, backend, ready]);
 }
+
+/**
+ * The furniture models, fetched once each for the session (Pages serves /models): the 3D
+ * view's, which the exact render shares.
+ */
+export const modelLibrary = new ModelLibrary('/models/', fetchUploaded, configureLoader);

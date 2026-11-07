@@ -444,6 +444,186 @@ Checked with the skill's `lint.mjs` and `inspect.mjs` (0 FAIL, 0 WARN at 1440, 7
 run the inspector with a `--no-sandbox` Chrome wrapper as root). Whether `/` should become
 the welcome page (and the app move) is the owner's call.
 
+**Exact render (slices 0 and 1, [spec](docs/specs/exact-render.md)):** the render dialog opens
+on **Exact | AI impression**, on Exact every time. Exact path traces the 3D model on the
+device: `buildExactScene` (packages/render) builds the same `LevelMeshes` as the 3D view with
+`PhotoMaterials` (physical versions of the same material ids) and adds only the sun, the sky
+(an equirect float texture), every lamp (`lampLights`: flush ceiling lights as spots, the rest
+points, candela as is) and the ground. `lampsAuto` (core) turns lamps on at night or in a room
+daylight doesn't reach. The engine is `three-gpu-pathtracer@0.0.23` (WebGL 2), pinned, lazily
+loaded (61 KB gzip) behind `ExactEngine` (`apps/web/src/exact/engine.ts`); `ExactRun` drives
+it (a step a frame, never more than one GPU step queued: a fence per step; time cap, Stop,
+Carry on, More samples, paused when hidden or on the AI side). The frame stays covered until
+the first whole sample is metered (exposure: AgX, ±3 EV about a typical room at that hour, set
+for good at 8 samples). The engine is kept for the session (`loadEngine`): its shader is
+compiled once, each render only builds its scene (`claim`/`release`); a lost context makes a
+fresh one, and the last kept snapshot stands in, to see and download, with Try again. A render
+left for another camera ("Render from") is kept as its last picture. The 3D view's frameloop
+rests while Exact renders. Tests set `window.__DHD_EXACT_TEST__` (size box, samples, cap).
+- **Library bugs found (0.0.23 on three 0.170), handled in the adapter:** a mesh with several
+  materials (geometry groups: every wall) shifts the material of every mesh after it, because
+  materials are numbered per mesh but listed per slot; most paths then went black.
+  `flattenForTracing` hands the tracer one mesh per material, in world space (same
+  triangles). `WebGLPathTracer.dispose()` throws (`_renderQuad`); the adapter frees the parts.
+  The detectors aren't exported; `PrecisionDetector` is imported from its source.
+  **Shadow rays pass through the shown face of a one-sided material** (its sidedness test
+  skips `side == material.side`), so ceilings and floors (single planes) let the sun and sky
+  into closed rooms: every material the exact scene uses is two-sided (`PhotoMaterials`,
+  model copies, the ground). A sealed room at noon now reads black (e2e); before, about
+  3,700 cd/m². `SpotLight.copy` drops the tracer's ad-hoc `radius`; `flattenForTracing` keeps
+  it, and expands instanced meshes.
+  Without `KHR_parallel_shader_compile` (SwiftShader, some phones) the shader is built on the
+  first draw, holding the page; that can't be timed or caught, so the dialog says "the first
+  time takes longest" before that draw. A failed link is caught (`LINK_STATUS` after compile).
+  Sharing GLB textures with the exact renderer leaves a dispose listener on them; with one
+  engine per session that holds one renderer, not one per render.
+- **Spike measurements (6 Nov, this cloud machine: 4 CPUs, no GPU, so Chromium's SwiftShader
+  as in CI; the furnished sample from eye height):** prepare (flatten, BVH, textures, shader
+  link) 0.3–0.8 s; SwiftShader compiles the tracer's shader on its first draw, about 25 s; then
+  35–45 k pixel-samples a second (160 × 120: about 1.5 samples/s; 320 × 180: 0.6/s). 16 samples
+  at 160 × 120 take 35–50 s in all, inside the 60 s CI budget, so the pixel test runs in CI.
+  A GPU was not available here: the desktop and phone budgets (samples/s at 1600 px, first
+  picture, Good in 45 s) are **not measured yet**; use `/dev/exact-spike.html` on the dev
+  server on the reference devices.
+- **Sun through glazed windows reaches the floor** (spike `probe=auto`, redone after the
+  two-sided fix; the first numbers were inflated by the leak): at 4 pm, through a kitchen
+  window facing the sun, the patch read 208 cd/m² against 28 in the shade beside it, and 227
+  with the pane left out (the pane passes about 92%; 32 samples at 200 × 150, noisy). From eye
+  height in the living room at 4 pm the sun's patch through the window shows on the wall. No
+  fallback needed.
+- **Window light portals (6–7 Nov):** daylight-only interiors were grainy because the tracer
+  finds the sky only by rays that chance on a window (its sky sampling doesn't aim at them;
+  no portals in 0.0.23): at 64 samples 10–18% of pixels black and 10–15% specks. Now, for a
+  view from inside a room (ceilings on, the camera in a room, by day: `daylight.light` ≥
+  `PORTALS_FROM`), `portalLights` puts one light in each opening to the sky of the rooms whose
+  daylight reaches the camera. `skyOpenings` (core, `portals.ts`) finds windows, passages,
+  glazed doors, glass walls (an opening in one is part of the wall's), the gap over a half wall
+  (glazed if it has glass above; an opening in a half wall only up to the wall's top) and
+  boundaries, between a room and outside; `daylightReach`
+  goes from the camera's room on through passages, inside windows, glazed doors, doors
+  standing open (the 3D view's open fractions; a shut one stops it), glass walls and half
+  walls, room after room. Each light is an even rectangle the opening's size, **flat in the
+  hole a hair inside the pane** (a passage's at its far end; a glazed door's a hair on the
+  room's side of its shut leaves, wherever they stand): the reveal's sill, jambs and head on
+  the room's side are lit, and nothing reaches into the room. It carries the sky's light (its irradiance on the opening over π, `portalRadiance`)
+  and the ground's (half its radiance for the lower half of the view: sky-lit, plus sunlit as
+  much as `groundInSun` finds the ground below that window in sun, a few shadow tests against
+  the solid walls; times `GROUND_REACHES`, 0.37), less what the reveal beyond it hides
+  (`revealPasses`, the view factor through the outer half of the hole) and the glass (90%).
+  The sun is unchanged (a directional light, aimed at, through the panes). **No double
+  counting:** with at least one portal the sky lights nothing (`environmentIntensity` 0) and
+  stays the backdrop (seen by camera rays and through glass); rays from a room pass through
+  the ground (`castShadow` false, which the tracer's diffuse bounces honour), so the ground
+  lights the rooms only through the portals; seen through glass, the backdrop below the
+  horizon is the ground's lit look; seen straight on (an open passage) it gives off the sky's
+  share. A portal sits inside the pane so a ray from the room meets it first and the tracer
+  weighs the hit against the bounce that sent it (behind the pane it is weighed against the
+  pane and counted twice). **With no portal in reach** (a windowless room, a camera outside
+  the rooms, night) the sky lights the scene as before, so the sealed-room e2e still guards
+  leaks. **Known limits:** an outside wall seen from a window has the sun's light but not the
+  sky's; a mirror or glossy surface facing a window reflects the portal's even light, not the
+  view out (the tracer counts light hits on reflected rays; making portals invisible to them
+  needs a deeper shader patch, and the glossy share would then be counted twice); a door in a
+  glass wall is lit as glass; `GROUND_REACHES` is one number for every window (below).
+- **Firefly clamp:** each sample is capped, a shader patch on the tracer's material. The cap is
+  `sampleClamp` (twice a white wall in full sun, 20,000 cd/m² at least) **times the number of
+  lights the tracer picks among** (`lightChoices`, by the tracer's own rule, `getLights`:
+  every visible rect area, spot, point and directional light whatever its intensity, and the
+  sky if it lights; counted on the scene the tracer is given and checked against its code in
+  a unit test). The tracer aims each sample at one light at random and scales the find by the
+  count, so the first version, capped at `sampleClamp` alone, cut true direct sun (at 4 pm the
+  picture lost about a fifth); now a sunlit white wall's one direct sample is under the cap.
+  It only cuts a rare path the tracer boosts (Russian roulette, a glossy bounce).
+- **Specks spread, not cut (7 Nov):** what was left was white specks: true light (the sun's
+  patches on the floor and furniture, seen off a wall) found too rarely to average out by 64
+  samples, which the denoiser keeps as detail. Clamping only what comes after the first bounce
+  was tried (a shader patch splitting the sample where the tracer first aims at a light from a
+  second surface): it removes the specks but **the room loses 15–50% of its light** (a cap of
+  1,000 cd/m²: specks 0.05–0.3%, room −20 to −50%; 4,000: 0.06–0.6%, −14 to −40%), since that
+  light is real, found only by such paths. So the shown picture spreads them instead
+  (`KeepPass`, `ExcessPass`, `SpreadPass` in `pathtracer.ts`, before exposure and the
+  denoiser; `specks.ts` is the same kernel in TypeScript, with tests): a pixel more than
+  `speckLimit` times the median of the eight around it (2.5 up to Good's 256 samples, then
+  loosening with the square of the samples: 10 at 512, 40 at 1024) keeps that much, and its
+  excess is spread over the pixels about it by a Gaussian (σ 1/40 of the picture's width:
+  **12 px on a real 480-px picture, at most 12**; the spike's 120-px measurements used 3 px)
+  weighted by how alike each looks to the speck's own pixel (colour, and loosely brightness),
+  so a floor's light stays on the floor and doesn't tint the sofa on it (a plain spread
+  failed the pixel test's grey sofa: saturation 0.22). Each speck's share is divided by the
+  weights it hands out before it is gathered, and taps off the picture are mirrored back in
+  at its edge, so the picture keeps all its light and an even picture stays even to its edges
+  (clamped taps, as at 78ac7b0, smeared a corner and didn't keep the light; skipped ones keep
+  it but darken the edges, a uniform field to 0.69 at the edge). A pixel that isn't a finite
+  number counts as black. The passes run once a whole sample (the picture shown between is
+  the last whole sample's; drawing it every tile step cost as much as tracing on SwiftShader),
+  each pixel's look is written once, and `speck = 0` skips them. At 1280 × 720 in headless
+  Chromium (SwiftShader) a whole sample took 11.3 s of tracing (82%), 1.4 s of speck spread
+  (10%) and 1.1 s of display (8%); 15.3 s a sample in all, 12.5 s without the spread, against
+  30.1 and 26.7 s at 78ac7b0 (which drew every tile step). The tiles adapt on the tracer's step
+  alone (the fence goes in before the picture is drawn): 3 4 4 4 4 4 a side over six samples
+  with the spread and without. `release()` shrinks its targets to 1 × 1. Specks as shown:
+  0.04% at 256 samples where the raw picture has 2.1% (the sample flat's living room at 4 pm,
+  160 × 120), 0.10% at 1024 (raw 0.05%): there, a window's corner, 6 times its neighbours,
+  stands at its full 841 cd/m² (cut to 346 at the 2.5 limit). Early on the walls show soft,
+  low mottling where the specks were; it fades as samples add up. The tracer's own sample
+  stays as it was, so the metering and the spike's raw numbers (`raw=1`) are unchanged.
+- **Measured (7 Nov; spike on SwiftShader, 120 × 90, 6 Nov sun):** black = pixels with no light
+  at all, specks = over 4× their 5 × 5 neighbourhood's median, of the raw samples or of the
+  picture as shown (specks spread; both linear, before the denoiser); room = the mean over the reference's room pixels (under 5× its median, so not
+  the windows), pixel for pixel and specks included, so light found by chance counts;
+  reference = no portals, no clamp, 1024 samples. `GROUND_REACHES` was set on the first three
+  (the ground's share at 0 and 1 against the references: 0.30–0.41, mean 0.37); the last four
+  are held out: another flat (the 4-room fixture), other hours, furnished.
+
+  | scene | before, 32 / 64 samples: black; specks (raw) | 34e204a at 64: specks (raw); room vs reference | now, 32 / 64: black; specks (shown) | now, room at 64 vs reference |
+  |---|---|---|---|---|
+  | sample flat, living, noon | 28 / 10%; 23 / 13% | 1.3%; −1% | 0 / 0%; 0.06 / 0.06% | 158 vs 166 (−5%) |
+  | sample flat, living, 4 pm | 26 / 10%; 19 / 10% | 1.7%; +4% | 0 / 0%; 0.06 / 0.03% | 120 vs 113 (+7%) |
+  | sample flat, walk (8.16, 4.6) north, noon | 28 / 10%; 24 / 11% | 1.1%; −12% | 0 / 0%; 0.06 / 0.06% | 181 vs 198 (−9%) |
+  | *held out:* 4-room, living (west window), 10 am | 41 / 18%; 29 / 15% | 0.5%; −13% | 0 / 0%; 0.14 / 0.08% | 67 vs 77 (−13%) |
+  | *held out:* 4-room, master bedroom, 3 pm | 29 / 11%; 23 / 14% | 2.7%; −30% | 0 / 0%; 0.30 / 0.03% | 128 vs 168 (**−24%**) |
+  | *held out:* furnished sample, living, 9 am | 35 / 17%; 26 / 15% | 1.6%; −1% | 0 / 0%; 0.13 / 0.09% | 73 vs 88 (−18%; again: 88, 0%) |
+  | *held out:* furnished sample, living, 4 pm | 32 / 13%; 26 / 13% | 4.9%; +6% | 0 / 0%; 0.33 / 0.11% | 128 vs 108 (+18%; again: 100, −7%) |
+
+  **This table is the regression baseline** (`phase3.sh`-style runs: the spike's `portals=1`,
+  `clamp=auto`, its default speck spread, against `portals=0` at 1024). Room numbers at 64
+  samples move by up to ±20% from run to run in the furnished scenes (the sun's patches on
+  the furniture light the room by chance), about ±10% in the others, so compare a few runs
+  (the furnished ones were run twice here). So: no black pixels; specks, as shown,
+  0.03–0.33% (from 10–15% before the portals, 1–5% at 34e204a); the room's light within the
+  64-sample noise of the reference in six scenes of seven, held-out ones included. **Accepted slice-1 limit: the 4-room master bedroom at
+  3 pm is 23–30% dark** (its own fit would be about 1.0, against 0.37): the ground's share is
+  the weak part. An even light in the window sends the ground's light down onto the floor as
+  much as up to the ceiling, where the real light goes up, so how much reaches the camera's
+  view varies with the view (0.30–1.0); "ground light sent upward" is slice 2 (a light that
+  shines upward: a tipped emitter, which no longer fits in a reveal, or spot lights). The sky's
+  portal alone was checked against a render with no light sampling at all (sun off, ground
+  black): 53.2 against 52.5 cd/m². Redo with the spike's `portals=1`, `plain=1`,
+  `flat=hdb4`, `room=`, `pose=`, `clamp=auto`, `speck=`, `raw=1`, `gk=`, `nosun=1`, `mis=0`,
+  `glow=0`, `darkground=1`; it writes each pixel's luminance for comparing. The app's own
+  picture (the walk at 4 pm, 48 samples, 480 × 420): specks 1.55% at 34e204a, 0.01% now
+  (390 × 844 phone, 32 samples: 0.63% and 0.02%; display values, over 1.6× their 5 × 5
+  median). That dialog's 48 samples took 3:24 on SwiftShader, against 4:14 at 78ac7b0 (the
+  spread every tile step) and 3:01 at 34e204a (no spread).
+- **Tests:** `e2e/exact.spec.ts` (about 3 min under SwiftShader: one dialog flow (stop, carry
+  on, switch and back with the frame and focus kept, kept renders per camera, a context reset,
+  close and reopen; the picture kept after a reset is a metered one, not mostly black: the
+  snapshot is taken only once the first whole sample is metered), a sealed room (no portals
+  in reach, so the sky lights the scene: a leak shows), the pixel test on a fixture room at 32
+  samples, the phone walk, no WebGL 2). The AI render tests now click "AI impression" first.
+  Unit tests: `portals.test.ts` (core: the openings, the pane, glass walls once, gaps over
+  half walls and a half wall's window cut at its top, a glazed door inside its leaf, reach
+  through open and shut doors and glass, the ground in sun), `exactScene.test.ts` (one flat
+  portal per opening, its light, sky on with none or at night, the clamp per light choice)
+  and `flatten.test.ts` (the light count against the tracer's own `getLights`).
+- **Seen, to check on a GPU at 256 samples:** what grain is left (the sun's patches on the
+  floor lighting the room by chance, the lamps' at night: lamps are aimed at already); the
+  picture is warm where an oak floor bounces sunlight and cool where only the sky lights a
+  room (physically so; no white balance, which the spec leaves out). The view out of the
+  walk's end window shows dark dots on SwiftShader, with or without portals (not looked into).
+- **Left for slice 2+:** Quality, Time, Lamps and Brightness settings; hints; full-screen
+  viewer; real textures; Polish with AI; the slow-device estimate.
+
 ## 5. Owner to-dos
 
 - **Before the repo goes public:** `apps/web/public/samples/hdb-3room-type4.pdf` (and its PNG

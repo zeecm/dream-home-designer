@@ -66,6 +66,12 @@ importers:
       three:
         specifier: ^0.170.0
         version: 0.170.0
+      three-gpu-pathtracer:
+        specifier: 0.0.23
+        version: 0.0.23(three-mesh-bvh@0.7.8(three@0.170.0))(three@0.170.0)(xatlas-web@0.1.0)
+      three-mesh-bvh:
+        specifier: 0.7.8
+        version: 0.7.8(three@0.170.0)
       zustand:
         specifier: ^5.0.2
         version: 5.0.16(@types/react@18.3.31)(immer@10.2.0)(react@18.3.1)(use-sync-external-store@1.7.0(react@18.3.1))
@@ -1732,6 +1738,13 @@ packages:
     peerDependencies:
       react: '>=17.0'
 
+  three-gpu-pathtracer@0.0.23:
+    resolution: {integrity: sha512-CjMX5YU3ajDklOv3hW1EQ4CCkPLiLR+jB31w6G5WLf6Nasemib62tmCj45vBK5ItKAD0aHG1NWc479gXzk6fOQ==}
+    peerDependencies:
+      three: '>=0.151.0'
+      three-mesh-bvh: '>=0.7.4'
+      xatlas-web: ^0.1.0
+
   three-mesh-bvh@0.7.8:
     resolution: {integrity: sha512-BGEZTOIC14U0XIRw3tO4jY7IjP7n7v24nv9JXS1CyeVRWOCkcOMhRnmENUjuV39gktAw4Ofhr0OvIAiTspQrrw==}
     deprecated: Deprecated due to three.js version incompatibility. Please use v0.8.0, instead.
@@ -1932,6 +1945,9 @@ packages:
     resolution: {integrity: sha512-hUrmaWBdVDcxvYqnyh09zunKzROWjbZTiNy8dBEjkS7ehEDQibXJ7XvlmtbwuTclUiIyN+CyXQD4Vmko8fNm8w==}
     engines: {node: '>=8'}
     hasBin: true
+
+  xatlas-web@0.1.0:
+    resolution: {integrity: sha512-PprVfuXbaIskxLTLBUQRaWfgSy9xUQqAMIRooOw0P6NYqwgh6T0voeer6+Z5M7AFt5SGXUybuww/uDGs1yw8vQ==}
 
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
@@ -3368,6 +3384,12 @@ snapshots:
     dependencies:
       react: 18.3.1
 
+  three-gpu-pathtracer@0.0.23(three-mesh-bvh@0.7.8(three@0.170.0))(three@0.170.0)(xatlas-web@0.1.0):
+    dependencies:
+      three: 0.170.0
+      three-mesh-bvh: 0.7.8(three@0.170.0)
+      xatlas-web: 0.1.0
+
   three-mesh-bvh@0.7.8(three@0.170.0):
     dependencies:
       three: 0.170.0
@@ -3530,6 +3552,8 @@ snapshots:
     dependencies:
       siginfo: 2.0.0
       stackback: 0.0.2
+
+  xatlas-web@0.1.0: {}
 
   yallist@3.1.1: {}
 
