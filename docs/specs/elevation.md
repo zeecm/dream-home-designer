@@ -300,20 +300,31 @@ is the **wall view**: the word "elevation" is never shown.
    return wall is a `wall` face `faceAt` finds.
 2. **Face A** as above (the last door on the route, or the boundary).
 3. **The face key** is a `FaceRef` (above).
-4. **Wall cabinet gap:** the note keeps its 0.55 m and 0.65 m thresholds and its text now says
-   so: "0.45 m between the counter and the wall cabinets: 0.55 m or more is usual, and at least
-   0.65 m over the hob for the hood." The catalogue's wall cabinet at 1.45 m over a 0.90 m
-   counter (0.55 m) gets no note, except over a hob (`assetId` `kitchen-hob`). Windows are
-   numbered left to right on the face ("Window 1").
+4. **Wall cabinet gap:** the note keeps its 0.55 m and 0.65 m thresholds, with one text for
+   each: "0.45 m between the counter and the wall cabinets: 0.55 m or more is usual." and, over
+   a hob (`assetId` `kitchen-hob`), "0.55 m from the hob to the wall cabinet above: a cooker
+   hood needs at least 0.65 m." The catalogue's wall cabinet at 1.45 m over a 0.90 m counter
+   (0.55 m, measured from the worktop) gets no note except over a hob. Windows are numbered left
+   to right on the face ("Window 1").
 5. **Stub walls** (dead ends pruned from room loops) draw as a section band across the face;
    points on them have no wall view.
 6. **Wall status in After:** Before's (`statusOf`).
 
+**Faces and pieces as built (after review).** Letters go only to the faces stepping stops at
+(A, B, C… with none skipped); a tiny empty face between takes the letter before it, primed
+("C′"). A side wall is cut through (a section band) only at an inside corner, its neighbours
+taken from the face's own loop, so a column's faces and an L's outside corner have none. A
+piece wholly behind a face (beyond a column, past a notch's side) isn't drawn on it. Only a
+piece backed onto a wall names it ("wardrobe wall"); a piece in a corner backed onto the other
+wall isn't drawn side-on (a bed still is, its length running along the wall).
+
 **Notes as built.** "Hidden" counts a bed, or a piece at least 1.5 m tall in Bedroom, Living,
 Dining, Storage or Built-in (so not a fridge, a lamp, a plant or a person). "Covers" leaves out
 lamps, plants and people. Names mid-sentence are in lower case ("behind the built-in
-wardrobe"). Each note is numbered with a "!" badge on its red outline; the header says
-"2 to check".
+wardrobe"). Each note is numbered with a "!" badge on its red outline, placed clear of the
+tags; a note about a point rides on its tag instead ("3 · h300 !1"). The header's "N to check"
+counts the notes and the points with their own warnings (shelter, structural, wet room), which
+are listed with a ring and ringed on the drawing: a quieter kind than a note.
 
 **The viewer** (`apps/web/src/elevation/`):
 - `ElevationSvg.tsx` is pure (elevation, labels, scale), drawn in metres on paper colours, so
@@ -332,11 +343,15 @@ wardrobe"). Each note is numbered with a "!" badge on its red outline; the heade
   wall", then "2 916 × 2 600 mm · Plain paint" in grey and "2 to check". Line 2: [‹] D of 6
   [›] (also `[` and `]`), [See from Bedroom] (not "Other side", which the wall Inspector already
   uses; only when a room is on the other side), [Show ▾] (Furniture: Against the wall · None;
-  Dimensions · None), [Save image], [Close]. With a renovation, a Before | After switch tied to
-  the app's, and in After a key: New · Removed · Hacked.
-- **On the plan:** every steppable wall of the room gets its letter in a faint marker pointing
-  at it, the open one filled in the accent colour; clicking a letter opens that wall. Not in a
-  saved picture of the plan.
+  Dimensions: Shown · None), [Save image]; Close is a × in the title row. With a renovation the
+  app's own Before | After switch is the one (a phone shows the view's own and hides the app's),
+  and in After a key: New · Moved · Removed · Hacked. Stepping or flipping with a wall selected
+  moves the selection to the wall shown; the way in to the wall already open is hidden.
+  Menus close on Esc (which goes no further), a press outside, and after choosing.
+- **On the plan:** every steppable wall of the room gets its letter in a faint marker (24 px)
+  pointing at it, the open one filled in the accent colour; clicking a letter opens that wall.
+  A marker moves along its wall clear of the selected wall's length tag and the room names.
+  The plan frames the room closely. Not in a saved picture of the plan.
 - **Esc:** the first press clears the selection, the next closes, and focus goes back to the
   button the view was opened from. 1, 2 and 3 close it and show that view.
 - **The drawing** is on a framed white sheet (white in both themes). Wheel or pinch to zoom,
@@ -347,10 +362,15 @@ wardrobe"). Each note is numbered with a "!" badge on its red outline; the heade
   thing; "Nothing on this wall yet." for an empty face; "Doors are indicative…" when fronts are
   drawn; the heights note.
 - **Phone:** the wall view fills the stage and its bar takes the tool bar's place: [‹] [D of 6]
-  (a menu of the room's walls, which replaces the key plan) [›] [See from…] [⋯] (furniture,
-  dimensions, Save image, and on its side the list) [Close], 44 px targets. Opening folds the
-  Inspector sheet so the drawing has the stage; tapping something opens it again. Upright, the
-  list is under the drawing; on its side, behind ⋯. Back closes the view (a history entry).
+  (a menu of the room's walls, which replaces the key plan) [›] [See from / room name] (two
+  lines; its place kept empty when no room is behind) [⋯] (furniture, dimensions, Save image,
+  and on its side Hide list / Show list) [Close], 44 px targets. Opening folds the details sheet
+  (the selection is kept; its handle reads "Show wall details"), and with nothing selected the
+  handle goes; tapping something opens the sheet. Upright, the view is one scrolling column:
+  the sheet full width and as tall as the drawing needs, the list under it. On its side the
+  list is a panel beside the drawing. Labels are compact there: short tags, every height in one
+  column at the right. Back closes the view; the history entry goes however it closes, and a
+  reload strips it.
 - **Save image:** a PNG of the drawing (white, its dimensions) with its title, the notes and
   the points drawn in, named "Main bedroom - D wardrobe wall.png" (a plain hyphen: Chrome
   drops a download name with an en dash). A phone shares it where the browser can.
@@ -363,6 +383,10 @@ always in colour on screen; black-and-white comes with slice 2), side-on pieces 
 the points chain (the list gives each point's distance), label leaders (tags hide instead),
 the faint old place of a moved point, the merge rule for rooms joined in After, the phone's key
 plan and its portrait hint. AC7's `furniture: 'room'` check became `furniture: 'none'`.
+
+**Gestures:** a pinch or pan changes only the drawing's transform (the fit and the drawing are
+memoized); a cancelled pointer only ends the gesture; a double tap that fits leaves the
+selection as it was before its first tap.
 
 **Performance:** every face of the furnished sample in about 12 ms with caches cold (a fresh
 frozen level, as each edit makes), 3–6 ms warm (`PERF=1` bound 20 ms).
