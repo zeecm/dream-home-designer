@@ -38,18 +38,21 @@ function Row({
   r,
   d,
   note,
+  waived = false,
 }: {
   c: ResultCheck | DesignProblem;
   r: DesignResult;
   d: Design;
   note?: string;
+  /** Accepted anyway: amber, not red. */
+  waived?: boolean;
 }) {
   const p = 'key' in c ? asProblem(c) : c;
   const it = p.itemId ? r.level.items[p.itemId] : undefined;
   const text = keepTogether(humanize(p.text, d.aliases, r.level, d.baseLevel));
   const room = problemRoom(p, r.level);
   return (
-    <li>
+    <li {...(waived ? { className: 'designer-waived' } : {})}>
       <span>
         {/* The room once: not when the line names it already. */}
         {room && !text.includes(room) ? <strong>{room}: </strong> : null}
@@ -132,7 +135,7 @@ export function ChecksView({
             />
           ))}
           {waived.map((c) => (
-            <Row key={c.key} c={c} r={r} d={d} note="(accepted anyway)" />
+            <Row key={c.key} c={c} r={r} d={d} note="(accepted anyway)" waived />
           ))}
         </ul>
       )}

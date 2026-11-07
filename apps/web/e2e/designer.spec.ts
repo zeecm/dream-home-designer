@@ -148,7 +148,7 @@ async function designFlat(page: Page) {
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'Next: check the cost' }).click();
   const check = page.getByRole('dialog', { name: 'Check the cost' });
-  await check.getByRole('button', { name: /^Design my flat · about US\$/ }).click();
+  await check.getByRole('button', { name: /^Design (my flat|anyway) · about US\$/ }).click();
   await expect(panel(page).getByText(/^Done in /)).toBeVisible({ timeout: 30_000 });
 }
 
@@ -556,7 +556,7 @@ test.describe('desktop', () => {
     await p.getByRole('button', { name: /^Make V2 · about US\$/ }).click();
     const check = page.getByRole('dialog', { name: 'Make V2' });
     if (await check.isVisible().catch(() => false)) {
-      await check.getByRole('button', { name: /^Make V2 · about/ }).click();
+      await check.getByRole('button', { name: /^Make V2 (anyway )?· about/ }).click();
     }
     await expect(p.getByRole('tab', { name: 'V2' })).toHaveAttribute('aria-selected', 'true', {
       timeout: 30_000,
@@ -623,7 +623,7 @@ test.describe('desktop', () => {
     await p.getByRole('button', { name: /^Make V3 · about US\$/ }).click();
     const check3 = page.getByRole('dialog', { name: 'Make V3' });
     if (await check3.isVisible().catch(() => false)) {
-      await check3.getByRole('button', { name: /^Make V3 · about/ }).click();
+      await check3.getByRole('button', { name: /^Make V3 (anyway )?· about/ }).click();
     }
     await expect(p.getByRole('tab', { name: 'V3' })).toHaveAttribute('aria-selected', 'true', {
       timeout: 30_000,
@@ -763,7 +763,7 @@ test.describe('desktop', () => {
     await p.getByRole('button', { name: /^Finish the design · about US\$/ }).click();
     const check = page.getByRole('dialog', { name: 'Finish the design' });
     if (await check.isVisible().catch(() => false)) {
-      await check.getByRole('button', { name: /^Finish the design · about/ }).click();
+      await check.getByRole('button', { name: /^Finish the design (anyway )?· about/ }).click();
     }
     await expect(p.getByText(/^Done in /)).toBeVisible({ timeout: 30_000 });
     expect(m.calls.length - before).toBe(3);
@@ -832,7 +832,7 @@ test.describe('desktop', () => {
     await notice.getByRole('button', { name: 'Finish the design' }).click();
     const check = page.getByRole('dialog', { name: 'Finish the design' });
     if (await check.isVisible().catch(() => false)) {
-      await check.getByRole('button', { name: /^Finish the design · about/ }).click();
+      await check.getByRole('button', { name: /^Finish the design (anyway )?· about/ }).click();
     }
     await expect(p.getByText(/^Done in /)).toBeVisible({ timeout: 30_000 });
     expect(m.calls.slice(before).every((c) => c.step !== 'layout')).toBe(true);

@@ -5557,6 +5557,9 @@ textarea {
 .designer-failing li {
   color: var(--negative);
 }
+.designer-failing li.designer-waived {
+  color: var(--advise);
+}
 .designer-failing li strong {
   color: var(--text);
 }

@@ -53,13 +53,14 @@ export function failingChecks(
       r,
       caused.filter((c) => !waived.has(c.key)),
     ),
+    // Accepted anyway stays so once accepted, when the plan has it and it reads as "already".
     waived: sortChecks(
       r,
-      caused.filter((c) => waived.has(c.key)),
+      r.checks.filter((c) => c.hard && waived.has(c.key) && shown(c)),
     ),
     already: sortChecks(
       r,
-      r.checks.filter((c) => c.hard && c.already),
+      r.checks.filter((c) => c.hard && c.already && !waived.has(c.key)),
     ),
   };
 }

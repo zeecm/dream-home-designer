@@ -53,6 +53,13 @@ describe('Accept’s failing parts and the card’s line (designer v2, criteria 
     expect(checksShort(r, { waivers })).toBe('1 waived');
     expect(checksLine(r, { waivers: [] })).toEqual({ text: '1 doesn’t pass', tone: 'fail' });
     expect(checksLine(result([]), { waivers: [] }).text).toBe('Passes all checks');
+    // Once accepted, the plan has it and its checks read as already there: still amber.
+    const accepted = result([{ ...sofa, already: true }]);
+    expect(checksLine(accepted, { waivers })).toEqual({
+      text: '1 accepted anyway',
+      tone: 'waived',
+    });
+    expect(failingChecks(accepted, { waivers }).already).toEqual([]);
   });
 
   it('someone with no bed is listed first, and lines keep a steady order', () => {
