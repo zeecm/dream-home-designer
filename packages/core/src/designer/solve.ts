@@ -91,7 +91,7 @@ const KEEP = 16;
 /** How many of a piece's best candidates are tried with the pieces that go with it. */
 const LOOK = 8;
 /** Going back: how many other places each piece tried. */
-const ALTS = 3;
+const ALTS = 5;
 const GRID = 0.25;
 const ALONG = 0.2;
 const deg = (r: number) => (r * 180) / Math.PI;
@@ -120,9 +120,9 @@ function anchorRoles(rel: Relation | undefined): Role[] {
 }
 
 /** Two poses unlike each other: turned differently, or more than 0.6 m apart. */
-const apartPose = (o: { item: Item }, c: { item: Item }) =>
+const apartPose = (o: { item: Item }, c: { item: Item }, by = 0.6) =>
   Math.abs(o.item.rotationY - c.item.rotationY) > 0.1 ||
-  Math.hypot(o.item.position.x - c.item.position.x, o.item.position.z - c.item.position.z) > 0.6;
+  Math.hypot(o.item.position.x - c.item.position.x, o.item.position.z - c.item.position.z) > by;
 
 /** Whether a piece must back onto a wall (it has no free-standing form). */
 function wallOnlyOf(t: Intent): boolean {
@@ -601,54 +601,80 @@ export function solveSpace(input: SolveInput): SolveOutcome {
       chosen[j] = null;
     }
   };
-  /** Other places for a piece, unlike its first and each other (another wall, or apart). */
+  /** Other places for a piece, clear of trouble and unlike its first and each other. */
   const alternatives = (cs: Candidate[]): Candidate[] => {
     const out: Candidate[] = [];
     const first = cs[0];
-    const apart = apartPose;
     for (const c of cs.slice(1)) {
-      if (first && !apart(first, c)) continue;
-      if (out.every((o) => apart(o, c))) out.push(c);
+      if (c.soft) continue;
+      if (first && !apartPose(first, c, 0.3)) continue;
+      if (out.every((o) => apartPose(o, c, 0.3))) out.push(c);
       if (out.length >= ALTS) break;
     }
     return out;
   };
+  /** A piece's weight when it is left out: a bed counts for more than any number of lamps. */
+  const weight = (t: Intent) => 10 ** (6 - Math.min(6, priorityOf(t.want.kind)));
+  /**
+   * How good the placements up to `i` are, worst first: pieces short of the room they need
+   * (they fail a hard check), then what is left out (by priority), then the score.
+   */
+  const costOf = (i: number): [number, number, number] => {
+    let soft = 0;
+    let drops = 0;
+    let score = 0;
+    for (let j = 0; j <= i; j++) {
+      const c = chosen[j];
+      if (!c) drops += weight(order[j] as Intent);
+      else {
+        if (c.soft) soft++;
+        score += c.score;
+      }
+    }
+    return [soft, drops, -score];
+  };
+  const better = (p: [number, number, number], q: [number, number, number]) =>
+    p[0] < q[0] || (p[0] === q[0] && (p[1] < q[1] || (p[1] === q[1] && p[2] < q[2] - 1e-6)));
+  /** Puts back a whole set of placements from `j` on. */
+  const restore = (j: number, list: (Candidate | null)[]) => {
+    undoTo(j);
+    list.forEach((c, n) => put(j + n, c));
+  };
+
   for (let i = 0; i < order.length; i++) {
     const t = order[i] as Intent;
     const cs = candidates(t, placed);
-    if (cs.length) {
-      put(i, cs[0] as Candidate);
-      continue;
-    }
-    // Go back: its anchor, then the two pieces before it, each tried elsewhere with the
-    // pieces after it placed again.
+    const first = cs[0] ?? null;
+    put(i, first);
+    // Nowhere for it, or only short of room: try its anchor and the two pieces before it
+    // elsewhere, the pieces after them placed again, and keep the whole set only if it is
+    // better. A more important piece is never left out to place a less important one.
+    if (first && !first.soft) continue;
+    let best = { cost: costOf(i), list: chosen.slice(0, i + 1), changed: false };
     const anchorIdx = order.findIndex((o) => o.want.ref === anchorOf.get(t.want.ref));
     const backs = [...new Set([anchorIdx, i - 1, i - 2].filter((j) => j >= 0 && j < i))];
-    let done = false;
     for (const j of backs) {
-      const was = chosen.slice(j, i);
+      const was = chosen.slice(j, i + 1);
       undoTo(j);
-      for (const alt of alternatives(candidates(order[j] as Intent, placed))) {
+      const alts = alternatives(candidates(order[j] as Intent, placed));
+      for (const alt of alts) {
         put(j, alt);
-        let ok = true;
-        for (let m = j + 1; m <= i; m++) {
-          const c = candidates(order[m] as Intent, placed)[0];
-          if (c) put(m, c);
-          else if (m === i) ok = false;
-          else put(m, null);
-        }
-        if (ok) {
-          done = true;
-          break;
+        for (let m = j + 1; m <= i; m++) put(m, candidates(order[m] as Intent, placed)[0] ?? null);
+        const dropsMore = was.some(
+          (c, n) =>
+            !!c &&
+            !chosen[j + n] &&
+            priorityOf((order[j + n] as Intent).want.kind) < priorityOf(t.want.kind),
+        );
+        const cost = costOf(i);
+        if (!dropsMore && better(cost, best.cost)) {
+          best = { cost, list: chosen.slice(0, i + 1), changed: true };
         }
         undoTo(j);
       }
-      if (done) break;
-      // As it was before going back.
-      undoTo(j);
-      was.forEach((c, n) => put(j + n, c));
+      restore(j, was);
     }
-    if (!done) put(i, null);
+    if (best.changed) restore(0, best.list);
   }
 
   const items: Item[] = [];

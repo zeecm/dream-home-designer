@@ -32,6 +32,11 @@ export interface BenchFlat {
   brief: DesignBrief;
   /** Recorded answers by space key: the first, then each fix round's. */
   answers: Record<string, unknown[]>;
+  /**
+   * Pieces known to be left out today, by ref, with why: the test fails once they fit, so
+   * the note comes off then.
+   */
+  known?: Record<string, string>;
 }
 
 export interface BenchReport {
@@ -53,23 +58,19 @@ export interface BenchReport {
 
 const sample = () => sampleFlatProject().levels[0] as Level;
 
-/**
- * The Ongs (spec user stories) without Sophie: Rachel and Daniel, and Mdm Koh (a stick) in
- * Bedroom. Two single beds don't fit Bedroom with its door's swing (a bunk isn't in the
- * catalogue yet): where Sophie sleeps is a question for the conversation (slice 2).
- */
+/** The Ongs (spec user stories): Rachel and Daniel, Mdm Koh (a stick) and Sophie (6). */
 export const ONGS: DesignBrief = {
   ...defaultBrief(),
   household: {
     adults: 2,
-    children: [],
+    children: ['primary'],
     elders: ['stick'],
     helper: false,
     pets: '',
     text: '',
   },
-  names: { 'adult-1': 'Rachel', 'adult-2': 'Daniel', 'elder-1': 'Mdm Koh' },
-  sleeping: { 'rm_main-bedroom': ['adult-1', 'adult-2'], rm_bedroom: ['elder-1'] },
+  names: { 'adult-1': 'Rachel', 'adult-2': 'Daniel', 'elder-1': 'Mdm Koh', 'child-1': 'Sophie' },
+  sleeping: { 'rm_main-bedroom': ['adult-1', 'adult-2'], rm_bedroom: ['elder-1', 'child-1'] },
   budget: { low: 30_000, high: 40_000 },
 };
 
@@ -79,6 +80,12 @@ export const BENCHMARK: BenchFlat[] = [
     name: 'The sample 3-room (the Ongs)',
     level: sample,
     brief: ONGS,
+    known: {
+      // Bedroom is 2.88 × 2.90 m: two singles with an aisle leave 0.90 m at their feet, and a
+      // hinged wardrobe needs 0.60 m in front of its 0.60 m depth, clear of the door.
+      ward1:
+        'Bedroom: two single beds and a hinged wardrobe don’t fit; a sliding one or a bunk would',
+    },
     answers: {
       'rm_main-bedroom': [sampleMain],
       rm_bedroom: [sampleBedroom],
