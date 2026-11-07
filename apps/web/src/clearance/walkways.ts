@@ -49,8 +49,8 @@ let started = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let wait = 100;
 let pointerDown = false;
-/** The ageing choice the last run used. */
-let lastChoice = 'null';
+/** The clearance switch and ageing choice the last run used. */
+let lastRun = '';
 
 /** Whether a pointer is held down on the page (a drag in progress). */
 export const pointerHeld = () => pointerDown;
@@ -61,9 +61,10 @@ function run(released = false) {
   const { on, ageingChoice } = useWalkways.getState();
   const level = on || ageingChoice ? (currentLevel() ?? null) : null;
   const prev = useWalkways.getState();
-  const choice = JSON.stringify(ageingChoice);
-  if (level === prev.level && choice === lastChoice && !released) return;
-  lastChoice = choice;
+  // What the last run was for: the level, the clearance switch and the ageing choice.
+  const ran = JSON.stringify([on, ageingChoice]);
+  if (level === prev.level && ran === lastRun && !released) return;
+  lastRun = ran;
   const t0 = performance.now();
   // Walkways first: ageing then reuses their furnished pass.
   const report = level && on ? walkwayReport(level) : null;

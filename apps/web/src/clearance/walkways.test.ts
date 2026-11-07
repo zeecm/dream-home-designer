@@ -36,14 +36,14 @@ describe('the walkway runner', () => {
     startAgeing({ profile: 'walking' });
     flushWalkways();
     expect(useWalkways.getState().ageing?.profile).toBe('walking');
-    // Both on: one pass, both reports.
+    // Clearance turned on (by keyboard: no release) with ageing on: walkways show too.
     startWalkways(true);
-    flushWalkways(true);
+    flushWalkways();
     expect(useWalkways.getState().report).not.toBeNull();
     expect(useWalkways.getState().ageing).not.toBeNull();
     startAgeing(null);
     startWalkways(false);
-    flushWalkways(true);
+    flushWalkways();
     expect(useWalkways.getState().ageing).toBeNull();
     expect(useWalkways.getState().level).toBeNull();
   });

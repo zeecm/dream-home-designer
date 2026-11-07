@@ -19,7 +19,7 @@ import { type EditorDoc, dispatch, emptyHistory } from './history';
 import { variantLevels } from './levels';
 import { startRenovation } from './renovation';
 import type { Level, Opening, Vec2 } from './schema';
-import { walkwayReport } from './walkway';
+import { furnishedPass, walkwayReport } from './walkway';
 
 /**
  * Two 4 m rooms over a corridor `clear` wide (walls 100 mm on centre lines), a door from the
@@ -813,6 +813,23 @@ describe('the sample flat', () => {
     walkwayReport(furnished);
     const again = ageingReport(before, wheel());
     expect(again.issues).toEqual(fresh.issues);
+  });
+
+  it('a level with no main door rastered between: the pass kept for L is still L’s', () => {
+    // L furnished, its pass made by walkways; then a new plan with no main door (its bare
+    // raster is made afresh); then the ageing check on L reads L's pass.
+    const L = Object.freeze({ ...furnishedSample() });
+    const fresh = ageingReport(Object.freeze({ ...L }), wheel());
+    walkwayReport(L);
+    const near = Int32Array.from(furnishedPass(L).near);
+    const other = box(3.0, 2.0, 'Bedroom');
+    const X = Object.freeze({ ...other.lvl(), items: { ...other.lvl().items } });
+    expect(walkwayReport(X).status).toBe('no-main-door');
+    const kept = furnishedPass(L).near;
+    let differ = 0;
+    for (let k = 0; k < near.length; k++) if (kept[k] !== near[k]) differ++;
+    expect(differ).toBe(0);
+    expect(ageingReport(L, wheel()).issues).toEqual(fresh.issues);
   });
 
   it('Before and After are checked separately', () => {
