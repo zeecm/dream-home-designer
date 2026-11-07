@@ -30,6 +30,7 @@ import {
   spaceIndex,
 } from './place';
 import { ACCESS, peopleOf } from './principles';
+import { acceptResolve, piecesNoWorse } from './resolve';
 import type { Concept, DesignInput, DesignItem, RoomUse, SpaceDesign, SpaceStatus } from './schema';
 import type { Zone } from './schema';
 import { type Intent, type SolveOutcome, applySwap, solveSpace } from './solve';
@@ -1094,34 +1095,29 @@ function keepWalkwaysClear(
       const was = run.outcome;
       const out = run.solveWith?.(kept.get(run) ?? [], keptFor.get(run));
       if (!out || !was || !run.apply || !run.unapply) continue;
-      // Taken whole, and only if no worse: no more pieces of any kind left out, none more
-      // short of room or turned from what it goes with (P2), and fewer hard failures.
-      if (
-        out.dropped.length > was.dropped.length ||
-        out.soft > was.soft ||
-        out.broken > was.broken
-      ) {
+      // Taken whole, and only if strictly better and no worse in any way (acceptResolve).
+      const pieces = (o: SolveOutcome) => ({
+        dropped: o.dropped.length,
+        soft: o.soft,
+        broken: o.broken,
+      });
+      if (!piecesNoWorse(pieces(was), pieces(out)) || !run.spaceHard) {
         rejected.add(run);
         continue;
       }
-      const before = changed ? hardCount(lvl) : hardCount(lvl, report);
-      const hardBefore = run.spaceHard?.(lvl);
+      const before = {
+        keys: run.spaceHard(lvl),
+        plan: changed ? hardCount(lvl) : hardCount(lvl, report),
+        ...pieces(was),
+      };
       run.unapply();
       run.apply(out);
-      const after = hardCount(lvl);
-      // The space's own hard checks strictly better: none failing that didn't before, and
-      // fewer; and the plan's walkways and clearances no worse.
-      const hardAfter = run.spaceHard?.(lvl);
-      const better =
-        !hardBefore || !hardAfter
-          ? after < before
-          : [...hardAfter].every((k) => hardBefore.has(k)) &&
-            hardAfter.size < hardBefore.size &&
-            after <= before;
+      const after = { keys: run.spaceHard(lvl), plan: hardCount(lvl), ...pieces(out) };
+      const better = acceptResolve(before, after);
       resolves.push({
         space: run.key,
-        before: hardBefore?.size ?? before,
-        after: hardAfter?.size ?? after,
+        before: before.keys.size,
+        after: after.keys.size,
         taken: better,
       });
       if (better) {
