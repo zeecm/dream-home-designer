@@ -190,6 +190,8 @@ export function clothesLines(
   report: StorageReport,
   room: StorageRoom,
   rates: Rates,
+  /** Starts with the room and its people (off on the room's own card, which says them). */
+  named = true,
 ): { line: string; more?: string; warn?: boolean } | null {
   const c = room.clothes;
   if (!c || c.target === undefined) {
@@ -200,15 +202,18 @@ export function clothesLines(
       : null;
   }
   const have = c.have > 0 ? `${amount('clothes', c.have)} of wardrobe` : 'no wardrobe';
-  const line = `${room.name}, ${peopleText(room.people)}: ${have}; about ${amount('clothes', c.target)} is usual.`;
-  if (c.status === 'enough') return { line };
+  const usual = `${have}; about ${amount('clothes', c.target)} is usual.`;
+  const line = named
+    ? `${room.name}, ${peopleText(room.people)}: ${usual}`
+    : `${usual.slice(0, 1).toUpperCase()}${usual.slice(1)}`;
+  if (c.status === 'enough') return { line, more: 'Enough.' };
   const gap = c.gap ?? 0;
   if (report.home.clothes.status === 'enough') {
     const spare = report.spareClothes[0];
     return {
       line,
       more: spare
-        ? `Enough for the whole home: ${amount('clothes', spare.clothes)} more stands in ${spare.roomId ? `the ${roomName(report, spare.roomId)}` : 'no room'}.`
+        ? `Enough for the whole home: ${amount('clothes', spare.clothes)} more stands ${spare.roomId ? `in ${roomName(report, spare.roomId)}` : 'outside the rooms'}.`
         : 'Enough for the whole home.',
     };
   }

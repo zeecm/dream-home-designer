@@ -160,6 +160,9 @@ function panTo(c: Vec2 | null) {
   if (c && ed.view) ed.setView({ ...ed.view, cx: c.x, cy: c.y }, true);
 }
 
+const narrow = () =>
+  typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 720px)').matches;
+
 const returnFocus = () =>
   requestAnimationFrame(() =>
     document.querySelector<HTMLButtonElement>('[data-storage-open]')?.focus(),
@@ -392,7 +395,7 @@ function RoomCard({
   const rates = useRates((s) => s.rates);
   const highlight = useStorage((s) => s.highlight);
   const { level, report } = view;
-  const lines = clothesLines(report, room, rates);
+  const lines = clothesLines(report, room, rates, false);
   const gains = gain
     ? STORAGE_MEASURES.filter((m) => gain[m] > (m === 'shoes' ? 0.5 : 0.005)).map(
         (m) => `+${amount(m, gain[m])}`,
@@ -497,7 +500,8 @@ export function StoragePanel() {
   }, []);
   if (!view) return null;
   const { level, report } = view;
-  const open = change ?? (intro || nobody);
+  // Unfolded the first time, or with nobody to count; on a phone one line with Change.
+  const open = change ?? (nobody || (intro && !narrow()));
   const shelter = report.rooms.find((r) => r.store?.kind === 'shelter');
   const copy = async () => {
     const name = AMOUNTS.find((a) => a.value === setting.amount)?.label ?? '';
@@ -719,23 +723,6 @@ export function StorageAnnouncement({ selection }: { selection: Selection | null
 export function StorageHighlight({ level }: { level: Level }) {
   const open = useStorage((s) => s.open);
   const highlight = useStorage((s) => s.highlight);
-  const fitAll = useStorage((s) => s.fitAll);
-  // On a phone the plan shrinks above the half-height sheet: show all of it there.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: on opening only
-  useEffect(() => {
-    if (!fitAll || Date.now() - fitAll > 1000) return;
-    const plan = document.querySelector('svg.plan-svg')?.getBoundingClientRect();
-    if (!plan) return;
-    const frame = requestAnimationFrame(() =>
-      useEditor
-        .getState()
-        .setView(
-          fitBounds(levelBounds(level), { width: plan.width, height: plan.height }, 12),
-          true,
-        ),
-    );
-    return () => cancelAnimationFrame(frame);
-  }, [fitAll]);
   if (!open || !highlight) return null;
   const s = roomShapes(level).get(highlight);
   if (!s) return null;
@@ -764,6 +751,17 @@ export const StorageChips = memo(function StorageChips({
 }) {
   const open = useStorage((s) => s.open);
   const sv = useStorageReport();
+  const fitAll = useStorage((s) => s.fitAll);
+  // On a phone the plan shrinks above the half-height sheet: show all of it there (on opening,
+  // and the resizes just after).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on opening, and the resizes after it
+  useEffect(() => {
+    if (!fitAll || Date.now() - fitAll > 1000 || size.width === 0) return;
+    const frame = requestAnimationFrame(() =>
+      useEditor.getState().setView(fitBounds(levelBounds(level), size, 12), true),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [fitAll, size]);
   if (!open || !sv || sv.level !== level) return null;
   const { report } = sv;
   const small = size.width < 560;
