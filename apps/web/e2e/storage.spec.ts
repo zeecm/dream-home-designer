@@ -130,7 +130,7 @@ test.describe('desktop', () => {
       'Needs about 0.80 m more: a 3 ft run, about $600–1,050 built in.',
     );
     await expect(card(page, 'Bedroom')).toContainText(
-      'No wardrobe yet; about 1.00 m is usual: a 3 ft run, about $600–1,050 built in.',
+      'No wardrobe yet; about 1.00 m is usual: a 4 ft run, about $800–1,400 built in.',
     );
     // The chips on the plan, amber where something drawn needs more; nothing drawn is dashed.
     await expect(chip(page).filter({ hasText: 'Wardrobe 1.20 of 2.00 m' })).toHaveClass(
@@ -235,6 +235,12 @@ test.describe('desktop', () => {
     await page.getByRole('button', { name: 'Reset to the beds' }).click();
     await expect(card(page, 'Bedroom')).toContainText('about 1.00 m is usual');
     await expect(bedroom).toContainText('Guessed from the beds');
+    // Any room can take people: one adult in the living room (a sofa bed), then back.
+    await page.getByLabel('Add people to a room').selectOption({ label: 'Living and dining' });
+    await expect(page.locator('.storage-people[data-room="Living and dining"]')).toBeVisible();
+    await expect(card(page, 'Living and dining')).toContainText('1 adult');
+    await page.getByRole('button', { name: 'Reset to the beds' }).click();
+    await expect(page.locator('.storage-people[data-room="Living and dining"]')).toHaveCount(0);
 
     // 21. Lots: every target the Lots row; kept after a reload.
     await page.getByRole('button', { name: 'Lots' }).click();
@@ -333,6 +339,25 @@ test.describe('desktop', () => {
         expect(over, JSON.stringify({ c, s })).toBe(false);
       }
     }
+    // Each chip stays inside its room, across.
+    const inside = await page.evaluate(() => {
+      const out: string[] = [];
+      for (const g of document.querySelectorAll('[data-testid="storage-chip"]')) {
+        const c = g.getBoundingClientRect();
+        const rooms = [...document.querySelectorAll('[data-hit^="room:"]')].map((r) =>
+          r.getBoundingClientRect(),
+        );
+        const mid = { x: (c.left + c.right) / 2, y: (c.top + c.bottom) / 2 };
+        const room = rooms.find(
+          (r) => mid.x > r.left && mid.x < r.right && mid.y > r.top && mid.y < r.bottom,
+        );
+        if (!room || c.left < room.left - 1 || c.right > room.right + 1) {
+          out.push(g.textContent ?? '');
+        }
+      }
+      return out;
+    });
+    expect(inside).toEqual([]);
     // The clearance marks come after the chips: drawn over them.
     const after = await page.evaluate(() => {
       const s = document.querySelector('[data-testid="storage-chips"]');
@@ -359,8 +384,12 @@ test.describe('desktop', () => {
     await expect(panel(page)).toBeVisible();
     const p = await at(page, 9.85, 5.3);
     await page.mouse.click(p.x, p.y);
-    // Placed: the panel is back, the bar gone, the shoes counted.
+    // Placed by the main door, where it's in the way: its details open with the problem and the
+    // way back; back, the panel shows the shoes counted.
     await expect(page.locator('.storage-add-bar')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Shoe cabinet' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Clearances' })).toBeVisible();
+    await page.getByRole('button', { name: '‹ Back to storage' }).click();
     await expect(panel(page)).toBeVisible();
     await expect(meter(page, 'shoes')).toContainText('15 of 28 pairs');
     await expect(page.getByRole('button', { name: /^Select/ })).toHaveAttribute(
@@ -377,6 +406,28 @@ test.describe('desktop', () => {
       'true',
     );
   });
+
+  for (const [w, h, touch] of [
+    [1024, 768, false],
+    [844, 390, true],
+  ] as const) {
+    test(`nothing scrolls sideways in the panel at ${w}×${h}`, async ({ browser }) => {
+      const { defaultBrowserType: _w, ...land } = devices['iPhone 13 landscape'];
+      const ctx = await browser.newContext(touch ? land : { viewport: { width: w, height: h } });
+      const page = await ctx.newPage();
+      await openFurnished(page);
+      if (touch) await page.getByRole('button', { name: 'Show plan details' }).tap();
+      await seeStorage(page, touch);
+      await page.locator('.storage-oneline').getByRole('button', { name: 'Change' }).click();
+      await page.locator('.storage-cards').scrollIntoViewIfNeeded();
+      const sizes = await page.locator('.inspector').evaluate((el) => ({
+        scroll: el.scrollWidth,
+        client: el.clientWidth,
+      }));
+      expect(sizes.scroll).toBeLessThanOrEqual(sizes.client);
+      await ctx.close();
+    });
+  }
 
   test('23: an uploaded model is not counted', async ({ page }) => {
     const dir = fileURLToPath(new URL('../public/models', import.meta.url));
@@ -422,6 +473,12 @@ test.describe('desktop', () => {
     await expect(meter(page, 'clothes')).toContainText('3.00 of 3.00 m');
     await expect(meter(page, 'clothes')).toContainText('Before: 1.20 m');
     await expect(card(page, 'Main bedroom')).toContainText('+1.80 m, +0.5 m³ in the renovation');
+    // Copy says it's the renovation, and what it adds.
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await panel(page).getByRole('button', { name: 'Copy summary' }).click();
+    const text = await page.evaluate(() => navigator.clipboard.readText());
+    expect(text).toContain('After the renovation: Storage for 3 people (Typical)');
+    expect(text).toContain('(Before: 1.20 m; +1.80 m)');
     await bar.getByRole('button', { name: 'Before' }).click();
     await expect(meter(page, 'clothes')).toContainText('1.20 of 3.00 m');
     await expect(meter(page, 'clothes')).not.toContainText('Before:');
@@ -583,6 +640,9 @@ test.describe('phone', () => {
     const spot = await at(page, 9.85, 5.3);
     await page.touchscreen.tap(spot.x, spot.y);
     await expect(page.locator('.storage-add-bar')).toHaveCount(0);
+    // In the way of the main door: its details first, then back to the sheet where it was.
+    await expect(page.getByRole('heading', { name: 'Shoe cabinet' })).toBeVisible();
+    await page.getByRole('button', { name: '‹ Back to storage' }).tap();
     await expect(panel(page)).toBeVisible();
     await expect(meter(page, 'shoes')).toContainText('15 of 28 pairs');
 

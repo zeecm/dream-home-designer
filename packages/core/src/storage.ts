@@ -105,7 +105,19 @@ const PeopleSchema = z.object({ adults: count, children: count });
 /** Who lives here and how much they own, as kept per browser and project. */
 export const StorageSetting = z.object({
   /** By room id; a room not here takes its people from its beds. */
-  people: z.record(z.string(), PeopleSchema).catch({}),
+  people: z
+    .record(z.string(), z.unknown())
+    .catch({})
+    .transform((all) => {
+      const out: Record<string, People> = {};
+      for (const [id, v] of Object.entries(all)) {
+        const r = z
+          .object({ adults: z.number().finite(), children: z.number().finite() })
+          .safeParse(v);
+        if (r.success) out[id] = PeopleSchema.parse(r.data);
+      }
+      return out;
+    }),
   /** Also living here, without a bed drawn. */
   others: PeopleSchema.catch({ adults: 0, children: 0 }),
   amount: z.enum(['few', 'typical', 'lots']).catch('typical'),
@@ -190,6 +202,10 @@ export interface PieceStorage {
   pantry?: boolean;
   /** A base run less the sink's level (no sink cabinet on the level). */
   sink?: boolean;
+  /** What it is for (counted as drawn for that measure even if it holds none). */
+  measure: StorageMeasure;
+  /** A shoe cabinet that holds no pair: too narrow for one, or too low for a shelf. */
+  why?: 'narrow' | 'low';
 }
 
 /** An uploaded model (a .glb of the person's own): we can't tell what it holds. */
@@ -236,6 +252,7 @@ export function storageOf(item: Item, ctx: RoomCtx): PieceStorage | null {
     other: 0,
     top: 0,
     cabinets: 0,
+    measure: 'other',
   };
   switch (c) {
     case 'hanging':
@@ -243,10 +260,12 @@ export function storageOf(item: Item, ctx: RoomCtx): PieceStorage | null {
         out.other = w * d * h;
         break;
       }
+      out.measure = 'clothes';
       out.clothes = d < HANG_MIN_DEPTH - EPS ? w / 2 : w;
       if (h > TOP_CABINET_OVER + EPS) out.top = out.other = w * d * (h - TOP_CABINET_FROM);
       break;
     case 'folded':
+      out.measure = 'clothes';
       out.clothes = w / 2;
       break;
     case 'shoes':
@@ -255,22 +274,31 @@ export function storageOf(item: Item, ctx: RoomCtx): PieceStorage | null {
         out.kitchen = w * Math.max(1, Math.round((h - SHOE_PLINTH) / KITCHEN_LEVEL + EPS));
         out.cabinets = w;
         out.pantry = true;
+        out.measure = 'kitchen';
         break;
       }
-      out.shoes =
-        Math.floor(w / PAIR_WIDTH + EPS) *
-        Math.max(0, Math.floor((h - SHOE_PLINTH) / SHOE_PITCH + EPS));
+      {
+        out.measure = 'shoes';
+        const across = Math.floor(w / PAIR_WIDTH + EPS);
+        const shelves = Math.max(0, Math.floor((h - SHOE_PLINTH) / SHOE_PITCH + EPS));
+        out.shoes = across * shelves;
+        if (!across) out.why = 'narrow';
+        else if (!shelves) out.why = 'low';
+      }
       break;
     case 'base':
     case 'base-run':
+      out.measure = 'kitchen';
       out.kitchen = w * 2;
       out.cabinets = w;
       break;
     case 'sink':
+      out.measure = 'kitchen';
       out.kitchen = w;
       out.cabinets = w;
       break;
     case 'wall':
+      out.measure = 'kitchen';
       out.kitchen = w * levels(h);
       out.cabinets = w;
       break;
@@ -418,6 +446,8 @@ export interface Meter {
   status?: StorageStatus;
   /** How much more the target asks for (zero when enough). */
   gap?: number;
+  /** How many pieces (and rooms: a store, the shelter) are drawn for it, holding any or none. */
+  pieces: number;
 }
 
 /** Status from have and target, with a little tolerance (1.2 × 1.5 is 1.7999…). */
@@ -426,13 +456,18 @@ export function meterStatus(have: number, target: number): Exclude<StorageStatus
   return r >= 1 - 1e-6 ? 'enough' : r >= 0.8 - 1e-6 ? 'nearly' : 'short';
 }
 
-export function meter(have: number, target?: number): Meter {
-  if (target === undefined || !(target > 0)) return { have };
+/**
+ * A measure's meter. `pieces` drawn for it (default: one if it holds any): with none, the status
+ * is `none` (nothing drawn, not a shortfall); a piece that holds nothing is a shortfall.
+ */
+export function meter(have: number, target?: number, pieces = have > EPS ? 1 : 0): Meter {
+  if (target === undefined || !(target > 0)) return { have, pieces };
   return {
     have,
     target,
-    status: have <= EPS ? 'none' : meterStatus(have, target),
+    status: pieces === 0 && have <= EPS ? 'none' : meterStatus(have, target),
     gap: Math.max(0, target - have),
+    pieces,
   };
 }
 
@@ -444,8 +479,14 @@ export function shortfallPrice(
   shortfall: number,
   rates: Rates,
 ): { feet: number; low: number; high: number } | null {
-  return shortfall >= PRICE_FROM - EPS ? carpentryPrice('wardrobe', shortfall, rates) : null;
+  if (shortfall < PRICE_FROM - EPS) return null;
+  // Enough feet to cover it (an estimate's runs round to the nearest foot; this one can't fall
+  // short of what's needed).
+  const feet = Math.ceil(shortfall / FOOT - 1e-6);
+  return carpentryPrice('wardrobe', feet * FOOT, rates);
 }
+
+const FOOT = 0.3048;
 
 /** About how wide a full-height cupboard would hold `m3`, to the half metre (at least 0.5). */
 export const cupboardFor = (m3: number) =>
@@ -579,15 +620,22 @@ export function storageReport(
       r.totals.other += volume;
     }
     if (headcount(r.people) > 0) {
-      r.clothes = meter(r.totals.clothes, clothesTarget(r.people, setting.amount));
+      r.clothes = meter(
+        r.totals.clothes,
+        clothesTarget(r.people, setting.amount),
+        r.pieces.filter((p) => p.measure === 'clothes').length,
+      );
     }
   }
 
   const targets = headcount(people) > 0 ? storageTargets(people, setting.amount) : null;
   const have = (m: StorageMeasure) =>
     sum(outside, m) + [...rooms.values()].reduce((t, r) => t + r.totals[m], 0);
+  const drawn = (m: StorageMeasure) =>
+    all.filter((p) => p.measure === m || (m === 'other' && p.top > 0)).length +
+    (m === 'other' ? [...rooms.values()].filter((r) => r.store?.counted).length : 0);
   const home = Object.fromEntries(
-    STORAGE_MEASURES.map((m) => [m, meter(have(m), targets?.[m])]),
+    STORAGE_MEASURES.map((m) => [m, meter(have(m), targets?.[m], drawn(m))]),
   ) as Record<StorageMeasure, Meter>;
 
   const group = (r: StorageRoom) =>

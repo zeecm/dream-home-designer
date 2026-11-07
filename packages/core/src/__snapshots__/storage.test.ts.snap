@@ -77,6 +77,7 @@ exports[`the report > 16. the furnished sample, Typical, from the beds (reviewed
   "shoes": {
     "gap": 28,
     "have": 0,
+    "pieces": 0,
     "status": "none",
     "target": 28,
   },

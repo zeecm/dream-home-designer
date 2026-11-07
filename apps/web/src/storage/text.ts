@@ -288,7 +288,18 @@ export function pieceLine(p: PieceStorage): string {
   if (p.other > 0) return `Storage: ${amount('other', p.other)}`;
   return p.shoes > 0
     ? `Storage: about ${amount('shoes', p.shoes)} of shoes`
-    : 'Storage: 0 pairs of shoes (too narrow)';
+    : `Storage: 0 pairs of shoes (too ${p.why === 'low' ? 'low' : 'narrow'})`;
+}
+
+/** Nothing of a measure drawn: no piece at all (a piece that holds none is drawn, and short). */
+export const isEmpty = (meter: Meter) => meter.status === 'none' || meter.pieces === 0;
+
+/** Why the shoe cabinets drawn hold no pair: "too narrow" or "too low" (null: they hold some). */
+export function shoesWhy(report: StorageReport): string | null {
+  if (report.home.shoes.have > 0) return null;
+  const all = [...report.rooms.flatMap((r) => r.pieces), ...report.outside];
+  const p = all.find((x) => x.measure === 'shoes' && x.why);
+  return p ? `too ${p.why === 'low' ? 'low' : 'narrow'} for a pair` : null;
 }
 
 /**
@@ -301,7 +312,7 @@ export function chipText(
   meter: Meter,
   small: boolean,
 ): { text: string; warn: boolean; empty: boolean } {
-  const empty = meter.have <= 0;
+  const empty = isEmpty(meter);
   const t = meter.target;
   if (empty) {
     const what = m === 'clothes' ? 'No wardrobe' : 'No kitchen cabinets';
@@ -332,6 +343,10 @@ export const NOT_COUNTED = 'Not counted as storage.';
 export const INTRO =
   'Do you have room for everything? We add up wardrobes, shoe cabinets, kitchen cabinets and cupboards, and compare them with what a household like yours usually needs. We guessed who lives here from the beds; change it below.';
 
+/** The intro with no beds to guess from. */
+export const INTRO_NO_BEDS =
+  'Do you have room for everything? We add up wardrobes, shoe cabinets, kitchen cabinets and cupboards, and compare them with what a household like yours usually needs. Add who lives here below.';
+
 export const AMOUNT_HINT =
   'Typical is what most Singapore families own. Choose Lots if your wardrobe is full today.';
 
@@ -353,22 +368,42 @@ export function copyText(
   report: StorageReport,
   rates: Rates,
   amountName: string,
+  /**
+   * In a renovation: which version this is, and, for After, the flat as it is (each meter then
+   * says what it was and what the renovation adds).
+   */
+  version?: { shown: 'before' | 'after'; before?: StorageReport },
 ): string {
   const out: string[] = [];
   const n = count(report.people);
-  out.push(n ? `Storage for ${plural(n, 'person', 'people')} (${amountName})` : 'Storage');
+  const head = n ? `Storage for ${plural(n, 'person', 'people')} (${amountName})` : 'Storage';
+  out.push(
+    version?.shown === 'after'
+      ? `After the renovation: ${head}`
+      : version?.shown === 'before'
+        ? `As it is now: ${head}`
+        : head,
+  );
   if (n) out.push(`Who lives here: ${householdLine(report).replace(/^[^:]*: /, '')}`);
   out.push('');
   for (const m of ['clothes', 'shoes', 'kitchen', 'other'] as const) {
     const meter = report.home[m];
     const s = statusWord(m, meter);
-    const what =
-      meter.status === 'none' || meter.have <= 0
-        ? emptyText(m, meter)
-        : m === 'kitchen'
-          ? `${figures(m, meter)} of shelves and drawers (${amount('kitchen', report.cabinets)} of cabinets)`
-          : figures(m, meter);
-    out.push(`${MEASURE_LABEL[m]}: ${what}${s ? `. ${s.text}` : ''}`);
+    const why = m === 'shoes' ? shoesWhy(report) : null;
+    const what = isEmpty(meter)
+      ? emptyText(m, meter)
+      : m === 'kitchen'
+        ? `${figures(m, meter)} of shelves and drawers (${amount('kitchen', report.cabinets)} of cabinets)`
+        : `${figures(m, meter)}${why ? ` (${why})` : ''}`;
+    const was = version?.before?.home[m];
+    const change = was
+      ? (() => {
+          const d = meter.have - was.have;
+          const sign = storageRound(m, Math.abs(d)) === 0 ? '' : d > 0 ? '+' : '−';
+          return ` (Before: ${amount(m, was.have)}${sign ? `; ${sign}${amount(m, Math.abs(d))}` : ''})`;
+        })()
+      : '';
+    out.push(`${MEASURE_LABEL[m]}: ${what}${change}${s ? `. ${s.text}` : ''}`);
   }
   const rooms = report.rooms
     .map((r) => {

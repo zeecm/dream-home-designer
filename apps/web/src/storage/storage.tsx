@@ -12,8 +12,10 @@ import {
   type StorageRoom,
   type StorageSetting,
   type Vec2,
+  clearanceIssues,
   furnitureKind,
   isUploadedModel,
+  issueItem,
   levelBounds,
   matchRooms,
   pieceIn,
@@ -41,6 +43,7 @@ import {
   DISCLAIMER,
   HDB_NOTE,
   INTRO,
+  INTRO_NO_BEDS,
   KITCHEN_NOTE,
   MEASURE_LABEL,
   NOT_COUNTED,
@@ -55,10 +58,12 @@ import {
   emptyText,
   figures,
   householdLine,
+  isEmpty,
   meterValueText,
   peopleText,
   pieceLine,
   pieceShare,
+  shoesWhy,
   statusWord,
   summaryLine,
 } from './text';
@@ -127,6 +132,8 @@ export interface StorageView {
   alias?: Map<string, string>;
   /** Every room id in the project, both versions: people for rooms not here are dropped. */
   known: Set<string>;
+  /** With a renovation, the version shown. */
+  shown?: 'before' | 'after';
 }
 
 /** Every room in the project, in the flat as it is and the renovation. */
@@ -149,11 +156,17 @@ export function useStorageReport(): StorageView | null {
     if (!level || !ready) return null;
     const known = roomIds(project);
     const flat = beforeOf(project, level);
-    if (flat === level) return { level, report: reportFor(level, setting), known };
+    if (flat === level) {
+      const report = reportFor(level, setting);
+      return project.renovation
+        ? { level, report, known, shown: 'before' as const }
+        : { level, report, known };
+    }
     const alias = matchFor(flat, level);
     const report = reportFor(level, setting, alias);
     const before = reportFor(flat, setting);
-    return { level, report, before, gain: storageGain(before, report, alias), alias, known };
+    const gain = storageGain(before, report, alias);
+    return { level, report, before, gain, alias, known, shown: 'after' as const };
   }, [level, project, setting, ready]);
 }
 
@@ -203,6 +216,9 @@ function addPiece(m: StorageMeasure) {
   const ed = useEditor.getState();
   if (!canEdit(useStore.getState()) || ed.preview) return;
   const { kindId, what } = ADD_PIECE[m];
+  // Back where the panel was once it's placed.
+  const sheet = document.querySelector('.inspector');
+  useStorage.getState().setReturnTo({ scroll: sheet?.scrollTop ?? 0, roomId: null });
   ed.select(null);
   ed.setFurnitureKind(kindId);
   ed.setTool('furniture');
@@ -303,6 +319,13 @@ function Household({ view }: { view: StorageView }) {
   };
   const edited = Object.keys(setting.people).length > 0 || count(setting.others) > 0;
   const rooms = report.rooms.filter((r) => r.sleeps);
+  // Rooms anyone could live in that aren't listed (a study, a room not named yet): a choice.
+  const listedIds = new Set(rooms.map((r) => r.roomId));
+  const others = Object.values(view.level.rooms)
+    .filter(
+      (r) => !listedIds.has(r.id) && roomKind(r.name) !== 'none' && roomKind(r.name) !== 'bathroom',
+    )
+    .sort((a, b) => a.name.localeCompare(b.name));
   return (
     <div className="storage-household">
       {rooms.map((r) => (
@@ -327,6 +350,26 @@ function Household({ view }: { view: StorageView }) {
           />
         </div>
       ))}
+      {others.length > 0 && (
+        <label className="storage-add-room">
+          <span className="field-label">Add people to a room</span>
+          <select
+            className="input"
+            value=""
+            onChange={(e) => {
+              const r = view.level.rooms[e.target.value];
+              if (r) setPeople(r.id, r.name, { adults: 1, children: 0 });
+            }}
+          >
+            <option value="">Choose a room…</option>
+            {others.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <div className="storage-people">
         <p className="storage-people-room">Also living here, without a bed drawn</p>
         <Stepper
@@ -377,7 +420,9 @@ function MeterRow({
   const canAdd = useCanAdd();
   const status = statusWord(m, meter);
   // Nothing drawn (with or without people to compare with): the empty state, never a shortfall.
-  const empty = meter.have <= 0;
+  // A piece that holds none (a shoe cabinet too narrow for a pair) is drawn, and says why.
+  const empty = isEmpty(meter);
+  const why = m === 'shoes' ? shoesWhy(report) : null;
   const t = meter.target;
   const top = Math.max(meter.have, t ?? 0) || 1;
   const pct = (v: number) => `${Math.min(100, (v / top) * 100)}%`;
@@ -425,6 +470,7 @@ function MeterRow({
         <p className="storage-figures num">
           {m === 'kitchen' && t === undefined ? cabinetsText(report) : figures(m, meter)}
           {m === 'kitchen' && t !== undefined && ' of shelves and drawers'}
+          {why && <span className="storage-aside"> · {why}</span>}
           {more && <span className="storage-aside"> · {more}</span>}
         </p>
       )}
@@ -606,7 +652,10 @@ export function StoragePanel() {
   const copy = async () => {
     const name = AMOUNTS.find((a) => a.value === setting.amount)?.label ?? '';
     try {
-      await navigator.clipboard.writeText(copyText(level, report, rates, name));
+      const version = view.shown
+        ? { shown: view.shown, ...(view.before ? { before: view.before } : {}) }
+        : undefined;
+      await navigator.clipboard.writeText(copyText(level, report, rates, name, version));
       setCopied('done');
     } catch {
       setCopied('failed');
@@ -631,7 +680,11 @@ export function StoragePanel() {
       <p className="storage-finding" data-testid="storage-finding">
         {summaryLine(report, roomShapes(level).size)}
       </p>
-      {intro && <p className="storage-intro">{INTRO}</p>}
+      {intro && (
+        <p className="storage-intro">
+          {report.rooms.some((r) => r.fromBeds && count(r.people) > 0) ? INTRO : INTRO_NO_BEDS}
+        </p>
+      )}
 
       <div className="storage-who">
         <p className="storage-oneline">
@@ -780,14 +833,17 @@ export function StorageAddBar() {
   useEffect(() => {
     if (adding && !armed) useStorage.getState().setAdding(null);
   }, [adding, armed]);
-  // Placed: back to Select and the panel.
+  // Placed: back to Select and the panel; with a clearance problem, its details first (with the
+  // way back to storage), so the problem shows.
   useEffect(() => {
-    if (!armed || selection?.kind !== 'item') return;
-    if (level?.items[selection.id]?.assetId !== adding?.kindId) return;
+    if (!armed || selection?.kind !== 'item' || !level) return;
+    if (level.items[selection.id]?.assetId !== adding?.kindId) return;
     useStorage.getState().setAdding(null);
     const ed = useEditor.getState();
-    ed.select(null);
     ed.setTool('select');
+    const problem = clearanceIssues(level).some((i) => issueItem(i) === selection.id);
+    if (problem) ed.select(selection);
+    else ed.select(null);
   }, [armed, selection, level, adding]);
   if (!armed || !adding) return null;
   const touch = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
@@ -897,6 +953,7 @@ export function StorageHighlight({ level }: { level: Level }) {
 
 /** A chip under a room's label, in plan metres: its box and words. */
 interface PlacedChip {
+  key: string;
   roomId: string;
   text: string;
   warn: boolean;
@@ -912,10 +969,61 @@ interface PlacedChip {
 /** A plan narrower than this gets the short chips, at 11 px. */
 const SMALL_PLAN = 560;
 
+type Bar = [Vec2, Vec2];
+
+/** The clearance and ageing bars drawn on the plan now (a chip keeps off them). */
+function useBars(level: Level): Bar[] {
+  const report = useWalkways((s) => s.report);
+  const ageing = useWalkways((s) => s.ageing);
+  const of = useWalkways((s) => s.level);
+  return useMemo(() => {
+    if (of?.id !== level.id) return [];
+    const out: Bar[] = [];
+    for (const i of report?.issues ?? []) out.push(i.pinch);
+    for (const i of ageing?.issues ?? []) if (i.draw.bar) out.push(i.draw.bar);
+    return out;
+  }, [report, ageing, of, level.id]);
+}
+
+/** The stretch of a room across, at height y, that holds x (or the widest there). */
+function across(outer: Vec2[], y: number, x: number): [number, number] | null {
+  const xs: number[] = [];
+  for (let i = 0; i < outer.length; i++) {
+    const a = outer[i] as Vec2;
+    const b = outer[(i + 1) % outer.length] as Vec2;
+    if ((a.y <= y && b.y > y) || (b.y <= y && a.y > y)) {
+      xs.push(a.x + ((y - a.y) / (b.y - a.y)) * (b.x - a.x));
+    }
+  }
+  xs.sort((p, q) => p - q);
+  let best: [number, number] | null = null;
+  for (let i = 0; i + 1 < xs.length; i += 2) {
+    const iv: [number, number] = [xs[i] as number, xs[i + 1] as number];
+    if (x >= iv[0] && x <= iv[1]) return iv;
+    if (!best || iv[1] - iv[0] > best[1] - best[0]) best = iv;
+  }
+  return best;
+}
+
+/** Whether a bar runs through a box (grown by `pad`). */
+function crosses(bar: Bar, b: { x: number; y: number; w: number; h: number }, pad: number) {
+  const [p, q] = bar;
+  for (let k = 0; k <= 16; k++) {
+    const x = p.x + ((q.x - p.x) * k) / 16;
+    const y = p.y + ((q.y - p.y) * k) / 16;
+    if (x >= b.x - pad && x <= b.x + b.w + pad && y >= b.y - pad && y <= b.y + b.h + pad) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * The chips for the panel's report at this zoom: each bedroom's clothes under its label, the
- * kitchen's shelves under the kitchen's (a kitchen room with nothing drawn: "No kitchen
- * cabinets"). Placed in plan metres, so clearance labels can keep off them.
+ * kitchen's shelves under the kitchen's (a studio has both, one under the other; a kitchen room
+ * with nothing drawn: "No kitchen cabinets"). Each stays inside its room (the short words where
+ * the long ones don't fit) and off the clearance and ageing bars (below them, or above the
+ * label). In plan metres, so clearance labels can keep off them.
  */
 function placeChips(
   level: Level,
@@ -923,11 +1031,23 @@ function placeChips(
   zoom: number,
   report: StorageReport,
   small: boolean,
+  bars: Bar[],
 ): PlacedChip[] {
-  const wanted: { roomId: string; text: string; warn: boolean; empty: boolean }[] = [];
+  type Want = {
+    key: string;
+    roomId: string;
+    long: ReturnType<typeof chipText>;
+    short: ReturnType<typeof chipText>;
+  };
+  const wanted: Want[] = [];
   for (const r of report.rooms) {
     if (!r.clothes || r.clothes.target === undefined) continue;
-    wanted.push({ roomId: r.roomId, ...chipText('clothes', r.clothes, small) });
+    wanted.push({
+      key: `c-${r.roomId}`,
+      roomId: r.roomId,
+      long: chipText('clothes', r.clothes, small),
+      short: chipText('clothes', r.clothes, true),
+    });
   }
   const kitchenRoom =
     report.kitchenRoomId ??
@@ -936,20 +1056,54 @@ function placeChips(
       .sort((a, b) => a.name.localeCompare(b.name))[0]?.id;
   const k = report.home.kitchen;
   if (kitchenRoom && (k.have > 0 || k.target !== undefined)) {
-    if (!wanted.some((c) => c.roomId === kitchenRoom)) {
-      wanted.push({ roomId: kitchenRoom, ...chipText('kitchen', k, small) });
-    }
+    wanted.push({
+      key: `k-${kitchenRoom}`,
+      roomId: kitchenRoom,
+      long: chipText('kitchen', k, small),
+      short: chipText('kitchen', k, true),
+    });
   }
   const labels = new Map(roomLabelBoxes(level, geom, zoom).map((l) => [l.id, l]));
+  const shapes = roomShapes(level);
   const px = 1 / zoom;
-  const font = (small ? 11 : 12) * px;
+  const size = small ? 11 : 12;
+  const font = size * px;
+  const h = font + 8 * px;
+  const widthOf = (t: string) => (t.length * size * 0.56 + 12) * px;
+  const inset = 0.08 + 2 * px;
   const out: PlacedChip[] = [];
+  const perRoom = new Map<string, number>();
   for (const c of wanted) {
     const l = labels.get(c.roomId);
-    if (!l) continue;
-    const w = (c.text.length * (small ? 11 : 12) * 0.56 + 12) * px;
-    const h = font + 8 * px;
-    out.push({ ...c, x: l.at.x - w / 2, y: l.at.y + (l.area ? 22 : 12) * px, w, h, font });
+    const outer = shapes.get(c.roomId)?.outer;
+    if (!l || !outer) continue;
+    const n = perRoom.get(c.roomId) ?? 0;
+    perRoom.set(c.roomId, n + 1);
+    const step = h + 4 * px;
+    const below = l.at.y + (l.area ? 22 : 12) * px + n * step;
+    const above = l.at.y - l.half.y - 4 * px - h - n * step;
+    const tries = [below, below + step, above];
+    let pick: PlacedChip | null = null;
+    for (const y of tries) {
+      const iv = across(outer, y + h / 2, l.at.x);
+      const room = iv ? iv[1] - iv[0] - 2 * inset : Number.POSITIVE_INFINITY;
+      const words = widthOf(c.long.text) <= room ? c.long : c.short;
+      const w = widthOf(words.text);
+      let x = l.at.x - w / 2;
+      if (iv) {
+        x =
+          w <= room
+            ? Math.min(Math.max(x, iv[0] + inset), iv[1] - inset - w)
+            : (iv[0] + iv[1] - w) / 2;
+      }
+      const chip: PlacedChip = { key: c.key, roomId: c.roomId, ...words, x, y, w, h, font };
+      pick ??= chip;
+      if (!bars.some((b) => crosses(b, chip, 3 * px))) {
+        pick = chip;
+        break;
+      }
+    }
+    if (pick) out.push(pick);
   }
   return out;
 }
@@ -963,13 +1117,14 @@ export function useStorageChipBoxes(
 ): { at: Vec2; half: Vec2 }[] {
   const open = useStorage((s) => s.open);
   const sv = useStorageReport();
+  const bars = useBars(level);
   return useMemo(() => {
     if (!open || !sv || sv.level !== level) return [];
-    return placeChips(level, geom, zoom, sv.report, width < SMALL_PLAN).map((c) => ({
+    return placeChips(level, geom, zoom, sv.report, width < SMALL_PLAN, bars).map((c) => ({
       at: { x: c.x + c.w / 2, y: c.y + c.h / 2 },
       half: { x: c.w / 2, y: c.h / 2 },
     }));
-  }, [open, sv, level, geom, zoom, width]);
+  }, [open, sv, level, geom, zoom, width, bars]);
 }
 
 /**
@@ -990,6 +1145,7 @@ export const StorageChips = memo(function StorageChips({
 }) {
   const open = useStorage((s) => s.open);
   const sv = useStorageReport();
+  const bars = useBars(level);
   const fitAll = useStorage((s) => s.fitAll);
   // On a phone the plan shrinks above the half-height sheet: show all of it there (on opening,
   // and the resizes just after).
@@ -1004,9 +1160,9 @@ export const StorageChips = memo(function StorageChips({
   const chips = useMemo(
     () =>
       open && sv && sv.level === level
-        ? placeChips(level, geom, view.zoom, sv.report, size.width < SMALL_PLAN)
+        ? placeChips(level, geom, view.zoom, sv.report, size.width < SMALL_PLAN, bars)
         : [],
-    [open, sv, level, geom, view.zoom, size.width],
+    [open, sv, level, geom, view.zoom, size.width, bars],
   );
   if (!chips.length) return null;
   const px = 1 / view.zoom;
@@ -1019,7 +1175,7 @@ export const StorageChips = memo(function StorageChips({
     >
       {chips.map((c) => (
         <g
-          key={c.roomId}
+          key={c.key}
           className={`storage-chip${c.warn ? ' storage-chip-warn' : ''}${c.empty ? ' storage-chip-empty' : ''}`}
           data-testid="storage-chip"
         >

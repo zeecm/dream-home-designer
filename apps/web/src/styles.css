@@ -6371,6 +6371,13 @@ textarea {
   justify-self: start;
   font-size: var(--fs-hint);
 }
+.storage-add-room {
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rule);
+  font-size: var(--fs-hint);
+}
 .storage-own .segmented button {
   font-size: var(--fs-small);
 }
@@ -6461,6 +6468,8 @@ textarea {
 }
 .storage-card {
   display: grid;
+  /* Its full-bleed rows (100% + 16 px) must not widen the column past the panel. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   padding: 8px 0;
   border-top: 1px solid var(--rule);
@@ -6506,6 +6515,7 @@ textarea {
 }
 .storage-pieces {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -6530,9 +6540,13 @@ textarea {
   border-color: var(--border);
 }
 .storage-piece .num {
+  min-width: 0;
   color: var(--muted);
   text-align: right;
-  white-space: nowrap;
+}
+.storage-piece > span:first-child {
+  flex: none;
+  max-width: 55%;
 }
 .storage-notes {
   display: grid;
@@ -6699,13 +6713,19 @@ textarea {
   .inspector-storage .inspector-toggle {
     display: none;
   }
+  /* The panel here is padded 8 px by 12 px: the header and footer reach exactly its edges. */
   .inspector-storage .storage-head {
     position: sticky;
-    top: calc(-1 * var(--pad));
+    top: -8px;
     z-index: 1;
-    margin: calc(-1 * var(--pad)) calc(-1 * var(--pad)) 0;
-    padding: 0 var(--pad);
+    margin: -8px -12px 0;
+    padding: 0 12px;
     background: var(--surface);
+  }
+  .inspector-storage .storage-foot {
+    bottom: -8px;
+    margin: auto -12px -8px;
+    padding: 8px 12px;
   }
   .storage-foot .label-long {
     display: none;

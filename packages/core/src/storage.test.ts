@@ -372,7 +372,9 @@ describe('targets and status', () => {
     expect(meterStatus(1, 1)).toBe('enough');
     expect(meterStatus(0.8, 1)).toBe('nearly');
     expect(meterStatus(0.799, 1)).toBe('short');
-    expect(meter(1.2)).toEqual({ have: 1.2 });
+    expect(meter(1.2)).toEqual({ have: 1.2, pieces: 1 });
+    // A piece drawn that holds nothing (a shoe cabinet too narrow for a pair) is a shortfall.
+    expect(meter(0, 28, 1)).toMatchObject({ status: 'short', gap: 28 });
     expect(meter(0, 2)).toMatchObject({ status: 'none', gap: 2 });
     // 1.2 × 1.5 is 1.7999999999999998: shown 1.80 / 1.80, and enough.
     expect(meter(1.2 * 1.5, 1.8).status).toBe('enough');
@@ -383,6 +385,9 @@ describe('targets and status', () => {
     expect(shortfallPrice(0.01, TYPICAL_RATES)).toBeNull();
     expect(shortfallPrice(0.149, TYPICAL_RATES)).toBeNull();
     expect(shortfallPrice(0.15, TYPICAL_RATES)?.feet).toBe(1);
+    // Rounded up, so the run covers it: 1.00 m is 3.28 ft, a 4 ft run.
+    expect(shortfallPrice(1, TYPICAL_RATES)).toEqual({ feet: 4, low: 800, high: 1400 });
+    expect(shortfallPrice(0.9144, TYPICAL_RATES)?.feet).toBe(3);
   });
 
   it('rounds as shown', () => {
@@ -577,13 +582,43 @@ describe('the household setting', () => {
         }),
       ),
     ).toEqual({
-      people: { rm_a: { adults: 0, children: 6 }, rm_b: { adults: 0, children: 1 } },
+      // Two numbers are clamped; anything else is dropped (the room's beds stand).
+      people: { rm_a: { adults: 0, children: 6 } },
       others: { adults: 0, children: 0 },
       amount: 'typical',
       shelter: true,
     });
     const good = { people: {}, others: { adults: 1, children: 2 }, amount: 'lots', shelter: false };
     expect(parseStorageSetting(JSON.stringify(good))).toEqual(good);
+  });
+});
+
+describe('drawn but holding nothing', () => {
+  it('a shoe cabinet too narrow or too low is drawn: short, with why; not "nothing drawn"', () => {
+    const narrow = storageOf(piece('shoe-cabinet', { w: 0.2 }), LIVING);
+    expect(narrow).toMatchObject({ shoes: 0, measure: 'shoes', why: 'narrow' });
+    const low = storageOf(piece('shoe-cabinet', { h: 0.27 }), LIVING);
+    expect(low).toMatchObject({ shoes: 0, measure: 'shoes', why: 'low' });
+    const l = withPieces(furnishedSample(), [['shoe-cabinet', LIVING_AT, 0, 0.2 / 0.8]], 'it_s');
+    expect(storageReport(l, setting()).home.shoes).toMatchObject({
+      have: 0,
+      pieces: 1,
+      status: 'short',
+    });
+    expect(storageReport(furnishedSample(), setting()).home.shoes).toMatchObject({
+      pieces: 0,
+      status: 'none',
+    });
+  });
+
+  it('a room entry that is junk falls back to its beds', () => {
+    const l = withPieces(sampleFlatProject().levels[0] as Level, [['bed-queen', MAIN]]);
+    const main = sampleRoom('Main bedroom');
+    const s = parseStorageSetting(JSON.stringify({ people: { [main]: { adults: 'x' } } }));
+    expect(storageReport(l, s).rooms.find((r) => r.roomId === main)).toMatchObject({
+      people: { adults: 2, children: 0 },
+      fromBeds: true,
+    });
   });
 });
 
