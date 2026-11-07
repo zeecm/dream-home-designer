@@ -6599,6 +6599,8 @@ textarea {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  /* No tap highlight: it repaints the whole drawing under the finger on every tap. */
+  -webkit-tap-highlight-color: transparent;
 }
 .elev-svg {
   display: block;

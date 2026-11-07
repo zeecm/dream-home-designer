@@ -379,7 +379,9 @@ test.describe('phone', () => {
     await expect(page.locator('svg.plan-svg')).toBeVisible();
   });
 
-  test('29, slow phone: every tap on › counts with the CPU throttled 4×', async ({ page }) => {
+  test('29, slow phone: every tap on › counts, and a pinch then double tap fits, CPU 4×', async ({
+    page,
+  }) => {
     await openByFinger(page);
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
@@ -388,6 +390,37 @@ test.describe('phone', () => {
       await tapCentre(page, next);
       await expect(title(page)).toHaveText(new RegExp(`^Main bedroom · (Wall )?${letter}`));
     }
+    // Pinch, then a double tap on whatever is in the middle: it fits, and selects nothing
+    // (the first tap waits out the double tap before it would select).
+    const sheet = wallView(page).locator('.elev-sheet');
+    const box = await sheet.boundingBox();
+    if (!box) throw new Error('no sheet');
+    const c = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    const frames = Array.from({ length: 10 }, (_, i) => [
+      { x: c.x - 30 - i * 8, y: c.y },
+      { x: c.x + 30 + i * 8, y: c.y },
+    ]);
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: (frames[0] ?? []).map((p, id) => ({ ...p, id })),
+    });
+    for (const f of frames.slice(1)) {
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: f.map((p, id) => ({ ...p, id })),
+      });
+      await page.waitForTimeout(16);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect(sheet).not.toHaveAttribute('data-zoom', '1.00');
+    const before = await page.locator('.inspector-toggle').textContent();
+    await page.waitForTimeout(300);
+    await page.touchscreen.tap(c.x, c.y);
+    await page.waitForTimeout(80);
+    await page.touchscreen.tap(c.x, c.y);
+    await expect(sheet).toHaveAttribute('data-zoom', '1.00');
+    await page.waitForTimeout(500);
+    await expect(page.locator('.inspector-toggle')).toHaveText(before ?? '');
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
   });
 

@@ -17,6 +17,7 @@ import {
 import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
+  startTransition,
   useEffect,
   useMemo,
   useRef,
@@ -521,6 +522,9 @@ export function ElevationView() {
   );
 }
 
+/** A second tap within this long (and 30 px) of the first is a double tap: fit the drawing. */
+const DOUBLE_TAP_MS = 300;
+
 /** The selected thing's id, if it's on the drawing. */
 const selectedId = (s: Selection | null) => s?.id ?? null;
 
@@ -570,9 +574,27 @@ function Sheet({
     setZoom({ k: 1, x: 0, y: 0 });
     setLabelK(1);
   }, [faceKey]);
+  // Labels are laid out again once the zoom has settled and the fingers have rested (a re-render
+  // of the whole drawing, slow on a slow phone, must not land between the taps of a double
+  // tap), as a transition, so input that comes meanwhile is handled first.
+  const zoomK = useRef(1);
+  zoomK.current = zoom.k;
+  const lastInput = useRef(0);
+  const relayout = useRef(0);
+  const scheduleRelayout = () => {
+    clearTimeout(relayout.current);
+    relayout.current = window.setTimeout(() => {
+      if (performance.now() - lastInput.current < 450 || pointers.current.size > 0) {
+        scheduleRelayout();
+        return;
+      }
+      startTransition(() => setLabelK(zoomK.current));
+    }, 200);
+  };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: each settled zoom
   useEffect(() => {
-    const t = setTimeout(() => setLabelK(zoom.k), 160);
-    return () => clearTimeout(t);
+    scheduleRelayout();
+    return () => clearTimeout(relayout.current);
   }, [zoom.k]);
 
   // The fit (scale and box) only changes with the drawing, the sheet's size or the dimensions
@@ -610,8 +632,31 @@ function Sheet({
     moved: boolean;
     target: EventTarget | null;
   } | null>(null);
-  const lastTap = useRef(0);
-  const beforeTap = useRef<Selection | null>(null);
+  // A tap waits out the double-tap window before it selects: selecting opens the details
+  // sheet (on a phone it changes the layout, and the render can hold the page long enough
+  // that a quick second tap lands late), so the first tap of a double tap changes nothing.
+  const pendingTap = useRef<{
+    t: number;
+    x: number;
+    y: number;
+    timer: number;
+    fire: () => void;
+  } | null>(null);
+  const secondTap = useRef(false);
+  /**
+   * The last tap that has selected, and what was selected before it: a second press that
+   * comes within the window by its own time (a busy page can handle it late, after the first
+   * tap has already selected) still makes a double tap, and puts the selection back.
+   */
+  const firedTap = useRef<{ t: number; x: number; y: number; before: Selection | null } | null>(
+    null,
+  );
+  useEffect(
+    () => () => {
+      if (pendingTap.current) clearTimeout(pendingTap.current.timer);
+    },
+    [],
+  );
   const local = (e: { clientX: number; clientY: number }) => {
     const r = box.current?.getBoundingClientRect();
     return { x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0) };
@@ -640,6 +685,22 @@ function Sheet({
   };
   const onDown = (e: ReactPointerEvent) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
+    lastInput.current = performance.now();
+    // A press soon after a tap's release, near it, starts a double tap: judged by the events'
+    // own times, from the first release to the second press (as phones do), and place on the
+    // sheet. The first tap then doesn't select (or, if it already has, is taken back).
+    const prev = pendingTap.current ?? firedTap.current;
+    const here = local(e);
+    secondTap.current =
+      !!prev &&
+      pointers.current.size === 0 &&
+      e.timeStamp - prev.t < DOUBLE_TAP_MS &&
+      Math.hypot(here.x - prev.x, here.y - prev.y) < 30;
+    if (secondTap.current) {
+      if (pendingTap.current) clearTimeout(pendingTap.current.timer);
+      else if (firedTap.current) useEditor.getState().select(firedTap.current.before);
+      firedTap.current = null;
+    }
     pointers.current.set(e.pointerId, local(e));
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
     if (pointers.current.size === 1) gesture.current = null;
@@ -653,6 +714,12 @@ function Sheet({
     if (!g.moved && Math.hypot(c.x - g.from.x, c.y - g.from.y) < 6 && pointers.current.size < 2)
       return;
     g.moved = true;
+    lastInput.current = performance.now();
+    // The second press became a drag: not a double tap; the first tap counts.
+    if (secondTap.current) {
+      secondTap.current = false;
+      pendingTap.current?.fire();
+    }
     const k = Math.min(
       12,
       Math.max(1, g.dist > 0 && c.dist > 0 ? (g.start.k * c.dist) / g.dist : g.start.k),
@@ -664,6 +731,7 @@ function Sheet({
   };
   const onUp = (e: ReactPointerEvent) => {
     const g = gesture.current;
+    lastInput.current = performance.now();
     pointers.current.delete(e.pointerId);
     if (pointers.current.size > 0) {
       begin(g?.target ?? null);
@@ -671,28 +739,44 @@ function Sheet({
     }
     gesture.current = null;
     if (!g || g.moved) return;
-    // A tap: select what's under it; a second tap soon after fits the drawing again.
-    const now = e.timeStamp;
-    const ed0 = useEditor.getState();
-    if (now - lastTap.current < 300) {
+    // A tap selects what's under it, once no second tap has come; a second tap soon after
+    // and near the first (by time and place on the sheet, not by what it hit) fits the
+    // drawing again and selects nothing.
+    const at = local(e);
+    if (secondTap.current) {
+      secondTap.current = false;
+      if (pendingTap.current) clearTimeout(pendingTap.current.timer);
+      pendingTap.current = null;
       setZoom({ k: 1, x: 0, y: 0 });
-      lastTap.current = 0;
-      // The first tap's selection was the start of a double tap, not a choice.
-      ed0.select(beforeTap.current);
       return;
     }
-    lastTap.current = now;
-    beforeTap.current = ed0.selection;
+    const prev = pendingTap.current;
+    if (prev) {
+      // A second tap elsewhere, or too late: the first one counts at once.
+      clearTimeout(prev.timer);
+      prev.fire();
+    }
     const hit = (g.target as Element | null)
       ?.closest?.('[data-elev-hit]')
       ?.getAttribute('data-elev-hit');
-    const ed = useEditor.getState();
-    if (!hit) {
-      ed.select(null);
-      return;
-    }
-    const [kind, id] = hit.split(':') as [Selection['kind'], string];
-    ed.select({ kind, id });
+    const t = e.timeStamp;
+    const fire = () => {
+      pendingTap.current = null;
+      const ed = useEditor.getState();
+      firedTap.current = { t, x: at.x, y: at.y, before: ed.selection };
+      if (!hit) ed.select(null);
+      else {
+        const [kind, id] = hit.split(':') as [Selection['kind'], string];
+        ed.select({ kind, id });
+      }
+    };
+    pendingTap.current = {
+      t: e.timeStamp,
+      x: at.x,
+      y: at.y,
+      timer: window.setTimeout(fire, DOUBLE_TAP_MS),
+      fire,
+    };
   };
   useEffect(() => {
     const el = box.current;
