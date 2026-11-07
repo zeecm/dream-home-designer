@@ -15,6 +15,7 @@ import {
 } from '@dhd/core';
 import { memo, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
+import { useAgeing } from '../ageing/store';
 import { range, useRates } from '../cost/estimate';
 import { useEditor } from '../editor';
 import { MAX_ZOOM, MIN_ZOOM, type Size, fitBounds } from '../plan/view';
@@ -78,6 +79,8 @@ export const useSuggest = create<SuggestState>((set, get) => ({
   done: new Map(),
   openPanel: () => {
     useElectricalOn.getState().set(true);
+    // One list in the details at a time.
+    useAgeing.getState().closeList();
     const ed = useEditor.getState();
     ed.select(null);
     ed.setTrunking(null);

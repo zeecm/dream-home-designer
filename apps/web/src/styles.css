@@ -25,6 +25,8 @@
   --suggest-soft: rgba(109, 79, 194, 0.12);
   /* The same, laid on the sheet: an opaque fill for a ghost's symbol. */
   --suggest-soft-solid: #eeeaf8;
+  /* Recommended (not needed) ageing advice: amber, apart from comment orange and the red. */
+  --advise: #a16207;
   /* Comment pins: unlike clearance red and renovation teal. */
   --comment: #b54708;
   --comment-ink: #ffffff;
@@ -86,6 +88,7 @@
     --accent-soft: rgba(79, 179, 201, 0.16);
     --negative: #e5566f;
     --clearance: #ff6b5e;
+    --advise: #e3a008;
     --suggest: #b49cf5;
     --suggest-soft: rgba(180, 156, 245, 0.18);
     --suggest-soft-solid: #2e2a3a;
@@ -5823,5 +5826,349 @@ textarea {
   }
   .compare-mini.mini-layout {
     max-height: 52vh;
+  }
+}
+
+/* ---------------------------------------------------------------- older person (ageing check) */
+
+.ageing-entry {
+  gap: 8px;
+}
+.ageing-entry .section-title {
+  margin: 0;
+}
+.ageing-check-for,
+.ageing-row {
+  display: grid;
+  gap: 4px;
+}
+/* Three choices in the 264 px column: "Walking aid" needs the smaller size. */
+.ageing-check-for .segmented button,
+.ageing-row .segmented button {
+  font-size: var(--fs-small);
+}
+.ageing-summary {
+  display: grid;
+  gap: 6px;
+}
+.ageing-summary-text {
+  margin: 0;
+  font-size: var(--fs-hint);
+  line-height: 18px;
+}
+.ageing {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 100%;
+}
+.ageing-head .panel-title:focus {
+  outline: none;
+}
+.ageing-head .panel-title:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* One line for the choices on a phone; the rows themselves on a desktop. */
+.ageing-oneline {
+  display: none;
+  margin: 0;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: var(--fs-hint);
+}
+.ageing-oneline span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ageing-rows {
+  display: grid;
+  gap: 10px;
+}
+.ageing-intro,
+.ageing-empty,
+.ageing-note {
+  margin: 0;
+  font-size: var(--fs-hint);
+  line-height: 18px;
+  color: var(--muted);
+}
+.ageing-empty {
+  color: var(--text);
+}
+.ageing-body {
+  display: grid;
+  gap: 16px;
+}
+.ageing-group {
+  display: grid;
+  gap: 4px;
+}
+.ageing-group .section-title {
+  margin: 0;
+}
+.ageing-lines {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ageing-line {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  padding: 8px;
+  margin: 0 -8px;
+  width: calc(100% + 16px);
+  border: 1px solid transparent;
+  border-radius: var(--radius-card);
+  background: none;
+  color: var(--text);
+  font-size: var(--fs-hint);
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+}
+.ageing-line:hover {
+  border-color: var(--border);
+}
+.ageing-line-shown {
+  background: var(--active);
+}
+.ageing-choose {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.ageing-choose-name {
+  font-weight: 500;
+}
+.ageing-choose .num {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ageing-lines-plain {
+  gap: 8px;
+}
+.ageing-lines-plain li {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  font-size: var(--fs-hint);
+  line-height: 18px;
+}
+/* "Needed" or "Recommended": the word carries the meaning, the tint repeats it. */
+.ageing-tag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: var(--fs-small);
+  line-height: 18px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.ageing-tag-needed {
+  background: var(--pill-negative-bg);
+  color: var(--pill-negative-ink);
+}
+.ageing-tag-advise {
+  background: var(--pill-warning-bg);
+  color: var(--pill-warning-ink);
+}
+.ageing-also {
+  margin: 0;
+  font-size: var(--fs-small);
+  line-height: 16px;
+  color: var(--muted);
+}
+.ageing-back {
+  justify-self: start;
+  margin-bottom: 8px;
+  font-size: var(--fs-hint);
+}
+.ease-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-hint);
+  line-height: 18px;
+}
+.ease-table th {
+  padding: 4px 0;
+  font-size: var(--fs-small);
+  font-weight: 400;
+  color: var(--muted);
+  text-align: left;
+}
+.ease-table th.num,
+.ease-table td.num {
+  width: 1%;
+  text-align: right;
+  padding-left: 12px;
+  white-space: nowrap;
+}
+.ease-table td {
+  padding: 6px 0;
+  vertical-align: top;
+  border-top: 1px solid var(--rule);
+}
+.ease-why {
+  display: block;
+  font-size: var(--fs-small);
+  line-height: 16px;
+  color: var(--muted);
+}
+.ageing-foot {
+  position: sticky;
+  bottom: calc(-1 * var(--pad));
+  display: grid;
+  gap: 8px;
+  margin: auto calc(-1 * var(--pad)) calc(-1 * var(--pad));
+  padding: 12px var(--pad) var(--pad);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.inspector-ageing .inspector-body {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* On the plan, in metres; strokes in screen pixels. Red is needed, amber recommended; a dashed
+   bar is the flat's own walls. */
+.ageing-needed {
+  --tone: var(--clearance);
+}
+.ageing-advise {
+  --tone: var(--advise);
+}
+.ageing-marks polygon,
+.ageing-marks circle {
+  fill: color-mix(in srgb, var(--tone, var(--muted)) 14%, transparent);
+  stroke: var(--tone, var(--muted));
+  stroke-width: 1.5px;
+  stroke-dasharray: 5 3;
+}
+.ageing-marks .ageing-bar line {
+  stroke: var(--tone);
+  stroke-width: 2.5px;
+  stroke-linecap: round;
+}
+.ageing-flat .ageing-bar line:first-child {
+  stroke-dasharray: 6 4;
+  stroke-linecap: butt;
+}
+.ageing-marks .ageing-ring {
+  fill: none;
+  stroke-width: 2px;
+  stroke-dasharray: none;
+}
+.ageing-chip rect {
+  fill: var(--surface);
+  stroke: var(--tone);
+  stroke-width: 1px;
+  stroke-dasharray: none;
+}
+.ageing-chip text {
+  font-weight: 600;
+}
+.ageing-chip.ageing-needed text {
+  fill: var(--negative);
+}
+.ageing-chip.ageing-advise text {
+  fill: var(--pill-warning-ink);
+}
+.ageing-marks .ageing-fine circle,
+.ageing-marks .ageing-fine-zone {
+  fill: color-mix(in srgb, var(--muted) 8%, transparent);
+  stroke: var(--muted);
+  stroke-width: 1px;
+  stroke-dasharray: 3 3;
+}
+.ageing-fine text {
+  fill: var(--muted);
+}
+@media (pointer: coarse) {
+  .ageing-line,
+  .ageing-foot .btn,
+  .ageing-summary .btn {
+    min-height: 44px;
+  }
+  .ageing-entry .segmented button,
+  .ageing-rows .segmented button {
+    height: 40px;
+  }
+  .ageing-rows .input,
+  .ageing-ease .input {
+    min-height: 44px;
+  }
+  .ageing-head .icon-btn {
+    width: 44px;
+    height: 44px;
+    margin-right: -10px;
+  }
+  .ageing-oneline .link-btn,
+  .ageing-back {
+    min-height: 44px;
+  }
+}
+/* A phone held upright: a half-height sheet with the plan refitted above it; the choices on
+   one line until Change opens them. */
+@media (max-width: 720px) {
+  .inspector.inspector-ageing {
+    height: 50vh;
+    max-height: 50vh;
+  }
+  .inspector-ageing .inspector-toggle {
+    display: none;
+  }
+  .inspector-ageing .ageing {
+    gap: 8px;
+  }
+  .inspector-ageing .ageing-head {
+    position: sticky;
+    top: calc(-1 * var(--pad));
+    z-index: 1;
+    margin: calc(-1 * var(--pad)) calc(-1 * var(--pad)) 0;
+    padding: 4px var(--pad) 0;
+    background: var(--surface);
+  }
+  .ageing-oneline {
+    display: flex;
+  }
+  .ageing-rows:not(.ageing-rows-open),
+  .inspector-ageing .ageing-intro {
+    display: none;
+  }
+  .inspector-ageing .ageing-foot {
+    grid-template-columns: 2fr 1fr;
+    gap: 6px;
+    padding-top: 8px;
+  }
+  .inspector-ageing .ageing-foot .btn:only-child {
+    grid-column: 1 / -1;
+  }
+}
+/* A phone on its side: the list in the right-hand column, with the same one-line top. */
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  .ageing-oneline {
+    display: flex;
+  }
+  .ageing-rows:not(.ageing-rows-open),
+  .inspector-ageing .ageing-intro,
+  .inspector-ageing .inspector-toggle {
+    display: none;
+  }
+  .inspector-ageing .ageing-foot {
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    padding-top: 8px;
+  }
+  .inspector-ageing .ageing-foot .btn:only-child {
+    grid-column: 1 / -1;
   }
 }
