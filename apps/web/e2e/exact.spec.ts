@@ -258,9 +258,25 @@ test('opens on Exact and renders by itself, on this device: stop, carry on, swit
   await expect(again.locator('canvas.exact-canvas')).toBeVisible();
   const kept = page.waitForEvent('download');
   await again.getByRole('button', { name: 'Download' }).click();
-  const { statSync } = await import('node:fs');
-  // A picture, not an empty canvas (a blank 160 × 100 PNG is a few hundred bytes).
-  expect(statSync(await (await kept).path()).size).toBeGreaterThan(4_000);
+  const png = readFileSync(await (await kept).path());
+  // A picture, not an empty canvas (a blank 160 × 100 PNG is a few hundred bytes)...
+  expect(png.length).toBeGreaterThan(4_000);
+  // ...and a whole metered one, not a part-drawn first sample: mostly not black.
+  const black = await page.evaluate(async (b64) => {
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const img = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+    const c = new OffscreenCanvas(img.width, img.height);
+    const g = c.getContext('2d');
+    if (!g) return 1;
+    g.drawImage(img, 0, 0);
+    const px = g.getImageData(0, 0, img.width, img.height).data;
+    let n = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      if ((px[i] ?? 0) + (px[i + 1] ?? 0) + (px[i + 2] ?? 0) < 24) n++;
+    }
+    return n / (px.length / 4);
+  }, png.toString('base64'));
+  expect(black).toBeLessThan(0.25);
   await again.getByRole('button', { name: 'Try again' }).click();
   await expect(again.getByTestId('exact-progress')).toHaveText(/^Preparing the scene…|^Sample/);
   await page
@@ -366,6 +382,8 @@ test('a sealed room with no window or lamp is dark at noon: no light through its
   for (let i = 0; i < rgba.length; i += 4)
     sum += ((rgba[i] ?? 0) + (rgba[i + 1] ?? 0) + (rgba[i + 2] ?? 0)) / 3;
   // Exposure lifts a dark room as far as it goes (+3 EV): sky or sun leaking in reads bright.
+  // With no opening to the sky in reach there are no portals, so the sky lights the scene
+  // itself here (as from outside): a leak through the ceiling or walls would show.
   expect(sum / (rgba.length / 4)).toBeLessThan(8);
 });
 
@@ -564,9 +582,11 @@ test('the picture is the plan: walls where they are, the opening where it is, no
   const floor = at('floor', [1.9, 0.01, 2.0]);
   expect(hueGap(floor.h, hueOf('#c49a6c')), JSON.stringify(floor)).toBeLessThan(25);
   expect(floor.s).toBeGreaterThan(0.2);
-  // The sofa there, in its own neutral colours (its seat's cushion), not something else.
+  // The sofa there, in its own neutral colours (its seat's cushion), not something else: less
+  // saturated than any paint (over 0.25 above), though lit by the yellow wall beside it, the
+  // oak floor and the sunlit ground through the window it reads a little warm (0.15–0.16).
   const sofa = at('sofa', [2.35, 0.5, 2.0]);
-  expect(sofa.s, JSON.stringify(sofa)).toBeLessThan(0.15);
+  expect(sofa.s, JSON.stringify(sofa)).toBeLessThan(0.2);
 });
 
 // ---------------------------------------------------------------- on a phone, in the walk

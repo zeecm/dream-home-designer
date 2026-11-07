@@ -5,6 +5,8 @@ import {
   dispatch,
   emptyHistory,
   furnitureKind,
+  groundInSun,
+  hdb4RoomLevel,
   itemLights,
   newItem,
   revealPasses,
@@ -23,16 +25,20 @@ import {
   GROUND_COLOR,
   GROUND_REACHES,
   PORTAL,
-  PORTAL_TILT,
+  PORTALS_FROM,
   buildExactScene,
   exactCamera,
   exactDaylight,
   groundRadiance,
   isSpotLamp,
   lampLights,
+  lightChoices,
+  portalLight,
   portalLights,
   portalRadiance,
+  sampleClamp,
   skyOnGround,
+  sunOnGround,
 } from './exactScene';
 import { LevelMeshes } from './levelMeshes';
 import { MaterialCache } from './materials';
@@ -342,85 +348,96 @@ describe('exactCamera', () => {
 
 describe('portals: the sky’s light through its openings', () => {
   const level = sampleFlatProject().levels[0] as Level;
-  const sky = exactDaylight(DEFAULT_SITE, 300, 12).sky;
+  const noon = exactDaylight(DEFAULT_SITE, 300, 12);
+  const sky = noon.sky;
 
-  it('puts lights in each opening to the sky, its size, shining into the room', () => {
+  it('puts one light in each opening to the sky, its size, flat inside the pane, shining in', () => {
     const openings = skyOpenings(level);
-    const ground = new THREE.Color(1000, 900, 800);
-    const lights = portalLights(level, sky, undefined, ground);
-    // The sky's and the ground's in every window to the outside, and nothing else.
-    expect(lights).toHaveLength(2 * openings.length);
+    const lights = portalLights(level, noon);
+    expect(lights).toHaveLength(openings.length);
     expect(openings.length).toBeGreaterThan(5);
     for (const o of openings) {
-      for (const part of ['sky', 'ground'] as const) {
-        const l = lights.find((x) => x.name === `${PORTAL}${o.id}:${part}`);
-        if (!l) throw new Error(`${o.id} ${part}`);
-        expect(l).toBeInstanceOf(THREE.RectAreaLight);
-        expect(l.width).toBeCloseTo(o.width, 9);
-        expect(l.height).toBeCloseTo(o.height, 9);
-        // Its middle at the opening's height, in the room, clear of the wall (tipped, its upper
-        // edge reaches back no further than the wall's face).
-        expect(l.position.y).toBeCloseTo(level.elevation + o.bottom + o.height / 2, 9);
-        expect(roomIdAt(level, { x: l.position.x, y: l.position.z })).toBe(o.roomId);
-        const inward = (l.position.x - o.at.x) * -o.out.x + (l.position.z - o.at.y) * -o.out.y;
-        expect(inward).toBeCloseTo((o.height / 2) * Math.sin(PORTAL_TILT) + 0.001, 9);
-        // It shines along -z: into the room, tipped down (the sky's) or up (the ground's).
-        const shines = new THREE.Vector3(0, 0, -1).applyQuaternion(l.quaternion);
-        expect(shines.x * -o.out.x + shines.z * -o.out.y).toBeCloseTo(Math.cos(PORTAL_TILT), 9);
-        expect(shines.y).toBeCloseTo((part === 'sky' ? -1 : 1) * Math.sin(PORTAL_TILT), 9);
-        // Its width runs along the wall (its local x).
-        const across = new THREE.Vector3(1, 0, 0).applyQuaternion(l.quaternion);
-        expect(Math.abs(across.x * o.along.x + across.z * o.along.y)).toBeCloseTo(1, 9);
-        // The sky's light, or half the ground's (the lower half of the view), less what the
-        // reveal hides and the glass takes.
-        const view = part === 'sky' ? portalRadiance(sky) : ground.clone().multiplyScalar(0.5);
-        const want = view.multiplyScalar(revealPasses(o.width, o.height, o.depth) * GLASS_PASSES);
-        expect(l.intensity * l.color.g).toBeCloseTo(want.g, 6);
-        expect(l.intensity * l.color.r).toBeCloseTo(want.r, 6);
-      }
-    }
-    // Without the ground's light, the sky's alone.
-    expect(portalLights(level, sky).map((l) => l.name)).toEqual(
-      openings.map((o) => `${PORTAL}${o.id}:sky`),
-    );
-    // Windows in the flat's 0.2 m walls: the reveal hides a fifth or so of the sky.
-    for (const o of openings) {
-      const f = revealPasses(o.width, o.height, o.depth);
-      expect(f, o.id).toBeGreaterThan(0.6);
-      expect(f, o.id).toBeLessThan(0.95);
+      const l = lights.find((x) => x.name === `${PORTAL}${o.id}`);
+      if (!l) throw new Error(o.id);
+      expect(l).toBeInstanceOf(THREE.RectAreaLight);
+      expect(l.width).toBeCloseTo(o.width, 9);
+      expect(l.height).toBeCloseTo(o.height, 9);
+      // Its middle at the opening's: in the hole, a hair inside the pane (the wall's middle).
+      expect(l.position.y).toBeCloseTo(level.elevation + o.bottom + o.height / 2, 9);
+      expect(l.position.x).toBeCloseTo(o.at.x, 9);
+      expect(l.position.z).toBeCloseTo(o.at.y, 9);
+      const op = level.openings[o.id];
+      const t = level.walls[op?.wallId ?? '']?.thickness ?? 0;
+      // Flat, square to the wall, shining into the room (along -z): nothing of it reaches
+      // past the wall's inner face, and the reveal's inner half (sill, jambs, head) is in
+      // front of it.
+      const shines = new THREE.Vector3(0, 0, -1).applyQuaternion(l.quaternion);
+      expect(shines.x * -o.out.x + shines.z * -o.out.y).toBeCloseTo(1, 9);
+      expect(shines.y).toBeCloseTo(0, 9);
+      // In the wall: the hole beyond it (to the outer face) and before it (to the inner face)
+      // add up to the wall's thickness, both more than nothing.
+      expect(o.depth, o.id).toBeGreaterThan(0);
+      expect(o.depth, o.id).toBeLessThan(t / 2);
+      const step = (k: number) => ({ x: o.at.x + o.out.x * k, y: o.at.y + o.out.y * k });
+      expect(roomIdAt(level, step(-t)), o.id).toBe(o.roomId);
+      expect(roomIdAt(level, step(o.depth + 0.05)), o.id).toBeNull();
+      const across = new THREE.Vector3(1, 0, 0).applyQuaternion(l.quaternion);
+      expect(Math.abs(across.x * o.along.x + across.z * o.along.y)).toBeCloseTo(1, 9);
+      // The sky's light and the ground's (half, as much as reaches and is sunlit), less what
+      // the reveal behind it hides and the glass takes.
+      const sun = noon.sun?.direction;
+      const lit = sun ? groundInSun(level, o, { x: sun.x, y: sun.y, z: sun.z }) : 0;
+      const ground = skyOnGround(sky).add(sunOnGround(noon).multiplyScalar(lit));
+      const want = portalRadiance(sky)
+        .add(ground.multiplyScalar(0.5 * GROUND_REACHES))
+        .multiplyScalar(revealPasses(o.width, o.height, o.depth) * GLASS_PASSES);
+      expect(l.intensity * l.color.g).toBeCloseTo(want.g, 6);
+      expect(l.intensity * l.color.r).toBeCloseTo(want.r, 6);
     }
     // Only the rooms asked for.
-    expect(portalLights(level, sky, new Set(['rm_kitchen']))).toHaveLength(
+    expect(portalLights(level, noon, new Set(['rm_kitchen']))).toHaveLength(
       openings.filter((o) => o.roomId === 'rm_kitchen').length,
     );
+  });
+
+  it('gives a window onto shaded ground less of the ground’s light than one onto sunlit', () => {
+    const hdb = hdb4RoomLevel();
+    const living = skyOpenings(hdb).find((o) => o.id === 'op_win_living');
+    if (!living) throw new Error('no living window');
+    // It looks west: in the morning the house shades the ground below it.
+    const morning = exactDaylight(DEFAULT_SITE, 300, 9);
+    const afternoon = exactDaylight(DEFAULT_SITE, 300, 16);
+    const strip = (d: typeof noon) =>
+      portalLight(hdb, living, d).g - portalLight(hdb, living, { ...d, sun: null }).g;
+    const m = strip(morning) / (sunOnGround(morning).g || 1);
+    const a = strip(afternoon) / (sunOnGround(afternoon).g || 1);
+    expect(m).toBeLessThan(a / 2);
   });
 
   it('carries an even sky at half its radiance (a window sees the upper half of its view)', () => {
     const even = { ...sky, zenith: sky.horizon.clone() };
     const L = portalRadiance(even);
     expect(L.g / (even.horizon.g * even.nits)).toBeCloseTo(0.5, 3);
+    // An even sky of radiance L lights open ground with πL, so it gives off its colour × L.
+    expect(
+      skyOnGround(even).g / (new THREE.Color(GROUND_COLOR).g * even.horizon.g * even.nits),
+    ).toBeCloseTo(1, 3);
   });
 
   it('with portals, lights by them, not by the sky, which is still seen', () => {
-    const daylight = exactDaylight(DEFAULT_SITE, 300, 12);
-    const lit = buildExactScene(level, { ceilings: true, daylight, lamps: false, portals: true });
-    expect(lit.portals.length).toBe(2 * skyOpenings(level).length);
-    const sunlit = lit.portals.find((p) => p.name.endsWith(':ground'));
-    // The ground's: open ground's light, as much as reaches the rooms (and the reveal and
-    // glass pass, over half here).
-    const want = groundRadiance(daylight).multiplyScalar(0.5 * GROUND_REACHES * GLASS_PASSES);
-    expect(sunlit && sunlit.intensity * sunlit.color.g).toBeGreaterThan(0.5 * want.g);
-    expect(sunlit && sunlit.intensity * sunlit.color.g).toBeLessThan(want.g);
+    const lit = buildExactScene(level, {
+      ceilings: true,
+      daylight: noon,
+      lamps: false,
+      portals: true,
+    });
+    expect(lit.portals.length).toBe(skyOpenings(level).length);
     // The ground's light comes in through them: rays from the rooms pass through the ground.
     const ground = lit.scene.getObjectByName(EXACT_EXTRAS.ground) as THREE.Mesh;
     const m = ground.material as THREE.MeshStandardMaterial & { castShadow?: boolean };
     expect(m.castShadow).toBe(false);
     // The sky lights nothing, the ground included: seen, it gives off the sky's share itself.
-    expect(m.emissiveIntensity * m.emissive.g).toBeCloseTo(skyOnGround(daylight.sky).g, 6);
-    // An even sky of radiance L lights open ground with πL, so it gives off its colour × L.
-    const even = { ...daylight.sky, zenith: daylight.sky.horizon.clone() };
-    const L = even.horizon.g * even.nits;
-    expect(skyOnGround(even).g / (new THREE.Color(GROUND_COLOR).g * L)).toBeCloseTo(1, 3);
+    expect(m.emissiveIntensity * m.emissive.g).toBeCloseTo(skyOnGround(sky).g, 6);
     expect(lit.scene.environmentIntensity).toBe(0);
     // The backdrop is the sky, and below the horizon the ground as it looks lit (seen through
     // glass, where the tracer passes the ground).
@@ -430,16 +447,67 @@ describe('portals: the sky’s light through its openings', () => {
     const top = (bg.image.height - 1) * bg.image.width * 4;
     const env = (lit.scene.environment as THREE.DataTexture).image.data as unknown as Float32Array;
     expect(px[top + 1]).toBeCloseTo(env[top + 1] ?? 0, 3);
-    expect(px[1]).toBeCloseTo(groundRadiance(daylight).g, 1);
+    expect(px[1]).toBeCloseTo(groundRadiance(noon).g, 1);
     expect(lit.scene.backgroundIntensity).toBe(1);
     lit.dispose();
-    const open = buildExactScene(level, { ceilings: false, daylight, lamps: false });
+    const open = buildExactScene(level, { ceilings: false, daylight: noon, lamps: false });
     expect(open.portals).toHaveLength(0);
     expect(open.scene.environmentIntensity).toBe(1);
     const bare = open.scene.getObjectByName(EXACT_EXTRAS.ground) as THREE.Mesh;
     expect((bare.material as THREE.MeshStandardMaterial).emissiveIntensity).toBe(1);
     expect((bare.material as THREE.MeshStandardMaterial).emissive.getHex()).toBe(0);
     expect((bare.material as THREE.Material & { castShadow?: boolean }).castShadow).not.toBe(false);
+    open.dispose();
+  });
+
+  it('keeps the sky lighting where no opening to the sky is in reach, and at night', () => {
+    // The shelter has no window: no portals, so the sky still lights (a leak would show).
+    const shelter = buildExactScene(level, {
+      ceilings: true,
+      daylight: noon,
+      lamps: false,
+      portals: new Set(['rm_household-shelter']),
+    });
+    expect(shelter.portals).toHaveLength(0);
+    expect(shelter.scene.environmentIntensity).toBe(1);
+    expect(shelter.scene.background).toBe(shelter.scene.environment);
+    const g = shelter.scene.getObjectByName(EXACT_EXTRAS.ground) as THREE.Mesh;
+    expect((g.material as THREE.Material & { castShadow?: boolean }).castShadow).not.toBe(false);
+    shelter.dispose();
+    const night = exactDaylight(DEFAULT_SITE, 300, 22);
+    expect(night.light).toBeLessThan(PORTALS_FROM);
+    const dark = buildExactScene(level, {
+      ceilings: true,
+      daylight: night,
+      lamps: true,
+      portals: true,
+    });
+    expect(dark.portals).toHaveLength(0);
+    expect(dark.scene.environmentIntensity).toBe(1);
+    dark.dispose();
+  });
+
+  it('caps each sample so a sunlit white floor’s one direct sample is never cut', () => {
+    const lit = buildExactScene(level, {
+      ceilings: true,
+      daylight: noon,
+      lamps: true,
+      portals: true,
+    });
+    const n = lightChoices(lit.scene);
+    // The sun, every portal, every lamp; not the sky (it lights nothing here).
+    expect(n).toBe(1 + lit.portals.length + lit.lamps.length);
+    const sun = noon.sun;
+    if (!sun) throw new Error('no sun');
+    // The tracer picks one light of n and scales its find by n: a white floor square to the
+    // sun, its one direct sample.
+    const direct = n * (1 / Math.PI) * sun.intensity;
+    expect(direct).toBeLessThan(n * sampleClamp(noon));
+    // Without the sky's scale, it would be cut (the bug this guards against).
+    expect(direct).toBeGreaterThan(sampleClamp(noon));
+    lit.dispose();
+    const open = buildExactScene(level, { ceilings: false, daylight: noon, lamps: false });
+    expect(lightChoices(open.scene)).toBe(2);
     open.dispose();
   });
 });

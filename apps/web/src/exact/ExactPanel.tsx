@@ -255,15 +255,17 @@ export function ExactPanel({
         // The room the camera stands in, if it is inside one (not above the cut-away walls).
         const inside = cam.position.y < level.elevation + level.ceilingHeight;
         const room = inside ? roomIdAt(level, { x: cam.position.x, y: cam.position.z }) : null;
+        const doors = shownDoors();
         built = buildExactScene(level, {
           ceilings: shown.ceilings,
           models: modelLibrary,
           daylight,
           lamps: lampsAuto(level, room, daylight.light),
-          doors: shownDoors(),
-          // From inside, the sky lights the rooms through lights in their openings (aimed at
-          // every sample): those of the camera's room and the rooms it opens onto.
-          portals: shown.ceilings ? (room ? daylightReach(level, room) : true) : false,
+          doors,
+          // From inside a room, the sky lights the rooms through lights in their openings
+          // (aimed at every sample): those of the camera's room and the rooms whose light
+          // reaches it (through open doors, passages, glass). Outside the rooms, the sky.
+          portals: shown.ceilings && room ? daylightReach(level, room, doors) : false,
         });
         engine.clamp = sampleClamp(daylight);
         await engine.start(

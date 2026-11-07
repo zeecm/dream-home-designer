@@ -6,9 +6,9 @@
  * `adapt=0` (fixed tiles), `glass=0` (panes left out), `view=orbit`, `ceil=0`, `models=0`,
  * `probe=auto|<window id>` (the sun patch through a window against the shade beside it),
  * `scene=plane` (`sun=1`: the ground alone), `sync=1` (wait for the GPU every step);
- * `portals=1`, `plain=1` (no furniture or lamps), `pose=x,y,yaw[,across]`, `clamp=<n>|auto`,
+ * `portals=1`, `plain=1` (no furniture or lamps), `flat=hdb4` (the 4-room fixture), `day=`, `pose=x,y,yaw[,across]`, `clamp=<n>|auto`,
  * and to weigh the portals' light: `nosun=1`, `mis=0` (no light sampling), `gk=<k>` (the
- * ground's portals × k), `glow=0`, `darkground=1`. Logs black pixels, specks and luminance at
+ * ground's share reaching in, for GROUND_REACHES), `glow=0`, `darkground=1`. Logs black pixels, specks and luminance at
  * 32 and 64 samples and the last (`stats at`).
  */
 import {
@@ -18,16 +18,20 @@ import {
   dayOfYear,
   daylightReach,
   eyeLevelCamera,
+  hdb4RoomLevel,
   lampsAuto,
   roomIdAt,
   sampleFlatProject,
+  skyOpenings,
 } from '@dhd/core';
 import {
   EXACT_EXTRAS,
   ModelLibrary,
+  PORTAL,
   buildExactScene,
   exactCamera,
   exactDaylight,
+  portalLight,
   sampleClamp,
 } from '@dhd/render';
 // The test fixture of a furnished flat, straight from core's source (a dev page only).
@@ -121,6 +125,7 @@ const log = (s: string) => {
 };
 
 function level(): Level {
+  if (q.get('flat') === 'hdb4') return hdb4RoomLevel();
   if (PLAIN) return sampleFlatProject().levels[0] as Level;
   // Lamps to light the night: a ceiling light in each main room, a floor lamp, a pendant.
   return withPieces(
@@ -237,7 +242,8 @@ async function main() {
     }
     lap(`models (${files.filter((f) => models.has(f)).length}/${files.length})`);
   }
-  const day = dayOfYear(new Date());
+  // `day=<n>`: the day of the year (310, 6 Nov, by default: the measurements' day).
+  const day = num('day', 310);
   const lit = exactDaylight(DEFAULT_SITE, day, HOUR);
   // `nosun=1`: the sky alone (to check the sky's light against a reference that finds it only
   // by chance, `mis=0`, which is unbiased whatever the sky sampling does).
@@ -259,10 +265,18 @@ async function main() {
     };
     g.material.emissiveIntensity = 0;
   }
-  // `gk=<k>`: the ground's portals at k times their light (to weigh the ground's share).
+  // `gk=<k>`: the portals carry k of the ground's light, not GROUND_REACHES (to weigh it).
   const gk = q.get('gk');
   if (gk !== null) {
-    for (const p of built.portals) if (p.name.endsWith(':ground')) p.intensity *= Number(gk);
+    const openings = skyOpenings(l);
+    for (const p of built.portals) {
+      const o = openings.find((x) => `${PORTAL}${x.id}` === p.name);
+      if (!o) continue;
+      const c = portalLight(l, o, daylight, Number(gk));
+      const peak = Math.max(c.r, c.g, c.b, 1e-9);
+      p.color.setRGB(c.r / peak, c.g / peak, c.b / peak);
+      p.intensity = peak;
+    }
   }
   // `darkground=1`: the ground reflects nothing (to weigh its share of a room's light).
   if (q.get('darkground') === '1') {
@@ -379,6 +393,18 @@ async function main() {
           inner.renderer.readRenderTargetPixels(t, 0, 0, t.width, t.height, px);
           const st = stats(px, t.width, t.height);
           allStats.push({ samples: whole, ...st });
+          // Each pixel's luminance (cd/m², rows from the bottom), at 64 samples and the last,
+          // to compare pictures pixel for pixel.
+          const lum: number[] = [];
+          for (let i = 0; i < t.width * t.height; i++) {
+            lum.push(
+              0.2126 * (px[i * 4] ?? 0) +
+                0.7152 * (px[i * 4 + 1] ?? 0) +
+                0.0722 * (px[i * 4 + 2] ?? 0),
+            );
+          }
+          const w = window as unknown as { lum?: Record<number, number[]> };
+          w.lum = { ...w.lum, [whole]: lum };
           log(
             `stats at ${whole}: black ${st.black.toFixed(1)}%, dark ${st.dark.toFixed(1)}%, fireflies ${st.fireflies.toFixed(2)}%, mean ${st.mean.toFixed(1)}, room ${st.room.toFixed(1)}, median ${st.median.toFixed(1)} cd/m²`,
           );

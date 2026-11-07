@@ -11,6 +11,7 @@ function fakeEngine(nits = 40) {
     samples: 0,
     lost: false,
     exposure: 1,
+    metered: false,
     shown: 0,
     meterings: [] as number[],
     sample() {
@@ -91,9 +92,12 @@ describe('an exact render’s run', () => {
     h.frames(1);
     expect(h.engine.meterings).toEqual([1]);
     expect(h.run.status.picture).toBe(false);
+    // Nothing to keep yet (a lost context would leave nothing, not a part-drawn sample).
+    expect(h.engine.metered).toBe(false);
     await Promise.resolve();
     await Promise.resolve();
     expect(h.run.status.picture).toBe(true);
+    expect(h.engine.metered).toBe(true);
     expect(h.seen.at(-1)?.picture).toBe(true);
   });
 

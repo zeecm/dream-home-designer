@@ -63,8 +63,17 @@ export interface ExactEngine {
    * GPU without stalling it (0 if the context is lost).
    */
   luminance(): Promise<number>;
-  /** No single sample brighter than this (cd/m²), cutting runaway paths (fireflies). */
+  /**
+   * No single sample brighter than this (cd/m²) for each light the tracer picks among
+   * (`lightChoices`: it scales a light's find by their count), cutting runaway paths
+   * (fireflies). The cap on a sample is this times that count, set for each scene.
+   */
   clamp: number;
+  /**
+   * The first whole sample has been metered (its exposure set): the picture shown is one to
+   * keep from then on (the snapshot a lost context leaves).
+   */
+  metered: boolean;
   /** Multiplies the scene's light before tone mapping (AgX), applied at display. */
   exposure: number;
   /** Draws the picture shown again (after an exposure change, say) without a new sample. */

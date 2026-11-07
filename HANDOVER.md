@@ -491,60 +491,95 @@ rests while Exact renders. Tests set `window.__DHD_EXACT_TEST__` (size box, samp
   with the pane left out (the pane passes about 92%; 32 samples at 200 × 150, noisy). From eye
   height in the living room at 4 pm the sun's patch through the window shows on the wall. No
   fallback needed.
-- **Window light portals (6 Nov):** daylight-only interiors were grainy because the tracer
+- **Window light portals (6–7 Nov):** daylight-only interiors were grainy because the tracer
   finds the sky only by rays that chance on a window (its sky sampling doesn't aim at them;
-  no portals in 0.0.23): at 64 samples 11–12% of pixels black and 10–13% specks. Now, for a
-  view from inside (ceilings on), `portalLights` puts two lights in each opening to the sky of
-  the rooms the camera can see (`skyOpenings` and `daylightReach` in core: windows, passages,
-  glazed doors and glass walls between a room and outside): even rectangles the opening's
-  size, just inside the wall's inner face, shining in. One carries the sky's light (its
-  irradiance on the opening over π, `portalRadiance`) tipped 35° down; one the ground's
-  (`groundRadiance`, open ground lit by sun and sky, half of it for the lower half of the view)
-  tipped up. Each is scaled by what the reveal lets through (`revealPasses`: the view factor
-  between the hole's two ends; 78% for the living room's 2 m × 1.2 m window in its 0.2 m
-  wall) and the glass (90%); the ground's also by `GROUND_REACHES` (0.42), measured: what lies
-  just below a window is the house's wall and the ground in its shade. The sun is unchanged
-  (a directional light, aimed at, through the panes). **No double counting:** the sky then
-  lights nothing (`environmentIntensity` 0) and stays the backdrop (`background`, seen by
-  camera rays and through glass); rays from a room pass through the ground (`castShadow`
-  false on its material, which the tracer's bounce rays honour), so the ground lights the
-  rooms only through its portals; seen through glass it is the backdrop below the horizon,
-  set to the ground's lit look; seen straight on (an open passage) it gives off the sky's
-  share itself. The portals sit inside the glass so that a ray from the room meets one before
-  the pane and the tracer weighs that hit against the bounce that sent it (behind the pane it
-  was weighed against the pane and counted twice: rooms twice as bright). Not covered: an
-  outside wall seen from a window has the sun's light but not the sky's.
-- **Firefly clamp:** the tracer's sample is clamped (`sampleClamp`: twice a white wall in full
-  sun, or 20,000 cd/m² at least), a shader patch on its material, so a rare glossy bounce onto
-  the sun can't leave a speck; nothing true is cut.
-- **Measured** (spike, SwiftShader, sample flat with no furniture, 160 × 120, eye height in the
-  living room at noon and 4 pm, and the walk at (8.16, 4.6) facing north at noon; the raw
-  samples, before the denoiser; black: no light at all; specks: over 4× their 5 × 5
-  neighbourhood's median; room: mean of the pixels under 5× the median, i.e. not the
-  windows; reference: no portals, 1024 samples):
+  no portals in 0.0.23): at 64 samples 10–18% of pixels black and 10–15% specks. Now, for a
+  view from inside a room (ceilings on, the camera in a room, by day: `daylight.light` ≥
+  `PORTALS_FROM`), `portalLights` puts one light in each opening to the sky of the rooms whose
+  daylight reaches the camera. `skyOpenings` (core, `portals.ts`) finds windows, passages,
+  glazed doors, glass walls (an opening in one is part of the wall's), the gap over a half wall
+  (glazed if it has glass above) and boundaries, between a room and outside; `daylightReach`
+  goes from the camera's room on through passages, inside windows, glazed doors, doors
+  standing open (the 3D view's open fractions; a shut one stops it), glass walls and half
+  walls, room after room. Each light is an even rectangle the opening's size, **flat in the
+  hole a hair inside the pane** (a passage's at its far end, a glazed door's at its near end):
+  the reveal's sill, jambs and head on the room's side are lit, and nothing reaches into the
+  room. It carries the sky's light (its irradiance on the opening over π, `portalRadiance`)
+  and the ground's (half its radiance for the lower half of the view: sky-lit, plus sunlit as
+  much as `groundInSun` finds the ground below that window in sun, a few shadow tests against
+  the walls; times `GROUND_REACHES`, 0.45), less what the reveal beyond it hides
+  (`revealPasses`, the view factor through the outer half of the hole) and the glass (90%).
+  The sun is unchanged (a directional light, aimed at, through the panes). **No double
+  counting:** with at least one portal the sky lights nothing (`environmentIntensity` 0) and
+  stays the backdrop (seen by camera rays and through glass); rays from a room pass through
+  the ground (`castShadow` false, which the tracer's diffuse bounces honour), so the ground
+  lights the rooms only through the portals; seen through glass, the backdrop below the
+  horizon is the ground's lit look; seen straight on (an open passage) it gives off the sky's
+  share. A portal sits inside the pane so a ray from the room meets it first and the tracer
+  weighs the hit against the bounce that sent it (behind the pane it is weighed against the
+  pane and counted twice). **With no portal in reach** (a windowless room, a camera outside
+  the rooms, night) the sky lights the scene as before, so the sealed-room e2e still guards
+  leaks. **Known limits:** an outside wall seen from a window has the sun's light but not the
+  sky's; a mirror or glossy surface facing a window reflects the portal's even light, not the
+  view out (the tracer counts light hits on reflected rays; making portals invisible to them
+  needs a deeper shader patch, and the glossy share would then be counted twice); a door in a
+  glass wall is lit as glass; `GROUND_REACHES` is one number for every window (below).
+- **Firefly clamp:** each sample is capped, a shader patch on the tracer's material. The cap is
+  `sampleClamp` (twice a white wall in full sun, 20,000 cd/m² at least) **times the number of
+  lights the tracer picks among** (`lightChoices`: it aims each sample at one light at random
+  and scales the find by their count: in the sample flat's living room by day, the sun and 7
+  portals, 8). The first version capped at `sampleClamp` alone and cut true direct sun (a
+  sunlit floor's direct sample is the count times its value: at 4 pm the picture lost about a
+  fifth); now a sunlit white wall's one direct sample is under the cap (unit test). It can
+  still cut rare paths the tracer boosts (Russian roulette up to 20×, glossy bounces), so it
+  does less against specks than before; measured below.
+- **Measured (7 Nov; spike on SwiftShader, 120 × 90, 6 Nov sun):** black = pixels with no light
+  at all, specks = over 4× their 5 × 5 neighbourhood's median, both of the raw samples (before
+  the denoiser); room = the mean over the reference's room pixels (under 5× its median, so not
+  the windows), pixel for pixel and specks included, so light found by chance counts;
+  reference = no portals, no clamp, 1024 samples. `GROUND_REACHES` was set on the first three
+  (the ground's share at 0 and 1 against the references: 0.30–0.41, mean 0.37); the last four
+  are held out: another flat (the 4-room fixture), other hours, furnished.
 
-  | scene | before 32 / 64: black, specks | after 32 / 64: black, specks | room after 64 vs reference | median | mean |
-  |---|---|---|---|---|---|
-  | living, noon | 30.6 / 11.9%, 23.2 / 13.2% | 0 / 0%, 0.5 / 0.5% | 154 vs 164 (−6%) | 149 vs 140 (+6%) | 581 vs 579 (0%) |
-  | living, 4 pm | 25.1 / 11.2%, 18.7 / 9.7% | 0 / 0%, 0.6 / 1.2% | 117 vs 110 (+7%) | 114 vs 105 (+8%) | 442 vs 411 (+8%) |
-  | walk, noon | 27.4 / 10.7%, 21.8 / 13.0% | 0 / 0%, 0.8 / 0.5% | 190 vs 203 (−7%) | 185 vs 181 (+2%) | 397 vs 407 (−2%) |
+  | scene | before, 32 / 64 samples: black; specks | after, 32 / 64: black; specks | room at 64, after vs reference |
+  |---|---|---|---|
+  | sample flat, living, noon | 28 / 10%; 23 / 13% | 0 / 0%; 1.1 / 1.3% | 165 vs 166 (−1%) |
+  | sample flat, living, 4 pm | 26 / 10%; 19 / 10% | 0 / 0%; 1.0 / 1.7% | 116 vs 113 (+4%) |
+  | sample flat, walk (8.16, 4.6) north, noon | 28 / 10%; 24 / 11% | 0 / 0%; 1.0 / 1.1% | 175 vs 198 (−12%) |
+  | *held out:* 4-room, living (west window), 10 am | 41 / 18%; 29 / 15% | 0 / 0%; 0.4 / 0.5% | 67 vs 77 (−13%) |
+  | *held out:* 4-room, master bedroom, 3 pm | 29 / 11%; 23 / 14% | 0 / 0%; 2.6 / 2.7% | 118 vs 168 (**−30%**) |
+  | *held out:* furnished sample, living, 9 am | 35 / 17%; 26 / 15% | 0 / 0%; 1.2 / 1.6% | 87 vs 88 (−1%) |
+  | *held out:* furnished sample, living, 4 pm | 32 / 13%; 26 / 13% | 0.1 / 0%; 3.4 / 4.9% | 115 vs 108 (+6%) |
 
-  The sky's portal alone was checked against a reference with no light sampling at all
-  (sun off, ground black, unbiased whatever the tracer's sky sampling does): 53.2 against
-  52.5 cd/m². `GROUND_REACHES` came from the same three scenes (the ground's portals at 0 and
-  1 against the references: 0.34–0.49). The reference itself still has specks at 1024
-  samples; after, the picture at 64 is cleaner than it. The spike's `portals=1`, `plain=1`,
-  `pose=`, `clamp=auto`, `nosun=1`, `mis=0`, `gk=`, `glow=0` and `darkground=1` redo these.
-  Before the portals, the 64-sample median read 40–50% low against the reference (the
-  energy sat in specks); with them, within 8% everywhere.
+  So: no black pixels, specks down from 10–15% to 0.5–5% (what is left is mostly the sun's
+  patches on the floor lighting the room, found by chance), and the room's light within 13%
+  of the reference in six scenes of seven, held-out ones included; **the 4-room master bedroom
+  at 3 pm is 30% dark** (its own fit would be about 1.0, against 0.37). The ground's share
+  is the weak part: an even light in the window sends the ground's light down onto the floor
+  as much as up to the ceiling, where the real light goes up, so how much reaches the camera's
+  view varies with the view (0.30–1.0); fixing that needs a light that shines upward (a
+  tipped emitter, which no longer fits in a reveal, or spot lights), or the sunlit ground
+  found by chance (back to specks). The clamp: the same two held-out scenes without it read
+  129 (−23%) and 102 (−6%) against 118 and 115 with it, within the 64-sample noise (±10%):
+  it no longer cuts visibly. The sky's portal alone was checked earlier against a render with
+  no light sampling at all (sun off, ground black): 53.2 against 52.5 cd/m². Redo with the
+  spike's `portals=1`, `plain=1`, `flat=hdb4`, `room=`, `pose=`, `clamp=auto`, `gk=`, `nosun=1`,
+  `mis=0`, `glow=0`, `darkground=1`; it writes each pixel's luminance for comparing.
 - **Tests:** `e2e/exact.spec.ts` (about 3 min under SwiftShader: one dialog flow (stop, carry
   on, switch and back with the frame and focus kept, kept renders per camera, a context reset,
-  close and reopen), a sealed room, the pixel test on a fixture room at 32 samples, the phone
-  walk, no WebGL 2). The AI render tests now click "AI impression" first.
-- **Seen, to check on a GPU at 256 samples:** what grain is left (the sun's specks, the
-  lamps' at night: lamps are aimed at already); the picture is warm where an
-  oak floor bounces sunlight and cool where only the sky lights a room (physically so; no
-  white balance, which the spec leaves out).
+  close and reopen; the picture kept after a reset is a metered one, not mostly black: the
+  snapshot is taken only once the first whole sample is metered), a sealed room (no portals
+  in reach, so the sky lights the scene: a leak shows), the pixel test on a fixture room at 32
+  samples, the phone walk, no WebGL 2). The AI render tests now click "AI impression" first.
+  Unit tests: `portals.test.ts` (core: the openings, the pane, glass walls once, gaps over
+  half walls, reach through open and shut doors and glass, the ground in sun) and
+  `exactScene.test.ts` (one flat portal per opening, its light, sky on with none or at night,
+  the clamp per light choice).
+- **Seen, to check on a GPU at 256 samples:** what grain is left (the sun's patches on the
+  floor lighting the room by chance, the lamps' at night: lamps are aimed at already); the
+  picture is warm where an oak floor bounces sunlight and cool where only the sky lights a
+  room (physically so; no white balance, which the spec leaves out). The view out of the
+  walk's end window shows dark dots on SwiftShader, with or without portals (not looked into).
 - **Left for slice 2+:** Quality, Time, Lamps and Brightness settings; hints; full-screen
   viewer; real textures; Polish with AI; the slow-device estimate.
 

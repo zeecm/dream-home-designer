@@ -203,6 +203,7 @@ export class ExactRun {
         if (this.disposed || (!final && this.final)) return;
         if (final) this.final = true;
         e.exposure = autoExposure(nits, this.opts.light);
+        e.metered = true;
         e.show();
         if (!this.picture) {
           this.picture = true;

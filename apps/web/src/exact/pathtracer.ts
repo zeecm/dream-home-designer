@@ -1,3 +1,4 @@
+import { lightChoices } from '@dhd/render';
 import * as THREE from 'three';
 import { WebGLPathTracer } from 'three-gpu-pathtracer';
 // Not exported from the package's index in 0.0.23: the precision check, from its source.
@@ -270,14 +271,28 @@ export class PathTracerEngine implements ExactEngine {
   /** The tracer's sample clamp (null if its shader couldn't take one). */
   private clamping: THREE.IUniform | null;
 
-  /** No sample is brighter than this (cd/m²): rare bright paths (fireflies) are cut down. */
+  /** The sample cap for each light the tracer picks among (`ExactEngine.clamp`). */
+  private clampEach = 0;
+  /** How many lights the tracer picks among in the scene it has (`lightChoices`). */
+  private choices = 1;
+
   get clamp(): number {
-    return (this.clamping?.value as number | undefined) ?? Number.POSITIVE_INFINITY;
+    return this.clampEach > 0 ? this.clampEach : Number.POSITIVE_INFINITY;
   }
 
   set clamp(v: number) {
-    if (this.clamping) this.clamping.value = v > 0 ? v : 1e30;
+    this.clampEach = v;
+    this.applyClamp();
   }
+
+  /** The cap on a sample: the cap for each light times how many it picks among. */
+  private applyClamp() {
+    if (this.clamping) {
+      this.clamping.value = this.clampEach > 0 ? this.clampEach * this.choices : 1e30;
+    }
+  }
+
+  metered = false;
 
   constructor(opts: ExactEngineOptions) {
     this.opts = opts;
@@ -398,9 +413,12 @@ export class PathTracerEngine implements ExactEngine {
     this.clearFence();
     this.quick = 0;
     this.kept = -1;
+    this.metered = false;
     this.snapshot.getContext('2d')?.clearRect(0, 0, this.snapshot.width, this.snapshot.height);
     this.configure(this.opts);
     this.tracer.setScene(flattenForTracing(scene), camera);
+    this.choices = lightChoices(scene);
+    this.applyClamp();
     // Without float blending the tracer averages samples itself, in two targets.
     const alpha = !this.renderer.extensions.has('EXT_float_blend');
     full.alpha = alpha;
@@ -485,6 +503,9 @@ export class PathTracerEngine implements ExactEngine {
    * is a read back from the GPU, so not every step).
    */
   private keep(force = false) {
+    // Not before the first whole sample is metered: until then the picture is a part-drawn
+    // sample at a guessed exposure.
+    if (!this.metered) return;
     const n = Math.floor(this.inner._pathTracer.samples);
     if (!force && this.kept >= 0 && n < this.kept + 4) return;
     this.kept = n;

@@ -2,9 +2,11 @@ import {
   type Level,
   type SceneCamera,
   type Site,
+  type SkyOpening,
   type SunPosition,
   daylight,
   furnitureKind,
+  groundInSun,
   itemLights,
   levelBounds,
   revealPasses,
@@ -171,10 +173,12 @@ export function skyOnGround(sky: SkyLight): THREE.Color {
 }
 
 /**
- * The brightest a single sample of the picture may be (cd/m²): twice what the brightest thing
- * in the scene can really give (a white wall in full sun; a surface a hand's width from a
- * lamp), so nothing true is cut, only the rare runaway path (a glossy bounce that happens on
- * the sun) that would leave a speck.
+ * The cap on a single sample (cd/m²) for each light the tracer can choose from: twice what the
+ * brightest thing in the scene can really give (a white wall in full sun; a surface a hand's
+ * width from a lamp), so only a rare runaway path (a glossy bounce onto the sun's patch) that
+ * would leave a speck is cut. The tracer aims each sample at one light picked at random and
+ * scales what it finds by how many there are (`lightChoices`), so the cap the picture uses is
+ * this times that count: a sunlit wall's one direct sample is never cut.
  */
 export function sampleClamp(daylight: Daylight): number {
   const sunlit = daylight.sun ? (0.9 * daylight.sun.intensity) / Math.PI : 0;
@@ -182,36 +186,40 @@ export function sampleClamp(daylight: Daylight): number {
 }
 
 /**
- * How much of the ground's light reaches the rooms through the windows, against an even view of
- * open, sunlit ground filling the lower half of each. Measured against the tracer finding the
- * ground itself (long renders of the sample flat at noon and 4 pm, `HANDOVER.md`): much less
- * than the view suggests, as what lies just below a window is the house's own wall and the
- * ground in its shade.
+ * How many lights the tracer picks among for each sample: its lights, and the sky if it lights
+ * the scene (three-gpu-pathtracer 0.0.23: one at random, its find scaled by the count).
  */
-export const GROUND_REACHES = 0.42;
-
-/**
- * Open ground's radiance outside (linear RGB, cd/m²): its colour lit by the sun and the sky.
- */
-export function groundRadiance(daylight: Daylight): THREE.Color {
-  const c = skyOnGround(daylight.sky);
-  const sun = daylight.sun;
-  if (sun) {
-    c.add(
-      sun.color
-        .clone()
-        .multiply(new THREE.Color(GROUND_COLOR))
-        .multiplyScalar((sun.intensity * Math.max(0, sun.direction.y)) / Math.PI),
-    );
-  }
-  return c;
+export function lightChoices(scene: THREE.Scene): number {
+  let n = 0;
+  scene.traverse((o) => {
+    if ((o as THREE.Light).isLight && (o as THREE.Light).intensity > 0) n++;
+  });
+  return Math.max(1, n + (scene.environment && scene.environmentIntensity > 0 ? 1 : 0));
 }
 
 /**
- * How far a portal's light is tipped down from square to the wall (radians): about where the
- * sky's light through an opening heads.
+ * How much of the ground's light reaches the rooms through a window, against an even view of
+ * open ground (its sunlit share as `groundInSun` finds it) filling the lower half of the view.
+ * Measured against the tracer finding the ground itself (long renders, `HANDOVER.md`): less
+ * than the view suggests, as what lies just below a window is the house's own wall, and the
+ * ground beside the house sees only part of the sky.
  */
-export const PORTAL_TILT = (35 * Math.PI) / 180;
+export const GROUND_REACHES = 0.37;
+
+/** Open ground's radiance from the sun alone (linear RGB, cd/m²). */
+export function sunOnGround(daylight: Daylight): THREE.Color {
+  const sun = daylight.sun;
+  if (!sun) return new THREE.Color(0, 0, 0);
+  return sun.color
+    .clone()
+    .multiply(new THREE.Color(GROUND_COLOR))
+    .multiplyScalar((sun.intensity * Math.max(0, sun.direction.y)) / Math.PI);
+}
+
+/** Open ground's radiance outside (linear RGB, cd/m²): its colour lit by the sun and the sky. */
+export function groundRadiance(daylight: Daylight): THREE.Color {
+  return skyOnGround(daylight.sky).add(sunOnGround(daylight));
+}
 
 /** Lights in the sky's openings: their names start with this, then the opening's id. */
 export const PORTAL = 'portal:';
@@ -219,58 +227,62 @@ export const PORTAL = 'portal:';
 /** Clear glass lets this much of the light through (its colour, #f4faf8, in linear light). */
 export const GLASS_PASSES = 0.9;
 
+/** Below this much daylight (`Daylight.light`) the sky's light is too little to aim at. */
+export const PORTALS_FROM = 0.05;
+
 /**
- * Lights in each opening that lets the sky into a room (`skyOpenings`) of the rooms given (all
- * if none): even rectangles the size of the opening just inside the wall's inner face, shining
- * in. One carries the sky's light (`portalRadiance`), tipped down; with `ground` (the ground's
- * radiance as the windows have it) another carries the ground's, tipped up (an even view of it
- * below the horizon gives the opening half its radiance). Each less what the reveal hides
- * (`revealPasses`) and the glass takes. The tracer aims samples at lights, so a room's
- * daylight is found every sample, where the sky and the sunlit ground alone are found only by
- * rays that chance on a window, in specks. They sit inside the glass so that a ray from the
- * room meets them before the pane, and the tracer weighs that hit against the bounce that sent
- * it (behind the pane it would weigh it against the pane, and count it twice).
+ * The radiance a portal gives (linear RGB, cd/m²): the sky's (`portalRadiance`), and the
+ * ground's below it (open ground's sky-lit radiance, and its sunlit radiance as much as it is in
+ * the sun, `groundInSun`; half of it, the lower half of the view; as much as reaches the rooms,
+ * `GROUND_REACHES`), less what the reveal behind it hides (`revealPasses`) and the glass takes.
  */
-export function portalLights(
+export function portalLight(
   level: Level,
-  sky: SkyLight,
-  rooms?: ReadonlySet<string>,
-  ground?: THREE.Color,
-) {
-  const parts: [string, THREE.Color, number][] = [['sky', portalRadiance(sky), -PORTAL_TILT]];
-  if (ground) parts.push(['ground', ground.clone().multiplyScalar(0.5), PORTAL_TILT]);
+  o: SkyOpening,
+  daylight: Daylight,
+  reaches = GROUND_REACHES,
+): THREE.Color {
+  const ground = skyOnGround(daylight.sky);
+  const s = daylight.sun;
+  if (s) {
+    const dir = { x: s.direction.x, y: s.direction.y, z: s.direction.z };
+    ground.add(sunOnGround(daylight).multiplyScalar(groundInSun(level, o, dir)));
+  }
+  return portalRadiance(daylight.sky)
+    .add(ground.multiplyScalar(0.5 * reaches))
+    .multiplyScalar(revealPasses(o.width, o.height, o.depth) * (o.glazed ? GLASS_PASSES : 1));
+}
+
+/**
+ * A light in each opening that lets the sky into a room (`skyOpenings`) of the rooms given (all
+ * if none), carrying the light that comes in through it (`portalLight`): an even rectangle the
+ * opening's size, flat in it just inside the pane (the reveal's sill, jambs and head on the
+ * room's side of it lit, nothing of it reaching into the room), shining in. The tracer aims
+ * samples at lights, so a room's daylight is found every sample, where the sky and the sunlit
+ * ground alone are found only by rays that chance on a window, in specks. Inside the pane, a ray
+ * from the room meets it before the pane, and the tracer weighs that hit against the bounce
+ * that sent it (behind the pane it would weigh it against the pane, and count it twice).
+ */
+export function portalLights(level: Level, daylight: Daylight, rooms?: ReadonlySet<string>) {
   const out: THREE.RectAreaLight[] = [];
   for (const o of skyOpenings(level)) {
     if (rooms && !rooms.has(o.roomId)) continue;
-    const passes = revealPasses(o.width, o.height, o.depth) * (o.glazed ? GLASS_PASSES : 1);
-    for (const [part, L, tilt] of parts) {
-      const c = L.clone().multiplyScalar(passes);
-      const peak = Math.max(c.r, c.g, c.b, 1e-9);
-      // Into the room from the wall's face, far enough that the tipped light stays out of it.
-      const inward = (o.height / 2) * Math.sin(PORTAL_TILT) + 0.001;
-      const at = new THREE.Vector3(
-        o.at.x - o.out.x * inward,
-        level.elevation + o.bottom + o.height / 2,
-        o.at.y - o.out.y * inward,
-      );
-      const light = new THREE.RectAreaLight(
-        new THREE.Color(c.r / peak, c.g / peak, c.b / peak),
-        peak,
-        o.width,
-        o.height,
-      );
-      light.name = `${PORTAL}${o.id}:${part}`;
-      light.position.copy(at);
-      // Lights look along -z: into the room, tipped down (the sky's) or up (the ground's), its
-      // width along the wall.
-      light.lookAt(
-        at.x - o.out.x * Math.cos(tilt),
-        at.y + Math.sin(tilt),
-        at.z - o.out.y * Math.cos(tilt),
-      );
-      light.updateMatrixWorld();
-      out.push(light);
-    }
+    const c = portalLight(level, o, daylight);
+    const peak = Math.max(c.r, c.g, c.b);
+    if (!(peak > 0)) continue;
+    const at = new THREE.Vector3(o.at.x, level.elevation + o.bottom + o.height / 2, o.at.y);
+    const light = new THREE.RectAreaLight(
+      new THREE.Color(c.r / peak, c.g / peak, c.b / peak),
+      peak,
+      o.width,
+      o.height,
+    );
+    light.name = `${PORTAL}${o.id}`;
+    light.position.copy(at);
+    // Lights look along -z: into the room, its width along the wall.
+    light.lookAt(at.x - o.out.x, at.y, at.z - o.out.y);
+    light.updateMatrixWorld();
+    out.push(light);
   }
   return out;
 }
@@ -365,8 +377,10 @@ export interface ExactSceneOptions {
   doors?: ReadonlyMap<string, number>;
   /**
    * Lights in the openings that let the sky in (`portalLights`), for a view from inside (with
-   * ceilings): the sky then lights the rooms only through them, and is seen (through windows,
-   * and as the backdrop) but not lit by. `true` for every room, or the rooms to light.
+   * ceilings): `true` for every room, or the rooms to light (`daylightReach`). If there are
+   * any (and it is day, `PORTALS_FROM`), the sky lights the rooms only through them, and is
+   * seen (through windows, and as the backdrop) but lights nothing; if none, the sky lights
+   * the scene as without.
    */
   portals?: boolean | ReadonlySet<string>;
 }
@@ -418,16 +432,13 @@ export function buildExactScene(level: Level, opts: ExactSceneOptions): ExactSce
   scene.environment = sky;
   scene.background = sky;
   // With portals the sky's light comes through them alone: the sky lights nothing directly (it
-  // would twice), and is still seen, through the windows and as the backdrop.
-  const portals = opts.portals
-    ? portalLights(
-        level,
-        opts.daylight.sky,
-        opts.portals === true ? undefined : opts.portals,
-        groundRadiance(opts.daylight).multiplyScalar(GROUND_REACHES),
-      )
-    : [];
-  if (opts.portals) {
+  // would twice), and is still seen, through the windows and as the backdrop. Without any (no
+  // opening to the sky in reach, or night), the sky lights the scene itself.
+  const portals =
+    opts.portals && opts.daylight.light >= PORTALS_FROM
+      ? portalLights(level, opts.daylight, opts.portals === true ? undefined : opts.portals)
+      : [];
+  if (portals.length) {
     scene.environmentIntensity = 0;
     // The ground's light comes in through the portals too: a ray from a room that passes out
     // through an opening goes through the ground (as a shadow ray does through anything that
