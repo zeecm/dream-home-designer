@@ -127,7 +127,10 @@ function start() {
   if (typeof window !== 'undefined') {
     window.addEventListener(
       'pointerdown',
-      () => {
+      (e) => {
+        // A press on the wall view's drawing edits nothing: no walkways to work out again
+        // when it ends (a whole report and re-render on every tap held up a double tap).
+        if ((e.target as Element | null)?.closest?.('.elev-sheet')) return;
         pointerDown = true;
       },
       true,
