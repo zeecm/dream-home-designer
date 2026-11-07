@@ -10,7 +10,17 @@ import {
   sampleFlatProject,
 } from '@dhd/core';
 import { describe, expect, it } from 'vitest';
-import { type Seg, notchDrawings, notchFigure, readingAngle } from './notches';
+import {
+  type Box,
+  type Seg,
+  boxHits,
+  figureBox,
+  figureWidth,
+  notchDrawings,
+  notchFigure,
+  obstaclesOf,
+  readingAngle,
+} from './notches';
 
 /** An upright line 10 mm long on paper, inner end at the top. */
 const line = { a: { x: 50, y: 40 }, b: { x: 50, y: 50 } };
@@ -41,18 +51,98 @@ describe('notchFigure', () => {
       { x: 51.4, y: 30 },
       { x: 51.4, y: 60 },
     ];
-    const f = notchFigure(line, 6.5, '1000', { blockers: [ext] });
+    const f = notchFigure(line, 6.5, '1000', { obstacles: { segs: [ext] } });
     expect(f.place).toBe('beside');
     expect(f.at.x).toBeLessThan(50);
     const g = notchFigure(line, 6.5, '1000', {
-      blockers: [
-        [
-          { x: 48.6, y: 30 },
-          { x: 48.6, y: 60 },
+      obstacles: {
+        segs: [
+          [
+            { x: 48.6, y: 30 },
+            { x: 48.6, y: 60 },
+          ],
         ],
-      ],
+      },
     });
     expect(g.at.x).toBeGreaterThan(50);
+  });
+
+  /** A printed figure ("1900"), level, centred on (x, y). */
+  const label = (x: number, y: number, text = '1900'): Box => ({
+    c: { x, y },
+    hw: (text.length * 2.2 * 0.55) / 2,
+    hh: 0.85,
+    d: { x: 1, y: 0 },
+  });
+  const clear = (f: { at: { x: number; y: number }; deg: number }, text: string, b: Box) => {
+    const r = (f.deg * Math.PI) / 180;
+    const fb = figureBox(f.at, { x: Math.cos(r), y: Math.sin(r) }, figureWidth(text));
+    return boxHits(fb, { boxes: [b] }) === 0;
+  };
+
+  it('M1: another chain’s figure across the line’s middle: the figure moves along the line, clear of it', () => {
+    // A long line in a wide notch, a figure printed across its middle, both sides.
+    const long = { a: { x: 50, y: 30 }, b: { x: 50, y: 50 } };
+    const other = label(50, 40);
+    const f = notchFigure(long, 19, '2000', { obstacles: { boxes: [other] } });
+    expect(f.place).toBe('beside');
+    expect(clear(f, '2000', other)).toBe(true);
+    expect(Math.abs(f.at.y - 40)).toBeGreaterThan(1);
+  });
+
+  it('M1: both sides crossed all along: the break, then beyond the mouth', () => {
+    // Text either side of the line, all along it: the line itself is clear.
+    const walls = [label(46.8, 35, '00000000'), label(53.2, 35, '00000000')].map((b) => ({
+      ...b,
+      d: { x: 0, y: 1 },
+      hw: 12,
+      hh: 1,
+    }));
+    const brk = notchFigure(line, 6.5, '1000', { obstacles: { boxes: walls } });
+    expect(brk.place).toBe('break');
+    // And with the line's middle printed over too, beyond the mouth.
+    const mid = { ...label(50, 45, '0000'), d: { x: 0, y: 1 }, hw: 5.5 };
+    const out = notchFigure(line, 6.5, '1000', { obstacles: { boxes: [...walls, mid] } });
+    expect(out.place).toBe('mouth');
+    expect(out.at.y).toBeGreaterThan(50);
+  });
+
+  it('M2: beyond the mouth no further than 6 mm; else a leader from a clear spot beside the notch', () => {
+    // A 1 mm slot (100 mm at 1:100); two chain rows 2 and 5 mm past the mouth, full width.
+    const rows: Seg[] = [2, 5, 8, 11, 14].map((dy) => [
+      { x: 0, y: 50 + dy },
+      { x: 100, y: 50 + dy },
+    ]);
+    const f = notchFigure(line, 1, '1000', { obstacles: { segs: rows } });
+    expect(f.place).toBe('leader');
+    expect(f.deg).toBe(0);
+    // Beside the slot, near the line's middle, and a leader from the line to it.
+    expect(Math.abs(f.at.x - 50)).toBeLessThan(10);
+    expect(f.at.y).toBeGreaterThan(40);
+    expect(f.at.y).toBeLessThan(50);
+    const l = f.leader as Seg;
+    expect(Math.abs(l[0].x - 50)).toBeLessThan(0.5);
+    expect(boxHits(figureBox(f.at, { x: 1, y: 0 }, figureWidth('1000')), { segs: rows })).toBe(0);
+    // With room just past the mouth, it stays there (within 6 mm).
+    const near = notchFigure(line, 1, '1000', { obstacles: { segs: rows.slice(2) } });
+    expect(near.place).toBe('mouth');
+  });
+
+  it('L4: beyond the mouth, clear of a wall stub beside it', () => {
+    // A stub of wall right past the mouth, across the line: the figure clears it.
+    const stub = [
+      { x: 49, y: 50.5 },
+      { x: 53, y: 50.5 },
+      { x: 53, y: 53 },
+      { x: 49, y: 53 },
+    ];
+    const f = notchFigure(line, 1, '1700', { obstacles: { walls: [stub] } });
+    expect(
+      boxHits(
+        figureBox(f.at, f.deg === 0 ? { x: 1, y: 0 } : { x: 0, y: -1 }, figureWidth('1700')),
+        { walls: [stub] },
+      ),
+    ).toBe(0);
   });
 
   it('beyond the mouth, it moves out along the line past whatever it would touch', () => {
@@ -60,7 +150,7 @@ describe('notchFigure', () => {
       { x: 40, y: 52.5 },
       { x: 60, y: 52.5 },
     ];
-    const f = notchFigure(line, 2, '1000', { blockers: [chain] });
+    const f = notchFigure(line, 2, '1000', { obstacles: { segs: [chain] } });
     expect(f.place).toBe('mouth');
     // Clear of the chain line: its near end past 52.5 by the margin.
     expect(f.at.y - (4 * 2.2 * 0.55) / 2).toBeGreaterThan(52.5);
@@ -159,5 +249,60 @@ describe('notchDrawings', () => {
       .sort();
     expect(depths).toEqual(expected);
     expect(depths).toEqual(['2000', '2020']);
+  });
+
+  it('M3: a label on the centre line (a new wall’s length) moves the line across, clear of it', () => {
+    // The U at 1:100: the depth on x = 30 mm from y 20.5 to 40.5; "2000" printed under the
+    // back wall, centred on the line.
+    const u: NotchDim = {
+      a: { x: 3, y: 2.05 },
+      b: { x: 3, y: 4.05 },
+      gap: 1.9,
+      notch: 0,
+      corners: [
+        { x: 2.05, y: 4.05 },
+        { x: 3.95, y: 4.05 },
+      ],
+    };
+    const teal: Box = { c: { x: 30, y: 21.7 }, hw: 2.1, hh: 0.75, d: { x: 1, y: 0 } };
+    const [d] = notchDrawings([u], P, 10, { boxes: [teal] });
+    if (!d) throw new Error('no depth');
+    const [a, b] = d.ticks as [{ x: number; y: number }, { x: number; y: number }];
+    expect(Math.abs(a.x - 30)).toBeGreaterThan(2.1);
+    expect(Math.abs(b.x - a.x)).toBeLessThan(1e-9);
+    // Still in the notch, and the figure clear of the label.
+    expect(a.x).toBeGreaterThan(20.5);
+    expect(a.x).toBeLessThan(39.5);
+    const f = d.figures[0];
+    if (!f) throw new Error('no figure');
+    const r = (f.deg * Math.PI) / 180;
+    const fb = figureBox(f.at, { x: Math.cos(r), y: Math.sin(r) }, figureWidth(f.text));
+    expect(boxHits(fb, { boxes: [teal] })).toBe(0);
+  });
+});
+
+describe('obstaclesOf', () => {
+  it('reads lines and turned text from the sheet’s markup, a box per line of a name', () => {
+    const svg = [
+      '<line x1="1" y1="2" x2="3" y2="4" stroke="#000"></line>',
+      '<text x="10" y="20" transform="rotate(-90 10 20)" font-size="2.2" text-anchor="middle" dominant-baseline="central">1900</text>',
+      '<text x="50" y="50" font-size="2.6" font-weight="700" text-anchor="middle"><tspan x="50" dy="0">Main </tspan><tspan x="50" dy="2.86">bedroom</tspan></text>',
+    ].join('');
+    const o = obstaclesOf(svg);
+    expect(o.segs).toEqual([
+      [
+        { x: 1, y: 2 },
+        { x: 3, y: 4 },
+      ],
+    ]);
+    expect(o.boxes).toHaveLength(3);
+    const [fig, l1, l2] = o.boxes as [Box, Box, Box];
+    // Turned a quarter: it runs up the page, centred where it is drawn.
+    expect(fig.c.x).toBeCloseTo(10, 6);
+    expect(fig.c.y).toBeCloseTo(20, 6);
+    expect(fig.d.y).toBeCloseTo(-1, 6);
+    expect(fig.hw).toBeCloseTo((4 * 2.2 * 0.55) / 2, 6);
+    expect(l2.c.y - l1.c.y).toBeCloseTo(2.86, 6);
+    expect(l2.hw).toBeGreaterThan(l1.hw);
   });
 });

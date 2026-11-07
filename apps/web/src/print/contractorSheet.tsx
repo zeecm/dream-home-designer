@@ -53,7 +53,10 @@ import { ElecGlyph } from '../electrical/glyph';
 import { changesAsText } from '../ui/Renovation';
 import { hackedPoints, sheetLevels } from './extent';
 import { printFrame } from './frame';
-import { type Seg, notchDrawings } from './notches';
+import { type Obstacles, type Seg, notchDrawings, obstaclesOf } from './notches';
+
+/** What page 1 prints apart from the notches' depths, read from a first drawing of it. */
+export type SheetObstacles = Pick<Obstacles, 'segs' | 'boxes'>;
 
 /**
  * The plan for contractors: a measured drawing on A4 or A3, landscape, one SVG per page in
@@ -772,7 +775,7 @@ function Rooms({
 /**
  * How the chains outside are laid out, mm: the first one's line out from the outline and the
  * step to each further out; an extension line starts off its face and runs past the line;
- * figures stand off the line, a second row further out. `chainSegs` follows the same numbers.
+ * figures stand off the line, a second row further out.
  */
 const CHAIN_MM = { first: 7, step: 7.5, extFrom: 1.5, extPast: 1.2, figGap: 0.7, row: 2.7 };
 /** How far out the `i`-th chain on a side runs (an aligned chain is the first). */
@@ -1011,59 +1014,22 @@ function Chains({ dims, sheet }: { dims: PlanDimensions; sheet: Sheet }) {
 }
 
 /**
- * What the chains draw that a notch's figure keeps off, on paper: their extension lines,
- * their lines and the rows their figures stand in (as Chains lays them out).
- */
-function chainSegs(dims: PlanDimensions, sheet: Sheet): Seg[] {
-  const segs: Seg[] = [];
-  for (const side of ['top', 'right', 'bottom', 'left'] as const) {
-    const list = dims.chains.filter((c) => c.side === side).sort((a, b) => a.tier - b.tier);
-    const horizontal = side === 'top' || side === 'bottom';
-    const outSign = side === 'top' || side === 'left' ? -1 : 1;
-    const alongP = (v: number) =>
-      horizontal ? sheet.P({ x: v, y: 0 }).x : sheet.P({ x: 0, y: v }).y;
-    const acrossP = (v: number) =>
-      horizontal ? sheet.P({ x: 0, y: v }).y : sheet.P({ x: v, y: 0 }).x;
-    const pt = (a: number, c: number) => (horizontal ? { x: a, y: c } : { x: c, y: a });
-    list.forEach((c, i) => {
-      const lineAt = acrossP(c.at) + outSign * chainOffset(i);
-      c.stops.forEach((s, j) => {
-        const from = acrossP(c.from[j] ?? c.at) + outSign * CHAIN_MM.extFrom;
-        segs.push([pt(alongP(s), from), pt(alongP(s), lineAt + outSign * CHAIN_MM.extPast)]);
-      });
-      const a0 = alongP(c.stops[0] ?? 0) - 1.2;
-      const a1 = alongP(c.stops[c.stops.length - 1] ?? 0) + 1.2;
-      // The line, and the middles of its two rows of figures.
-      const mid = CHAIN_MM.figGap + DIM_TEXT * 0.36;
-      for (const row of [0, mid, mid + CHAIN_MM.row]) {
-        segs.push([pt(a0, lineAt + outSign * row), pt(a1, lineAt + outSign * row)]);
-      }
-    });
-  }
-  for (const c of dims.chains) {
-    const l = c.line;
-    if (c.side !== 'aligned' || !l) continue;
-    const len = Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y);
-    const at = (s: number, out: number) => {
-      const p = sheet.P({
-        x: l.a.x + ((l.b.x - l.a.x) * s) / len,
-        y: l.a.y + ((l.b.y - l.a.y) * s) / len,
-      });
-      return { x: p.x + l.out.x * out, y: p.y + l.out.y * out };
-    };
-    for (const s of c.stops) {
-      segs.push([at(s, CHAIN_MM.extFrom), at(s, chainOffset(0) + CHAIN_MM.extPast)]);
-    }
-  }
-  return segs;
-}
-
-/**
  * Notches' depths, like the chains outside: a line with ticks, the figure along it, and a
- * grey extension line from where the flank turns at the mouth (page 1 only).
+ * grey extension line from where the flank turns at the mouth (page 1 only). They keep off
+ * `obstacles`, what the rest of the page prints, and off the walls.
  */
-function Notches({ dims, sheet }: { dims: PlanDimensions; sheet: Sheet }) {
-  const drawings = notchDrawings(dims.notches, sheet.P, sheet.k, chainSegs(dims, sheet));
+function Notches({
+  dims,
+  sheet,
+  obstacles,
+  walls,
+}: {
+  dims: PlanDimensions;
+  sheet: Sheet;
+  obstacles: SheetObstacles;
+  walls: Vec2[][];
+}) {
+  const drawings = notchDrawings(dims.notches, sheet.P, sheet.k, { ...obstacles, walls });
   if (!drawings.length) return null;
   const L = (s: Seg, w: number, color: string, key: string) => (
     <line
@@ -1087,6 +1053,7 @@ function Notches({ dims, sheet }: { dims: PlanDimensions; sheet: Sheet }) {
           data-depth={d.depths.join(' ')}
         >
           {d.ext.map((s, j) => L(s, 0.1, MUTED, `e${j}`))}
+          {d.leaders.map((s, j) => L(s, 0.1, INK, `r${j}`))}
           {d.lines.map((s, j) => L(s, 0.15, INK, `l${j}`))}
           {d.ticks.map((t, j) => {
             const p = { x: t.x - 0.6, y: t.y + 0.6 };
@@ -2057,6 +2024,8 @@ export function contractorPages(
   project: Project,
   opts: SheetOptions,
   date = sheetDate(),
+  /** What page 1 prints without the depths: with it, they are drawn clear of it; without, not at all. */
+  obstacles?: SheetObstacles,
 ): ContractorSheets {
   const levels = sheetLevels(project, opts.variant);
   if (!levels) throw new Error('This plan has no level to print.');
@@ -2189,7 +2158,18 @@ export function contractorPages(
         {diff && <BuiltLengths diff={diff} sheet={sheet} dims={dims} />}
         <Rooms level={level} dims={dims} sheet={sheet} />
         <Chains dims={dims} sheet={sheet} />
-        <Notches dims={dims} sheet={sheet} />
+        {obstacles && (
+          <Notches
+            dims={dims}
+            sheet={sheet}
+            obstacles={obstacles}
+            walls={[
+              ...geom.pieces.map((p) => p.polygon),
+              ...geom.footprints.hubs.map((h) => h.polygon),
+              ...geom.openings.map((o) => o.polygon),
+            ].map((poly) => poly.map(sheet.P))}
+          />
+        )}
       </g>
       {title(1, legend)}
     </Frame>
@@ -2253,7 +2233,13 @@ export function contractorPages(
 /** The pages as SVG markup, rendered with React's server renderer (loaded when needed). */
 export async function contractorMarkup(project: Project, opts: SheetOptions): Promise<string[]> {
   const { renderToStaticMarkup } = await import('react-dom/server');
-  return contractorPages(project, opts).pages.map((p) => renderToStaticMarkup(p as ReactElement));
+  // Twice: first without the notches' depths, to see what page 1 prints for them to keep off.
+  const date = sheetDate();
+  const first = contractorPages(project, opts, date).pages[0];
+  const obstacles = first ? obstaclesOf(renderToStaticMarkup(first as ReactElement)) : undefined;
+  return contractorPages(project, opts, date, obstacles).pages.map((p) =>
+    renderToStaticMarkup(p as ReactElement),
+  );
 }
 
 /**
