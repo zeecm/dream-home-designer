@@ -1,20 +1,21 @@
 import { overlapDepth, polygonGap, roomOff, sideOf } from '../convex';
-import { furnitureKind, itemFootprint, itemSize } from '../furniture';
+import { type FurnitureKind, furnitureKind, itemFootprint, itemSize } from '../furniture';
 import { pointInPolygon } from '../geometry';
 import type { Item, Vec2 } from '../schema';
 import { priorityOf } from './catalogue';
 import {
   BUILT_IN_MIN,
-  type Hit,
+  type OnFace,
   type Shape,
   type SpaceIndex,
   type Want,
   addToIndex,
   blocking,
-  fixedHit,
+  fixedHitOf,
   hitsOf,
   inRooms,
   itemAt,
+  keepOutHit,
   nameOf,
   onFace,
   vertical,
@@ -154,6 +155,71 @@ const fwd = (r: number): Vec2 => ({ x: -Math.sin(r), y: Math.cos(r) });
 const facing = (v: Vec2) => Math.atan2(-v.x, v.y);
 const centre = (it: Item): Vec2 => ({ x: it.position.x, y: it.position.z });
 
+/**
+ * Footprints of the solver's items, worked out once per item: a pose is scored, checked and
+ * looked ahead from many times. Items made here are never changed after.
+ */
+const fpMemo = new WeakMap<Item, { kind: FurnitureKind | undefined; fp: Vec2[] }>();
+function fpOf(item: Item, kind = furnitureKind(item.assetId)): Vec2[] {
+  const m = fpMemo.get(item);
+  if (m && m.kind === kind) return m.fp;
+  const fp = itemFootprint(item, kind);
+  if (!m) fpMemo.set(item, { kind, fp });
+  return fp;
+}
+
+/**
+ * A pose of a piece, made once per space and kept for every solve of it (the first, its swaps,
+ * the walkway re-solves): the item, and what the walls, doors and windows do to it.
+ */
+interface Pose {
+  item: Item;
+  fp: Vec2[];
+  on?: OnFace;
+  /** Blocked by what is fixed, whatever ways are kept clear (worked out when first tried). */
+  base?: boolean;
+  /** The ways kept clear it was last checked against, and whether it stands on one. */
+  koFor?: Shape[];
+  ko?: boolean;
+  /** Its key among a piece's candidates (two poses this close are the same place). */
+  seen?: string;
+}
+
+/** A piece's poses (by its intent, in one space), as candidates() lists them. */
+interface PoseCache {
+  /** On each face, by the centre's distance along it. */
+  wall: Map<Face, Map<number, Pose>>;
+  /** A dining table end-on to each face, by the same. */
+  turned: Map<Face, Map<number, Pose>>;
+  /** Round an anchor at its pose (null: outside the rooms), by the anchor's role. */
+  near: WeakMap<Item, Map<Role | undefined, (Pose | null)[]>>;
+  /** In its zone. */
+  zone?: Pose[];
+  /** Each face's stretches clear of openings, for the piece's height. */
+  stretches: Map<Face, [number, number][]>;
+}
+/** Per space (its index), per piece (its intent). */
+const poseCaches = new WeakMap<SpaceIndex, WeakMap<Intent, PoseCache>>();
+function poseCacheOf(ix: SpaceIndex, t: Intent): PoseCache {
+  let per = poseCaches.get(ix);
+  if (!per) {
+    per = new WeakMap();
+    poseCaches.set(ix, per);
+  }
+  let c = per.get(t);
+  if (!c) {
+    c = { wall: new Map(), turned: new Map(), near: new WeakMap(), stretches: new Map() };
+    per.set(t, c);
+  }
+  return c;
+}
+/** A pose made: the item, its footprint remembered. */
+function poseOf(item: Item, kind: FurnitureKind, on?: OnFace): Pose {
+  const fp = itemFootprint(item, kind);
+  fpMemo.set(item, { kind, fp });
+  return on ? { item, fp, on } : { item, fp };
+}
+
 /** The angle (degrees) between a pose's forward line and the way to a point. */
 function offAngle(at: Vec2, r: number, to: Vec2): number {
   const f = fwd(r);
@@ -248,7 +314,7 @@ export function solveSpace(input: SolveInput): SolveOutcome {
   const kinds = new Map(input.intents.map((t) => [t.want.id, t.want.kind]));
   for (const item of first.items) {
     const kind = kinds.get(item.id) ?? furnitureKind(item.assetId);
-    if (kind) addToIndex(input.ix, item, kind);
+    if (kind) addToIndex(input.ix, item, kind, fpOf(item, kind));
   }
   return first;
 }
@@ -291,7 +357,7 @@ function seatsShort(input: SolveInput, items: Item[], mark: number, intents: Int
       const want = kinds.get(it.id);
       return {
         kind: want?.kind ?? furnitureKind(it.assetId),
-        fp: itemFootprint(it),
+        fp: fpOf(it),
         w: want?.w ?? 0,
       };
     }),
@@ -322,10 +388,9 @@ function seatsShort(input: SolveInput, items: Item[], mark: number, intents: Int
 /** Whether a dining group stands short of 0.60 m from the lounge (pieces solved and fixed). */
 function tightIn(input: SolveInput, items: Item[], mark: number): boolean {
   const fixed = input.ix.placed.slice(0, mark).map((p) => ({ assetId: p.assetId, fp: p.fp }));
-  const all = [
-    ...fixed,
-    ...items.map((it) => ({ assetId: it.assetId, fp: itemFootprint(it) })),
-  ].map((p) => ({ ...p, role: roleOf(furnitureKind(p.assetId)) }));
+  const all = [...fixed, ...items.map((it) => ({ assetId: it.assetId, fp: fpOf(it) }))].map(
+    (p) => ({ ...p, role: roleOf(furnitureKind(p.assetId)) }),
+  );
   for (const t of all) {
     const kind = furnitureKind(t.assetId);
     const ap = kind ? relationOf(kind)?.apart : undefined;
@@ -350,7 +415,7 @@ function diningOnWay(input: SolveInput, items: Item[]): boolean {
   return items.some((it) => {
     const kind = furnitureKind(it.assetId);
     if (!kind || !relationOf(kind)?.apart) return false;
-    const fp = itemFootprint(it, kind);
+    const fp = fpOf(it, kind);
     const fb = boxOf(fp);
     return (input.ways ?? []).some(
       (x) =>
@@ -510,21 +575,20 @@ function solveOnce(input: SolveInput): SolveOutcome {
   const solids = ix.solid.map((x) => x.poly);
   /** Set false by `score` when a pose breaks one of the piece's relationships. */
   let related = true;
-  /** Each free piece's poses in its zone (they don't depend on what is placed). */
-  const zoneMemo = new Map<string, { at: Vec2; r: number }[]>();
-  /** Each free piece's zone poses as pieces, and whether walls, doors or ways block them. */
-  const fixedMemo = new Map<string, { item: Item; ok: boolean }[]>();
-  /** What walls, doors and the ways kept clear do to a pose: the same however often it's tried. */
-  const fixedAt = new Map<string, Hit | null>();
-  /** What a pose runs into: its fixed hits remembered, then the pieces placed. */
-  const hits = (item: Item, kind: Want['kind'], on?: Parameters<typeof hitsOf>[3]): Hit[] => {
-    const key = `${item.id}|${item.position.x.toFixed(4)}|${item.position.z.toFixed(4)}|${item.rotationY.toFixed(4)}|${item.scale.x.toFixed(4)}|${ix.keepOut.length}|${on ? `${on.face.wallId}:${on.face.side}:${on.u0.toFixed(3)}` : ''}`;
-    let fixed = fixedAt.get(key);
-    if (fixed === undefined) {
-      fixed = fixedHit(ix, item, kind, on);
-      fixedAt.set(key, fixed);
+  /**
+   * Whether walls, doors, windows or the ways kept clear block a pose: the same however often
+   * it's tried, so worked out once (what is fixed once per space, the ways once per set kept).
+   */
+  const fixedBlocks = (p: Pose, kind: FurnitureKind): boolean => {
+    p.base ??= fixedHitOf(ix, p.item, kind, p.on, p.fp, []) !== null;
+    if (p.base) return true;
+    const ko = ix.keepOut;
+    if (!ko.length) return false;
+    if (p.koFor !== ko) {
+      p.koFor = ko;
+      p.ko = keepOutHit(ko, kind, p.fp);
     }
-    return fixed ? [fixed] : hitsOf(ix, item, kind, on, true);
+    return !!p.ko;
   };
 
   // Each piece's anchor: the ref it names (faces or near), else the first piece of a role its
@@ -575,7 +639,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
       (d) => roles.get(d.want.ref) === 'dining-chair',
     ).length;
     const { w, d } = itemSize(item, t.want.kind);
-    if (!chairs) return itemFootprint(item, t.want.kind);
+    if (!chairs) return fpOf(item, t.want.kind);
     const per = Math.max(1, Math.min(3, Math.floor(Math.max(w, d) / 0.58)));
     const ends = chairs > 2 * per;
     const gw = w + (w >= d ? (ends ? 2 * CHAIR_REACH : 0) : 2 * CHAIR_REACH);
@@ -630,12 +694,10 @@ function solveOnce(input: SolveInput): SolveOutcome {
     const mine = apartRows.get(t.want.ref);
     if (!mine && !lounge.has(role)) return { short: 0, slack: 0, dining: false };
     if (mine) {
-      const fp = relationOf(t.want.kind)?.apart
-        ? groupOf(t, item)
-        : itemFootprint(item, t.want.kind);
+      const fp = relationOf(t.want.kind)?.apart ? groupOf(t, item) : fpOf(item, t.want.kind);
       for (const [ref, q] of placed) {
         if (!mine.from.includes(roles.get(ref) as Role)) continue;
-        short = Math.max(short, mine.gap - polygonGap(fp, itemFootprint(q)).d);
+        short = Math.max(short, mine.gap - polygonGap(fp, fpOf(q)).d);
       }
       return { short, slack: mine.gap - mine.hard, dining: true };
     }
@@ -646,8 +708,8 @@ function solveOnce(input: SolveInput): SolveOutcome {
       if (!qt) continue;
       const theirs = apartRows.get(ref);
       if (!theirs?.from.includes(role)) continue;
-      fp ??= itemFootprint(item, t.want.kind);
-      const other = relationOf(qt.want.kind)?.apart ? groupAt(qt, q) : itemFootprint(q);
+      fp ??= fpOf(item, t.want.kind);
+      const other = relationOf(qt.want.kind)?.apart ? groupAt(qt, q) : fpOf(q);
       short = Math.max(short, theirs.gap - polygonGap(fp, other).d);
       slack = theirs.gap - theirs.hard;
     }
@@ -742,10 +804,16 @@ function solveOnce(input: SolveInput): SolveOutcome {
     const seen = new Set<string>();
     const keepOut = ix.keepOut;
     if (input.keepOutFor && !input.keepOutFor.has(w.id)) ix.keepOut = [];
-    const add = (item: Item, hs: Hit[], narrowed = false, wish = 0) => {
+    const cache = poseCacheOf(ix, t);
+    /** What a pose runs into: what is fixed (remembered), then the pieces placed. */
+    const add = (p: Pose, narrowed = false, wish = 0) => {
       tries++;
+      if (fixedBlocks(p, k)) return;
+      const item = p.item;
+      const hs = hitsOf(ix, item, k, p.on, true, p.fp);
       if (blocking(hs)) return;
-      const key = `${item.position.x.toFixed(2)}|${item.position.z.toFixed(2)}|${item.rotationY.toFixed(2)}|${item.scale.x.toFixed(2)}`;
+      p.seen ??= `${item.position.x.toFixed(2)}|${item.position.z.toFixed(2)}|${item.rotationY.toFixed(2)}|${item.scale.x.toFixed(2)}`;
+      const key = p.seen;
       if (seen.has(key)) return;
       seen.add(key);
       const soft = hs.length > 0;
@@ -760,7 +828,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
       // group kept apart by standing on a way through the flat doesn't count as apart.
       const sh = shortOf(t, item, placed);
       const short = Math.max(0, sh.short);
-      const way = sh.dining && !k.walkThrough && onWay(itemFootprint(item, k));
+      const way = sh.dining && !k.walkThrough && onWay(p.fp);
       out.push({
         item,
         soft,
@@ -783,7 +851,22 @@ function solveOnce(input: SolveInput): SolveOutcome {
         return true;
       });
       for (const face of list.length ? list : faces) {
-        for (const [s0, s1] of clearStretches(face, bottom, top)) {
+        let stretches = cache.stretches.get(face);
+        if (!stretches) {
+          stretches = clearStretches(face, bottom, top);
+          cache.stretches.set(face, stretches);
+        }
+        let onIt = cache.wall.get(face);
+        if (!onIt) {
+          onIt = new Map();
+          cache.wall.set(face, onIt);
+        }
+        let turnedOn = cache.turned.get(face);
+        if (!turnedOn) {
+          turnedOn = new Map();
+          cache.turned.set(face, turnedOn);
+        }
+        for (const [s0, s1] of stretches) {
           const len = s1 - s0;
           let width = w.w;
           let narrowed = false;
@@ -815,19 +898,24 @@ function solveOnce(input: SolveInput): SolveOutcome {
             }
           }
           for (const u of [...us].sort((a, b) => a - b)) {
-            const pose = onFace(face, u, w.d);
-            const item = itemAt(w, pose.at, pose.rotation, width);
-            add(
-              item,
-              hits(item, k, { face, u0: u - width / 2, u1: u + width / 2, bottom, top }),
-              narrowed,
-              t.against === 'free' && !wallOnly ? -0.5 : 0,
-            );
+            // The same u on a face is the same pose (stretches don't overlap).
+            let pose = onIt.get(u);
+            if (!pose) {
+              const at = onFace(face, u, w.d);
+              const item = itemAt(w, at.at, at.rotation, width);
+              pose = poseOf(item, k, { face, u0: u - width / 2, u1: u + width / 2, bottom, top });
+              onIt.set(u, pose);
+            }
+            add(pose, narrowed, t.against === 'free' && !wallOnly ? -0.5 : 0);
             // A dining table may stand end-on to the wall too, its chairs along both sides.
             if (endOn && !narrowed) {
-              const end = onFace(face, u, w.w);
-              const turned = itemAt(w, end.at, end.rotation + Math.PI / 2, w.w);
-              add(turned, hits(turned, k), false, -0.5);
+              let turned = turnedOn.get(u);
+              if (!turned) {
+                const end = onFace(face, u, w.w);
+                turned = poseOf(itemAt(w, end.at, end.rotation + Math.PI / 2, w.w), k);
+                turnedOn.set(u, turned);
+              }
+              add(turned, false, -0.5);
             }
           }
         }
@@ -837,11 +925,18 @@ function solveOnce(input: SolveInput): SolveOutcome {
     if (!onWall || facesTv || (t.against === 'free' && !wallOnly) || (!out.length && !wallOnly)) {
       // Free-standing; a little less wished for when the designer asked for a wall.
       const wish = t.against !== 'free' ? -1 : 0;
+      // Round its anchor: the same poses whenever the anchor stands here.
+      let byRole = anchor ? cache.near.get(anchor) : undefined;
+      if (anchor && !byRole) {
+        byRole = new Map();
+        cache.near.set(anchor, byRole);
+      }
+      let nearPoses = byRole?.get(anchorRole);
       const poses: { at: Vec2; r: number }[] = [];
-      if (anchor) {
+      if (anchor && !nearPoses) {
         const a = centre(anchor);
         const af = fwd(anchor.rotationY);
-        const afp = itemFootprint(anchor);
+        const afp = fpOf(anchor);
         const front = sideOf(afp, 'front');
         const fm = { x: (front.a.x + front.b.x) / 2, y: (front.a.y + front.b.y) / 2 };
         const across = { x: -af.y, y: af.x };
@@ -919,10 +1014,13 @@ function solveOnce(input: SolveInput): SolveOutcome {
           }
         }
       }
+      if (anchor && !nearPoses) {
+        nearPoses = poses.map((p) =>
+          inRooms(ix, p.at) ? poseOf(itemAt(w, p.at, p.r, w.w), k) : null,
+        );
+        byRole?.set(anchorRole, nearPoses);
+      }
       const zonePoses = (): { at: Vec2; r: number }[] => {
-        // The same for a piece however often it is tried (going back, looking ahead).
-        const was = zoneMemo.get(w.ref);
-        if (was) return was;
         const out: { at: Vec2; r: number }[] = [];
         // In its zone (or near where the designer would have it).
         const turns = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2];
@@ -938,38 +1036,21 @@ function solveOnce(input: SolveInput): SolveOutcome {
             }
           }
         }
-        zoneMemo.set(w.ref, out);
         return out;
       };
-      const tryPoses = (list: { at: Vec2; r: number }[]) => {
-        for (const p of list) {
-          if (!inRooms(ix, p.at)) continue;
-          const item = itemAt(w, p.at, p.r, w.w);
-          add(item, hits(item, k), false, wish);
-        }
+      const tryPoses = (list: (Pose | null)[]) => {
+        for (const p of list) if (p) add(p, false, wish);
       };
-      // The zone's poses: what walls, doors and the ways kept clear block is worked out once.
+      // The zone's poses (they don't depend on what is placed): made once per space.
       const tryZone = () => {
-        let list = fixedMemo.get(w.ref);
-        if (!list) {
-          list = zonePoses().map((p) => {
-            const item = itemAt(w, p.at, p.r, w.w);
-            return { item, ok: !fixedHit(ix, item, k) };
-          });
-          fixedMemo.set(w.ref, list);
-        }
-        for (const p of list) {
-          if (!p.ok) {
-            tries++;
-            continue;
-          }
-          add(p.item, hitsOf(ix, p.item, k, undefined, true), false, wish);
-        }
+        cache.zone ??= zonePoses().map((p) => poseOf(itemAt(w, p.at, p.r, w.w), k));
+        for (const p of cache.zone) add(p, false, wish);
       };
-      if (poses.length && anchor) tryPoses(poses);
+      const n = nearPoses?.length ?? 0;
+      if (n && anchor && nearPoses) tryPoses(nearPoses);
       else tryZone();
       // Nothing by its anchor: anywhere in its zone.
-      if (!out.length && poses.length && anchor && !rel?.belongs) tryZone();
+      if (!out.length && n && anchor && !rel?.belongs) tryZone();
     }
     ix.keepOut = keepOut;
     // The way between the dining and the lounge groups is kept wherever any clear pose keeps
@@ -1006,7 +1087,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
   function lookAhead(t: Intent, c: Candidate, deps: Intent[], placed: Map<string, Item>): number {
     const mark = ix.placed.length;
     const trial = new Map(placed);
-    addToIndex(ix, c.item, t.want.kind);
+    addToIndex(ix, c.item, t.want.kind, fpOf(c.item, t.want.kind));
     trial.set(t.want.ref, c.item);
     let total = 0;
     for (const d of deps) {
@@ -1020,7 +1101,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
         continue;
       }
       total += Math.min(best.score, 4) - (best.soft ? 2 : 0);
-      addToIndex(ix, best.item, d.want.kind);
+      addToIndex(ix, best.item, d.want.kind, fpOf(best.item, d.want.kind));
       trial.set(d.want.ref, best.item);
     }
     ix.placed.length = mark;
@@ -1042,7 +1123,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
     const r = item.rotationY;
     const rel = relationOf(w.kind);
     const role = roleOf(w.kind);
-    const fp = itemFootprint(item, w.kind);
+    const fp = fpOf(item, w.kind);
     let s = soft ? -6 : 0;
     // Made to a narrower width than asked: only if nothing full-width fits.
     if (Math.abs(itemSize(item, w.kind).w - w.w) > 0.01) s -= 1.5;
@@ -1063,7 +1144,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
       const back = backSide(fp);
       const gap = roomOff(back, rel.backs.gap + 0.3, solids);
       if (gap > rel.backs.gap + 1e-6) {
-        const others = [...placed.values()].map((p) => itemFootprint(p));
+        const others = [...placed.values()].map((p) => fpOf(p));
         const behind = rel.backs.free ? roomOff(back, rel.backs.free, [...solids, ...others]) : 0;
         // Floating is allowed with room behind, but a wall is better in a small room.
         if (!rel.backs.free || behind < rel.backs.free - 0.005) {
@@ -1082,7 +1163,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
       s -= off * 0.02;
       const front = sideOf(fp, 'front');
       const mid = { x: (front.a.x + front.b.x) / 2, y: (front.a.y + front.b.y) / 2 };
-      const dist = polygonGap([mid, mid, mid], itemFootprint(anchor)).d;
+      const dist = polygonGap([mid, mid, mid], fpOf(anchor)).d;
       if (dist < f.min || dist > f.max) {
         s -= 8;
         related = false;
@@ -1118,7 +1199,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
       const seats = [...placed.values()].filter(
         (q) =>
           roleOf(furnitureKind(q.assetId)) === 'dining-chair' &&
-          polygonGap(itemFootprint(q), itemFootprint(anchor)).d < 0.4,
+          polygonGap(fpOf(q), fpOf(anchor)).d < 0.4,
       );
       const same = seats.filter((q) => sideOf2(centre(q)) === mine).length;
       const opp = seats.filter((q) => sideOf2(centre(q)) === opposite[mine]).length;
@@ -1132,7 +1213,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
       }
     }
     if (anchor && rel?.before) {
-      const gap = roomOff(sideOf(itemFootprint(anchor), 'front'), rel.before.max + 1, [fp]);
+      const gap = roomOff(sideOf(fpOf(anchor), 'front'), rel.before.max + 1, [fp]);
       if (gap < rel.before.min - 0.005 || gap > rel.before.max + 0.005) {
         s -= 8;
         related = false;
@@ -1141,7 +1222,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
       s -= Math.abs(dotAcross(anchor, at)) * 3;
     }
     if (anchor && (rel?.near || rel?.belongs)) {
-      const d = polygonGap(fp, itemFootprint(anchor)).d;
+      const d = polygonGap(fp, fpOf(anchor)).d;
       const within = rel.near?.within ?? rel.belongs?.within ?? 0.3;
       if (d > within) {
         s -= 4 + d;
@@ -1153,7 +1234,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
       }
     } else if (anchor && !rel?.faces && !rel?.before) {
       // With the piece the designer said it goes with (a console under its TV).
-      s -= Math.min(6, polygonGap(fp, itemFootprint(anchor)).d);
+      s -= Math.min(6, polygonGap(fp, fpOf(anchor)).d);
     }
     // What it goes with may face it too (the TV the sofa).
     const arel = anchor ? relationOf(furnitureKind(anchor.assetId) ?? w.kind) : undefined;
@@ -1208,7 +1289,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
     chosen[i] = c;
     const t = order[i] as Intent;
     if (c) {
-      addToIndex(ix, c.item, t.want.kind);
+      addToIndex(ix, c.item, t.want.kind, fpOf(c.item, t.want.kind));
       placed.set(t.want.ref, c.item);
       viewOf(t, c.item, placed);
     }
@@ -1219,8 +1300,8 @@ function solveOnce(input: SolveInput): SolveOutcome {
     const tv = a && roles.get(a) === 'tv' ? placed.get(a) : undefined;
     const last = ix.placed[ix.placed.length - 1];
     if (!tv || !relationOf(t.want.kind)?.faces || !last || last.id !== item.id) return;
-    const front = sideOf(itemFootprint(item, t.want.kind), 'front');
-    const tvFront = sideOf(itemFootprint(tv), 'front');
+    const front = sideOf(fpOf(item, t.want.kind), 'front');
+    const tvFront = sideOf(fpOf(tv), 'front');
     const mid = { x: (tvFront.a.x + tvFront.b.x) / 2, y: (tvFront.a.y + tvFront.b.y) / 2 };
     const reach = (mid.x - front.a.x) * front.n.x + (mid.y - front.a.y) * front.n.y;
     if (reach <= 0.3) return;
@@ -1400,7 +1481,7 @@ function dotAcross(it: Item, p: Vec2): number {
 
 /** Where chairs go round a table: along its long sides, then at its ends, facing it. */
 function chairSlots(table: Item, depth: number): { at: Vec2; r: number }[] {
-  const fp = itemFootprint(table);
+  const fp = fpOf(table);
   const [bl, br, fr, fl] = fp as [Vec2, Vec2, Vec2, Vec2];
   const sides: [Vec2, Vec2][] = [
     [bl, br],
