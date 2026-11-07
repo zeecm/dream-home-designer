@@ -11,6 +11,7 @@ import hdb4Kitchen from './answers/hdb4-kitchen.json';
 import hdb4Living from './answers/hdb4-living.json';
 import hdb4Master from './answers/hdb4-master.json';
 import ownerBedroom from './answers/owner-bedroom.json';
+import ownerDiningFix from './answers/owner-dining-fix.json';
 import ownerDining from './answers/owner-dining.json';
 import sampleBedroom from './answers/sample-bedroom.json';
 import sampleKitchen from './answers/sample-kitchen.json';
@@ -52,19 +53,23 @@ export interface BenchReport {
 
 const sample = () => sampleFlatProject().levels[0] as Level;
 
-/** The Ongs (spec user stories): Rachel and Daniel, Mdm Koh (a stick) and Sophie (6). */
+/**
+ * The Ongs (spec user stories) without Sophie: Rachel and Daniel, and Mdm Koh (a stick) in
+ * Bedroom. Two single beds don't fit Bedroom with its door's swing (a bunk isn't in the
+ * catalogue yet): where Sophie sleeps is a question for the conversation (slice 2).
+ */
 export const ONGS: DesignBrief = {
   ...defaultBrief(),
   household: {
     adults: 2,
-    children: ['primary'],
+    children: [],
     elders: ['stick'],
     helper: false,
     pets: '',
     text: '',
   },
-  names: { 'adult-1': 'Rachel', 'adult-2': 'Daniel', 'elder-1': 'Mdm Koh', 'child-1': 'Sophie' },
-  sleeping: { 'rm_main-bedroom': ['adult-1', 'adult-2'], rm_bedroom: ['elder-1', 'child-1'] },
+  names: { 'adult-1': 'Rachel', 'adult-2': 'Daniel', 'elder-1': 'Mdm Koh' },
+  sleeping: { 'rm_main-bedroom': ['adult-1', 'adult-2'], rm_bedroom: ['elder-1'] },
   budget: { low: 30_000, high: 40_000 },
 };
 
@@ -123,8 +128,9 @@ export const BENCHMARK: BenchFlat[] = [
     brief: {
       ...defaultBrief(),
       household: { ...defaultBrief().household, adults: 2, children: ['primary', 'teen'] },
+      sleeping: {},
     },
-    answers: { 'rm_dry-kitchen+rm_living-and-dining': [ownerDining] },
+    answers: { 'rm_dry-kitchen+rm_living-and-dining': [ownerDining, ownerDiningFix] },
   },
 ];
 
@@ -178,7 +184,7 @@ export function runFlat(flat: BenchFlat): BenchReport {
     shown,
     caught,
     fixRounds,
-    bedless: result.checks.filter((c) => c.key.startsWith('P1|bed|')).length,
+    bedless: result.checks.filter((c) => !c.already && c.key.startsWith('P1|bed|')).length,
     dropped: result.dropped.length,
     pieces: Object.keys(result.level.items).length,
     ms: performance.now() - t0,

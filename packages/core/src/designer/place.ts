@@ -1,4 +1,4 @@
-import { CLEARANCE_RULES, doorSweep, ruleSide } from '../clearance';
+import { CLEARANCE_RULES, DINING_CHAIRS, PULL_BACK, doorSweep, ruleSide } from '../clearance';
 import { frontReach } from '../clearance-doors';
 import { overlapDepth, roomOff, sideOf, zoneOf } from '../convex';
 import { type FurnitureKind, furnitureLayer, itemFootprint, itemSize, newItem } from '../furniture';
@@ -56,6 +56,8 @@ interface Placed {
   box: Box;
   /** The room it needs kept clear to be used. */
   zones: Vec2[][];
+  /** Its zones include the view to the TV (a coffee table, a rug or a side table may stand there). */
+  view?: boolean;
 }
 
 export interface Box {
@@ -116,9 +118,19 @@ export function spaceIndex(level: Level, geom: PlanGeometry, rooms: string[]): S
   ]
     .map(shape)
     .filter(near);
+  // A doorway, and its throat: 0.6 m into the rooms either side, kept free to walk through.
   const doorways = geom.openings
     .filter((o) => o.kind !== 'window')
-    .map((o) => shape(o.polygon))
+    .flatMap((o) => {
+      const f = o.frame;
+      const [u0, u1] = o.span;
+      const v = f.half + THROAT;
+      const at = (u: number, k: number) => ({
+        x: f.a.x + f.d.x * u + f.n.x * k,
+        y: f.a.y + f.d.y * u + f.n.y * k,
+      });
+      return [shape(o.polygon), shape([at(u0, -v), at(u1, -v), at(u1, v), at(u0, v)])];
+    })
     .filter(near);
   const sweeps = Object.values(level.openings)
     .filter((o) => o.kind === 'door')
@@ -147,6 +159,27 @@ function inset(fp: Vec2[]): Vec2[] {
 
 export const inRooms = (ix: SpaceIndex, p: Vec2) =>
   ix.rooms.some((r) => pointInPolygon(p, r.outer) && !r.holes.some((h) => pointInPolygon(p, h)));
+
+/** A footprint's back side, facing out behind. */
+function backOf(fp: Vec2[]) {
+  const [bl, br, , fl] = fp as [Vec2, Vec2, Vec2, Vec2];
+  const depth = Math.hypot(fl.x - bl.x, fl.y - bl.y) || 1;
+  const width = Math.hypot(bl.x - br.x, bl.y - br.y) || 1;
+  return { a: br, b: bl, n: { x: (bl.x - fl.x) / depth, y: (bl.y - fl.y) / depth }, width };
+}
+
+/**
+ * Room behind a dining chair to pull it out: the checks measure 0.75 m from the table's
+ * edge, and a chair half tucked under reaches 0.15 m less than its depth past it.
+ */
+function chairPull(fp: Vec2[]): number {
+  const [bl, , , fl] = fp as [Vec2, Vec2, Vec2, Vec2];
+  const depth = Math.hypot(fl.x - bl.x, fl.y - bl.y);
+  return Math.max(0.3, PULL_BACK - depth + 0.15);
+}
+
+/** How far a doorway's throat reaches into the rooms either side. */
+const THROAT = 0.6;
 
 /** Whether a piece blocks the floor (rugs, lamps, wall cabinets and ceiling lights don't). */
 export const blocksFloor = (kind: FurnitureKind) =>
@@ -222,6 +255,18 @@ export function hitsOf(ix: SpaceIndex, item: Item, kind: FurnitureKind, on?: OnF
           : room('left') || room('right');
     if (!ok) out.push({ kind: 'zone' });
   }
+  // A dining chair: room behind it to pull it out and sit (from its table, which is ahead).
+  if (DINING_CHAIRS.has(kind.id) && !out.length) {
+    const back = backOf(fp);
+    const need = chairPull(fp);
+    const zone = zoneOf(back, need);
+    const zb = boxOf(zone);
+    const obstacles = [
+      ...ix.solid.filter((s) => !apart(s.box, zb)).map((s) => s.poly),
+      ...ix.placed.filter((p) => !apart(p.box, zb) && !TABLE.test(p.assetId)).map((p) => p.fp),
+    ];
+    if (roomOff(back, need, obstacles) < need - 0.005) out.push({ kind: 'zone' });
+  }
   // Its hinged front (a wardrobe's, the fridge's doors) clear of doors' swings.
   const reach = frontReach(item, fp);
   if (reach && !out.length) {
@@ -230,8 +275,9 @@ export function hitsOf(ix: SpaceIndex, item: Item, kind: FurnitureKind, on?: OnF
       out.push({ kind: 'zone' });
     }
   }
+  const low = LOW_ROLES.has(roleOf(kind));
   for (const p of ix.placed) {
-    if (!p.zones.length || tuckedWith(p)) continue;
+    if (!p.zones.length || tuckedWith(p) || (p.view && low)) continue;
     if (p.zones.some((z) => !apart(boxOf(z), box) && overlapDepth(fp, z) > 0.01)) {
       out.push({ kind: 'in-zone', otherId: p.id, otherName: p.name });
       break;
@@ -240,12 +286,33 @@ export function hitsOf(ix: SpaceIndex, item: Item, kind: FurnitureKind, on?: OnF
   return out;
 }
 
-/** The room a placed piece needs kept clear: in front, or a double bed's two sides. */
-function zonesOf(kind: FurnitureKind, fp: Vec2[]): Vec2[][] {
+/** What may stand between a sofa and its TV: low tables and rugs. */
+const LOW_ROLES = new Set(['coffee-table', 'side-table', 'rug']);
+
+/**
+ * The room a placed piece needs kept clear: in front, a double bed's two sides, a single
+ * bed's roomier side.
+ */
+function zonesOf(ix: SpaceIndex, kind: FurnitureKind, fp: Vec2[]): Vec2[][] {
+  if (DINING_CHAIRS.has(kind.id)) {
+    const back = backOf(fp);
+    return [zoneOf(back, chairPull(fp))];
+  }
   const rule = CLEARANCE_RULES[kind.id];
-  if (!rule || rule.side === 'either-side') return [];
+  if (!rule) return [];
   if (rule.side === 'front') return [zoneOf(sideOf(fp, 'front'), rule.need)];
-  return (['left', 'right'] as const).map((s) => zoneOf(ruleSide(fp, s), rule.need));
+  const sides = (['left', 'right'] as const).map((s) => ruleSide(fp, s));
+  if (rule.side === 'sides') return sides.map((s) => zoneOf(s, rule.need));
+  const room = (s: (typeof sides)[number]) => {
+    const z = boxOf(zoneOf(s, rule.need));
+    const near = [
+      ...ix.solid.filter((x) => !apart(x.box, z)).map((x) => x.poly),
+      ...ix.placed.filter((p) => !apart(p.box, z)).map((p) => p.fp),
+    ];
+    return roomOff(s, rule.need, near);
+  };
+  const [l, r] = sides as [(typeof sides)[number], (typeof sides)[number]];
+  return [zoneOf(room(l) >= room(r) ? l : r, rule.need)];
 }
 
 /**
@@ -253,18 +320,23 @@ function zonesOf(kind: FurnitureKind, fp: Vec2[]): Vec2[][] {
  * (all of it, with none), as wide as the walkway needs.
  */
 export function keepOutOf(path: Vec2[], pinch: [Vec2, Vec2] | null, need: number): Shape[] {
-  const mid = pinch
-    ? { x: (pinch[0].x + pinch[1].x) / 2, y: (pinch[0].y + pinch[1].y) / 2 }
-    : null;
+  const mid = pinch ? { x: (pinch[0].x + pinch[1].x) / 2, y: (pinch[0].y + pinch[1].y) / 2 } : null;
   const h = need / 2;
-  const close = (p: Vec2) => !mid || Math.hypot(p.x - mid.x, p.y - mid.y) <= 1.5;
   const out: Shape[] = [];
   for (let i = 0; i + 1 < path.length; i++) {
     const p = path[i] as Vec2;
     const q = path[i + 1] as Vec2;
-    if (!close(p) && !close(q)) continue;
     const len = Math.hypot(q.x - p.x, q.y - p.y);
     if (len < 1e-6) continue;
+    if (mid) {
+      // The segment's nearest point to the pinch (a long one passes close by between its ends).
+      const t = Math.max(
+        0,
+        Math.min(1, ((mid.x - p.x) * (q.x - p.x) + (mid.y - p.y) * (q.y - p.y)) / (len * len)),
+      );
+      const c = { x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t };
+      if (Math.hypot(c.x - mid.x, c.y - mid.y) > 1.5) continue;
+    }
     const d = { x: (q.x - p.x) / len, y: (q.y - p.y) / len };
     const n = { x: -d.y * h, y: d.x * h };
     const a = { x: p.x - d.x * h, y: p.y - d.y * h };
@@ -291,7 +363,7 @@ export function addToIndex(ix: SpaceIndex, item: Item, kind: FurnitureKind) {
     name: nameOf(kind),
     fp,
     box: boxOf(fp),
-    zones: zonesOf(kind, fp),
+    zones: zonesOf(ix, kind, fp),
   });
 }
 

@@ -1,7 +1,7 @@
 import { z } from 'zod';
+import { pointInPolygon } from '../geometry';
 import { roomShapes } from '../rooms';
 import { Level, SCHEMA_VERSION } from '../schema';
-import { pointInPolygon } from '../geometry';
 import { type DesignCheck, designChecks } from './checks';
 import type { Relation } from './principles';
 import { DesignBrief } from './schema';

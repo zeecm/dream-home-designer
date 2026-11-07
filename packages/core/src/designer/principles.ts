@@ -167,7 +167,7 @@ export const RELATIONS: Partial<Record<Role, Relation>> = {
     faces: {
       focus: ['tv', 'coffee-table', 'sofa'],
       angle: 50,
-      min: 0.3,
+      min: 0,
       max: 4.0,
       over: 1.0,
       clear: 0.6,

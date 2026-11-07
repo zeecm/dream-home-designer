@@ -136,7 +136,9 @@ describe('placing pieces (criteria 7–15)', () => {
     );
     expect(issues).toEqual([]);
     const note = r.repaired.find((n) => n.ref === 'w1')!;
-    expect(note.text).toMatch(/^Moved the wardrobe 0\.\d\d m along the wall to clear the door\.$/);
+    expect(note.text).toMatch(
+      /^Moved the wardrobe 0\.\d\d m along the wall to clear the (door|doorway)\.$/,
+    );
     const moved = Number(/(\d\.\d\d) m/.exec(note.text)?.[1]);
     expect(moved).toBeGreaterThan(0.2);
     expect(moved).toBeLessThanOrEqual(0.6);
@@ -255,16 +257,16 @@ describe('placing pieces (criteria 7–15)', () => {
     expect(Object.values(k.level.items).some((i) => i.assetId === 'kitchen-sink')).toBe(true);
   });
 
-  it('12: a sofa pushed into the corridor narrows the way: listed with the walkway wording', () => {
+  it('12: a sofa pushed into the passage by the bedroom doors is left out, and the room then fails its seats', () => {
     const r = result(
       SAMPLE_KEYS.living,
       answer([{ ref: 'sofa1', assetId: 'sofa-3', at: { x: 4.6, y: 3.62 }, rotation: 0 }]),
     );
-    const sofa = Object.values(r.level.items).find((i) => i.assetId === 'sofa-3')!;
-    const walk = r.problems.filter((p) => p.kind === 'walkway');
-    expect(walk.length).toBeGreaterThan(0);
-    expect(walk.some((p) => p.itemId === sofa.id && p.issue?.kind === 'walkway')).toBe(true);
-    expect(walk[0]?.text).toMatch(/^The way through narrows to \d\.\d\d m; it needs 0\.90 m\.$/);
+    expect(Object.values(r.level.items).some((i) => i.assetId === 'sofa-3')).toBe(false);
+    expect(r.dropped.find((n) => n.ref === 'sofa1')?.text).toBe(
+      'Left out the 3-seat sofa: no room for it here (it would hit the doorway).',
+    );
+    expect(r.checks.find((c) => c.key === 'P1|seats|rm_living-and-dining')?.hard).toBe(true);
   });
 
   it('13: a new king bed that can’t get through the door is listed with the delivery verdict', () => {

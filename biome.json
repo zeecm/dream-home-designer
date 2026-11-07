@@ -10,7 +10,8 @@
       "**/test-results",
       "**/playwright-report",
       "tools/models/.cache",
-      "apps/web/public/draco"
+      "apps/web/public/draco",
+      "packages/core/src/fixtures/designer/cases"
     ]
   },
   "formatter": {

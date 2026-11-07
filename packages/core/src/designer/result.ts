@@ -16,6 +16,7 @@ import { aspectOf } from './accept';
 import { type AliasMap, resolveAlias } from './aliases';
 import { fixedSize, priorityOf, resolveAsset } from './catalogue';
 import { type DesignCheck, designChecks } from './checks';
+import { usesOf } from './checks';
 import { bathroomsHeld, heldAspects, wallsHeld } from './handEdits';
 import { WET } from './locks';
 import {
@@ -28,6 +29,8 @@ import {
   spaceIndex,
 } from './place';
 import type { Concept, DesignInput, DesignItem, RoomUse, SpaceDesign, SpaceStatus } from './schema';
+import type { Zone } from './schema';
+import { type Intent, type SolveOutcome, solveSpace } from './solve';
 import {
   type Face,
   type Space,
@@ -39,9 +42,6 @@ import {
 } from './spaces';
 import { hash, levelFingerprint, rotationOf, seededId, settled, stableJson } from './util';
 import { type Note, applyDesignWalls } from './walls';
-import { type Intent, type SolveOutcome, solveSpace } from './solve';
-import { usesOf } from './checks';
-import type { Zone } from './schema';
 
 /**
  * A version placed on the plan as it is now: its walls applied (and checked), rooms named,
@@ -421,10 +421,17 @@ function work(
         .flatMap((r) => keepOutOf(r.path, null, r.need));
       const ways = bareWays;
       const base = ix.placed.length;
-      const solveWith = (keepOut: SpaceIndex['keepOut']) => {
+      const solveWith = (keepOut: SpaceIndex['keepOut'], keepOutFor?: Set<string>) => {
         ix.placed.length = base;
         ix.keepOut = keepOut;
-        const out = solveSpace({ ix, faces, intents, zoneArea, ways });
+        const out = solveSpace({
+          ix,
+          faces,
+          intents,
+          zoneArea,
+          ways,
+          ...(keepOutFor ? { keepOutFor } : {}),
+        });
         ix.keepOut = [];
         return out;
       };
@@ -436,7 +443,10 @@ function work(
         const want = wantOf.get(item.id);
         if (want) take(want, item);
       }
-      runs.push({ ix, wants, key: s.key, solveWith });
+      const free = new Set(
+        intents.filter((t) => t.against === 'free' && !t.want.kind.carpentry).map((t) => t.want.id),
+      );
+      runs.push({ ix, wants, key: s.key, solveWith, free });
     } else {
       runs.push({ ix, wants, key: s.key });
       for (const want of wants) {
@@ -865,38 +875,47 @@ interface Run {
   key: string;
   ix: SpaceIndex;
   wants: Want[];
-  solveWith?: (keepOut: SpaceIndex['keepOut']) => SolveOutcome;
+  solveWith?: (keepOut: SpaceIndex['keepOut'], keepOutFor?: Set<string>) => SolveOutcome;
+  /** By id: pieces that stand free (moved off a walkway before the wall pieces). */
+  free?: Set<string>;
 }
 
 function keepWalkwaysClear(lvl: Level, runs: Run[], repaired: Note[]): WalkwayReport | null {
   const moved = new Set<string>();
   const kept = new Map<Run, SpaceIndex['keepOut']>();
+  const keptFor = new Map<Run, Set<string>>();
   for (let round = 0; round < WALK_ROUNDS; round++) {
     const report = walkwayReport({ ...lvl, items: { ...lvl.items } });
     const blamed = report.issues.filter(
-      (i) => !moved.has(i.itemId) || runs.some((r) => r.solveWith && r.wants.some((w) => w.id === i.itemId)),
+      (i) =>
+        !moved.has(i.itemId) ||
+        runs.some((r) => r.solveWith && r.wants.some((w) => w.id === i.itemId)),
     );
-    if (process.env.SOLVE_DEBUG) {
-      for (const i of report.issues) {
-        console.log('WALK', round, lvl.items[i.itemId]?.assetId, i.have.toFixed(2), JSON.stringify(i.pinch), i.path.length);
-      }
-    }
     if (!blamed.length) return report;
     let changed = false;
     // Spaces placed by intent are solved again, keeping out of every way they narrowed.
     const again = new Set<Run>();
+    // Of the pieces narrowing one way, those standing free move; the wall pieces only if none do.
+    const byPinch = new Map<string, typeof blamed>();
     for (const issue of blamed) {
-      const run = runs.find((r) => r.solveWith && r.wants.some((w) => w.id === issue.itemId));
+      const k = JSON.stringify(issue.pinch);
+      byPinch.set(k, [...(byPinch.get(k) ?? []), issue]);
+    }
+    for (const group of byPinch.values()) {
+      const run = runs.find(
+        (r) => r.solveWith && group.some((i) => r.wants.some((w) => w.id === i.itemId)),
+      );
       if (!run) continue;
-      moved.add(issue.itemId);
-      kept.set(run, [
-        ...(kept.get(run) ?? []),
-        ...keepOutOf(issue.path, issue.pinch, issue.need),
-      ]);
+      const ids = group.map((i) => i.itemId).filter((id) => run.wants.some((w) => w.id === id));
+      const free = ids.filter((id) => run.free?.has(id));
+      const issue = group[0] as (typeof group)[number];
+      for (const id of ids) moved.add(id);
+      kept.set(run, [...(kept.get(run) ?? []), ...keepOutOf(issue.path, issue.pinch, issue.need)]);
+      keptFor.set(run, new Set([...(keptFor.get(run) ?? []), ...(free.length ? free : ids)]));
       again.add(run);
     }
     for (const run of again) {
-      const out = run.solveWith?.(kept.get(run) ?? []);
+      const out = run.solveWith?.(kept.get(run) ?? [], keptFor.get(run));
       if (!out) continue;
       const ids = new Set(run.wants.map((w) => w.id));
       const now = new Map(out.items.map((it) => [it.id, it]));
