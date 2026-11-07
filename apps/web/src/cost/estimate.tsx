@@ -388,6 +388,7 @@ export function EstimateDialog({ onClose }: { onClose: () => void }) {
         </button>
       </header>
       <div className="dialog-body">
+        {unpricedText(est) && <p className="dialog-note notice-warning">{unpricedText(est)}</p>}
         <p className="dialog-note">{DISCLAIMER}</p>
         {!est.renovation && (
           <p className="dialog-note">
@@ -399,7 +400,6 @@ export function EstimateDialog({ onClose }: { onClose: () => void }) {
         {fromFileText(est, project.levels[0]?.id) && (
           <p className="dialog-note">{fromFileText(est, project.levels[0]?.id)}</p>
         )}
-        {unpricedText(est) && <p className="dialog-note">{unpricedText(est)}</p>}
         <div className="estimate">
           {levels.length > 0 && (
             <section className="estimate-group estimate-by-level" aria-label="By level">
@@ -413,10 +413,6 @@ export function EstimateDialog({ onClose }: { onClose: () => void }) {
                     <span className="num estimate-cost">{range(r.low, r.high)}</span>
                   </li>
                 ))}
-                <li className="estimate-line estimate-sub estimate-sub-total">
-                  <span className="estimate-item">Total</span>
-                  <span className="num estimate-cost">about {range(est.low, est.high)}</span>
-                </li>
               </ul>
             </section>
           )}
@@ -436,7 +432,7 @@ export function EstimateDialog({ onClose }: { onClose: () => void }) {
                     <li
                       // biome-ignore lint/suspicious/noArrayIndexKey: a fixed list, rebuilt whole
                       key={i}
-                      className={`estimate-line${l.place ? ' has-place' : ''}`}
+                      className={`estimate-line${l.place ? ' has-place' : qtyText(l) ? '' : ' bare'}`}
                       data-level={l.levelId}
                     >
                       <span className="estimate-item">

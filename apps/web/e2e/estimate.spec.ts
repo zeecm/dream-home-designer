@@ -124,19 +124,16 @@ test('slice 2s C2: a two-level file is priced on both levels, by level and in to
   await expect(dialog).toContainText(
     'Upper is priced from the file. It can’t be shown or edited here yet.',
   );
-  // By level, above the trade groups: each level, the whole home's part, then the total.
+  // By level, above the trade groups: each level and the whole home's part. The foot's
+  // Total is the only total.
   const by = dialog.getByRole('region', { name: 'By level' });
   await expect(by.locator('.estimate-item')).toHaveText([
     'Ground',
     'Upper',
     'Whole home (contingency)',
-    'Total',
   ]);
-  await expect(by.locator('.estimate-sub-total')).toContainText(TWO_LEVELS_TOTAL);
   await expect(dialog.locator('.estimate-total strong')).toHaveText(TWO_LEVELS_TOTAL);
-  const sums = await by
-    .locator('.estimate-sub:not(.estimate-sub-total) .estimate-cost')
-    .allTextContents();
+  const sums = await by.locator('.estimate-sub .estimate-cost').allTextContents();
   const lows = sums.map((t) => Number((t.match(/\$([\d,]+)/)?.[1] ?? '0').replace(/,/g, '')));
   const total = lows.reduce((a, b) => a + b, 0);
   expect(Math.abs(total - 5200)).toBeLessThanOrEqual(50);
@@ -145,6 +142,9 @@ test('slice 2s C2: a two-level file is priced on both levels, by level and in to
   const text = await page.evaluate(() => navigator.clipboard.readText());
   expect(text).toContain('Built-in wardrobe · Upper · Bedroom 2 · 6 ft run');
   expect(text.indexOf('By level')).toBeLessThan(text.indexOf('Total: about $5,200–8,700'));
+  // A line with no quantity has no empty part.
+  expect(text).not.toContain(' ·  · ');
+  expect(text).toMatch(/Contingency \(10%\) · \$480–790/);
   expect(text).toMatch(/Upper: \$[\d,]+–[\d,]+/);
 });
 

@@ -45,6 +45,9 @@ describe('the estimate across levels, as the dialog and Copy show it', () => {
     expect(by).toBeGreaterThan(text.indexOf('Contingency (10%)'));
     expect(text.indexOf('Ground: $')).toBeGreaterThan(by);
     expect(text.indexOf('Whole home (contingency): $')).toBeLessThan(text.indexOf('Total: about'));
+    // No empty part where a line has no place or quantity.
+    expect(text).not.toContain(' ·  · ');
+    expect(text).toMatch(/^Contingency \(10%\) · \$[\d,]+–[\d,]+$/m);
   });
 
   it('one level: no hint, no rows by level, Copy as before', () => {
@@ -64,7 +67,9 @@ describe('the estimate across levels, as the dialog and Copy show it', () => {
       { ...p, renovation: { levels: [{ ...ground, id: `${ground.id}~after` }] } },
       TYPICAL_RATES,
     );
-    expect(unpricedText(est)).toBe('Upper has no renovation plan, so it isn’t priced.');
+    expect(unpricedText(est)).toBe(
+      'Upper has no renovation plan, so it isn’t priced. It can’t be planned here yet.',
+    );
     expect(levelsHint(est)).toBeNull();
     // Ground is shown: nothing is priced from the file.
     expect(fromFileText(est, ground.id)).toBeNull();

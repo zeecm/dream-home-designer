@@ -378,7 +378,9 @@ function assemble(
     });
   const lines: CostLine[] = priced.flatMap((p) => tagged(p, 'changes'));
   if (rates.debrisOn && lines.some((l) => /^(Hack|Cut|Widen)/.test(l.label))) {
-    lines.push(line('Building', 'Debris disposal', 'Flat', 1, 'lot', rates.debris));
+    // The whole home's, in a home of levels; "Flat" as ever for one.
+    const place = many ? 'Whole home' : 'Flat';
+    lines.push(line('Building', 'Debris disposal', place, 1, 'lot', rates.debris));
   }
   for (const key of ['painting', 'carpentry', 'electrical'] as const) {
     lines.push(...priced.flatMap((p) => tagged(p, key)));

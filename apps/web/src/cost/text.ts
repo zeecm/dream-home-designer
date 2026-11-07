@@ -22,8 +22,8 @@ export function unpricedText(est: CostEstimate): string | null {
   const n = est.unpriced;
   if (!n.length) return null;
   return n.length === 1
-    ? `${n[0]} has no renovation plan, so it isn’t priced.`
-    : `${listOf(n)} have no renovation plan, so they aren’t priced.`;
+    ? `${n[0]} has no renovation plan, so it isn’t priced. It can’t be planned here yet.`
+    : `${listOf(n)} have no renovation plan, so they aren’t priced. They can’t be planned here yet.`;
 }
 
 /** Levels priced that the app can't show (any but the one shown): they come from the file. */
@@ -78,8 +78,8 @@ export const qtyText = (l: CostLine) =>
  * disclaimer (for Copy and Print).
  */
 export function estimateText(est: CostEstimate, name: string): string {
-  const rows = est.lines.map(
-    (l) => `${l.label}${l.place ? ` · ${l.place}` : ''} · ${qtyText(l)} · ${range(l.low, l.high)}`,
+  const rows = est.lines.map((l) =>
+    [l.label, l.place, qtyText(l), range(l.low, l.high)].filter(Boolean).join(' · '),
   );
   const levels = byLevel(est);
   const unpriced = unpricedText(est);

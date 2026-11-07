@@ -281,7 +281,7 @@ describe('estimate across levels (slice 2s C2)', () => {
     expect(hacks[1]?.place.startsWith('Upper · ')).toBe(true);
     const debris = est.lines.filter((l) => l.label === 'Debris disposal');
     expect(debris).toHaveLength(1);
-    expect(debris[0]?.place).toBe('Flat');
+    expect(debris[0]?.place).toBe('Whole home');
     expect(debris[0]?.levelId).toBeUndefined();
     const c = est.lines.find((l) => l.group === 'Contingency');
     const rest = sumOf(est.lines.filter((l) => l.group !== 'Contingency'));

@@ -150,7 +150,10 @@ export interface NotchDrawing {
   depths: string[];
   /** The line, in pieces (a break leaves a gap). */
   lines: Seg[];
+  /** The first is at the inner end, at the back face. */
   ticks: Vec2[];
+  /** The way from the inner end to the mouth, on paper. */
+  dir: Vec2;
   /** Grey extension lines from where a flank turns at the mouth to the line's tick. */
   ext: Seg[];
   figures: (NotchFigure & { text: string })[];
@@ -249,6 +252,7 @@ function single(
     depths: [text],
     lines,
     ticks: [a, b],
+    dir: d,
     ext: e ? [e] : [],
     figures: [{ place: fig.place, at: fig.at, deg: fig.deg, text }],
   };
@@ -306,6 +310,7 @@ function chainOf(
     depths,
     lines,
     ticks: stops.map(at),
+    dir: unit(sub(at(1), at(0))),
     ext,
     figures,
   };

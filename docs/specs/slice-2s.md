@@ -520,7 +520,7 @@ today, maisonettes later) is under-priced without saying so.
   contingency, which are the whole home's, carry none. (revised, UX design)
 - In a home of 2 or more levels (priced or not), each line's `place` starts with its level's
   name: "Upper · Bedroom";
-  a line in no room is placed on the level itself ("Upper", not "Flat"). Debris stays "Flat".
+  a line in no room is placed on the level itself ("Upper", not "Flat"). Debris is placed "Whole home".
 - `levels: { id, name, low, high }[]`: each level's subtotal (the sum of its lines). These and
   the whole home's lines add up to the sum of all lines. (added)
 - Level names, every one different: a blank one is "Level n"; names shared by two levels get
@@ -536,16 +536,21 @@ today, maisonettes later) is under-priced without saying so.
   (Immer keeps those the same objects through unrelated edits).
 - The trade groups stay; within each, lines go level by level.
 - With 2 or more levels (revised, UX design):
-  - a **By level** block above the groups: each level's subtotal, "Whole home (debris,
-    contingency)" (naming what is there), then "Total, about $x–y";
+  - a **By level** block above the groups: each level's subtotal, then "Whole home (debris,
+    contingency)" (naming what is there). The foot's Total stays the only total, as in Copy
+    and Print (UX review: a second, rounded total there didn't match the rows);
   - summary hint: "Covers both levels: Ground and Upper." ("all 3 levels: …" for more);
   - dialog note, whenever a priced level isn't the one shown: "Upper is priced from the file.
     It can't be shown or edited here yet." There is no level switcher, so no level is
     highlighted as current.
-- A level with no renovation plan, in the summary and the dialog: "Upper has no renovation
-  plan, so it isn't priced."
+- A level with no renovation plan, in the summary and, first among the dialog's notes in the
+  warning style: "Upper has no renovation plan, so it isn't priced. It can't be planned here
+  yet."
 - Phone: each line keeps two rows; the place moves to the second row beside the quantity
-  ("Upper · Living · 71.9 m²", the price on the right).
+  ("Upper · Living · 71.9 m²", grey, the price dark on the right). The place wraps before the
+  quantity splits. A line with neither (contingency) keeps its price on the label's row.
+- With 2 or more levels, debris is placed "Whole home", not "Flat".
+- Copy leaves out a part a line hasn't got (no "Contingency (10%) ·  · $480–790").
 - Copy and Print: the lines in the same order with their prefixes, then "By level" with the
   subtotals, before the Total; the unpriced note after it.
 

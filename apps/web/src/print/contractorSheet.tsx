@@ -1088,17 +1088,15 @@ function Notches({ dims, sheet }: { dims: PlanDimensions; sheet: Sheet }) {
         >
           {d.ext.map((s, j) => L(s, 0.1, MUTED, `e${j}`))}
           {d.lines.map((s, j) => L(s, 0.15, INK, `l${j}`))}
-          {d.ticks.map((t, j) =>
-            L(
-              [
-                { x: t.x - 0.6, y: t.y + 0.6 },
-                { x: t.x + 0.6, y: t.y - 0.6 },
-              ],
-              0.22,
-              INK,
-              `t${j}`,
-            ),
-          )}
+          {d.ticks.map((t, j) => {
+            const p = { x: t.x - 0.6, y: t.y + 0.6 };
+            const q = { x: t.x + 0.6, y: t.y - 0.6 };
+            // At the back face, only the half in the notch: the other would cross the wall
+            // (and a window's glazing lines in it).
+            const k = (q.x - t.x) * d.dir.x + (q.y - t.y) * d.dir.y;
+            if (j > 0 || Math.abs(k) < 0.05) return L([p, q], 0.22, INK, `t${j}`);
+            return L([t, k > 0 ? q : p], 0.22, INK, `t${j}`);
+          })}
           {d.figures.map((f, j) => {
             // The baseline, below the figure's middle as it reads.
             const r = (f.deg * Math.PI) / 180;

@@ -3309,9 +3309,8 @@ h3.field-label {
 .estimate-sub .estimate-cost {
   white-space: nowrap;
 }
-.estimate-sub-total {
-  border-bottom: 0;
-  font-weight: 600;
+.dialog-note.notice-warning {
+  margin: 4px 20px 12px;
 }
 .estimate-total {
   display: flex;
@@ -3344,7 +3343,8 @@ h3.field-label {
 @media (max-width: 560px) {
   /* Two rows: what; then where and how much, and the price. */
   .estimate-line {
-    grid-template-columns: auto 1fr auto;
+    /* The place wraps before the quantity does; the quantity never splits. */
+    grid-template-columns: minmax(0, max-content) 1fr auto;
     column-gap: 0;
     row-gap: 2px;
   }
@@ -3363,6 +3363,18 @@ h3.field-label {
   }
   .estimate-qty {
     text-align: left;
+    white-space: nowrap;
+    color: var(--muted);
+  }
+  /* Nothing for a second row (contingency): the price stays on the label's row. */
+  .estimate-line.bare {
+    grid-template-columns: 1fr auto;
+  }
+  .bare .estimate-label {
+    grid-column: auto;
+  }
+  .bare .estimate-qty {
+    display: none;
   }
   .estimate-cost {
     padding-left: 8px;
