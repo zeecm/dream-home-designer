@@ -106,7 +106,8 @@ side tables, the vanity, fridge, washer, sofas, rugs, decor, lamps, people, My-f
 are). Uploaded models are listed: "Not counted: Ikea Pax (your model). Storage can't be
 told from a model."
 
-**Rounding.** Clothes and kitchen to 0.05 m (ft run with `footRun`), pairs whole, volume to
+**Rounding.** A shortfall's foot run rounds **up**, so the run covers it (1.00 m: 4 ft; the
+estimate's own runs still round to the nearest foot). Clothes and kitchen to 0.05 m (ft run with `footRun`), pairs whole, volume to
 0.1 m³. Sums use unrounded values. Divisions before a `floor` or `round` add 1e-9.
 
 ## Targets (the benchmarks)
@@ -193,7 +194,10 @@ says "Couldn't copy here." in sight.
    none) has stacked steppers, "Adults − 2 +" over "Children − 0 +" (32 px buttons, 44 px on a
    touch screen, labelled "More children in Bedroom"); one live line per change ("Bedroom: 1
    adult and 1 child"). People edited in the renovation for a room matched to the flat as it is
-   are kept under that room's id; entries for rooms gone from the project are dropped.
+   are kept under that room's id; entries for rooms gone from the project are dropped, and a
+   stored entry that isn't two numbers falls back to the room's beds. "Add people to a room" lets
+   any other room (not a bathroom, ledge or the shelter) take people; with no beds at all the intro
+   says "Add who lives here below."
 2. **Four meters** for the home: Clothes, Shoes, Kitchen, Everything else. Each: the label and
    status word; a 6 px bar filled in ink with a 1 px tick at the target (`role="meter"`, its
    `aria-valuetext` the same words); "1.20 of 3.00 m (4 of 10 ft)", "15 of 28 pairs", "4.8 of
@@ -226,7 +230,8 @@ says "Couldn't copy here." in sight.
 5. **Disclaimer:** "A rough guide from UK and Australian housing standards, a wardrobe
    maker's guide and Singapore practice. No Singapore rule sets storage. Count your own clothes
    and shoes if you can."
-6. [Copy] gives a plain-text summary (household, four meters, room lines, disclaimer) for a
+6. [Copy] gives a plain-text summary (in a renovation: "After the renovation: …" or "As it is
+   now: …", each meter with "(Before: 1.20 m; +1.80 m)") (household, four meters, room lines, disclaimer) for a
    chat. No Print in slice 1.
 
 Tapping a room card's name pans to the room and outlines it on the plan (left out of
@@ -243,11 +248,15 @@ by room id; a room new in After gets its people from the beds until edited.
   neutral pill, "No wardrobe · about 1.00 m usual" ("No kitchen cabinets"). Never the clearance
   red. On a narrow plan, 11 px and short: "1.2 of 2.0 m", "No wardrobe". Chips are drawn under
   the clearance and ageing marks, and their labels keep off the chips (as off room names).
+- A chip stays inside its room across (the short words where the long ones don't fit) and off
+  the clearance and ageing bars (below them, or above the room's name); a studio's clothes and
+  kitchen chips stack.
 - **Add a shoe cabinet** (and the others, where nothing is drawn; not on a view link or over a
   designer's preview) arms the piece, scrolls it into view in the catalogue, says "Shoe cabinet
   chosen. Click the plan where it goes; Esc to cancel.", and puts a bar over the plan, "Click
   (Tap) where the shoe cabinet goes · Cancel". The panel stays; once placed, it's back in Select
-  with the piece counted.
+  with the piece counted; if the piece has a clearance problem where it was put, its details
+  open first (with "‹ Back to storage"), and the panel comes back where it was.
 - (The selected piece's contribution beside it on the plan: left out; its details say it.)
 - All `data-export="skip"`: not in the PNG, print, contractor sheet, 3D or walk.
 
@@ -326,7 +335,10 @@ Constants (one place, for the unverified numbers): `PAIR_WIDTH` 0.22, `SHOE_PITC
 - **The shelter in After:** it can't change in a renovation; same volume.
 - **Many people** (up to 6 per room, 6 others): targets grow linearly; Everything else stops
   at the 5+ row.
-- **Very small pieces** (a 0.2 m shoe cabinet): 0 pairs, shown as "0 pairs (too narrow)".
+- **Very small pieces** (a 0.2 m shoe cabinet, or one 0.27 m tall): 0 pairs, "too narrow" or
+  "too low" for a pair. It is drawn, so the meter reads "0 of 28 pairs · too narrow for a pair"
+  and needs more; "No shoe cabinet drawn" means no piece at all (core counts each meter's
+  `pieces`).
 - **Multi-level homes:** the level shown, as the ageing check. Maisonettes later.
 
 ## Out of scope
