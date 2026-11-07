@@ -392,12 +392,35 @@ describe('routes (A)', () => {
     expect(kinds(ageingReport(lvl, walking()), 'route')).toEqual([]);
   });
 
-  it('a piece on a 0.90 route to the living room is the walkways’ line, not repeated', () => {
-    const h = home({ clear: 1.2, a: 'Store', b: 'Living', corridor: 'Hall', main: { width: 0.9 } });
+  it('a piece on a 0.90 route: the ageing line, and the walkway’s own is superseded', () => {
+    const h = home({ clear: 1.2, a: 'Study', b: 'Living', corridor: 'Hall', main: { width: 0.9 } });
     const face = h.y - 0.05;
     const lvl = withItems(h.lvl(), [['shoe-cabinet', { x: 5.0, y: face - 0.175 }, Math.PI]]);
-    expect(kinds(ageingReport(lvl, wheel()), 'route')).toEqual([]);
-    expect(walkwayReport(lvl).issues.length).toBeGreaterThan(0);
+    const age = ageingReport(lvl, wheel());
+    const walk = walkwayReport(lvl);
+    const routes = kinds(age, 'route');
+    expect(routes.length).toBeGreaterThan(0);
+    expect(routes[0]?.need).toBeCloseTo(0.9, 5);
+    expect(walk.issues.length).toBeGreaterThan(0);
+    const hide = ageingSupersedes(walk, age);
+    for (const w of walk.issues) expect(hide.has(`${w.itemId}|${pinchKey(w.pinch)}`)).toBe(true);
+    // Never "also checked" while a way is short.
+    expect(age.passed.some((x) => x.kind === 'route')).toBe(false);
+  });
+
+  it('walking aid: a cabinet leaving 0.85 m in the corridor is a route line, not a pass', () => {
+    const h = home({ clear: 1.2, main: { width: 0.9 } });
+    const face = h.y - 0.05;
+    // Between the main door (x 4) and the bathroom door (x 2): 0.35 deep, 0.85 m left.
+    const lvl = withItems(h.lvl(), [['shoe-cabinet', { x: 3.0, y: face - 0.175 }, Math.PI]]);
+    const r = ageingReport(lvl, walking());
+    const routes = kinds(r, 'route');
+    expect(routes).toHaveLength(1);
+    expect(routes[0]?.need).toBeCloseTo(0.9, 5);
+    expect(Math.abs((routes[0]?.have ?? 0) - 0.85)).toBeLessThanOrEqual(0.02);
+    expect(routes[0]?.itemIds).toEqual([lastId()]);
+    expect(r.status).toBe('issues');
+    expect(r.passed.some((x) => x.kind === 'route')).toBe(false);
   });
 
   it('the stricter 1.00 way to the bathroom: the ageing bar replaces the walkway bar', () => {
@@ -737,6 +760,33 @@ describe('the choice', () => {
     expect(chosen.bedroom).toBe(main?.roomId);
     expect(chosen.issues.filter((i) => i.group === 'bedroom')).toHaveLength(main?.count ?? -1);
     expect(chosen.passed.some((p) => p.group === 'bedroom') || (main?.count ?? 0) > 0).toBe(true);
+  });
+
+  it('rooms not yet named: every room that can be chosen is offered, with its count', () => {
+    // The fixture's rooms as traced: "Room 1", "Room 2", "Room 3"; no beds.
+    const h = home({ a: 'Room 1', b: 'Room 2', corridor: 'Room 3' });
+    const r = ageingReport(frozen(h.lvl()), wheel());
+    expect(r.bedroom).toBeUndefined();
+    expect(r.bedrooms.map((b) => b.roomId).sort()).toEqual([...r.bedroomIds].sort());
+    expect(r.bedroomIds.length).toBe(3);
+  });
+
+  it('a bed in the living room doesn’t make it a bedroom, nor hide its lines', () => {
+    const lvl = furnishedSample();
+    const living = Object.values(lvl.rooms).find((x) => x.name === 'Living and dining');
+    const withBed = Object.freeze(
+      withItems(lvl, [['bed-single', { x: 8.6, y: 5.0 }, Math.PI / 2]]),
+    ) as Level;
+    const r = ageingReport(withBed, wheel());
+    expect(r.bedrooms.map((b) => b.roomId)).not.toContain(living?.id);
+    expect(r.bedroomIds).toContain(living?.id);
+  });
+
+  it('a corridor, foyer, store or utility room is never offered', () => {
+    for (const name of ['Corridor', 'Foyer', 'Store', 'Utility']) {
+      const h = home({ a: name, b: 'Bedroom', corridor: 'Living' });
+      expect(ageingReport(frozen(h.lvl()), wheel()).bedroomIds).not.toContain(h.room(2, 2));
+    }
   });
 
   it('a bedroom named for the person, or a study, can be theirs and stays chosen', () => {
