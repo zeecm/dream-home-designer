@@ -48,11 +48,13 @@ describe('the cases folder (criteria 15, 16)', () => {
       );
     expect(lines('owner-2026-11-07-missing-bed.json')).toContain('Child 1 has no bed in Bedroom.');
     expect(lines('owner-2026-11-07-sofa-facing-wall.json')).toContain(
-      'The 3-seat sofa faces the wall: 0.75 m in front of it.',
+      'The 3-seat sofa faces the wall, 0.75 m away: it needs 1.20 m clear in front.',
     );
     expect(
       lines('owner-2026-11-07-table-in-hallway.json').some((t) =>
-        /^The way through narrows to 0\.\d\d m; it needs 0\.90 m\.$/.test(t),
+        /^The dining table, 6 seats narrows the way through to 0\.\d\d m: 0\.90 m needed\.$/.test(
+          t,
+        ),
       ),
     ).toBe(true);
   });

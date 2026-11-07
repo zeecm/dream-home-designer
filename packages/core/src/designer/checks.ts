@@ -10,6 +10,7 @@ import { roomKind } from '../suggest';
 import { type WalkwayReport, walkwayReport } from '../walkway';
 import { nameOf } from './place';
 import {
+  ACCESS,
   BEDROOM_USES,
   CIRCULATION,
   FIT,
@@ -25,6 +26,7 @@ import {
   relationOf,
   roleOf,
   seatsOf,
+  sillTop,
   sleepingPlan,
   windowZones,
 } from './principles';
@@ -51,6 +53,11 @@ export interface DesignCheck {
   openingId?: string;
   /** The clearance or walkway issue behind it, for drawing. */
   issue?: ClearanceIssue;
+  /**
+   * Furnishing can't fix it (a bedroom with no window, more people than bedrooms): never
+   * sent back to the designer, and "already in your plan" when the plan had it.
+   */
+  unfixable?: boolean;
 }
 
 export interface CheckOptions {
@@ -64,6 +71,8 @@ export interface CheckOptions {
   walk?: WalkwayReport;
 }
 
+/** The way to a bed side, hard (the walkway check's 0.60 m is the better width). */
+export const BED_ACCESS = 0.5;
 const CORRIDOR = /corridor|foyer|passage|hallway|\bhall\b|entrance/i;
 const deg = (r: number) => (r * 180) / Math.PI;
 const fwd = (it: Item): Vec2 => ({ x: -Math.sin(it.rotationY), y: Math.cos(it.rotationY) });
@@ -208,17 +217,50 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
           issue: i,
         });
         break;
-      case 'zone':
+      case 'zone': {
+        const it = byId.get(i.itemId);
+        const access = it ? ACCESS[it.kind.id] : undefined;
+        const name = label(i.itemId);
+        let hard = true;
+        let text = `Not enough room to use ${name}: ${i.what.toLowerCase()} ${m(i.need)}, ${m(i.have)} left.`;
+        if (i.side === 'back') {
+          text = `Not enough room to pull out ${name}: ${m(i.need)} needed, ${m(i.have)} left.`;
+        } else if (access) {
+          const bed = it?.role === 'bed';
+          // A double bed: one long side to get in is enough; the other may be against a wall.
+          const sides = issues.filter(
+            (x): x is Extract<ClearanceIssue, { kind: 'zone' }> =>
+              x.kind === 'zone' && x.itemId === i.itemId,
+          );
+          const best =
+            access.oneSide && sides.length < 2
+              ? Number.POSITIVE_INFINITY
+              : Math.max(...sides.map((x) => x.have));
+          const ok = access.oneSide ? best >= access.hard - 0.005 : i.have >= access.hard - 0.005;
+          hard = !ok && (!access.oneSide || i.have === best);
+          if (hard) {
+            text = bed
+              ? `Not enough room to get into ${name}: ${m(access.hard)} needed beside it, ${m(i.have)} left.`
+              : `Not enough room to open ${name}: ${m(access.hard)} needed in front, ${m(i.have)} left.`;
+          } else if (access.oneSide && i.have < access.hard - 0.005) {
+            text = `${cap(name)} has one side to get in; the other is against the wall, fine in a small room.`;
+          } else {
+            text = bed
+              ? `Getting into ${name}: ${m(access.soft)} beside it is better, ${m(i.have)} left.`
+              : `Opening ${name}: ${m(access.soft)} in front is better, ${m(i.have)} left.`;
+          }
+        }
         out.push({
           key: `P4|zone|${i.itemId}|${i.side}`,
           principle: 'P4',
-          hard: true,
+          hard,
           waivable: true,
-          text: `${i.what} ${m(i.need)}; there is ${m(i.have)}.`,
+          text,
           itemId: i.itemId,
           issue: i,
         });
         break;
+      }
       case 'door': {
         const hdb = shelterDoors.has(i.openingId);
         out.push({
@@ -256,12 +298,17 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
   }
   const walk = opts.walk ?? walkwayReport(level);
   for (const i of walk.issues) {
+    // To a bed side: 0.50 m is enough to get in (0.60 m better).
+    const hard = i.route !== 'bed' || i.have < BED_ACCESS - 0.005;
     out.push({
       key: `P3|walkway|${i.itemId}|${i.route}`,
       principle: 'P3',
-      hard: true,
+      hard,
       waivable: true,
-      text: `The way through narrows to ${m(i.have)}; it needs ${m(i.need)}.`,
+      text:
+        i.route === 'bed'
+          ? `${cap(label(i.itemId))} narrows the way to a bed to ${m(i.have)}: ${m(hard ? BED_ACCESS : i.need)} ${hard ? 'needed' : 'is better'}.`
+          : `${cap(label(i.itemId))} narrows the way through to ${m(i.have)}: ${m(i.need)} needed.`,
       itemId: i.itemId,
       issue: i,
     });
@@ -275,18 +322,22 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
       // A counter under a kitchen window, a plant or a lamp by one, are as they should be.
       if (!blocks(p.it) || UNDER_WINDOW.has(p.role)) continue;
       const bottom = p.kind.elevation ?? 0;
-      if (bottom + p.size.h <= o.opening.sill - FIT.sill) continue;
-      if (windowZones(o).some((z) => overlapDepth(p.fp, z) > 0.01)) {
-        out.push({
-          key: `P4|window|${p.it.id}|${o.opening.id}`,
-          principle: 'P4',
-          hard: true,
-          waivable: true,
-          text: `${cap(label(p.it.id))} stands in front of a window, higher than its sill.`,
-          itemId: p.it.id,
-          openingId: o.opening.id,
-        });
-      }
+      const full = bottom + p.size.h;
+      if (full <= o.opening.sill - FIT.sill) continue;
+      if (!windowZones(o).some((z) => overlapDepth(p.fp, z) > 0.01)) continue;
+      // A bed is measured at its mattress; a headboard above the sill is advice.
+      const hard = sillTop(p.kind, p.size.h) > o.opening.sill - FIT.sill;
+      out.push({
+        key: `P4|window|${p.it.id}|${o.opening.id}`,
+        principle: 'P4',
+        hard,
+        waivable: true,
+        text: hard
+          ? `${cap(label(p.it.id))} blocks a window: it stands higher than the sill.`
+          : `${cap(label(p.it.id))}’s headboard rises ${m(full - o.opening.sill)} above the window sill.`,
+        itemId: p.it.id,
+        openingId: o.opening.id,
+      });
     }
   }
 
@@ -331,11 +382,11 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
         }
       } else if (!onWall) {
         if (!rel.backs.free) {
-          fail('backs', `The ${name} stands ${m(gap)} off the wall; it goes against one.`);
+          fail('backs', `The ${name} stands ${m(gap)} off the wall: it goes against one.`);
         } else if (behind < rel.backs.free - 0.005) {
           fail(
             'backs',
-            `The ${name} has ${m(behind)} behind it; away from a wall it needs ${m(rel.backs.free)}.`,
+            `Not enough room to walk behind the ${name}: ${m(rel.backs.free)} needed, ${m(behind)} left.`,
           );
         }
       }
@@ -352,7 +403,10 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
             (a.it.id < b.it.id ? -1 : 1),
         );
       if (f.clear && ahead < f.clear - 0.005) {
-        fail('faces', `The ${name} faces the wall: ${m(ahead)} in front of it.`);
+        fail(
+          'faces',
+          `The ${name} faces the wall, ${m(ahead)} away: it needs ${m(f.clear)} clear in front.`,
+        );
       } else if (focus.length) {
         const q = focus[0] as Piece;
         const angle = offAngle(p.it, centre(q.it));
@@ -368,12 +422,12 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
         if (angle > f.angle + 1e-6) {
           fail(
             'faces',
-            `The ${name} doesn’t face the ${nameOf(q.kind)}: ${Math.round(angle)}° off (at most ${f.angle}°).`,
+            `The ${name} is turned ${Math.round(angle)}° away from the ${nameOf(q.kind)}: ${f.angle}° at most.`,
           );
         } else if (dist < f.min - 1e-6 || dist > f.max + 1e-6) {
           fail(
             'faces',
-            `The ${name} is ${m(dist)} from the ${nameOf(q.kind)}; ${f.min.toFixed(1)}–${f.max.toFixed(1)} m is right.`,
+            `The ${name} is ${m(dist)} from the ${nameOf(q.kind)}: ${f.min.toFixed(1)}–${f.max.toFixed(1)} m is right.`,
           );
         } else if (between) {
           fail(
@@ -430,7 +484,7 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
         } else if (gap < bef.min - 0.005 || gap > bef.max + 0.005) {
           fail(
             'before',
-            `The ${name} is ${m(gap)} from the sofa; ${bef.min.toFixed(2)}–${bef.max.toFixed(2)} m is in reach.`,
+            `The ${name} is ${m(gap)} from the sofa: ${bef.min.toFixed(2)}–${bef.max.toFixed(2)} m keeps it in reach.`,
           );
         }
       }
@@ -443,7 +497,7 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
   const bedrooms = Object.values(level.rooms)
     .filter((r) => usesOf(level, r.id, opts).some((u) => BEDROOM_USES.has(u as RoomUse)))
     .map((r) => ({ id: r.id, area: roomArea(level, r) }));
-  const plan = sleepingPlan(opts.brief, bedrooms);
+  const plan = sleepingPlan(opts.brief, bedrooms, (id) => !!level.rooms[id]);
   const windowsOf = new Set<string>();
   for (const o of Object.values(level.openings)) {
     if (o.kind !== 'window') continue;
@@ -492,11 +546,15 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
         switch (n) {
           case 'window':
             if (!windowsOf.has(r.id)) {
-              need(
-                'window',
-                r.id,
-                `${r.name} has no window. A bedroom needs one for light and air.`,
-              );
+              out.push({
+                key: `P1|window|${r.id}`,
+                principle: 'P1',
+                hard: true,
+                waivable: true,
+                text: `${r.name} has no window. A bedroom needs one for light and air.`,
+                roomId: r.id,
+                unfixable: true,
+              });
             }
             break;
           case 'beds':
@@ -620,6 +678,47 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
       }
     }
   }
+  // People who sleep in a room that isn't a bedroom by its use still get their bed checked.
+  for (const [roomId, ps] of plan.rooms) {
+    const r = level.rooms[roomId];
+    if (!r || !ps.length) continue;
+    const uses = usesOf(level, roomId, opts);
+    if (uses.some((u) => PROGRAMMES[u].must.includes('beds')) || uses.includes('shelter')) continue;
+    for (const c of bedNeeds(roomId, r.name, plan, inRoom(roomId))) {
+      out.push({
+        key: `P1|bed|${roomId}|${c.who}`,
+        principle: 'P1',
+        hard: true,
+        waivable: true,
+        text: c.text,
+        roomId,
+      });
+    }
+  }
+  // Nobody is dropped silently: each person with nowhere to sleep is a line of its own.
+  const bedroomsN = bedrooms.length;
+  for (const p of plan.unplaced) {
+    out.push({
+      key: `P1|unplaced|${p.key}`,
+      principle: 'P1',
+      hard: true,
+      waivable: true,
+      text: plan.assumed
+        ? `${p.name} has no bedroom: ${household} people and ${bedroomsN} ${bedroomsN === 1 ? 'bedroom' : 'bedrooms'}. Say who sleeps where in the brief.`
+        : `${p.name} has no bed: say where they sleep in the brief.`,
+      unfixable: true,
+    });
+  }
+  for (const p of plan.gone) {
+    out.push({
+      key: `P1|unplaced|${p.key}`,
+      principle: 'P1',
+      hard: true,
+      waivable: true,
+      text: `${p.name} has no bed: the room they sleep in isn’t on the plan any more.`,
+      unfixable: true,
+    });
+  }
   if (plan.assumed && bedrooms.length && people.length) {
     out.push({
       key: 'P1|assumed',
@@ -629,7 +728,13 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
       text: 'Who sleeps where was assumed: say so in the brief to check beds for each person.',
     });
   }
-  return out;
+  // One line per key (a piece narrowing a way at two places is one failure).
+  const seen = new Set<string>();
+  return out.filter((c) => {
+    if (seen.has(c.key)) return false;
+    seen.add(c.key);
+    return true;
+  });
 }
 
 /** The people in a room left without a bed, in words. */

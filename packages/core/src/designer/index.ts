@@ -106,7 +106,6 @@ export {
   BATHROOMS,
   Concept,
   type ConceptRoom,
-  AGAINST,
   Design,
   DesignBrief,
   type DesignInput,

@@ -525,7 +525,7 @@ describe('fix rounds: the app checks each answer before it is shown (designer v2
     const body = promptOf(calls[1]?.body);
     expect(body).toContain('## Fix round 1');
     expect(body).toMatch(
-      /- \["sofa1"\] "The 3-seat sofa faces the wall: 0\.\d\d m in front of it\."/,
+      /- \["sofa1"\] "The 3-seat sofa faces the wall, 0\.\d\d m away: it needs 1\.20 m clear in front\."/,
     );
     const space = Object.values(design.spaces).find((s) => s.name.startsWith('Living'));
     expect(space).toMatchObject({ status: 'done', fixes: 1, fixed: 3 });

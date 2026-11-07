@@ -752,7 +752,7 @@ function work(
   const designedRooms = new Set(
     resultSpaces.filter((s) => s.storedKey && s.status !== 'missing').flatMap((s) => s.rooms),
   );
-  const baseKeys = baseChecks(start, brief);
+  const baseKeys = baseChecks(start, brief, uses);
   const unchanged = (id: string) => {
     const a = level.items[id];
     const b = start.items[id];
@@ -773,9 +773,15 @@ function work(
     clearance: issues,
     walk,
   }).map((c) => {
+    // In the plan before and not the version's doing: a piece it didn't touch, a room it
+    // didn't furnish, or what furnishing can't change (a window, the bedroom count).
     const already =
       baseKeys.has(c.key) &&
-      (c.itemId ? unchanged(c.itemId) : c.roomId ? !designedRooms.has(c.roomId) : true);
+      (c.itemId
+        ? unchanged(c.itemId)
+        : c.roomId
+          ? !designedRooms.has(c.roomId) || !!c.unfixable
+          : true);
     const it = c.itemId ? level.items[c.itemId] : undefined;
     let part: ResultCheck['part'] = null;
     if (it) {
@@ -855,13 +861,18 @@ function zoneAreaOf(
 const baseMemo = new WeakMap<Level, Map<string, Set<string>>>();
 
 /** The checks' keys on the plan a version was made on (kept per plan and brief). */
-function baseChecks(start: Level, brief: DesignInput['brief']): Set<string> {
-  const k = stableJson(brief);
+function baseChecks(
+  start: Level,
+  brief: DesignInput['brief'],
+  uses: Record<string, RoomUse>,
+): Set<string> {
+  const k = stableJson([brief, uses]);
   const per = baseMemo.get(start) ?? new Map<string, Set<string>>();
   baseMemo.set(start, per);
   const hit = per.get(k);
   if (hit) return hit;
-  const keys = new Set(designChecks(start, { brief }).map((c) => c.key));
+  // The version's room uses, so the same failure has the same key on both.
+  const keys = new Set(designChecks(start, { brief, uses }).map((c) => c.key));
   per.set(k, keys);
   if (per.size > 4) per.delete(per.keys().next().value as string);
   return keys;

@@ -48,11 +48,22 @@ const at = (x: number, y: number): Vec2 => ({ x, y });
 
 /** A queen bed, head on Main bedroom's east wall (it spans y 0.44–1.96). */
 const QUEEN: [string, Vec2, number] = ['bed-queen', at(2.216, 1.2), PI / 2];
-/** Two singles in Bedroom: head to the west wall by the window, head to the east wall further in. */
+/**
+ * Two singles in Bedroom, heads under the window (a bed is measured at its mattress), the aisle
+ * between them, their feet clear of the door.
+ */
 const SINGLES: [string, Vec2, number][] = [
-  ['bed-single', at(4.316, 0.77), -PI / 2],
-  ['bed-single', at(5.195, 2.45), PI / 2],
+  ['bed-single', at(3.316 + 0.46, 0.15 + 1.0), 0],
+  ['bed-single', at(6.195 - 0.46, 0.15 + 1.0), 0],
 ];
+/** The hard checks in the two bedrooms (on a room, or on a piece in one). */
+const inBedrooms = (lvl: Level, opts: Partial<CheckOptions> = {}) =>
+  run(lvl, opts).filter((c) => {
+    if (!c.hard) return false;
+    if (c.roomId) return c.roomId === 'rm_bedroom' || c.roomId === 'rm_main-bedroom';
+    const it = c.itemId ? lvl.items[c.itemId] : undefined;
+    return !!it && it.position.z < 4.3 && it.position.x < 6.3;
+  });
 
 describe('P1: function per room (criteria 1, 2)', () => {
   it('1: only a queen bed in Main bedroom: Mdm Koh and Sophie have no bed, both on Bedroom', () => {
@@ -65,11 +76,69 @@ describe('P1: function per room (criteria 1, 2)', () => {
     expect(beds.every((c) => c.roomId === 'rm_bedroom' && c.hard)).toBe(true);
   });
 
-  it('1: adding two single beds that fit passes P1', () => {
-    const cs = run(withPieces(base, [QUEEN, ...SINGLES]));
-    expect(cs.filter((c) => c.key.startsWith('P1|bed|') || c.key.startsWith('P1|window'))).toEqual(
-      [],
+  it('1: adding two single beds that fit: no hard check fails in either bedroom', () => {
+    expect(inBedrooms(withPieces(base, [QUEEN, ...SINGLES])).map((c) => c.text)).toEqual([]);
+  });
+
+  it('a bed is measured at its mattress under a window; its headboard is advice', () => {
+    const cs = run(withPieces(base, SINGLES));
+    const w = cs.filter((c) => c.key.startsWith('P4|window'));
+    expect(w.length).toBeGreaterThan(0);
+    expect(w.every((c) => !c.hard)).toBe(true);
+    expect(w[0]?.text).toMatch(/headboard rises 0\.10 m above the window sill/);
+  });
+
+  it('a double bed needs one long side to get in (0.50 m); 0.60 m is better (advice)', () => {
+    // QUEEN: 0.29 m to the north wall, a metre to the south: the short side is a note.
+    const cs = run(withPieces(base, [QUEEN]));
+    const zone = cs.filter((c) => c.key.startsWith(`P4|zone|it_f000`));
+    expect(zone.every((c) => !c.hard)).toBe(true);
+    expect(zone.map((c) => c.text)).toContain(
+      'The queen bed has one side to get in; the other is against the wall, fine in a small room.',
     );
+    // Both sides short: hard.
+    const squeezed = run(
+      withPieces(base, [
+        ['bed-queen', at(1.0, 1.2), PI / 2],
+        ['wardrobe', at(1.0, 0.15 + 0.3 + 0.0), 0],
+        ['wardrobe', at(1.0, 2.25), PI],
+      ]),
+    );
+    expect(
+      squeezed.some((c) => c.hard && /Not enough room to get into the queen bed/.test(c.text)),
+    ).toBe(true);
+  });
+
+  it('nobody is dropped silently: more people than bedrooms, or a room that is gone', () => {
+    const big = ongs({
+      household: { ...ongs().household, adults: 2, children: ['primary', 'teen', 'teen'] },
+      sleeping: {},
+      names: {},
+    });
+    const cs = run(withPieces(base, [QUEEN, ...SINGLES]), { brief: big });
+    const lines = cs.filter((c) => c.key.startsWith('P1|unplaced'));
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.every((c) => c.hard && c.unfixable)).toBe(true);
+    expect(lines[0]?.text).toMatch(/has no bedroom: \d people and 2 bedrooms/);
+    const gone = run(withPieces(base, [QUEEN, ...SINGLES]), {
+      brief: ongs({
+        sleeping: {
+          'rm_main-bedroom': ['adult-1', 'adult-2'],
+          rm_bedroom: ['elder-1'],
+          rm_gone: ['child-1'],
+        },
+      }),
+    });
+    // Sophie said to sleep in a room no longer on the plan (and not in Bedroom).
+    expect(gone.map((c) => c.text)).toContain(
+      'Sophie has no bed: the room they sleep in isn’t on the plan any more.',
+    );
+  });
+
+  it('one line per key: a piece narrowing a way twice is one failure', () => {
+    const cs = run(withPieces(base, [['dining-6', at(5.4, 3.71), 0]]));
+    const keys = cs.map((c) => c.key);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 
   it('a couple in a single bed: one of them has no bed', () => {
@@ -140,7 +209,7 @@ describe('P2: relationships (criteria 3, 4, 8)', () => {
   it('3: a sofa whose front is 0.5 m from a wall faces the wall; turned with its back to it, passes', () => {
     const facing = run(withPieces(base, [['sofa-3', at(8.3, 2.599), PI]]));
     expect(facing.find((c) => c.key.startsWith('P2|faces'))?.text).toBe(
-      'The 3-seat sofa faces the wall: 0.50 m in front of it.',
+      'The 3-seat sofa faces the wall, 0.50 m away: it needs 1.20 m clear in front.',
     );
     const turned = run(withPieces(base, [['sofa-3', at(8.3, 2.099), 0]]));
     expect(turned.filter((c) => c.key.startsWith('P2|'))).toEqual([]);
@@ -151,10 +220,10 @@ describe('P2: relationships (criteria 3, 4, 8)', () => {
     // Back on the east wall: 2.955 m across from the TV's centre.
     expect(
       faces(withPieces(base, [TV, sofa(9.575, 2.5 + 2.955 * Math.tan(PI / 7.2))]))[0]?.text,
-    ).toBe('The 3-seat sofa doesn’t face the TV, 55 inch: 25° off (at most 20°).');
+    ).toBe('The 3-seat sofa is turned 25° away from the TV, 55 inch: 20° at most.');
     expect(faces(withPieces(base, [TV, sofa(9.575, 2.5 + 2.955 * Math.tan(PI / 18))]))).toEqual([]);
     expect(faces(withPieces(base, [TV, sofa(8.695, 2.75)]))[0]?.text).toBe(
-      'The 3-seat sofa is 1.50 m from the TV, 55 inch; 1.8–4.0 m is right.',
+      'The 3-seat sofa is 1.50 m from the TV, 55 inch: 1.8–4.0 m is right.',
     );
     expect(faces(withPieces(base, [TV, sofa(9.595, 2.75)]))).toEqual([]);
     expect(
@@ -168,7 +237,7 @@ describe('P2: relationships (criteria 3, 4, 8)', () => {
         c.key.startsWith('P2|backs'),
       );
     expect(behind(0.7)[0]?.text).toBe(
-      'The 3-seat sofa has 0.70 m behind it; away from a wall it needs 0.90 m.',
+      'Not enough room to walk behind the 3-seat sofa: 0.90 m needed, 0.70 m left.',
     );
     expect(behind(0.9)).toEqual([]);
   });
@@ -184,7 +253,7 @@ describe('P2: relationships (criteria 3, 4, 8)', () => {
       run(withPieces(base, [sofa, coffee(gap)])).filter((c) => c.key.startsWith('P2|before'));
     expect(coffeeAt(0.4)).toEqual([]);
     expect(coffeeAt(0.2)[0]?.text).toBe(
-      'The coffee table is 0.20 m from the sofa; 0.35–0.50 m is in reach.',
+      'The coffee table is 0.20 m from the sofa: 0.35–0.50 m keeps it in reach.',
     );
     const bedside = (x: number) =>
       run(withPieces(base, [QUEEN, ['bedside', at(x, 2.17), PI / 2]])).filter((c) =>
@@ -216,7 +285,9 @@ describe('P3 and P4: circulation, fit and access (criteria 5, 6, 7)', () => {
     const cs = run(withPieces(base, [['dining-4', at(5.0, 3.55), 0]]));
     const walk = cs.filter((c) => c.key.startsWith('P3|walkway'));
     expect(walk.length).toBeGreaterThan(0);
-    expect(walk[0]?.text).toMatch(/^The way through narrows to 0\.\d\d m; it needs 0\.90 m\.$/);
+    expect(walk[0]?.text).toMatch(
+      /^The dining table, 4 seats narrows the way through to 0\.\d\d m: 0\.90 m needed\.$/,
+    );
   });
 
   it('5: a shallow shoe cabinet in the passage, leaving 0.92 m, passes', () => {
@@ -236,15 +307,23 @@ describe('P3 and P4: circulation, fit and access (criteria 5, 6, 7)', () => {
     expect(shelter).toMatchObject({ principle: 'HDB', waivable: false });
     const wardrobe = run(withPieces(base, [['wardrobe', at(8.16, 1.57 + 0.3), 0]]));
     expect(wardrobe.map((x) => x.text)).toContain(
-      'The wardrobe stands in front of a window, higher than its sill.',
+      'The wardrobe blocks a window: it stands higher than the sill.',
     );
   });
 
   it('a wardrobe whose doors open onto a bed fails P4 with the zone’s words', () => {
     const lvl = withPieces(base, [QUEEN, ['wardrobe', at(0.6, 3.2), -PI / 2]]);
-    expect(texts(lvl).some((t) => /^Wardrobe doors need 0\.60 m; there is/.test(t))).toBe(false);
+    expect(
+      texts(lvl).some((t) =>
+        /^Not enough room to use the wardrobe: wardrobe doors need 0\.60 m/.test(t),
+      ),
+    ).toBe(false);
     const tight = withPieces(base, [QUEEN, ['wardrobe', at(0.6, 1.2), -PI / 2]]);
-    expect(texts(tight).some((t) => /^Wardrobe doors need 0\.60 m; there is/.test(t))).toBe(true);
+    expect(
+      texts(tight).some((t) =>
+        /^Not enough room to use the wardrobe: wardrobe doors need 0\.60 m/.test(t),
+      ),
+    ).toBe(true);
   });
 });
 

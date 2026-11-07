@@ -7,7 +7,7 @@ import type { PlanGeometry } from '../plan';
 import { roomShapes } from '../rooms';
 import type { Item, Level, Vec2 } from '../schema';
 import { fixedSize } from './catalogue';
-import { FIT, UNDER_WINDOW, roleOf, windowZones } from './principles';
+import { ACCESS, FIT, UNDER_WINDOW, roleOf, sillTop, windowZones } from './principles';
 import { type Face, clearStretches } from './spaces';
 import type { Note } from './walls';
 
@@ -218,7 +218,7 @@ export function hitsOf(ix: SpaceIndex, item: Item, kind: FurnitureKind, on?: OnF
   if (hit(ix.sweeps, 0.005)) out.push({ kind: 'door' });
   if (hit(ix.keepOut, 0.01)) out.push({ kind: 'keep-out' });
   if (!UNDER_WINDOW.has(roleOf(kind))) {
-    const top = (kind.elevation ?? 0) + itemSize(item, kind).h;
+    const top = sillTop(kind, itemSize(item, kind).h);
     const high = ix.windows.filter((w) => top > w.sill - FIT.sill);
     if (hit(high, 0.01)) out.push({ kind: 'opening', window: true });
   }
@@ -243,14 +243,18 @@ export function hitsOf(ix: SpaceIndex, item: Item, kind: FurnitureKind, on?: OnF
         ...ix.placed.filter((p) => !apart(p.box, zb) && !tuckedWith(p)).map((p) => p.fp),
       ];
     };
+    // The hard need (a bed's access side, sliding wardrobe doors: 0.50 m); a double bed needs
+    // one long side only.
+    const access = ACCESS[kind.id];
+    const need = access?.hard ?? rule.need;
     const room = (side: 'front' | 'left' | 'right') => {
       const sd = side === 'front' ? sideOf(fp, side) : ruleSide(fp, side);
-      return roomOff(sd, rule.need, near(zoneOf(sd, rule.need))) >= rule.need - 0.005;
+      return roomOff(sd, need, near(zoneOf(sd, need))) >= need - 0.005;
     };
     const ok =
       rule.side === 'front'
         ? room('front')
-        : rule.side === 'sides'
+        : rule.side === 'sides' && !access?.oneSide
           ? room('left') && room('right')
           : room('left') || room('right');
     if (!ok) out.push({ kind: 'zone' });
@@ -300,19 +304,21 @@ function zonesOf(ix: SpaceIndex, kind: FurnitureKind, fp: Vec2[]): Vec2[][] {
   }
   const rule = CLEARANCE_RULES[kind.id];
   if (!rule) return [];
-  if (rule.side === 'front') return [zoneOf(sideOf(fp, 'front'), rule.need)];
+  const access = ACCESS[kind.id];
+  const need = access?.hard ?? rule.need;
+  if (rule.side === 'front') return [zoneOf(sideOf(fp, 'front'), need)];
   const sides = (['left', 'right'] as const).map((s) => ruleSide(fp, s));
-  if (rule.side === 'sides') return sides.map((s) => zoneOf(s, rule.need));
+  if (rule.side === 'sides' && !access?.oneSide) return sides.map((s) => zoneOf(s, need));
   const room = (s: (typeof sides)[number]) => {
-    const z = boxOf(zoneOf(s, rule.need));
+    const z = boxOf(zoneOf(s, need));
     const near = [
       ...ix.solid.filter((x) => !apart(x.box, z)).map((x) => x.poly),
       ...ix.placed.filter((p) => !apart(p.box, z)).map((p) => p.fp),
     ];
-    return roomOff(s, rule.need, near);
+    return roomOff(s, need, near);
   };
   const [l, r] = sides as [(typeof sides)[number], (typeof sides)[number]];
-  return [zoneOf(room(l) >= room(r) ? l : r, rule.need)];
+  return [zoneOf(room(l) >= room(r) ? l : r, need)];
 }
 
 /**
@@ -467,7 +473,7 @@ export function onFace(f: Face, along: number, d: number): { at: Vec2; rotation:
 
 export const vertical = (want: Want) => {
   const bottom = want.kind.elevation ?? 0;
-  return { bottom, top: bottom + want.h };
+  return { bottom, top: sillTop(want.kind, want.h) };
 };
 
 /**

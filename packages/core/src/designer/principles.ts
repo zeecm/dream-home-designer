@@ -220,7 +220,32 @@ export const FIT = {
   sill: 0.02,
   /** How far in front of a window's face nothing taller than its sill may stand. */
   window: 0.15,
+  /**
+   * A bed is measured against a sill at its mattress (the catalogue bed's top): a headboard
+   * above the sill is advice, not a block (decision, 7 Nov).
+   */
+  mattress: 0.52,
 } as const;
+
+/** How high a piece stands where a window's sill is concerned (a bed: its mattress). */
+export function sillTop(kind: FurnitureKind, height: number): number {
+  const bottom = kind.elevation ?? 0;
+  return bottom + (roleOf(kind) === 'bed' ? Math.min(height, FIT.mattress) : height);
+}
+
+/**
+ * Room to use a piece, hard and recommended (decision, 7 Nov): a bed's access side at least
+ * 0.50 m (0.60 m recommended), a double needing one long side only; sliding wardrobe doors
+ * (the built-in wardrobe) 0.50 m (0.60 m recommended). Anything else: its clearance rule's
+ * need, hard.
+ */
+export const ACCESS: Record<string, { hard: number; soft: number; oneSide?: boolean }> = {
+  'bed-single': { hard: 0.5, soft: 0.6 },
+  'bed-super-single': { hard: 0.5, soft: 0.6 },
+  'bed-queen': { hard: 0.5, soft: 0.6, oneSide: true },
+  'bed-king': { hard: 0.5, soft: 0.6, oneSide: true },
+  'built-in-wardrobe': { hard: 0.5, soft: 0.6 },
+};
 
 /** Roles that may stand at a window whatever their height (a kitchen counter, a lamp). */
 export const UNDER_WINDOW = new Set<Role>([
@@ -352,8 +377,10 @@ export interface SleepingPlan {
   rooms: Map<string, Person[]>;
   /** Not said in the brief: the checks assumed it. */
   assumed: boolean;
-  /** People with no room (said, or more people than bedrooms). */
+  /** People with no room (not said where, or more people than bedrooms). */
   unplaced: Person[];
+  /** People said to sleep in a room that isn't on the plan any more. */
+  gone: Person[];
 }
 
 /**
@@ -364,6 +391,7 @@ export interface SleepingPlan {
 export function sleepingPlan(
   brief: DesignBrief,
   bedrooms: { id: string; area: number }[],
+  exists: (roomId: string) => boolean = () => true,
 ): SleepingPlan {
   const people = peopleOf(brief);
   const byKey = new Map(people.map((p) => [p.key, p]));
@@ -371,6 +399,7 @@ export function sleepingPlan(
   const rooms = new Map<string, Person[]>();
   if (said.length) {
     const placed = new Set<string>();
+    const gone: Person[] = [];
     for (const [roomId, keys] of said) {
       const ps = keys.flatMap((k) => {
         const p = byKey.get(k);
@@ -378,10 +407,12 @@ export function sleepingPlan(
         placed.add(k);
         return [p];
       });
-      if (ps.length) rooms.set(roomId, ps);
+      if (!ps.length) continue;
+      if (exists(roomId)) rooms.set(roomId, ps);
+      else gone.push(...ps);
     }
     const unplaced = people.filter((p) => !placed.has(p.key) && p.kind !== 'helper');
-    return { rooms, assumed: false, unplaced };
+    return { rooms, assumed: false, unplaced, gone };
   }
   const order = [...bedrooms].sort((p, q) => q.area - p.area || (p.id < q.id ? -1 : 1));
   const adults = people.filter((p) => p.kind === 'adult');
@@ -402,5 +433,13 @@ export function sleepingPlan(
     const p = queue.shift();
     if (p) rooms.set(r.id, [p]);
   }
-  return { rooms, assumed: true, unplaced: queue };
+  // More people than bedrooms: children share, two to a room, before anyone is left out.
+  for (const r of rest) {
+    const here = rooms.get(r.id) ?? [];
+    const next = queue[0];
+    if (next?.kind === 'child' && here.length === 1 && here[0]?.kind === 'child') {
+      rooms.set(r.id, [...here, queue.shift() as Person]);
+    }
+  }
+  return { rooms, assumed: true, unplaced: queue, gone: [] };
 }
