@@ -9,6 +9,7 @@ import {
 } from '@dhd/core';
 import { create } from 'zustand';
 import { useEditor } from '../editor';
+import { ageingEnabled } from '../features';
 import { currentLevel, useStore } from '../store';
 
 /**
@@ -101,7 +102,9 @@ export function startWalkways(on: boolean) {
 }
 
 /** Turns the ageing check on for this choice, or off (null); it runs with or without walkways. */
-export function startAgeing(choice: AgeingChoice | null) {
+export function startAgeing(asked: AgeingChoice | null) {
+  // On hold (owner): off whatever the browser holds, unless its flag is on.
+  const choice = ageingEnabled() ? asked : null;
   if (JSON.stringify(choice) === JSON.stringify(useWalkways.getState().ageingChoice) && started) {
     return;
   }

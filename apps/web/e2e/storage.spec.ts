@@ -429,6 +429,37 @@ test.describe('desktop', () => {
     });
   }
 
+  test('no beds: who lives here stays open as people are added, the stepper keeps focus', async ({
+    page,
+  }) => {
+    // The furnished sample with its beds taken out, so nobody is guessed.
+    const doc = JSON.parse(FILE.toString());
+    for (const level of doc.levels) {
+      for (const [id, it] of Object.entries(level.items as Record<string, { assetId: string }>)) {
+        if (/bed/.test(it.assetId)) delete level.items[id];
+      }
+    }
+    await page.goto('/');
+    await waitSaved(page);
+    const before = new URL(page.url()).searchParams.get('p');
+    await page.locator('input[type="file"][accept=".json,application/json"]').setInputFiles({
+      name: 'no-beds.dreamhome.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(doc)),
+    });
+    await expect.poll(() => new URL(page.url()).searchParams.get('p')).not.toBe(before);
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    await seeStorage(page);
+    const more = page.getByRole('button', { name: 'More adults without a bed' });
+    await more.click();
+    await expect(more).toBeVisible();
+    await expect(more).toBeFocused();
+    await more.click();
+    await expect(page.getByTestId('storage-household')).toContainText('2 people');
+    await expect(more).toBeVisible();
+  });
+
   test('23: an uploaded model is not counted', async ({ page }) => {
     const dir = fileURLToPath(new URL('../public/models', import.meta.url));
     const file = readdirSync(dir).find((f) => f.startsWith('nightstand-painted.'));

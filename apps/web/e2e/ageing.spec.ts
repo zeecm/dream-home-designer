@@ -49,6 +49,12 @@ async function wheelchair(page: Page, touch = false) {
   await expect(section(page).getByTestId('ageing-summary')).toBeVisible();
 }
 
+// The check is on hold (owner, 7 Nov 2026), hidden unless its flag is on: these tests turn it on.
+const flagOn = () => window.localStorage.setItem('dhd-feature-ageing', '1');
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(flagOn);
+});
+
 test.describe('desktop', () => {
   test('21, 25, 26, 27: the choice, the bedrooms, the list, Show next, EASE and Off', async ({
     page,
@@ -375,7 +381,9 @@ test('a view link can look with the older person check', async ({ page, browser 
   await page.getByRole('button', { name: 'Share' }).click();
   const viewLink = await page.getByLabel('View-only link').inputValue();
   await page.keyboard.press('Escape');
-  const viewer = await (await browser.newContext()).newPage();
+  const viewerCtx = await browser.newContext();
+  await viewerCtx.addInitScript(flagOn);
+  const viewer = await viewerCtx.newPage();
   await viewer.goto(viewLink);
   await expect(viewer.getByText('View only.')).toBeVisible();
   await viewer.keyboard.press('1');

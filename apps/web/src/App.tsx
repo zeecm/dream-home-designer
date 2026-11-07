@@ -14,6 +14,7 @@ import { type Tool, type ViewMode, useEditor } from './editor';
 import { ElevationView } from './elevation/ElevationView';
 import { stepRef } from './elevation/nav';
 import { closeView, openFace, openSelected } from './elevation/open';
+import { ageingEnabled } from './features';
 import { absorbLinkKey } from './keys';
 import { useModelSync } from './models';
 import { PlanCanvas } from './plan/PlanCanvas';
@@ -395,7 +396,8 @@ export function App() {
         {commentsOpen ? <CommentsPanel /> : designerOpen ? <DesignerPanel /> : <Inspector />}
       </div>
       <CommentsLive />
-      <AgeingSync />
+      {/* The Older person check is on hold (owner): it runs only with its flag. */}
+      {ageingEnabled() && <AgeingSync />}
       <DesignerDialogs />
       <h1 className="visually-hidden">{name} · Dream Home Designer</h1>
     </div>

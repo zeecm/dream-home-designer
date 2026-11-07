@@ -597,6 +597,11 @@ export function StoragePanel() {
   const nobody = !!view && count(view.report.people) === 0;
   const [change, setChange] = useState<boolean | null>(null);
   const [copied, setCopied] = useState<'' | 'done' | 'failed'>('');
+  // Opened because nobody is counted: stay open once the first person is added, so the steppers
+  // (and focus on them) don't vanish under the finger.
+  useEffect(() => {
+    if (nobody) setChange((c) => c ?? true);
+  }, [nobody]);
   // A fresh open starts at the top, focus on its heading; back from a piece, where it was, focus
   // on that piece's card.
   // biome-ignore lint/correctness/useExhaustiveDependencies: on mounting only

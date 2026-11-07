@@ -74,6 +74,7 @@ import { useEditor } from '../editor';
 import { ElectricalSummary, PointInspector } from '../electrical/electrical';
 import { SuggestPanel, useSuggest } from '../electrical/suggest';
 import { RoomViewEntry, ThingViewEntry, ViewerWallEntry, WallViewEntry } from '../elevation/Entry';
+import { ageingEnabled } from '../features';
 import { roomsBeside } from '../plan/keyboard';
 import { OPENING_PRESETS, ROOM_NAMES } from '../presets';
 import { ItemStorage, StorageBack, StoragePanel, StorageRow } from '../storage/storage';
@@ -176,7 +177,7 @@ export function Inspector() {
   const viewer = useStore((s) => s.role === 'viewer');
   const suggesting = useSuggest((s) => s.open);
   // The older person list (a view link can look at it too).
-  const ageingList = useAgeing((s) => s.listOpen && s.setting.profile !== 'off');
+  const ageingList = useAgeing((s) => s.listOpen && s.setting.profile !== 'off') && ageingEnabled();
   // The storage panel (a view link uses it too, with the viewer's own household).
   const storageList = useStorage((s) => s.open);
   // A piece armed from storage's Add link: the panel stays, with a bar over the plan.
@@ -430,7 +431,8 @@ function PlanSummary({ level, viewer }: { level: Level; viewer: boolean }) {
         </fieldset>
         {/* Ways of looking: a view link can use them (storage with the viewer's household). */}
         <StorageRow />
-        <OlderPersonSection />
+        {/* On hold (owner): shown only with the feature flag. */}
+        {ageingEnabled() && <OlderPersonSection />}
       </section>
       <fieldset className="inspector-part" disabled={viewer}>
         <RenovationSection />
@@ -1067,7 +1069,7 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
       {/* First, so a phone's sheet shows it without scrolling. */}
       <ItemClearances level={level} id={id} />
       <ThingViewEntry level={level} selection={{ kind: 'item', id }} />
-      <ItemAgeing level={level} id={id} kind="item" />
+      {ageingEnabled() && <ItemAgeing level={level} id={id} kind="item" />}
       <ItemStorage level={level} id={id} />
       <CarpentryLine item={it} />
       <GettingItIn level={level} id={id} />
@@ -1239,7 +1241,7 @@ function OpeningInspector({ level, id }: { level: Level; id: string }) {
       {/* First, so a phone's sheet shows it without scrolling. */}
       <DoorClearances level={level} id={id} />
       <ThingViewEntry level={level} selection={{ kind: 'opening', id }} />
-      <ItemAgeing level={level} id={id} kind="opening" />
+      {ageingEnabled() && <ItemAgeing level={level} id={id} kind="opening" />}
       <Segmented
         label="Kind"
         value={o.kind}
