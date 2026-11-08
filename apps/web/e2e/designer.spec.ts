@@ -1654,6 +1654,47 @@ test.describe('iterating (slice 2, PR 3)', () => {
     expect(file).not.toContain(KEY);
   });
 
+  test('twenty cards in: a design, an accept and an Undo take as long as with two (QA P4-6)', async ({
+    page,
+  }) => {
+    test.setTimeout(300_000);
+    await setup(page);
+    await mock(page);
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    // Kitchen, accepted, then Undo, twenty times: each a new card in the log.
+    const times: number[] = [];
+    for (let i = 1; i <= 20; i++) {
+      const t0 = Date.now();
+      await panel(page)
+        .getByRole('button', { name: /^Kitchen · about US\$/ })
+        .last()
+        .click();
+      const go = panel(page).getByRole('button', { name: /^Go ahead · about US\$/ });
+      if (i === 1) await go.click();
+      const v = card(page, i);
+      const accept = v.getByRole('button', { name: /^Accept selected/ });
+      await expect(accept).toBeEnabled({ timeout: 30_000 });
+      await accept.click();
+      const line = log(page)
+        .getByText(new RegExp(`changes from V${i}\\.`))
+        .last();
+      await expect(line).toBeVisible();
+      await panel(page).getByRole('button', { name: 'Undo' }).last().click();
+      await expect(log(page).getByText(new RegExp(`^Undone: .* from V${i} `))).toBeVisible();
+      times.push(Date.now() - t0);
+    }
+    const mean = (xs: number[]) => xs.reduce((t, x) => t + x, 0) / xs.length;
+    const early = mean(times.slice(1, 4));
+    const late = mean(times.slice(-3));
+    console.log(`card 2–4: ${Math.round(early)} ms; card 18–20: ${Math.round(late)} ms`);
+    // Older cards are folded: card 20 costs about what card 2 did.
+    expect(late).toBeLessThan(early * 1.6 + 400);
+    // Folded cards work nothing out: only the newest card is open.
+    await expect(panel(page).locator('article.talk-card:not(.talk-card-folded)')).toHaveCount(1);
+  });
+
   test('Start over: a new conversation, the versions under Earlier designs, the numbering goes on', async ({
     page,
   }) => {
@@ -1856,19 +1897,22 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     await fingerSized(page);
     await noSideways(page);
     await shot(page, 'phone-alternatives');
-    // A sideways swipe on the change list: back to A; a mostly vertical drag doesn't switch.
+    // A real finger's swipe on the change list (touch events, as a phone sends them, so the
+    // browser's own gestures can take it): back to A; a mostly vertical drag doesn't switch.
     const list = b.locator('.talk-changes');
+    await list.scrollIntoViewIfNeeded();
     const box = await list.boundingBox();
     if (!box) throw new Error('no change list');
+    const cdp = await page.context().newCDPSession(page);
     const swipe = async (dx: number, dy: number) => {
       const x = box.x + box.width / 2;
-      const y = box.y + Math.min(80, box.height / 2);
-      await list.dispatchEvent('pointerdown', { pointerType: 'touch', clientX: x, clientY: y });
-      await list.dispatchEvent('pointerup', {
-        pointerType: 'touch',
-        clientX: x + dx,
-        clientY: y + dy,
-      });
+      const y = Math.max(box.y + 20, Math.min(box.y + box.height - 20, 500));
+      const at = (t: number) => [{ x: x + dx * t, y: y + dy * t, id: 1 }];
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(0) });
+      for (let i = 1; i <= 8; i++) {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(i / 8) });
+      }
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     };
     await swipe(10, 120);
     await expect(tabs.getByRole('tab', { name: /^B: / })).toHaveAttribute('aria-selected', 'true');

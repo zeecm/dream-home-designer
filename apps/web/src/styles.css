@@ -7839,6 +7839,9 @@ textarea {
 .talk-changes {
   display: grid;
   gap: 6px;
+  /* A sideways swipe switches A / B / C (QA P4-1): the browser keeps vertical scrolling and
+     leaves the sideways drag to the page, so it isn't cancelled. */
+  touch-action: pan-y;
 }
 .talk-changes-head {
   display: flex;
@@ -8560,6 +8563,15 @@ html[data-proposal] .elec-warn circle {
   }
   .designer-bar .designer-bar-text {
     display: none;
+  }
+  /* My plan before the designer keeps saying what is shown (QA P4-5), on its own row. */
+  .reno-bar.designer-bar-start {
+    flex-wrap: wrap;
+  }
+  .designer-bar-start .designer-bar-text {
+    display: block;
+    flex-basis: 100%;
+    font-size: var(--fs-hint);
   }
 }
 .talk-folded > :not(.talk-side-tab) {

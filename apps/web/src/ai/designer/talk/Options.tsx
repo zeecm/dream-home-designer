@@ -1,5 +1,5 @@
 import type { Proposal } from '@dhd/core';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { failingChecks } from '../parts';
 import { useResultsTickN } from '../results';
 import { useDesigner } from '../state';
@@ -15,7 +15,7 @@ import { useTalk } from './useTalk';
  * has alternatives. Switching is free and instant: the plan (if the card is on it), the rows,
  * the checks and the cost all follow; each option keeps its own ticks.
  */
-export function ProposalTurn({
+export const ProposalTurn = memo(function ProposalTurn({
   proposal,
   cards,
   newest,
@@ -75,7 +75,7 @@ export function ProposalTurn({
       {...(count > 1 ? { onSwipe: (dir: 1 | -1) => step(dir) } : {})}
     />
   );
-}
+});
 
 function Tabs({
   proposal,

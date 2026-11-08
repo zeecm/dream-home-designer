@@ -441,9 +441,13 @@ export function TalkPanel() {
     if (sheet && startShown) setSize((s) => (s === 'full' ? 'half' : s));
   }, [sheet, startShown]);
   useEffect(() => {
-    if (!sheet || !costCard) return;
-    before.current = null;
-    setSize('full');
+    if (!costCard) return;
+    if (sheet) {
+      before.current = null;
+      setSize('full');
+    }
+    // Its answers in sight at every size: in a short column (a phone on its side) the card is
+    // taller than the log, and its foot is what is needed (QA P4-7).
     const f = requestAnimationFrame(() => {
       const foot = document.querySelector(
         `[aria-labelledby="h-${CSS.escape(costCard)}"] .dialog-foot`,

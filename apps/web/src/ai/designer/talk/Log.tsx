@@ -2,6 +2,7 @@ import {
   type Conversation,
   FIX_PER_RUN,
   type Level,
+  type Proposal,
   type QuestionKey,
   type ScopeRef,
   TALK_LIMITS,
@@ -507,6 +508,17 @@ function Event({ t }: { t: TurnOf<'event'> }) {
   );
 }
 
+const cardModels = new WeakMap<Proposal, CardModel[]>();
+/** A proposal's cards, made once per version of its record. */
+function cardsOf(p: Proposal): CardModel[] {
+  let cs = cardModels.get(p);
+  if (!cs) {
+    cs = p.options.map((o) => optionCard(p, o));
+    cardModels.set(p, cs);
+  }
+  return cs;
+}
+
 /** v1's versions, folded at the top of the log ("Earlier designs (3)"). */
 function Earlier({ cards }: { cards: CardModel[] }) {
   const [open, setOpen] = useState(false);
@@ -557,9 +569,10 @@ export function Log() {
     [designs, convId],
   );
   const byId = useMemo(() => new Map(proposals.map((p) => [p.id, p])), [proposals]);
-  // One card model per option while its proposal is unchanged (cards are memoised on it).
+  // One card model per option while its proposal is unchanged: a write to one proposal
+  // re-renders its card only (cards are memoised on their models; QA P4-6).
   const cards = useMemo(
-    () => new Map(proposals.map((p) => [p.id, p.options.map((o) => optionCard(p, o))] as const)),
+    () => new Map(proposals.map((p) => [p.id, cardsOf(p)] as const)),
     [proposals],
   );
   const newestProposal = useMemo(() => {

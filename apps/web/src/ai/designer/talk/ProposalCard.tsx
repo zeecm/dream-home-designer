@@ -201,8 +201,13 @@ export const ProposalCard = memo(function ProposalCard({
   const comparable = useDesigner((s) => !!versionId && s.designs.some((d) => d.id === versionId));
   const running = card.status === 'running';
   const [expanded, setExpanded] = useState(newest);
+  // The newest card opens; once a newer one comes it folds to its line (opened again by a
+  // tap), so a long conversation works out one or two cards, not every one (QA P4-6).
+  const wasNewest = useRef(newest);
   useEffect(() => {
     if (newest) setExpanded(true);
+    else if (wasNewest.current) setExpanded(false);
+    wasNewest.current = newest;
   }, [newest]);
   // Worked out only while it is open or on the plan; folded, it shows what it said last.
   const active = expanded || shown;
@@ -259,12 +264,13 @@ export const ProposalCard = memo(function ProposalCard({
   // biome-ignore lint/correctness/useExhaustiveDependencies: on what the price reads
   const another = useMemo(
     () =>
-      !running && proposal && ai && !designerCannotUse(ai)
+      // Priced only while the card is open: a folded card shows no button to price.
+      expanded && !running && proposal && ai && !designerCannotUse(ai)
         ? timed(() =>
             card.status === 'failed' ? scopePrice(proposal.scope) : anotherPrice(proposal),
           )
         : null,
-    [running, proposal, ai, project, prices, tick, card.status],
+    [expanded, running, proposal, ai, project, prices, tick, card.status],
   );
   // A sideways swipe of at least 60 px on the change list; a mostly vertical one scrolls.
   const swipe = useRef<{ x: number; y: number } | null>(null);

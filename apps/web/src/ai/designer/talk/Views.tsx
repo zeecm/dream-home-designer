@@ -8,6 +8,7 @@ import {
   peopleOf,
 } from '@dhd/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useStore } from '../../../store';
 import { failingChecks } from '../parts';
 import { readResult, useResultsTickN } from '../results';
 import { designOpts, useDesigner } from '../state';
@@ -277,6 +278,10 @@ export function Versions() {
   const designs = useDesigner((s) => s.designs);
   const busy = useBusy();
   const list = [...designs].sort((a, b) => b.n - a.n || b.createdAt.localeCompare(a.createdAt));
+  // On a plan of several levels, the level each version designs (as the card heads say).
+  const levels = useStore((s) => s.editor.doc.levels);
+  const levelOf = (d: Design) =>
+    levels.length > 1 ? (levels.find((l) => l.id === d.levelId)?.name ?? '') : '';
   if (!conv) return null;
   return (
     <section className="talk-view" aria-label="Versions">
@@ -289,11 +294,13 @@ export function Versions() {
         <ul className="talk-versions">
           {list.map((d) => {
             const title = versionTitle(d);
+            const levelName = levelOf(d);
             return (
               <li key={d.id} className="talk-version" data-version={title}>
                 <span className="talk-version-text">
                   <span className="talk-version-title">
                     {title} · {d.concept?.name ?? d.name}
+                    {levelName ? ` · ${levelName}` : ''}
                   </span>
                   <VersionVerdict d={d} />
                 </span>
@@ -324,7 +331,10 @@ export function Versions() {
           })}
         </ul>
       )}
-      <p className="field-hint">A plan keeps 20 versions; alternatives count.</p>
+      <p className="field-hint">
+        Only what you accept becomes a version; a plan keeps 20. Ideas you didn’t take stay in the
+        conversation.
+      </p>
     </section>
   );
 }
