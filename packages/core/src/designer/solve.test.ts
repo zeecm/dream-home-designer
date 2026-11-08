@@ -17,6 +17,7 @@ import { SAMPLE_KEYS, answer, parsed, sampleDesign, sampleLevel } from './fixtur
 import { roleOf } from './principles';
 import { designResult } from './result';
 import { type SpaceDesign, defaultBrief, parseSpaceDesign } from './schema';
+import { sofaName } from './solve';
 
 /**
  * The solver (answers of version 2): pieces placed from intent, relationships by
@@ -225,7 +226,8 @@ describe('the solver', () => {
     };
     const make = (id: string) =>
       designResult(level, level, {
-        ...sampleDesign({ answers, brief: ONGS, concept: null, id }),
+        // The level given, so the fixture's own build of the sample isn't timed.
+        ...sampleDesign({ level, answers, brief: ONGS, concept: null, id }),
         aliases: aliasesFor(level),
       });
     make('dsn_perf_warm');
@@ -242,14 +244,14 @@ describe('the solver', () => {
     const edited = withPieces(level, [['plant', { x: 1.2, y: 5.2 }, 0]], 'it_edit');
     const t0 = performance.now();
     designResult(edited, edited, {
-      ...sampleDesign({ answers, brief: ONGS, concept: null, id: 'dsn_perf_0' }),
+      ...sampleDesign({ level, answers, brief: ONGS, concept: null, id: 'dsn_perf_0' }),
       aliases: aliasesFor(level),
     });
     const warm = performance.now() - t0;
     console.log(
       `v2 designResult: ${cold.toFixed(0)} ms (median of 7), again ${warm.toFixed(0)} ms`,
     );
-    expect(cold).toBeLessThan(process.env.PERF ? 350 : 1050);
+    expect(cold).toBeLessThan(process.env.PERF ? 300 : 900);
     expect(warm).toBeLessThan(process.env.PERF ? 150 : 450);
   });
 
@@ -317,7 +319,13 @@ describe('the solver', () => {
     const FULL = living('chesterfield-sofa', 2, 'dining-6', 6);
     const make = (a: SpaceDesign, brief: ReturnType<typeof household>, id: string) =>
       designResult(level, level, {
-        ...sampleDesign({ answers: { [SAMPLE_KEYS.living]: a }, brief, concept: null, id }),
+        ...sampleDesign({
+          level,
+          answers: { [SAMPLE_KEYS.living]: a },
+          brief,
+          concept: null,
+          id,
+        }),
         aliases: aliasesFor(level),
       });
     /** Median and worst of 7 cold runs (another version each time), after one to warm up. */
@@ -333,10 +341,11 @@ describe('the solver', () => {
       return { median: sorted[3] as number, worst: sorted[6] as number };
     };
     /**
-     * The heavy rooms' bound (median of 7 cold, desktop): 350 ms was the aim; with the swaps
-     * tried (their own budget, so crowded rooms still get them) they measure 320–370 ms.
+     * The heavy rooms' bound (median of 7 cold, desktop): the spec's 300 ms for a design. With
+     * each pose made and its room-only score parts worked out once per space, and a walkway
+     * re-solve stopped once it can only be refused, they measure about 150–190 ms.
      */
-    const HEAVY_PERF = 400;
+    const HEAVY_PERF = 300;
     /** A 3-seat sofa, two armchairs, a side table, a shelf and a table for four. */
     const SIDE_SHELF = living('sofa-3', 2, 'dining-4', 4, [
       { ref: 'side1', assetId: 'side-table-two-tier' },
@@ -372,7 +381,7 @@ describe('the solver', () => {
       expect(r.swaps.find((x) => x.space === SAMPLE_KEYS.living)?.tried ?? 0).toBeGreaterThan(0);
     });
 
-    it('PERF: the full living room (a table for six and six chairs, a chesterfield, two armchairs, six people) under 400 ms', () => {
+    it('PERF: the full living room (a table for six and six chairs, a chesterfield, two armchairs, six people) under 300 ms', () => {
       const { median, worst } = coldOf(FULL, household(6), 'dsn_full');
       console.log(
         `full living room: ${median.toFixed(0)} ms median, ${worst.toFixed(0)} worst of 7`,
@@ -380,7 +389,7 @@ describe('the solver', () => {
       expect(median).toBeLessThan(process.env.PERF ? HEAVY_PERF : 3 * HEAVY_PERF);
     });
 
-    it('PERF: a 3-seat sofa, two armchairs, a table for four and its chairs (four people) under 400 ms', () => {
+    it('PERF: a 3-seat sofa, two armchairs, a table for four and its chairs (four people) under 300 ms', () => {
       const { median, worst } = coldOf(
         living('sofa-3', 2, 'dining-4', 4),
         household(4),
@@ -392,7 +401,7 @@ describe('the solver', () => {
       expect(median).toBeLessThan(process.env.PERF ? HEAVY_PERF : 3 * HEAVY_PERF);
     });
 
-    it('PERF: a 3-seat sofa, two armchairs, a side table, a shelf and a table for four (six people) under 400 ms', () => {
+    it('PERF: a 3-seat sofa, two armchairs, a side table, a shelf and a table for four (six people) under 300 ms', () => {
       const { median, worst } = coldOf(SIDE_SHELF, household(6), 'dsn_side_shelf_perf');
       console.log(
         `sofa, two armchairs, side table, shelf: ${median.toFixed(0)} ms median, ${worst.toFixed(0)} worst of 7`,
@@ -558,6 +567,24 @@ describe('the solver', () => {
       expect(byRole(r, 'tv')).toHaveLength(1);
       expect(r.checks.filter((c) => c.key.startsWith('P2|faces'))).toEqual([]);
       expect(r.checks.filter((c) => c.key.startsWith('P2|apart') && c.hard)).toEqual([]);
+    });
+
+    it('a sofa swap names the sofa as a sentence would, without what follows a comma', () => {
+      const name = (id: string) =>
+        sofaName(furnitureKind(id) as NonNullable<ReturnType<typeof furnitureKind>>);
+      expect(name('sofa-3')).toBe('3-seat sofa');
+      expect(name('chesterfield-sofa')).toBe('chesterfield sofa');
+      expect(name('leather-sofa-rolled')).toBe('leather sofa');
+      const leather = {
+        ...sampleLiving,
+        items: sampleLiving.items.map((i) =>
+          i.ref === 'sofa1' ? { ...i, assetId: 'leather-sofa-rolled' } : i,
+        ),
+      };
+      const r = runOn(withEastWall(9.5), leather, couple, 'dsn_apart_leather');
+      expect(swaps(r)).toContain(
+        'Swapped the leather sofa for a 2-seat to keep 0.60 m to the dining table.',
+      );
     });
 
     it('0.35 m narrower, for four: nothing smaller seats them, so the check fails (never a silent gap)', () => {
