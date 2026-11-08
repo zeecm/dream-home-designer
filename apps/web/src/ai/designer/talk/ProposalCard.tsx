@@ -343,7 +343,11 @@ export const ProposalCard = memo(function ProposalCard({
   // A version to compare: this card's, once accepted (or an earlier design's).
   const versionId = card.design?.id ?? card.option?.version ?? null;
   const comparable = useDesigner((s) => !!versionId && s.designs.some((d) => d.id === versionId));
-  const running = card.status === 'running';
+  // Running in the record, with no run here, no checkpoint to carry on from and nothing to say
+  // about it (an older build dropped the checkpoint): shown as stopped, as it is.
+  const stale =
+    card.status === 'running' && card.kind === 'proposal' && !live && !card.option?.run && !resume;
+  const running = card.status === 'running' && !stale;
   const [expanded, setExpanded] = useState(newest);
   // The newest card opens; once a newer one comes it folds to its line (opened again by a
   // tap), so a long conversation works out one or two cards, not every one (QA P4-6).
@@ -755,7 +759,7 @@ export const ProposalCard = memo(function ProposalCard({
       {!running && card.status !== 'failed' && changes.length === 0 && !accepted.length && (
         <p className="talk-card-note">No changes from your plan as it is.</p>
       )}
-      {card.status === 'stopped' && missing.length > 0 && (
+      {(card.status === 'stopped' || stale) && missing.length > 0 && (
         <div className="talk-stopped">
           <p>
             {card.note ? `${card.note} ` : ''}Stopped before {missing.map((s) => s.name).join(', ')}{' '}

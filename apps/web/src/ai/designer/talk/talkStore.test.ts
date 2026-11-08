@@ -229,6 +229,8 @@ describe('a run’s checkpoint in its option (locked-phone runs, part 1)', () =>
     fixesLeft: 2,
     approved: 0.9,
     spent: 0.3,
+    inflight: [{ step: 'rm_bedroom', high: 0.12 }],
+    stopped: false,
     paused: null,
     times: [{ kind: 'room' as const, ms: 31_000 }],
   };

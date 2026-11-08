@@ -127,6 +127,12 @@ export interface RunOptions {
   onTimed?: (kind: 'layout' | 'room' | 'fix', ms: number) => void;
   /** A step cut off while the page was out of view was sent again on its return. */
   onResent?: (st: StepState) => void;
+  /**
+   * A step's request goes ('start'), or came back with its answer ('end'): the layout, a
+   * room's answer, a fix round (by the row's key). Not ended when the run stops or is
+   * interrupted mid-step.
+   */
+  onStep?: (key: string, kind: 'layout' | 'room' | 'fix', phase: 'start' | 'end') => void;
   onUsage?: (u: Usage) => void;
   /** Where a version is placed and checked (the designer's worker); else here, at once. */
   results?: (
@@ -351,6 +357,9 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       throttle,
       resumeOnReturn: true,
       onResent: () => o.onResent?.(st),
+      // No request is sent again past the run's figure or the tab's limit (the room gate's
+      // own check): the run is interrupted, and its card asks before more is spent.
+      mayRetry: () => (o.overLimit?.() ? 'this design has used what it was priced at.' : null),
     });
   }
 
@@ -385,7 +394,9 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
         previous: plan.layout.previous ?? null,
       });
       const t0 = Date.now();
+      o.onStep?.(st.key, 'layout', 'start');
       const concept = await step(prompt, st, (raw) => parseConcept(raw, bounds));
+      o.onStep?.(st.key, 'layout', 'end');
       // (A step sent again after the page was away took the time away too: not timed.)
       if (!st.resent) o.onTimed?.('layout', Date.now() - t0);
       if (!concept) return ended('failed');
@@ -463,7 +474,9 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       try {
         const parse = (raw: unknown) => parseSpaceDesign(raw, bounds);
         const t0 = Date.now();
+        o.onStep?.(st.key, 'room', 'start');
         const answer = await step(prompt, st, parse, onStart);
+        o.onStep?.(st.key, 'room', 'end');
         if (!st.resent) o.onTimed?.('room', Date.now() - t0);
         if (answer) {
           const merge = (a: SpaceDesign) =>
@@ -485,7 +498,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
             update();
             const fix: FixRequest = { round: fixes, failures: left, placed: now.placed };
             const tf = Date.now();
-            const resent = st.resent;
+            o.onStep?.(st.key, 'fix', 'start');
             const again = await step(
               roomStep(ctx, s, r.level, design.aliases, {
                 concept: design.concept,
@@ -498,7 +511,8 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
               st,
               parse,
             );
-            if (st.resent === resent) o.onTimed?.('fix', Date.now() - tf);
+            o.onStep?.(st.key, 'fix', 'end');
+            if (!st.resent) o.onTimed?.('fix', Date.now() - tf);
             st.fixing = null;
             if (!again) {
               // The fix didn't come: the answer before it stands, checked as it is.

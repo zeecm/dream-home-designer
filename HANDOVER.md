@@ -703,7 +703,10 @@ a network retry; away over 10 min, or after a reload, the card carries on by its
 plan unchanged, within the approved figure and the tab's limit, same model) or asks once: Carry on
 · at most US$x, or Keep as it is. Another tab holding the run shows "Designing in another tab" and
 queues for the lock. A screen wake lock is held while it runs (`talk/wakeLock.ts`); the card says
-the time left (`talk/timeLeft.ts`), on phones with "Keep this screen open".
+the time left (`talk/timeLeft.ts`), on phones with "Keep this screen open". Money guards (tech-lead
+review): a step is sent again at most twice and never past the figure or the tab's limit; spending
+and the steps in flight (at their most) are written as they happen and counted on carrying on;
+Stop or another plan opened marks the checkpoint stopped and writes the end by plan id.
 
 ## 5. Owner to-dos
 

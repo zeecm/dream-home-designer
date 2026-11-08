@@ -4,8 +4,8 @@ import { wouldPass } from '../spend';
 import { useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
 import { cardKey } from './cards';
-import { resumeFigure } from './pricing';
-import { carryOn, keepAsItIs, resumePriced, roomsDone, runHooks } from './propose';
+import { approvedLeft, resumeFigure } from './pricing';
+import { carryOn, endStopped, keepAsItIs, resumePriced, roomsDone, runHooks } from './propose';
 import { type RunHold, takeRunLock } from './runLock';
 import { type ResumeView, loadTalk, say, talkLevels, useTalk } from './useTalk';
 
@@ -88,6 +88,14 @@ async function decide(
     setView(key, null);
     return;
   }
+  // Stopped by the person (Stop, or another plan opened) before its end was written: ended
+  // so, never carried on and never asked about.
+  if (found.o.run.stopped) {
+    await endStopped(found.p, letter);
+    hold.release();
+    setView(key, null);
+    return;
+  }
   holds.set(key, hold);
   await offer(key, found.p, letter);
 }
@@ -112,11 +120,9 @@ async function offer(key: string, p: Proposal, letter: string) {
   const changed = !base || levelFingerprint(base) !== o.base.fingerprint;
   const recent = Date.now() - Date.parse(run.at) <= RESUME_MS;
   const sameModel = !!ai && ai.provider === run.provider && ai.model === run.model;
-  const approvedLeft = run.approved === null ? null : run.approved - run.spent;
-  const fits =
-    figure !== null &&
-    (approvedLeft === null || figure <= approvedLeft + 0.005) &&
-    !wouldPass(figure);
+  // What it may still spend: the steps that were in flight count at their most.
+  const may = approvedLeft(run);
+  const fits = figure !== null && (may === null || figure <= may + 0.005) && !wouldPass(figure);
   if (made && recent && !changed && sameModel && fits && !run.paused) {
     setView(key, { kind: 'carrying-on' });
     const r = await carryOn(p, letter, hold, null);

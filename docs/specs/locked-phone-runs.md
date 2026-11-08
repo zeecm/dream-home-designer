@@ -175,8 +175,20 @@ The figure on Carry on is the remaining steps at their high plus fix rounds left
   (`resume` in `talk/pricing.ts`).
 - The runner's requests carry `resumeOnReturn`: a step cut off while the page was hidden (or one
   that went quiet meanwhile) waits for the page to be back and online, then goes again at once,
-  not counted as a network retry; away more than 10 min, the run ends `interrupted` and its card
+  not counted as a network retry. Each send pays for its prompt again, so one step is sent again
+  at most twice, and never past the run's figure or the tab's limit (the room gate's own check,
+  as `mayRetry`); past either, or away more than 10 min, the run ends `interrupted` and its card
   asks. Talk calls keep their own recovery as it was.
+- What a run spent is written to its checkpoint as each request is metered, with each step in
+  flight and the most it may cost (`inflight`). Carrying on counts the steps that were in flight
+  at their most as spent (a page that died mid-step never metered them), so by itself it never
+  goes past the figure it was approved for.
+- Stop, or opening another plan mid-run, marks the checkpoint `stopped` before the requests are
+  aborted, and the run's end is written into its own plan's record whichever plan is open: a
+  stopped run is never carried on or asked about.
+- An older build reading a record drops the checkpoint (it doesn't know it). The option is then
+  running with nothing to carry on from: this build's card shows it as stopped, with its "Design …
+  too" buttons.
 - Differences from the copy above: the cost detail says "Kitchen was cut off and sent again: about
   ~US$0.03 extra may be billed." (the cause isn't kept after a reload); a run paused at a limit
   when the page died asks with the interrupted card, not the pause question; a Carry on priced

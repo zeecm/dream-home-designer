@@ -32,7 +32,15 @@ import { type StepState, blankStep, runDesign } from '../run';
 import { addUsage, capUsd, countRun, overLimit, priceTable, spent, usd } from '../spend';
 import { type Running, designOpts, useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
-import { type PriceInput, type Priced, figureHolds, finishedSpace, resumeFigure } from './pricing';
+import {
+  type PriceInput,
+  type Priced,
+  approvedLeft,
+  figureHolds,
+  finishedSpace,
+  resumeFigure,
+  spentWithInflight,
+} from './pricing';
 import { type RunHold, takeRunLock } from './runLock';
 import { talkStore } from './talkStore';
 import { threshold } from './threshold';
@@ -616,11 +624,9 @@ export async function carryOn(
     const figure = resumeFigure(made.est, run.fixesLeft);
     const shown = press?.shown ?? null;
     if (press && !figureHolds(shown, figure)) return 'dearer';
-    const approved = press
-      ? shown
-      : run.approved === null
-        ? figure
-        : Math.max(0, run.approved - run.spent);
+    // By itself: what is left of what it was approved for (the steps in flight counted at
+    // their most); on Carry on, the figure its button showed.
+    const approved = press ? shown : run.approved === null ? figure : approvedLeft(run);
     const sp: ScopePlan = {
       ...made.sp,
       draft: structuredClone(made.sp.draft),
@@ -704,14 +710,20 @@ async function runOption(
   const hold = from?.hold ?? (await takeRunLock(runId)) ?? { release: () => {} };
   const now = nowIso();
   const prior = from?.run;
+  // Carried on: the steps that were in flight when the page went count as spent at their most
+  // (they were never metered), and what it may spend now is on top of that.
+  const priorSpent = prior ? spentWithInflight(prior) : 0;
   const ck: RunCheckpoint = prior
     ? {
         ...structuredClone(prior),
         at: now,
         provider: ai.provider,
         model: ai.model,
-        approved: approved === null ? null : prior.spent + approved,
+        spent: priorSpent,
+        inflight: [],
+        approved: approved === null ? null : priorSpent + approved,
         paused: null,
+        stopped: false,
       }
     : {
         id: runId,
@@ -726,6 +738,8 @@ async function runOption(
         fixesLeft: FIX_PER_RUN,
         approved,
         spent: 0,
+        inflight: [],
+        stopped: false,
         paused: null,
         times: [],
       };
@@ -798,7 +812,9 @@ async function runOption(
   // The screen kept on while it runs (not while it waits at a limit).
   const screen = holdScreen((wake) => setLive({ wake }));
   const liveState = () => useTalk.getState().live?.state;
-  const spentRun = () => (liveState()?.usage ?? []).reduce((t, u) => t + (u.usd ?? 0), 0);
+  // What this run has spent, as each request is metered (the checkpoint has it at once).
+  let spentHere = 0;
+  const spentRun = () => spentHere;
   /** The most finishing may still cost: the steps not done, at their limit, and the fix rounds. */
   const remainingHigh = () => {
     if (!est.usd) return null;
@@ -825,16 +841,28 @@ async function runOption(
     ck.at = nowIso();
     return structuredClone(ck);
   };
+  /** The highest a step sent now may cost: its own estimate, else the dearest room's, a fix's. */
+  const highOf = (key: string, kind: 'layout' | 'room' | 'fix') => {
+    if (!est.usd) return 0;
+    if (kind === 'fix') return est.fixes > 0 ? est.usd.fix / est.fixes : 0;
+    const own = est.steps.find((x) => x.step === key)?.usd?.high;
+    return own ?? Math.max(0, ...est.steps.map((x) => x.usd?.high ?? 0));
+  };
   // The run's own figure: past what it was priced at, it asks as the tab's limit does. After
   // Finish, a new figure (what finishing may still cost) holds until the run ends.
   let cap = approved;
   let pastTab = false;
+  // Written to this plan's record by its id, whichever plan is open now (another plan opened
+  // mid-run still ends this one's run in its own record).
   const writeOption = (patch: (o: ProposalOption) => ProposalOption) =>
-    actProposal(p.id, (x) =>
-      x ? { ...x, options: x.options.map((o) => (o.letter === letter ? patch(o) : o)) } : x,
+    actProposal(
+      p.id,
+      (x) =>
+        x ? { ...x, options: x.options.map((o) => (o.letter === letter ? patch(o) : o)) } : x,
+      projectId,
     );
+  const writeRun = () => writeOption((o) => ({ ...o, run: structuredClone(ck) }));
   const save = async (d: DraftDesign, info: { fixesLeft: number }) => {
-    if (doc().id !== projectId) return;
     const copy = structuredClone(d);
     const run = checkpoint(copy, info.fixesLeft);
     await writeOption((o) => ({
@@ -846,8 +874,17 @@ async function runOption(
       run,
     }));
   };
+  // Stop (or another plan opened): marked stopped before the requests are aborted, so a page
+  // that goes before the run's end is written never carries it on.
+  setLive({
+    stop: () => {
+      ck.stopped = true;
+      void writeRun();
+      ctrl.abort();
+    },
+  });
   // Saved at once: a page that goes before the first step ends can carry on from the start.
-  await writeOption((o) => ({ ...o, run: structuredClone(ck) }));
+  await writeRun();
   const { state, design } = await runDesign({
     ai,
     ctx: sp.ctx,
@@ -869,7 +906,18 @@ async function runOption(
       if (r && r.ctrl === ctrl) useDesigner.setState({ run: { ...r, state: shown } });
     },
     onSave: save,
-    onUsage: addUsage,
+    onUsage: (u) => {
+      addUsage(u);
+      spentHere += u.usd ?? 0;
+      ck.spent = spentBefore + spentHere;
+      void writeRun();
+    },
+    onStep: (key, kind, phase) => {
+      // A step on its way, at its most: counted as spent if the page goes before it is back.
+      ck.inflight = ck.inflight.filter((x) => x.step !== key);
+      if (phase === 'start') ck.inflight = [...ck.inflight, { step: key, high: highOf(key, kind) }];
+      void writeRun();
+    },
     onTimed: (kind, ms) => {
       ck.times = [...ck.times, { kind, ms }].slice(-60);
     },
@@ -898,7 +946,7 @@ async function runOption(
         // Waiting for the person: the screen may sleep, and a page closed now asks again.
         screen.release();
         ck.paused = by;
-        void writeOption((o) => ({ ...o, run: structuredClone(ck) }));
+        void writeRun();
         setLive({
           pausedBy: by,
           remaining: more,
@@ -919,12 +967,10 @@ async function runOption(
       }),
   });
   screen.end();
-  if (state.phase === 'interrupted') {
+  if (state.phase === 'interrupted' && !ck.stopped) {
     // Away too long to go on by itself: the checkpoint stays, the card asks (resume.ts).
-    if (doc().id === projectId) {
-      const run = checkpoint(design, ck.fixesLeft);
-      await writeOption((o) => ({ ...o, run }));
-    }
+    const run = checkpoint(design, ck.fixesLeft);
+    await writeOption((o) => ({ ...o, run }));
     if (useTalk.getState().live?.ctrl === ctrl) useTalk.setState({ live: null });
     const r = useDesigner.getState().run;
     if (r?.ctrl === ctrl) useDesigner.setState({ run: null });
@@ -948,21 +994,21 @@ async function runOption(
         ? 'checked'
         : 'stopped';
   const cutOff = state.steps.reduce((t, s) => t + (s.cutOffHigh ?? 0), 0);
+  await writeOption((o) => {
+    // Ended: nothing to carry on from.
+    const { run: _ended, ...rest } = o;
+    return {
+      ...rest,
+      status,
+      // Named by the designer's summary (A keeps its room's name without one).
+      name: optionName(o, o.letter === 'A' ? o.name : undefined),
+      note: cutNote(
+        state.halt?.message ?? (failed ? (state.steps.find((s) => s.error)?.error ?? null) : null),
+      ),
+    };
+  });
+  // The conversation's lines, only while its plan is open (the record `act` writes is its).
   if (doc().id === projectId) {
-    await writeOption((o) => {
-      // Ended: nothing to carry on from.
-      const { run: _ended, ...rest } = o;
-      return {
-        ...rest,
-        status,
-        // Named by the designer's summary (A keeps its room's name without one).
-        name: optionName(o, o.letter === 'A' ? o.name : undefined),
-        note: cutNote(
-          state.halt?.message ??
-            (failed ? (state.steps.find((s) => s.error)?.error ?? null) : null),
-        ),
-      };
-    });
     if (state.phase === 'stopped') {
       await act({
         type: 'event',
@@ -993,4 +1039,24 @@ async function runOption(
 }
 
 /** Stops the design run going on (its finished rooms are kept). */
-export const stopTalkRun = () => useTalk.getState().live?.ctrl.abort();
+export const stopTalkRun = () => {
+  const l = useTalk.getState().live;
+  if (l?.stop) l.stop();
+  else l?.ctrl.abort();
+};
+
+/** Ends a run the person stopped whose end was never written: stopped, nothing carried on. */
+export async function endStopped(p: Proposal, letter: string) {
+  await actProposal(p.id, (x) =>
+    x
+      ? {
+          ...x,
+          options: x.options.map((o) => {
+            if (o.letter !== letter) return o;
+            const { run: _stopped, ...rest } = o;
+            return { ...rest, status: 'stopped' as const };
+          }),
+        }
+      : x,
+  );
+}

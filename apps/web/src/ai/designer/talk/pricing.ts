@@ -129,6 +129,18 @@ export function resumeFigure(est: RunEstimate, fixesLeft: number): number | null
   return est.usd.high + est.usd.fix * share;
 }
 
+/** What an interrupted run spent: what was metered, and the most each step in flight may cost. */
+export const spentWithInflight = (run: RunCheckpoint): number =>
+  run.spent + run.inflight.reduce((t, x) => t + x.high, 0);
+
+/**
+ * What an interrupted run may still spend of what it was approved for (null: no figure): less
+ * what it spent, and the steps that were in flight at their most (a page that died mid-step
+ * never metered them).
+ */
+export const approvedLeft = (run: RunCheckpoint): number | null =>
+  run.approved === null ? null : Math.max(0, run.approved - spentWithInflight(run));
+
 /**
  * Whether a press may go ahead on the figure its button showed: not if priced higher now (or
  * priced now and not then, or the other way round): its card shows the new figure and asks.

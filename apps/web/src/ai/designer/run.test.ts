@@ -16,7 +16,13 @@ import { answerFor, promptOf } from './fixtures/sample';
 import { type FixtureUsage, anthropicStream, geminiStream, openaiStream } from './fixtures/streams';
 import { type DraftDesign, QUIET_MS, type RunOptions, type RunState, runDesign } from './run';
 import { designerCannotUse, requestFor } from './stream';
-import { figureHolds, priceRequest, resumeFigure } from './talk/pricing';
+import {
+  approvedLeft,
+  figureHolds,
+  priceRequest,
+  resumeFigure,
+  spentWithInflight,
+} from './talk/pricing';
 
 const level = sampleFlatProject('prj_test').levels[0] as Level;
 const brief: DesignBrief = {
@@ -787,34 +793,77 @@ describe('a locked phone: a step cut off while away goes again on return (locked
     await vi.advanceTimersByTimeAsync(ms);
   }
 
-  it('the step in flight is sent again once the page is back, as often as it happens; finished ones never (criteria 1, 2)', async () => {
+  it('the step in flight is sent again once the page is back; four returns in a run carry on; finished steps never (criteria 1, 2)', async () => {
     const resent: string[] = [];
     const { prov, r, room3, of } = await midRun({ onResent: (st) => resent.push(st.label) });
-    for (let cycle = 1; cycle <= 4; cycle++) {
+    const room4 = prov.calls[4]?.step as string;
+    // Rooms 3 and 4 are each cut off twice as the phone locks, and each sent again.
+    for (const [cycle, step] of [room3, room3, room4, room4].entries()) {
+      const n = of(step).length;
       // (Ten seconds each: under the two minutes after which a quiet stream is cut off too.)
-      await away(r, () => of(room3).at(-1)?.cut(), 10_000);
+      await away(r, () => of(step).at(-1)?.cut(), 10_000);
       // Nothing goes while hidden.
-      expect(of(room3)).toHaveLength(cycle);
+      expect(of(step)).toHaveLength(n);
       turn('visible');
-      await until(() => of(room3).length === cycle + 1, `sent again (${cycle})`);
+      await until(() => of(step).length === n + 1, `sent again (${cycle + 1})`);
     }
     for (const c of prov.calls) c.release();
     const { state, design } = await r.run;
     expect(state.phase).toBe('done');
     expect(Object.values(design.spaces).every((s) => s.status === 'done')).toBe(true);
-    // The layout and the finished rooms were asked for once; the cut-off room five times.
+    // The layout and the finished rooms were asked for once; the cut-off rooms three times.
     const steps = prov.calls.map((c) => c.step);
     for (const s of new Set(steps)) {
-      expect(steps.filter((x) => x === s).length).toBe(s === room3 ? 5 : 1);
+      expect(steps.filter((x) => x === s).length).toBe(s === room3 || s === room4 ? 3 : 1);
     }
     const row = rowOf(state, room3);
     // Not network retries (two of those halt a run): sent again on return.
-    expect(row).toMatchObject({ resent: 4, retries: 0 });
+    expect(row).toMatchObject({ resent: 2, retries: 0 });
     const label = row?.label ?? '';
-    expect(resent).toEqual([label, label, label, label]);
+    expect(resent.filter((x) => x === label)).toHaveLength(2);
     // Each cut-off attempt is metered as estimated ("~").
     const tries = state.usage.filter((u) => u.step === row?.key);
-    expect(tries.map((u) => u.estimated)).toEqual([true, true, true, true, false]);
+    expect(tries.map((u) => u.estimated)).toEqual([true, true, false]);
+  });
+
+  it('five hide-and-show cycles on one step: sent again twice at most, then the run is interrupted', async () => {
+    const { prov, r, room3, of } = await midRun();
+    for (let cycle = 1; cycle <= 5; cycle++) {
+      turn('hidden');
+      of(room3).at(-1)?.cut();
+      await vi.advanceTimersByTimeAsync(10_000);
+      turn('visible');
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    for (const c of prov.calls) c.release();
+    const { state, design } = await r.run;
+    expect(state.phase).toBe('interrupted');
+    // The first request and two sent again: the third cut-off sends nothing more.
+    expect(of(room3)).toHaveLength(3);
+    const key = rowOf(state, room3)?.key as string;
+    expect(design.spaces[key]?.status).toBe('skipped');
+  });
+
+  it('nothing is sent again past what the run was approved for (the room gate’s own check)', async () => {
+    let spent = 0;
+    let cap = Number.POSITIVE_INFINITY;
+    const { prov, r, room3, of } = await midRun({
+      onUsage: (u) => {
+        spent += u.usd ?? 0;
+      },
+      overLimit: () => spent >= cap,
+    });
+    // What it was approved for is spent: the step cut off now is not sent again.
+    cap = spent;
+    const before = prov.calls.length;
+    await away(r, () => of(room3)[0]?.cut(), 10_000);
+    turn('visible');
+    await vi.advanceTimersByTimeAsync(1000);
+    for (const c of prov.calls) c.release();
+    const { state } = await r.run;
+    expect(state.phase).toBe('interrupted');
+    expect(prov.calls).toHaveLength(before);
+    expect(of(room3)).toHaveLength(1);
   });
 
   it('away more than 10 minutes: nothing is sent again, the run ends interrupted, its finished rooms kept', async () => {
@@ -874,6 +923,8 @@ describe('a locked phone: a step cut off while away goes again on return (locked
       fixesLeft: 2,
       approved: null,
       spent: 0,
+      inflight: [],
+      stopped: false,
       paused: null,
       times: [],
     };
@@ -894,6 +945,7 @@ describe('a locked phone: a step cut off while away goes again on return (locked
     const left = Object.entries(d.spaces)
       .filter(([, s]) => s.status !== 'done')
       .map(([k]) => k);
+    const key0 = left[0] as string;
     expect(left).toHaveLength(2);
     expect(priced?.sp.plan).toMatchObject({ layout: null, rooms: left });
     // Priced for what is left only: those two rooms' requests.
@@ -913,6 +965,13 @@ describe('a locked phone: a step cut off while away goes again on return (locked
     expect(figureHolds(0.4, 0.39)).toBe(true);
     expect(figureHolds(0.4, 0.41)).toBe(false);
     expect(figureHolds(null, 0.4)).toBe(false);
+    // By itself it may spend what is left of its figure, less what it spent and the steps
+    // that were in flight at their most (a page that died mid-step never metered them).
+    const cut = { ...run, approved: 1, spent: 0.2, inflight: [{ step: key0, high: 0.3 }] };
+    expect(spentWithInflight(cut)).toBeCloseTo(0.5, 9);
+    expect(approvedLeft(cut)).toBeCloseTo(0.5, 9);
+    expect(approvedLeft({ ...cut, spent: 0.9 })).toBe(0);
+    expect(approvedLeft({ ...cut, approved: null })).toBeNull();
     const prov2 = provider('anthropic', { auto: true });
     const again = await runDesign({
       ai: AI.anthropic,

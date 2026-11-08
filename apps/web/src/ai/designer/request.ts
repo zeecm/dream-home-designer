@@ -27,6 +27,11 @@ const BACK_MS = 10 * 60_000;
  * card asks before anything more is spent.
  */
 export const AWAY_MS = 10 * 60_000;
+/**
+ * How many times one step is sent again after the page came back: each time pays for its
+ * prompt again, so a third cut-off interrupts the run (its card asks before more is spent).
+ */
+export const RESENDS = 2;
 const LOWER: Record<Effort, Effort | null> = { high: 'medium', medium: 'low', low: null };
 const ABORT_TEXT = 'Stopped.';
 
@@ -194,8 +199,9 @@ export interface RequestOptions<T> {
   mayRetry?: () => string | null;
   /**
    * A design run's step: cut off while the page was out of view, it is sent again at once
-   * when the page is back (not counted as a network retry), or the run is interrupted
-   * (`Interrupted`) when it was away more than AWAY_MS. A talk call leaves this off.
+   * when the page is back (not counted as a network retry), at most RESENDS times and only
+   * while `mayRetry` allows (the run's figure and the tab's limit); else, or when the page was
+   * away more than AWAY_MS, the run is interrupted (`Interrupted`). A talk call leaves this off.
    */
   resumeOnReturn?: boolean;
   /** Sent again after the page came back. */
@@ -207,6 +213,8 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
   const { ai, st } = o;
   const name = PROVIDERS[ai.provider].short;
   watchPage();
+  // This request's own count (a row's fix round is a request of its own).
+  st.resent = 0;
   const throttle = o.throttle ?? { last: 0 };
   const fail = (text: string): null => {
     st.status = 'failed';
@@ -226,6 +234,9 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
   for (;;) {
     if (o.signal.aborted) throw new Stopped(ABORT_TEXT);
     const no = attempt++ > 0 ? (o.mayRetry?.() ?? null) : null;
+    // A design run's step isn't failed for it (it would never be asked for again): the run is
+    // interrupted with the step left to do, and its card asks.
+    if (no && o.resumeOnReturn) throw new Interrupted();
     if (no) return fail(`${st.label}: ${no}`);
     const ctrl = new AbortController();
     const signal = anySignal([o.signal, ctrl.signal]);
@@ -298,7 +309,8 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
         o.update();
         await backOnline(o.signal, Number.POSITIVE_INFINITY);
         if (o.signal.aborted) throw new Stopped(ABORT_TEXT);
-        if (awayFor > AWAY_MS) throw new Interrupted();
+        if (awayFor > AWAY_MS || (st.resent ?? 0) >= RESENDS || o.mayRetry?.())
+          throw new Interrupted();
         st.resent = (st.resent ?? 0) + 1;
         st.wait = null;
         o.onResent?.();

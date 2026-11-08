@@ -2089,8 +2089,35 @@ test.describe('a locked phone: resume and the wake lock (locked-phone runs, part
     await justDesign(page);
     await design(page, /^The whole flat · about US\$/);
     await expect.poll(() => waits.length, { timeout: 30_000 }).toBe(1);
+    // Every other room saved as done: only the kitchen is left (a reload now loses only it).
+    await expect
+      .poll(() => savedSpaces(page), { timeout: 30_000 })
+      .toEqual({ done: 3, other: ['rm_kitchen'] });
     return { m, waits };
   }
+
+  /** The running option's rooms as saved: how many done, and which are not. */
+  const savedSpaces = (page: Page) =>
+    page.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const r = indexedDB.open('dhd-talk');
+        r.onsuccess = () => resolve(r.result);
+        r.onerror = () => reject(r.error);
+      });
+      const all = await new Promise<
+        { options: { status: string; spaces: Record<string, { status: string }> }[] }[]
+      >((resolve) => {
+        const q = db.transaction('proposals', 'readonly').objectStore('proposals').getAll();
+        q.onsuccess = () => resolve(q.result);
+      });
+      db.close();
+      const o = all.flatMap((p) => p.options).find((x) => x.status === 'running');
+      const entries = Object.entries(o?.spaces ?? {});
+      return {
+        done: entries.filter(([, x]) => x.status === 'done').length,
+        other: entries.filter(([, x]) => x.status !== 'done').map(([k]) => k),
+      };
+    });
 
   /** Every request to our server, with its body (none may carry the run or the key). */
   const apiLog = (page: Page) => {
@@ -2100,6 +2127,55 @@ test.describe('a locked phone: resume and the wake lock (locked-phone runs, part
         sent.push(`${r.url()} ${r.postData() ?? ''}`);
     });
     return sent;
+  };
+
+  type RunRecord = {
+    at: string;
+    approved: number | null;
+    spent: number;
+    inflight: { step: string; high: number }[];
+    stopped: boolean;
+  };
+  /**
+   * The run checkpoints in `dhd-talk` as saved (`patch` merged into each first, as if the
+   * page had saved them so).
+   */
+  const runs = (page: Page, patch: Partial<RunRecord> | null = null) =>
+    page.evaluate(async (more) => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const r = indexedDB.open('dhd-talk');
+        r.onsuccess = () => resolve(r.result);
+        r.onerror = () => reject(r.error);
+      });
+      const store = db
+        .transaction('proposals', more ? 'readwrite' : 'readonly')
+        .objectStore('proposals');
+      const all = await new Promise<{ options: { run?: Record<string, unknown> }[] }[]>(
+        (resolve) => {
+          const q = store.getAll();
+          q.onsuccess = () => resolve(q.result);
+        },
+      );
+      const out: unknown[] = [];
+      for (const p of all) {
+        for (const o of p.options) {
+          if (!o.run) continue;
+          if (more) Object.assign(o.run, more);
+          out.push(o.run);
+        }
+        if (more) store.put(p);
+      }
+      await new Promise((r) => {
+        store.transaction.oncomplete = r;
+      });
+      db.close();
+      return out as RunRecord[];
+    }, patch);
+  /** Reopens the plan's conversation (after a reload). */
+  const reopen = async (page: Page) => {
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    await page.getByRole('button', { name: /^Designer · V1 on the table$/ }).click();
   };
 
   test('hidden mid-step, its request cut off, shown again: only that step goes again, four times running (1, 2, 7, 8, 13)', async ({
@@ -2165,6 +2241,13 @@ test.describe('a locked phone: resume and the wake lock (locked-phone runs, part
     const { m, waits } = await wholeFlat(page);
     const before = m.calls.length;
     const done = new Set(m.calls.filter((c) => c.step !== KITCHEN).map((c) => c.step));
+    // What it spent is saved as each request is metered, with the kitchen in flight at its most.
+    await expect
+      .poll(async () => (await runs(page))[0]?.inflight.map((x) => x.step) ?? [])
+      .toEqual(['rm_kitchen']);
+    const [saved] = await runs(page);
+    expect(saved?.spent).toBeGreaterThan(0);
+    expect(saved?.inflight[0]?.high).toBeGreaterThan(0);
     await page.reload();
     waits[0]?.(undefined);
     await waitSaved(page);
@@ -2232,27 +2315,7 @@ test.describe('a locked phone: resume and the wake lock (locked-phone runs, part
     waits[0]?.(undefined);
     await waitSaved(page);
     // Its last progress 11 minutes ago.
-    await page.evaluate(async () => {
-      const db = await new Promise<IDBDatabase>((resolve, reject) => {
-        const r = indexedDB.open('dhd-talk');
-        r.onsuccess = () => resolve(r.result);
-        r.onerror = () => reject(r.error);
-      });
-      const store = db.transaction('proposals', 'readwrite').objectStore('proposals');
-      const all = await new Promise<{ options: { run?: { at: string } }[] }[]>((resolve) => {
-        const q = store.getAll();
-        q.onsuccess = () => resolve(q.result);
-      });
-      for (const p of all) {
-        for (const o of p.options)
-          if (o.run) o.run.at = new Date(Date.now() - 11 * 60_000).toISOString();
-        store.put(p);
-      }
-      await new Promise((r) => {
-        store.transaction.oncomplete = r;
-      });
-      db.close();
-    });
+    await runs(page, { at: new Date(Date.now() - 11 * 60_000).toISOString() });
     await page.reload();
     await waitSaved(page);
     await page.keyboard.press('1');
@@ -2307,6 +2370,82 @@ test.describe('a locked phone: resume and the wake lock (locked-phone runs, part
       0,
     );
     expect(await dumpIdb(page)).not.toContain('fixesLeft');
+    expect(m.calls.length).toBe(n);
+  });
+
+  test('what was in flight when the page went counts as spent: past its figure so, it asks', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await setup(page);
+    const { m, waits } = await wholeFlat(page);
+    await page.reload();
+    waits[0]?.(undefined);
+    await waitSaved(page);
+    // Within its figure by what was metered; past it once the kitchen in flight counts.
+    const [saved] = await runs(page);
+    await runs(page, {
+      approved: (saved?.spent ?? 0) + 2,
+      inflight: [{ step: 'rm_kitchen', high: 2 }],
+    });
+    await page.reload();
+    const n = m.calls.length;
+    await reopen(page);
+    await expect(
+      card(page, 1).getByRole('button', { name: /^Carry on · at most US\$\d+\.\d\d$/ }),
+    ).toBeVisible();
+    await page.waitForTimeout(1000);
+    expect(m.calls.length).toBe(n);
+    await expect(log(page).getByText(/^Picked up where it stopped/)).toHaveCount(0);
+  });
+
+  test('another plan opened mid-run: the run stops for good, and its plan never carries it on', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await setup(page);
+    const { m, waits } = await wholeFlat(page);
+    const first = planId(page);
+    await page.getByRole('button', { name: 'Projects' }).click();
+    await page.getByRole('button', { name: 'New copy of the sample flat' }).click();
+    await page
+      .getByRole('dialog', { name: 'Stop designing and open the other plan?' })
+      .getByRole('button', { name: 'Stop and open' })
+      .click();
+    await waitSaved(page);
+    await expect.poll(() => planId(page)).not.toBe(first);
+    waits[0]?.(undefined);
+    const n = m.calls.length;
+    // Its end was written into its own plan's record, though another plan was open.
+    await expect.poll(async () => (await dumpIdb(page)).includes('fixesLeft')).toBe(false);
+    await page.goto(`/?p=${first}`);
+    await reopen(page);
+    await expect(card(page, 1).getByText(/^Stopped before .+ placed\./)).toBeVisible();
+    await page.waitForTimeout(1000);
+    await expect(panel(page).getByText(/stopped when the page closed|Picked up where/)).toHaveCount(
+      0,
+    );
+    expect(m.calls.length).toBe(n);
+  });
+
+  test('a checkpoint marked stopped (the page went right after Stop) is ended, never carried on', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await setup(page);
+    const { m, waits } = await wholeFlat(page);
+    await page.reload();
+    waits[0]?.(undefined);
+    await waitSaved(page);
+    await runs(page, { stopped: true });
+    await page.reload();
+    const n = m.calls.length;
+    await reopen(page);
+    await expect(card(page, 1).getByText(/^Stopped before .+ placed\./)).toBeVisible();
+    await expect(panel(page).getByText(/stopped when the page closed|Picked up where/)).toHaveCount(
+      0,
+    );
+    expect(await runs(page)).toEqual([]);
     expect(m.calls.length).toBe(n);
   });
 

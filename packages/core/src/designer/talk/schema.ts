@@ -440,9 +440,19 @@ export const RunCheckpoint = z.object({
   rooms: z.array(z.string()).nullable(),
   /** Fix requests it may still send. */
   fixesLeft: z.number().int().min(0),
-  /** The most it was approved for (US$), and what it has spent of it. */
+  /** The most it was approved for (US$), and what it has spent of it (as each request is metered). */
   approved: z.number().min(0).nullable(),
   spent: z.number().min(0),
+  /**
+   * Steps sent and not yet back, with the most each may cost: a page that dies mid-step never
+   * meters it, so carrying on counts this as spent.
+   */
+  inflight: z
+    .array(z.object({ step: z.string(), high: z.number().min(0) }))
+    .max(20)
+    .default([]),
+  /** Stopped by the person (Stop, or another plan opened): never carried on. */
+  stopped: z.boolean().default(false),
   /** Waiting at a limit when it was last saved. */
   paused: z.enum(['tab', 'approved']).nullable().default(null),
   /** How long its finished steps took (for the time left). */

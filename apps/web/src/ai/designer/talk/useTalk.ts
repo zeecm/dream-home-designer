@@ -40,6 +40,8 @@ export interface LiveRun {
   left?: TimeLeft | null;
   /** Whether the screen is kept on while it runs. */
   wake?: WakeState | null;
+  /** Stops it for good (marked stopped, then aborted): Stop, or another plan opened. */
+  stop?: () => void;
 }
 
 /**
@@ -295,15 +297,17 @@ export async function act(action: TalkAction): Promise<Conversation | null> {
 export async function actProposal(
   id: string,
   fn: (p: Proposal | null) => Proposal | null,
+  /** The plan it belongs to: the open one unless said (a run's end, after another opened). */
+  projectId = doc().id,
 ): Promise<Proposal | null> {
-  const projectId = doc().id;
   const s = await talkStore();
   let p: Proposal | null;
   try {
     p = await s.applyProposal(projectId, id, fn);
   } catch {
-    p = fn(useTalk.getState().proposals.find((x) => x.id === id) ?? null);
-    useTalk.setState({ note: UNSAVED });
+    const mine = doc().id === projectId;
+    p = fn(mine ? (useTalk.getState().proposals.find((x) => x.id === id) ?? null) : null);
+    if (mine) useTalk.setState({ note: UNSAVED });
   }
   if (p && doc().id === projectId) {
     useTalk.setState((st) => {
@@ -376,7 +380,10 @@ export async function ensureConversation(): Promise<Conversation | null> {
 // Another plan: its own conversation.
 useStore.subscribe((s, prev) => {
   if (s.editor.doc.id === prev.editor.doc.id) return;
-  useTalk.getState().live?.ctrl.abort();
+  // Leaving the plan stops its run for good: it is never carried on later.
+  const live = useTalk.getState().live;
+  if (live?.stop) live.stop();
+  else live?.ctrl.abort();
   useTalk.getState().reply?.ctrl.abort();
   useTalk.setState({
     projectId: null,
