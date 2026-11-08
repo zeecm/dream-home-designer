@@ -11,6 +11,7 @@ import {
   type ResultCheck,
   type Usage,
   changeSet,
+  designLevels,
   levelFingerprint,
   mergeChanges,
   optionTitle,
@@ -27,6 +28,8 @@ export interface CardModel {
   /** `proposalId:A`, or `d:designId`. */
   key: string;
   kind: 'proposal' | 'design';
+  /** The level it designs (the conversation's, or the version's own). */
+  levelId: string;
   n: number;
   /** "V4", or "V4B" for an alternative. */
   title: string;
@@ -63,10 +66,11 @@ export const versionKey = (d: Design, conversationId: string | null) =>
 export const earlierDesign = (d: Design, conversationId: string | null) =>
   !d.from || d.from.conversationId !== conversationId;
 
-export function optionCard(p: Proposal, o: ProposalOption): CardModel {
+export function optionCard(p: Proposal, o: ProposalOption, levelId: string): CardModel {
   return {
     key: cardKey(p, o.letter),
     kind: 'proposal',
+    levelId,
     n: p.n,
     title: optionTitle(p.n, o.letter, p.options.length),
     // With alternatives, each is named by its own idea (the title says it on a phone, where
@@ -102,6 +106,7 @@ export function designCard(d: Design, title = `V${d.n}`): CardModel {
   return {
     key: `d:${d.id}`,
     kind: 'design',
+    levelId: d.levelId,
     n: d.n,
     title,
     label: d.concept?.name ?? d.name,
@@ -119,11 +124,13 @@ export function designCard(d: Design, title = `V${d.n}`): CardModel {
   };
 }
 
-/** The plan a card is placed on and merged into: After when there is one, else the flat. */
-export function nowOf(project: Project): { now: Level; before: Level } | null {
-  const before = project.levels[0];
-  if (!before) return null;
-  return { now: project.renovation?.levels[0] ?? before, before };
+/**
+ * The level a card is placed on and merged into, of level `levelId`: its renovation when there
+ * is one, else the level as it is.
+ */
+export function nowOf(project: Project, levelId: string): { now: Level; before: Level } | null {
+  const l = designLevels(project, levelId);
+  return l ? { now: l.after ?? l.before, before: l.before } : null;
 }
 
 /**
@@ -131,7 +138,7 @@ export function nowOf(project: Project): { now: Level; before: Level } | null {
  * works it out (a calm "Checking…" shows; `useResultsTick` re-renders when it lands).
  */
 export function cardResult(project: Project, card: CardModel): DesignResult | null {
-  const b = nowOf(project);
+  const b = nowOf(project, card.levelId);
   if (!b) return null;
   return readResult(b.now, b.before, card.input, designOpts(project));
 }
@@ -141,7 +148,7 @@ export async function cardResultNow(
   project: Project,
   card: CardModel,
 ): Promise<DesignResult | null> {
-  const b = nowOf(project);
+  const b = nowOf(project, card.levelId);
   if (!b) return null;
   return requestResult(b.now, b.before, card.input, designOpts(project));
 }
@@ -149,7 +156,7 @@ export async function cardResultNow(
 const changesMemo = new Map<string, Change[]>();
 /** The card's changes from the plan as it is now. */
 export function cardChanges(project: Project, card: CardModel, r: DesignResult): Change[] {
-  const b = nowOf(project);
+  const b = nowOf(project, card.levelId);
   if (!b) return [];
   const inAlready = card.accepted.filter((a) => !a.out).map((a) => a.id);
   const key = `${card.key}|${levelFingerprint(b.now)}|${levelFingerprint(r.level)}|${inAlready.join(',')}`;
@@ -225,7 +232,7 @@ export function precheckOn(
   r: DesignResult | null,
   rates: Rates,
 ): { failing: ResultCheck[]; hdb: boolean; missing: boolean } {
-  const b = nowOf(project);
+  const b = nowOf(project, card.levelId);
   if (!b || !r) return { failing: [], hdb: false, missing: true };
   const changes = cardChanges(project, card, r);
   const merged = mergeChanges(b.now, r.level, changes, ticked);
@@ -259,12 +266,12 @@ export function putBackMoves<T extends { patches: unknown; out: boolean }>(
 
 /** Whether the plan the card would go on has changed since it was made. */
 export const planMoved = (project: Project, card: CardModel) => {
-  const b = nowOf(project);
+  const b = nowOf(project, card.levelId);
   return !!b && card.status !== 'running' && levelFingerprint(b.now) !== card.madeOn;
 };
 
-/** A card's head: on a plan of several levels it names the level it designs (the first). */
-export const headLabel = (project: Project, card: CardModel) =>
-  project.levels.length > 1 && project.levels[0]?.name
-    ? `${card.label} · ${project.levels[0].name}`
-    : card.label;
+/** A card's head: on a plan of several levels it names the level it designs. */
+export const headLabel = (project: Project, card: CardModel) => {
+  const name = project.levels.length > 1 ? designLevels(project, card.levelId)?.before.name : '';
+  return name ? `${card.label} · ${name}` : card.label;
+};

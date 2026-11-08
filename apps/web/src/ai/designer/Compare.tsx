@@ -1,7 +1,13 @@
-import { type Design, type DesignResult, type Level, renovationChanges } from '@dhd/core';
+import {
+  type Design,
+  type DesignResult,
+  type Level,
+  designLevels,
+  renovationChanges,
+} from '@dhd/core';
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { useProject } from '../../store';
+import { shownLevelId, useProject } from '../../store';
 import { Segmented } from '../../ui/fields';
 import { MiniLayout, sharedBox } from '../MiniLayout';
 import { ordered, problemsInOrder, togglePick } from './compare';
@@ -41,7 +47,9 @@ export function DesignerCompare() {
 
 function CompareView({ picks, designs }: { picks: string[]; designs: Design[] }) {
   const project = useProject();
-  const before = project.levels[0];
+  // The level the versions compared design (each version names its own), else the one shown.
+  const levelId = designs.find((d) => picks.includes(d.id))?.levelId ?? shownLevelId() ?? '';
+  const before = designLevels(project, levelId)?.before;
   const heading = useRef<HTMLHeadingElement>(null);
   const shown = ordered(designs, picks).join();
   const tick = useResultsTickN();
@@ -63,7 +71,7 @@ function CompareView({ picks, designs }: { picks: string[]; designs: Design[] })
       const d = designs.find((x) => x.id === id);
       // Placed by the designer's worker: a column waits for it, calmly.
       const v = d ? onPlanNow(d, designs, project) : null;
-      const b = v ? baseOf(project, v.base.variant) : null;
+      const b = v ? baseOf(project, v.base.variant, v.levelId) : null;
       const r = v && b ? readResult(b.base, b.before, v, designOpts(project)) : null;
       if (!d || !r) continue;
       // Against the flat as it is, as the drawing and the cost are (whatever it was made on).

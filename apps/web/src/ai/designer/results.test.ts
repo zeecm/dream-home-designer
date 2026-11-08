@@ -90,6 +90,7 @@ const stubDesign = (id: string) => ({ id, accepted: null }) as unknown as Design
 /** A scope press's price input on the sample (Living and dining, nothing accepted). */
 const priceIn = (): Omit<PriceInput, 'designs'> => ({
   project: sampleFlatProject('prj_price'),
+  levelId: sampleFlatProject('prj_price').levels[0]?.id ?? '',
   brief: tanBrief(),
   scope: { label: 'Living and dining', spaces: [SAMPLE_KEYS.living], all: false },
   words: '',

@@ -16,6 +16,7 @@ vi.mock('../../../store', () => ({
     editor: { doc: project, history: { past: [], future: [] } },
     role: 'owner',
   })),
+  shownLevelId: () => project.levels[0]?.id,
 }));
 vi.mock('../state', () => ({
   designOpts: () => ({}),

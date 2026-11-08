@@ -1,8 +1,8 @@
-import { usageTotals } from '@dhd/core';
+import { type Project, designLevels, usageTotals } from '@dhd/core';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useComments } from '../../comments/store';
 import { useEditor } from '../../editor';
-import { useStore } from '../../store';
+import { shownLevelId, useStore } from '../../store';
 import { Segmented } from '../../ui/fields';
 import { LayoutsDialog } from '../LayoutsDialog';
 import { usd } from './spend';
@@ -11,6 +11,10 @@ import { flatMoved, putBackWords, putItBack } from './talk/iterate';
 import { stopTalkRun } from './talk/propose';
 import { loadTalk, useTalk } from './talk/useTalk';
 
+/** Whether the level shown has rooms (the designer designs the level shown). */
+const hasRoomsShown = (doc: Project) =>
+  Object.keys(designLevels(doc, shownLevelId() ?? '')?.before.rooms ?? {}).length > 0;
+
 /**
  * Where the designer starts (Plan details ▸ Renovation, and the top bar on a computer): Talk
  * to the designer, or the conversation there is ("Designer · V4 on the table"), and Suggest
@@ -18,7 +22,7 @@ import { loadTalk, useTalk } from './talk/useTalk';
  */
 export function DesignerEntry() {
   const viewer = useStore((s) => s.role === 'viewer');
-  const hasRooms = useStore((s) => Object.keys(s.editor.doc.levels[0]?.rooms ?? {}).length > 0);
+  const hasRooms = useStore((s) => hasRoomsShown(s.editor.doc));
   const projectId = useStore((s) => s.editor.doc.id);
   const conv = useTalk((s) => (s.projectId === projectId ? s.conv : null));
   const proposals = useTalk((s) => s.proposals);
@@ -79,7 +83,7 @@ export function openTalk() {
 /** The top bar's Designer button, on a computer (UX §4.1). */
 export function DesignerButton() {
   const viewer = useStore((s) => s.role === 'viewer');
-  const hasRooms = useStore((s) => Object.keys(s.editor.doc.levels[0]?.rooms ?? {}).length > 0);
+  const hasRooms = useStore((s) => hasRoomsShown(s.editor.doc));
   const open = useDesigner((s) => s.panel);
   const comments = useComments((s) => s.panelOpen);
   if (viewer) return null;

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { furnishedSample } from '../../fixtures/furnishedSample';
 import { sampleFlatProject } from '../../fixtures/sampleFlat';
+import { twoLevelProject } from '../../fixtures/twoLevels';
 import { type EditorDoc, dispatch, emptyHistory, redo, undo } from '../../history';
+import { AFTER_SUFFIX } from '../../levels';
 import type { Level } from '../../schema';
 import { acceptDesign, mergeDesign } from '../accept';
 import {
@@ -270,6 +272,32 @@ describe('mergeChanges and acceptChanges (criterion 23)', () => {
     const s3 = dispatch(s1, putPlanBack(lvl.id, lvl));
     expect(reno(s3).items).toEqual({});
     expect(reno(s3).walls).toEqual(lvl.walls);
+  });
+
+  it('putPlanBack on a home of two levels puts back its own level only', () => {
+    const two = twoLevelProject();
+    const [ground, upper] = two.levels as [Level, Level];
+    const copy = (l: Level) => ({ ...structuredClone(l), id: `${l.id}${AFTER_SUFFIX}` });
+    const gAfter = copy(ground);
+    const uAfter = copy(upper);
+    const gItem = Object.keys(gAfter.items)[0];
+    const uItem = Object.keys(uAfter.items)[0];
+    if (!gItem || !uItem) throw new Error('levels without items');
+    delete gAfter.items[gItem];
+    delete uAfter.items[uItem];
+    const s0: EditorDoc = {
+      doc: { ...two, renovation: { levels: [gAfter, uAfter] } },
+      history: emptyHistory(),
+    };
+    // Upper back as it was: Ground's own change stays, and so does the renovation.
+    const s1 = dispatch(s0, putPlanBack(upper.id, null));
+    const after = s1.doc.renovation?.levels ?? [];
+    expect(after.find((l) => l.id === uAfter.id)?.items).toEqual(upper.items);
+    expect(after.find((l) => l.id === gAfter.id)?.items[gItem]).toBeUndefined();
+    // Ground back too: nothing is changed any more, so the renovation goes.
+    const s2 = dispatch(s1, putPlanBack(ground.id, null));
+    expect(s2.doc.renovation).toBeUndefined();
+    expect(undo(s2).doc).toEqual(s1.doc);
   });
 });
 

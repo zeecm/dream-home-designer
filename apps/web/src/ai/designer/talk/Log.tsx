@@ -38,7 +38,7 @@ import { ProposalTurn } from './Options';
 import { ProposalCard } from './ProposalCard';
 import { ReplyParts, ReplyText, SentState, Streaming } from './Talk';
 import { lineState, redoLine, undoLine } from './accept';
-import { type CardModel, designCard, earlierDesign, optionCard } from './cards';
+import { type CardModel, designCard, earlierDesign, nowOf, optionCard } from './cards';
 import { dayMark } from './days';
 import {
   answerCost,
@@ -51,7 +51,7 @@ import {
 import { toNewest } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { lineTitle, versionTitle } from './titles';
-import { act, newId, nowIso, talkLevel, useBusy, useTalk } from './useTalk';
+import { act, designLevelId, newId, nowIso, talkLevel, useBusy, useTalk } from './useTalk';
 
 /**
  * The conversation's log (UX §5.3, §6): your turns in a bubble on the right, the designer's
@@ -220,7 +220,8 @@ function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
   const ai = useAi();
   const busy = useBusy();
   const { prices } = useSpend();
-  const level = project.renovation?.levels[0] ?? project.levels[0];
+  // The level the conversation designs (on the settled plan).
+  const level = nowOf(project, designLevelId())?.now;
   const scopes = useMemo<ScopeRef[]>(
     () =>
       level
@@ -323,7 +324,8 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
   const busy = useBusy();
   const project = useSettledProject();
   const { prices } = useSpend();
-  const level = project.renovation?.levels[0] ?? project.levels[0];
+  // The level the conversation designs (on the settled plan).
+  const level = nowOf(project, designLevelId())?.now;
   const first = useMemo<ScopeRef | null>(() => {
     if (t.just) return t.just;
     if (!t.scope.all || !level) return null;
@@ -515,7 +517,7 @@ const cardModels = new WeakMap<Proposal, CardModel[]>();
 function cardsOf(p: Proposal): CardModel[] {
   let cs = cardModels.get(p);
   if (!cs) {
-    cs = p.options.map((o) => optionCard(p, o));
+    cs = p.options.map((o) => optionCard(p, o, designLevelId()));
     cardModels.set(p, cs);
   }
   return cs;

@@ -1,7 +1,14 @@
-import { type LayoutOp, type Level, adoptLayout, applyLayout, renovationChanges } from '@dhd/core';
+import {
+  type LayoutOp,
+  type Level,
+  adoptLayout,
+  applyLayout,
+  designLevels,
+  renovationChanges,
+} from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../editor';
-import { useProject, useStore } from '../store';
+import { shownLevelId, useProject, useStore } from '../store';
 import { changeText } from '../ui/Renovation';
 import { icons } from '../ui/icons';
 import { AiSettingsDialog } from './AiSettingsDialog';
@@ -55,8 +62,8 @@ export function LayoutsDialog({
   useEffect(() => () => busy?.abort(), [busy]);
   const close = () => ref.current?.close();
 
-  // Always from the flat as it is (Before), whichever version is shown.
-  const before = () => useStore.getState().editor.doc.levels[0];
+  // Always from the level shown as it is (Before), whichever version is shown.
+  const before = () => designLevels(useStore.getState().editor.doc, shownLevelId() ?? '')?.before;
 
   const run = async () => {
     const level = before();

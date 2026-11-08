@@ -10,6 +10,7 @@ import {
   acceptChanges,
   allowedChanges,
   cut,
+  designLevels,
   levelFingerprint,
   mergeChanges,
   partsOf,
@@ -136,7 +137,7 @@ async function acceptOnce(
   waive: { key: string; text: string }[],
 ): Promise<string | null> {
   const project = useStore.getState().editor.doc;
-  const b = nowOf(project);
+  const b = nowOf(project, card.levelId);
   const r = await cardResultNow(project, card);
   if (!b || !r) return nothing(CHANGED);
   const changes = cardChanges(project, card, r);
@@ -189,7 +190,7 @@ async function acceptOnce(
   const step = now.history.past.at(-1);
   if (step) steps.set(eventId, step.patches);
   useStore.setState({ toast: null });
-  const after = now.doc.renovation?.levels[0];
+  const after = designLevels(now.doc, card.levelId)?.after;
   const at = nowIso();
   const waivers = [...card.waivers, ...waiving.map((w) => ({ ...w, at }))].filter(
     (w, i, all) => all.findIndex((x) => x.key === w.key) === i,
@@ -311,7 +312,7 @@ async function keepVersion(
         {
           id: o.designId,
           projectId,
-          levelId: useStore.getState().editor.doc.levels[0]?.id ?? '',
+          levelId: card.levelId,
           name: cut(o.concept?.name ?? card.label, 80),
           parent: null,
           createdAt: card.at,

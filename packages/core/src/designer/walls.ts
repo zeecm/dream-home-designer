@@ -115,8 +115,10 @@ export function applyDesignWalls(
     const refused: { i: number; note: Note }[] = [];
     const structural: string[] = [];
     const apply = (cmd: Command) => {
+      // The level alone, as a home of one level, through the command.
       const doc = { levels: [lvl] } as unknown as Project;
-      lvl = produce(doc, (d) => cmd.recipe(d))?.levels[0] ?? lvl;
+      const [next] = produce(doc, (d) => cmd.recipe(d))?.levels ?? [];
+      lvl = next ?? lvl;
     };
     ops.forEach((o, i) => {
       if (skip.has(i)) return;

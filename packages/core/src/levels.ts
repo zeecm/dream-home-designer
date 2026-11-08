@@ -14,6 +14,23 @@ export function findLevel<L extends { id: string }>(p: HasLevels<L>, id: string)
   return p.levels.find((l) => l.id === id) ?? p.renovation?.levels.find((l) => l.id === id);
 }
 
+/**
+ * One level of a home, as the designer designs it: the flat as it is (`before`) and its
+ * renovation (`after`, once there is one). Null when the plan has no such level.
+ */
+export function designLevels<L extends { id: string }>(
+  p: HasLevels<L>,
+  levelId: string,
+): { before: L; after: L | undefined } | null {
+  const before = p.levels.find((l) => l.id === levelId);
+  if (!before) return null;
+  return { before, after: p.renovation?.levels.find((l) => l.id === `${levelId}${AFTER_SUFFIX}`) };
+}
+
+/** A level's id in the plan as it is (its renovation's copy has `AFTER_SUFFIX` added). */
+export const beforeId = (id: string) =>
+  id.endsWith(AFTER_SUFFIX) ? id.slice(0, -AFTER_SUFFIX.length) : id;
+
 /** In a recipe: the level with this id, wherever it is; throws if there's none. */
 export function draftLevel(d: Draft<Project>, id: string): Draft<Level> {
   const l = findLevel<Draft<Level>>(d, id);

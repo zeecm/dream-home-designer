@@ -1,8 +1,15 @@
-import { type Bounds, type DesignBrief, optionTitle, roomShapes, spentOf } from '@dhd/core';
+import {
+  type Bounds,
+  type DesignBrief,
+  designLevels,
+  optionTitle,
+  roomShapes,
+  spentOf,
+} from '@dhd/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useEditor } from '../../../editor';
-import { useProject, useStore } from '../../../store';
+import { shownLevelId, useProject, useStore } from '../../../store';
 import { icons } from '../../../ui/icons';
 import { AiSettingsDialog } from '../../AiSettingsDialog';
 import { aiSettings } from '../../credentials';
@@ -21,7 +28,15 @@ import { stopTalkRun } from './propose';
 import { focusInLog, keepFocus, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { recoverPending, stopReply } from './turn';
-import { act, ensureConversation, newId, nowIso, talkLevel, useTalk } from './useTalk';
+import {
+  act,
+  designLevelId,
+  ensureConversation,
+  newId,
+  nowIso,
+  talkLevel,
+  useTalk,
+} from './useTalk';
 import { useProposalView } from './view';
 
 /**
@@ -75,7 +90,7 @@ function OnTheTable() {
     if (!proposal) return null;
     const mine = shown?.startsWith(`${proposal.id}:`) ? shown.slice(proposal.id.length + 1) : null;
     const o = proposal.options.find((x) => x.letter === mine) ?? proposal.options.at(-1);
-    return o ? optionCard(proposal, o) : null;
+    return o ? optionCard(proposal, o, designLevelId()) : null;
   }, [proposal, shown]);
   const tick = useResultsTickN();
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
@@ -174,6 +189,25 @@ function OnTheTable() {
         </>
       )}
     </section>
+  );
+}
+
+/**
+ * A home of several levels is designed a level at a time: when the plan shows another level
+ * than the one this conversation designs, a calm line says so (its cards stay on their level).
+ */
+function OtherLevel() {
+  const project = useProject();
+  useEditor((s) => s.variant);
+  const mine = useTalk((s) => s.conv?.levelId);
+  const shown = shownLevelId();
+  if (!mine || !shown || mine === shown) return null;
+  const name = (id: string) => designLevels(project, id)?.before.name ?? 'another level';
+  return (
+    <p className="field-hint talk-memory" data-other-level="">
+      This conversation designs {name(mine)}; the plan shows {name(shown)}. Its proposals stay on{' '}
+      {name(mine)}. Start over to design {name(shown)}.
+    </p>
   );
 }
 
@@ -357,7 +391,7 @@ export function TalkPanel() {
   );
   const wantSide = useDesigner((s) => s.wantSide);
   useEffect(() => {
-    const before = project.levels[0];
+    const before = designLevels(project, designLevelId())?.before;
     const ed = useEditor.getState();
     if (!previewing || !shown || pv.card !== shown || !pv.merged || !before) {
       if (ed.preview && !(ed.preview.start && !shown)) ed.setPreview(null);
@@ -366,7 +400,7 @@ export function TalkPanel() {
     const side = wantSide ?? ed.preview?.side ?? 'version';
     if (wantSide) useDesigner.setState({ wantSide: null });
     ed.setPreview({ level: pv.merged, before, label: pv.label, side });
-  }, [previewing, shown, pv, project.levels, wantSide]);
+  }, [previewing, shown, pv, project, wantSide]);
   // While a proposal is on the plan its electrical notes read amber (notes, not failures).
   const previewOn = useEditor((s) => !!s.preview && s.preview.side === 'version');
   useEffect(() => {
@@ -644,6 +678,7 @@ export function TalkPanel() {
         </p>
       )}
       {note && <p className="field-hint talk-memory">{note}</p>}
+      <OtherLevel />
       {view === 'log' && <OnTheTable />}
       <div className="talk-body">
         {view === 'know' ? (

@@ -8,6 +8,7 @@ import {
   copiedLine,
   costEstimate,
   defaultBrief,
+  designLevels,
   handEditCount,
   handEdits,
   lastAccepted,
@@ -17,14 +18,25 @@ import {
 } from '@dhd/core';
 import { useRates } from '../../../cost/estimate';
 import { useEditor } from '../../../editor';
-import { useStore } from '../../../store';
+import { shownLevelId, useStore } from '../../../store';
 import { useDesigner } from '../state';
 import { rememberPutBack } from './accept';
 import { type CardModel, nowOf } from './cards';
 import { numbered } from './propose';
 import { talkStore } from './talkStore';
 import { versionTitle } from './titles';
-import { act, actProposal, loadTalk, newId, nowIso, say, talkLevel, useTalk } from './useTalk';
+import {
+  act,
+  actProposal,
+  designLevelId,
+  loadTalk,
+  newId,
+  nowIso,
+  say,
+  talkLevel,
+  talkLevels,
+  useTalk,
+} from './useTalk';
 
 /**
  * Going back and keeping a copy (slice 2, PR 3): Bring this back, My plan before the designer
@@ -34,6 +46,10 @@ import { act, actProposal, loadTalk, newId, nowIso, say, talkLevel, useTalk } fr
 
 const doc = () => useStore.getState().editor.doc;
 const toast = (text: string) => useStore.setState({ toast: { text, at: Date.now() } });
+
+/** The versions of the level the conversation designs (another level's never count). */
+const levelDesigns = () =>
+  useDesigner.getState().designs.filter((d) => d.levelId === designLevelId());
 
 /** What a card or a version is called where it is brought back from ("V2", "V4B"). */
 const titleOf = (src: BringSource) =>
@@ -60,13 +76,13 @@ export async function bringBack(src: BringSource): Promise<string | null> {
 async function bringBackOnce(src: BringSource): Promise<string | null> {
   const conv = useTalk.getState().conv;
   const project = doc();
-  const b = nowOf(project);
+  const b = nowOf(project, designLevelId());
   if (!conv || !b) return null;
   const fp = await (await talkStore()).putLevel(project.id, b.now);
   // What the person changed by hand since the last accept (or since the conversation began)
   // stays as they left it, as a fresh proposal keeps it (QA P4-2).
-  const after = project.renovation?.levels[0];
-  const last = lastAccepted(useDesigner.getState().designs, after);
+  const after = talkLevels()?.after;
+  const last = lastAccepted(levelDesigns(), after);
   const ref = last?.accepted?.level ?? (after ? await startLevel() : null);
   const held = after && ref ? handEdits(ref, after) : [];
   const proposalId = newId('prop');
@@ -79,7 +95,7 @@ async function bringBackOnce(src: BringSource): Promise<string | null> {
     turnId,
     conversationId: conv.id,
     brief: conv.brief,
-    base: { variant: project.renovation ? 'after' : 'before', fingerprint: fp },
+    base: { variant: after ? 'after' : 'before', fingerprint: fp },
     held,
   });
   await actProposal(proposalId, () => p);
@@ -131,7 +147,7 @@ export const startDay = () => {
  */
 export async function showStart() {
   const level = await startLevel();
-  const before = doc().levels[0];
+  const before = talkLevels()?.before;
   if (!level || !before) {
     toast('The plan from before the designer isn’t kept in this browser.');
     return;
@@ -150,7 +166,7 @@ export async function showStart() {
 /** Whether the flat as it is (Before) has changed since the conversation started. */
 export function flatMoved(): boolean {
   const conv = useTalk.getState().conv;
-  const before = doc().levels[0];
+  const before = talkLevels()?.before;
   if (!conv || !before) return false;
   return conv.start.beforeFp !== levelFingerprint(before);
 }
@@ -162,8 +178,8 @@ export function flatMoved(): boolean {
  */
 export function putBackWords(start: Level, day: string): string {
   const conv = useTalk.getState().conv;
-  const after = doc().renovation?.levels[0];
-  const last = lastAccepted(useDesigner.getState().designs, after);
+  const after = talkLevels()?.after;
+  const last = lastAccepted(levelDesigns(), after);
   // Each piece added, removed or moved by hand counts (three sofas are three; QA R1).
   const hand = after ? handEditCount(last?.accepted?.level ?? start, after) : 0;
   const byHand = hand ? `${hand} ${hand === 1 ? 'change' : 'changes'} you made by hand` : '';
@@ -179,7 +195,7 @@ export function putBackWords(start: Level, day: string): string {
  */
 export async function putItBack(): Promise<boolean> {
   const conv = useTalk.getState().conv;
-  const before = doc().levels[0];
+  const before = talkLevels()?.before;
   if (!conv || !before) return false;
   const after = conv.start.afterFp
     ? await (await talkStore()).getLevel(doc().id, conv.start.afterFp)
@@ -212,11 +228,9 @@ export async function putItBack(): Promise<boolean> {
 
 /** The renovation's cost, as the cost lens says it ("about S$31–38k"), or null without one. */
 function costWords(): string | null {
-  const project = doc();
-  const before = project.levels[0];
-  const after = project.renovation?.levels[0];
-  if (!before || !after) return null;
-  const c = costEstimate(before, after, useRates.getState().rates);
+  const levels = talkLevels();
+  if (!levels?.after) return null;
+  const c = costEstimate(levels.before, levels.after, useRates.getState().rates);
   const k = (v: number) => Math.round(v / 1000);
   return c.high > 0 ? `about S$${k(c.low)}–${k(c.high)}k` : null;
 }
@@ -279,20 +293,23 @@ export async function downloadConversation() {
 export async function startOver(keep: boolean): Promise<boolean> {
   const { conv, live, reply } = useTalk.getState();
   const project = doc();
-  const before = project.levels[0];
-  const level = talkLevel();
-  if (!conv || !before || !level || live || reply) return false;
+  // The new conversation designs the level shown (the old one may have designed another).
+  const levelId = shownLevelId() ?? designLevelId();
+  const levels = designLevels(project, levelId);
+  if (!conv || !levels || live || reply) return false;
+  const { before, after } = levels;
+  const level = after ?? before;
   const s = await talkStore();
   const beforeFp = await s.putLevel(project.id, before);
-  const after = project.renovation?.levels[0];
   const afterFp = after ? await s.putLevel(project.id, after) : null;
   const fresh = await act({
     type: 'restart',
     fromId: conv.id,
+    levelId,
     id: newId('conv'),
     at: nowIso(),
     keep,
-    brief: { ...defaultBrief(), start: project.renovation ? 'after' : 'before' },
+    brief: { ...defaultBrief(), start: after ? 'after' : 'before' },
     beforeFp,
     afterFp,
     level,

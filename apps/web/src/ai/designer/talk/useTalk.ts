@@ -5,11 +5,12 @@ import {
   type QuestionKey,
   type TalkAction,
   defaultBrief,
+  designLevels,
   levelFingerprint,
   talk,
 } from '@dhd/core';
 import { create } from 'zustand';
-import { useStore } from '../../../store';
+import { shownLevelId, useStore } from '../../../store';
 import type { RunState } from '../run';
 import { getBrief, loadDesigns, putBrief, useDesigner } from '../state';
 import { onOtherTab, talkStore, talkStoreReady } from './talkStore';
@@ -140,11 +141,26 @@ export const newId = (prefix: string) =>
 export const nowIso = () => new Date().toISOString();
 
 const doc = () => useStore.getState().editor.doc;
-/** The level the conversation designs: After when there is a renovation, else the flat. */
-export const talkLevel = () => {
-  const d = doc();
-  return d.renovation?.levels[0] ?? d.levels[0];
+
+/**
+ * The level the conversation designs (a home of several levels is designed a level at a time):
+ * its own, set from the level shown when it started. Before one starts, or if its level has
+ * gone from the plan, the level shown.
+ */
+export const designLevelId = (): string => {
+  const id = useTalk.getState().conv?.levelId;
+  if (id && designLevels(doc(), id)) return id;
+  return shownLevelId() ?? '';
 };
+
+/** That level as the designer works on it: its renovation when there is one, else as it is. */
+export const talkLevel = () => {
+  const l = designLevels(doc(), designLevelId());
+  return l ? (l.after ?? l.before) : undefined;
+};
+
+/** The level it designs, as it is and in the renovation. */
+export const talkLevels = () => designLevels(doc(), designLevelId());
 
 export const say = (text: string) => useTalk.setState({ said: text });
 
@@ -260,9 +276,11 @@ export async function ensureConversation(): Promise<Conversation | null> {
   if (useTalk.getState().projectId !== project.id) await loadTalk(project.id);
   const have = useTalk.getState().conv;
   if (have) return have;
-  const before = project.levels[0];
+  // The level shown: the one this conversation will design.
+  const levels = talkLevels();
   const level = talkLevel();
-  if (!before || !level) return null;
+  if (!levels || !level) return null;
+  const { before, after } = levels;
   const s = await talkStore();
   // One this build can't read is kept aside (never overwritten), and the log says so; one a
   // newer build wrote stays as it is, and this tab only says to reload.
@@ -277,11 +295,10 @@ export async function ensureConversation(): Promise<Conversation | null> {
   const form = await getBrief(project.id);
   const brief: DesignBrief = {
     ...(form ?? defaultBrief()),
-    start: project.renovation ? 'after' : 'before',
+    start: after ? 'after' : 'before',
   };
   const designs = useDesigner.getState().designs;
   const beforeFp = await s.putLevel(project.id, before);
-  const after = project.renovation?.levels[0];
   const afterFp = after ? await s.putLevel(project.id, after) : null;
   const started = await act({
     type: 'start',

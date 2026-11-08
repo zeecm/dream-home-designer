@@ -1,3 +1,4 @@
+import { designLevels } from '../../levels';
 import type { Level, Project } from '../../schema';
 import { aliasesFor } from '../aliases';
 import type { ContextInput } from '../describe';
@@ -45,14 +46,18 @@ export interface RunPlan {
  * stable context, the requests a whole design or a change makes, and what they'll cost.
  */
 
-/** The level a design starts from: After when asked and there is one, else the flat as it is. */
+/**
+ * The level a design starts from, of level `levelId` (a home of several levels is designed a
+ * level at a time): After when asked and there is one, else the flat as it is.
+ */
 export function baseOf(
   doc: Project,
   want: 'after' | 'before',
+  levelId: string,
 ): { base: Level; before: Level; variant: 'after' | 'before' } | null {
-  const before = doc.levels[0];
-  if (!before) return null;
-  const after = doc.renovation?.levels[0];
+  const l = designLevels(doc, levelId);
+  if (!l) return null;
+  const { before, after } = l;
   return want === 'after' && after
     ? { base: after, before, variant: 'after' }
     : { base: before, before, variant: 'before' };
@@ -61,9 +66,10 @@ export function baseOf(
 export function contextFor(
   doc: Project,
   brief: DesignBrief,
+  levelId: string,
   aliases?: Record<string, string>,
 ): (ContextInput & { variant: 'after' | 'before' }) | null {
-  const b = baseOf(doc, brief.start);
+  const b = baseOf(doc, brief.start, levelId);
   if (!b) return null;
   return {
     base: b.base,
@@ -79,10 +85,10 @@ export function contextFor(
 /** A version placed on the plan as it is now (on After, if it was designed on it). */
 export function resultFor(
   doc: Project,
-  d: Pick<Design, 'id' | 'brief' | 'aliases' | 'concept' | 'spaces' | 'base'>,
+  d: Pick<Design, 'id' | 'brief' | 'aliases' | 'concept' | 'spaces' | 'base' | 'levelId'>,
   opts: DesignOptions,
 ): DesignResult | null {
-  const b = baseOf(doc, d.base.variant);
+  const b = baseOf(doc, d.base.variant, d.levelId);
   if (!b) return null;
   return designResult(b.base, b.before, d, opts);
 }
@@ -245,8 +251,12 @@ export function changeFrom(
   designs: Design[],
   doc: Project,
 ): { v: Design; held: Lock[]; accepted: Design | null } {
-  const after = doc.renovation?.levels[0];
-  const accepted = lastAccepted(designs, after);
+  // Its own level's renovation, and the versions of that level.
+  const after = designLevels(doc, v.levelId)?.after;
+  const accepted = lastAccepted(
+    designs.filter((d) => d.levelId === v.levelId),
+    after,
+  );
   if (!accepted?.accepted || !after) return { v, held: [], accepted: null };
   const wallsIn = wallsInAfter(v, designs, after);
   return {
@@ -419,13 +429,14 @@ export function planScope(
   scope: ScopeRef,
   brief0: DesignBrief,
   project: Project,
+  levelId: string,
   designs: Design[],
   words: string,
   designId: string,
   opts: DesignOptions,
   talk?: TalkAsk,
 ): ScopePlan | null {
-  const sp = planScopeOnly(scope, brief0, project, designs, words, designId, opts);
+  const sp = planScopeOnly(scope, brief0, project, levelId, designs, words, designId, opts);
   return sp && talk ? { ...sp, plan: { ...sp.plan, talk } } : sp;
 }
 
@@ -433,16 +444,19 @@ function planScopeOnly(
   scope: ScopeRef,
   brief0: DesignBrief,
   project: Project,
-  designs: Design[],
+  levelId: string,
+  designs0: Design[],
   words: string,
   designId: string,
   opts: DesignOptions,
 ): ScopePlan | null {
-  const brief: DesignBrief = { ...brief0, start: project.renovation ? 'after' : 'before' };
+  // The level designed, and its own versions (another level's never count).
+  const after = designLevels(project, levelId)?.after;
+  const designs = designs0.filter((d) => d.levelId === levelId);
+  const brief: DesignBrief = { ...brief0, start: after ? 'after' : 'before' };
   // The whole flat changes its walls too, unless the scope says furniture only.
   const walls = scope.all && scope.walls !== false;
   const feedback = words.trim();
-  const after = project.renovation?.levels[0];
   const accepted = lastAccepted(designs, after);
   if (accepted) {
     const from = changeFrom(accepted, designs, project);
@@ -461,7 +475,7 @@ function planScopeOnly(
       },
       designId,
     );
-    const ctx = made && contextFor(project, v.brief, made.design.aliases);
+    const ctx = made && contextFor(project, v.brief, levelId, made.design.aliases);
     if (!made || !ctx) return null;
     return {
       scope,
@@ -475,7 +489,7 @@ function planScopeOnly(
         .map((s) => ({ key: s.key, label: s.name })),
     };
   }
-  const ctx = contextFor(project, brief);
+  const ctx = contextFor(project, brief, levelId);
   if (!ctx) return null;
   const draft: DraftDesign = {
     id: designId,

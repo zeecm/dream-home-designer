@@ -46,11 +46,13 @@ import {
   type LiveReply,
   act,
   clearTyped,
+  designLevelId,
   fillComposer,
   newId,
   nowIso,
   say,
   talkLevel,
+  talkLevels,
   useTalk,
 } from './useTalk';
 
@@ -94,8 +96,7 @@ export async function otherTabReplying(projectId: string): Promise<boolean> {
 
 /** Hand edits since the last accept, said once each in the log (criterion 32). */
 export async function noteHandEdits() {
-  const project = doc();
-  const after = project.renovation?.levels[0];
+  const after = talkLevels()?.after;
   const conv = useTalk.getState().conv;
   if (!after || !conv) return;
   const accepted = lastAccepted(useDesigner.getState().designs, after);
@@ -119,7 +120,7 @@ async function onTable(conv: Conversation): Promise<string[]> {
     const o = p?.options.find((x) => shown === `${p.id}:${x.letter}`) ?? p?.options.at(-1);
     if (!p || !o || o.status === 'running' || o.status === 'failed') return [];
     try {
-      const card = optionCard(p, o);
+      const card = optionCard(p, o, designLevelId());
       const r = await cardResultNow(project, card);
       if (!r) return [];
       const changes = cardChanges(project, card, r);
@@ -166,7 +167,7 @@ function inputFor(
 ): TalkInput | null {
   const project = doc();
   const level = talkLevel();
-  const before = project.levels[0];
+  const before = talkLevels()?.before;
   if (!level || !before) return null;
   return {
     conv,
@@ -458,7 +459,7 @@ async function replyNow(turnId: string, prompt: TalkPrompt) {
   const conv = useTalk.getState().conv;
   const project = doc();
   const level = talkLevel();
-  const before = project.levels[0];
+  const before = talkLevels()?.before;
   if (!ai || !conv || !level || !before) return;
   const ctrl = new AbortController();
   const set = (patch: Partial<LiveReply>) => {

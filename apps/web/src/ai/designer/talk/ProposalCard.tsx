@@ -136,7 +136,7 @@ function useSubset(
 ) {
   const project = useSettledProject();
   const rates = useRates((s) => s.rates);
-  const b = useMemo(() => nowOf(project), [project]);
+  const b = useMemo(() => nowOf(project, card.levelId), [project, card.levelId]);
   const merged = useMemo(
     () => (b && r ? timed(() => mergeChanges(b.now, r.level, changes, ticked)) : null),
     [b, r, changes, ticked],
@@ -256,7 +256,7 @@ export const ProposalCard = memo(function ProposalCard({
   // The electrical layer's notes on the points this proposal adds (surface trunking on a
   // structural wall, an aircon with no compressor): notes, not failures, so amber.
   const elecNotes = useMemo(() => {
-    const b = nowOf(project);
+    const b = nowOf(project, card.levelId);
     if (!merged || !b) return [] as string[];
     return timed(() => {
       const out: string[] = [];
@@ -266,7 +266,7 @@ export const ProposalCard = memo(function ProposalCard({
       }
       return out;
     });
-  }, [merged, project]);
+  }, [merged, project, card.levelId]);
   const checkText = useMemo(() => new Map((r?.checks ?? []).map((c) => [c.key, c])), [r]);
   const accepted = card.accepted.filter((a) => !a.out);
   const allIn = !running && changes.length === 0 && accepted.length > 0;
@@ -325,7 +325,7 @@ export const ProposalCard = memo(function ProposalCard({
   );
   useEffect(() => {
     if (!shown || !r) return;
-    const b = nowOf(project);
+    const b = nowOf(project, card.levelId);
     useProposalView.setState({
       card: card.key,
       label: card.title,
@@ -340,7 +340,19 @@ export const ProposalCard = memo(function ProposalCard({
         .filter((s) => s.storedKey && ['done', 'copied'].includes(s.status))
         .flatMap((s) => s.rooms),
     });
-  }, [shown, r, merged, changes, ticked, failingItems, running, card.key, card.title, project]);
+  }, [
+    shown,
+    r,
+    merged,
+    changes,
+    ticked,
+    failingItems,
+    running,
+    card.key,
+    card.title,
+    card.levelId,
+    project,
+  ]);
   useEffect(
     () => () => {
       if (useProposalView.getState().card === card.key) useProposalView.setState(EMPTY_VIEW);
@@ -1098,13 +1110,13 @@ export const ProposalCard = memo(function ProposalCard({
           d={{
             id: card.option.designId,
             projectId: card.proposal.projectId,
-            levelId: project.levels[0]?.id ?? '',
+            levelId: card.levelId,
             n: card.n,
             name: card.label,
             parent: null,
             createdAt: card.at,
             base: card.option.base,
-            baseLevel: nowOf(project)?.now ?? r.level,
+            baseLevel: nowOf(project, card.levelId)?.now ?? r.level,
             brief: card.option.brief,
             request: { scope: { kind: 'all' }, feedback: card.words, locks: card.option.locks },
             aliases: card.option.aliases,

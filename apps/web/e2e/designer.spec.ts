@@ -1743,6 +1743,59 @@ test.describe('iterating (slice 2, PR 3)', () => {
     await expect(panel(page).locator('article.talk-card:not(.talk-card-folded)')).toHaveCount(1);
   });
 
+  test('a home of two levels: the level shown is the one designed, accepted and undone, and the card names it', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    const m = await mock(page);
+    await page.goto('/');
+    await waitSaved(page);
+    // The maisonette with Upper shown (it is the level the plan opens on).
+    const file = JSON.parse(
+      readFileSync(new URL('./two-levels.dreamhome.json', import.meta.url), 'utf8'),
+    );
+    const levels = file.levels as { id: string; name: string }[];
+    file.levels = [...levels].reverse();
+    await page.locator('input[type="file"][accept=".json,application/json"]').setInputFiles({
+      name: 'maisonette.dreamhome.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(file)),
+    });
+    await waitSaved(page);
+    const start = await saved(page);
+    const ground = start.levels.find((l: Level) => l.name === 'Ground') as Level;
+    const upper = start.levels.find((l: Level) => l.name === 'Upper') as Level;
+    expect(start.levels[0].id).toBe(upper.id);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^Kitchen · about US\$/);
+    // The card names the level it designs.
+    const v1 = panel(page)
+      .locator('article.talk-card')
+      .filter({ has: page.getByRole('heading', { name: /^V1 · Kitchen · Upper$/ }) });
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // What was sent is Upper's plan (its rooms by their names on that level).
+    expect(m.calls.length).toBeGreaterThan(0);
+    await v1.getByRole('button', { name: /^Accept selected/ }).click();
+    await expect(log(page).getByText(/^You accepted \d+ (of \d+ )?changes from V1/)).toBeVisible();
+    const accepted = await saved(page);
+    const after = (id: string) =>
+      accepted.renovation.levels.find((l: Level) => l.id === `${id}~after`) as Level;
+    // Upper changed in the renovation; Ground is as it was.
+    expect(after(upper.id).items).not.toEqual(upper.items);
+    expect(after(ground.id).items).toEqual(ground.items);
+    expect(accepted.levels).toEqual(start.levels);
+    // Undo puts it all back.
+    await panel(page).getByRole('button', { name: 'Undo' }).first().click();
+    await expect(log(page).getByText(/^Undone: /)).toBeVisible();
+    const back = await saved(page);
+    expect(back.levels).toEqual(start.levels);
+    expect(back.renovation).toBeUndefined();
+  });
+
   test('Start over: a new conversation, the versions under Earlier designs, the numbering goes on', async ({
     page,
   }) => {
