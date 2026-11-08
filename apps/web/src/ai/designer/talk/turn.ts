@@ -34,6 +34,7 @@ import {
 } from '@dhd/core';
 import { useStore } from '../../../store';
 import { aiSettings } from '../../credentials';
+import { QUIET_MS } from '../request';
 import { addUsage, capUsd, overLimit, priceTable, spent, usd } from '../spend';
 import { designOpts, useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
@@ -85,7 +86,8 @@ export async function otherTabReplying(projectId: string): Promise<boolean> {
       (q.held ?? []).some((x) => x.name === lockName(projectId))
     );
   } catch {
-    return false;
+    // Can't tell: the other tab's reply is taken to be alive (never cut off by guesswork).
+    return true;
   }
 }
 
@@ -342,6 +344,9 @@ export async function recoverPending() {
   const t = conv && pendingReply(conv);
   // This tab's own reply (about to start, or running) is never taken for a dead one.
   if (!conv || !t?.reply || useTalk.getState().reply || holding) return;
+  // Without Web Locks no tab can tell a live reply from a dead one: only one that has been
+  // waiting longer than any reply goes quiet for is taken as cut off.
+  if (!locks() && Date.now() - Date.parse(t.reply.startedAt) < QUIET_MS) return;
   if (await otherTabReplying(conv.projectId)) return;
   if (holding || useTalk.getState().reply) return;
   const price = aiSettings() ? priceOf(aiSettings()?.model ?? '', priceTable()) : null;
@@ -445,6 +450,9 @@ async function replyNow(turnId: string, prompt: TalkPrompt) {
     if (r && r.ctrl === ctrl) useTalk.setState({ reply: { ...r, ...patch } });
   };
   useTalk.setState({ reply: { turnId, say: '', kind: null, thinking: '', wait: null, ctrl } });
+  /** The most this reply was priced at, and what it has spent so far. */
+  const atMost = priceOfPrompt(prompt, conv)?.usd?.high ?? null;
+  let spentHere = 0;
   try {
     const res = await talkCall({
       ai,
@@ -457,9 +465,19 @@ async function replyNow(turnId: string, prompt: TalkPrompt) {
       signal: ctrl.signal,
       prices: priceTable(),
       onText: (t) => set({ say: t.say, kind: t.kind }),
-      mayRetry: () => (overLimit() ? 'stopped at your limit for this tab.' : null),
+      // Never past the tab's limit, nor past what the reply was priced at most: its "up to"
+      // figure stays true whatever the network does.
+      mayRetry: () =>
+        overLimit()
+          ? 'stopped at your limit for this tab.'
+          : atMost !== null && spentHere >= atMost
+            ? `stopped: it has used the most it was priced at (${usd(atMost)}).`
+            : null,
       onStatus: (st) => set({ thinking: st.thinking, wait: st.wait }),
-      onUsage: addUsage,
+      onUsage: (u) => {
+        spentHere += u.usd ?? 0;
+        addUsage(u);
+      },
     });
     const cost = res.usage.reduce((t, u) => t + (u.usd ?? 0), 0);
     if (res.status === 'stopped') {

@@ -90,3 +90,64 @@ describe('a Send under the reply lock', () => {
     expect(useTalk.getState().reply).toBeNull();
   });
 });
+
+describe('another tab’s reply: never cut off by guesswork', () => {
+  /** A message left waiting for its reply, sent `ago` ms ago (by another tab, for all this one knows). */
+  async function waiting(ago: number) {
+    const { act, useTalk, newId } = await import('./useTalk');
+    // One waits at a time: one left from before goes first.
+    const pending = useTalk
+      .getState()
+      .conv?.turns.find((t) => t.kind === 'person' && t.reply?.state === 'pending');
+    if (pending) {
+      await act({
+        type: 'replyFailed',
+        turnId: pending.id,
+        id: newId('turn'),
+        at: new Date().toISOString(),
+        error: 'x',
+        text: '',
+        usage: [],
+      });
+    }
+    const id = newId('turn');
+    await act({
+      type: 'send',
+      id,
+      at: new Date(Date.now() - ago).toISOString(),
+      text: 'Is the sofa too big?',
+      sent: 'x',
+    });
+    return id;
+  }
+  const stateOf = async (id: string) => {
+    const { useTalk } = await import('./useTalk');
+    const t = useTalk.getState().conv?.turns.find((x) => x.id === id);
+    return t?.kind === 'person' ? t.reply?.state : undefined;
+  };
+
+  it('a lock query that fails counts as another tab replying: nothing is cut off', async () => {
+    vi.stubGlobal('navigator', {
+      ...globalThis.navigator,
+      onLine: true,
+      locks: { ...locks(), query: async () => Promise.reject(new Error('no')) },
+    });
+    const { otherTabReplying, recoverPending } = await import('./turn');
+    expect(await otherTabReplying('prj_turn')).toBe(true);
+    const id = await waiting(10 * 60_000);
+    await recoverPending();
+    expect(await stateOf(id)).toBe('pending');
+  });
+
+  it('without Web Locks a recent reply is left alone; one older than any reply is cut off', async () => {
+    vi.stubGlobal('navigator', { ...globalThis.navigator, onLine: true, locks: undefined });
+    const { recoverPending } = await import('./turn');
+    const { QUIET_MS } = await import('../request');
+    const fresh = await waiting(1000);
+    await recoverPending();
+    expect(await stateOf(fresh)).toBe('pending');
+    const old = await waiting(QUIET_MS + 60_000);
+    await recoverPending();
+    expect(await stateOf(old)).toBe('failed');
+  });
+});
