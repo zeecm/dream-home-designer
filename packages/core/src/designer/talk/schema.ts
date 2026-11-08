@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Concept, DesignBrief, Lock, SpaceDesign, SpaceStatus, Usage } from '../schema';
+import { Aspect, Concept, DesignBrief, Lock, SpaceDesign, SpaceStatus, Usage } from '../schema';
 import { clean } from '../util';
 
 /**
@@ -399,6 +399,60 @@ export const Conversation = z.object({
 });
 export type Conversation = z.infer<typeof Conversation>;
 
+/** How far ahead an interrupted run carries on by itself, from its last progress (ms). */
+export const RESUME_MS = 10 * 60_000;
+
+/**
+ * A design run's checkpoint (docs/specs/locked-phone-runs.md, part 1): what it needs to carry
+ * on from its last finished step when the page comes back, or after a reload. Written with the
+ * option's saved rooms (one write), removed when the run ends. Never a key or a price table.
+ */
+export const RunCheckpoint = z.object({
+  /** Its Web Lock is `dhd-run:{id}`: a checkpoint whose lock nobody holds was interrupted. */
+  id: z.string().max(80),
+  startedAt: z.string(),
+  /** Its last progress (a step finished, or it started). */
+  at: z.string(),
+  provider: z.enum(['anthropic', 'openai', 'gemini']),
+  model: z.string().max(120),
+  /** What it asks for, as planned (what is done so far is below). */
+  plan: z.object({
+    layout: z.object({ previous: Concept.nullable().optional() }).nullable(),
+    rooms: z.union([z.literal('all'), z.array(z.string())]),
+    skip: z.array(z.string()).optional(),
+    feedback: z.string().max(DRAFT_CHARS).optional(),
+    locks: z.array(Lock).optional(),
+    previous: z.record(SpaceDesign).optional(),
+    keep: z.record(z.array(Aspect)).optional(),
+    talk: z
+      .object({
+        intent: z.string(),
+        said: z.string(),
+        decided: z.array(z.string()),
+        others: z.array(z.string()).optional(),
+      })
+      .optional(),
+  }),
+  /** The room rows before the layout is known. */
+  expected: z.array(z.object({ key: z.string(), label: z.string() })).optional(),
+  layout: z.enum(['none', 'left', 'done']),
+  /** The rooms it designs, once known (after the layout, or from the start without one). */
+  rooms: z.array(z.string()).nullable(),
+  /** Fix requests it may still send. */
+  fixesLeft: z.number().int().min(0),
+  /** The most it was approved for (US$), and what it has spent of it. */
+  approved: z.number().min(0).nullable(),
+  spent: z.number().min(0),
+  /** Waiting at a limit when it was last saved. */
+  paused: z.enum(['tab', 'approved']).nullable().default(null),
+  /** How long its finished steps took (for the time left). */
+  times: z
+    .array(z.object({ kind: z.enum(['layout', 'room', 'fix']), ms: z.number().min(0) }))
+    .max(60)
+    .default([]),
+});
+export type RunCheckpoint = z.infer<typeof RunCheckpoint>;
+
 /** One option (A, B, C) of a proposal: a version as the runner builds it, not yet a version. */
 export const ProposalOption = z.object({
   letter: z.enum(['A', 'B', 'C']),
@@ -447,6 +501,11 @@ export const ProposalOption = z.object({
   waivers: z.array(z.object({ key: z.string(), text: z.string(), at: z.string() })).default([]),
   /** The version made by its first accept. */
   version: z.string().nullable().default(null),
+  /**
+   * While it runs: where to carry on from (an older build leaves it out). One that can't be
+   * read is dropped, never the proposal with it: the card is then today's stopped one.
+   */
+  run: RunCheckpoint.optional().catch(undefined),
 });
 export type ProposalOption = z.infer<typeof ProposalOption>;
 

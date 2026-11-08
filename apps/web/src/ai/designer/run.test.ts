@@ -1,6 +1,9 @@
 import {
   type DesignBrief,
   type Level,
+  PRICES,
+  type ProposalOption,
+  type RunCheckpoint,
   aliasesFor,
   defaultBrief,
   designResult,
@@ -13,6 +16,7 @@ import { answerFor, promptOf } from './fixtures/sample';
 import { type FixtureUsage, anthropicStream, geminiStream, openaiStream } from './fixtures/streams';
 import { type DraftDesign, QUIET_MS, type RunOptions, type RunState, runDesign } from './run';
 import { designerCannotUse, requestFor } from './stream';
+import { figureHolds, priceRequest, resumeFigure } from './talk/pricing';
 
 const level = sampleFlatProject('prj_test').levels[0] as Level;
 const brief: DesignBrief = {
@@ -45,6 +49,8 @@ interface Call {
   headers: Record<string, string>;
   signal: AbortSignal;
   release: () => void;
+  /** Cuts its stream off part-way, as a locked phone or a dropped connection does. */
+  cut: () => void;
   done: boolean;
 }
 
@@ -71,6 +77,7 @@ function provider(
       headers: init?.headers as Record<string, string>,
       signal: init?.signal as AbortSignal,
       release,
+      cut: () => {},
       done: false,
     };
     calls.push(call);
@@ -92,9 +99,14 @@ function provider(
         };
         if (call.signal.aborted) return abort();
         call.signal.addEventListener('abort', abort, { once: true });
+        call.cut = () => {
+          if (call.done) return;
+          call.done = true;
+          ctrl.error(new TypeError('network error'));
+        };
         ctrl.enqueue(bytes.encode(text.slice(0, cut)));
         await gate;
-        if (call.signal.aborted) return;
+        if (call.signal.aborted || call.done) return;
         ctrl.enqueue(bytes.encode(text.slice(cut)));
         call.done = true;
         ctrl.close();
@@ -726,5 +738,198 @@ describe('the requests', () => {
     expect(g3.body).toMatchObject({
       generationConfig: { thinkingConfig: { thinkingLevel: 'low' } },
     });
+  });
+});
+
+describe('a locked phone: a step cut off while away goes again on return (locked-phone runs, part 1)', () => {
+  class Page extends EventTarget {
+    visibilityState: 'visible' | 'hidden' = 'visible';
+  }
+  let page: Page;
+  beforeEach(() => {
+    page = new Page();
+    vi.stubGlobal('document', page);
+    vi.stubGlobal('window', new EventTarget());
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+  const turn = (to: 'visible' | 'hidden') => {
+    page.visibilityState = to;
+    page.dispatchEvent(new Event('visibilitychange'));
+  };
+
+  /** A whole flat with rooms 1 and 2 done, rooms 3 and 4 in flight; room 3's label. */
+  async function midRun(extra: Partial<RunOptions> = {}) {
+    const prov = provider('anthropic');
+    const r = start('anthropic', { fetch: prov.fetch, ...extra });
+    await until(() => prov.calls.length === 1, 'layout');
+    prov.calls[0]?.release();
+    await until(() => prov.calls.length === 4, 'rooms 1 to 3');
+    prov.calls[1]?.release();
+    prov.calls[2]?.release();
+    await until(() => prov.calls.length === 5, 'room 4');
+    const room3 = prov.calls[3]?.step as string;
+    const of = (step: string) => prov.calls.filter((c) => c.step === step);
+    return { prov, r, room3, of };
+  }
+  /** A step's row, by the fixture's step name ('furnish "Living' is Living and dining). */
+  const rowOf = (state: RunState, step: string) => {
+    const name = step.replace(/^furnish "/, '').replace(/"$/, '');
+    return state.steps.find((s) => s.label.startsWith(name));
+  };
+
+  /** Cut off while hidden, and away `ms` before the page is back. */
+  async function away(r: Awaited<ReturnType<typeof midRun>>['r'], cut: () => void, ms: number) {
+    turn('hidden');
+    cut();
+    await until(() => !!r.last()?.steps.some((s) => s.wait?.away), 'waiting for the page');
+    await vi.advanceTimersByTimeAsync(ms);
+  }
+
+  it('the step in flight is sent again once the page is back, as often as it happens; finished ones never (criteria 1, 2)', async () => {
+    const resent: string[] = [];
+    const { prov, r, room3, of } = await midRun({ onResent: (st) => resent.push(st.label) });
+    for (let cycle = 1; cycle <= 4; cycle++) {
+      // (Ten seconds each: under the two minutes after which a quiet stream is cut off too.)
+      await away(r, () => of(room3).at(-1)?.cut(), 10_000);
+      // Nothing goes while hidden.
+      expect(of(room3)).toHaveLength(cycle);
+      turn('visible');
+      await until(() => of(room3).length === cycle + 1, `sent again (${cycle})`);
+    }
+    for (const c of prov.calls) c.release();
+    const { state, design } = await r.run;
+    expect(state.phase).toBe('done');
+    expect(Object.values(design.spaces).every((s) => s.status === 'done')).toBe(true);
+    // The layout and the finished rooms were asked for once; the cut-off room five times.
+    const steps = prov.calls.map((c) => c.step);
+    for (const s of new Set(steps)) {
+      expect(steps.filter((x) => x === s).length).toBe(s === room3 ? 5 : 1);
+    }
+    const row = rowOf(state, room3);
+    // Not network retries (two of those halt a run): sent again on return.
+    expect(row).toMatchObject({ resent: 4, retries: 0 });
+    const label = row?.label ?? '';
+    expect(resent).toEqual([label, label, label, label]);
+    // Each cut-off attempt is metered as estimated ("~").
+    const tries = state.usage.filter((u) => u.step === row?.key);
+    expect(tries.map((u) => u.estimated)).toEqual([true, true, true, true, false]);
+  });
+
+  it('away more than 10 minutes: nothing is sent again, the run ends interrupted, its finished rooms kept', async () => {
+    const { prov, r, room3, of } = await midRun();
+    // Room 3 cut off as the phone locks; room 4's stream goes quiet meanwhile, cut off too.
+    await away(r, () => of(room3)[0]?.cut(), 11 * 60_000);
+    turn('visible');
+    for (const c of prov.calls) c.release();
+    const { state, design } = await r.run;
+    expect(state.phase).toBe('interrupted');
+    expect(prov.calls).toHaveLength(5);
+    const key = rowOf(state, room3)?.key as string;
+    expect(design.spaces[key]?.status).toBe('skipped');
+    expect(
+      Object.values(design.spaces)
+        .map((s) => s.status)
+        .sort(),
+    ).toEqual(['done', 'done', 'skipped', 'skipped']);
+  });
+
+  it('killed mid-step, then carried on from its checkpoint: only the room left is asked for', async () => {
+    const { prov, r, room3, of } = await midRun();
+    await away(r, () => of(room3)[0]?.cut(), 11 * 60_000);
+    turn('visible');
+    for (const c of prov.calls) c.release();
+    await r.run;
+    // What the page kept: the version as last saved, and the checkpoint written with it.
+    const d = r.saved.at(-1) as DraftDesign;
+    const project = sampleFlatProject('prj_test');
+    const option: ProposalOption = {
+      letter: 'A',
+      name: 'Whole flat',
+      designId: d.id,
+      brief: d.brief,
+      aliases: d.aliases,
+      concept: d.concept,
+      spaces: d.spaces,
+      locks: [],
+      usage: d.usage,
+      base: { variant: 'before', fingerprint: 'fp' },
+      status: 'running',
+      ticks: null,
+      accepted: [],
+      note: null,
+      waivers: [],
+      version: null,
+    };
+    const run: RunCheckpoint = {
+      id: 'run_test',
+      startedAt: new Date().toISOString(),
+      at: new Date().toISOString(),
+      provider: 'anthropic',
+      model: 'claude-opus-5-5',
+      plan: { layout: {}, rooms: 'all' },
+      layout: 'done',
+      rooms: Object.keys(d.spaces),
+      fixesLeft: 2,
+      approved: null,
+      spent: 0,
+      paused: null,
+      times: [],
+    };
+    const scope = { label: 'Whole flat', spaces: [], all: true };
+    const priced = priceRequest({
+      project,
+      levelId: project.levels[0]?.id ?? '',
+      designs: [],
+      brief: d.brief,
+      scope,
+      words: '',
+      resume: { option, run, scope },
+      designId: d.id,
+      opts: {},
+      ai: { provider: 'anthropic', model: 'claude-opus-5-5' },
+      prices: PRICES,
+    });
+    const left = Object.entries(d.spaces)
+      .filter(([, s]) => s.status !== 'done')
+      .map(([k]) => k);
+    expect(left).toHaveLength(2);
+    expect(priced?.sp.plan).toMatchObject({ layout: null, rooms: left });
+    // Priced for what is left only: those two rooms' requests.
+    expect(priced?.est.steps).toHaveLength(2);
+    // Carry on's figure (criterion 6): those steps at their high, and the fix rounds left.
+    const est = priced?.est;
+    if (!est?.usd) throw new Error('not priced');
+    const high = est.steps.reduce((t, s) => t + (s.usd?.high ?? 0), 0);
+    expect(est.usd.high).toBeCloseTo(high, 6);
+    expect(resumeFigure(est, run.fixesLeft)).toBeCloseTo(
+      high + (est.usd.fix * run.fixesLeft) / est.fixes,
+      6,
+    );
+    expect(resumeFigure(est, 0)).toBeCloseTo(high, 6);
+    // Bound to the figure its button showed: priced higher now, it asks again.
+    expect(figureHolds(0.4, 0.4)).toBe(true);
+    expect(figureHolds(0.4, 0.39)).toBe(true);
+    expect(figureHolds(0.4, 0.41)).toBe(false);
+    expect(figureHolds(null, 0.4)).toBe(false);
+    const prov2 = provider('anthropic', { auto: true });
+    const again = await runDesign({
+      ai: AI.anthropic,
+      ctx: priced?.sp.ctx as RunOptions['ctx'],
+      design: priced?.sp.draft as DraftDesign,
+      plan: priced?.sp.plan as RunOptions['plan'],
+      signal: new AbortController().signal,
+      fetch: prov2.fetch,
+      fixesLeft: run.fixesLeft,
+    });
+    // Only the two rooms left: never the layout or a finished room again.
+    expect(prov2.calls).toHaveLength(2);
+    expect(prov2.calls.map((c) => c.step)).toContain(room3);
+    expect(prov2.calls.some((c) => c.step === 'layout')).toBe(false);
+    expect(again.state.phase).toBe('done');
+    expect(Object.values(again.design.spaces).every((s) => s.status === 'done')).toBe(true);
+    // Its earlier usage is kept with it, the new requests' added.
+    expect(again.design.usage.length).toBe(d.usage.length + 2);
   });
 });

@@ -31,7 +31,7 @@ import {
 } from '@dhd/core';
 import { type AiSettings, PROVIDERS } from '../credentials';
 import { AiError } from '../providers';
-import { type Halt, Halted, Stopped, requestStep } from './request';
+import { type Halt, Halted, Interrupted, Stopped, requestStep } from './request';
 import { type StepSink, streamStep } from './stream';
 
 /**
@@ -64,9 +64,18 @@ export interface StepState {
    * Waiting out a rate limit, or for the connection to come back: seconds left, and which
    * wait of two.
    */
-  wait: { seconds: number; attempt: number; net?: boolean; server?: boolean } | null;
+  wait: {
+    seconds: number;
+    attempt: number;
+    net?: boolean;
+    server?: boolean;
+    /** Cut off while the page was out of view: going again once it is back. */
+    away?: boolean;
+  } | null;
   /** Requests made again (an unreadable answer, a step too long, a busy server). */
   retries: number;
+  /** Sent again after the page came back (a locked phone): not a retry of a bad answer. */
+  resent: number;
   /** Cut off by Stop: the most it may still be billed (its prompt, and output to its limit). */
   cutOffHigh: number | null;
   /** Sent back to be fixed: which round, and how many checks it failed. */
@@ -77,8 +86,11 @@ export type { Halt };
 
 export interface RunState {
   steps: StepState[];
-  /** paused: the tab's limit was reached, waiting for the person. */
-  phase: 'running' | 'paused' | 'done' | 'stopped' | 'halted' | 'failed';
+  /**
+   * paused: the tab's limit was reached, waiting for the person. interrupted: the page was
+   * away too long to carry on by itself (its checkpoint carries on when asked).
+   */
+  phase: 'running' | 'paused' | 'done' | 'stopped' | 'halted' | 'failed' | 'interrupted';
   halt: Halt | null;
   /** This run's requests. */
   usage: Usage[];
@@ -104,8 +116,17 @@ export interface RunOptions {
   expected?: { key: string; label: string }[];
   fetch?: typeof fetch;
   onUpdate?: (state: RunState) => void;
-  /** The version after each step that changed it (never called if the layout fails). */
-  onSave?: (design: DraftDesign) => void | Promise<void>;
+  /**
+   * The version after each step that changed it (never called if the layout fails), with
+   * the fix requests the run may still send.
+   */
+  onSave?: (design: DraftDesign, info: { fixesLeft: number }) => void | Promise<void>;
+  /** Fix requests this run may send (a run carried on keeps what was left); FIX_PER_RUN. */
+  fixesLeft?: number;
+  /** How long a finished step took: the layout, a room's answer, a fix round (ms). */
+  onTimed?: (kind: 'layout' | 'room' | 'fix', ms: number) => void;
+  /** A step cut off while the page was out of view was sent again on its return. */
+  onResent?: (st: StepState) => void;
   onUsage?: (u: Usage) => void;
   /** Where a version is placed and checked (the designer's worker); else here, at once. */
   results?: (
@@ -173,6 +194,7 @@ export const blankStep = (key: string, label: string, kind: StepState['kind']): 
   error: null,
   wait: null,
   retries: 0,
+  resent: 0,
   cutOffHigh: null,
   fixing: null,
 });
@@ -221,9 +243,12 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
   };
   const spentSoFar = () => state.usage.reduce((t, u) => t + (u.usd ?? 0), 0);
   let saving: Promise<void> = Promise.resolve();
+  /** Fix requests the run may still send (the estimate counts this many at most). */
+  let fixesLeft = o.fixesLeft ?? FIX_PER_RUN;
   const save = () => {
     const snapshot = structuredClone(design);
-    saving = saving.then(() => o.onSave?.(snapshot)).catch(() => {});
+    const info = { fixesLeft };
+    saving = saving.then(() => o.onSave?.(snapshot, info)).catch(() => {});
     return saving;
   };
 
@@ -324,6 +349,8 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
         cap = 1;
       },
       throttle,
+      resumeOnReturn: true,
+      onResent: () => o.onResent?.(st),
     });
   }
 
@@ -357,7 +384,10 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
         locks: plan.locks ?? [],
         previous: plan.layout.previous ?? null,
       });
+      const t0 = Date.now();
       const concept = await step(prompt, st, (raw) => parseConcept(raw, bounds));
+      // (A step sent again after the page was away took the time away too: not timed.)
+      if (!st.resent) o.onTimed?.('layout', Date.now() - t0);
       if (!concept) return ended('failed');
       design.concept = concept;
       say(`Layout and style done. ${usdText(spentSoFar())} so far.`);
@@ -417,8 +447,6 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     // A run-stopping error (a refused key, a quota): set before the first room's gate opens,
     // so no other room is sent after it.
     let runError: unknown = null;
-    /** Fix requests the run may still send (the estimate counts this many at most). */
-    let fixesLeft = FIX_PER_RUN;
     const room = async (s: (typeof spaces)[number], onStart?: () => void) => {
       const st = state.steps.find((x) => x.key === s.key) as StepState;
       if (!(await mayStart())) {
@@ -434,7 +462,9 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       });
       try {
         const parse = (raw: unknown) => parseSpaceDesign(raw, bounds);
+        const t0 = Date.now();
         const answer = await step(prompt, st, parse, onStart);
+        if (!st.resent) o.onTimed?.('room', Date.now() - t0);
         if (answer) {
           const merge = (a: SpaceDesign) =>
             mergeAnswer(plan.previous?.[s.key], a, plan.keep?.[s.key] ?? [], o.result);
@@ -454,6 +484,8 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
             say(`${s.name}: checking… fixing ${plural(left.length, 'problem')}.`);
             update();
             const fix: FixRequest = { round: fixes, failures: left, placed: now.placed };
+            const tf = Date.now();
+            const resent = st.resent;
             const again = await step(
               roomStep(ctx, s, r.level, design.aliases, {
                 concept: design.concept,
@@ -466,6 +498,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
               st,
               parse,
             );
+            if (st.resent === resent) o.onTimed?.('fix', Date.now() - tf);
             st.fixing = null;
             if (!again) {
               // The fix didn't come: the answer before it stands, checked as it is.
@@ -551,6 +584,10 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       state.halt = e.halt;
       say(e.halt.message);
       return ended('halted');
+    }
+    if (e instanceof Interrupted) {
+      say('Paused while you were away. Finished steps are kept.');
+      return ended('interrupted');
     }
     state.halt = {
       kind: 'network',

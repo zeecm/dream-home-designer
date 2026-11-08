@@ -696,6 +696,15 @@ incrementally from the last one (`rasterBare`, exact; widths recomputed within W
 72-room corner drag: about 970 ms CPU a step before, about 150 ms after; walkway run 126 to
 58 ms. Left: the main-door widest-way search (about 25 ms, global), possibly a Web Worker.
 
+**AI runs that survive a locked phone, part 1 (8 Nov):** spec `docs/specs/locked-phone-runs.md`.
+A design run checkpoints after every finished step (`ProposalOption.run` in `dhd-talk`) and holds
+the Web Lock `dhd-run:{id}`. A step cut off while the page was hidden goes again on return, not as
+a network retry; away over 10 min, or after a reload, the card carries on by itself (within 10 min,
+plan unchanged, within the approved figure and the tab's limit, same model) or asks once: Carry on
+· at most US$x, or Keep as it is. Another tab holding the run shows "Designing in another tab" and
+queues for the lock. A screen wake lock is held while it runs (`talk/wakeLock.ts`); the card says
+the time left (`talk/timeLeft.ts`), on phones with "Keep this screen open".
+
 ## 5. Owner to-dos
 
 - **Before the repo goes public:** `apps/web/public/samples/hdb-3room-type4.pdf` (and its PNG

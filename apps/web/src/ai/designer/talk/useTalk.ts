@@ -14,6 +14,8 @@ import { shownLevelId, useStore } from '../../../store';
 import type { RunState } from '../run';
 import { getBrief, loadDesigns, putBrief, useDesigner } from '../state';
 import { onOtherTab, talkStore, talkStoreReady } from './talkStore';
+import type { TimeLeft } from './timeLeft';
+import type { WakeState } from './wakeLock';
 
 /**
  * The open plan's conversation as the panel sees it: the record (mirrored from `dhd-talk`
@@ -34,7 +36,35 @@ export interface LiveRun {
   remaining: number | null;
   /** The most it was priced at (US$), bound by the button pressed. */
   approved: number | null;
+  /** About how long it has left (worked out again as each step ends). */
+  left?: TimeLeft | null;
+  /** Whether the screen is kept on while it runs. */
+  wake?: WakeState | null;
 }
+
+/**
+ * A run that stopped when the page closed (or was away too long), as its card shows it until
+ * it carries on or is kept as it is (docs/specs/locked-phone-runs.md, part 1).
+ */
+export type ResumeView =
+  | { kind: 'other-tab' }
+  | { kind: 'carrying-on' }
+  | { kind: 'offline'; done: number; total: number | null }
+  | {
+      kind: 'ask';
+      /** The plan has changed since it stopped. */
+      changed: boolean;
+      /** What carrying on may cost at most (US$), as its button shows it; null: not priced. */
+      figure: number | null;
+      /** Still being priced. */
+      pending: boolean;
+      done: number;
+      total: number | null;
+      /** A different model is set now than it was started with. */
+      model: { now: string; was: string } | null;
+      /** No key now: Carry on opens AI settings. */
+      noKey: boolean;
+    };
 
 /** A talk call on its way (ephemeral: never written per token). */
 export interface LiveReply {
@@ -69,6 +99,8 @@ interface TalkState {
   open: { card: string; change: string } | null;
   hover: { card: string; change: string } | null;
   live: LiveRun | null;
+  /** Runs interrupted, by card key, as their cards show them. */
+  resume: Record<string, ResumeView>;
   /** The designer replying to a message. */
   reply: LiveReply | null;
   /** The polite live region's words. */
@@ -102,6 +134,7 @@ export const useTalk = create<TalkState>(() => ({
   open: null,
   hover: null,
   live: null,
+  resume: {},
   reply: null,
   said: '',
   formOpen: false,
@@ -350,6 +383,7 @@ useStore.subscribe((s, prev) => {
     conv: null,
     proposals: [],
     live: null,
+    resume: {},
     shown: null,
     open: null,
     hover: null,

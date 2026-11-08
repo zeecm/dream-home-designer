@@ -215,3 +215,40 @@ describe('versions and days', () => {
     expect(dayMark(new Date(2026, 10, 4, 10).toISOString(), now)).toBe('Wed 4 Nov');
   });
 });
+
+describe('a run’s checkpoint in its option (locked-phone runs, part 1)', () => {
+  const run = {
+    id: 'run_1',
+    startedAt: AT,
+    at: AT,
+    provider: 'anthropic' as const,
+    model: 'claude-opus-5-5',
+    plan: { layout: {}, rooms: 'all' as const },
+    layout: 'done' as const,
+    rooms: ['rm_kitchen', 'rm_bedroom'],
+    fixesLeft: 2,
+    approved: 0.9,
+    spent: 0.3,
+    paused: null,
+    times: [{ kind: 'room' as const, ms: 31_000 }],
+  };
+  const withRun = (r: unknown) => {
+    const p = proposal('prop1');
+    return { ...p, options: [{ ...p.options[0], run: r }] } as Proposal;
+  };
+
+  it('is kept with the rooms it saved, and read back as written', async () => {
+    const s = await openTalk(new IDBFactory());
+    await s.applyProposal('prj_a', 'prop1', () => withRun(run));
+    const [back] = await s.proposals('prj_a');
+    expect(back?.options[0]?.run).toEqual(run);
+  });
+
+  it('one that can’t be read is dropped, never the proposal with it', async () => {
+    const s = await openTalk(new IDBFactory());
+    await s.applyProposal('prj_a', 'prop1', () => withRun({ ...run, fixesLeft: -1 }));
+    const [back] = await s.proposals('prj_a');
+    expect(back?.id).toBe('prop1');
+    expect(back?.options[0]?.run).toBeUndefined();
+  });
+});
