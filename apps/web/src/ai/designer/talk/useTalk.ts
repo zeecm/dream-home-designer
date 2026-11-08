@@ -318,6 +318,12 @@ export async function ensureConversation(): Promise<Conversation | null> {
   if (!levels || !level) return null;
   const { before, after } = levels;
   const s = await talkStore();
+  // One set aside before that this build can read now goes back first (nothing is lost).
+  if (await s.restore(project.id).catch(() => false)) {
+    await loadTalk(project.id);
+    const back = useTalk.getState().conv;
+    if (back) return back;
+  }
   // One this build can't read is kept aside (never overwritten), and the log says so; one a
   // newer build wrote stays as it is, and this tab only says to reload.
   const found = await s.setAside(project.id).catch(() => 'none' as const);

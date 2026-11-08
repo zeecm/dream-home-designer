@@ -759,6 +759,12 @@ function work(
       : keepWalkwaysClear(lvl, runs, repaired, resolves, {
           rules: opts.rules ?? [],
           usesOf: (id) => usesOf(lvl, id, { brief, uses }),
+          hard: (l, walk) =>
+            new Set(
+              designChecks(l, { brief, uses, ...rulesOpt, ...(walk ? { walk } : {}) })
+                .filter((c) => c.hard)
+                .map((c) => c.key),
+            ),
         });
   // The notes of each space solved by intent, as finally placed.
   for (const run of runs) {
@@ -945,7 +951,7 @@ function work(
     // Someone with nowhere to sleep is always the version's to answer for.
     const already =
       !c.key.startsWith('P1|unplaced') &&
-      baseKeys.has(c.itemId ? c.key.split(c.itemId).join(twinOf(c.itemId)) : c.key) &&
+      baseKeys.has(c.itemId ? swapSegment(c.key, c.itemId, twinOf(c.itemId)) : c.key) &&
       (c.itemId
         ? unchanged(c.itemId)
         : c.roomId
@@ -1045,21 +1051,12 @@ function remember<T>(memo: Map<string, T>, key: string, value: T): T {
 }
 const settledMemo = new Map<string, SolveOutcome>();
 
-/** The rule failures' and walkway issues' keys on a level (for a rule move, slice 3a). */
-function hardKeys(
-  level: Level,
-  house: { rules: readonly Rule[]; usesOf: (roomId: string) => ProgrammeUse[] },
-): Set<string> {
-  const l = { ...level, items: { ...level.items } };
-  return new Set([
-    ...ruleKeepOuts(house.rules, { level: l, usesOf: house.usesOf }).map((k) => k.key),
-    ...walkwayReport(l)
-      .issues.filter((i) => i.route !== 'bed' || i.have < BED_ACCESS - 0.005)
-      .map((i) => `W|${i.itemId}|${i.route}`),
-    ...clearanceIssues(l)
-      .filter((i) => i.kind === 'overlap' || i.kind === 'wall' || i.kind === 'door')
-      .map((i) => `C|${i.kind}|${i.itemId}`),
-  ]);
+/** What the walkway step knows of the house rules, and every hard check's key on a level. */
+interface House {
+  rules: readonly Rule[];
+  usesOf: (roomId: string) => ProgrammeUse[];
+  /** The hard checks' keys (the design checks with the rules, as `spaceHard` counts them). */
+  hard: (level: Level, walk?: WalkwayReport) => Set<string>;
 }
 
 /** The hard failures on a level the walkway step can change: walkways, clearances. */
@@ -1079,6 +1076,13 @@ function hardCount(level: Level, walk?: WalkwayReport): number {
   }).length;
   return w + c;
 }
+
+/** A check's key with one `|`-delimited segment (a piece's id) swapped for another. */
+export const swapSegment = (key: string, from: string, to: string) =>
+  key
+    .split('|')
+    .map((part) => (part === from ? to : part))
+    .join('|');
 
 const baseMemo = new WeakMap<Level, Map<string, Set<string>>>();
 
@@ -1145,7 +1149,7 @@ function keepWalkwaysClear(
   runs: Run[],
   repaired: Note[],
   resolves: DesignResult['resolves'],
-  house: { rules: readonly Rule[]; usesOf: (roomId: string) => ProgrammeUse[] },
+  house: House,
 ): WalkwayReport | null {
   const moved = new Set<string>();
   const kept = new Map<Run, SpaceIndex['keepOut']>();
@@ -1176,6 +1180,8 @@ function keepWalkwaysClear(
       : [];
     if (!blamed.length && !ruled.length) return report;
     let changed = false;
+    /** The hard checks' keys on the level as it is this round (for a rule move). */
+    let roundHard: Set<string> | null = null;
     // Spaces placed by intent are solved again, keeping out of every way they narrowed.
     const again = new Set<Run>();
     // Of the pieces narrowing one way, those standing free move; the wall pieces only if none do.
@@ -1285,16 +1291,20 @@ function keepWalkwaysClear(
         ix.placed = placed;
         continue;
       }
-      // Taken only if the rule now holds for it and nothing hard is added (as acceptResolve).
-      const before = hardKeys(lvl, house);
+      // Taken only if the rule now holds for it and no hard check is added, the design checks
+      // included (as acceptResolve). The level before is worked out once a round.
+      const copy = (l: Level) => ({ ...l, items: { ...l.items } });
+      roundHard ??= house.hard(copy(lvl), changed ? undefined : report);
+      const before = roundHard;
       const was = lvl.items[k.itemId];
       lvl.items[out.item.id] = out.item;
-      const after = hardKeys(lvl, house);
+      const after = house.hard(copy(lvl));
       if (after.has(k.key) || [...after].some((x) => !before.has(x))) {
         if (was) lvl.items[k.itemId] = was;
         ix.placed = placed;
         continue;
       }
+      roundHard = after;
       changed = true;
       repaired.push({
         text: `Moved the ${nameOf(want.kind)} to keep your rule “${k.ruleName}”.`,

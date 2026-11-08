@@ -166,7 +166,9 @@ function compile(
     return geomMemo;
   };
   // Every route rule measured on one furnished pass: a frozen copy is the pass's key.
-  let routeLevel: Level | null = ctx.samePass ? level : null;
+  // A frozen level is its own key (the walkway pass on it is kept for the next call); an
+  // unfrozen one is copied once, frozen, so this call's route rules share one pass.
+  let routeLevel: Level | null = ctx.samePass || Object.isFrozen(level) ? level : null;
   const routeOf = () => {
     routeLevel ??= Object.freeze({ ...level });
     return routeLevel;

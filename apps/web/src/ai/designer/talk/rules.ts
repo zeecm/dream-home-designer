@@ -176,17 +176,30 @@ export function numberProblem(rule: Rule, n: number): string | null {
 }
 
 /** A rule's status on the plan as it is (free, worked out here): what it breaks now. */
+const planMemo = new WeakMap<object, Map<string, string[]>>();
+/**
+ * What a rule breaks on the plan as it is, kept per level object and rule (a route rule costs
+ * a walkway pass: worked out once per plan, never per result tick).
+ */
 export function planStatus(rule: Rule): string[] {
   const conv = useTalk.getState().conv;
   const level = talkLevel();
   if (!conv || !level) return [];
+  const per = planMemo.get(level) ?? new Map<string, string[]>();
+  planMemo.set(level, per);
+  const key = JSON.stringify([rule, conv.brief.rooms]);
+  const hit = per.get(key);
+  if (hit) return hit;
   const prefix = `Your rule “${rule.name}”: `;
-  return ruleChecks([rule], {
+  const out = ruleChecks([rule], {
     level,
     usesOf: (id) => usesOf(level, id, { brief: conv.brief }),
   }).map((c) =>
     c.text.startsWith(prefix) ? c.text.slice(prefix.length).replace(/\.$/, '') : c.text,
   );
+  if (per.size > 40) per.clear();
+  per.set(key, out);
+  return out;
 }
 
 /** Show on plan (UX §3.6): the rule's target and what breaks it, for 8 s or until dismissed. */

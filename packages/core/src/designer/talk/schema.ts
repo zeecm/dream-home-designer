@@ -91,6 +91,14 @@ const isQuestionKey = (v: unknown): v is QuestionKey =>
  * Question keys as a record keeps them, read tolerantly (from version 3): strings, and a key this
  * build doesn't know (a newer build's question) is dropped, never a reason to refuse the record.
  */
+/** The items of a list this build can read: one it can't (a newer build's) is dropped. */
+export function readable<T extends z.ZodTypeAny>(schema: T, items: unknown[]): z.output<T>[] {
+  return items.flatMap((i) => {
+    const r = schema.safeParse(i);
+    return r.success ? [r.data as z.output<T>] : [];
+  });
+}
+
 export const QuestionKeys = z.array(z.string()).transform((keys) => keys.filter(isQuestionKey));
 
 /** What a proposal is about: the whole flat, or some spaces (by key), in words. */
@@ -182,7 +190,7 @@ export const Decision = z.object({
   from: z.string().max(12).nullable(),
   deleted: z.boolean().default(false),
   /** Kept from a rule offer with Just this once: Make this a rule reopens it, free. */
-  rule: Rule.optional(),
+  rule: Rule.optional().catch(undefined),
 });
 export type Decision = z.infer<typeof Decision>;
 
@@ -329,8 +337,8 @@ export const Turn = z.discriminatedUnion('kind', [
           .default([]),
         concern: TalkConcern.nullable().default(null),
         plan: TalkPlan.nullable().default(null),
-        /** A rule it offers to keep (slice 3a), with the app's verdict. */
-        offer: RuleOffer.nullable().default(null),
+        /** A rule it offers to keep (slice 3a), with the app's verdict (dropped if unreadable). */
+        offer: RuleOffer.nullable().default(null).catch(null),
       })
       .optional(),
   }),
@@ -441,7 +449,10 @@ export const Conversation = z.object({
    * The household's house rules (slice 3a): checked on every proposal, here only (never in the
    * project, an export or a share link). At most 20 live; deleted ones stay a while for Undo.
    */
-  rules: z.array(Rule).max(MAX_RULE_RECORDS).default([]),
+  rules: z
+    .array(z.unknown())
+    .transform((items) => readable(Rule, items).slice(-MAX_RULE_RECORDS))
+    .default([]),
   /** Notes for the household's ID: what isn't in the app (plumbing moves, lighting). */
   notes: z
     .array(z.object({ id: z.string(), text: z.string().max(TALK_LIMITS.note), turnId: z.string() }))

@@ -315,6 +315,33 @@ describe('records version 3', () => {
     expect(conversationFromRecord({ ...conv, recordVersion: TALK_RECORD_VERSION + 1 })).toBeNull();
   });
 
+  it('a rule, a Decision’s rule or an offer this build can’t read is dropped, not the record', () => {
+    const first = exchange(met(), 'Never anything in the corridor', REPLY_RULE);
+    const kept = talk(first.conv, { type: 'ruleKeep', turnId: first.turn.id, id: id(), at: AT });
+    const wish = ruleReply('Noted.', {
+      ...CORRIDOR_RULE,
+      name: 'Clear way',
+      relation: 'keepClear',
+      n: 1,
+    });
+    const { conv, turn } = exchange(kept, 'And a wide way', wish);
+    const once = talk(conv, { type: 'ruleOnce', turnId: turn.id, id: 'dec_x', at: AT });
+    const raw = JSON.parse(JSON.stringify(once));
+    const good = raw.rules[0];
+    raw.rules = [{ ...good, id: 'ru_future', relation: 'nearTo' }, good];
+    const d = raw.decisions.find((x: { id: string }) => x.id === 'dec_x');
+    if (d) d.rule = { ...good, target: { kind: 'balcony' } };
+    const t = raw.turns.find((x: { id: string }) => x.id === turn.id);
+    t.talk.offer.state = 'some-future-state';
+    const read = conversationFromRecord(raw);
+    expect(read).not.toBeNull();
+    expect(read?.rules.map((r) => r.id)).toEqual([good.id]);
+    expect(read?.decisions.find((x) => x.id === 'dec_x')).toMatchObject({ kind: 'wish' });
+    expect(read?.decisions.find((x) => x.id === 'dec_x')?.rule).toBeUndefined();
+    const back = read?.turns.find((x) => x.id === turn.id);
+    expect(back?.kind === 'designer' && back.talk?.offer).toBeNull();
+  });
+
   it('a question key a newer build added is dropped, never a reason to refuse the record', () => {
     const conv = met();
     const raw = JSON.parse(JSON.stringify(conv));

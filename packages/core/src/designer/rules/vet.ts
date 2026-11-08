@@ -8,7 +8,7 @@ import { usesOf as roomUses } from '../checks';
 import { BEDROOM_USES, peopleOf, roleOf, sleepingPlan } from '../principles';
 import type { ProgrammeUse } from '../principles';
 import type { DesignBrief, RoomUse } from '../schema';
-import { roomsBeside } from '../spaces';
+import { roomIdAt, roomsBeside } from '../spaces';
 import { stableJson } from '../util';
 import { ruleChecks } from './check';
 import {
@@ -421,12 +421,26 @@ function hdbOf(
     if (beds && rule.subject.kind !== 'any' && rooms.length && rooms.every(shelter) && !helperThere)
       return 'A bed can’t be in the household shelter: HDB doesn’t allow it as a bedroom.';
   }
-  // Something kept right by the shelter's door, where it opens.
-  if (rule.relation === 'within' && t.kind === 'opening') {
-    const o = level.openings[t.openingId];
-    const isShelterDoor =
-      !!o && o.kind !== 'window' && roomsBeside(level, o.wallId).some((r) => shelter(r));
-    if (isShelterDoor && (ruleNumber(rule) ?? 0) < Math.max(0.9, o?.width ?? 0.9) - 0.005)
+  // Something kept right by the shelter's door, where it opens: that door named, or "their
+  // room's door" for a piece that stands in the shelter.
+  if (rule.relation === 'within' && (t.kind === 'opening' || t.kind === 'ownDoor')) {
+    const doors =
+      t.kind === 'opening'
+        ? [level.openings[t.openingId]].filter((o) => !!o)
+        : Object.values(level.items).some((it) => {
+              const k = furnitureKind(it.assetId);
+              return (
+                !!k &&
+                subjectMatches(rule.subject, it, k) &&
+                shelter(roomIdAt(level, { x: it.position.x, y: it.position.z }))
+              );
+            })
+          ? Object.values(level.openings)
+          : [];
+    const shelterDoor = doors.find(
+      (o) => !!o && o.kind !== 'window' && roomsBeside(level, o.wallId).some((r) => shelter(r)),
+    );
+    if (shelterDoor && (ruleNumber(rule) ?? 0) < Math.max(0.9, shelterDoor.width) - 0.005)
       return 'The household shelter’s door must open fully: nothing can stand within 0.90 m of it.';
   }
   return null;

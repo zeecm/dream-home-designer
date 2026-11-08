@@ -8,7 +8,7 @@ import sampleLiving from '../benchmark/answers/sample-living.json';
 import { ONGS } from '../benchmark/benchmark';
 import { designChecks } from '../checks';
 import { SAMPLE_KEYS, parsed, sampleDesign, sampleLevel } from '../fixtures/sample';
-import { designResult, designResultKey } from '../result';
+import { designResult, designResultKey, swapSegment } from '../result';
 import { type DesignBrief, defaultBrief, parseSpaceDesign } from '../schema';
 import { ruleChecks, ruleKeepOuts } from './check';
 import {
@@ -526,6 +526,16 @@ describe('vetRule (tech §4)', () => {
       why: 'hdb',
       text: 'The household shelter’s door must open fully: nothing can stand within 0.90 m of it.',
     });
+    // Their room's door is the shelter's for a piece that stands in the shelter.
+    const own = rule({
+      subject: { kind: 'kind', kindId: 'shoe-cabinet' },
+      relation: 'within',
+      target: { kind: 'ownDoor' },
+      n: 0.5,
+    });
+    const inShelter = withPieces(base, [['shoe-cabinet', at(7.6, 7.6), 0]]);
+    expect(vetRule(own, ctx([], inShelter))).toMatchObject({ why: 'hdb' });
+    expect(vetRule(own, ctx())).toMatchObject({ ok: true });
   });
 
   it('the flat: a clear width over the way’s own is set to it', () => {
@@ -656,6 +666,39 @@ describe('rules in a design (3a.5–3a.7, the solver)', () => {
     const s = run([pinned], base, 'dsn_rules_spot');
     expect(s.checks.filter((c) => c.key.startsWith('R|')).length).toBe(1);
     for (const x of s.resolves) if (x.taken) expect(x.after).toBeLessThan(x.before);
+  });
+
+  it('a rule move that would break a P2 relationship (a bedside away from its bed) is refused', () => {
+    const plain = (rules: Rule[]) =>
+      designResult(
+        base,
+        base,
+        { ...sampleDesign({ concept: null, id: 'dsn_rules_p2' }), aliases: aliasesFor(base) },
+        { rules },
+      );
+    const first = plain([]);
+    const bedside = Object.values(first.level.items).find((i) => i.assetId === 'bedside');
+    expect(bedside).toBeDefined();
+    if (!bedside) return;
+    const spot = rule({
+      subject: { kind: 'item', itemId: bedside.id },
+      relation: 'notIn',
+      target: { kind: 'spot', at: at(bedside.position.x, bedside.position.z), r: 0.3 },
+      name: 'Nothing by the bed',
+    });
+    const r = plain([spot]);
+    // Left where it was: the rule fails, and no P2 check is added by moving it.
+    expect(r.level.items[bedside.id]?.position).toEqual(bedside.position);
+    expect(r.checks.some((c) => c.key === `R|${spot.id}|${bedside.id}`)).toBe(true);
+    const p2 = (x: typeof r) =>
+      x.checks.filter((c) => c.hard && c.key.startsWith('P2|')).map((c) => c.key);
+    expect(p2(r)).toEqual(p2(first));
+    expect(r.repaired.some((n) => /your rule/.test(n.text))).toBe(false);
+  });
+
+  it('a check key swaps the piece id segment only', () => {
+    expect(swapSegment('P2|near|it_1', 'it_1', 'it_9')).toBe('P2|near|it_9');
+    expect(swapSegment('R|it_1x|it_1', 'it_1', 'it_9')).toBe('R|it_1x|it_9');
   });
 
   it('PERF: 20 rules add at most 20 ms (median) to the checks on the sample', () => {

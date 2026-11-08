@@ -248,9 +248,11 @@ function RuleArticle({ rule, onDeleted }: { rule: Rule; onDeleted: (r: Rule) => 
   const tick = useResultsTickN();
   const [rename, setRename] = useState<string | null>(null);
   const shownRule = useRuleShown((s) => s.rule?.id === rule.id);
+  // The plan's part once per plan and rule; the card's part as its result lands.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: worked out on the plan as it is
+  const plan = useMemo(() => timed(() => planStatus(rule)), [rule, project]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
   const status = useMemo(() => {
-    const plan = timed(() => planStatus(rule));
     const t = tableCard();
     if (!t) return { table: null, plan };
     const r = timed(() => cardResult(project, t.card));
@@ -269,7 +271,7 @@ function RuleArticle({ rule, onDeleted }: { rule: Rule; onDeleted: (r: Rule) => 
       : waived
         ? { table: `Accepted anyway once, in ${t.title}`, plan, tone: 'waived' }
         : { table: `✓ ${t.title} meets it`, plan, tone: 'pass' };
-  }, [rule, project, tick]);
+  }, [rule, project, tick, plan]);
   return (
     <article className="talk-rule" aria-label={rule.name}>
       {rename !== null ? (
