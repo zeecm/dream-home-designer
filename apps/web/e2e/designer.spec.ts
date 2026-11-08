@@ -1928,7 +1928,7 @@ const consoleInCorridor = (c: Call) =>
       }
     : null;
 const CORRIDOR =
-  'Your rule “Never anything in the corridor”: the chinese console table is in the way from the main door to Main bedroom and Bedroom.';
+  'Your rule “Never anything in the corridor”: the Chinese console table is in the way from the main door to Main bedroom and Bedroom.';
 
 async function yourRules(page: Page) {
   await panel(page).getByRole('button', { name: 'Designer menu' }).click();
@@ -1986,7 +1986,7 @@ test.describe('house rules (slice 3a, PR A)', () => {
     const view = await yourRules(page);
     await expect(
       view.getByRole('article', { name: 'Never anything in the corridor' }),
-    ).toContainText('✕ V1 doesn’t meet it: the chinese console table is in the way');
+    ).toContainText('✕ V1 doesn’t meet it: the Chinese console table is in the way');
     await expect(view).toContainText(
       'Your rules stay on this device, with this conversation. They’re not in the plan, its exports or share links.',
     );
@@ -2042,6 +2042,7 @@ test.describe('house rules (slice 3a, PR A)', () => {
         faces('notFaces', 'The sofa away from the window'),
         faces('faces', 'The sofa facing the window'),
         faces('faces', 'The sofa facing the window'),
+        REPLY_RULE,
       ],
     });
     await openSample(page);
@@ -2086,6 +2087,23 @@ test.describe('house rules (slice 3a, PR A)', () => {
     const view = await yourRules(page);
     await expect(view.getByRole('article')).toHaveCount(1);
     await expect(view.getByRole('article', { name: 'The sofa facing the window' })).toBeVisible();
+    // Make this a rule from a Decision (priced as a Send): kept, it moves to Your rules.
+    await view.getByRole('button', { name: /^Decisions \(\d+\) are told/ }).click();
+    const decisions = panel(page).getByRole('region', { name: 'Decisions' });
+    await decisions
+      .getByRole('textbox', { name: 'Something to keep, avoid or have' })
+      .fill('Nothing in the corridor');
+    await decisions.getByRole('button', { name: 'Add' }).click();
+    const row = decisions.getByRole('listitem').filter({ hasText: 'Nothing in the corridor' });
+    await row.getByRole('button', { name: /^Make this a rule · about US\$\d\.\d\d$/ }).click();
+    await expect(
+      log(page).getByText('Asked to make a rule of: Nothing in the corridor.'),
+    ).toBeVisible();
+    await panel(page)
+      .getByRole('region', { name: 'Rule offer: Never anything in the corridor' })
+      .getByRole('button', { name: 'Keep as a rule' })
+      .click();
+    await expect(log(page).getByText('Moved to Your rules.')).toBeVisible();
   });
 
   test('3a.7 and 3a.8: a rule the plan breaks is said and never stops a proposal; Bring this back is checked on your rules', async ({
@@ -2110,7 +2128,7 @@ test.describe('house rules (slice 3a, PR A)', () => {
       name: 'Rule offer: Never anything in the corridor',
     });
     await expect(offer).toContainText(
-      'Your plan doesn’t meet it now: the chinese console table is in the way from the main door to Main bedroom and Bedroom. That won’t stop a proposal.',
+      'Your plan doesn’t meet it now: the Chinese console table is in the way from the main door to Main bedroom and Bedroom. That won’t stop a proposal.',
     );
     await offer.getByRole('button', { name: 'Keep as a rule' }).click();
     await expect(
@@ -2223,6 +2241,20 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     await fingerSized(page);
     await noSideways(page);
     await shot(page, 'rule-offer-phone');
+    // Show on plan drops the sheet so the rule is in sight (QA B1).
+    await offer.getByRole('button', { name: 'Show on plan' }).tap();
+    await expect(panel(page)).not.toHaveClass(/talk-full/);
+    const band = page.getByTestId('rule-layer').locator('.rl-band').first();
+    await expect(band).toBeVisible();
+    const onTop = await band.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return !!top?.closest('svg.plan-svg');
+    });
+    expect(onTop).toBe(true);
+    await shot(page, 'rule-shown-phone');
+    await panel(page).getByRole('button', { name: 'Make the designer full height' }).tap();
+    await offer.scrollIntoViewIfNeeded();
     await offer.getByRole('button', { name: 'Keep as a rule' }).tap();
     await log(page).getByRole('button', { name: 'Your rules' }).last().tap();
     const view = panel(page).getByRole('region', { name: 'Your rules' });

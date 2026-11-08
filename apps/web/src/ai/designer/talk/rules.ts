@@ -145,7 +145,11 @@ export async function deleteRule(rule: Rule) {
   if (next) await ruleLine(rule, `You deleted a rule: ${rule.name}.`);
 }
 
-export const restoreRule = (rule: Rule) => act({ type: 'ruleRestore', ruleId: rule.id });
+/** Undo a delete: the rule back, the card checked again, and the log says so (QA B2). */
+export async function restoreRule(rule: Rule) {
+  const next = await act({ type: 'ruleRestore', ruleId: rule.id });
+  if (next) await ruleLine(rule, `You brought a rule back: ${rule.name}.`);
+}
 
 /** Just this once's Make it a rule (free): the offer opens again, vetted on the plan as it is. */
 export async function reopenRule(decisionId: string) {

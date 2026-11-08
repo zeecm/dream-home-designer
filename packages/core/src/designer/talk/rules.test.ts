@@ -6,6 +6,7 @@ import { designChecks } from '../checks';
 import { tokensOf } from '../prices';
 import { ruleChecks } from '../rules/check';
 import { ruleOffer } from '../rules/offer';
+import { cutName } from '../rules/parse';
 import { MAX_RULES, type Rule } from '../rules/schema';
 import { ruleSentence } from '../rules/words';
 import { type DesignBrief, defaultBrief } from '../schema';
@@ -284,6 +285,68 @@ describe('Just this once, and Decisions made rules', () => {
       type: 'rule',
       text: 'Moved to Your rules.',
     });
+  });
+
+  it('Make this a rule (priced): the Decision carries the offer; keeping it moves it to Your rules', () => {
+    let conv = talk(met(), {
+      type: 'decisionAdd',
+      id: 'dec_w',
+      at: AT,
+      kind: 'wish',
+      text: 'Nothing in the corridor',
+      from: null,
+    });
+    const pid = id();
+    const did = id();
+    conv = talk(conv, {
+      type: 'send',
+      id: pid,
+      at: AT,
+      text: 'Make this a rule: Nothing in the corridor',
+      sent: sentText('Make this a rule: Nothing in the corridor', []),
+      ruleAsk: { decisionId: 'dec_w' },
+    });
+    const r = parseTalkReply(REPLY_RULE, ctx);
+    if (!r.ok || !r.reply.memory.rule) throw new Error('no rule');
+    const offer = ruleOffer(r.reply.memory.rule, {
+      id: 'ru_m',
+      at: AT,
+      turnId: did,
+      version: null,
+      levelId: level.id,
+      rules: [],
+      level,
+      brief: conv.brief,
+    });
+    conv = talk(conv, {
+      type: 'replyDone',
+      turnId: pid,
+      id: did,
+      at: AT,
+      reply: r.reply,
+      lines: [],
+      echo: echoOf(r.reply),
+      usage: [],
+      probe: null,
+      ids: [id(), id(), id()],
+      fold: null,
+      offer,
+    });
+    expect(conv.decisions.find((d) => d.id === 'dec_w')?.rule?.id).toBe('ru_m');
+    const kept = talk(conv, { type: 'ruleKeep', turnId: did, id: 'ev_m', at: AT });
+    expect(kept.decisions.find((d) => d.id === 'dec_w')?.deleted).toBe(true);
+    const line = kept.turns.find((t) => t.id === 'ev_m');
+    expect(line?.kind === 'event' && line.event).toMatchObject({ text: 'Moved to Your rules.' });
+  });
+
+  it('a name over 80 characters is cut at a word, with an ellipsis', () => {
+    const long =
+      'Never put anything at all in the corridor between the bedrooms because Mum walks at night please';
+    const cut = cutName(long);
+    expect(cut.length).toBeLessThanOrEqual(80);
+    expect(cut.endsWith('…')).toBe(true);
+    expect(long.startsWith(cut.slice(0, -1))).toBe(true);
+    expect(long.charAt(cut.length - 1)).toBe(' ');
   });
 
   it('a wider clear width on the same way raises the rule you have', () => {

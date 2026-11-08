@@ -72,6 +72,7 @@ function NumberField({
   if (!range) return null;
   return (
     <LengthField
+      revertInvalid
       label={range.what}
       ariaLabel={label ?? `${range.what}, ${rule.name}`}
       value={value ?? range.default ?? undefined}
@@ -287,11 +288,24 @@ function RuleArticle({ rule, onDeleted }: { rule: Rule; onDeleted: (r: Rule) => 
             className="input"
             maxLength={80}
             aria-label="Rule name"
+            aria-describedby={`rename-${rule.id}`}
             value={rename}
             // biome-ignore lint/a11y/noAutofocus: opened to rename it
             autoFocus
             onChange={(e) => setRename(e.target.value)}
+            onKeyDown={(e) => {
+              // Esc cancels the rename only, never the view (QA B3).
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                setRename(null);
+              }
+            }}
           />
+          {rename.length >= 70 && (
+            <span id={`rename-${rule.id}`} className="field-hint">
+              {rename.length} of 80 characters
+            </span>
+          )}
           <button type="submit" className="btn btn-small" disabled={!rename.trim()}>
             Save
           </button>
@@ -318,7 +332,8 @@ function RuleArticle({ rule, onDeleted }: { rule: Rule; onDeleted: (r: Rule) => 
         )}
         {status.plan.length > 0 ? (
           <span className="muted">
-            {status.table ? ' · ' : ''}Your plan: already {status.plan.slice(0, 2).join('; ')}
+            {status.table ? ' · ' : ''}Your plan already breaks it:{' '}
+            {status.plan.slice(0, 2).join('; ')}
           </span>
         ) : (
           !status.table && <span>Your plan meets it</span>

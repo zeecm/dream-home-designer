@@ -178,18 +178,20 @@ interface Props {
 }
 
 /** What a folded card last said of itself (its checks need the plan worked out again). */
-const verdicts = new Map<string, { text: string; total: number }>();
+const verdicts = new Map<string, { text: string; total: number; rules: string }>();
 
 /**
  * A folded card's line: its checks as last worked out, and what is in the renovation as the
  * record says now (an Undo or a Put it back since takes rows out; QA R2).
  */
-function foldedLine(card: CardModel): string {
+function foldedLine(card: CardModel, rules: string): string {
   const said = verdicts.get(card.key);
   const inNow = card.accepted.filter((a) => !a.out).length;
   if (!said) return inNow ? ` · Accepted ${inNow}` : '';
   if (inNow && inNow >= said.total) return ' · In your renovation';
-  return ` · ${said.text}${inNow ? ` · Accepted ${inNow} of ${said.total}` : ''}`;
+  // Worked out before your rules last changed: it says so rather than an old verdict (QA B5).
+  const text = said.rules === rules ? said.text : 'Not checked against your rules yet';
+  return ` · ${text}${inNow ? ` · Accepted ${inNow} of ${said.total}` : ''}`;
 }
 
 export const ProposalCard = memo(function ProposalCard({
@@ -409,7 +411,7 @@ export const ProposalCard = memo(function ProposalCard({
         >
           <span>
             {card.title} · {headLabel(project, card)}
-            {foldedLine(card)}
+            {foldedLine(card, rulesKey)}
           </span>
           <span className="talk-fold-show" aria-hidden="true">
             Show ›
@@ -513,7 +515,11 @@ export const ProposalCard = memo(function ProposalCard({
   );
 
   // What the folded line will say (with what is in the renovation then, as the record has it).
-  verdicts.set(card.key, { text: verdict, total: accepted.length + changes.length });
+  verdicts.set(card.key, {
+    text: verdict,
+    total: accepted.length + changes.length,
+    rules: rulesKey,
+  });
   if (!expanded) {
     return (
       <article className="talk-card talk-card-folded" aria-labelledby={`card-${card.key}`}>
@@ -526,7 +532,7 @@ export const ProposalCard = memo(function ProposalCard({
         >
           <span>
             {card.title} · {headLabel(project, card)}
-            {foldedLine(card)}
+            {foldedLine(card, rulesKey)}
           </span>
           <span className="talk-fold-show" aria-hidden="true">
             Show ›

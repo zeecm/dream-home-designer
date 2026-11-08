@@ -405,6 +405,9 @@ export function StartOverDialog({ onClose }: { onClose: () => void }) {
           Your versions stay, under Earlier designs. The designer forgets this conversation’s
           messages and decisions, and the ideas you didn’t accept go with them.
         </p>
+        <p id="restart-r" className="field-hint">
+          Keeping what I know about you keeps your rules too; untick it and they go.
+        </p>
         <label className="check-row">
           <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} />
           Keep what I know about you

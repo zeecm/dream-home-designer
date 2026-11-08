@@ -315,7 +315,7 @@ function compile(
         ...extra,
       });
     };
-    const name = (p: Piece) => `the ${nameOf(p.kind)}`;
+    const name = (p: Piece) => `the ${nameOf(p.kind).replace(/\bchinese\b/g, 'Chinese')}`;
     const t = rule.target;
 
     // Routes: the walkway search at the rule's width.

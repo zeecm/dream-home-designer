@@ -27,6 +27,7 @@ import { lineState, undoLine } from './accept';
 import { cardChanges, cardResult, cardVerdict, optionCard, versionKey } from './cards';
 import { copyConversation, downloadConversation, showStart } from './iterate';
 import { stopTalkRun } from './propose';
+import { useRuleShown } from './rules';
 import { focusInLog, keepFocus, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { recoverPending, stopReply } from './turn';
@@ -521,6 +522,19 @@ export function TalkPanel() {
   // only 3D shows the plan, where new, moved and left-out pieces are marked (not an older card
   // shown by Show in 3D, which asked for 3D).
   const oneView = useOneView();
+  // Show on plan for a rule (slice 3a QA B1): the sheet drops to half (peek where half still
+  // covers the plan), and a phone showing only 3D shows the plan, where the rule is drawn.
+  const ruleShown = useRuleShown((st) => st.rule?.id ?? null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on a rule being shown
+  useEffect(() => {
+    if (!ruleShown) return;
+    if (sheet)
+      setSize((s) =>
+        s === 'full' ? (coversPlan('half') ? 'peek' : 'half') : coversPlan(s) ? 'peek' : s,
+      );
+    const ed = useEditor.getState();
+    if (oneView && !ed.walking && !ed.elevation && shownViewNow() === '3d') ed.setViewMode('plan');
+  }, [ruleShown]);
   const seen = useRef(new Set<string>());
   const mountedAt = useRef(Date.now());
   useEffect(() => {
