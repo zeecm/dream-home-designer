@@ -32,7 +32,14 @@ import {
 } from '@dhd/core';
 import { type AiSettings, PROVIDERS } from '../credentials';
 import { AiError } from '../providers';
-import { type Halt, Halted, Stopped, requestStep } from './request';
+import {
+  type Halt,
+  Halted,
+  type InterruptReason,
+  Interrupted,
+  Stopped,
+  requestStep,
+} from './request';
 import { type StepSink, streamStep } from './stream';
 
 /**
@@ -65,9 +72,18 @@ export interface StepState {
    * Waiting out a rate limit, or for the connection to come back: seconds left, and which
    * wait of two.
    */
-  wait: { seconds: number; attempt: number; net?: boolean; server?: boolean } | null;
+  wait: {
+    seconds: number;
+    attempt: number;
+    net?: boolean;
+    server?: boolean;
+    /** Cut off while the page was out of view: going again once it is back. */
+    away?: boolean;
+  } | null;
   /** Requests made again (an unreadable answer, a step too long, a busy server). */
   retries: number;
+  /** Sent again after the page came back (a locked phone): not a retry of a bad answer. */
+  resent: number;
   /** Cut off by Stop: the most it may still be billed (its prompt, and output to its limit). */
   cutOffHigh: number | null;
   /** Sent back to be fixed: which round, and how many checks it failed. */
@@ -78,9 +94,14 @@ export type { Halt };
 
 export interface RunState {
   steps: StepState[];
-  /** paused: the tab's limit was reached, waiting for the person. */
-  phase: 'running' | 'paused' | 'done' | 'stopped' | 'halted' | 'failed';
+  /**
+   * paused: the tab's limit was reached, waiting for the person. interrupted: the page was
+   * away too long to carry on by itself (its checkpoint carries on when asked).
+   */
+  phase: 'running' | 'paused' | 'done' | 'stopped' | 'halted' | 'failed' | 'interrupted';
   halt: Halt | null;
+  /** Interrupted: why (away too long, cut off too often, no room left in its figure). */
+  interrupt?: InterruptReason | null;
   /** This run's requests. */
   usage: Usage[];
   startedAt: number;
@@ -105,8 +126,23 @@ export interface RunOptions {
   expected?: { key: string; label: string }[];
   fetch?: typeof fetch;
   onUpdate?: (state: RunState) => void;
-  /** The version after each step that changed it (never called if the layout fails). */
-  onSave?: (design: DraftDesign) => void | Promise<void>;
+  /**
+   * The version after each step that changed it (never called if the layout fails), with
+   * the fix requests the run may still send.
+   */
+  onSave?: (design: DraftDesign, info: { fixesLeft: number }) => void | Promise<void>;
+  /** Fix requests this run may send (a run carried on keeps what was left); FIX_PER_RUN. */
+  fixesLeft?: number;
+  /** How long a finished step took: the layout, a room's answer, a fix round (ms). */
+  onTimed?: (kind: 'layout' | 'room' | 'fix', ms: number) => void;
+  /** A step cut off while the page was out of view was sent again on its return. */
+  onResent?: (st: StepState) => void;
+  /**
+   * A step's request goes ('start'), or came back with its answer ('end'): the layout, a
+   * room's answer, a fix round (by the row's key). Not ended when the run stops or is
+   * interrupted mid-step.
+   */
+  onStep?: (key: string, kind: 'layout' | 'room' | 'fix', phase: 'start' | 'end') => void;
   onUsage?: (u: Usage) => void;
   /** Where a version is placed and checked (the designer's worker); else here, at once. */
   results?: (
@@ -115,8 +151,11 @@ export interface RunOptions {
     design: DesignInput,
     opts?: DesignOptions,
   ) => Promise<DesignResult>;
-  /** Whether the tab's limit has been reached. */
-  overLimit?: () => boolean;
+  /**
+   * Whether the tab's limit (or the run's figure) has been reached, counting `next` (the step
+   * about to be sent) at its most: before each step, and before any request is sent again.
+   */
+  overLimit?: (next?: { key: string; kind: 'layout' | 'room' | 'fix' }) => boolean;
   /** The limit was reached: true to finish the design, false to stop here. */
   confirmOver?: () => Promise<boolean>;
   /**
@@ -154,6 +193,14 @@ export function mergeAnswer(
   };
 }
 
+/** What a run interrupted says, by why. */
+export const interruptText = (why: InterruptReason) =>
+  why === 'away'
+    ? 'Paused while you were away. Finished steps are kept.'
+    : why === 'resent'
+      ? 'Paused: a step was cut off again and again. Finished steps are kept.'
+      : 'Paused: this design has used what it was priced at. Finished steps are kept.';
+
 /** Which step a run is on, the same everywhere it is shown: "Step 2 of 5". */
 export function progressOf(state: Pick<RunState, 'steps'>): { step: number; of: number } {
   const of = Math.max(1, state.steps.length);
@@ -174,6 +221,7 @@ export const blankStep = (key: string, label: string, kind: StepState['kind']): 
   error: null,
   wait: null,
   retries: 0,
+  resent: 0,
   cutOffHigh: null,
   fixing: null,
 });
@@ -204,6 +252,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     steps: [],
     phase: 'running',
     halt: null,
+    interrupt: null,
     usage: [],
     startedAt: Date.now(),
     endedAt: null,
@@ -222,9 +271,12 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
   };
   const spentSoFar = () => state.usage.reduce((t, u) => t + (u.usd ?? 0), 0);
   let saving: Promise<void> = Promise.resolve();
+  /** Fix requests the run may still send (the estimate counts this many at most). */
+  let fixesLeft = o.fixesLeft ?? FIX_PER_RUN;
   const save = () => {
     const snapshot = structuredClone(design);
-    saving = saving.then(() => o.onSave?.(snapshot)).catch(() => {});
+    const info = { fixesLeft };
+    saving = saving.then(() => o.onSave?.(snapshot, info)).catch(() => {});
     return saving;
   };
 
@@ -237,9 +289,21 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     if (o.signal.aborted) resolve(false);
     o.signal.addEventListener('abort', () => resolve(false), { once: true });
   });
-  const mayStart = async (): Promise<boolean> => {
+  /**
+   * Whether the next step may go (`next`: counted at its most). It is reserved (`onStep`
+   * 'start') in the same step as the check passes: two rooms let go together each count the
+   * other, never both checked against the room only one of them fits.
+   */
+  const mayStart = async (next?: {
+    key: string;
+    kind: 'layout' | 'room' | 'fix';
+  }): Promise<boolean> => {
+    const reserve = () => {
+      if (next) o.onStep?.(next.key, next.kind, 'start');
+      return true;
+    };
     if (stopping || o.signal.aborted) return false;
-    if (allowOver || !o.overLimit?.()) return true;
+    if (allowOver || !o.overLimit?.(next)) return reserve();
     if (!asking) {
       state.phase = 'paused';
       say(`Paused: this tab has reached its limit. ${usdText(spentSoFar())} spent on this design.`);
@@ -256,7 +320,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     }
     // Stop while paused ends the wait too.
     const go = await Promise.race([asking, aborted]);
-    return go && !o.signal.aborted;
+    return go && !o.signal.aborted && reserve();
   };
 
   let cap = 2;
@@ -273,8 +337,20 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       promptChars,
       outputChars,
     });
-    if (!finished) {
-      // Cut off before its usage arrived: what streamed, counted from its characters.
+    if (!finished && !o.signal.aborted) {
+      // Cut off before its usage arrived (a locked phone, a dropped connection): it may be
+      // billed in full, its whole prompt and output to its limit, and is counted so (the
+      // figure it is held to never assumes less). Stop's cut-off is said apart, at that most.
+      const price = priceOf(u.model, o.prices);
+      const most = {
+        input: tokensOf(promptChars),
+        cachedInput: 0,
+        cacheWrite: 0,
+        output: Math.max(p.maxTokens, u.output, tokensOf(outputChars)),
+      };
+      u = { ...u, ...most, estimated: true, usd: price ? usdOf(most, price) : null };
+    } else if (!finished) {
+      // Cut off by Stop: what streamed, counted from its characters.
       const output = Math.max(u.output, tokensOf(outputChars));
       const price = priceOf(u.model, o.prices);
       u = { ...u, output, estimated: true, usd: price ? usdOf({ ...u, output }, price) : null };
@@ -325,6 +401,11 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
         cap = 1;
       },
       throttle,
+      resumeOnReturn: true,
+      onResent: () => o.onResent?.(st),
+      // No request is sent again past the run's figure or the tab's limit (the room gate's
+      // own check): the run is interrupted, and its card asks before more is spent.
+      mayRetry: () => (o.overLimit?.() ? 'this design has used what it was priced at.' : null),
     });
   }
 
@@ -350,7 +431,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     // 1. The layout and style.
     if (plan.layout) {
       const st = state.steps[0] as StepState;
-      if (!(await mayStart())) return ended('stopped');
+      if (!(await mayStart({ key: 'layout', kind: 'layout' }))) return ended('stopped');
       const bounds = levelBounds(ctx.base);
       const prompt = layoutStep(ctx, {
         ...(plan.feedback ? { feedback: plan.feedback } : {}),
@@ -358,7 +439,12 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
         locks: plan.locks ?? [],
         previous: plan.layout.previous ?? null,
       });
+      const t0 = Date.now();
+      // (Reserved as `mayStart` let it go.)
       const concept = await step(prompt, st, (raw) => parseConcept(raw, bounds));
+      o.onStep?.(st.key, 'layout', 'end');
+      // (A step sent again after the page was away took the time away too: not timed.)
+      if (!st.resent) o.onTimed?.('layout', Date.now() - t0);
       if (!concept) return ended('failed');
       design.concept = concept;
       say(`Layout and style done. ${usdText(spentSoFar())} so far.`);
@@ -418,13 +504,11 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     // A run-stopping error (a refused key, a quota): set before the first room's gate opens,
     // so no other room is sent after it.
     let runError: unknown = null;
-    /** Fix requests the run may still send (the estimate counts this many at most). */
-    let fixesLeft = FIX_PER_RUN;
     // The storage lens's block in each room step (what the space should hold), unless it's off.
     const storage = o.result && !lensOn(o.result, 'storage') ? false : o.result?.storage;
     const room = async (s: (typeof spaces)[number], onStart?: () => void) => {
       const st = state.steps.find((x) => x.key === s.key) as StepState;
-      if (!(await mayStart())) {
+      if (!(await mayStart({ key: s.key, kind: 'room' }))) {
         onStart?.();
         return;
       }
@@ -438,7 +522,10 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       });
       try {
         const parse = (raw: unknown) => parseSpaceDesign(raw, bounds);
+        const t0 = Date.now();
         const answer = await step(prompt, st, parse, onStart);
+        o.onStep?.(st.key, 'room', 'end');
+        if (!st.resent) o.onTimed?.('room', Date.now() - t0);
         if (answer) {
           const merge = (a: SpaceDesign) =>
             mergeAnswer(plan.previous?.[s.key], a, plan.keep?.[s.key] ?? [], o.result);
@@ -448,7 +535,12 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
           let fixes = 0;
           let now = first;
           const rounds = fixRoundsFor(ctx.brief.quality);
-          while (now.fixable.length && fixes < rounds && fixesLeft > 0 && (await mayStart())) {
+          while (
+            now.fixable.length &&
+            fixes < rounds &&
+            fixesLeft > 0 &&
+            (await mayStart({ key: s.key, kind: 'fix' }))
+          ) {
             // Taken from the run's few before the request goes (rooms run side by side).
             fixesLeft--;
             fixes++;
@@ -458,6 +550,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
             say(`${s.name}: checking… fixing ${plural(left.length, 'problem')}.`);
             update();
             const fix: FixRequest = { round: fixes, failures: left, placed: now.placed };
+            const tf = Date.now();
             const again = await step(
               roomStep(ctx, s, r.level, design.aliases, {
                 concept: design.concept,
@@ -471,6 +564,8 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
               st,
               parse,
             );
+            o.onStep?.(st.key, 'fix', 'end');
+            if (!st.resent) o.onTimed?.('fix', Date.now() - tf);
             st.fixing = null;
             if (!again) {
               // The fix didn't come: the answer before it stands, checked as it is.
@@ -556,6 +651,11 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       state.halt = e.halt;
       say(e.halt.message);
       return ended('halted');
+    }
+    if (e instanceof Interrupted) {
+      state.interrupt = e.reason;
+      say(interruptText(e.reason));
+      return ended('interrupted');
     }
     state.halt = {
       kind: 'network',

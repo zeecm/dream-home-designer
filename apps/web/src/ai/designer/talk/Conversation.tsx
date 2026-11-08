@@ -619,7 +619,8 @@ export function TalkPanel() {
   const spendLine =
     totals.usd === null
       ? `This conversation ${tokens(totals.tokens)} tokens`
-      : `This conversation ${totals.estimated || live ? '~' : ''}${usd(totals.usd)} · this tab ${usd(spend.usd)}${cap !== null ? ` of ${usd(cap)}` : ''}`;
+      : // A cut-off attempt is counted at its most: the figure is "up to" (while one runs, "~").
+        `This conversation ${totals.estimated ? 'up to ' : live ? '~' : ''}${usd(totals.usd)} · this tab ${usd(spend.usd)}${cap !== null ? ` of ${usd(cap)}` : ''}`;
 
   // Folded to its tab (a phone on its side), the conversation stays mounted, hidden, so the
   // proposal stays on the plan, bigger.
