@@ -31,7 +31,11 @@ import {
 } from './cards';
 
 // The cards read the app's design options and results; these tests need neither.
-vi.mock('../state', () => ({ designOpts: () => ({}), houseRulesFor: () => [] }));
+vi.mock('../state', () => ({
+  designOpts: () => ({}),
+  houseRulesFor: () => [],
+  houseKeptFor: () => [],
+}));
 vi.mock('../results', () => ({}));
 
 const row = (id: string, group: string): Change => ({

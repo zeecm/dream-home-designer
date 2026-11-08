@@ -4,6 +4,7 @@ import {
   type Rule,
   type TurnOf,
   dayOf,
+  keptName,
   liveRules,
   numberRange,
   ruleNumber,
@@ -11,6 +12,7 @@ import {
 } from '@dhd/core';
 import { useEffect, useMemo, useState } from 'react';
 import { LengthField } from '../../../ui/fields';
+import { lightPointer, unkeep } from './pointers';
 import { useAi } from '../../credentials';
 import { useResultsTickN } from '../results';
 import { tokens, usd } from '../spend';
@@ -403,6 +405,7 @@ export function YourRules({ Back }: { Back: (p: { title: string }) => JSX.Elemen
           </div>
         </>
       )}
+      <KeptList />
       <p>
         <button
           type="button"
@@ -416,6 +419,59 @@ export function YourRules({ Back }: { Back: (p: { title: string }) => JSX.Elemen
         Your rules stay on this device, with this conversation. They’re not in the plan, its exports
         or share links.
       </p>
+    </section>
+  );
+}
+
+/** Kept as they are (UX §3.4, §2.4): pieces kept where they are, with Show and Let go. */
+function KeptList() {
+  const kept = useTalk((s) => s.conv?.kept ?? []);
+  if (!kept.length) return null;
+  return (
+    <section className="talk-kept" aria-label="Kept as they are">
+      <h4 className="talk-rules-head">Kept as they are ({kept.length})</h4>
+      <ul className="talk-decisions">
+        {kept.map((k) => (
+          <li key={k.id}>
+            <span>
+              {keptName(k).replace(/^the /, '').replace(/^./, (c) => c.toUpperCase())}
+              <span className="muted">
+                {' '}
+                · {k.from === 'plan' ? 'in your plan' : `from ${k.from}`}
+              </span>
+            </span>
+            <span className="talk-decision-actions">
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() =>
+                  lightPointer(
+                    {
+                      id: `show_${k.id}`,
+                      kind: k.itemId ? 'item' : 'spot',
+                      targetId: k.itemId,
+                      at: { x: k.pose.x, y: k.pose.y },
+                      levelId: k.levelId,
+                      levelName: null,
+                      version: { kind: 'plan' },
+                      label: keptName(k),
+                      room: null,
+                      where: '',
+                      state: '',
+                    },
+                    2000,
+                  )
+                }
+              >
+                Show
+              </button>
+              <button type="button" className="link-btn" onClick={() => void unkeep(k)}>
+                Let the designer move it
+              </button>
+            </span>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

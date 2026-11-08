@@ -1,4 +1,4 @@
-import type { Design, DesignBrief, DesignOptions, Project, Rule } from '@dhd/core';
+import type { Design, DesignBrief, DesignOptions, Kept, Project, Rule } from '@dhd/core';
 import { create } from 'zustand';
 import { useRates } from '../../cost/estimate';
 import { useEditor } from '../../editor';
@@ -72,6 +72,12 @@ export const setHouseRules = (f: (levelId: string) => readonly Rule[]) => {
   houseRules = f;
 };
 export const houseRulesFor = (levelId: string): readonly Rule[] => houseRules(levelId);
+/** The pieces kept where they are on a level (Keep this), from the conversation. */
+let houseKept: (levelId: string) => readonly Kept[] = () => [];
+export const setHouseKept = (f: (levelId: string) => readonly Kept[]) => {
+  houseKept = f;
+};
+export const houseKeptFor = (levelId: string): readonly Kept[] => houseKept(levelId);
 
 /**
  * What a version is placed and checked with: the rates, the site, the plan's own models and,
@@ -80,11 +86,13 @@ export const houseRulesFor = (levelId: string): readonly Rule[] => houseRules(le
  */
 export const designOpts = (doc: Project, levelId?: string): DesignOptions => {
   const rules = levelId ? houseRules(levelId) : [];
+  const kept = levelId ? houseKept(levelId) : [];
   return {
     rates: useRates.getState().rates,
     ...(doc.site ? { site: doc.site } : {}),
     ...(doc.models ? { models: doc.models } : {}),
     ...(rules.length ? { rules: [...rules] } : {}),
+    ...(kept.length ? { kept: [...kept] } : {}),
   };
 };
 

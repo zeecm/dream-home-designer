@@ -18,7 +18,7 @@ import {
   subsetReport,
 } from '@dhd/core';
 import { readResult, requestResult } from '../results';
-import { designOpts, houseRulesFor } from '../state';
+import { designOpts, houseKeptFor, houseRulesFor } from '../state';
 
 /**
  * A card in the conversation: a proposal's option, or a version made by v1's form ("Earlier
@@ -254,6 +254,7 @@ export function precheckOn(
     waived: [...card.waivers.map((w) => w.key), ...waived],
     renovation: !!project.renovation,
     rules: houseRulesFor(card.levelId),
+    kept: houseKeptFor(card.levelId),
   });
   return { failing: rep.failing, hdb: rep.failing.some((c) => !c.waivable), missing: false };
 }

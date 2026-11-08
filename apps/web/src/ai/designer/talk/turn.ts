@@ -4,6 +4,7 @@ import {
   type Conversation,
   type DesignBrief,
   type FactKey,
+  type Pointer,
   type QuestionKey,
   STYLE_NAMES,
   type TalkEstimate,
@@ -168,6 +169,7 @@ function inputFor(
   message: string,
   table: string[],
   sent?: string,
+  pointers: readonly Pointer[] = conv.draftPointers,
 ): TalkInput | null {
   const project = doc();
   const level = talkLevel();
@@ -184,6 +186,7 @@ function inputFor(
     events: eventsSince(conv, digests()),
     onTable: table,
     ...(sent !== undefined ? { sent } : {}),
+    ...(pointers.length ? { pointers } : {}),
   };
 }
 
@@ -265,6 +268,8 @@ export async function sendMessage(
   text: string,
   anyway = false,
   ruleAsk?: { decisionId: string },
+  /** The chips it goes with: the composer's, unless given (a popover's one). */
+  pointersGiven?: Pointer[],
 ): Promise<boolean> {
   const words = text.trim();
   const ai = aiSettings();
@@ -277,7 +282,8 @@ export async function sendMessage(
     await noteHandEdits();
     const conv = useTalk.getState().conv ?? conv0;
     if (pendingReply(conv)) return;
-    const input = inputFor(conv, words, await onTable(conv));
+    const pointers = pointersGiven ?? (ruleAsk ? [] : conv.draftPointers);
+    const input = inputFor(conv, words, await onTable(conv), undefined, pointers);
     if (!input) return;
     const prompt = talkPrompt(input);
     if (await pastLimit(prompt, conv, anyway)) return;
@@ -290,6 +296,7 @@ export async function sendMessage(
       sent: prompt.sent,
       aliases: input.aliases,
       ...(ruleAsk ? { ruleAsk } : {}),
+      ...(pointers.length ? { pointers } : {}),
     });
     if (!next || pendingReply(next)?.id !== id) return;
     sent = true;

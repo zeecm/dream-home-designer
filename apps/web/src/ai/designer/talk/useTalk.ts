@@ -13,7 +13,14 @@ import {
 import { create } from 'zustand';
 import { shownLevelId, useStore } from '../../../store';
 import type { RunState } from '../run';
-import { getBrief, loadDesigns, putBrief, setHouseRules, useDesigner } from '../state';
+import {
+  getBrief,
+  loadDesigns,
+  putBrief,
+  setHouseKept,
+  setHouseRules,
+  useDesigner,
+} from '../state';
 import { onOtherTab, talkStore, talkStoreReady } from './talkStore';
 
 /**
@@ -188,6 +195,10 @@ export const rulesOn = (levelId: string) => {
   return c && c.levelId === levelId ? liveRules(c).filter((r) => r.levelId === levelId) : [];
 };
 setHouseRules(rulesOn);
+setHouseKept((levelId) => {
+  const c = useTalk.getState().conv;
+  return c && c.levelId === levelId ? c.kept.filter((k) => k.levelId === levelId) : [];
+});
 
 /** A key that changes when the live rules do (a card re-reads its result then). */
 export const useRulesKey = (levelId: string) =>
@@ -196,6 +207,7 @@ export const useRulesKey = (levelId: string) =>
       ? s.conv.rules
           .filter((r) => !r.deleted && r.levelId === levelId)
           .map((r) => `${r.id}:${r.n}:${r.name}`)
+          .concat(s.conv.kept.map((k) => `k:${k.id}`))
           .join('|')
       : '',
   );

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Kept, MAX_KEPT } from '../rules/kept';
 import { Rule } from '../rules/schema';
 import { Concept, DesignBrief, Lock, SpaceDesign, SpaceStatus, Usage } from '../schema';
 import { clean } from '../util';
@@ -21,6 +22,46 @@ export const TALK_RECORD_VERSION = 3;
 export const PROPOSAL_RECORD_VERSION = 2;
 /** Rules kept per conversation, the recently deleted (for Undo) included. */
 export const MAX_RULE_RECORDS = 40;
+/** Pointers in one message (UX §1.2). */
+export const MAX_POINTERS = 5;
+
+/**
+ * What the person pointed at on the plan (slice 3a §1): a piece, a door or window, an electrical
+ * point, a wall, a room or a spot, on their plan or on a version, with the words the chip and the
+ * model are given. The target is looked up again when shown ("(gone)" is never stored).
+ */
+export const Pointer = z.object({
+  id: z.string(),
+  kind: z.enum(['item', 'opening', 'point', 'wall', 'room', 'spot']),
+  targetId: z.string().nullable(),
+  /** The spot, a wall's spot along it, or the target's centre (where it was, if gone). */
+  at: z.object({ x: z.number(), y: z.number() }),
+  levelId: z.string(),
+  /** Its level's name, when the home has several (said on the chip). */
+  levelName: z.string().max(60).nullable().default(null),
+  version: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('plan') }),
+    z.object({
+      kind: z.literal('option'),
+      proposalId: z.string(),
+      letter: z.string().max(1),
+      /** "V4", "V4B". */
+      title: z.string().max(8),
+    }),
+  ]),
+  label: z.string().max(80),
+  room: z.string().max(80).nullable(),
+  /** Where it is, as the change rows say it ("by the window"). */
+  where: z.string().max(120),
+  /** Its state in that version ("added in V4", "not changed"). */
+  state: z.string().max(80),
+});
+export type Pointer = z.infer<typeof Pointer>;
+
+/** The pointers of a list this build can read, at most five. */
+const Pointers = z
+  .array(z.unknown())
+  .transform((items) => readable(Pointer, items).slice(0, MAX_POINTERS));
 /** Turns kept in one conversation; the oldest go first. */
 export const MAX_TURNS = 500;
 /** Decisions kept, and how long each may be. */
@@ -245,6 +286,13 @@ export const TalkEvent = z.discriminatedUnion('type', [
     lines: z.array(z.string().max(TALK_LIMITS.line)).max(3),
     more: z.number().int().min(0),
   }),
+  /** A piece kept where it is (Keep this): the app's line, with Undo while it is the newest. */
+  z.object({
+    type: z.literal('kept'),
+    keptId: z.string(),
+    text: z.string().max(TALK_LIMITS.note),
+    undone: z.boolean().default(false),
+  }),
   /** A house rule kept, changed, deleted or replaced: the app's line, with Your rules. */
   z.object({
     type: z.literal('rule'),
@@ -278,6 +326,8 @@ export const Turn = z.discriminatedUnion('kind', [
     sent: z.string().max(SENT_CHARS).optional(),
     /** Make this a rule (UX §3.8): shown as the app's line, not a bubble. */
     ruleAsk: z.object({ decisionId: z.string() }).optional(),
+    /** What it pointed at (chips above the words; frozen into `sent` as quoted data). */
+    pointers: Pointers.optional(),
     /** Its reply: running, answered, failed (Try again), or cut off (Stop, a closed tab). */
     reply: z
       .object({
@@ -443,6 +493,18 @@ export const Conversation = z.object({
   turns: z.array(Turn).max(MAX_TURNS),
   /** The composer, kept across closes and reloads. */
   draft: z.string().max(DRAFT_CHARS).default(''),
+  /** The composer's chips (slice 3a), kept with the draft. */
+  draftPointers: Pointers.default([]),
+  /** Pieces kept where they are (Keep this), at most 30. */
+  kept: z
+    .array(z.unknown())
+    .transform((items) => readable(Kept, items).slice(-MAX_KEPT))
+    .default([]),
+  /** One-time tips seen (the pointing tip). */
+  tips: z
+    .array(z.string())
+    .transform((t) => t.filter((x): x is 'point' => x === 'point'))
+    .default([]),
   /** Short names (R1, W3, P12) the talk calls use, never renamed once given. */
   aliases: z.record(z.string()).default({}),
   /**

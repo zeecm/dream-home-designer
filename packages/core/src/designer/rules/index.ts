@@ -1,4 +1,15 @@
 /** House rules (slice 3a): the rule object, its sentence, its checks and vetting. */
+export {
+  KEPT_ANGLE,
+  KEPT_GAP,
+  Kept,
+  type KeptCheck,
+  MAX_KEPT,
+  keptChecks,
+  keptHolds,
+  keptItem,
+  keptName,
+} from './kept';
 export { type OfferCtx, revet, ruleOffer, storedVet } from './offer';
 export { ROLE_NAMES, type RuleDraft, type RuleParseContext, ruleFromReply } from './parse';
 export { type RuleCheck, type RuleCtx, type RuleKeepOut, ruleChecks, ruleKeepOuts } from './check';

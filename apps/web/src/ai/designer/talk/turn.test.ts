@@ -21,6 +21,8 @@ vi.mock('../../../store', () => ({
 vi.mock('../state', () => ({
   designOpts: () => ({}),
   setHouseRules: () => {},
+  setHouseKept: () => {},
+  houseKeptFor: () => [],
   houseRulesFor: () => [],
   useDesigner: create(() => ({
     designs: [],

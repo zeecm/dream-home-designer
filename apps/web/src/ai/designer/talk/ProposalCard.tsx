@@ -6,6 +6,7 @@ import {
   WARNING_TEXT,
   defaultTicks,
   mergeChanges,
+  keptHolds,
   spentOf,
   subsetReport,
   usageTotals,
@@ -20,7 +21,7 @@ import { CaseDialog } from '../CaseDialog';
 import { failingChecks } from '../parts';
 import { useResultsTickN } from '../results';
 import { tokens, usd, useSpend } from '../spend';
-import { houseRulesFor, openCompare, useDesigner } from '../state';
+import { houseKeptFor, houseRulesFor, openCompare, useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
 import { keepTogether } from '../words';
 import { Mark } from './Mark';
@@ -46,7 +47,7 @@ import {
 } from './propose';
 import { focusInLog, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
-import { type LiveRun, actProposal, useBusy, useRulesKey, useTalk } from './useTalk';
+import { type LiveRun, act, actProposal, useBusy, useRulesKey, useTalk } from './useTalk';
 import { EMPTY_VIEW, useProposalView } from './view';
 
 /**
@@ -127,6 +128,19 @@ export function TurnCost({ usage, fixes = 0 }: { usage: CardModel['usage']; fixe
   );
 }
 
+const NO_IDS: string[] = [];
+/** The ids of pieces kept where they are on the card's result (for the Kept tag). */
+function useKeptIds(levelId: string): string[] {
+  const kept = useTalk((s) => (s.conv?.levelId === levelId ? s.conv.kept : null));
+  const view = useProposalView();
+  return useMemo(() => {
+    if (!kept?.length || !view.target) return NO_IDS;
+    return Object.values(view.target.items)
+      .filter((it) => kept.some((k) => (k.itemId ? k.itemId === it.id : keptHolds(k, it))))
+      .map((it) => it.id);
+  }, [kept, view.target]);
+}
+
 /** The plan as the ticked changes would make it, and what that fails and costs (150 ms). */
 function useSubset(
   card: CardModel,
@@ -156,6 +170,7 @@ function useSubset(
               waived: [...card.waivers.map((w) => w.key), ...waive],
               renovation: !!project.renovation,
               rules: houseRulesFor(card.levelId),
+              kept: houseKeptFor(card.levelId),
             }),
           ),
         ),
@@ -226,10 +241,13 @@ export const ProposalCard = memo(function ProposalCard({
   }, [newest]);
   // Worked out only while it is open or on the plan; folded, it shows what it said last.
   const active = expanded || shown;
+  // The pointing tip, once per conversation; kept pieces tag their rows.
+  const tipSeen = useTalk((s) => !!s.conv?.tips.includes('point'));
+  const keptIds = useKeptIds(card.levelId);
   const tick = useResultsTickN();
   // A rule kept, changed or deleted re-checks the card, with no request (3a.5).
   const rulesKey = useRulesKey(card.levelId);
-  const ruleCount = rulesKey ? rulesKey.split('|').length : 0;
+  const ruleCount = rulesKey ? rulesKey.split('|').filter((x) => !x.startsWith('k:')).length : 0;
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
   const r = useMemo(
     () => (active ? timed(() => cardResult(project, card)) : null),
@@ -382,9 +400,8 @@ export const ProposalCard = memo(function ProposalCard({
             'nearest',
           ),
         );
-      } else {
-        useStore.setState({ toast: { text: `Not changed in ${card.title}`, at: Date.now() } });
       }
+      // Not changed in it: the popover says so (slice 3a), no toast.
     });
   }, [shown, changes, card.key, card.title]);
 
@@ -772,7 +789,12 @@ export const ProposalCard = memo(function ProposalCard({
                               })
                             }
                           >
-                            <span>{keepTogether(c.text)}</span>
+                            <span>
+                              {keepTogether(c.text)}
+                              {keptIds.some((k) => c.items.target.includes(k)) && (
+                                <span className="talk-kept-tag"> Kept</span>
+                              )}
+                            </span>
                             <span className="talk-row-why" aria-hidden="true">
                               ›
                             </span>
@@ -933,6 +955,27 @@ export const ProposalCard = memo(function ProposalCard({
             </div>
           )}
         </dl>
+      )}
+      {onPlan && !tipSeen && (
+          <p className="talk-app-line talk-tip">
+            <span className="talk-app-icon">
+              <Mark kind="dot" />
+            </span>
+            <span className="talk-app-text">
+              <span>
+                {window.matchMedia?.('(pointer: coarse)').matches
+                  ? 'Tap a piece on the plan to comment on it or ask why it’s there. Press and hold empty floor to point at a spot.'
+                  : 'Click a piece on the plan to comment on it or ask why it’s there. Right-click empty floor to point at a spot.'}
+              </span>
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => void act({ type: 'tipSeen', tip: 'point' })}
+              >
+                Got it
+              </button>
+            </span>
+          </p>
       )}
       {!allIn && card.status !== 'failed' && (changes.length > 0 || running) && (
         <div className="talk-actions">
