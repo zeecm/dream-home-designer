@@ -52,6 +52,30 @@ const areaOf = (level: Level, rooms: string[]) =>
     return t + (r ? roomArea(level, r) : 0);
   }, 0);
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * Changes made by hand, said once (UX §6.6): "You moved the 3-seat sofa yourself; it stays
+ * where you put it." A label is "3-seat sofa (moved)".
+ */
+export function handText(lines: readonly string[], more: number): string {
+  const one = (l: string) => {
+    const m = /^(.*) \((moved|resized|added|removed|repainted)\)$/.exec(l);
+    return m ? { what: m[1] as string, how: m[2] as string } : { what: l, how: 'changed' };
+  };
+  const items = lines.map(one);
+  const first = items[0];
+  if (items.length === 1 && !more && first) {
+    const it =
+      first.how === 'removed'
+        ? 'it stays out'
+        : first.how === 'moved' || first.how === 'added'
+          ? 'it stays where you put it'
+          : 'it stays as you made it';
+    return `You ${first.how} the ${first.what.charAt(0).toLowerCase()}${first.what.slice(1)} yourself; ${it}.`;
+  }
+  const list = items.map((x) => `${x.what.charAt(0).toLowerCase()}${x.what.slice(1)} (${x.how})`);
+  return `You changed these yourself: ${list.join(', ')}${more ? ` and ${more} more` : ''}. They stay as you left them.`;
+}
 function Person({ t }: { t: TurnOf<'person'> }) {
   return (
     <article className="talk-turn talk-you" aria-labelledby={`h-${t.id}`}>
@@ -390,6 +414,9 @@ function Event({ t }: { t: TurnOf<'event'> }) {
   } else if (e.type === 'stopped') {
     icon = 'stop';
     text = `Stopped. What’s done is kept.${e.usd ? ` Up to about ${usd(e.usd)} may still be billed.` : ''}`;
+  } else if (e.type === 'hand-edits') {
+    icon = 'edit';
+    text = handText(e.lines, e.more);
   } else {
     icon = e.type === 'fact' ? 'edit' : /^Couldn’t/.test(e.text) ? 'warn' : 'dot';
     text = e.text;

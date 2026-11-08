@@ -1,14 +1,13 @@
 import {
   type Aspect,
-  type Concept,
   type ContextInput,
-  type DesignInput,
   type DesignOptions,
+  type DraftDesign,
   FIX_PER_RUN,
   type FixRequest,
-  type Lock,
   type ParseResult,
   type Price,
+  type RunPlan,
   type SpaceDesign,
   type StepPrompt,
   type Usage,
@@ -88,23 +87,8 @@ export interface RunState {
   said: string;
 }
 
-/** A version as the runner builds it. */
-export type DraftDesign = DesignInput & { usage: Usage[] };
-
-export interface RunPlan {
-  /** Run the layout-and-style step first; null keeps the version's concept. */
-  layout: { previous?: Concept | null } | null;
-  /** The spaces to furnish: every space of the level after the layout, or these keys. */
-  rooms: 'all' | string[];
-  /** Spaces not to ask for (everything in them kept). */
-  skip?: string[];
-  feedback?: string;
-  locks?: Lock[];
-  /** The answers being changed, by space key. */
-  previous?: Record<string, SpaceDesign>;
-  /** Per space, what stays as the previous answer had it (locked, or not asked for). */
-  keep?: Record<string, Aspect[]>;
-}
+/** A version as the runner builds it, and what a run asks for (core's). */
+export type { DraftDesign, RunPlan };
 
 export interface RunOptions {
   ai: AiSettings;
@@ -598,6 +582,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       const bounds = levelBounds(ctx.base);
       const prompt = layoutStep(ctx, {
         ...(plan.feedback ? { feedback: plan.feedback } : {}),
+        ...(plan.talk ? { talk: plan.talk } : {}),
         locks: plan.locks ?? [],
         previous: plan.layout.previous ?? null,
       });
@@ -672,6 +657,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       const prompt = roomStep(ctx, s, r.level, design.aliases, {
         concept: design.concept,
         ...(plan.feedback ? { feedback: plan.feedback } : {}),
+        ...(plan.talk ? { talk: plan.talk } : {}),
         locks: plan.locks ?? [],
         previous: plan.previous?.[s.key] ?? null,
       });
@@ -701,6 +687,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
               roomStep(ctx, s, r.level, design.aliases, {
                 concept: design.concept,
                 ...(plan.feedback ? { feedback: plan.feedback } : {}),
+                ...(plan.talk ? { talk: plan.talk } : {}),
                 locks: plan.locks ?? [],
                 previous: current,
                 fix,

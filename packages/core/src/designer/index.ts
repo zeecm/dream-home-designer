@@ -87,11 +87,13 @@ export {
   SYSTEM_PROMPT,
   type StepOptions,
   type StepPrompt,
+  type TalkAsk,
   conceptBlock,
   layoutStep,
   promptText,
   roomStep,
   runPrompts,
+  talkBlock,
 } from './prompts';
 export {
   type DesignOptions,

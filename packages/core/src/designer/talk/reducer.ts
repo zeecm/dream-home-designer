@@ -1,5 +1,5 @@
 import type { Level } from '../../schema';
-import type { DesignBrief } from '../schema';
+import type { DesignBrief, Usage } from '../schema';
 import {
   GREETING_NEXT,
   assume,
@@ -9,6 +9,9 @@ import {
   greeting as greetingText,
   nextQuestions,
 } from './firstMeeting';
+import type { ProbeLines } from './probe';
+import { mechanicalSummary } from './prompt';
+import { type TalkReply, applyFacts } from './reply';
 import {
   type Conversation,
   DECISION_CHARS,
@@ -18,9 +21,11 @@ import {
   MAX_DECISIONS,
   MAX_TURNS,
   type QuestionKey,
+  SENT_CHARS,
   type ScopeRef,
   TALK_RECORD_VERSION,
   type TalkEvent,
+  type TalkNoted,
   type Turn,
   type TurnOf,
   cut,
@@ -77,6 +82,9 @@ export type TalkAction =
       reason: TurnOf<'cost-ask'>['reason'];
       estimate: TurnOf<'cost-ask'>['estimate'];
       finish?: TurnOf<'cost-ask'>['finish'];
+      /** A designer's plan: its card follows the reply (no bubble of the person's). */
+      talk?: TurnOf<'cost-ask'>['talk'];
+      just?: ScopeRef | null;
     }
   /** The figure on an open cost card, worked out again (the plan or the prices moved). */
   | { type: 'costRefresh'; turnId: string; estimate: TurnOf<'cost-ask'>['estimate'] }
@@ -120,6 +128,65 @@ export type TalkAction =
       from: string | null;
     }
   | { type: 'decisionEdit'; id: string; text: string }
+  /** A message to the designer: the person's turn, its reply on its way. */
+  | { type: 'send'; id: string; at: string; text: string; sent: string }
+  /** The text streamed so far, kept as the tab hides (a phone may kill it). */
+  | { type: 'checkpoint'; turnId: string; text: string; chars: number }
+  | {
+      type: 'replyDone';
+      turnId: string;
+      id: string;
+      at: string;
+      reply: TalkReply;
+      /** The app's lines about what it couldn't use ("Walls stay: …"). */
+      lines: string[];
+      echo: string;
+      usage: Usage[];
+      /** A concern's measured lines (the probe), worked out by the app. */
+      probe: ProbeLines | null;
+      /** Ids for what the reply notes and the app lines: one each, in order. */
+      ids: string[];
+      /** The reply was asked to sum up the turns up to this one. */
+      fold: { upTo: string; hard: boolean } | null;
+    }
+  | {
+      type: 'replyFailed';
+      turnId: string;
+      id: string;
+      at: string;
+      error: string;
+      /** Text that streamed before it failed, kept as cut off. */
+      text: string;
+      usage: Usage[];
+    }
+  | {
+      type: 'replyCut';
+      turnId: string;
+      ids: [string, string];
+      at: string;
+      text: string;
+      usage: Usage[];
+      cut: 'stopped' | 'tab';
+      /** The app's line ("Stopped. The text so far is kept. ~US$0.02, may still be billed."). */
+      line: string;
+    }
+  /** Try again: the same message, its reply on its way again. */
+  | { type: 'retry'; turnId: string; at: string }
+  /** Edit: a message not answered goes back into the composer. */
+  | { type: 'unsend'; turnId: string }
+  /** A designer's question answered with a chip (free when it is a What I know fact). */
+  | {
+      type: 'talkAnswer';
+      turnId: string;
+      index: number;
+      words: string;
+      id: string;
+      at: string;
+      brief?: DesignBrief;
+      key?: QuestionKey;
+    }
+  /** Changes made by hand since the last accept, said once each. */
+  | { type: 'handEdits'; id: string; at: string; labels: string[] }
   | { type: 'decisionDelete'; id: string }
   | { type: 'decisionRestore'; id: string };
 
@@ -137,10 +204,18 @@ export function newConversation(a: Extract<TalkAction, { type: 'start' }>): Conv
     brief: a.brief,
     assumed: [],
     known,
+    met: false,
+    settled: [],
     nextN: a.nextN,
     decisions: [],
     turns: [],
     draft: '',
+    aliases: {},
+    notes: [],
+    summary: null,
+    foldMisses: 0,
+    lastSentAt: null,
+    handSeen: [],
   };
   const date = a.form ? dayOf(a.form.at) : '';
   const greet: Turn = {
@@ -168,7 +243,7 @@ export const dayOf = (iso: string) => {
 
 /** What was asked so far, answered, skipped or assumed, and what a form told. */
 export function doneKeys(conv: Conversation): Set<QuestionKey> {
-  const out = new Set<QuestionKey>(conv.known);
+  const out = new Set<QuestionKey>([...conv.known, ...conv.settled]);
   for (const t of conv.turns) {
     if (t.kind !== 'app-question') continue;
     for (const k of t.keys) if (t.done[k]) out.add(k);
@@ -178,7 +253,8 @@ export function doneKeys(conv: Conversation): Set<QuestionKey> {
 }
 
 /** Whether the first meeting is over: no question waits and the offer has been made. */
-export const meetingOver = (conv: Conversation) => conv.turns.some((t) => t.kind === 'scope');
+export const meetingOver = (conv: Conversation) =>
+  conv.met || conv.turns.some((t) => t.kind === 'scope');
 
 /** The question message waiting for answers, if any. */
 export const openQuestions = (conv: Conversation): TurnOf<'app-question'> | null => {
@@ -205,7 +281,15 @@ function after(conv: Conversation, level: Level, id: string, at: string): Turn[]
 
 const push = (conv: Conversation, ...turns: Turn[]): Conversation => {
   const all = [...conv.turns, ...turns];
-  return { ...conv, turns: all.length > MAX_TURNS ? all.slice(all.length - MAX_TURNS) : all };
+  if (all.length <= MAX_TURNS) return { ...conv, turns: all };
+  // The oldest turns go; what the first meeting settled stays (L10).
+  const full = { ...conv, turns: all };
+  return {
+    ...conv,
+    met: meetingOver(full),
+    settled: [...doneKeys(full)].filter((k) => !conv.known.includes(k)),
+    turns: all.slice(all.length - MAX_TURNS),
+  };
 };
 
 const replaceTurn = (conv: Conversation, t: Turn): Conversation => ({
@@ -356,7 +440,16 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
     case 'ask':
       return push(
         conv,
-        { kind: 'person', id: a.ids[0], at: a.at, text: personText(a.scope, a.words) },
+        ...(a.talk
+          ? []
+          : [
+              {
+                kind: 'person' as const,
+                id: a.ids[0],
+                at: a.at,
+                text: personText(a.scope, a.words),
+              },
+            ]),
         {
           kind: 'cost-ask',
           id: a.ids[1],
@@ -368,6 +461,14 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
           state: 'open',
           answerId: null,
           finish: a.finish ?? null,
+          talk: a.talk
+            ? {
+                replyTo: a.talk.replyTo,
+                title: cut(a.talk.title, 60),
+                intent: cut(a.talk.intent, 600),
+              }
+            : null,
+          just: a.just ? scopeCut(a.just) : null,
         },
       );
     case 'costAnswer': {
@@ -462,6 +563,122 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
         decisions: conv.decisions.map((d) => (d.id === a.id ? { ...d, text } : d)),
       };
     }
+    case 'send': {
+      // One reply at a time: a second Send waits for the first.
+      if (pendingReply(conv)) return conv;
+      return push(
+        { ...conv, draft: '', lastSentAt: a.at },
+        {
+          kind: 'person',
+          id: a.id,
+          at: a.at,
+          text: cutLines(a.text, L.person) || '…',
+          sent: a.sent.slice(0, SENT_CHARS),
+          reply: {
+            state: 'pending',
+            error: null,
+            checkpoint: '',
+            chars: 0,
+            startedAt: a.at,
+            usage: [],
+          },
+        },
+      );
+    }
+    case 'checkpoint': {
+      const t = findTurn(conv, a.turnId, 'person');
+      if (!t?.reply || t.reply.state !== 'pending') return conv;
+      return replaceTurn(conv, {
+        ...t,
+        reply: { ...t.reply, checkpoint: cutLines(a.text, L.designer), chars: a.chars },
+      });
+    }
+    case 'replyDone':
+      return replyDone(conv, a);
+    case 'replyFailed': {
+      const t = findTurn(conv, a.turnId, 'person');
+      if (!t?.reply || t.reply.state !== 'pending') return conv;
+      const text = cutLines(a.text, L.designer);
+      const next = replaceTurn(conv, {
+        ...t,
+        reply: {
+          ...t.reply,
+          state: 'failed',
+          error: cut(a.error, 300),
+          checkpoint: '',
+          usage: text ? [] : a.usage.slice(0, 8),
+        },
+      });
+      return text ? push(next, cutTurn(a.id, a.at, t.id, text, a.usage, 'network')) : next;
+    }
+    case 'replyCut': {
+      const t = findTurn(conv, a.turnId, 'person');
+      if (!t?.reply || t.reply.state !== 'pending') return conv;
+      const text = cutLines(a.text, L.designer);
+      const next = replaceTurn(conv, {
+        ...t,
+        reply: { ...t.reply, state: 'cut', checkpoint: '', usage: text ? [] : a.usage.slice(0, 8) },
+      });
+      return push(next, ...(text ? [cutTurn(a.ids[0], a.at, t.id, text, a.usage, a.cut)] : []), {
+        kind: 'event',
+        id: a.ids[1],
+        at: a.at,
+        event: { type: 'note', text: cut(a.line, L.note) },
+      });
+    }
+    case 'retry': {
+      const t = findTurn(conv, a.turnId, 'person');
+      if (!t?.reply || (t.reply.state !== 'failed' && t.reply.state !== 'cut')) return conv;
+      if (pendingReply(conv)) return conv;
+      return replaceTurn(
+        { ...conv, lastSentAt: a.at },
+        { ...t, reply: { ...t.reply, state: 'pending', error: null, startedAt: a.at } },
+      );
+    }
+    case 'unsend': {
+      const t = findTurn(conv, a.turnId, 'person');
+      if (!t?.reply || t.reply.state === 'pending' || t.reply.state === 'done') return conv;
+      const turns = conv.turns.filter(
+        (x) => x.id !== t.id && !(x.kind === 'designer' && x.talk?.replyTo === t.id),
+      );
+      return { ...conv, turns, draft: t.text.slice(0, DRAFT_CHARS) };
+    }
+    case 'talkAnswer': {
+      const t = findTurn(conv, a.turnId, 'designer');
+      const q = t?.talk?.questions[a.index];
+      if (!t?.talk || !q || t.talk.answered[a.index] !== undefined) return conv;
+      const words = cut(a.words, L.words);
+      const next = replaceTurn(conv, {
+        ...t,
+        talk: { ...t.talk, answered: { ...t.talk.answered, [a.index]: words } },
+      });
+      const key = a.key;
+      const known = a.brief
+        ? {
+            ...next,
+            brief: a.brief,
+            assumed: key ? next.assumed.filter((k) => k !== key) : next.assumed,
+          }
+        : next;
+      return push(known, { kind: 'person', id: a.id, at: a.at, text: words });
+    }
+    case 'handEdits': {
+      const fresh = a.labels.filter((l) => !conv.handSeen.includes(l));
+      if (!fresh.length) return conv;
+      return push(
+        { ...conv, handSeen: [...conv.handSeen, ...fresh].slice(-200) },
+        {
+          kind: 'event',
+          id: a.id,
+          at: a.at,
+          event: {
+            type: 'hand-edits',
+            lines: fresh.slice(0, 3).map((l) => cut(l, L.line)),
+            more: Math.max(0, fresh.length - 3),
+          },
+        },
+      );
+    }
     case 'decisionDelete':
     case 'decisionRestore':
       return {
@@ -471,6 +688,148 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
         ),
       };
   }
+}
+
+/** The message whose reply is on its way, if any (one at a time). */
+export const pendingReply = (conv: Conversation): TurnOf<'person'> | null =>
+  (conv.turns.find((t) => t.kind === 'person' && t.reply?.state === 'pending') as
+    | TurnOf<'person'>
+    | undefined) ?? null;
+
+/** A reply cut off: its text so far, kept as a plain reply that can't be acted on. */
+function cutTurn(
+  id: string,
+  at: string,
+  replyTo: string,
+  text: string,
+  usage: Usage[],
+  how: 'stopped' | 'network' | 'tab',
+): Turn {
+  return {
+    kind: 'designer',
+    id,
+    at,
+    text,
+    lines: [],
+    after: '',
+    talk: {
+      replyTo,
+      kind: 'reply',
+      echo: JSON.stringify({ kind: 'reply', say: text, cut: true }).slice(0, SENT_CHARS),
+      usage: usage.slice(0, 8),
+      cut: how,
+      noted: [],
+      questions: [],
+      answered: {},
+      concern: null,
+      plan: null,
+    },
+  };
+}
+
+/**
+ * A reply in: the designer's turn, what it notes (Decisions, What I know, notes for the ID,
+ * each a line with Edit), the app's own lines, and a summary of older turns when asked for.
+ */
+function replyDone(
+  conv: Conversation,
+  a: Extract<TalkAction, { type: 'replyDone' }>,
+): Conversation {
+  const t = findTurn(conv, a.turnId, 'person');
+  if (!t?.reply || t.reply.state !== 'pending') return conv;
+  const ids = [...a.ids];
+  const take = () => ids.shift() ?? `${a.id}-${ids.length}`;
+  const r = a.reply;
+  const noted: TalkNoted[] = [];
+  let next = replaceTurn(conv, { ...t, reply: { ...t.reply, state: 'done', checkpoint: '' } });
+  for (const d of r.memory.decisions) {
+    const id = take();
+    const before = next.decisions.length;
+    next = talk(next, {
+      type: 'decisionAdd',
+      id,
+      at: a.at,
+      kind: d.kind,
+      text: d.text,
+      from: null,
+    });
+    if (next.decisions.length > before || next.decisions.some((x) => x.id === id)) {
+      noted.push({ kind: 'decision', text: cut(`Noted in Decisions: ${d.text}`, 300), ref: id });
+    }
+  }
+  if (r.memory.facts.length) {
+    const f = applyFacts(next.brief, r.memory.facts);
+    next = { ...next, brief: f.brief, assumed: next.assumed.filter((k) => !f.keys.includes(k)) };
+    f.lines.forEach((l, k) =>
+      noted.push({
+        kind: 'fact',
+        text: cut(`Noted in What I know: ${l}`, 300),
+        ref: f.keys[k] ?? null,
+      }),
+    );
+  }
+  for (const n of r.memory.notes) {
+    const id = take();
+    next = {
+      ...next,
+      notes: [...next.notes, { id, text: cut(n, L.note), turnId: a.id }].slice(-60),
+    };
+    noted.push({ kind: 'note', text: cut(`Noted for your ID: ${n}`, 300), ref: id });
+  }
+  const concern = r.concern
+    ? {
+        rule: r.concern.rule,
+        lines: a.probe?.lines ?? [],
+        hdb: a.probe?.hdb ?? false,
+        alt: a.probe?.hdb ? null : r.concern.alt,
+      }
+    : null;
+  const said: Turn = {
+    kind: 'designer',
+    id: a.id,
+    at: a.at,
+    text: cutLines(r.say, L.designer),
+    lines: (r.plan?.assumptions ?? []).slice(0, 5).map((l) => cut(l, L.line)),
+    after: '',
+    talk: {
+      replyTo: t.id,
+      kind: r.kind,
+      echo: a.echo.slice(0, SENT_CHARS),
+      usage: a.usage.slice(0, 8),
+      cut: null,
+      noted: noted.slice(0, 12),
+      questions: r.questions,
+      answered: {},
+      concern,
+      plan: r.plan,
+    },
+  };
+  const appLines: Turn[] = a.lines.slice(0, 3).map((text) => ({
+    kind: 'event',
+    id: take(),
+    at: a.at,
+    event: { type: 'note', text: cut(text, L.note) },
+  }));
+  next = push(next, said, ...appLines);
+  if (a.fold) {
+    const text =
+      r.fold ?? (a.fold.hard || next.foldMisses >= 2 ? mechanicalSummary(next, a.fold.upTo) : null);
+    if (text) {
+      next = push(
+        { ...next, summary: { upTo: a.fold.upTo, text: cut(text, 1200) }, foldMisses: 0 },
+        {
+          kind: 'event',
+          id: take(),
+          at: a.at,
+          event: {
+            type: 'note',
+            text: 'I’ve summed up our earlier messages in Decisions and What I know, so I can keep the conversation short. Nothing is lost.',
+          },
+        },
+      );
+    } else next = { ...next, foldMisses: next.foldMisses + 1 };
+  }
+  return next;
 }
 
 const label = (k: QuestionKey) =>

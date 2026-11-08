@@ -1,25 +1,29 @@
 import {
   DRAFT_CHARS,
+  type DraftDesign,
   type Proposal,
   type ProposalOption,
   type RunEstimate,
+  type RunPlan,
+  type ScopePlan,
   type ScopeRef,
   TALK_LIMITS,
+  TALK_RECORD_VERSION,
   type TurnOf,
   askRule,
   atMostOf,
   cut,
   levelFingerprint,
+  planScope,
   scopeCut,
 } from '@dhd/core';
 import { useStore } from '../../../store';
 import { aiSettings } from '../../credentials';
 import { contextFor, estimateFor, plannedPrompts } from '../plan';
-import { type DraftDesign, type RunPlan, blankStep, runDesign } from '../run';
+import { blankStep, runDesign } from '../run';
 import { addUsage, capUsd, countRun, overLimit, priceTable, spent, usd } from '../spend';
 import { type Running, designOpts, useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
-import { type ScopePlan, planScope } from './scope';
 import { talkStore } from './talkStore';
 import { threshold } from './threshold';
 import { act, actProposal, clearTyped, newId, nowIso, say, typedNow, useTalk } from './useTalk';
@@ -291,7 +295,7 @@ async function run(
     projectId: project.id,
     id: proposalId,
     conversationId: conv.id,
-    recordVersion: 1,
+    recordVersion: TALK_RECORD_VERSION,
     n: conv.nextN,
     turnId: ids.turn,
     at: nowIso(),

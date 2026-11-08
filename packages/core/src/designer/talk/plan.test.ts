@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import {
   type Design,
   type EditorDoc,
@@ -13,12 +14,8 @@ import {
   undo,
   updateItem,
   updateWall,
-} from '@dhd/core';
-import { describe, expect, it } from 'vitest';
-import {
-  SAMPLE_KEYS,
-  sampleDesign,
-} from '../../../../../packages/core/src/designer/fixtures/sample';
+} from '../../index';
+import { SAMPLE_KEYS, sampleDesign } from '../fixtures/sample';
 import {
   acceptedNow,
   changeFrom,

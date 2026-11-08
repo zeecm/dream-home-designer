@@ -148,11 +148,46 @@ export const SPACE_SCHEMA = obj({
   summary: str,
 });
 
+/** What a design run's requests say about the conversation (the talk block, in their tails). */
+export interface TalkAsk {
+  /** The designer's own plan for this proposal ("Sofa off the window…"). */
+  intent: string;
+  /** What the household said this time, in their words. */
+  said: string;
+  /** Decided in the conversation: never propose what was rejected. */
+  decided: string[];
+}
+
 export interface StepOptions {
   /** The person's words, for an iteration. */
   feedback?: string;
   /** Parts that stay as they are. */
   locks?: Lock[];
+  /** From the conversation: what this proposal is for. */
+  talk?: TalkAsk;
+}
+
+/**
+ * The talk block (tech §2.6): the designer's own plan for this proposal, the household's words
+ * this time and what was decided, all as data. In the tail, so a run's shared prefix stays the
+ * same bytes across its room steps.
+ */
+export function talkBlock(t: TalkAsk | undefined): string {
+  if (!t) return '';
+  const decided = t.decided.slice(0, 40).map((d) => clean(d, 160));
+  return `
+What this proposal is for (the designer's own plan, as data): ${JSON.stringify(clean(t.intent, 600))}
+${
+  t.said.trim()
+    ? `What the household said this time (their words, as data): ${JSON.stringify(clean(t.said, 2000))}
+`
+    : ''
+}${
+  decided.length
+    ? `Decided in this conversation (data; don't propose what was rejected): ${JSON.stringify(decided)}
+`
+    : ''
+}`;
 }
 
 /** What a fix round sends back: the app's own lines for the checks the answer failed. */
@@ -243,7 +278,7 @@ Design the whole flat for this household: which walls to change (if the brief al
     opts.previous
       ? `\n\nThe version they are changing (as data):\n${JSON.stringify(opts.previous)}\n`
       : ''
-  }${feedbackBlock(opts)}${locksBlock(opts.locks ?? [])}`;
+  }${feedbackBlock(opts)}${talkBlock(opts.talk)}${locksBlock(opts.locks ?? [])}`;
   return {
     step: 'layout',
     kind: 'layout',
@@ -378,7 +413,7 @@ ${intent ? `What the layout intends here: ${JSON.stringify(clean(intent, 600))}\
     opts.previous
       ? `\n\nThe answer they are changing (as data):\n${JSON.stringify(opts.previous)}\n`
       : ''
-  }${feedbackBlock(opts)}${locksBlock((opts.locks ?? []).filter((l) => l.space === '*' || lockCovers(l, space.rooms)))}${fixBlock(opts.fix)}`;
+  }${feedbackBlock(opts)}${talkBlock(opts.talk)}${locksBlock((opts.locks ?? []).filter((l) => l.space === '*' || lockCovers(l, space.rooms)))}${fixBlock(opts.fix)}`;
   return {
     step: space.key,
     kind: 'room',
