@@ -110,23 +110,23 @@ for any plan.
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
-- The designer works on the level you are looking at (a multi-level home designed the lower
-  floor whatever was shown).
 - The 3D view draws only when something changes (it redrew 60 times a second while idle).
 - AI interior designer v2, slice 3a: point at the plan ("not here", "keep this") and house rules
   ("nothing in the corridor") that become checks on every proposal. [spec](docs/specs/ai-designer-v2.md)
 
 ### Planned
-1. AI interior designer v2, slice 3b: a second look at each proposal (flow, focal point, a room
+1. Levels you can switch between in the editor: today it shows only the first level of a
+   multi-level home (a maisonette), so the upper floor can't be drawn or designed.
+2. AI interior designer v2, slice 3b: a second look at each proposal (flow, focal point, a room
    too empty or too full) and a storage lens scored on the storage meter.
-2. Elevations on the contractor sheet (elevation slice 2), with piece labels, the saved
+3. Elevations on the contractor sheet (elevation slice 2), with piece labels, the saved
    picture's font and the iPhone canvas size. [spec](docs/specs/elevation.md)
-3. Storage meter 1b: storage beds, a pantry and a bay seat. [spec](docs/specs/storage-meter.md)
-4. AI interior designer v2, slice 4: sharing a conversation.
-5. Exact render, slice 2: quality settings, real textures, AI polish; daylight bounced up off
+4. Storage meter 1b: storage beds, a pantry and a bay seat. [spec](docs/specs/storage-meter.md)
+5. AI interior designer v2, slice 4: sharing a conversation.
+6. Exact render, slice 2: quality settings, real textures, AI polish; daylight bounced up off
    the ground outside, and dark dots seen through a far window.
-6. Elevation 1b: dragging heights in the wall view.
-7. Storage meter slice 2: the household saved in the project.
+7. Elevation 1b: dragging heights in the wall view.
+8. Storage meter slice 2: the household saved in the project.
 
 ### Waiting on the owner
 - Google sign-in keys ([#21](https://github.com/zeecm/dream-home-designer/issues/21)) and the
