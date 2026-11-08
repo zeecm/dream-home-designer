@@ -1,4 +1,5 @@
 import { AGAINST, type ParseResult, ZONES } from '../schema';
+import { RULE_REPLY_SCHEMA } from '../talk/reply';
 import { clean } from '../util';
 
 /**
@@ -75,7 +76,7 @@ export const LOOK_SCHEMA = obj({
           kindId: nullable(str),
           room: nullable(str),
           // A house rule (slice 3a's object): checked by the app before anything is offered.
-          rule: nullable({ type: 'object' }),
+          rule: RULE_REPLY_SCHEMA,
         }),
       ),
     }),

@@ -729,8 +729,11 @@ pictures (image blocks in `requestFor` for Claude, OpenAI and Gemini). `parseLoo
 findings leniently (aliases only; storage is never a fix). `actOnLook`: a P1–P4 fix is acted on
 only when an app check on the same target and principle fails (sent back in the app's words),
 else dropped as `checks-disagree`; one taste fix an option; consider findings are notes; a rule
-suggestion is an offer, shown as a note until the house rules vet it (TODO after 3a merges:
-`vetRule` and the Keep as a rule block); intent, swap, remove and add are edits to the answer
+suggestion is read in the house rules' vocabulary and vetted (`lookRuleOffer`: `ruleFromReply`,
+`ruleOffer`/`vetRule`), then posted as the designer's line "From my second look at V4: …" with
+3a's free Keep as a rule offer under it (`lookOffer`, a designer turn with `talk.look`: never
+history, and the events since the last reply see past it); one the app can't hold is a card
+note; intent, swap, remove and add are edits to the answer
 with no request, anything else a room request. The round counts against `FIX_PER_RUN` and is
 kept only if `lookNoWorse`. Priced in `estimateRun` (`look: true`: the step and one round in
 `fix`). Stored as `ProposalOption.look`; proposals are records of 3 (`PROPOSAL_RECORD_VERSION`).

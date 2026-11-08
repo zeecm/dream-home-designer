@@ -782,6 +782,57 @@ describe('the second look (41)', () => {
     expect(Object.values(design.spaces).every((s) => s.status === 'done')).toBe(true);
   });
 
+  it('a suggested house rule comes back to be offered (the caller vets it), not as a note', async () => {
+    const rule = {
+      name: 'Keep the way to the bedrooms clear',
+      subject: { kind: 'any', id: null },
+      relation: 'keepClear',
+      target: { kind: 'route', id: null, rooms: ['R1', 'R2'], at: null, r: null },
+      n: 0.9,
+    };
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) =>
+        c.step === 'look'
+          ? new Response(
+              anthropicStream(
+                {
+                  findings: [
+                    {
+                      target: { kind: 'room', id: 'R2' },
+                      principle: 'P3',
+                      severity: 'consider',
+                      line: 'Keep the way to the bedrooms clear.',
+                      suggest: {
+                        kind: 'rule',
+                        piece: null,
+                        against: null,
+                        faces: null,
+                        near: null,
+                        zone: null,
+                        kindId: null,
+                        room: null,
+                        rule,
+                      },
+                    },
+                  ],
+                  summary: null,
+                },
+                USAGE,
+              ),
+              { status: 200, headers: { 'content-type': 'text/event-stream' } },
+            )
+          : null,
+    });
+    const r = start('anthropic', { fetch: prov.fetch, look: { rasterise: async () => PNG } });
+    const { look } = await r.run;
+    expect(look?.offers).toEqual([{ rule, line: 'Keep the way to the bedrooms clear.' }]);
+    expect(look?.notes).toEqual([]);
+    // The request asked for rules in the house rules' own shape.
+    const body = JSON.stringify(prov.calls.find((c) => c.step === 'look')?.body);
+    expect(body).toContain('"relation"');
+  });
+
   it('a run with no second look asked for sends none', async () => {
     const prov = provider('anthropic', { auto: true });
     const r = start('anthropic', { fetch: prov.fetch });

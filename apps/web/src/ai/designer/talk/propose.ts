@@ -2,6 +2,7 @@ import {
   type Conversation,
   DRAFT_CHARS,
   type DraftDesign,
+  type OptionLook,
   PROPOSAL_RECORD_VERSION,
   type Proposal,
   type ProposalOption,
@@ -10,6 +11,7 @@ import {
   type ScopePlan,
   type ScopeRef,
   TALK_LIMITS,
+  type TalkAction,
   type TalkAsk,
   type TalkPlan,
   type TurnOf,
@@ -17,10 +19,15 @@ import {
   askRule,
   atMostOf,
   cut,
+  entranceDoor,
   levelFingerprint,
+  liveRules,
+  lookNote,
+  lookRuleOffer,
   looksAt,
   nextLetter,
   optionName,
+  optionTitle,
   planScope,
   ruleSentence,
   scopeCut,
@@ -568,6 +575,57 @@ export const anotherPrice = (p: Proposal): RunEstimate | null => pressPrice(anot
 
 const cutNote = (s: string | null) => (s ? cut(s, 300) : null);
 
+/**
+ * The second look's suggested house rules, vetted as a reply's rule is (slice 3a's `vetRule`
+ * through `lookRuleOffer`) on the plan as it is now: each becomes the designer's line with the
+ * free Keep as a rule offer under it; one the app can't hold as a rule stays a note on the card.
+ */
+function lookOffersOf(
+  look: OptionLook | null,
+  p: Proposal,
+  letter: string,
+  design: DraftDesign,
+): { look: OptionLook | null; offers: Extract<TalkAction, { type: 'lookOffer' }>[] } {
+  const conv = useTalk.getState().conv;
+  const level = talkLevel();
+  if (!look?.offers.length || !conv || !level) return { look, offers: [] };
+  const version = optionTitle(p.n, letter, p.options.length);
+  const notes = [...look.notes];
+  const offers: Extract<TalkAction, { type: 'lookOffer' }>[] = [];
+  let rules = liveRules(conv);
+  for (const o of look.offers) {
+    const id = newId('turn');
+    const offer = lookRuleOffer(o.rule, {
+      id: newId('rule'),
+      at: nowIso(),
+      turnId: id,
+      version,
+      levelId: conv.levelId,
+      rules,
+      level,
+      brief: conv.brief,
+      aliases: design.aliases,
+      mainDoor: entranceDoor(level),
+    });
+    if (!offer) {
+      notes.push(lookNote(o.line));
+      continue;
+    }
+    // Two alike in one look: the second is vetted against the first.
+    rules = [...rules, offer.rule];
+    offers.push({
+      type: 'lookOffer',
+      id,
+      at: nowIso(),
+      replyTo: p.turnId,
+      version,
+      line: o.line,
+      offer,
+    });
+  }
+  return { look: { ...look, notes: [...new Set(notes)].slice(0, 12) }, offers };
+}
+
 /** Runs one option with slice 1's runner, saving each room into the proposal. */
 async function runOption(
   p: Proposal,
@@ -669,7 +727,11 @@ async function runOption(
         : x,
     );
   };
-  const { state, design, look } = await runDesign({
+  const {
+    state,
+    design,
+    look: looked,
+  } = await runDesign({
     ...(looks ? { look: { rasterise } } : {}),
     ai,
     ctx: sp.ctx,
@@ -724,6 +786,7 @@ async function runOption(
         ? 'checked'
         : 'stopped';
   const cutOff = state.steps.reduce((t, s) => t + (s.cutOffHigh ?? 0), 0);
+  const { look, offers } = lookOffersOf(looked, p, letter, design);
   if (doc().id === projectId) {
     await actProposal(p.id, (x) =>
       x
@@ -756,6 +819,8 @@ async function runOption(
         event: { type: 'stopped', usd: cutOff > 0 ? cutOff : null },
       });
     }
+    // A house rule the second look suggests: offered in the log as a reply's is (free).
+    for (const o of offers) await act(o);
     if (status !== 'failed') await act({ type: 'scopeNext', at: nowIso(), id: newId('turn') });
   }
   // Nothing designed: no empty version stays on the plan (N3).

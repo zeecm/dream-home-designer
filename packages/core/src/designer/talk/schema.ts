@@ -343,6 +343,11 @@ export const Turn = z.discriminatedUnion('kind', [
         plan: TalkPlan.nullable().default(null),
         /** A rule it offers to keep (slice 3a), with the app's verdict (dropped if unreadable). */
         offer: RuleOffer.nullable().default(null).catch(null),
+        /**
+         * A proposal's second look offering a rule (slice 3b), not a reply to a message:
+         * `replyTo` is the proposal's turn, and it is never repeated as history.
+         */
+        look: z.boolean().default(false),
       })
       .optional(),
   }),

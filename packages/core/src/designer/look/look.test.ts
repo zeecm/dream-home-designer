@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { entranceDoor } from '../../delivery';
 import { withPieces } from '../../fixtures/furnishedSample';
 import { furnitureKind } from '../../furniture';
 import { levelBounds } from '../../geometry';
@@ -11,10 +12,14 @@ import { SAMPLE_KEYS, parsed, sampleDesign, sampleLevel } from '../fixtures/samp
 import { estimateRun } from '../prices';
 import { roomStep } from '../prompts';
 import { type DesignResult, designResult } from '../result';
+import type { Rule } from '../rules/schema';
 import { type SpaceDesign, parseSpaceDesign } from '../schema';
 import { spacesOf } from '../spaces';
+import { eventsSince, exchanges } from '../talk/prompt';
+import { liveRules, talk } from '../talk/reducer';
 import { PROPOSAL_RECORD_VERSION, proposalFromRecord } from '../talk/schema';
-import { actOnLook, applyLookEdit, lookNoWorse } from './act';
+import type { Conversation, TurnOf } from '../talk/schema';
+import { actOnLook, applyLookEdit, lookNoWorse, lookNote, lookRuleOffer } from './act';
 import { type LookAnswer, type LookFinding, MAX_FINDINGS, parseLook } from './findings';
 import { lookFacts, lookStep } from './prompt';
 import { LOOK_PX, MIN_PX_PER_M, critiqueSketch, lookPictureSizes } from './sketch';
@@ -25,6 +30,7 @@ import { IMAGE_TOKENS, canSee, imageTokens, looksAt } from './vision';
  * does with them: the checks always win, a taste fix once, notes, rule offers; no request here.
  */
 const level = sampleLevel();
+const AT = '2026-11-08T10:00:00.000Z';
 const b = levelBounds(level);
 const v2 = (raw: unknown): SpaceDesign => parsed(parseSpaceDesign(raw, b));
 const ANSWERS = {
@@ -263,7 +269,8 @@ describe('what the app does with them (actOnLook): the checks always win', () =>
       ctx,
     );
     expect(plan.offers).toHaveLength(1);
-    expect(plan.notes).toEqual(['Designer’s second look: Keep the passage clear.']);
+    // A note only if it can't be offered (lookRuleOffer, below).
+    expect(plan.notes).toEqual([]);
     expect(plan.rounds).toEqual([]);
   });
 
@@ -426,6 +433,83 @@ describe('what the app does with them (actOnLook): the checks always win', () =>
           .filter((c) => c.hard && !c.already)
           .every((c) => worse.checks.some((w) => w.key === c.key && w.hard && !w.already)),
     );
+  });
+});
+
+describe('a suggested house rule: the free Keep as a rule offer (3a’s vetting)', () => {
+  const RULE = {
+    name: 'Keep the way to the bedrooms clear',
+    subject: { kind: 'any', id: null },
+    relation: 'keepClear',
+    target: { kind: 'route', id: null, rooms: ['R1', 'R2'], at: null, r: null },
+    n: 0.9,
+  };
+  const ctxOf = (rules: Rule[] = []) => ({
+    id: 'rule_look1',
+    at: AT,
+    turnId: 'turn_look1',
+    version: 'V1',
+    levelId: 'lvl',
+    rules,
+    level,
+    brief: ONGS,
+    aliases,
+    mainDoor: entranceDoor(level),
+  });
+
+  it('a rule the app can hold is vetted and offered; one it can’t is a note', () => {
+    const offer = lookRuleOffer(RULE, ctxOf());
+    expect(offer?.vet.ok).toBe(true);
+    expect(offer?.rule).toMatchObject({ relation: 'keepClear', from: { version: 'V1' } });
+    // The same rule again: offered, refused as a duplicate (the offer block says so).
+    const again = lookRuleOffer(RULE, { ...ctxOf([offer!.rule]), id: 'rule_look2' });
+    expect(again?.vet).toMatchObject({ ok: false, why: 'duplicate' });
+    // Not the rule vocabulary: no offer.
+    expect(lookRuleOffer({ name: 'Feng shui', relation: 'harmony' }, ctxOf())).toBeNull();
+    expect(lookNote('Keep it calm.')).toBe('Designer’s second look: Keep it calm.');
+  });
+
+  it('becomes the designer’s line with the offer under it; Keep as a rule keeps it, free', () => {
+    let c = talk({} as Conversation, {
+      type: 'start',
+      id: 'conv1',
+      at: AT,
+      projectId: 'p1',
+      levelId: 'lvl',
+      brief: ONGS,
+      beforeFp: 'fp0',
+      afterFp: null,
+      nextN: 1,
+      level,
+      form: null,
+      ids: ['n1', 'n2'],
+    });
+    c = talk(c, {
+      type: 'event',
+      id: 'ev1',
+      at: AT,
+      event: { type: 'stopped', usd: null },
+    });
+    const offer = lookRuleOffer(RULE, ctxOf())!;
+    c = talk(c, {
+      type: 'lookOffer',
+      id: 'turn_look1',
+      at: AT,
+      replyTo: 'turn_proposal',
+      version: 'V1',
+      line: 'Keep the way to the bedrooms clear.',
+      offer,
+    });
+    const t = c.turns.at(-1) as TurnOf<'designer'>;
+    expect(t.text).toBe('From my second look at V1: Keep the way to the bedrooms clear.');
+    expect(t.talk).toMatchObject({ look: true, offer: { state: 'open' } });
+    // It isn't a reply: the events since the last reply still include what came before it.
+    expect(eventsSince(c)).toContain('They stopped the last design part-way.');
+    expect(exchanges(c)).toEqual([]);
+    c = talk(c, { type: 'ruleKeep', turnId: 'turn_look1', id: 'ev2', at: AT });
+    expect(liveRules(c).map((r) => r.name)).toEqual(['Keep the way to the bedrooms clear']);
+    // A second press is a no-op.
+    expect(talk(c, { type: 'ruleKeep', turnId: 'turn_look1', id: 'ev3', at: AT })).toBe(c);
   });
 });
 

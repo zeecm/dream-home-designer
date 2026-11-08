@@ -2,7 +2,11 @@ import type { Project } from '../../schema';
 import { type AliasMap, resolveAlias } from '../aliases';
 import { categoriesFor, resolveAsset } from '../catalogue';
 import type { DesignResult } from '../result';
+import { type OfferCtx, ruleOffer } from '../rules/offer';
+import { ruleFromReply } from '../rules/parse';
+import type { Rule } from '../rules/schema';
 import type { DesignItem, SpaceDesign } from '../schema';
+import type { RuleVet } from '../talk/schema';
 import { clean } from '../util';
 import type { LookAnswer, LookFinding, LookSuggest } from './findings';
 
@@ -105,8 +109,8 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
     }
     const line = clean(f.line, 160);
     if (f.suggest?.kind === 'rule') {
+      // Offered as a house rule once the app has vetted it (`lookRuleOffer`); a note if not.
       plan.offers.push({ rule: f.suggest.rule, line });
-      plan.notes.push(NOTE(line));
       continue;
     }
     if (f.severity === 'consider') {
@@ -177,6 +181,24 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
   plan.notes = [...new Set(plan.notes)];
   return plan;
 }
+
+/**
+ * A second look's suggested house rule as slice 3a offers one: read in the rule vocabulary
+ * (`ruleFromReply`) and vetted on the plan as it is (`ruleOffer`: duplicates, conflicts, HDB,
+ * what the flat can meet). Null when it isn't a rule the app can hold: then it is a note.
+ */
+export function lookRuleOffer(
+  raw: unknown,
+  ctx: OfferCtx & { aliases: AliasMap; mainDoor: string | null },
+): { rule: Rule; vet: RuleVet } | null {
+  const read = ruleFromReply(raw, { aliases: ctx.aliases, mainDoor: ctx.mainDoor });
+  if (!read || !('draft' in read)) return null;
+  const offer = ruleOffer(read.draft, ctx);
+  return offer.vet.why === 'unfit' ? null : offer;
+}
+
+/** The card's note for a suggestion that couldn't be offered as a rule. */
+export const lookNote = NOTE;
 
 /** A space's answer with a second look's edit made: the solver places it; the checks gate it. */
 export function applyLookEdit(d: SpaceDesign, e: LookEdit, n: number): SpaceDesign {

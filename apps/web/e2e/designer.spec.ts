@@ -422,6 +422,29 @@ test.describe('desktop', () => {
               line: 'The way to the window is blocked.',
               suggest: null,
             },
+            {
+              target: { kind: 'room', id: 'R2' },
+              principle: 'P3',
+              severity: 'consider',
+              line: 'Keep the way to the bedrooms clear.',
+              suggest: {
+                kind: 'rule',
+                piece: null,
+                against: null,
+                faces: null,
+                near: null,
+                zone: null,
+                kindId: null,
+                room: null,
+                rule: {
+                  name: 'Keep the way to the bedrooms clear',
+                  subject: { kind: 'any', id: null },
+                  relation: 'keepClear',
+                  target: { kind: 'route', id: null, rooms: ['R1', 'R2'], at: null, r: null },
+                  n: 0.9,
+                },
+              },
+            },
           ],
           summary: 'Calm, with a clear way round the bed.',
         },
@@ -466,6 +489,23 @@ test.describe('desktop', () => {
       await second.scrollIntoViewIfNeeded();
       await shot(page, `second-look-${width}`);
     }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // A house rule it suggests: the designer's line with the free Keep as a rule offer, vetted
+    // as a reply's rule is; kept with no request.
+    await expect(log(page)).toContainText(
+      'From my second look at V1: Keep the way to the bedrooms clear.',
+    );
+    const offer = panel(page).getByRole('region', {
+      name: 'Rule offer: Keep the way to the bedrooms clear',
+    });
+    await expect(offer).toContainText('I’ll keep this as a rule for your home');
+    await expect(second).not.toContainText('Keep the way to the bedrooms clear.');
+    const before = m.calls.length + m.looks.length;
+    await offer.getByRole('button', { name: 'Keep as a rule' }).click();
+    await expect(
+      log(page).getByText('Kept as a rule: Keep the way to the bedrooms clear.'),
+    ).toBeVisible();
+    expect(m.calls.length + m.looks.length).toBe(before);
   });
 
   test('the second look: Quicker and cheaper sends none (41)', async ({ page }) => {
