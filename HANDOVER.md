@@ -1288,6 +1288,8 @@ algorithm notes and the checklists for Phases 3 to 5.
 
 ## 7. Conventions
 
+**Check main after every merge (owner, 8 Nov).** A green PR is not enough: after a squash merge, watch the `ci` run on `main` to the end and fix a red one at once. Main went red after #48, #51 and #52 (e2e: `exact.spec.ts:99`, `elevation.spec.ts:238`, `guide.spec.ts:33`) without anyone noticing until the owner did.
+
 **Never go idle (owner, 7 Nov).** This session only wakes on a message, a finished agent or
 command, a PR event or a scheduled check-in, so a turn that ends with nothing running stops all
 work until the owner prompts. After a merge, start the next roadmap item (spec, design or
