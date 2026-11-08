@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { sampleFlatProject } from '../../fixtures/sampleFlat';
+import { updateItem } from '../../furniture';
+import { dispatch, emptyHistory } from '../../history';
 import type { Level } from '../../schema';
+import { acceptDesign } from '../accept';
 import { SAMPLE_KEYS, sampleDesign, tanBrief } from '../fixtures/sample';
+import { handEdits } from '../handEdits';
 import { talkBlock } from '../prompts';
+import { designResult } from '../result';
+import { BATHROOMS, type Part } from '../schema';
 import type { Design } from '../schema';
+import { spacesOf } from '../spaces';
+import { changeSet } from './changes';
 import {
   ANOTHER_INTENT,
   ConversationExport,
@@ -218,6 +226,64 @@ describe('Bring this back (criterion 27)', () => {
     expect(p.scope.all).toBe(true);
     expect(p.words).toBe('Calm');
     expect(p.options[0]?.concept).toEqual(design.concept);
+  });
+
+  it('keeps what the person changed by hand since, as a fresh proposal does (QA P4-2)', () => {
+    // V1 accepted whole, then the sofa moved by hand; V1 brought back on the plan as it is.
+    const doc = { doc: sampleFlatProject(), history: emptyHistory() };
+    const lvl = doc.doc.levels[0] as Level;
+    const design = sampleDesign({ level: lvl });
+    const r = designResult(lvl, lvl, design);
+    const parts: Part[] = [
+      { aspect: 'walls' },
+      ...spacesOf(r.level).flatMap((s) =>
+        (['furniture', 'built-ins', 'finishes', 'electrical'] as const).map((aspect) => ({
+          space: s.key,
+          aspect,
+        })),
+      ),
+      { space: BATHROOMS, aspect: 'finishes' },
+    ];
+    const s1 = dispatch(doc, acceptDesign(lvl.id, r.level, parts, { base: lvl }));
+    const accepted = s1.doc.renovation?.levels[0] as Level;
+    const sofa = Object.values(accepted.items).find((i) => i.assetId === 'sofa-3');
+    if (!sofa) throw new Error('no sofa');
+    const s2 = dispatch(
+      s1,
+      updateItem(accepted.id, sofa.id, { position: { x: sofa.position.x - 0.6 } }),
+    );
+    const now = s2.doc.renovation?.levels[0] as Level;
+    const held = handEdits(accepted, now);
+    expect(held.length).toBeGreaterThan(0);
+    const back = (h: typeof held) => {
+      const p = broughtBack(
+        {
+          kind: 'design',
+          design: {
+            ...design,
+            request: { scope: { kind: 'all' }, feedback: '', locks: [] },
+          } as unknown as Design,
+        },
+        {
+          id: 'prop_b',
+          designId: 'dsn_b',
+          n: 2,
+          at: AT,
+          turnId: 't',
+          conversationId: 'conv1',
+          brief: design.brief,
+          base: { variant: 'after', fingerprint: 'fp1' },
+          held: h,
+        },
+      );
+      const o = p.options[0] as ProposalOption;
+      const input = { ...o, id: o.designId, request: { locks: o.locks } };
+      const rows = changeSet(now, designResult(now, lvl, input), input);
+      return rows.filter((c) => c.items.now.includes(sofa.id) || c.items.target.includes(sofa.id));
+    };
+    // Without what was changed by hand, it would put the sofa back; with it, it stays put.
+    expect(back([]).length).toBeGreaterThan(0);
+    expect(back(held)).toEqual([]);
   });
 
   it('the reducer adds the app line and the card, and takes the next number', () => {

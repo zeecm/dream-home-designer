@@ -44,12 +44,30 @@ const titleOf = (src: BringSource) =>
  * Bring this back (criterion 27): the old option or version made again as V(n+1), with no
  * request, checked on today's plan and rules, and shown on the plan.
  */
+let bringing = false;
 export async function bringBack(src: BringSource): Promise<string | null> {
+  // One at a time: a double click makes one card (QA P4-4).
+  if (bringing) return null;
+  bringing = true;
+  try {
+    return await bringBackOnce(src);
+  } finally {
+    bringing = false;
+  }
+}
+
+async function bringBackOnce(src: BringSource): Promise<string | null> {
   const conv = useTalk.getState().conv;
   const project = doc();
   const b = nowOf(project);
   if (!conv || !b) return null;
   const fp = await (await talkStore()).putLevel(project.id, b.now);
+  // What the person changed by hand since the last accept (or since the conversation began)
+  // stays as they left it, as a fresh proposal keeps it (QA P4-2).
+  const after = project.renovation?.levels[0];
+  const last = lastAccepted(useDesigner.getState().designs, after);
+  const ref = last?.accepted?.level ?? (after ? await startLevel() : null);
+  const held = after && ref ? handEdits(ref, after) : [];
   const proposalId = newId('prop');
   const turnId = newId('turn');
   const p = broughtBack(src, {
@@ -61,17 +79,18 @@ export async function bringBack(src: BringSource): Promise<string | null> {
     conversationId: conv.id,
     brief: conv.brief,
     base: { variant: project.renovation ? 'after' : 'before', fingerprint: fp },
+    held,
   });
   await actProposal(proposalId, () => p);
   const from = titleOf(src);
-  const after = await act({
+  const written = await act({
     type: 'bringBack',
     at: nowIso(),
     ids: { event: newId('turn'), turn: turnId },
     proposalId,
     from,
   });
-  const made = await numbered(p, after);
+  const made = await numbered(p, written);
   useTalk.setState({ view: 'log', shown: `${proposalId}:A`, open: null, why: null });
   useDesigner.setState({ previewing: true });
   say(`Brought back ${from} as V${made.n}, checked on your plan as it is now.`);

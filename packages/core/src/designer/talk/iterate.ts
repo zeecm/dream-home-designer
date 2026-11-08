@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { Level } from '../../schema';
 import { peopleOf } from '../principles';
 import type { TalkAsk } from '../prompts';
-import type { Design } from '../schema';
+import type { Design, Lock } from '../schema';
 import { FACT_LABELS, factText } from './firstMeeting';
 import {
   Conversation,
@@ -122,6 +122,12 @@ export function broughtBack(
     conversationId: string;
     brief: ProposalOption['brief'];
     base: ProposalOption['base'];
+    /**
+     * What the person changed by hand since (`hand-edit` locks, as a fresh proposal gets them):
+     * kept as the plan has them, never removed or moved unless the person unlocks them. They
+     * take the place of the old option's own, which were about the plan as it was then.
+     */
+    held?: Lock[];
   },
 ): Proposal {
   const from =
@@ -156,7 +162,7 @@ export function broughtBack(
     aliases: from.aliases,
     concept: from.concept,
     spaces: from.spaces,
-    locks: from.locks,
+    locks: [...from.locks.filter((l) => l.by !== 'hand-edit'), ...(a.held ?? [])],
     usage: [],
     base: a.base,
     status: 'checked',
