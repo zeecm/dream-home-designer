@@ -1,10 +1,13 @@
 import {
   type Aspect,
   type ContextInput,
+  type DesignInput,
   type DesignOptions,
+  type DesignResult,
   type DraftDesign,
   FIX_PER_RUN,
   type FixRequest,
+  type Level,
   type ParseResult,
   type Price,
   type RunPlan,
@@ -104,6 +107,13 @@ export interface RunOptions {
   /** The version after each step that changed it (never called if the layout fails). */
   onSave?: (design: DraftDesign) => void | Promise<void>;
   onUsage?: (u: Usage) => void;
+  /** Where a version is placed and checked (the designer's worker); else here, at once. */
+  results?: (
+    base: Level,
+    before: Level,
+    design: DesignInput,
+    opts?: DesignOptions,
+  ) => Promise<DesignResult>;
   /** Whether the tab's limit has been reached. */
   overLimit?: () => boolean;
   /** The limit was reached: true to finish the design, false to stop here. */
@@ -170,8 +180,22 @@ export const blankStep = (key: string, label: string, kind: StepState['kind']): 
 const usdText = (v: number) => (v < 10 ? `US$${v.toFixed(2)}` : `US$${Math.round(v)}`);
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
+/** `p`, or Stopped as soon as `signal` aborts (whichever comes first). */
+function untilStopped<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Stopped());
+  return new Promise<T>((resolve, reject) => {
+    const stop = () => reject(new Stopped());
+    signal.addEventListener('abort', stop, { once: true });
+    p.then(resolve, reject).finally(() => signal.removeEventListener('abort', stop));
+  });
+}
+
 export async function runDesign(o: RunOptions): Promise<{ state: RunState; design: DraftDesign }> {
   const { ai, ctx, plan } = o;
+  // Placed and checked in the designer's worker when there is one; here otherwise. Stop always
+  // ends the run, even while a check is out (a worker that hangs or dies says nothing).
+  const placeAny = o.results ?? ((b, f, d, opts) => Promise.resolve(designResult(b, f, d, opts)));
+  const place: typeof placeAny = (b, f, d, opts) => untilStopped(placeAny(b, f, d, opts), o.signal);
   const doFetch = o.fetch ?? fetch.bind(globalThis);
   const design: DraftDesign = structuredClone(o.design);
   const name = PROVIDERS[ai.provider].short;
@@ -341,7 +365,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     }
 
     // 2. The spaces, on the plan as the layout leaves it.
-    const r0 = designResult(ctx.base, ctx.before, { ...design, spaces: {} }, o.result);
+    const r0 = await place(ctx.base, ctx.before, { ...design, spaces: {} }, o.result);
     const all = r0.spaces.map((s) => s.key);
     const wanted = (plan.rooms === 'all' ? all : plan.rooms).filter(
       (k) => all.includes(k) && !(plan.skip ?? []).includes(k),
@@ -353,7 +377,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     const others = Object.fromEntries(
       Object.entries(design.spaces).filter(([k]) => !wanted.includes(k)),
     );
-    const r = designResult(ctx.base, ctx.before, { ...design, spaces: others }, o.result);
+    const r = await place(ctx.base, ctx.before, { ...design, spaces: others }, o.result);
     design.aliases = aliasesFor(r.level, design.aliases);
     const spaces = r.spaces.filter((s) => wanted.includes(s.key));
     // The room rows as they really are.
@@ -370,12 +394,12 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
      * words, and where it placed each piece: worked out on that space alone. Failures that
      * furnishing can't fix (a missing window, more people than bedrooms) aren't sent back.
      */
-    const failing = (s: (typeof spaces)[number], answer: SpaceDesign) => {
+    const failing = async (s: (typeof spaces)[number], answer: SpaceDesign) => {
       const trial: DraftDesign = {
         ...design,
         spaces: { [s.key]: { name: s.name, status: 'done', design: answer } },
       };
-      const res = designResult(ctx.base, ctx.before, trial, o.result);
+      const res = await place(ctx.base, ctx.before, trial, o.result);
       const mine = res.checks.filter(
         (c) =>
           c.hard &&
@@ -416,7 +440,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
             mergeAnswer(plan.previous?.[s.key], a, plan.keep?.[s.key] ?? [], o.result);
           let current = merge(answer);
           // Placed and checked: what fails goes back to the designer, at most twice.
-          const first = failing(s, current);
+          const first = await failing(s, current);
           let fixes = 0;
           let now = first;
           const rounds = fixRoundsFor(ctx.brief.quality);
@@ -449,7 +473,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
               st.error = null;
               break;
             }
-            const next = failing(s, merge(again));
+            const next = await failing(s, merge(again));
             // Kept only if it fails less; no better twice running is a room that can't pass,
             // and the second round isn't spent on it.
             if (next.fixable.length < left.length) {

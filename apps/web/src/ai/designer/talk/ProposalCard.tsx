@@ -18,6 +18,7 @@ import { useStore } from '../../../store';
 import { useAi } from '../../credentials';
 import { CaseDialog } from '../CaseDialog';
 import { failingChecks } from '../parts';
+import { useResultsTickN } from '../results';
 import { tokens, usd, useSpend } from '../spend';
 import { openCompare, useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
@@ -187,9 +188,11 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
   }, [newest]);
   // Worked out only while it is open or on the plan; folded, it shows what it said last.
   const active = expanded || shown;
+  const tick = useResultsTickN();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
   const r = useMemo(
     () => (active ? timed(() => cardResult(project, card)) : null),
-    [active, project, card],
+    [active, project, card, tick],
   );
   const changes = useMemo(
     () => (r ? timed(() => cardChanges(project, card, r)) : []),
@@ -239,7 +242,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
   const another = useMemo(
     () =>
       !running && scope && ai && !designerCannotUse(ai) ? timed(() => scopePrice(scope)) : null,
-    [running, scope, ai, project, prices],
+    [running, scope, ai, project, prices, tick],
   );
   const rowsRef = useRef<HTMLDivElement>(null);
 
@@ -347,7 +350,19 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
       </article>
     );
   }
-  if (!r) return null;
+  if (!r) {
+    // Being placed and checked by the designer's worker: a calm line, the card's head kept.
+    return (
+      <article className="talk-card" data-card={card.key} aria-labelledby={`card-${card.key}`}>
+        <h3 className="talk-card-title" id={`card-${card.key}`}>
+          V{card.n} · {headLabel(project, card)}
+        </h3>
+        <p className="talk-card-note muted" aria-busy="true">
+          Checking it on your plan…
+        </p>
+      </article>
+    );
+  }
   const fails = failingChecks(r, { waivers: card.waivers });
   // Failing checks no row answers for (a missing bed, a piece no change moves).
   const unrowed = (report?.failing ?? []).filter(

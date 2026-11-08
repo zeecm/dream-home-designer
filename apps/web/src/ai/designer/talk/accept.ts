@@ -19,7 +19,7 @@ import { useEditor } from '../../../editor';
 import { useStore } from '../../../store';
 import { loadDesigns, useDesigner } from '../state';
 import { designStore } from '../storage';
-import { type CardModel, cardChanges, cardResult, nowOf } from './cards';
+import { type CardModel, cardChanges, cardResult, cardResultNow, nowOf } from './cards';
 import { focusInLog } from './scroll';
 import { talkStore } from './talkStore';
 import { act, actProposal, newId, nowIso, say, useTalk } from './useTalk';
@@ -108,7 +108,7 @@ async function acceptOnce(
 ): Promise<string | null> {
   const project = useStore.getState().editor.doc;
   const b = nowOf(project);
-  const r = cardResult(project, card);
+  const r = await cardResultNow(project, card);
   if (!b || !r) return nothing(CHANGED);
   const changes = cardChanges(project, card, r);
   let ok = allowedChanges(changes, ticked);

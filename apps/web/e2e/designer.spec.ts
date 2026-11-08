@@ -798,6 +798,19 @@ test.describe('desktop', () => {
   }) => {
     test.setTimeout(120_000);
     await setup(page);
+    // Counts what the designer's worker answered, and what was worked out here instead.
+    await page.addInitScript(() => {
+      (window as unknown as { __dhdDesignerWorker: unknown }).__dhdDesignerWorker = {
+        worker: 0,
+        here: 0,
+      };
+    });
+    const answered = () =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __dhdDesignerWorker: { worker: number; here: number } })
+            .__dhdDesignerWorker,
+      );
     await mock(page);
     await openSample(page);
     await talk(page);
@@ -807,6 +820,10 @@ test.describe('desktop', () => {
     await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
       timeout: 30_000,
     });
+    // The real worker placed, checked and priced it all: nothing fell back to the main thread.
+    const placed = await answered();
+    expect(placed.worker).toBeGreaterThan(3);
+    expect(placed.here).toBe(0);
     await v1.getByRole('button', { name: /^Accept selected/ }).click();
     await expect(log(page).getByText(/^You accepted \d+ changes from V1\.$/)).toBeVisible();
     // The accepted sofa, dragged across the plan in 30 steps.
@@ -830,6 +847,9 @@ test.describe('desktop', () => {
     );
     await page.mouse.up();
     expect(perf.ms / frames).toBeLessThan(5);
+    // The drag's re-checks went to the worker too.
+    await expect.poll(async () => (await answered()).worker).toBeGreaterThan(placed.worker);
+    expect((await answered()).here).toBe(0);
   });
 
   test('opening another plan mid-run asks first; Stop and open keeps the rooms done', async ({

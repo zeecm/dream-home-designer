@@ -666,10 +666,19 @@ record version 2. Web `talk/turn.ts`: Send, Try again (newest message only), Edi
 reply per plan through a Web Lock (`withReplyLock` never re-runs a callback, so no double call);
 a dead reply in another tab is detected by re-querying the lock. A reply may tighten but never
 loosen the walls brief or raise the budget: those become a free Yes/No (`talkConfirm`). Talk
-calls stop retrying once they've spent their priced at-most or reach the tab limit. Not done:
-`designResult` in a Web Worker (needs async pricing on every priced button; about 800 lines,
-its own PR); A/B/C alternatives (PR 3); the phone cost card that needs scrolling; "about S$40k"
+calls stop retrying once they've spent their priced at-most or reach the tab limit. Not done: A/B/C alternatives (PR 3); the phone cost card that needs scrolling; "about S$40k"
 stored as S$32-40k. QA results: `s2pr2-qa.md` (session scratchpad).
+
+**Designer results in a Web Worker (8 Nov):** `apps/web/src/ai/designer/results.worker.ts` owns
+core's memos and does the pricing; `results.ts` keeps a 12-entry main-thread cache keyed by
+core's `designResultKey`, read through `readResult`/`readPrice` (pending until the answer lands;
+results frozen on arrival). Priced buttons show a skeleton until priced; a press re-prices and
+compares with the figure its button showed (missing or dearer: cost card). A worker that errors,
+fails to clone or doesn't answer within 12 s is terminated and the main thread answers from then
+on; Stop races every placing. `window.__dhdDesignerWorker` (set by tests only) counts answers.
+Heavy-room run: blocking time about 85 to 33 ms; drag with the panel open: about 73 to 0.
+Still on the main thread: `subsetReport` (about 190 ms heavy), `sendPrice`/`talkPrompt`,
+`probeLines`.
 
 **Drag on big plans (task #69):** room labels are fitted once per room (`fitRoomLabel`,
 memo keyed on everything the fit reads) with `placeLabel` filtering far circles and searching

@@ -102,6 +102,7 @@ export {
   type ResultCheck,
   type ResultSpace,
   designResult,
+  designResultKey,
   isFloorFinish,
   isWallFinish,
   wallFinishOf,

@@ -2,8 +2,9 @@ import type { Change } from '@dhd/core';
 import { describe, expect, it, vi } from 'vitest';
 import { type CardModel, cardScope, cardVerdict } from './cards';
 
-// The cards read the app's design options; these tests need none of the stores.
+// The cards read the app's design options and results; these tests need neither.
 vi.mock('../state', () => ({ designOpts: () => ({}) }));
+vi.mock('../results', () => ({}));
 
 const row = (id: string, group: string): Change => ({
   id,

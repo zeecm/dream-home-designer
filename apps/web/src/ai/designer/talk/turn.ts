@@ -38,7 +38,7 @@ import { QUIET_MS } from '../request';
 import { addUsage, capUsd, overLimit, priceTable, spent, usd } from '../spend';
 import { designOpts, useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
-import { cardChanges, cardResult, cardVerdict, optionCard } from './cards';
+import { cardChanges, cardResultNow, cardVerdict, optionCard } from './cards';
 import { followPlan } from './propose';
 import { talkCall } from './talkCall';
 import {
@@ -106,7 +106,7 @@ export async function noteHandEdits() {
 }
 
 /** The newest proposal still on the table, a line a change (what the designer sees of it). */
-function onTable(conv: Conversation): string[] {
+async function onTable(conv: Conversation): Promise<string[]> {
   const project = doc();
   const proposals = useTalk.getState().proposals;
   for (let i = conv.turns.length - 1; i >= 0; i--) {
@@ -117,7 +117,7 @@ function onTable(conv: Conversation): string[] {
     if (!p || !o || o.status === 'running' || o.status === 'failed') return [];
     try {
       const card = optionCard(p, o);
-      const r = cardResult(project, card);
+      const r = await cardResultNow(project, card);
       if (!r) return [];
       const changes = cardChanges(project, card, r);
       const ticks = o.ticks ?? changes.map((c) => c.id);
@@ -149,7 +149,12 @@ function digests(): Record<string, string> {
 }
 
 /** What a talk call is built from, on the plan as it is now. */
-function inputFor(conv: Conversation, message: string, sent?: string): TalkInput | null {
+function inputFor(
+  conv: Conversation,
+  message: string,
+  table: string[],
+  sent?: string,
+): TalkInput | null {
   const project = doc();
   const level = talkLevel();
   const before = project.levels[0];
@@ -163,7 +168,7 @@ function inputFor(conv: Conversation, message: string, sent?: string): TalkInput
     ...(project.models ? { models: project.models } : {}),
     message,
     events: eventsSince(conv, digests()),
-    onTable: onTable(conv),
+    onTable: table,
     ...(sent !== undefined ? { sent } : {}),
   };
 }
@@ -186,7 +191,8 @@ export function sendPrice(text: string): TalkEstimate | null {
     priceTable()[ai.model] ?? null,
   ]);
   if (priceMemo.has(key)) return priceMemo.get(key) ?? null;
-  const input = inputFor(conv, text);
+  // Send's figure leaves out the table's few lines (a send prices itself afresh, in full).
+  const input = inputFor(conv, text, []);
   const est = input
     ? estimateTalk(talkChars(talkPrompt(input)), {
         provider: ai.provider,
@@ -250,7 +256,7 @@ export async function sendMessage(text: string, anyway = false): Promise<boolean
     await noteHandEdits();
     const conv = useTalk.getState().conv ?? conv0;
     if (pendingReply(conv)) return;
-    const input = inputFor(conv, words);
+    const input = inputFor(conv, words, await onTable(conv));
     if (!input) return;
     const prompt = talkPrompt(input);
     if (await pastLimit(prompt, conv, anyway)) return;
@@ -282,7 +288,8 @@ export async function retryTurn(turnId: string) {
     const conv = useTalk.getState().conv ?? conv0;
     const at = conv.turns.findIndex((x) => x.id === turnId);
     // History before it only: the turn itself and what came after it aren't repeated.
-    const input = inputFor({ ...conv, turns: conv.turns.slice(0, at) }, t.text, t.sent);
+    const earlier = { ...conv, turns: conv.turns.slice(0, at) };
+    const input = inputFor(earlier, t.text, await onTable(earlier), t.sent);
     if (!input || at < 0) return;
     const prompt = talkPrompt(input);
     if (await pastLimit(prompt, conv)) return;
@@ -311,7 +318,7 @@ export function retryPrice(turnId: string): TalkEstimate | null {
   const i = conv?.turns.findIndex((x) => x.id === turnId) ?? -1;
   const t = conv?.turns[i];
   if (!ai || !conv || t?.kind !== 'person' || t.sent === undefined) return null;
-  const input = inputFor({ ...conv, turns: conv.turns.slice(0, i) }, t.text, t.sent);
+  const input = inputFor({ ...conv, turns: conv.turns.slice(0, i) }, t.text, [], t.sent);
   return input
     ? estimateTalk(talkChars(talkPrompt(input)), {
         provider: ai.provider,

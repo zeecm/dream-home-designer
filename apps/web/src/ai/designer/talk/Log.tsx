@@ -26,6 +26,7 @@ import {
 import { useProject, useStore } from '../../../store';
 import { useAi } from '../../credentials';
 import { CostCheck } from '../CostCheck';
+import { useResultsTickN } from '../results';
 import { capUsd, usd, useSpend } from '../spend';
 import { useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
@@ -36,7 +37,14 @@ import { ReplyParts, ReplyText, SentState, Streaming } from './Talk';
 import { lineState, redoLine, undoLine } from './accept';
 import { type CardModel, designCard, optionCard } from './cards';
 import { dayMark } from './days';
-import { answerCost, cardRequest, pressPrice, pressScope, scopePrice } from './propose';
+import {
+  answerCost,
+  cardRequest,
+  pressPrice,
+  pressPriceState,
+  pressScope,
+  scopeRequest,
+} from './propose';
 import { toNewest } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { act, newId, nowIso, talkLevel, useBusy, useTalk } from './useTalk';
@@ -224,10 +232,14 @@ function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
     [level],
   );
   // Prices without the person's words (they add little), once per plan, brief and prices.
+  const tick = useResultsTickN();
   // biome-ignore lint/correctness/useExhaustiveDependencies: on what the prices read
   const priced = useMemo(
-    () => (latest && ai ? timed(() => scopes.map((s) => ({ s, est: scopePrice(s) }))) : []),
-    [latest, ai, scopes, conv.brief, prices],
+    () =>
+      latest && ai
+        ? timed(() => scopes.map((s) => ({ s, ...pressPriceState(scopeRequest(s)) })))
+        : [],
+    [latest, ai, scopes, conv.brief, prices, project, tick],
   );
   const conflict = level ? sleepingConflict(conv.brief, level) : null;
   const cant = ai && designerCannotUse(ai);
@@ -266,7 +278,7 @@ function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
       )}
       {latest && ai && !cant && (
         <ul className="talk-scopes">
-          {priced.map(({ s, est }) => (
+          {priced.map(({ s, est, pending }) => (
             <li key={s.label}>
               <button
                 type="button"
@@ -276,11 +288,16 @@ function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
                 onClick={() => void pressScope(s)}
               >
                 {s.label}
-                {est?.usd
-                  ? ` · about ${usd(est.usd.typical)}`
-                  : est
-                    ? ` · about ${Math.round(est.tokens.typical).toLocaleString('en-US')} tokens`
-                    : ''}
+                {est?.usd ? (
+                  ` · about ${usd(est.usd.typical)}`
+                ) : est ? (
+                  ` · about ${Math.round(est.tokens.typical).toLocaleString('en-US')} tokens`
+                ) : pending ? (
+                  // Being priced: a skeleton where the figure goes (it can't be pressed yet).
+                  <span className="talk-price-skeleton" aria-label=", pricing" />
+                ) : (
+                  ''
+                )}
               </button>
             </li>
           ))}
@@ -313,15 +330,16 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
   const open = t.state === 'open';
   // The price as it is now: the card's figure follows it, so the sentence and the cost check
   // below always say the same (and Go ahead binds what they say).
+  const tick = useResultsTickN();
   // biome-ignore lint/correctness/useExhaustiveDependencies: on what the prices read
   const est = useMemo(
     () => (open ? timed(() => pressPrice(cardRequest(t))) : null),
-    [open, t.scope, t.words, t.finish, project, prices, ai],
+    [open, t.scope, t.words, t.finish, project, prices, ai, tick],
   );
   // biome-ignore lint/correctness/useExhaustiveDependencies: on what the prices read
   const cheaper = useMemo(
     () => (open && first ? timed(() => pressPrice(cardRequest(t, first))) : null),
-    [open, first, t.words, project, prices, ai],
+    [open, first, t.words, project, prices, ai, tick],
   );
   useEffect(() => {
     const u = est?.usd;
