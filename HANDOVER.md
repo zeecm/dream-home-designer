@@ -688,6 +688,14 @@ back is one Command and one undo step; `rememberPutBack`/`putBackMoves` keep car
 versions in step with real history moves only. Start over keeps numbering and sweeps unused
 levels. Folded cards compute nothing; a 20-card e2e keeps each round near 1-2 s.
 
+**Phone: a new proposal in sight before Accept (owner bug, 8 Nov).** A cost card takes the phone
+sheet to full height, which covers the whole stage, and nothing brought it down again, so the
+proposal (drawn all along) was hidden behind the sheet in Plan and 3D alike. Now a card going on
+the plan for the first time folds a sheet that covers the plan (full, or half on a short
+window) to peek, and a phone showing only 3D switches to the plan, where the changes are marked
+(`TalkPanel` in `talk/Conversation.tsx`). E2e: the phone test "asked to design it from the 3D
+view".
+
 **Drag on big plans (task #69):** room labels are fitted once per room (`fitRoomLabel`,
 memo keyed on everything the fit reads) with `placeLabel` filtering far circles and searching
 nearest-first (exact, ties kept); `wallStatuses`, `planGeometry`, `roomShapes` and
