@@ -114,12 +114,16 @@ describe('alternatives A/B/C (criterion 25, D3)', () => {
 
   it('names an option in 2–4 words from the designer’s summary, else "Idea B"', () => {
     expect(optionName(option('A', 'Sofa by the Bedroom wall, facing the TV.'))).toBe(
-      'Sofa by the Bedroom',
+      'Sofa by the Bedroom wall',
+    );
+    expect(optionName(option('B', 'Sofa on the long wall, facing the window.'))).toBe(
+      'Sofa on the long wall',
     );
     expect(optionName(option('B', 'I’ve put the dining table by the window.'))).toBe(
       'Put the dining table',
     );
     expect(optionName(option('B'))).toBe('Idea B');
+    expect(optionName(option('A'), 'Living and dining')).toBe('Living and dining');
     expect(optionTitle(4, 'B', 2)).toBe('V4B');
     expect(optionTitle(4, 'A', 1)).toBe('V4');
   });

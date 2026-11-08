@@ -53,15 +53,31 @@ export function optionSummary(o: Pick<ProposalOption, 'concept' | 'spaces'>): st
  * A 2–4 word name for an option's segment ("Sofa by the Bedroom wall"), from the designer's
  * own summary; "Idea B" until it has one.
  */
-export function optionName(o: Pick<ProposalOption, 'concept' | 'spaces' | 'letter'>): string {
+export function optionName(
+  o: Pick<ProposalOption, 'concept' | 'spaces' | 'letter'>,
+  fallback = `Idea ${o.letter}`,
+): string {
   const first = optionSummary(o)
     .split(/[.;:!?—–(]|, /)[0]
     ?.replace(/^(I(?:’|')ve|I have|I)\s+/i, '')
     .trim();
-  if (!first) return `Idea ${o.letter}`;
-  const words = first.split(/\s+/).slice(0, 4).join(' ');
+  if (!first) return fallback;
+  // Up to four words that say something ("Sofa on the long wall"), at most five in all, never
+  // ending on a little word ("by", "the").
+  const out: string[] = [];
+  let said = 0;
+  for (const w of first.split(/\s+/)) {
+    if (said >= 4 || out.length >= 5) break;
+    out.push(w);
+    if (!LITTLE.has(w.toLowerCase())) said++;
+  }
+  while (out.length > 1 && LITTLE.has((out[out.length - 1] ?? '').toLowerCase())) out.pop();
+  const words = out.join(' ');
   return cut(words.charAt(0).toUpperCase() + words.slice(1), TALK_LIMITS.name);
 }
+const LITTLE = new Set(
+  'a an the on by of to in at for with and or from near facing under over'.split(' '),
+);
 
 /**
  * What Another idea asks the designer for, in the person's words with the run: the same rooms,

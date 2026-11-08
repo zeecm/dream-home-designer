@@ -1,4 +1,4 @@
-import { type Bounds, type DesignBrief, roomShapes, spentOf } from '@dhd/core';
+import { type Bounds, type DesignBrief, optionTitle, roomShapes, spentOf } from '@dhd/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useEditor } from '../../../editor';
@@ -10,12 +10,13 @@ import { BriefDialog } from '../BriefDialog';
 import { failingChecks } from '../parts';
 import { useResultsTickN } from '../results';
 import { tokens, usd, useSpend } from '../spend';
-import { closePanel, useDesigner } from '../state';
+import { closePanel, openCompare, useDesigner } from '../state';
 import { Composer } from './Composer';
 import { Log } from './Log';
-import { Decisions, WhatIKnow } from './Views';
+import { Decisions, StartOverDialog, Versions, WhatIKnow } from './Views';
 import { lineState, undoLine } from './accept';
-import { cardChanges, cardResult, cardVerdict, optionCard } from './cards';
+import { cardChanges, cardResult, cardVerdict, optionCard, versionKey } from './cards';
+import { copyConversation, downloadConversation, showStart } from './iterate';
 import { stopTalkRun } from './propose';
 import { focusInLog, keepFocus, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
@@ -71,9 +72,11 @@ function OnTheTable() {
   const proposals = useTalk((s) => s.proposals);
   const shown = useTalk((s) => s.shown);
   const last = useMemo(() => {
-    const o = proposal?.options[0];
-    return proposal && o ? optionCard(proposal, o) : null;
-  }, [proposal]);
+    if (!proposal) return null;
+    const mine = shown?.startsWith(`${proposal.id}:`) ? shown.slice(proposal.id.length + 1) : null;
+    const o = proposal.options.find((x) => x.letter === mine) ?? proposal.options.at(-1);
+    return o ? optionCard(proposal, o) : null;
+  }, [proposal, shown]);
   const tick = useResultsTickN();
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
   const r = useMemo(
@@ -104,7 +107,7 @@ function OnTheTable() {
     // Being placed and checked by the designer's worker: said calmly, nothing to press yet.
     return (
       <section className="talk-table" aria-label="On the table" aria-busy="true">
-        <span className="talk-table-text">On the table: V{last.n} · Checking…</span>
+        <span className="talk-table-text">On the table: {last.title} · Checking…</span>
       </section>
     );
   }
@@ -114,7 +117,11 @@ function OnTheTable() {
     else scrollInLog(el, 'start');
   };
   const other = shown && shown !== last.key ? shown : null;
-  const otherN = other ? proposals.find((p) => other.startsWith(`${p.id}:`))?.n : null;
+  const otherP = other ? proposals.find((p) => other.startsWith(`${p.id}:`)) : null;
+  const otherN =
+    other && otherP
+      ? optionTitle(otherP.n, other.slice(otherP.id.length + 1), otherP.options.length)
+      : null;
   const accepted = last.accepted.filter((a) => !a.out);
   const allIn = last.status !== 'running' && accepted.length > 0 && remaining === 0;
   const line = accepted.at(-1)?.event;
@@ -133,19 +140,19 @@ function OnTheTable() {
     <section className="talk-table" aria-label="On the table">
       {other && otherN ? (
         <>
-          <span className="talk-table-text">Showing V{otherN}</span>
+          <span className="talk-table-text">Showing {otherN}</span>
           <button
             type="button"
             className="btn btn-small"
             onClick={() => useTalk.setState({ shown: last.key })}
           >
-            Back to V{last.n}
+            Back to {last.title}
           </button>
         </>
       ) : (
         <>
           <button type="button" className="talk-table-text link-plain" onClick={() => go(false)}>
-            {allIn ? `V${last.n} is in your renovation` : `On the table: V${last.n} · `}
+            {allIn ? `${last.title} is in your renovation` : `On the table: ${last.title} · `}
             {!allIn && (
               <span className={open && last.status !== 'running' ? 'negative' : ''}>{verdict}</span>
             )}
@@ -186,8 +193,9 @@ function scopeBox(key: string): Bounds | null {
   };
 }
 
-function Menu() {
+function Menu({ onStartOver }: { onStartOver: () => void }) {
   const [open, setOpen] = useState(false);
+  const versions = useDesigner((s) => s.designs.length);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -236,6 +244,16 @@ function Menu() {
         <div className="talk-menu talk-menu-head" role="menu">
           {item('What I know about you', () => useTalk.setState({ view: 'know', knowAt: null }))}
           {item('Decisions', () => useTalk.setState({ view: 'decisions' }))}
+          {item('Versions', () => useTalk.setState({ view: 'versions' }))}
+          {versions >= 2 &&
+            item('Compare…', () => {
+              const d = useDesigner.getState().designs.at(-1);
+              if (d) openCompare(d.id);
+            })}
+          {item('My plan before the designer', () => void showStart())}
+          {item('Copy as text', () => void copyConversation())}
+          {item('Download conversation', () => void downloadConversation())}
+          {item('Start over…', onStartOver)}
           {item('AI settings', () => useTalk.setState({ settings: 'spending' }))}
           <hr />
           {item('Close', closePanel)}
@@ -266,6 +284,7 @@ export function TalkPanel() {
   const heading = useRef<HTMLHeadingElement>(null);
   const aside = useRef<HTMLElement>(null);
   const [fresh, setFresh] = useState(false);
+  const [restarting, setRestarting] = useState(false);
 
   // Focus never falls to the page when the control that had it goes; `/` goes to the composer.
   useEffect(() => {
@@ -327,8 +346,7 @@ export function TalkPanel() {
     if (!picked) return;
     const d = useDesigner.getState().designs.find((x) => x.id === picked);
     useDesigner.setState({ selected: null });
-    if (d)
-      useTalk.setState({ shown: d.from ? `${d.from.proposalId}:${d.from.letter}` : `d:${d.id}` });
+    if (d) useTalk.setState({ shown: versionKey(d, useTalk.getState().conv?.id ?? null) });
   }, [picked]);
 
   // The card on the plan: what Accept selected would give, in the plan's place.
@@ -340,7 +358,7 @@ export function TalkPanel() {
     const before = project.levels[0];
     const ed = useEditor.getState();
     if (!previewing || !shown || pv.card !== shown || !pv.merged || !before) {
-      if (ed.preview) ed.setPreview(null);
+      if (ed.preview && !(ed.preview.start && !shown)) ed.setPreview(null);
       return;
     }
     const side = wantSide ?? ed.preview?.side ?? 'version';
@@ -410,6 +428,24 @@ export function TalkPanel() {
   const [size, setSize] = useState<Size>('half');
   const [folded, setFolded] = useState(false);
   const before = useRef<Size | null>(null);
+  // A cost card arriving on a phone: the sheet goes to full height, so its answers (Go ahead,
+  // Just …, Not now) are in sight without scrolling; the card reads from its top.
+  const costCard = useTalk((s) => {
+    const t = s.conv?.turns.at(-1);
+    return t?.kind === 'cost-ask' && t.state === 'open' ? t.id : null;
+  });
+  useEffect(() => {
+    if (!sheet || !costCard) return;
+    before.current = null;
+    setSize('full');
+    const f = requestAnimationFrame(() => {
+      const foot = document.querySelector(
+        `[aria-labelledby="h-${CSS.escape(costCard)}"] .dialog-foot`,
+      );
+      foot?.scrollIntoView({ block: 'nearest' });
+    });
+    return () => cancelAnimationFrame(f);
+  }, [costCard, sheet]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: on a change of the sheet's size
   useEffect(() => {
     const f = requestAnimationFrame(() => useEditor.getState().requestFit(64));
@@ -552,7 +588,7 @@ export function TalkPanel() {
               {totals.usd === null ? `${tokens(totals.tokens)} t` : usd(totals.usd)}
             </button>
           )}
-          <Menu />
+          <Menu onStartOver={() => setRestarting(true)} />
           {side && (
             <button
               type="button"
@@ -602,6 +638,8 @@ export function TalkPanel() {
           <WhatIKnow />
         ) : view === 'decisions' ? (
           <Decisions />
+        ) : view === 'versions' ? (
+          <Versions />
         ) : (
           <Log key={fresh ? 'new' : 'old'} />
         )}
@@ -629,6 +667,7 @@ export function TalkPanel() {
           onClose={() => useTalk.setState({ settings: null })}
         />
       )}
+      {restarting && <StartOverDialog onClose={() => setRestarting(false)} />}
       {formOpen && (
         <BriefDialog
           initial={conv?.brief}

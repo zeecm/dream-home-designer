@@ -10,6 +10,7 @@ import {
   type Usage,
   changeSet,
   levelFingerprint,
+  optionTitle,
 } from '@dhd/core';
 import { readResult, requestResult } from '../results';
 import { designOpts } from '../state';
@@ -23,6 +24,8 @@ export interface CardModel {
   key: string;
   kind: 'proposal' | 'design';
   n: number;
+  /** "V4", or "V4B" for an alternative. */
+  title: string;
   /** "Living and dining", "Whole flat". */
   label: string;
   input: DesignInput;
@@ -43,12 +46,28 @@ export interface CardModel {
 
 export const cardKey = (p: Proposal, letter: string) => `${p.id}:${letter}`;
 
+/**
+ * The card a version shows as: its proposal's option in this conversation, else its own
+ * (v1's form, or a conversation since started over: under Earlier designs).
+ */
+export const versionKey = (d: Design, conversationId: string | null) =>
+  d.from && d.from.conversationId === conversationId
+    ? `${d.from.proposalId}:${d.from.letter}`
+    : `d:${d.id}`;
+
+/** Versions shown under Earlier designs: v1's, and those of a conversation started over. */
+export const earlierDesign = (d: Design, conversationId: string | null) =>
+  !d.from || d.from.conversationId !== conversationId;
+
 export function optionCard(p: Proposal, o: ProposalOption): CardModel {
   return {
     key: cardKey(p, o.letter),
     kind: 'proposal',
     n: p.n,
-    label: p.scope.all ? 'Whole flat' : p.scope.label,
+    title: optionTitle(p.n, o.letter, p.options.length),
+    // With alternatives, each is named by its own idea (the title says it on a phone, where
+    // the segments show only letters).
+    label: p.options.length > 1 ? o.name : p.scope.all ? 'Whole flat' : p.scope.label,
     input: {
       id: o.designId,
       brief: o.brief,
@@ -80,6 +99,7 @@ export function designCard(d: Design): CardModel {
     key: `d:${d.id}`,
     kind: 'design',
     n: d.n,
+    title: `V${d.n}`,
     label: d.concept?.name ?? d.name,
     input: d,
     usage: d.usage,

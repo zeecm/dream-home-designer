@@ -68,9 +68,14 @@ export function toPrune(list: Design[]): Design[] {
 
 const byN = (a: Design, b: Design) => a.n - b.n;
 
-/** The number a new version takes: `want` if no version has it, else one past the highest. */
-export function numberFor(mine: Design[], want?: number): number {
-  if (want && want > 0 && !mine.some((x) => x.n === want)) return want;
+/**
+ * The number a new version takes: `want` if no version has it, else one past the highest. The
+ * options of one proposal share its number (V4A, V4B): `want` stays theirs.
+ */
+export function numberFor(mine: Design[], want?: number, from?: Design['from']): number {
+  const sharing = (x: Design) =>
+    !!from && x.from?.proposalId === from.proposalId && x.from.letter !== from.letter;
+  if (want && want > 0 && !mine.some((x) => x.n === want && !sharing(x))) return want;
   return Math.max(0, ...mine.map((x) => x.n)) + 1;
 }
 
@@ -89,7 +94,7 @@ export function memoryStore(): DesignStore {
     list,
     async create(d, want) {
       const mine = await list(d.projectId);
-      const n = numberFor(mine, want);
+      const n = numberFor(mine, want, d.from);
       const design = { ...d, n } as Design;
       designs.set(k(d.projectId, d.id), toRecord(design));
       const gone = toPrune([...mine, design]);
@@ -150,7 +155,7 @@ function idbStore(db: IDBDatabase): DesignStore {
       const store = tx.objectStore('designs');
       const ended = finished(tx);
       const mine = await all(store, d.projectId);
-      const n = numberFor(mine, want);
+      const n = numberFor(mine, want, d.from);
       const design = { ...d, n } as Design;
       store.put(toRecord(design));
       const gone = toPrune([...mine, design]);

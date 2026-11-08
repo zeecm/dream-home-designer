@@ -1,8 +1,22 @@
-import { FACT_LABELS, QUESTION_KEYS, type QuestionKey, factText, peopleOf } from '@dhd/core';
-import { useEffect, useRef, useState } from 'react';
+import {
+  type Design,
+  FACT_LABELS,
+  QUESTION_KEYS,
+  type QuestionKey,
+  factText,
+  optionTitle,
+  peopleOf,
+} from '@dhd/core';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { failingChecks } from '../parts';
+import { readResult, useResultsTickN } from '../results';
+import { designOpts, useDesigner } from '../state';
 import { FactEditor } from './Facts';
 import { Mark } from './Mark';
-import { act, newId, nowIso, talkLevel, useTalk } from './useTalk';
+import { cardVerdict, nowOf, versionKey } from './cards';
+import { bringBackDesign, copyConversation, startOver } from './iterate';
+import { timed, useSettledProject } from './settle';
+import { act, newId, nowIso, talkLevel, useBusy, useTalk } from './useTalk';
 
 /**
  * The menu's views, inside the column with "‹ Conversation" back (UX §11): What I know about
@@ -248,5 +262,164 @@ export function Decisions() {
         </ul>
       )}
     </section>
+  );
+}
+
+/**
+ * Versions (UX §11): every version of the plan, newest first (V1, V4, V7: the gaps are ideas
+ * not taken; alternatives as V4A, V4B), each with its verdict on the plan as it is now and
+ * Show and Bring this back, both free.
+ */
+export function Versions() {
+  const conv = useTalk((s) => s.conv);
+  const proposals = useTalk((s) => s.proposals);
+  const designs = useDesigner((s) => s.designs);
+  const busy = useBusy();
+  const list = [...designs].sort((a, b) => b.n - a.n || b.createdAt.localeCompare(a.createdAt));
+  if (!conv) return null;
+  return (
+    <section className="talk-view" aria-label="Versions">
+      <Back title="Versions" />
+      {list.length === 0 ? (
+        <p className="muted">
+          No versions yet. A proposal becomes a version when you accept some of it.
+        </p>
+      ) : (
+        <ul className="talk-versions">
+          {list.map((d) => {
+            const options = d.from
+              ? (proposals.find((p) => p.id === d.from?.proposalId)?.options.length ?? 1)
+              : 1;
+            const title = optionTitle(d.n, d.from?.letter ?? 'A', options);
+            return (
+              <li key={d.id} className="talk-version" data-version={title}>
+                <span className="talk-version-text">
+                  <span className="talk-version-title">
+                    {title} · {d.concept?.name ?? d.name}
+                  </span>
+                  <VersionVerdict d={d} />
+                </span>
+                <span className="talk-decision-actions">
+                  <button
+                    type="button"
+                    className="link-btn"
+                    aria-label={`Show ${title} on the plan`}
+                    onClick={() => {
+                      useTalk.setState({ view: 'log', shown: versionKey(d, conv.id) });
+                      useDesigner.setState({ previewing: true });
+                    }}
+                  >
+                    Show
+                  </button>
+                  <button
+                    type="button"
+                    className="link-btn"
+                    disabled={busy}
+                    aria-label={`Bring ${title} back`}
+                    onClick={() => void bringBackDesign(d)}
+                  >
+                    Bring this back
+                  </button>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <p className="field-hint">A plan keeps 20 versions; alternatives count.</p>
+    </section>
+  );
+}
+
+/** A version's verdict on the plan as it is now (pending while the worker checks it). */
+function VersionVerdict({ d }: { d: Design }) {
+  const project = useSettledProject();
+  const tick = useResultsTickN();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
+  const v = useMemo(() => {
+    const b = nowOf(project);
+    if (!b) return null;
+    const r = timed(() => readResult(b.now, b.before, d, designOpts(project)));
+    if (!r) return { text: 'Checking…', tone: 'pending' };
+    const f = failingChecks(r, d);
+    return cardVerdict(
+      f.open,
+      [],
+      f.waived.map((c) => c.key),
+    );
+  }, [project, d, tick]);
+  if (!v) return null;
+  return (
+    <span className="talk-version-verdict">
+      {d.accepted ? 'Accepted · ' : ''}
+      <span className={v.tone === 'fail' ? 'negative' : 'muted'}>{v.text}</span>
+    </span>
+  );
+}
+
+/**
+ * Start over (UX §8.6): a real dialog, as it removes things. Neither main button is focused for
+ * you; Copy this conversation first is offered.
+ */
+export function StartOverDialog({ onClose }: { onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [keep, setKeep] = useState(true);
+  const [going, setGoing] = useState(false);
+  const busy = useBusy();
+  useEffect(() => {
+    const el = ref.current;
+    if (el && !el.open) el.showModal();
+    // Focus on the dialog itself: neither Cancel nor Start over is chosen for you.
+    el?.focus();
+  }, []);
+  const close = () => ref.current?.close();
+  return (
+    <dialog
+      ref={ref}
+      className="dialog dialog-confirm talk-restart"
+      aria-labelledby="restart-h"
+      aria-describedby="restart-d"
+      tabIndex={-1}
+      onClose={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="dialog-head">
+        <h2 id="restart-h">Start a new conversation?</h2>
+      </div>
+      <div className="confirm-body">
+        <p id="restart-d">
+          Your versions stay, under Earlier designs. The designer forgets this conversation’s
+          messages and decisions.
+        </p>
+        <label className="check-row">
+          <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} />
+          Keep what I know about you
+        </label>
+        {busy && <p className="field-hint">Stop the designer first: it is still working.</p>}
+      </div>
+      <footer className="dialog-foot">
+        <button type="button" className="link-btn" onClick={() => void copyConversation()}>
+          Copy this conversation first
+        </button>
+        <span className="button-row">
+          <button type="button" className="btn" onClick={close}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-danger"
+            disabled={going || busy}
+            onClick={() => {
+              setGoing(true);
+              void startOver(keep).then((ok) => {
+                setGoing(false);
+                if (ok) close();
+              });
+            }}
+          >
+            Start over
+          </button>
+        </span>
+      </footer>
+    </dialog>
   );
 }

@@ -43,6 +43,8 @@ export interface TalkStore {
   /** Keeps a level once, by its fingerprint; returns the fingerprint. */
   putLevel(projectId: string, level: Level): Promise<string>;
   getLevel(projectId: string, fp: string): Promise<Level | null>;
+  /** Start over: every proposal but those of conversation `keep` goes (versions stay). */
+  removeProposals(projectId: string, keep: string): Promise<void>;
   removeProject(projectId: string): Promise<void>;
   /**
    * A conversation this build can't read is moved aside (kept in `bad`, never overwritten):
@@ -127,6 +129,11 @@ export function memoryTalkStore(): TalkStore {
     async getLevel(projectId, fp) {
       const l = levels.get(k(projectId, fp));
       return l ? structuredClone(l) : null;
+    },
+    async removeProposals(projectId, keep) {
+      for (const [key, p] of props) {
+        if (p.projectId === projectId && p.conversationId !== keep) props.delete(key);
+      }
     },
     async removeProject(projectId) {
       convs.delete(projectId);
@@ -222,6 +229,18 @@ function idbTalkStore(db: IDBDatabase): TalkStore {
         | undefined;
       const r = Level.safeParse(row?.level);
       return r.success ? r.data : null;
+    },
+    async removeProposals(projectId, keep) {
+      const tx = db.transaction('proposals', 'readwrite');
+      const ended = finished(tx);
+      const store = tx.objectStore('proposals');
+      const rows = (await done(store.index('projectId').getAll(projectId))) as {
+        id: string;
+        conversationId?: string;
+      }[];
+      for (const r of rows) if (r.conversationId !== keep) store.delete([projectId, r.id]);
+      await ended;
+      ping(projectId, -1);
     },
     async removeProject(projectId) {
       const tx = db.transaction(['conversations', 'proposals', 'levels', 'bad'], 'readwrite');

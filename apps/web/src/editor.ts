@@ -122,6 +122,8 @@ export interface DesignPreview {
   /** "V2". */
   label: string;
   side: 'before' | 'version';
+  /** My plan before the designer: the plan as the conversation found it (Put it back). */
+  start?: { day: string };
 }
 
 const VIEW_KEY = 'dhd:view';

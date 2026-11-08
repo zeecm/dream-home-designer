@@ -12,10 +12,13 @@ import {
   type TalkAsk,
   type TalkPlan,
   type TurnOf,
+  anotherWords,
   askRule,
   atMostOf,
   cut,
   levelFingerprint,
+  nextLetter,
+  optionName,
   planScope,
   scopeCut,
 } from '@dhd/core';
@@ -50,6 +53,8 @@ export interface PressRequest {
   talk?: TalkAsk;
   /** The designer's name for it ("A console by the door"). */
   title?: string;
+  /** Another idea as the next option (B, C) of a proposal, for the same rooms. */
+  alternative?: { proposalId: string; letter: 'B' | 'C' };
 }
 
 /** The decisions as a run's talk block carries them. */
@@ -90,11 +95,15 @@ function priceInput(req: PressRequest, designId: string): Omit<PriceInput, 'desi
     if (!p || !o) return null;
     finish = { option: o, rooms: f.rooms, words: p.words, scope: p.scope };
   }
+  // Another idea asks for something different from the options so far, with the person's words.
+  const alt = req.alternative;
+  const of = alt && useTalk.getState().proposals.find((x) => x.id === alt.proposalId);
+  if (alt && !of) return null;
   return {
     project,
     brief: conv.brief,
     scope: req.scope,
-    words: req.words,
+    words: of ? anotherWords({ ...of, words: req.words || of.words }) : req.words,
     ...(req.talk ? { talk: req.talk } : {}),
     ...(finish ? { finish } : {}),
     designId,
@@ -291,6 +300,7 @@ async function askOrRun(req: PressRequest) {
     reason: ask,
     estimate: u ? { typical: u.typical, high: u.high, fix: u.fix } : null,
     finish: req.finish,
+    alt: req.alternative ?? null,
     // A designer's idea keeps what it is for through its card (P2-2).
     ...(req.talk
       ? {
@@ -313,6 +323,8 @@ export const cardRequest = (card: TurnOf<'cost-ask'>, cheaper?: ScopeRef): Press
         ...(card.talk
           ? { talk: { intent: card.talk.intent, said: card.words, decided: decided() } }
           : {}),
+        // Another idea's card: the option it adds (the cheaper room is a new card of its own).
+        ...(card.alt && !cheaper ? { alternative: card.alt } : {}),
       };
 
 /**
@@ -388,27 +400,25 @@ async function run(
   const project = doc();
   const s = await talkStore();
   const fp = await s.putLevel(project.id, sp.ctx.base);
+  if (req.alternative) {
+    const { proposalId, letter } = req.alternative;
+    const option = newOption(letter, req.scope, sp, fp);
+    // Only the letter it was priced as: another tab may have added it meanwhile.
+    const p = await actProposal(proposalId, (x) =>
+      x && nextLetter(x) === letter ? { ...x, options: [...x.options, option] } : null,
+    );
+    if (!p?.options.some((o) => o.letter === letter && o.designId === option.designId)) return;
+    if (ids.person) await clearTyped();
+    useTalk.setState({ shown: `${proposalId}:${letter}`, open: null, why: null });
+    useDesigner.setState({ previewing: true });
+    say(`Designing V${p.n}${letter}, another idea for ${p.scope.label}.`);
+    void runOption(p, letter, sp, made.est, approved);
+    return;
+  }
   const proposalId = newId('prop');
   const scope = scopeCut(req.scope);
   const words = cut(req.words, DRAFT_CHARS);
-  const option: ProposalOption = {
-    letter: 'A',
-    name: cut(scope.all ? 'Whole flat' : scope.label, TALK_LIMITS.name),
-    designId: sp.draft.id,
-    brief: sp.brief,
-    aliases: sp.draft.aliases,
-    concept: sp.draft.concept,
-    spaces: sp.draft.spaces,
-    locks: sp.locks,
-    usage: [],
-    base: { variant: sp.ctx.variant, fingerprint: fp },
-    status: 'running',
-    ticks: null,
-    accepted: [],
-    waivers: [],
-    version: null,
-    note: null,
-  };
+  const option = newOption('A', scope, sp, fp);
   const proposal: Proposal = {
     projectId: project.id,
     id: proposalId,
@@ -430,6 +440,67 @@ async function run(
   say(`Designing V${proposal.n}, ${option.name}.`);
   void runOption(proposal, 'A', sp, made.est, approved);
 }
+
+/** An option as its run starts (its rooms saved into it as they come). */
+function newOption(
+  letter: ProposalOption['letter'],
+  scope: ScopeRef,
+  sp: ScopePlan,
+  fp: string,
+): ProposalOption {
+  return {
+    letter,
+    name: cut(
+      letter === 'A' ? (scope.all ? 'Whole flat' : scope.label) : `Idea ${letter}`,
+      TALK_LIMITS.name,
+    ),
+    designId: sp.draft.id,
+    brief: sp.brief,
+    aliases: sp.draft.aliases,
+    concept: sp.draft.concept,
+    spaces: sp.draft.spaces,
+    locks: sp.locks,
+    usage: [],
+    base: { variant: sp.ctx.variant, fingerprint: fp },
+    status: 'running',
+    ticks: null,
+    accepted: [],
+    waivers: [],
+    version: null,
+    note: null,
+  };
+}
+
+/**
+ * Another idea (UX §7.4): for one or two rooms, the next option (B, then C) of the same card;
+ * for the whole flat, or once C is there, a new card. Priced and asked like any press.
+ */
+export async function pressAnother(p: Proposal) {
+  if (!nextLetter(p)) {
+    await pressScope(p.scope);
+    return;
+  }
+  if (!begin()) return;
+  try {
+    await askOrRun({ ...anotherRequest(p), words: typedNow() });
+  } finally {
+    end();
+  }
+}
+
+/** Another idea's request: the next option of `p`, or a new card for its scope. */
+const anotherRequest = (p: Proposal): PressRequest => {
+  const letter = nextLetter(p);
+  return {
+    scope: p.scope,
+    words: '',
+    finish: null,
+    ...(letter ? { alternative: { proposalId: p.id, letter } } : {}),
+  };
+};
+
+/** Another idea's price for its button (what its press compares with). */
+export const anotherPrice = (p: Proposal): RunEstimate | null => pressPrice(anotherRequest(p));
 
 const cutNote = (s: string | null) => (s ? cut(s, 300) : null);
 
@@ -595,6 +666,8 @@ async function runOption(
                 ? {
                     ...o,
                     status,
+                    // Named by the designer's summary (A keeps its room's name without one).
+                    name: optionName(o, o.letter === 'A' ? o.name : undefined),
                     note: cutNote(
                       state.halt?.message ??
                         (failed ? (state.steps.find((s) => s.error)?.error ?? null) : null),

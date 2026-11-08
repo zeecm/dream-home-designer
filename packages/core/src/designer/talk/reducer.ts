@@ -117,6 +117,7 @@ export type TalkAction =
       /** A designer's plan: its card follows the reply (no bubble of the person's). */
       talk?: TurnOf<'cost-ask'>['talk'];
       just?: ScopeRef | null;
+      alt?: TurnOf<'cost-ask'>['alt'];
     }
   /** The figure on an open cost card, worked out again (the plan or the prices moved). */
   | { type: 'costRefresh'; turnId: string; estimate: TurnOf<'cost-ask'>['estimate'] }
@@ -552,6 +553,7 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
               }
             : null,
           just: a.just ? scopeCut(a.just) : null,
+          alt: a.alt ?? null,
         },
       );
     case 'costAnswer': {

@@ -124,6 +124,20 @@ describe('the conversation store (dhd-talk)', () => {
     expect(await s.proposals('prj_b')).toHaveLength(1);
   });
 
+  it('Start over removes the old conversation’s proposals only (both stores)', async () => {
+    for (const s of [await openTalk(new IDBFactory()), await openTalk(undefined)]) {
+      await s.applyProposal('prj_a', 'p_old', () => proposal('p_old'));
+      await s.applyProposal('prj_a', 'p_new', () => ({
+        ...proposal('p_new'),
+        conversationId: 'conv2',
+      }));
+      await s.applyProposal('prj_b', 'p_b', () => proposal('p_b', 'prj_b'));
+      await s.removeProposals('prj_a', 'conv2');
+      expect((await s.proposals('prj_a')).map((p) => p.id)).toEqual(['p_new']);
+      expect((await s.proposals('prj_b')).map((p) => p.id)).toEqual(['p_b']);
+    }
+  });
+
   it('a record that wouldn’t read back is never written; nothing is lost', async () => {
     const s = await openTalk(new IDBFactory());
     await s.apply('prj_a', () => started());

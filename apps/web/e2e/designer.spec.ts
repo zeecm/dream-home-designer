@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import {
   type Design,
   type Level,
@@ -1396,6 +1397,273 @@ test.describe('talking to the designer (slice 2, PR 2)', () => {
   });
 });
 
+/** A different idea for the living room: the sofa on another wall, said in a summary. */
+const LIVING_B = {
+  ...living,
+  summary: 'Sofa on the long wall, facing the window; the dining table by the kitchen.',
+  items: living.items.map((it, i) => (i === 0 ? { ...it, along: 2.4 } : it)),
+};
+
+/** Mocks Another idea's requests with `answer` (a stream, as any room's). */
+const anotherIdea =
+  (answer: unknown) =>
+  (c: Call): { status: number; body: string; headers?: Record<string, string> } | null =>
+    c.body.includes('Another idea for the same rooms')
+      ? {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+          body: STREAM.anthropic(answer, USAGE),
+        }
+      : null;
+
+/** The proposal card whose heading starts with `title` ("V1B"). */
+const titled = (page: Page, title: string) =>
+  panel(page)
+    .locator('article.talk-card')
+    .filter({ has: page.getByRole('heading', { name: new RegExp(`^${title} · `) }) });
+
+/** Opens the designer's menu and picks `item`. */
+async function menu(page: Page, item: string) {
+  await panel(page).getByRole('button', { name: 'Designer menu' }).click();
+  await panel(page).getByRole('menuitem', { name: item }).click();
+}
+
+test.describe('iterating (slice 2, PR 3)', () => {
+  test('alternatives A/B/C: Another idea adds B to the card; switching is free and keeps each option’s ticks (25)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    const m = await mock(page, { reply: anotherIdea(LIVING_B) });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^Living and dining · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    expect(m.calls).toHaveLength(1);
+    // One or two rooms: Another idea is the next option of this card, not a new card.
+    await v1.getByRole('button', { name: /^Another idea · about US\$/ }).click();
+    const b = titled(page, 'V1B');
+    await expect(b.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // Its request (and any fix round) asks for another idea for the same rooms.
+    const afterB = m.calls.length;
+    expect(m.calls.slice(1).every((c) => c.body.includes('Another idea for the same rooms'))).toBe(
+      true,
+    );
+    await expect(panel(page).locator('article.talk-card')).toHaveCount(1);
+    const tabs = panel(page).getByRole('tablist', { name: 'V1: ideas' });
+    await expect(tabs.getByRole('tab')).toHaveCount(2);
+    await expect(tabs.getByRole('tab', { name: /^B: Sofa on the long wall/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(
+      tabs.getByRole('tab', { name: /^A: .*(passes all checks|doesn’t pass)$/ }),
+    ).toBeVisible();
+    // B on the plan, and its own summary and checks.
+    await expect(page.getByText('Previewing V1B, not in your plan yet')).toBeVisible();
+    await expect(b.getByText(/^Sofa on the long wall, facing the window/)).toBeVisible();
+    await shot(page, 'alternatives-b');
+    // B's ticks are its own: untick one row of B, then switch to A (free and instant).
+    const tickedB = b.getByRole('checkbox', { name: /^Accept: /, checked: true });
+    const allB = await tickedB.count();
+    await tickedB.first().uncheck();
+    await expect(b.getByRole('button', { name: `Accept selected (${allB - 1})` })).toBeVisible();
+    await tabs.getByRole('tab', { name: /^A: / }).click();
+    const a = titled(page, 'V1A');
+    await expect(a).toBeVisible();
+    await expect(page.getByText('Previewing V1A, not in your plan yet')).toBeVisible();
+    const allA = await a.getByRole('checkbox', { name: /^Accept: /, checked: true }).count();
+    expect(allA).toBeGreaterThan(allB - 1);
+    await expect(a.getByRole('button', { name: `Accept selected (${allA})` })).toBeVisible();
+    // The keyboard: → to B; its one unticked row is still unticked.
+    await tabs.getByRole('tab', { name: /^A: / }).focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(tabs.getByRole('tab', { name: /^B: / })).toBeFocused();
+    await expect(b.getByRole('button', { name: `Accept selected (${allB - 1})` })).toBeVisible();
+    await expect(panel(page).getByRole('region', { name: 'On the table' })).toContainText(
+      'On the table: V1B',
+    );
+    // Switching cost nothing.
+    expect(m.calls).toHaveLength(afterB);
+    // Accepting B makes V1B a version.
+    await b.getByRole('button', { name: /^Accept selected/ }).click();
+    await expect(log(page).getByText(/^You accepted \d+ of \d+ changes from V1B\./)).toBeVisible();
+    await menu(page, 'Versions');
+    const versions = panel(page).getByRole('region', { name: 'Versions' });
+    await expect(versions.locator('[data-version="V1B"]')).toContainText('Accepted');
+    await shot(page, 'versions');
+    expect(m.calls).toHaveLength(afterB);
+  });
+
+  test('Bring this back makes V(n+1) with no request, checked on today’s plan (27)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    const m = await mock(page);
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^Living and dining · about US\$/);
+    await expect(card(page, 1).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    await design(page, /^Kitchen · about US\$/);
+    await expect(card(page, 2).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    const calls = m.calls.length;
+    // V1, older than V2: brought back (opened first if it is folded).
+    const folded = panel(page).getByRole('button', { name: /^V1 · Living and dining/ });
+    if (await folded.isVisible()) await folded.click();
+    await card(page, 1).getByRole('button', { name: 'Bring this back' }).click();
+    await expect(
+      log(page).getByText('Brought back V1 as V3, checked on your plan as it is now.'),
+    ).toBeVisible();
+    const v3 = card(page, 3);
+    await expect(v3.getByRole('button', { name: /^Accept selected/ })).toBeEnabled();
+    await expect(page.getByText('Previewing V3, not in your plan yet')).toBeVisible();
+    // No request, and nothing billed for it.
+    expect(m.calls.length).toBe(calls);
+    await expect(v3.getByRole('button', { name: /^Cost of this reply/ })).toHaveCount(0);
+    await shot(page, 'brought-back');
+    // It is accepted like any card; the next proposal takes V4.
+    await v3.getByRole('button', { name: /^Accept selected/ }).click();
+    await expect(log(page).getByText(/^You accepted \d+ changes from V3\./)).toBeVisible();
+    await design(page, /^Bedroom · about US\$/);
+    await expect(card(page, 4)).toBeVisible({ timeout: 30_000 });
+  });
+
+  test('My plan before the designer previews the start; Put it back is one undo step (28)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    await mock(page);
+    await openSample(page);
+    const start = await saved(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^Living and dining · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    await v1.getByRole('button', { name: /^Accept selected/ }).click();
+    await expect(log(page).getByText(/^You accepted \d+ changes from V1\./)).toBeVisible();
+    const accepted = await saved(page);
+    expect(accepted.renovation).toBeTruthy();
+    await menu(page, 'My plan before the designer');
+    const bar = page.locator('.designer-bar-start');
+    await expect(bar).toContainText(/^Your plan on \d+ \w+, before the designer/);
+    await shot(page, 'before-designer');
+    // Back to my plan leaves it as it is.
+    await bar.getByRole('button', { name: 'Back to my plan' }).click();
+    await expect(bar).toBeHidden();
+    expect((await saved(page)).renovation).toEqual(accepted.renovation);
+    // Put it back asks inline, then puts the plan back as one step.
+    await menu(page, 'My plan before the designer');
+    await bar.getByRole('button', { name: 'Put it back' }).click();
+    await expect(bar).toContainText('Everything accepted from the designer since is taken out.');
+    await bar.getByRole('button', { name: 'Put it back' }).click();
+    await expect(log(page).getByText(/^You put your plan back as it was on /)).toBeVisible();
+    const back = await saved(page);
+    expect(back.levels).toEqual(start.levels);
+    expect(back.renovation).toBeUndefined();
+    // One Undo brings the designer's changes back.
+    await page.locator('body').click({ position: { x: 5, y: 300 } });
+    await page.keyboard.press('Control+z');
+    await expect.poll(async () => (await saved(page)).renovation).toEqual(accepted.renovation);
+  });
+
+  test('Copy as text and Download conversation: the decisions, facts, accepted changes; no key', async ({
+    page,
+    context,
+  }) => {
+    test.setTimeout(120_000);
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await setup(page);
+    await mock(page);
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^Living and dining · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // One row left out: a decision.
+    await v1
+      .getByRole('checkbox', { name: /^Accept: / })
+      .first()
+      .uncheck();
+    await v1.getByRole('button', { name: /^Accept selected/ }).click();
+    await expect(log(page).getByText(/^You accepted \d+ of \d+ changes from V1\./)).toBeVisible();
+    await menu(page, 'Copy as text');
+    await expect(page.getByText(/^Copied: 1 decision and \d+ accepted changes\.$/)).toBeVisible();
+    const text = await page.evaluate(() => navigator.clipboard.readText());
+    expect(text).toContain('Decisions\n- Left out of V1:');
+    expect(text).toContain('What I know about you\n- Who lives here:');
+    expect(text).toMatch(/Accepted changes\nLiving and dining:\n- /);
+    expect(text).toMatch(/Renovation cost: about S\$\d+–\d+k/);
+    expect(text).not.toContain(KEY);
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      menu(page, 'Download conversation'),
+    ]);
+    expect(download.suggestedFilename()).toMatch(/-designer-conversation\.json$/);
+    const file = readFileSync((await download.path()) ?? '', 'utf8');
+    const json = JSON.parse(file);
+    expect(json.kind).toBe('dhd-designer-conversation');
+    expect(json.proposals).toHaveLength(1);
+    expect(Object.keys(json.levels).length).toBeGreaterThan(0);
+    expect(file).not.toContain(KEY);
+  });
+
+  test('Start over: a new conversation, the versions under Earlier designs, the numbering goes on', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    await mock(page);
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^Living and dining · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    await v1.getByRole('button', { name: /^Accept selected/ }).click();
+    await expect(log(page).getByText(/^You accepted \d+ changes from V1\./)).toBeVisible();
+    await menu(page, 'Start over…');
+    const dialog = page.getByRole('dialog', { name: 'Start a new conversation?' });
+    await expect(dialog).toBeVisible();
+    // Neither main button is chosen for you.
+    await expect(dialog.getByRole('button', { name: 'Start over' })).not.toBeFocused();
+    await expect(dialog.getByRole('button', { name: 'Cancel' })).not.toBeFocused();
+    await expect(
+      dialog.getByRole('checkbox', { name: 'Keep what I know about you' }),
+    ).toBeChecked();
+    await shot(page, 'start-over');
+    await dialog.getByRole('button', { name: 'Start over' }).click();
+    await expect(dialog).toBeHidden();
+    await expect(log(page).getByText(/^I’ve kept what I know about you/)).toBeVisible();
+    await expect(log(page).getByText(/You accepted/)).toHaveCount(0);
+    // The version stays, under Earlier designs; the next proposal is V2.
+    await expect(log(page).getByRole('button', { name: 'Earlier designs (1)' })).toBeVisible();
+    await expect(panel(page).getByText('Where shall we start?')).toBeVisible();
+    await design(page, /^Kitchen · about US\$/);
+    await expect(card(page, 2)).toBeVisible({ timeout: 30_000 });
+  });
+});
+
 test.describe('phone, 390 px, fingers only (35)', () => {
   const { defaultBrowserType: _webkit, ...iPhone } = devices['iPhone 13'];
   test.use({ ...iPhone, viewport: { width: 390, height: 844 } });
@@ -1507,5 +1775,70 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     await expect(panel(page)).toHaveClass(/talk-peek/);
     await shot(page, 'phone-peek');
     await noSideways(page);
+  });
+  test('alternatives on a phone: the cost card’s buttons in sight, letters 44 px, a swipe switches (35)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    const m = await mock(page, { reply: anotherIdea(LIVING_B) });
+    await page.goto('/');
+    await waitSaved(page);
+    await page
+      .getByRole('button', { name: /Plan details|Show plan details/ })
+      .first()
+      .tap()
+      .catch(() => {});
+    await page.getByRole('button', { name: 'Talk to the designer' }).tap();
+    await panel(page).getByRole('button', { name: 'Just design it' }).tap();
+    await panel(page)
+      .getByRole('button', { name: /^Living and dining · about US\$/ })
+      .tap();
+    // The cost card's answer is in sight at once, with no scrolling (QA: P2 leftover).
+    const go = panel(page).getByRole('button', { name: /^Go ahead · about US\$/ });
+    await expect(go).toBeInViewport({ ratio: 1 });
+    await shot(page, 'phone-cost-card');
+    await go.tap();
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // The cost card took the sheet to full height; it stays there.
+    await expect(panel(page)).toHaveClass(/talk-full/);
+    await v1.getByRole('button', { name: /^Another idea · about US\$/ }).tap();
+    const b = titled(page, 'V1B');
+    await expect(b.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    const calls = m.calls.length;
+    const tabs = panel(page).getByRole('tablist', { name: 'V1: ideas' });
+    // Letters only, each 44 px tall; the names are in the tabs' names and the card's title.
+    for (const t of await tabs.getByRole('tab').all()) {
+      expect((await t.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+    await expect(tabs.locator('.talk-option-name').first()).toBeHidden();
+    await fingerSized(page);
+    await noSideways(page);
+    await shot(page, 'phone-alternatives');
+    // A sideways swipe on the change list: back to A; a mostly vertical drag doesn't switch.
+    const list = b.locator('.talk-changes');
+    const box = await list.boundingBox();
+    if (!box) throw new Error('no change list');
+    const swipe = async (dx: number, dy: number) => {
+      const x = box.x + box.width / 2;
+      const y = box.y + Math.min(80, box.height / 2);
+      await list.dispatchEvent('pointerdown', { pointerType: 'touch', clientX: x, clientY: y });
+      await list.dispatchEvent('pointerup', {
+        pointerType: 'touch',
+        clientX: x + dx,
+        clientY: y + dy,
+      });
+    };
+    await swipe(10, 120);
+    await expect(tabs.getByRole('tab', { name: /^B: / })).toHaveAttribute('aria-selected', 'true');
+    await swipe(120, 10);
+    await expect(tabs.getByRole('tab', { name: /^A: / })).toHaveAttribute('aria-selected', 'true');
+    await expect(titled(page, 'V1A')).toBeVisible();
+    expect(m.calls.length).toBe(calls);
   });
 });

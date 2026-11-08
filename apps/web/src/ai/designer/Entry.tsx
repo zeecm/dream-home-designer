@@ -7,6 +7,7 @@ import { Segmented } from '../../ui/fields';
 import { LayoutsDialog } from '../LayoutsDialog';
 import { usd } from './spend';
 import { closePanel, endPreview, openPanel, useDesigner } from './state';
+import { flatMoved, putItBack } from './talk/iterate';
 import { stopTalkRun } from './talk/propose';
 import { loadTalk, useTalk } from './talk/useTalk';
 
@@ -156,6 +157,9 @@ export function DesignerBar() {
   const walking = useEditor((s) => !!s.walking);
   const run = useDesigner((s) => s.run);
   const panel = useDesigner((s) => s.panel);
+  const [confirming, setConfirming] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new preview asks afresh
+  useEffect(() => setConfirming(false), [preview?.level]);
   // The bar coming or going changes the plan's height: fit the plan to what's left, with a
   // margin, so nothing of it is cut under the bar or the designer's sheet.
   const barShown = !!preview || (!!run && !panel);
@@ -198,10 +202,62 @@ export function DesignerBar() {
   if (preview && walking) {
     return (
       <output className="designer-walk-pill">
-        {preview.side === 'before'
-          ? 'Showing the flat as it is'
-          : `Previewing ${preview.label}, not your plan`}
+        {preview.start
+          ? `Your plan on ${preview.start.day}, before the designer`
+          : preview.side === 'before'
+            ? 'Showing the flat as it is'
+            : `Previewing ${preview.label}, not your plan`}
       </output>
+    );
+  }
+  if (preview?.start) {
+    // My plan before the designer (criterion 28): Put it back confirms inline, one undo step.
+    const day = preview.start.day;
+    return (
+      <div className="reno-bar designer-bar designer-bar-start">
+        {confirming ? (
+          <>
+            <span className="designer-bar-text" role="alert">
+              Put your plan back as it was on {day}? Everything accepted from the designer since is
+              taken out. One Undo brings it back.
+              {flatMoved()
+                ? ' Your plan’s walls have changed since; only the renovation goes back.'
+                : ''}
+            </span>
+            <span className="button-row">
+              <button
+                type="button"
+                className="btn btn-small btn-primary"
+                onClick={() => {
+                  setConfirming(false);
+                  void putItBack();
+                }}
+              >
+                Put it back
+              </button>
+              <button type="button" className="btn btn-small" onClick={() => setConfirming(false)}>
+                Cancel
+              </button>
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="designer-bar-text">Your plan on {day}, before the designer</span>
+            <span className="button-row">
+              <button type="button" className="btn btn-small" onClick={() => setConfirming(true)}>
+                Put it back
+              </button>
+              <button
+                type="button"
+                className="btn btn-small"
+                onClick={() => useEditor.getState().setPreview(null)}
+              >
+                Back to my plan
+              </button>
+            </span>
+          </>
+        )}
+      </div>
     );
   }
   if (preview) {

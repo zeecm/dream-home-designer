@@ -10,7 +10,7 @@ import {
   subsetReport,
   usageTotals,
 } from '@dhd/core';
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useRates } from '../../../cost/estimate';
 import { useEditor } from '../../../editor';
 import { warningsOf } from '../../../electrical/electrical';
@@ -34,7 +34,15 @@ import {
   nowOf,
   planMoved,
 } from './cards';
-import { finishPrice, finishRooms, pressScope, scopePrice } from './propose';
+import { bringBackCard } from './iterate';
+import {
+  anotherPrice,
+  finishPrice,
+  finishRooms,
+  pressAnother,
+  pressScope,
+  scopePrice,
+} from './propose';
 import { focusInLog, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { type LiveRun, actProposal, useBusy, useTalk } from './useTalk';
@@ -160,12 +168,22 @@ interface Props {
   /** The newest card: open; older ones fold to one line. */
   newest: boolean;
   live: LiveRun | null;
+  /** Alternatives A / B / C: the segmented control over the card's body. */
+  tabs?: ReactNode;
+  /** A sideways swipe on the change list (phone): the next or previous option. */
+  onSwipe?: (dir: 1 | -1) => void;
 }
 
 /** What a folded card last said of itself (its checks need the plan worked out again). */
 const verdicts = new Map<string, string>();
 
-export const ProposalCard = memo(function ProposalCard({ card, newest, live }: Props) {
+export const ProposalCard = memo(function ProposalCard({
+  card,
+  newest,
+  live,
+  tabs,
+  onSwipe,
+}: Props) {
   // The plan once edits pause: a drag never works a card out again frame by frame.
   const project = useSettledProject();
   const { prices } = useSpend();
@@ -237,13 +255,19 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
   const allIn = !running && changes.length === 0 && accepted.length > 0;
   const acceptBtn = useRef<HTMLButtonElement>(null);
   // Another idea's price: once per plan (settled), scope and prices; never per keystroke.
-  const scope = card.proposal?.scope;
+  const proposal = card.proposal;
   // biome-ignore lint/correctness/useExhaustiveDependencies: on what the price reads
   const another = useMemo(
     () =>
-      !running && scope && ai && !designerCannotUse(ai) ? timed(() => scopePrice(scope)) : null,
-    [running, scope, ai, project, prices, tick],
+      !running && proposal && ai && !designerCannotUse(ai)
+        ? timed(() =>
+            card.status === 'failed' ? scopePrice(proposal.scope) : anotherPrice(proposal),
+          )
+        : null,
+    [running, proposal, ai, project, prices, tick, card.status],
   );
+  // A sideways swipe of at least 60 px on the change list; a mostly vertical one scrolls.
+  const swipe = useRef<{ x: number; y: number } | null>(null);
   const rowsRef = useRef<HTMLDivElement>(null);
 
   const setTicked = (next: string[]) => {
@@ -284,7 +308,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
     const b = nowOf(project);
     useProposalView.setState({
       card: card.key,
-      label: `V${card.n}`,
+      label: card.title,
       now: b?.now ?? null,
       target: r.level,
       merged: running ? (b?.now ?? null) : merged,
@@ -296,7 +320,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
         .filter((s) => s.storedKey && ['done', 'copied'].includes(s.status))
         .flatMap((s) => s.rooms),
     });
-  }, [shown, r, merged, changes, ticked, failingItems, running, card.key, card.n, project]);
+  }, [shown, r, merged, changes, ticked, failingItems, running, card.key, card.title, project]);
   useEffect(
     () => () => {
       if (useProposalView.getState().card === card.key) useProposalView.setState(EMPTY_VIEW);
@@ -321,10 +345,10 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
           ),
         );
       } else {
-        useStore.setState({ toast: { text: `Not changed in V${card.n}`, at: Date.now() } });
+        useStore.setState({ toast: { text: `Not changed in ${card.title}`, at: Date.now() } });
       }
     });
-  }, [shown, changes, card.key, card.n]);
+  }, [shown, changes, card.key, card.title]);
 
   const accepted0 = card.accepted.filter((a) => !a.out).length;
   if (!expanded && !r) {
@@ -339,7 +363,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
           onClick={() => setExpanded(true)}
         >
           <span>
-            V{card.n} · {headLabel(project, card)}
+            {card.title} · {headLabel(project, card)}
             {verdicts.get(card.key) ? ` · ${verdicts.get(card.key)}` : ''}
             {accepted0 && !verdicts.has(card.key) ? ` · Accepted ${accepted0}` : ''}
           </span>
@@ -355,7 +379,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
     return (
       <article className="talk-card" data-card={card.key} aria-labelledby={`card-${card.key}`}>
         <h3 className="talk-card-title" id={`card-${card.key}`}>
-          V{card.n} · {headLabel(project, card)}
+          {card.title} · {headLabel(project, card)}
         </h3>
         <p className="talk-card-note muted" aria-busy="true">
           Checking it on your plan…
@@ -413,14 +437,14 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
   const head = (
     <div className="talk-card-head">
       <h3 className="talk-card-title" id={`card-${card.key}`}>
-        V{card.n} · {headLabel(project, card)}
+        {card.title} · {headLabel(project, card)}
       </h3>
       {card.status !== 'failed' && (
         <button
           type="button"
           className={onPlan ? 'btn btn-small talk-onplan on' : 'btn btn-small talk-onplan'}
           aria-pressed={onPlan}
-          aria-label={`Show V${card.n} on the plan`}
+          aria-label={`Show ${card.title} on the plan`}
           onClick={() => {
             // Pressed only while the plan really shows it (Esc or a walk may have ended it).
             if (onPlan) {
@@ -454,7 +478,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
           onClick={() => setExpanded(true)}
         >
           <span>
-            V{card.n} · {headLabel(project, card)} · {allIn ? 'In your renovation' : verdict}
+            {card.title} · {headLabel(project, card)} · {allIn ? 'In your renovation' : verdict}
             {acc}
           </span>
           <span className="talk-fold-show" aria-hidden="true">
@@ -468,8 +492,14 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
   const tickedN = ticked.length;
   const progress = live?.state.steps ?? [];
   return (
-    <article className="talk-card" aria-labelledby={`card-${card.key}`} data-card={card.key}>
+    <article
+      className="talk-card"
+      aria-labelledby={`card-${card.key}`}
+      data-card={card.key}
+      id={`panel-${card.key}`}
+    >
       {head}
+      {tabs}
       {title && <p className="talk-card-summary">{keepTogether(title)}</p>}
       {card.words.trim() && <p className="talk-card-words">Your words: “{card.words.trim()}”</p>}
       {planMoved(project, card) && !card.accepted.length && (
@@ -585,7 +615,25 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
         </div>
       )}
       {(changes.length > 0 || accepted.length > 0) && (
-        <div className="talk-changes" ref={rowsRef}>
+        <div
+          className="talk-changes"
+          ref={rowsRef}
+          onPointerDown={(e) => {
+            if (onSwipe && e.pointerType !== 'mouse')
+              swipe.current = { x: e.clientX, y: e.clientY };
+          }}
+          onPointerUp={(e) => {
+            const s0 = swipe.current;
+            swipe.current = null;
+            if (!s0 || !onSwipe) return;
+            const dx = e.clientX - s0.x;
+            const dy = e.clientY - s0.y;
+            if (Math.abs(dx) >= 60 && Math.abs(dx) > Math.abs(dy) * 1.5) onSwipe(dx < 0 ? 1 : -1);
+          }}
+          onPointerCancel={() => {
+            swipe.current = null;
+          }}
+        >
           <div className="talk-changes-head">
             <h4>Changes</h4>
             <span className="muted num">
@@ -705,7 +753,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
                             </p>
                           )}
                           {blocked && (
-                            <p className="talk-row-sub">Needs the walls from V{card.n}</p>
+                            <p className="talk-row-sub">Needs the walls from {card.title}</p>
                           )}
                           {fail.length > 0 && !c.waivable && (
                             <p className="talk-row-sub negative">
@@ -973,7 +1021,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
                     onClick={() => {
                       setMore(false);
                       const text = [
-                        `V${card.n} · ${card.label}`,
+                        `${card.title} · ${card.label}`,
                         ...changes.map((c) => `- ${c.text}`),
                       ].join('\n');
                       void navigator.clipboard?.writeText(text).then(
@@ -991,13 +1039,24 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
               )}
             </span>
           </span>
+          {!newest && card.status !== 'failed' && (
+            <button
+              type="button"
+              className="link-btn"
+              data-bring-back=""
+              disabled={busy}
+              onClick={() => void bringBackCard(card)}
+            >
+              Bring this back
+            </button>
+          )}
           {card.proposal && another && card.status !== 'failed' && (
             <button
               type="button"
               className="link-btn"
               disabled={busy}
               data-spends=""
-              onClick={() => card.proposal && void pressScope(card.proposal.scope)}
+              onClick={() => card.proposal && void pressAnother(card.proposal)}
             >
               Another idea{another.usd ? ` · about ${usd(another.usd.typical)}` : ''}
             </button>

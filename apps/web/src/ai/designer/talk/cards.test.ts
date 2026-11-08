@@ -1,6 +1,6 @@
-import type { Change } from '@dhd/core';
+import type { Change, Design } from '@dhd/core';
 import { describe, expect, it, vi } from 'vitest';
-import { type CardModel, cardScope, cardVerdict } from './cards';
+import { type CardModel, cardScope, cardVerdict, earlierDesign, versionKey } from './cards';
 
 // The cards read the app's design options and results; these tests need neither.
 vi.mock('../state', () => ({ designOpts: () => ({}) }));
@@ -99,5 +99,20 @@ describe('cardVerdict: one verdict for the Checks line and On the table', () => 
   it('all waived: accepted anyway; nothing failing: passes', () => {
     expect(cardVerdict([{ key: 'a' }], [], ['a']).text).toBe('1 accepted anyway');
     expect(cardVerdict([], [], []).text).toBe('Passes all checks');
+  });
+});
+
+describe('versions in the conversation', () => {
+  const v = (from?: Design['from']) => ({ id: 'dsn_1', ...(from ? { from } : {}) }) as Design;
+  const mine = { conversationId: 'c1', proposalId: 'p1', letter: 'B' };
+  it('shows a version as its option’s card in this conversation, else as its own', () => {
+    expect(versionKey(v(mine), 'c1')).toBe('p1:B');
+    expect(versionKey(v(mine), 'c2')).toBe('d:dsn_1');
+    expect(versionKey(v(), 'c1')).toBe('d:dsn_1');
+  });
+  it('puts v1’s versions and a started-over conversation’s under Earlier designs', () => {
+    expect(earlierDesign(v(), 'c1')).toBe(true);
+    expect(earlierDesign(v(mine), 'c2')).toBe(true);
+    expect(earlierDesign(v(mine), 'c1')).toBe(false);
   });
 });
