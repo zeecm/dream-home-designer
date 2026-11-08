@@ -182,6 +182,8 @@ export function questionText(key: QuestionKey, brief: DesignBrief): string {
       return 'Any style in mind?';
     case 'anything':
       return 'Anything you want to keep, or anything I should know?';
+    case 'owns':
+      return 'How much do you own?';
   }
 }
 
@@ -340,6 +342,9 @@ export function factText(key: QuestionKey, brief: DesignBrief, level: Level): st
       const t = [brief.keep.text, brief.household.text].filter((x) => x.trim()).join(' · ');
       return t || 'Nothing to add';
     }
+    case 'owns':
+      // Asked from slice 3b (the storage lens), which keeps the answer in the brief.
+      return 'Not said';
   }
 }
 
@@ -354,6 +359,7 @@ export const FACT_LABELS: Record<QuestionKey, string> = {
   walls: 'Walls',
   style: 'Style',
   anything: 'Anything else',
+  owns: 'What you own',
 };
 
 /**

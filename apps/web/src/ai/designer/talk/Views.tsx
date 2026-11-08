@@ -14,6 +14,7 @@ import { readResult, useResultsTickN } from '../results';
 import { designOpts, useDesigner } from '../state';
 import { FactEditor } from './Facts';
 import { Mark } from './Mark';
+import { MakeRule } from './Rules';
 import { cardVerdict, nowOf, versionKey } from './cards';
 import { bringBackDesign, copyConversation, downloadConversation, startOver } from './iterate';
 import { timed, useSettledProject } from './settle';
@@ -26,7 +27,7 @@ import { act, newId, nowIso, talkLevel, useBusy, useTalk } from './useTalk';
  * marked) and Decisions.
  */
 
-function Back({ title }: { title: string }) {
+export function Back({ title }: { title: string }) {
   const head = useRef<HTMLHeadingElement>(null);
   useEffect(() => head.current?.focus({ preventScroll: true }), []);
   return (
@@ -59,6 +60,8 @@ export function WhatIKnow() {
   const b = conv.brief;
   const keys = QUESTION_KEYS.filter(
     (k) =>
+      // Slice 3b asks it (the storage lens); until then What I know doesn't show it.
+      k !== 'owns' &&
       (k !== 'mobility' || b.household.elders.length > 0) &&
       // Who sleeps where, whenever someone sleeps here: with no bedroom, it asks which rooms
       // they sleep in (N1).
@@ -143,6 +146,9 @@ export function Decisions() {
   return (
     <section className="talk-view" aria-label="Decisions">
       <Back title="Decisions" />
+      <p className="muted">
+        Rules are checked on every proposal. Decisions are told to the designer, not checked.
+      </p>
       <form
         className="talk-add"
         onSubmit={(e) => {
@@ -239,6 +245,7 @@ export function Decisions() {
                     </span>
                   </span>
                   <span className="talk-decision-actions">
+                    <MakeRule d={d} />
                     <button
                       type="button"
                       className="link-btn"
@@ -347,7 +354,7 @@ function VersionVerdict({ d }: { d: Design }) {
   const v = useMemo(() => {
     const b = nowOf(project, d.levelId);
     if (!b) return null;
-    const r = timed(() => readResult(b.now, b.before, d, designOpts(project)));
+    const r = timed(() => readResult(b.now, b.before, d, designOpts(project, d.levelId)));
     if (!r) return { text: 'Checking…', tone: 'pending' };
     const f = failingChecks(r, d);
     return cardVerdict(
@@ -397,6 +404,9 @@ export function StartOverDialog({ onClose }: { onClose: () => void }) {
         <p id="restart-d">
           Your versions stay, under Earlier designs. The designer forgets this conversation’s
           messages and decisions, and the ideas you didn’t accept go with them.
+        </p>
+        <p id="restart-r" className="field-hint">
+          Keeping what I know about you keeps your rules too; untick it and they go.
         </p>
         <label className="check-row">
           <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} />

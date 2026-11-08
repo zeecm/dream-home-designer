@@ -3,6 +3,7 @@ import {
   DRAFT_CHARS,
   type DraftDesign,
   FIX_PER_RUN,
+  PROPOSAL_RECORD_VERSION,
   type Proposal,
   type ProposalOption,
   type RunCheckpoint,
@@ -11,7 +12,6 @@ import {
   type ScopePlan,
   type ScopeRef,
   TALK_LIMITS,
-  TALK_RECORD_VERSION,
   type TalkAsk,
   type TalkPlan,
   type TurnOf,
@@ -23,6 +23,7 @@ import {
   nextLetter,
   optionName,
   planScope,
+  ruleSentence,
   scopeCut,
 } from '@dhd/core';
 import { useStore } from '../../../store';
@@ -53,7 +54,9 @@ import {
   levelGone,
   newId,
   nowIso,
+  rulesOn,
   say,
+  talkLevel,
   talkLevels,
   typedNow,
   useTalk,
@@ -82,6 +85,12 @@ export interface PressRequest {
   /** Another idea as the next option (B, C) of a proposal, for the same rooms. */
   alternative?: { proposalId: string; letter: 'B' | 'C' };
 }
+
+/** The house rules on the level designed, as the app says them. */
+const ruleWords = () => {
+  const level = talkLevel();
+  return level ? rulesOn(designLevelId()).map((r) => ruleSentence(r, level)) : [];
+};
 
 /** The decisions as a run's talk block carries them. */
 const decided = () =>
@@ -128,7 +137,15 @@ function priceInput(req: PressRequest, designId: string): Omit<PriceInput, 'desi
   // The person's words (this time's, else the card's) go as theirs; the options so far as the
   // designer's own, on a line of their own.
   const words = of ? req.words || of.words : req.words;
-  const talk = of && !req.talk ? anotherAsk(of, words, decided()) : req.talk;
+  const asked = of && !req.talk ? anotherAsk(of, words, decided()) : req.talk;
+  // The house rules go with what the run is for, in the app's words (slice 3a).
+  const rules = ruleWords();
+  const talk = !rules.length
+    ? asked
+    : asked
+      ? { ...asked, rules }
+      : // A scope button asks with no words: the rules go all the same.
+        { intent: '', said: '', decided: [], rules };
   return {
     project,
     levelId: designLevelId(),
@@ -138,7 +155,7 @@ function priceInput(req: PressRequest, designId: string): Omit<PriceInput, 'desi
     ...(talk ? { talk } : {}),
     ...(finish ? { finish } : {}),
     designId,
-    opts: designOpts(project),
+    opts: designOpts(project, designLevelId()),
     ai: { provider: ai.provider, model: ai.model },
     prices: priceTable(),
   };
@@ -465,7 +482,7 @@ async function run(
     projectId: project.id,
     id: proposalId,
     conversationId: conv.id,
-    recordVersion: TALK_RECORD_VERSION,
+    recordVersion: PROPOSAL_RECORD_VERSION,
     n: conv.nextN,
     turnId: ids.turn,
     at: nowIso(),
@@ -893,7 +910,7 @@ async function runOption(
     plan: sp.plan,
     signal: ctrl.signal,
     prices: priceTable(),
-    result: designOpts(project),
+    result: designOpts(project, designLevelId()),
     results: trialResult,
     fixesLeft: ck.fixesLeft,
     ...(sp.expected ? { expected: sp.expected } : {}),

@@ -23,6 +23,7 @@ import {
   cardScope,
   cardVerdict,
   earlierDesign,
+  midLine,
   optionCard,
   precheckOn,
   putBackMoves,
@@ -30,7 +31,7 @@ import {
 } from './cards';
 
 // The cards read the app's design options and results; these tests need neither.
-vi.mock('../state', () => ({ designOpts: () => ({}) }));
+vi.mock('../state', () => ({ designOpts: () => ({}), houseRulesFor: () => [] }));
 vi.mock('../results', () => ({}));
 
 const row = (id: string, group: string): Change => ({
@@ -126,6 +127,16 @@ describe('cardVerdict: one verdict for the Checks line and On the table', () => 
   it('all waived: accepted anyway; nothing failing: passes', () => {
     expect(cardVerdict([{ key: 'a' }], [], ['a']).text).toBe('1 accepted anyway');
     expect(cardVerdict([], [], []).text).toBe('Passes all checks');
+  });
+
+  it('with house rules: passes all checks and your rules (UX §3.7); a rule row reads mid-line', () => {
+    expect(cardVerdict([], [], [], 2).text).toBe('Passes all checks and your 2 rules');
+    expect(cardVerdict([], [], [], 1).text).toBe('Passes all checks and your rule');
+    expect(cardVerdict([{ key: 'R|ru1|it1' }], [], [], 2).text).toBe('1 doesn’t pass');
+    expect(midLine('Your rule “No clutter”: the console is in the way.')).toBe(
+      'your rule “No clutter”: the console is in the way.',
+    );
+    expect(midLine('The sofa is too close.')).toBe('The sofa is too close.');
   });
 });
 

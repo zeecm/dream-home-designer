@@ -18,6 +18,11 @@ import {
   REPLY_REJECT,
   REPLY_TEXT,
 } from '../../../packages/core/src/designer/talk/fixtures/replies';
+import {
+  REPLY_RULE,
+  REPLY_WISH,
+  ruleReply,
+} from '../../../packages/core/src/designer/talk/fixtures/rule-wordings';
 import { answerFor, promptOf } from '../src/ai/designer/fixtures/sample';
 import {
   type FixtureUsage,
@@ -1899,6 +1904,265 @@ test.describe('iterating (slice 2, PR 3)', () => {
   });
 });
 
+/** The sample's living room as mocked, with a shallow console in the passage to the bedrooms. */
+const LIVING_CONSOLE = {
+  ...living,
+  items: [
+    ...living.items,
+    {
+      ref: 'con1',
+      assetId: 'chinese-console',
+      keep: null,
+      wall: 'W10',
+      along: 1.2,
+      at: null,
+      rotation: null,
+      width: 0.3,
+      depth: 0.2,
+      height: null,
+      why: 'Somewhere for keys on the way in.',
+    },
+  ],
+};
+/** Answers the living room with the console in the corridor. */
+const consoleInCorridor = (c: Call) =>
+  c.step === 'furnish "Living'
+    ? {
+        status: 200,
+        body: STREAM[c.provider](LIVING_CONSOLE, USAGE),
+        headers: { 'content-type': 'text/event-stream' },
+      }
+    : null;
+const CORRIDOR =
+  'Your rule “Never anything in the corridor”: the Chinese console table is in the way from the main door to Main bedroom and Bedroom.';
+
+async function yourRules(page: Page) {
+  await panel(page).getByRole('button', { name: 'Designer menu' }).click();
+  await page.getByRole('menuitem', { name: /^Your rules/ }).click();
+  return panel(page).getByRole('region', { name: 'Your rules' });
+}
+
+test.describe('house rules (slice 3a, PR A)', () => {
+  test('39: the corridor rule is offered and kept; a console in the corridor fails with its wording; a number edit re-checks with no request; deleting it passes (3a.5, 3a.9)', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const m = await mock(page, { talk: [REPLY_RULE], reply: consoleInCorridor });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await send(page, 'Never put anything in the corridor, please.');
+    const offer = panel(page).getByRole('region', {
+      name: 'Rule offer: Never anything in the corridor',
+    });
+    await expect(offer).toBeVisible();
+    await expect(offer).toContainText('I’ll keep this as a rule for your home');
+    await expect(offer).toContainText(
+      'Checks: Nothing in the way from the main door to Main bedroom and Bedroom, with 0.90 m clear.',
+    );
+    // Show on plan: the way drawn on the plan, with the rule's name.
+    await offer.getByRole('button', { name: 'Show on plan' }).click();
+    await expect(page.getByTestId('rule-layer').locator('.rl-band').first()).toBeVisible();
+    await expect(page.getByTestId('rule-caption')).toHaveText(
+      'Your rule: Never anything in the corridor',
+    );
+    await shot(page, 'rule-offer');
+    await offer.getByRole('button', { name: 'Keep as a rule' }).click();
+    await expect(
+      log(page).getByText('Kept as a rule · Never anything in the corridor'),
+    ).toBeVisible();
+    await expect(
+      log(page).getByText('Kept as a rule: Never anything in the corridor.'),
+    ).toBeVisible();
+    expect(m.calls.map((c) => c.step)).toEqual(['talk']);
+    // A later proposal with a console in the corridor fails with the rule's wording.
+    await design(page, /^Living and dining · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // The run told the designer the rule, in the app's words (the talk block).
+    expect(m.calls.find((c) => c.step === 'furnish "Living')?.body).toContain(
+      'Rules this proposal must meet',
+    );
+    await expect(v1).toContainText(`Doesn’t pass: y${CORRIDOR.slice(1)}`);
+    await shot(page, 'rule-fails');
+    // Your rules: what V1 does with it, said on the device.
+    const view = await yourRules(page);
+    await expect(
+      view.getByRole('article', { name: 'Never anything in the corridor' }),
+    ).toContainText('✕ V1 doesn’t meet it: the Chinese console table is in the way');
+    await expect(view).toContainText(
+      'Your rules stay on this device, with this conversation. They’re not in the plan, its exports or share links.',
+    );
+    await shot(page, 'your-rules');
+    // A number edit re-checks at once, with no request.
+    const calls = m.calls.length;
+    const width = view.getByRole('textbox', {
+      name: 'Clear width, Never anything in the corridor',
+    });
+    await width.fill('1.0');
+    await width.press('Enter');
+    await expect(view).toContainText(
+      'Checks: Nothing in the way from the main door to Main bedroom and Bedroom, with 1.00 m clear.',
+    );
+    // The household's rules are on this device only: never in the saved plan.
+    const doc = JSON.stringify(await saved(page));
+    expect(doc).not.toContain('Never anything in the corridor');
+    expect(await dumpIdb(page)).toContain('Never anything in the corridor');
+    // Delete: the card is checked again and passes the rule; Undo is offered.
+    await view.getByRole('button', { name: 'Delete' }).click();
+    await expect(view.getByRole('button', { name: 'Undo' })).toBeVisible();
+    await view.getByRole('button', { name: '‹ Conversation' }).click();
+    await expect(
+      log(page).getByText(
+        /^You changed a rule: Never anything in the corridor, 0\.90 m → 1\.00 m\. V1 checked again: (passes|doesn’t pass)\.$/,
+      ),
+    ).toBeVisible();
+    await expect(
+      log(page).getByText(
+        /^You deleted a rule: Never anything in the corridor\. V1 checked again: (passes|doesn’t pass)\.$/,
+      ),
+    ).toBeVisible();
+    await expect(v1).not.toContainText('your rule');
+    expect(m.calls.length).toBe(calls);
+  });
+
+  test('40 and 3a.6: a wish is noted, not checked; a contradicting rule is refused, Keep yours keeps it', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await setup(page);
+    const faces = (relation: string, name: string) =>
+      ruleReply('Noted.', {
+        name,
+        subject: { kind: 'kind', id: 'sofa' },
+        relation,
+        target: { kind: 'window', id: null, rooms: [], at: null, r: null },
+        n: null,
+      });
+    await mock(page, {
+      talk: [
+        REPLY_WISH,
+        faces('notFaces', 'The sofa away from the window'),
+        faces('faces', 'The sofa facing the window'),
+        faces('faces', 'The sofa facing the window'),
+        REPLY_RULE,
+      ],
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await send(page, 'I want it to feel more airy.');
+    await expect(
+      log(page).getByText('Noted in Decisions, not checked: Feel more airy'),
+    ).toBeVisible();
+    await expect(panel(page).getByRole('region', { name: /^Rule offer/ })).toHaveCount(0);
+    await send(page, 'Never put the sofa facing the window, the glare is bad.');
+    await panel(page)
+      .getByRole('region', { name: 'Rule offer: The sofa away from the window' })
+      .getByRole('button', { name: 'Keep as a rule' })
+      .click();
+    await expect(
+      log(page).getByText('Kept as a rule: The sofa away from the window.'),
+    ).toBeVisible();
+    await send(page, 'Actually the sofa should face the window.');
+    const refused = panel(page)
+      .getByRole('region', { name: 'Rule offer: The sofa facing the window' })
+      .first();
+    await expect(refused).toContainText('This can’t be a rule as it stands');
+    await expect(refused).toContainText('It contradicts a rule you have:');
+    await expect(refused).toContainText('New: The sofa faces the window');
+    await expect(refused).toContainText('Yours: The sofa doesn’t face the window (kept ');
+    await expect(refused.getByRole('button', { name: 'Keep as a rule' })).toHaveCount(0);
+    await shot(page, 'rule-refused');
+    await refused.getByRole('button', { name: 'Keep yours' }).click();
+    await expect(log(page).getByText('Kept your rule.')).toBeVisible();
+    // Asked again, Replace yours swaps them in one step.
+    await send(page, 'No really, face the window.');
+    const again = panel(page)
+      .getByRole('region', { name: 'Rule offer: The sofa facing the window' })
+      .last();
+    await again.getByRole('button', { name: 'Replace yours with the new one' }).click();
+    await expect(
+      log(page).getByText(
+        'Replaced your rule The sofa away from the window with The sofa facing the window.',
+      ),
+    ).toBeVisible();
+    const view = await yourRules(page);
+    await expect(view.getByRole('article')).toHaveCount(1);
+    await expect(view.getByRole('article', { name: 'The sofa facing the window' })).toBeVisible();
+    // Make this a rule from a Decision (priced as a Send): kept, it moves to Your rules.
+    await view.getByRole('button', { name: /^Decisions \(\d+\) are told/ }).click();
+    const decisions = panel(page).getByRole('region', { name: 'Decisions' });
+    await decisions
+      .getByRole('textbox', { name: 'Something to keep, avoid or have' })
+      .fill('Nothing in the corridor');
+    await decisions.getByRole('button', { name: 'Add' }).click();
+    const row = decisions.getByRole('listitem').filter({ hasText: 'Nothing in the corridor' });
+    await row.getByRole('button', { name: /^Make this a rule · about US\$\d\.\d\d$/ }).click();
+    await expect(
+      log(page).getByText('Asked to make a rule of: Nothing in the corridor.'),
+    ).toBeVisible();
+    await panel(page)
+      .getByRole('region', { name: 'Rule offer: Never anything in the corridor' })
+      .getByRole('button', { name: 'Keep as a rule' })
+      .click();
+    await expect(log(page).getByText('Moved to Your rules.')).toBeVisible();
+  });
+
+  test('3a.7 and 3a.8: a rule the plan breaks is said and never stops a proposal; Bring this back is checked on your rules', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const m = await mock(page, { talk: [REPLY_RULE], reply: consoleInCorridor });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^Living and dining · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    await v1.getByRole('button', { name: /^Accept selected/ }).click();
+    await expect(log(page).getByText(/^You accepted \d+ changes from V1\./)).toBeVisible();
+    // The console is in the plan now: the offer says so, and it won't stop a proposal.
+    await send(page, 'Never put anything in the corridor, please.');
+    const offer = panel(page).getByRole('region', {
+      name: 'Rule offer: Never anything in the corridor',
+    });
+    await expect(offer).toContainText(
+      'Your plan doesn’t meet it now: the Chinese console table is in the way from the main door to Main bedroom and Bedroom. That won’t stop a proposal.',
+    );
+    await offer.getByRole('button', { name: 'Keep as a rule' }).click();
+    await expect(
+      log(page).getByText('Kept as a rule: Never anything in the corridor.'),
+    ).toBeVisible();
+    await design(page, /^Kitchen · about US\$/);
+    const v2 = card(page, 2);
+    await expect(v2.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    await v2.getByText(/^Already in your plan: \d+$/).click();
+    await expect(v2).toContainText(CORRIDOR);
+    await expect(v2).not.toContainText(`Doesn’t pass: y${CORRIDOR.slice(1)}`);
+    await shot(page, 'rule-already');
+    // Bring this back: checked on the plan as it is now and on the rule.
+    const calls = m.calls.length;
+    const folded = panel(page).getByRole('button', { name: /^V1 · Living and dining/ });
+    if (await folded.isVisible()) await folded.click();
+    await card(page, 1).getByRole('button', { name: 'Bring this back' }).click();
+    await expect(
+      log(page).getByText(
+        'Brought back V1 as V3, checked on your plan as it is now and on your rule.',
+      ),
+    ).toBeVisible();
+    expect(m.calls.length).toBe(calls);
+  });
+});
+
 test.describe('phone, 390 px, fingers only (35)', () => {
   const { defaultBrowserType: _webkit, ...iPhone } = devices['iPhone 13'];
   test.use({ ...iPhone, viewport: { width: 390, height: 844 } });
@@ -1951,6 +2215,61 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     await expect(log(page).getByText('Is a 2.4 m sofa too big?')).toBeVisible();
     await expect.poll(() => m.calls.filter((c) => c.step === 'talk').length).toBe(1);
     await expect(box).toHaveValue('');
+  });
+
+  test('a rule offer and Your rules by finger: 44 px targets, no sideways scroll (3a.11)', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await setup(page);
+    await mock(page, { talk: [REPLY_RULE] });
+    await page.goto('/');
+    await waitSaved(page);
+    await page
+      .getByRole('button', { name: /Plan details|Show plan details/ })
+      .first()
+      .tap()
+      .catch(() => {});
+    await page.getByRole('button', { name: 'Talk to the designer' }).tap();
+    await panel(page).getByRole('button', { name: 'Just design it' }).tap();
+    const box = panel(page).getByRole('textbox', { name: 'Message the designer' });
+    await box.tap();
+    await box.fill('Never put anything in the corridor.');
+    await panel(page)
+      .getByRole('button', { name: /^Send · about US\$/ })
+      .tap();
+    const offer = panel(page).getByRole('region', {
+      name: 'Rule offer: Never anything in the corridor',
+    });
+    await expect(offer).toBeVisible();
+    await box.blur();
+    await offer.getByRole('button', { name: 'Change the numbers' }).tap();
+    await fingerSized(page);
+    await noSideways(page);
+    await shot(page, 'rule-offer-phone');
+    // Show on plan drops the sheet so the rule is in sight (QA B1).
+    await offer.getByRole('button', { name: 'Show on plan' }).tap();
+    await expect(panel(page)).not.toHaveClass(/talk-full/);
+    const band = page.getByTestId('rule-layer').locator('.rl-band').first();
+    await expect(band).toBeVisible();
+    const onTop = await band.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return !!top?.closest('svg.plan-svg');
+    });
+    expect(onTop).toBe(true);
+    await shot(page, 'rule-shown-phone');
+    await panel(page).getByRole('button', { name: 'Make the designer full height' }).tap();
+    await offer.scrollIntoViewIfNeeded();
+    await offer.getByRole('button', { name: 'Keep as a rule' }).tap();
+    await log(page).getByRole('button', { name: 'Your rules' }).last().tap();
+    const view = panel(page).getByRole('region', { name: 'Your rules' });
+    await expect(
+      view.getByRole('article', { name: 'Never anything in the corridor' }),
+    ).toBeVisible();
+    await fingerSized(page);
+    await noSideways(page);
+    await shot(page, 'your-rules-phone');
   });
 
   test('asked to design it from the 3D view: the proposal is on the plan, in sight, before Accept (owner, 8 Nov)', async ({
