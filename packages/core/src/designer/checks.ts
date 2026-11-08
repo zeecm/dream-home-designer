@@ -779,7 +779,14 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
   }
   // One line per key (a piece narrowing a way at two places is one failure).
   if (opts.rules?.length) {
-    out.push(...ruleChecks(opts.rules, { level, usesOf: (id) => usesOf(level, id, opts) }));
+    out.push(
+      ...ruleChecks(opts.rules, {
+        level,
+        usesOf: (id) => usesOf(level, id, opts),
+        // The walkway check above made its pass on this level just now (unless it was given).
+        samePass: !opts.walk,
+      }),
+    );
   }
   const seen = new Set<string>();
   return out.filter((c) => {

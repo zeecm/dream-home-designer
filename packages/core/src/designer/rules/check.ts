@@ -37,6 +37,8 @@ export interface RuleCtx {
   level: Level;
   /** The uses a room is checked for (the design's, else its name's). */
   usesOf: (roomId: string) => ProgrammeUse[];
+  /** The walkway check has just made its furnished pass on `level`: routes reuse it. */
+  samePass?: boolean;
 }
 
 interface Piece {
@@ -157,7 +159,18 @@ function compile(
     const kind = furnitureKind(it.assetId);
     return kind ? [{ it, kind, fp: itemFootprint(it, kind), room: roomAt(centre(it)) }] : [];
   });
-  const geom = planGeometry(level);
+  // Worked out only when a rule needs them (doors' and windows' outlines, the furnished pass).
+  let geomMemo: ReturnType<typeof planGeometry> | null = null;
+  const geomOf = () => {
+    geomMemo ??= planGeometry(level);
+    return geomMemo;
+  };
+  // Every route rule measured on one furnished pass: a frozen copy is the pass's key.
+  let routeLevel: Level | null = ctx.samePass ? level : null;
+  const routeOf = () => {
+    routeLevel ??= Object.freeze({ ...level });
+    return routeLevel;
+  };
   const vertex = (id: string) => level.vertices[id] as Vec2;
   const wallSeg = (wallId: string): [Vec2, Vec2, number] | null => {
     const w = level.walls[wallId];
@@ -166,7 +179,13 @@ function compile(
     return w && a && b ? [a, b, w.thickness / 2] : null;
   };
   const openingCentre = (id: string): Vec2 | null => {
-    const o = geom.openings.find((x) => x.opening.id === id);
+    // On its wall, where it is along it (no outlines needed).
+    const op = level.openings[id];
+    const w = op && level.walls[op.wallId];
+    const a = w && level.vertices[w.a];
+    const b = w && level.vertices[w.b];
+    if (op && a && b) return { x: a.x + (b.x - a.x) * op.t, y: a.y + (b.y - a.y) * op.t };
+    const o = geomOf().openings.find((x) => x.opening.id === id);
     if (!o) return null;
     const n = o.polygon.length || 1;
     return {
@@ -174,12 +193,21 @@ function compile(
       y: o.polygon.reduce((t, p) => t + p.y, 0) / n,
     };
   };
+  const beside = new Map<string, (string | null)[]>();
+  const besideOf = (wallId: string) => {
+    let b = beside.get(wallId);
+    if (!b) {
+      b = roomsBeside(level, wallId);
+      beside.set(wallId, b);
+    }
+    return b;
+  };
   const roomOpenings = (roomId: string | null, kind: 'door' | 'window') =>
     roomId
       ? Object.values(level.openings).filter(
           (o) =>
             (kind === 'door' ? o.kind !== 'window' : o.kind === 'window') &&
-            roomsBeside(level, o.wallId).includes(roomId),
+            besideOf(o.wallId).includes(roomId),
         )
       : [];
   const targetRooms = (t: RuleTarget): string[] =>
@@ -291,7 +319,7 @@ function compile(
     // Routes: the walkway search at the rule's width.
     if (t.kind === 'route') {
       if (rule.relation !== 'notIn' && rule.relation !== 'keepClear') continue;
-      const routes = measureRoute(level, t.to, n ?? 0.9);
+      const routes = measureRoute(routeOf(), t.to, n ?? 0.9, !!ctx.samePass);
       if (routes.status === 'no-main-door') continue;
       const ids = new Set(subject.map((p) => p.it.id));
       const byId = new Map(pieces.map((p) => [p.it.id, p]));
@@ -375,7 +403,7 @@ function compile(
 
     // Clear in front of a door or window.
     if (t.kind === 'opening' && rule.relation === 'keepClear') {
-      const o = geom.openings.find((x) => x.opening.id === t.openingId);
+      const o = geomOf().openings.find((x) => x.opening.id === t.openingId);
       if (!o) continue;
       const depth = n ?? 0.9;
       const { a, d, n: nrm } = o.frame;

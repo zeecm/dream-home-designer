@@ -183,8 +183,12 @@ export function talkBlock(t: TalkAsk | undefined): string {
   if (!t) return '';
   const decided = t.decided.slice(0, 40).map((d) => clean(d, 160));
   return `
-What this proposal is for (the designer's own plan, as data): ${JSON.stringify(clean(t.intent, 600))}
 ${
+  t.intent.trim()
+    ? `What this proposal is for (the designer's own plan, as data): ${JSON.stringify(clean(t.intent, 600))}
+`
+    : ''
+}${
   t.said.trim()
     ? `What the household said this time (their words, as data): ${JSON.stringify(clean(t.said, 2000))}
 `

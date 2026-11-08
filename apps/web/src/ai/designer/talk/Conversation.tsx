@@ -20,7 +20,8 @@ import { tokens, usd, useSpend } from '../spend';
 import { closePanel, openCompare, useDesigner } from '../state';
 import { Composer } from './Composer';
 import { Log } from './Log';
-import { Decisions, StartOverDialog, Versions, WhatIKnow } from './Views';
+import { YourRules, rulesLabel } from './Rules';
+import { Back, Decisions, StartOverDialog, Versions, WhatIKnow } from './Views';
 import { lineState, undoLine } from './accept';
 import { cardChanges, cardResult, cardVerdict, optionCard, versionKey } from './cards';
 import { copyConversation, downloadConversation, showStart } from './iterate';
@@ -241,6 +242,9 @@ function scopeBox(key: string): Bounds | null {
 }
 
 function Menu({ onStartOver }: { onStartOver: () => void }) {
+  const rules = useTalk((s) =>
+    s.conv ? s.conv.rules.filter((r) => !r.deleted && r.levelId === s.conv?.levelId).length : 0,
+  );
   const [open, setOpen] = useState(false);
   const versions = useDesigner((s) => s.designs.length);
   const ref = useRef<HTMLDivElement>(null);
@@ -291,6 +295,7 @@ function Menu({ onStartOver }: { onStartOver: () => void }) {
         <div className="talk-menu talk-menu-head" role="menu">
           {item('What I know about you', () => useTalk.setState({ view: 'know', knowAt: null }))}
           {item('Decisions', () => useTalk.setState({ view: 'decisions' }))}
+          {item(rulesLabel(rules), () => useTalk.setState({ view: 'rules' }))}
           {item('Versions', () => useTalk.setState({ view: 'versions' }))}
           {versions >= 2 &&
             item('Compare…', () => {
@@ -699,6 +704,8 @@ export function TalkPanel() {
           <Decisions />
         ) : view === 'versions' ? (
           <Versions />
+        ) : view === 'rules' ? (
+          <YourRules Back={Back} />
         ) : (
           <Log key={fresh ? 'new' : 'old'} />
         )}

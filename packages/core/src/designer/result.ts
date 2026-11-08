@@ -905,9 +905,23 @@ function work(
     resultSpaces.filter((s) => s.storedKey && s.status !== 'missing').flatMap((s) => s.rooms),
   );
   const baseKeys = baseChecks(start, brief, uses, opts.rules);
+  // A piece the version copied (an earlier version's room, placed again) has a new id but the
+  // plan's pose: it is the plan's piece, its checks keyed as the plan's.
+  const poseKey = (it: {
+    assetId: string;
+    position: { x: number; z: number };
+    rotationY: number;
+  }) =>
+    `${it.assetId}|${it.position.x.toFixed(3)}|${it.position.z.toFixed(3)}|${it.rotationY.toFixed(3)}`;
+  const startByPose = new Map(Object.values(start.items).map((it) => [poseKey(it), it.id]));
+  const twinOf = (id: string): string => {
+    if (start.items[id]) return id;
+    const a = level.items[id];
+    return (a && startByPose.get(poseKey(a))) ?? id;
+  };
   const unchanged = (id: string) => {
     const a = level.items[id];
-    const b = start.items[id];
+    const b = start.items[twinOf(id)];
     return (
       !!a &&
       !!b &&
@@ -931,7 +945,7 @@ function work(
     // Someone with nowhere to sleep is always the version's to answer for.
     const already =
       !c.key.startsWith('P1|unplaced') &&
-      baseKeys.has(c.key) &&
+      baseKeys.has(c.itemId ? c.key.split(c.itemId).join(twinOf(c.itemId)) : c.key) &&
       (c.itemId
         ? unchanged(c.itemId)
         : c.roomId

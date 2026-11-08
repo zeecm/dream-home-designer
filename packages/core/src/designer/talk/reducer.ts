@@ -95,6 +95,8 @@ export type TalkAction =
       proposalId: string;
       /** What it was ("V2", "V4B"). */
       from: string;
+      /** The house rules it is checked on (3a.8). */
+      rules?: number;
     }
   | {
       type: 'answer';
@@ -436,7 +438,10 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
     case 'bringBack': {
       if (conv.turns.some((t) => t.kind === 'proposal' && t.proposalId === a.proposalId))
         return conv;
-      const text = `Brought back ${a.from} as V${conv.nextN}, checked on your plan as it is now.`;
+      const rules = a.rules ?? 0;
+      const text = `Brought back ${a.from} as V${conv.nextN}, checked on your plan as it is now${
+        rules ? ` and on your ${rules === 1 ? 'rule' : `${rules} rules`}` : ''
+      }.`;
       return push(
         { ...conv, nextN: conv.nextN + 1 },
         {
@@ -1146,6 +1151,15 @@ function replyDone(
       notes: [...next.notes, { id, text: cut(n, L.note), turnId: a.id }].slice(-60),
     };
     noted.push({ kind: 'note', text: cut(`Noted for your ID: ${n}`, 300), ref: id });
+  }
+  // Make this a rule from a Decision: the Decision carries the rule offered, so keeping it
+  // moves it to Your rules.
+  if (t.ruleAsk && offer?.vet.ok) {
+    const from = t.ruleAsk.decisionId;
+    next = {
+      ...next,
+      decisions: next.decisions.map((d) => (d.id === from ? { ...d, rule: offer.rule } : d)),
+    };
   }
   const concern = r.concern
     ? {

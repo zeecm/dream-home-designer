@@ -851,9 +851,13 @@ export interface FurnishedPass {
 
 let pass: FurnishedPass | null = null;
 
-/** The furnished pass for a level (recomputed whenever the level isn't the last one). */
-export function furnishedPass(level: Level): FurnishedPass {
-  if (pass && pass.level === level && Object.isFrozen(level)) return pass;
+/**
+ * The furnished pass for a level (recomputed whenever the level isn't the last one). `trust`:
+ * the caller knows the level hasn't changed since the last pass on it (one synchronous check),
+ * so an unfrozen level's pass is reused too.
+ */
+export function furnishedPass(level: Level, trust = false): FurnishedPass {
+  if (pass && pass.level === level && (trust || Object.isFrozen(level))) return pass;
   const bare = bareOf(level);
   const { g, room, rooms, throats, throatOf } = bare;
   const pieces = Object.values(level.items).filter(blocks);
@@ -1297,10 +1301,12 @@ export function measureRoute(
   level: Level,
   roomIds: readonly string[],
   need: number,
+  /** The last furnished pass on this very level still holds (see `furnishedPass`). */
+  trust = false,
 ): { status: 'ok' | 'no-main-door'; perRoom: RouteMeasure[] } {
   const bare = bareOf(level);
   if (!bare.start) return { status: 'no-main-door', perRoom: [] };
-  const pass = furnishedPass(level);
+  const pass = furnishedPass(level, trust);
   const { g, throatOf, throats } = bare;
   const perRoom: RouteMeasure[] = [];
   /** Whether the floor within `r` of a cell is nowhere `2r` wide (a corridor, not a room). */
