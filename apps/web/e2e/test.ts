@@ -7,8 +7,9 @@ export * from '@playwright/test';
  * context the test opened itself (`browser.newContext()`, a second person on a share link).
  *
  * Playwright closes only the context it made for `page`; one a test opens stays open in the
- * worker's browser for the rest of the run. Left in Split or 3D view, its 3D view keeps
- * drawing every frame in software GL (SwiftShader), so each one left behind takes CPU from
+ * worker's browser for the rest of the run. Left walking (or, before the 3D view drew only on
+ * demand, in Split or 3D view), its 3D view keeps drawing every frame in software GL
+ * (SwiftShader), so each one left behind takes CPU from
  * every test after it, in this worker and the other: on CI that starved the exact render's
  * first sample past a minute, a view link's first paint past 10 s and a click past 60 s.
  */
