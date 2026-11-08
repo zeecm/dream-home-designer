@@ -18,6 +18,7 @@ import { cardChanges, cardResult, cardVerdict, optionCard } from './cards';
 import { stopTalkRun } from './propose';
 import { focusInLog, keepFocus, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
+import { recoverPending, stopReply } from './turn';
 import { act, ensureConversation, newId, nowIso, talkLevel, useTalk } from './useTalk';
 import { useProposalView } from './view';
 
@@ -260,6 +261,8 @@ export function TalkPanel() {
     const had = !!useTalk.getState().conv && useTalk.getState().projectId === project.id;
     void ensureConversation().then((c) => {
       if (!live || !c) return;
+      // A reply cut off when a tab closed is said, and its text kept.
+      void recoverPending();
       const isNew = !had && c.turns.length <= 2 && !c.turns.some((t) => t.kind === 'person');
       setFresh(isNew);
       requestAnimationFrame(() => {
@@ -339,7 +342,10 @@ export function TalkPanel() {
         useTalk.setState({ view: 'log' });
         return;
       }
-      if (useTalk.getState().live) {
+      if (useTalk.getState().reply) {
+        e.preventDefault();
+        stopReply();
+      } else if (useTalk.getState().live) {
         e.preventDefault();
         stopTalkRun();
       }
@@ -388,9 +394,21 @@ export function TalkPanel() {
   const drag = useRef<number | null>(null);
   const moved = useRef(false);
 
+  // Every turn that spent: the proposals' runs, the replies, and messages not answered.
+  const turns = useTalk((s) => s.conv?.turns);
   const totals = useMemo(
-    () => spentOf(proposals.flatMap((p) => p.options.flatMap((o) => o.usage))),
-    [proposals],
+    () =>
+      spentOf([
+        ...proposals.flatMap((p) => p.options.flatMap((o) => o.usage)),
+        ...(turns ?? []).flatMap((t) =>
+          t.kind === 'designer'
+            ? (t.talk?.usage ?? [])
+            : t.kind === 'person'
+              ? (t.reply?.usage ?? [])
+              : [],
+        ),
+      ]),
+    [proposals, turns],
   );
   const spendLine =
     totals.usd === null

@@ -32,6 +32,7 @@ import { designerCannotUse } from '../stream';
 import { FactEditor } from './Facts';
 import { Mark, type MarkKind } from './Mark';
 import { ProposalCard } from './ProposalCard';
+import { ReplyParts, SentState, Streaming } from './Talk';
 import { lineState, redoLine, undoLine } from './accept';
 import { type CardModel, designCard, optionCard } from './cards';
 import { dayMark } from './days';
@@ -85,6 +86,7 @@ function Person({ t }: { t: TurnOf<'person'> }) {
       <p className="talk-bubble" title={new Date(t.at).toLocaleString()}>
         {t.text}
       </p>
+      <SentState t={t} />
     </article>
   );
 }
@@ -105,6 +107,7 @@ function Designer({ t, named }: { t: TurnOf<'designer'>; named: boolean }) {
         </ul>
       )}
       {t.after && <p className="talk-text">{t.after}</p>}
+      <ReplyParts t={t} />
     </article>
   );
 }
@@ -286,13 +289,14 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
   const { prices } = useSpend();
   const level = project.renovation?.levels[0] ?? project.levels[0];
   const first = useMemo<ScopeRef | null>(() => {
+    if (t.just) return t.just;
     if (!t.scope.all || !level) return null;
     // The largest space first (the living room, as a rule): the one most worth starting with.
     const s = [...spacesOf(level)].sort(
       (p, q) => areaOf(level, q.rooms) - areaOf(level, p.rooms),
     )[0];
     return s ? { label: s.name, spaces: [s.key], all: false } : null;
-  }, [t.scope.all, level]);
+  }, [t.scope.all, t.just, level]);
   const open = t.state === 'open';
   // The price as it is now: the card's figure follows it, so the sentence and the cost check
   // below always say the same (and Go ahead binds what they say).
@@ -315,7 +319,11 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
     }
   }, [open, est, t.estimate, t.id]);
   const cap = capUsd();
-  const what = t.scope.all ? 'Designing the whole flat' : `Designing ${t.scope.label}`;
+  const what = t.talk
+    ? `“${t.talk.title}” (${t.scope.all ? 'the whole flat' : t.scope.label})`
+    : t.scope.all
+      ? 'Designing the whole flat'
+      : `Designing ${t.scope.label}`;
   // Answered: your bubble says it ("Not now"), and the card that follows shows the run.
   if (t.state !== 'open') return null;
   return (
@@ -517,6 +525,7 @@ export function Log() {
   const turns = conv?.turns ?? [];
   const lastQuestion = [...turns].reverse().find((t) => t.kind === 'app-question')?.id;
   const lastScope = [...turns].reverse().find((t) => t.kind === 'scope')?.id;
+  const replyTo = useTalk((s) => s.reply?.turnId ?? null);
   // The log's own scrolls (to the newest turn) aren't the person scrolling away.
   const moved = useRef(0);
   const follow = useCallback((el: HTMLElement) => {
@@ -545,6 +554,15 @@ export function Log() {
     if (pinned.current) follow(el);
     else setBehind(true);
   }, [live?.state.steps, proposals]);
+  // A reply streaming in: followed only if the log was at its foot.
+  const replySay = useTalk((st) => st.reply?.say.length ?? 0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on the reply's text
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (!el || !replySay) return;
+    if (pinned.current) follow(el);
+    else setBehind(true);
+  }, [replySay]);
   useEffect(() => {
     const el = list.current;
     if (!el) return;
@@ -607,6 +625,11 @@ export function Log() {
                 <li className={`talk-li talk-li-${speaker}${named ? ' talk-li-named' : ''}`}>
                   {body}
                 </li>
+                {replyTo === t.id && (
+                  <li className="talk-li talk-li-designer talk-li-named">
+                    <Streaming named />
+                  </li>
+                )}
               </Fragment>
             );
           })}

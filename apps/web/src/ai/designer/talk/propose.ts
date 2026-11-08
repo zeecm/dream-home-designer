@@ -9,6 +9,8 @@ import {
   type ScopeRef,
   TALK_LIMITS,
   TALK_RECORD_VERSION,
+  type TalkAsk,
+  type TalkPlan,
   type TurnOf,
   askRule,
   atMostOf,
@@ -50,6 +52,7 @@ export function estimateScope(sp: ScopePlan): RunEstimate | null {
     sp.plan.rooms,
     !!sp.plan.layout,
     sp.plan.feedback ?? '',
+    sp.plan.talk ?? null,
     Object.keys(sp.draft.spaces).sort(),
     levelFingerprint(sp.ctx.base),
     priceTable()[ai.model] ?? null,
@@ -71,7 +74,21 @@ export interface PressRequest {
   scope: ScopeRef;
   words: string;
   finish: { proposalId: string; letter: string; rooms: string[] } | null;
+  /** From a designer's plan: what it is for, the household's words, the decisions. */
+  talk?: TalkAsk;
 }
+
+/** The decisions as a run's talk block carries them. */
+const decided = () =>
+  (useTalk.getState().conv?.decisions ?? []).filter((d) => !d.deleted).map((d) => d.text);
+
+/** A designer's plan (or a concern's alternative) as a run asks for it. */
+export const planRequest = (plan: TalkPlan, said: string, scope?: ScopeRef): PressRequest => ({
+  scope: scope ?? plan.scope,
+  words: said,
+  finish: null,
+  talk: { intent: plan.intent, said, decided: decided() },
+});
 
 /** The plan and price of a request, on the plan as it is now. */
 function planOf(req: PressRequest, designId: string): { sp: ScopePlan; est: RunEstimate } | null {
@@ -94,6 +111,7 @@ function planOf(req: PressRequest, designId: string): { sp: ScopePlan; est: RunE
     req.words,
     designId,
     designOpts(project),
+    req.talk,
   );
   const est = sp ? estimateScope(sp) : null;
   return sp && est ? { sp, est } : null;
@@ -157,16 +175,70 @@ export async function finishRooms(p: Proposal, letter: string, rooms: string[]) 
   }
 }
 
-async function askOrRun(req: PressRequest) {
-  const made = planOf(req, newId('dsn'));
-  if (!made) return;
-  const ask = askRule(made.est, {
+/** A priced button that runs a designer's idea (a concern's alternative), priced as shown. */
+export async function pressPlan(plan: TalkPlan, said: string) {
+  if (!begin()) return;
+  try {
+    await askOrRun(planRequest(plan, said));
+  } finally {
+    end();
+  }
+}
+
+/**
+ * The run after a designer's plan (tech §2.5): priced here, free; it runs at once unless a rule
+ * applies (the per-reply threshold too, now that no price was shown yet), else its cost card
+ * asks with Go ahead, Just {room} and Not now.
+ */
+export async function followPlan(plan: TalkPlan, said: string, replyTo: string) {
+  if (!begin()) return;
+  try {
+    const req = planRequest(plan, said);
+    const made = planOf(req, newId('dsn'));
+    if (!made) {
+      await act({
+        type: 'event',
+        id: newId('turn'),
+        at: nowIso(),
+        event: { type: 'note', text: 'Couldn’t work out what the designer’s plan would cost.' },
+      });
+      return;
+    }
+    const ask = rule(made.est, false);
+    if (ask === 'go') {
+      await run(req, made, atMostOf(made.est), { person: null, turn: newId('turn') });
+      return;
+    }
+    const u = made.est.usd;
+    await act({
+      type: 'ask',
+      at: nowIso(),
+      ids: [newId('turn'), newId('turn')],
+      scope: req.scope,
+      words: said,
+      reason: ask,
+      estimate: u ? { typical: u.typical, high: u.high, fix: u.fix } : null,
+      talk: { replyTo, title: plan.title, intent: plan.intent },
+      just: plan.just,
+    });
+  } finally {
+    end();
+  }
+}
+
+const rule = (est: RunEstimate, pressedPriced: boolean) =>
+  askRule(est, {
     spentTab: spent().usd,
     cap: capUsd(),
     threshold: threshold(),
     designRunsThisTab: spent().runs,
-    pressedPriced: true,
+    pressedPriced,
   });
+
+async function askOrRun(req: PressRequest) {
+  const made = planOf(req, newId('dsn'));
+  if (!made) return;
+  const ask = rule(made.est, true);
   if (ask === 'go') {
     await run(req, made, atMostOf(made.est), { person: newId('turn'), turn: newId('turn') });
     return;
@@ -189,7 +261,14 @@ async function askOrRun(req: PressRequest) {
 export const cardRequest = (card: TurnOf<'cost-ask'>, cheaper?: ScopeRef): PressRequest =>
   card.finish
     ? { scope: card.scope, words: '', finish: card.finish }
-    : { scope: cheaper ?? card.scope, words: card.words, finish: null };
+    : {
+        scope: cheaper ?? card.scope,
+        words: card.words,
+        finish: null,
+        ...(card.talk
+          ? { talk: { intent: card.talk.intent, said: card.words, decided: decided() } }
+          : {}),
+      };
 
 /** A card's figure as the price would be now (to keep the card and its cost check alike). */
 export function cardEstimate(card: TurnOf<'cost-ask'>): TurnOf<'cost-ask'>['estimate'] {

@@ -35,6 +35,19 @@ export interface LiveRun {
   approved: number | null;
 }
 
+/** A talk call on its way (ephemeral: never written per token). */
+export interface LiveReply {
+  /** The person's turn it answers. */
+  turnId: string;
+  /** What it has said so far, and its kind once known. */
+  say: string;
+  kind: 'reply' | 'question' | 'concern' | 'plan' | null;
+  /** The model's latest thinking line; a wait (rate limit, dropped connection). */
+  thinking: string;
+  wait: { seconds: number; attempt: number; net?: boolean; server?: boolean } | null;
+  ctrl: AbortController;
+}
+
 export type TalkView = 'log' | 'know' | 'decisions';
 
 interface TalkState {
@@ -55,6 +68,8 @@ interface TalkState {
   open: { card: string; change: string } | null;
   hover: { card: string; change: string } | null;
   live: LiveRun | null;
+  /** The designer replying to a message. */
+  reply: LiveReply | null;
   /** The polite live region's words. */
   said: string;
   /** v1's form, as "Fill in a form instead". */
@@ -65,6 +80,8 @@ interface TalkState {
   typed: string | null;
   /** Bumped when what was typed went with a design: the composer empties. */
   cleared: number;
+  /** Words put into the composer from elsewhere (a question's chip, Edit). */
+  fill: { text: string; replace: boolean; n: number } | null;
   /** "Why this layout?": every reason of this card shown. */
   why: string | null;
   /** AI settings open over the panel, and where. */
@@ -84,12 +101,14 @@ export const useTalk = create<TalkState>(() => ({
   open: null,
   hover: null,
   live: null,
+  reply: null,
   said: '',
   formOpen: false,
   note: null,
   settings: null,
   typed: null,
   cleared: 0,
+  fill: null,
   why: null,
 }));
 
@@ -100,6 +119,10 @@ export async function clearTyped() {
   useTalk.setState((s) => ({ typed: '', cleared: s.cleared + 1 }));
   await act({ type: 'draft', text: '' });
 }
+
+/** Puts words into the composer (after what is there, or in its place) and focuses it. */
+export const fillComposer = (text: string, replace = false) =>
+  useTalk.setState((s) => ({ fill: { text, replace, n: (s.fill?.n ?? 0) + 1 } }));
 
 let seq = 0;
 /** An id for a turn, a proposal or an event: random, and ordered within this tab. */
@@ -118,13 +141,33 @@ export const talkLevel = () => {
 
 export const say = (text: string) => useTalk.setState({ said: text });
 
+const OTHER_TAB = 'Updated with messages from another tab.';
+/** Says once, for a few seconds, that another tab's messages came in. */
+function otherTabNote() {
+  useTalk.setState({ note: OTHER_TAB });
+  setTimeout(() => {
+    if (useTalk.getState().note === OTHER_TAB) useTalk.setState({ note: null });
+  }, 6000);
+}
+
 /** Loads the open plan's conversation and proposals (none yet: null). */
-export async function loadTalk(projectId = doc().id) {
+export async function loadTalk(projectId = doc().id, fromOtherTab = false) {
   if (!talkStoreReady()) useTalk.setState({ opening: true });
   const s = await talkStore();
   useTalk.setState({ opening: false });
   const [conv, proposals] = await Promise.all([s.get(projectId), s.proposals(projectId)]);
   if (doc().id !== projectId) return;
+  const was = useTalk.getState();
+  // Turns this tab didn't write: another tab's (N7).
+  if (
+    fromOtherTab &&
+    was.projectId === projectId &&
+    was.conv &&
+    conv &&
+    conv.rev !== was.conv.rev &&
+    conv.turns.length > was.conv.turns.length
+  )
+    otherTabNote();
   useTalk.setState((st) => ({
     projectId,
     conv,
@@ -260,6 +303,7 @@ export async function ensureConversation(): Promise<Conversation | null> {
 useStore.subscribe((s, prev) => {
   if (s.editor.doc.id === prev.editor.doc.id) return;
   useTalk.getState().live?.ctrl.abort();
+  useTalk.getState().reply?.ctrl.abort();
   useTalk.setState({
     projectId: null,
     conv: null,
@@ -277,19 +321,12 @@ useStore.subscribe((s, prev) => {
 // Another tab wrote this plan's conversation: read it again.
 onOtherTab((projectId) => {
   if (projectId === useTalk.getState().projectId && !useTalk.getState().live) {
-    void loadTalk(projectId).then(() => {
-      useTalk.setState({ note: 'Updated with messages from another tab.' });
-      setTimeout(() => {
-        if (useTalk.getState().note === 'Updated with messages from another tab.') {
-          useTalk.setState({ note: null });
-        }
-      }, 6000);
-    });
+    void loadTalk(projectId, true);
   }
 });
 if (typeof window !== 'undefined') {
   window.addEventListener('focus', () => {
     const st = useTalk.getState();
-    if (st.projectId && !st.live) void loadTalk(st.projectId);
+    if (st.projectId && !st.live && !st.reply) void loadTalk(st.projectId, true);
   });
 }

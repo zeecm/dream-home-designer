@@ -129,7 +129,15 @@ export type TalkAction =
     }
   | { type: 'decisionEdit'; id: string; text: string }
   /** A message to the designer: the person's turn, its reply on its way. */
-  | { type: 'send'; id: string; at: string; text: string; sent: string }
+  | {
+      type: 'send';
+      id: string;
+      at: string;
+      text: string;
+      sent: string;
+      /** The short names the request used, kept (never renamed once given). */
+      aliases?: Record<string, string>;
+    }
   /** The text streamed so far, kept as the tab hides (a phone may kill it). */
   | { type: 'checkpoint'; turnId: string; text: string; chars: number }
   | {
@@ -567,7 +575,7 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
       // One reply at a time: a second Send waits for the first.
       if (pendingReply(conv)) return conv;
       return push(
-        { ...conv, draft: '', lastSentAt: a.at },
+        { ...conv, draft: '', lastSentAt: a.at, ...(a.aliases ? { aliases: a.aliases } : {}) },
         {
           kind: 'person',
           id: a.id,
@@ -617,7 +625,13 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
       const text = cutLines(a.text, L.designer);
       const next = replaceTurn(conv, {
         ...t,
-        reply: { ...t.reply, state: 'cut', checkpoint: '', usage: text ? [] : a.usage.slice(0, 8) },
+        // A closed tab's reply was never answered (Try again, Edit); a stopped one was cut.
+        reply: {
+          ...t.reply,
+          state: a.cut === 'tab' ? 'failed' : 'cut',
+          checkpoint: '',
+          usage: text ? [] : a.usage.slice(0, 8),
+        },
       });
       return push(next, ...(text ? [cutTurn(a.ids[0], a.at, t.id, text, a.usage, a.cut)] : []), {
         kind: 'event',
