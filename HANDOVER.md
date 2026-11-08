@@ -1297,6 +1297,7 @@ algorithm notes and the checklists for Phases 3 to 5.
 ## 7. Conventions
 
 **AI runs that survive a locked phone (owner, 8 Nov).** Approved: (1) designer runs resume from their last finished step when the tab comes back, with a screen wake lock while running; (2) opt-in cloud runs: the key is sent to our server for that run only, held in memory (never stored or logged) and wiped at the end; (3) storing keys on the server may be BUILT, but must stay disabled (flag off, not exposed) until the owner has finished setting up Google sign-in (#21). Do not enable (3) before the owner says so.
+Owner answers on #56: the consent wording is fine and a privacy notice page is needed before cloud runs reach production; agents may generate and set the push (VAPID) secret; production stays off until the owner has tried a cloud run with a real key; no rate limits or quotas (own key), but every cloud run shows estimated tokens and cost and asks to confirm.
 
 **Check main after every merge (owner, 8 Nov).** A green PR is not enough: after a squash merge, watch the `ci` run on `main` to the end and fix a red one at once. Main went red after #48, #51 and #52 (e2e: `exact.spec.ts:99`, `elevation.spec.ts:238`, `guide.spec.ts:33`) without anyone noticing until the owner did.
 
