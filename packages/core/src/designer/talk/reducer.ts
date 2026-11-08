@@ -1,4 +1,5 @@
 import type { Level } from '../../schema';
+import { MAX_RULES, type Rule, roundN } from '../rules/schema';
 import type { DesignBrief, Usage } from '../schema';
 import {
   GREETING_NEXT,
@@ -20,9 +21,12 @@ import {
   type Decision,
   TALK_LIMITS as L,
   MAX_DECISIONS,
+  MAX_RULE_RECORDS,
   MAX_TURNS,
   QUESTION_KEYS,
   type QuestionKey,
+  type RuleOffer,
+  type RuleVet,
   SENT_CHARS,
   type ScopeRef,
   TALK_RECORD_VERSION,
@@ -59,6 +63,8 @@ export type TalkAction =
       ids: [string, string];
       /** Start over keeping What I know: those facts are known (not asked), assumptions too. */
       kept?: { known: QuestionKey[]; assumed: QuestionKey[] };
+      /** Start over keeping What I know: the house rules go on too (Q2). */
+      rules?: Rule[];
     }
   /**
    * Start over (UX §8.6): a new conversation in this one's place (`fromId`, so two tabs start
@@ -89,6 +95,8 @@ export type TalkAction =
       proposalId: string;
       /** What it was ("V2", "V4B"). */
       from: string;
+      /** The house rules it is checked on (3a.8). */
+      rules?: number;
     }
   | {
       type: 'answer';
@@ -172,6 +180,8 @@ export type TalkAction =
       sent: string;
       /** The short names the request used, kept (never renamed once given). */
       aliases?: Record<string, string>;
+      /** Make this a rule from a Decision (priced): its reply offers the rule. */
+      ruleAsk?: { decisionId: string };
     }
   /** The text streamed so far, kept as the tab hides (a phone may kill it). */
   | { type: 'checkpoint'; turnId: string; text: string; chars: number }
@@ -191,6 +201,8 @@ export type TalkAction =
       ids: string[];
       /** The reply was asked to sum up the turns up to this one. */
       fold: { upTo: string; hard: boolean } | null;
+      /** The rule it offers, as the app built and vetted it (when the reply had one). */
+      offer?: { rule: Rule; vet: RuleVet } | null;
     }
   | {
       type: 'replyFailed';
@@ -233,7 +245,25 @@ export type TalkAction =
   /** Changes made by hand since the last accept, said once each. */
   | { type: 'handEdits'; id: string; at: string; labels: string[] }
   | { type: 'decisionDelete'; id: string }
-  | { type: 'decisionRestore'; id: string };
+  | { type: 'decisionRestore'; id: string }
+  /** House rules (slice 3a): the offer answered, and Your rules' edits. */
+  | {
+      type: 'ruleKeep';
+      turnId: string;
+      /** The numbers as the offer's fields have them (Change the numbers). */
+      n?: number | null;
+      /** The app line that follows (Moved to Your rules, for a Decision made a rule). */
+      id: string;
+      at: string;
+    }
+  | { type: 'ruleOnce'; turnId: string; id: string; at: string }
+  | { type: 'ruleReplace'; turnId: string; at: string }
+  | { type: 'ruleKeepYours'; turnId: string }
+  /** Just this once's Make it a rule (free): the offer opens again, vetted again. */
+  | { type: 'ruleReopen'; decisionId: string; vet: RuleVet }
+  | { type: 'ruleEdit'; ruleId: string; n?: number | null; name?: string }
+  | { type: 'ruleDelete'; ruleId: string }
+  | { type: 'ruleRestore'; ruleId: string };
 
 /** A new conversation: the greeting and the first questions (or, after a form, the offer). */
 export function newConversation(a: Extract<TalkAction, { type: 'start' }>): Conversation {
@@ -262,6 +292,7 @@ export function newConversation(a: Extract<TalkAction, { type: 'start' }>): Conv
     lastSentAt: null,
     handSeen: [],
     aside: { usd: 0, tokens: 0, estimated: false },
+    rules: (a.rules ?? []).slice(0, MAX_RULES),
   };
   const date = a.form ? dayOf(a.form.at) : '';
   const greet: Turn = {
@@ -401,13 +432,16 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
         level: a.level,
         form: null,
         ids: a.ids,
-        ...(a.keep ? { kept: { known, assumed: conv.assumed } } : {}),
+        ...(a.keep ? { kept: { known, assumed: conv.assumed }, rules: liveRules(conv) } : {}),
       });
     }
     case 'bringBack': {
       if (conv.turns.some((t) => t.kind === 'proposal' && t.proposalId === a.proposalId))
         return conv;
-      const text = `Brought back ${a.from} as V${conv.nextN}, checked on your plan as it is now.`;
+      const rules = a.rules ?? 0;
+      const text = `Brought back ${a.from} as V${conv.nextN}, checked on your plan as it is now${
+        rules ? ` and on your ${rules === 1 ? 'rule' : `${rules} rules`}` : ''
+      }.`;
       return push(
         { ...conv, nextN: conv.nextN + 1 },
         {
@@ -661,6 +695,7 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
           at: a.at,
           text: cutLines(a.text, L.person) || '…',
           sent: a.sent.slice(0, SENT_CHARS),
+          ...(a.ruleAsk ? { ruleAsk: a.ruleAsk } : {}),
           reply: {
             state: 'pending',
             error: null,
@@ -831,6 +866,178 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
           d.id === a.id ? { ...d, deleted: a.type === 'decisionDelete' } : d,
         ),
       };
+    case 'ruleKeep':
+    case 'ruleOnce':
+    case 'ruleReplace':
+    case 'ruleKeepYours':
+    case 'ruleReopen':
+    case 'ruleEdit':
+    case 'ruleDelete':
+    case 'ruleRestore':
+      return ruleAction(conv, a);
+  }
+}
+
+/** The house rules that stand (not deleted). */
+export const liveRules = (conv: Conversation): Rule[] => conv.rules.filter((r) => !r.deleted);
+
+/** The rules list with one added, the oldest deleted ones going first past the cap. */
+function withRule(rules: Rule[], rule: Rule): Rule[] {
+  const all = [...rules.filter((r) => r.id !== rule.id), rule];
+  const over = all.length - MAX_RULE_RECORDS;
+  if (over <= 0) return all;
+  const drop = new Set(
+    all
+      .filter((r) => r.deleted)
+      .slice(0, over)
+      .map((r) => r.id),
+  );
+  return all.filter((r) => !drop.has(r.id));
+}
+
+/** The designer turn with an offer, and the offer. */
+function offerOf(conv: Conversation, turnId: string) {
+  const t = findTurn(conv, turnId, 'designer');
+  return t?.talk?.offer ? { t, offer: t.talk.offer } : null;
+}
+
+const setOffer = (conv: Conversation, t: TurnOf<'designer'>, offer: RuleOffer): Conversation =>
+  t.talk ? replaceTurn(conv, { ...t, talk: { ...t.talk, offer } }) : conv;
+
+/**
+ * House rules (slice 3a tech §7): an offer kept, kept just this once, swapped for the rule it
+ * contradicts, or declined; a rule renamed, its number changed, deleted or put back. Each one
+ * that doesn't fit the state is a no-op (a second Keep, a twenty-first rule).
+ */
+function ruleAction(
+  conv: Conversation,
+  a: Extract<
+    TalkAction,
+    {
+      type:
+        | 'ruleKeep'
+        | 'ruleOnce'
+        | 'ruleReplace'
+        | 'ruleKeepYours'
+        | 'ruleReopen'
+        | 'ruleEdit'
+        | 'ruleDelete'
+        | 'ruleRestore';
+    }
+  >,
+): Conversation {
+  const live = liveRules(conv);
+  switch (a.type) {
+    case 'ruleKeep': {
+      const o = offerOf(conv, a.turnId);
+      if (!o || o.offer.state !== 'open' || !o.offer.vet.ok) return conv;
+      const n = a.n === undefined ? o.offer.rule.n : a.n === null ? null : roundN(a.n);
+      const rule: Rule = { ...o.offer.rule, n, at: a.at, deleted: false };
+      let rules = conv.rules;
+      const raises = o.offer.vet.raises;
+      const raised = raises && live.find((r) => r.id === raises.ruleId);
+      if (raised) {
+        // A wider clear width on a way a rule keeps clear already: that rule is raised.
+        rules = rules.map((r) => (r.id === raised.id ? { ...r, n: n ?? raises.to } : r));
+      } else {
+        if (live.length >= MAX_RULES || live.some((r) => r.id === rule.id)) return conv;
+        rules = withRule(rules, rule);
+      }
+      let next = setOffer({ ...conv, rules }, o.t, { ...o.offer, rule, state: 'kept' });
+      // A Decision made a rule leaves Decisions (UX §3.8).
+      const from = conv.decisions.find((d) => !d.deleted && d.rule?.id === rule.id);
+      if (from) {
+        next = {
+          ...next,
+          decisions: next.decisions.map((d) => (d.id === from.id ? { ...d, deleted: true } : d)),
+        };
+        next = push(next, {
+          kind: 'event',
+          id: a.id,
+          at: a.at,
+          event: {
+            type: 'rule',
+            rule: cut(rule.name, 80),
+            text: 'Moved to Your rules.',
+            ruleId: rule.id,
+          },
+        });
+      }
+      return next;
+    }
+    case 'ruleOnce': {
+      const o = offerOf(conv, a.turnId);
+      if (!o || o.offer.state !== 'open') return conv;
+      const text = o.offer.rule.name.slice(0, DECISION_CHARS);
+      const had = conv.decisions.some((d) => !d.deleted && d.rule?.id === o.offer.rule.id);
+      let next = setOffer(conv, o.t, { ...o.offer, state: 'once' });
+      if (!had) {
+        next = talk(next, {
+          type: 'decisionAdd',
+          id: a.id,
+          at: a.at,
+          kind: 'wish',
+          text,
+          from: o.offer.rule.from.version,
+        });
+        next = {
+          ...next,
+          decisions: next.decisions.map((d) => (d.id === a.id ? { ...d, rule: o.offer.rule } : d)),
+        };
+      }
+      return next;
+    }
+    case 'ruleReplace': {
+      const o = offerOf(conv, a.turnId);
+      const old = o?.offer.vet.with ? live.find((r) => r.id === o.offer.vet.with) : null;
+      if (!o || !old || o.offer.state !== 'refused' || o.offer.vet.why !== 'conflict') return conv;
+      const rule: Rule = { ...o.offer.rule, at: a.at, deleted: false };
+      const rules = withRule(
+        conv.rules.map((r) => (r.id === old.id ? { ...r, deleted: true } : r)),
+        rule,
+      );
+      return setOffer({ ...conv, rules }, o.t, { ...o.offer, rule, state: 'replaced' });
+    }
+    case 'ruleKeepYours': {
+      const o = offerOf(conv, a.turnId);
+      if (!o || o.offer.state !== 'refused') return conv;
+      return setOffer(conv, o.t, { ...o.offer, state: 'kept-yours' });
+    }
+    case 'ruleReopen': {
+      const d = conv.decisions.find((x) => x.id === a.decisionId && !x.deleted);
+      if (!d?.rule) return conv;
+      const id = d.rule.id;
+      const t = conv.turns.find(
+        (x): x is TurnOf<'designer'> => x.kind === 'designer' && x.talk?.offer?.rule.id === id,
+      );
+      if (!t?.talk?.offer) return conv;
+      return setOffer(conv, t, {
+        ...t.talk.offer,
+        vet: a.vet,
+        state: a.vet.ok ? 'open' : 'refused',
+      });
+    }
+    case 'ruleEdit': {
+      const r = live.find((x) => x.id === a.ruleId);
+      if (!r) return conv;
+      const name = a.name === undefined ? r.name : a.name.replace(/\s+/g, ' ').trim().slice(0, 80);
+      if (!name) return conv;
+      const n = a.n === undefined ? r.n : a.n === null ? null : roundN(a.n);
+      if (name === r.name && n === r.n) return conv;
+      return { ...conv, rules: conv.rules.map((x) => (x.id === r.id ? { ...x, name, n } : x)) };
+    }
+    case 'ruleDelete':
+    case 'ruleRestore': {
+      const r = conv.rules.find((x) => x.id === a.ruleId);
+      if (!r || r.deleted === (a.type === 'ruleDelete')) return conv;
+      if (a.type === 'ruleRestore' && live.length >= MAX_RULES) return conv;
+      return {
+        ...conv,
+        rules: conv.rules.map((x) =>
+          x.id === r.id ? { ...x, deleted: a.type === 'ruleDelete' } : x,
+        ),
+      };
+    }
   }
 }
 
@@ -868,6 +1075,7 @@ function cutTurn(
       confirms: [],
       concern: null,
       plan: null,
+      offer: null,
     },
   };
 }
@@ -899,8 +1107,28 @@ function replyDone(
       from: null,
     });
     if (next.decisions.length > before || next.decisions.some((x) => x.id === id)) {
-      noted.push({ kind: 'decision', text: cut(`Noted in Decisions: ${d.text}`, 300), ref: id });
+      // A wish is told to the designer, never checked: the line says so (criterion 40).
+      const head = d.kind === 'wish' ? 'Noted in Decisions, not checked' : 'Noted in Decisions';
+      noted.push({ kind: 'decision', text: cut(`${head}: ${d.text}`, 300), ref: id });
     }
+  }
+  // A rule offered that the vocabulary can't hold, or the app couldn't read: noted, not checked.
+  const unfit =
+    r.memory.unfit ??
+    (a.offer && !a.offer.vet.ok && a.offer.vet.why === 'unfit' ? a.offer.rule.name : null);
+  const offer = a.offer && !(a.offer.vet.why === 'unfit') ? a.offer : null;
+  const ruleLines: string[] = [];
+  if (unfit) {
+    const id = take();
+    const before = next.decisions.length;
+    next = talk(next, { type: 'decisionAdd', id, at: a.at, kind: 'wish', text: unfit, from: null });
+    if (next.decisions.length > before)
+      noted.push({
+        kind: 'decision',
+        text: cut(`Noted in Decisions, not checked: ${unfit}`, 300),
+        ref: id,
+      });
+    ruleLines.push('I couldn’t turn this into a check, so it’s noted, not checked.');
   }
   // What would widen the next paid run (walls loosened, a higher budget) is asked, not done.
   const wide = r.memory.facts.filter((x) => widens(next.brief, x));
@@ -923,6 +1151,15 @@ function replyDone(
       notes: [...next.notes, { id, text: cut(n, L.note), turnId: a.id }].slice(-60),
     };
     noted.push({ kind: 'note', text: cut(`Noted for your ID: ${n}`, 300), ref: id });
+  }
+  // Make this a rule from a Decision: the Decision carries the rule offered, so keeping it
+  // moves it to Your rules.
+  if (t.ruleAsk && offer?.vet.ok) {
+    const from = t.ruleAsk.decisionId;
+    next = {
+      ...next,
+      decisions: next.decisions.map((d) => (d.id === from ? { ...d, rule: offer.rule } : d)),
+    };
   }
   const concern = r.concern
     ? {
@@ -958,9 +1195,12 @@ function replyDone(
       })),
       concern,
       plan: r.plan,
+      offer: offer
+        ? { rule: offer.rule, vet: offer.vet, state: offer.vet.ok ? 'open' : 'refused' }
+        : null,
     },
   };
-  const appLines: Turn[] = a.lines.slice(0, 3).map((text) => ({
+  const appLines: Turn[] = [...a.lines.slice(0, 3), ...ruleLines].map((text) => ({
     kind: 'event',
     id: take(),
     at: a.at,
@@ -999,6 +1239,7 @@ const label = (k: QuestionKey) =>
     walls: 'walls',
     style: 'style',
     anything: 'anything else',
+    owns: 'what you own',
   })[k];
 
 /** The person's turn for a scope button: their words, or what they asked for. */

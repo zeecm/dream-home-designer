@@ -1,4 +1,4 @@
-import type { Design, DesignBrief, DesignOptions, Project } from '@dhd/core';
+import type { Design, DesignBrief, DesignOptions, Project, Rule } from '@dhd/core';
 import { create } from 'zustand';
 import { useRates } from '../../cost/estimate';
 import { useEditor } from '../../editor';
@@ -66,11 +66,27 @@ export const useDesigner = create<DesignerState>(() => ({
   selected: null,
 }));
 
-export const designOpts = (doc: Project): DesignOptions => ({
-  rates: useRates.getState().rates,
-  ...(doc.site ? { site: doc.site } : {}),
-  ...(doc.models ? { models: doc.models } : {}),
-});
+/** The household's house rules for a level (the conversation sets where they come from). */
+let houseRules: (levelId: string) => readonly Rule[] = () => [];
+export const setHouseRules = (f: (levelId: string) => readonly Rule[]) => {
+  houseRules = f;
+};
+export const houseRulesFor = (levelId: string): readonly Rule[] => houseRules(levelId);
+
+/**
+ * What a version is placed and checked with: the rates, the site, the plan's own models and,
+ * on `levelId`, the household's house rules (slice 3a: in the result's key, so a rule kept,
+ * changed or deleted re-checks every card with no request).
+ */
+export const designOpts = (doc: Project, levelId?: string): DesignOptions => {
+  const rules = levelId ? houseRules(levelId) : [];
+  return {
+    rates: useRates.getState().rates,
+    ...(doc.site ? { site: doc.site } : {}),
+    ...(doc.models ? { models: doc.models } : {}),
+    ...(rules.length ? { rules: [...rules] } : {}),
+  };
+};
 
 const doc = () => useStore.getState().editor.doc;
 let storeP: Promise<DesignStore> | null = null;

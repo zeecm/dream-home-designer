@@ -53,6 +53,11 @@ export interface TalkStore {
    * 'aside'. One a newer build wrote is left where it is: 'newer' (this tab stays read-only).
    */
   setAside(projectId: string): Promise<'aside' | 'newer' | 'none'>;
+  /**
+   * A record set aside that this build can read now (a later build reads more tolerantly) goes
+   * back in place, when there is no conversation there: true.
+   */
+  restore(projectId: string): Promise<boolean>;
 }
 
 /** A write the records' own schema refuses: nothing is written. */
@@ -150,6 +155,9 @@ export function memoryTalkStore(): TalkStore {
     },
     async setAside() {
       return 'none' as const;
+    },
+    async restore() {
+      return false;
     },
   };
 }
@@ -289,6 +297,22 @@ function idbTalkStore(db: IDBDatabase): TalkStore {
       }
       await ended;
       return newer ? 'newer' : bad ? 'aside' : 'none';
+    },
+    async restore(projectId) {
+      const tx = db.transaction(['conversations', 'bad'], 'readwrite');
+      const ended = finished(tx);
+      const now = await done(tx.objectStore('conversations').get(projectId));
+      const aside = (await done(tx.objectStore('bad').get(projectId))) as
+        | { raw?: unknown }
+        | undefined;
+      // Put back as it was kept (a newer build's fields too), and only where nothing is.
+      const ok = !now && !!aside?.raw && !!conversationFromRecord(aside.raw);
+      if (ok) {
+        tx.objectStore('conversations').put(aside?.raw);
+        tx.objectStore('bad').delete(projectId);
+      }
+      await ended;
+      return ok;
     },
   };
 }

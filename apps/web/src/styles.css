@@ -8203,6 +8203,151 @@ textarea {
   flex: none;
 }
 
+/* House rules (slice 3a): the offer under a reply, its refusals, and Your rules. */
+.talk-rule-offer {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+.talk-rule-offer p {
+  margin: 0;
+}
+.talk-rule-offer .button-row {
+  margin-top: 6px;
+}
+.talk-rule-refused .talk-q-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.talk-rule-name {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.talk-rule-checks {
+  margin: 0;
+}
+.talk-rule-pair {
+  padding-left: 12px;
+  border-left: 2px solid var(--rule);
+}
+.talk-rule-links,
+.talk-rule-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+}
+.talk-rules-head {
+  margin: 14px 0 8px;
+  font-size: var(--fs-body);
+  font-weight: 500;
+}
+.talk-rules {
+  display: grid;
+  gap: 10px;
+}
+.talk-rule {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+.talk-rule .field {
+  max-width: 220px;
+}
+.talk-rule-status {
+  margin: 0;
+  font-size: var(--fs-hint);
+}
+.talk-rule-status .negative {
+  color: var(--negative);
+}
+.talk-rule-status .advise {
+  color: var(--advise);
+}
+@media (max-width: 640px) {
+  /* A ruled section on a phone, not a frame; full-width fields and 44 px actions. */
+  .talk-rule {
+    padding: 12px 0;
+    border: 0;
+    border-bottom: 1px solid var(--rule);
+    border-radius: 0;
+  }
+  .talk-rule .field {
+    max-width: none;
+  }
+}
+.talk-decisions .talk-decision-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* A rule on the plan: its band (the rule's width), its target, and what breaks it. */
+/* The band is the rule's width in metres, so it scales with the plan. */
+.rl-bands {
+  opacity: 0.3;
+}
+.plan-svg .rl-band,
+.rl-band {
+  fill: none;
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: none;
+}
+.rl-target {
+  fill: color-mix(in srgb, var(--accent) 14%, transparent);
+  stroke: var(--accent);
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+.rl-wall {
+  stroke: var(--accent);
+  stroke-width: 6px;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.rl-fail {
+  fill: color-mix(in srgb, var(--clearance) 22%, transparent);
+  stroke: var(--clearance);
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+.rl-label {
+  fill: var(--text);
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+}
+.rule-caption {
+  position: absolute;
+  left: 16px;
+  bottom: 84px;
+  margin: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font-size: var(--fs-small);
+  color: var(--text);
+  pointer-events: none;
+}
+/* A short stage (a phone on its side): at the top, clear of the plan's middle and the Key. */
+@media (max-height: 600px) {
+  .rule-caption {
+    top: 12px;
+    bottom: auto;
+    max-width: calc(100% - 96px);
+  }
+}
+
 .talk-mark {
   display: inline-block;
   flex: none;

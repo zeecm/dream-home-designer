@@ -72,7 +72,7 @@ function CompareView({ picks, designs }: { picks: string[]; designs: Design[] })
       // Placed by the designer's worker: a column waits for it, calmly.
       const v = d ? onPlanNow(d, designs, project) : null;
       const b = v ? baseOf(project, v.base.variant, v.levelId) : null;
-      const r = v && b ? readResult(b.base, b.before, v, designOpts(project)) : null;
+      const r = v && b ? readResult(b.base, b.before, v, designOpts(project, v.levelId)) : null;
       if (!d || !r) continue;
       // Against the flat as it is, as the drawing and the cost are (whatever it was made on).
       const changes = renovationChanges(before, r.level).filter(

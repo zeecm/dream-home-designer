@@ -20,7 +20,7 @@ import { CaseDialog } from '../CaseDialog';
 import { failingChecks } from '../parts';
 import { useResultsTickN } from '../results';
 import { tokens, usd, useSpend } from '../spend';
-import { openCompare, useDesigner } from '../state';
+import { houseRulesFor, openCompare, useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
 import { keepTogether } from '../words';
 import { Mark } from './Mark';
@@ -31,6 +31,7 @@ import {
   cardResult,
   cardVerdict,
   headLabel,
+  midLine,
   nowOf,
   planMoved,
 } from './cards';
@@ -45,7 +46,7 @@ import {
 } from './propose';
 import { focusInLog, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
-import { type LiveRun, actProposal, useBusy, useTalk } from './useTalk';
+import { type LiveRun, actProposal, useBusy, useRulesKey, useTalk } from './useTalk';
 import { EMPTY_VIEW, useProposalView } from './view';
 
 /**
@@ -136,6 +137,7 @@ function useSubset(
 ) {
   const project = useSettledProject();
   const rates = useRates((s) => s.rates);
+  const rulesKey = useRulesKey(card.levelId);
   const b = useMemo(() => nowOf(project, card.levelId), [project, card.levelId]);
   const merged = useMemo(
     () => (b && r ? timed(() => mergeChanges(b.now, r.level, changes, ticked)) : null),
@@ -153,13 +155,14 @@ function useSubset(
               rates,
               waived: [...card.waivers.map((w) => w.key), ...waive],
               renovation: !!project.renovation,
+              rules: houseRulesFor(card.levelId),
             }),
           ),
         ),
       report ? 150 : 0,
     );
     return () => clearTimeout(t);
-  }, [merged, rates, waive.join('|'), card.waivers]);
+  }, [merged, rates, waive.join('|'), card.waivers, rulesKey]);
   return { merged, report };
 }
 
@@ -175,18 +178,20 @@ interface Props {
 }
 
 /** What a folded card last said of itself (its checks need the plan worked out again). */
-const verdicts = new Map<string, { text: string; total: number }>();
+const verdicts = new Map<string, { text: string; total: number; rules: string }>();
 
 /**
  * A folded card's line: its checks as last worked out, and what is in the renovation as the
  * record says now (an Undo or a Put it back since takes rows out; QA R2).
  */
-function foldedLine(card: CardModel): string {
+function foldedLine(card: CardModel, rules: string): string {
   const said = verdicts.get(card.key);
   const inNow = card.accepted.filter((a) => !a.out).length;
   if (!said) return inNow ? ` · Accepted ${inNow}` : '';
   if (inNow && inNow >= said.total) return ' · In your renovation';
-  return ` · ${said.text}${inNow ? ` · Accepted ${inNow} of ${said.total}` : ''}`;
+  // Worked out before your rules last changed: it says so rather than an old verdict (QA B5).
+  const text = said.rules === rules ? said.text : 'Not checked against your rules yet';
+  return ` · ${text}${inNow ? ` · Accepted ${inNow} of ${said.total}` : ''}`;
 }
 
 export const ProposalCard = memo(function ProposalCard({
@@ -224,10 +229,13 @@ export const ProposalCard = memo(function ProposalCard({
   // Worked out only while it is open or on the plan; folded, it shows what it said last.
   const active = expanded || shown;
   const tick = useResultsTickN();
+  // A rule kept, changed or deleted re-checks the card, with no request (3a.5).
+  const rulesKey = useRulesKey(card.levelId);
+  const ruleCount = rulesKey ? rulesKey.split('|').length : 0;
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
   const r = useMemo(
     () => (active ? timed(() => cardResult(project, card)) : null),
-    [active, project, card, tick],
+    [active, project, card, tick, rulesKey],
   );
   const changes = useMemo(
     () => (r ? timed(() => cardChanges(project, card, r)) : []),
@@ -403,7 +411,7 @@ export const ProposalCard = memo(function ProposalCard({
         >
           <span>
             {card.title} · {headLabel(project, card)}
-            {foldedLine(card)}
+            {foldedLine(card, rulesKey)}
           </span>
           <span className="talk-fold-show" aria-hidden="true">
             Show ›
@@ -463,10 +471,12 @@ export const ProposalCard = memo(function ProposalCard({
     changes.some(
       (x) => x.items.target.includes(c.itemId ?? '') || x.items.now.includes(c.itemId ?? ''),
     );
-  const one = cardVerdict(fails.open.filter(inCard), report?.failing ?? [], [
-    ...fails.waived.map((c) => c.key),
-    ...waive.map((w) => w.key),
-  ]);
+  const one = cardVerdict(
+    fails.open.filter(inCard),
+    report?.failing ?? [],
+    [...fails.waived.map((c) => c.key), ...waive.map((w) => w.key)],
+    ruleCount,
+  );
   const failingLine = report || !running ? { text: one.text, tone: one.tone } : null;
   const verdict = running ? 'Checking…' : (failingLine?.text ?? 'Checking…');
   const title =
@@ -505,7 +515,11 @@ export const ProposalCard = memo(function ProposalCard({
   );
 
   // What the folded line will say (with what is in the renovation then, as the record has it).
-  verdicts.set(card.key, { text: verdict, total: accepted.length + changes.length });
+  verdicts.set(card.key, {
+    text: verdict,
+    total: accepted.length + changes.length,
+    rules: rulesKey,
+  });
   if (!expanded) {
     return (
       <article className="talk-card talk-card-folded" aria-labelledby={`card-${card.key}`}>
@@ -518,7 +532,7 @@ export const ProposalCard = memo(function ProposalCard({
         >
           <span>
             {card.title} · {headLabel(project, card)}
-            {foldedLine(card)}
+            {foldedLine(card, rulesKey)}
           </span>
           <span className="talk-fold-show" aria-hidden="true">
             Show ›
@@ -802,7 +816,7 @@ export const ProposalCard = memo(function ProposalCard({
                           {fail.map((f) => (
                             <p key={f.key} className="talk-row-sub negative">
                               {isOn ? 'Accepted anyway: ' : 'Doesn’t pass: '}
-                              {keepTogether(f.text)}
+                              {keepTogether(midLine(f.text))}
                             </p>
                           ))}
                           {confirm === c.id && (

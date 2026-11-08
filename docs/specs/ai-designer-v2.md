@@ -505,9 +505,20 @@ widgets; What I know, Decisions; proposals as cards with per-change accept; alte
 (stored reasons); pushback; streaming text and ghosts; per-message cost and the ask-before-spending
 threshold; Bring this back; My plan before the designer; Copy as text; v1 versions imported.
 
-**Slice 3 (M): pointing, rules, second look.** Pointers and the popover; [Ask the designer] from
-the Inspector and from comments; house rules and Your rules; the second look with the plan picture;
-lenses for storage, Older person and feng shui.
+**Slice 3 is split in two (lead decision, 8 Nov 2026):**
+
+**Slice 3a (L): pointing at the plan, and house rules.** Three PRs, each shippable:
+- A, house rules: the rule object, its checks inside the design checks, vetting before it is offered,
+  the offer under a reply, Your rules, Decisions made rules, rule rows on the card and Accept anyway
+  per rule, re-checks with no request, records version 3.
+- B, pointers: chips in the composer and in sent messages, the popover (Why here?, Keep this, Leave it
+  out, Something else here, Remove this), Here on empty floor, [Ask the designer] from the Inspector,
+  kept pieces.
+- C, rules the solver aims for: steering for positive rules (in, faces, against, distances).
+
+**Slice 3b (M): second look and lenses.** The second look with the plan picture; lenses for storage
+and feng shui; [Ask the designer] on a comment thread (criterion 38, moved from 3a). The Older person
+lens is on hold.
 
 **Slice 4 (M, server):** share the conversation read-only with a link; family comments on a
 version; the owner forwards them to the designer.
@@ -587,16 +598,69 @@ means core's design checks.
 35. Phone 390 px, fingers only: first meeting, a proposal, accept part, Undo, alternatives, the
     sheet's three heights, composer above the keyboard; no sideways scroll; targets ≥ 44 px.
 
-### Slice 3: pointing, rules, second look
+### Slice 3a: pointing at the plan, and house rules
 36. While previewing, tapping the sofa opens the popover; Comment adds "Sofa · Living" to the
     composer; the request body names the piece's id, room and version.
 37. Up to 5 chips; a sixth is refused with "Up to 5 at a time"; a deleted target shows "(gone)".
-38. [Ask the designer] on a comment thread adds it quoted with its anchor; the request carries the
-    comment text as quoted data.
 39. "Never put anything in the corridor" (mocked rule) asks Keep as a rule; kept, a later mocked
     proposal with a console in the corridor fails with the rule's wording; deleting the rule makes
     it pass.
 40. A wish that maps to no rule is kept as a note labelled "not checked".
+
+Criteria 3a.1–3a.12 (from the PM's list and the UX design's §12):
+- 3a.1 On your own plan, the Inspector's [Ask the designer] (and a tap on a piece while the designer
+  is open) puts a chip for that piece in the composer; the request names its id, room and level.
+- 3a.2 While previewing, a right-click (desktop) or a 500 ms press (phone) on empty floor adds a
+  "Here · {Room}" chip with the spot in metres; a pan or a pinch never makes one.
+- 3a.3 Why here? shows the stored reason and Keep this keeps the piece where it is, both with no
+  request.
+- 3a.4 Chips in a sent message light their target; a target gone since shows "(gone)" and where it
+  was.
+- 3a.5 Changing a rule's number in Your rules re-checks the card on the table at once, with no
+  request, and says so in the log ("V6 checked again: …").
+- 3a.6 A rule that contradicts a kept one, breaks an HDB rule, can't be met by the flat or rules out
+  a must-have (beds where someone sleeps) is refused with why; a contradiction offers Replace yours
+  or Keep yours, and the older rule stays by default.
+- 3a.7 A rule the plan already breaks is said when it is offered ("Your plan doesn't meet it now:
+  …") and, on a proposal that doesn't touch it, is in "Already in your plan", never failing it.
+- 3a.8 Bring this back checks the old version on today's rules and says so ("…and on your 2 rules").
+- 3a.9 Rules and pointers are kept with the conversation on the device: never in the project, `/api`,
+  exports or share links.
+- 3a.10 Pointer labels, room names and comment text go to the model as quoted data; an
+  instruction-like text is never acted on.
+- 3a.11 Phone, 390 px, fingers only: chips, the action sheet, a rule offer and Your rules have
+  targets of at least 44 px and no sideways scroll.
+- 3a.12 A home of several levels: every pointer and every rule carries its level; a card is checked
+  only against its own level's rules, and a chip names the level when there are several.
+
+**Slice 3a, the PM's additions** (settled 8 Nov 2026):
+- **Rule vocabulary.** A rule is data: a subject (anything, a category such as tall pieces or
+  storage, a kind or role, or one piece in the plan) × a relation (not in, in, faces, doesn't face,
+  within, at least, against, keep clear) × a target (a room, a room use, a wall, a door or window,
+  their room's door, the window, a kind, the way from the main door to rooms, a spot) × a number in
+  metres. The app checks it; the model only fills it in; the sentence shown is the app's, from the
+  rule object, never the model's prose. At most 20 rules a home.
+- **A corridor is a route.** "Corridor", "passage" and "hallway" are never targets: the app names
+  the way it means ("the way from the main door to Main bedroom and Bedroom") and Show on plan draws
+  it. "Nothing in the way" fails a piece standing in the corridor part of that way even when the
+  width left passes; "keep 0.90 m clear" fails only a piece that leaves less.
+- **Decisions vs rules.** A rule is checked on every proposal; a Decision is told to the designer,
+  not checked. Just this once keeps an offered rule as a Decision; Make this a rule turns a Decision
+  into an offer (priced as a Send, about US$0.03; free when the Decision came from Just this once).
+- **Conflicts** are refused with why (see 3a.6); two clear widths on the same way merge to the wider.
+- **Already in your plan** works for rules as for the app's checks (3a.7); waivers are per rule and
+  per piece, and the rule stays.
+- **Your rules** is a menu view beside What I know and Decisions, on a phone too (no tab bar).
+- **Popover pricing:** Something else here and Remove this show Send's figure (about US$0.03); a
+  design that follows asks under the usual cost rules.
+- **The phone gesture:** a 500 ms press on empty floor makes a Here chip; a second press moves it.
+- **Level on pointers:** see 3a.12.
+- On Start over, rules and kept pieces carry over only when "Keep what I know about you" is ticked.
+- A rule never forces a piece in: "the desk in Bedroom" with no desk passes.
+
+### Slice 3b: second look and lenses
+38. [Ask the designer] on a comment thread adds it quoted with its anchor; the request carries the
+    comment text as quoted data. (Moved from 3a.)
 41. Second look: the request contains a plan image made on the device and the facts sheet; a "fix"
     finding on P2 that the checks confirm triggers one round; one the checks contradict is dropped;
     "consider" findings show as notes; Quicker sends no second look.

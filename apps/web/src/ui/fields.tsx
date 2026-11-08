@@ -48,6 +48,8 @@ interface LengthFieldProps {
   id?: string;
   /** The phone keyboard's Enter key. */
   enterKeyHint?: 'done' | 'next';
+  /** The input's name for a screen reader, when the visible label alone is ambiguous. */
+  ariaLabel?: string;
   onCommit: (value: number | undefined) => void;
 }
 
@@ -110,6 +112,7 @@ export function LengthField({
   problem,
   id,
   enterKeyHint,
+  ariaLabel,
   onCommit,
 }: LengthFieldProps) {
   const fmt = (v: number) => (unit === 'mm' ? `${Math.round(v * 1000)} mm` : formatLength(v));
@@ -189,6 +192,7 @@ export function LengthField({
           placeholder={placeholder}
           aria-invalid={!!(error || problem)}
           aria-describedby={describedBy}
+          {...(ariaLabel ? { 'aria-label': ariaLabel } : {})}
           onChange={(e) => edit.type(e.target.value)}
           onBlur={() => commit()}
           onKeyDown={(e) => {

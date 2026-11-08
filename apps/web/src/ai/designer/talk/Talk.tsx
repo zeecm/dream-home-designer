@@ -6,6 +6,7 @@ import { tokens, usd, useSpend } from '../spend';
 import { useDesigner } from '../state';
 import { Mark } from './Mark';
 import { TurnCost } from './ProposalCard';
+import { RuleOfferBlock } from './Rules';
 import { altRequest, pressPlan, pressPrice } from './propose';
 import { timed, useSettledProject } from './settle';
 import { answerChip, chipLabel, editTurn, retryPrice, retryTurn } from './turn';
@@ -200,6 +201,7 @@ export function ReplyParts({ t }: { t: TurnOf<'designer'> }) {
         </div>
       )}
       {k.concern && <Concern t={t} />}
+      {k.offer && <RuleOfferBlock t={t} />}
       {k.noted.length > 0 && (
         <ul className="talk-noted">
           {k.noted.map((n) => (

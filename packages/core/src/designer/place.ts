@@ -87,7 +87,7 @@ export interface Shape {
   poly: Vec2[];
   box: Box;
 }
-const shape = (poly: Vec2[]): Shape => ({ poly, box: boxOf(poly) });
+export const shape = (poly: Vec2[]): Shape => ({ poly, box: boxOf(poly) });
 
 /** Everything a piece in one space can run into, and the pieces placed in it so far. */
 export interface SpaceIndex {

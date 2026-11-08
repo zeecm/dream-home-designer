@@ -7,6 +7,7 @@ import { FACT_LABELS, factText } from './firstMeeting';
 import {
   Conversation,
   DRAFT_CHARS,
+  PROPOSAL_RECORD_VERSION,
   Proposal,
   type ProposalOption,
   QUESTION_KEYS,
@@ -176,7 +177,7 @@ export function broughtBack(
     projectId: from.projectId,
     id: a.id,
     conversationId: a.conversationId,
-    recordVersion: TALK_RECORD_VERSION,
+    recordVersion: PROPOSAL_RECORD_VERSION,
     n: a.n,
     turnId: a.turnId,
     at: a.at,
@@ -216,6 +217,8 @@ export function conversationText(
   out.push('', 'What I know about you');
   const b = conv.brief;
   for (const k of QUESTION_KEYS) {
+    // Not asked yet: slice 3b's question.
+    if (k === 'owns') continue;
     if (k === 'mobility' && !b.household.elders.length) continue;
     if (k === 'sleeping' && !peopleOf(b).some((p) => p.kind !== 'helper')) continue;
     const assumed = conv.assumed.includes(k) ? ' (assumed)' : '';
