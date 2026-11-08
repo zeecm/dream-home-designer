@@ -250,7 +250,20 @@ function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
         </p>
       )}
       {latest && cant && <p className="field-hint">{cant}</p>}
-      {latest && conflict && <p className="field-hint negative">Answer who sleeps where first.</p>}
+      {latest && conflict && (
+        <p className="field-hint negative">
+          {conflict.bedrooms === 0
+            ? 'Nobody has a bed yet: your plan has no bedroom. Say which rooms people sleep in first. '
+            : 'Answer who sleeps where first. '}
+          <button
+            type="button"
+            className="link-btn"
+            onClick={() => useTalk.setState({ view: 'know', knowAt: 'sleeping' })}
+          >
+            Who sleeps where
+          </button>
+        </p>
+      )}
       {latest && ai && !cant && (
         <ul className="talk-scopes">
           {priced.map(({ s, est }) => (

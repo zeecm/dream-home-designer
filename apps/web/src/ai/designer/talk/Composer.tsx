@@ -297,6 +297,7 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
         {replying || running ? (
           <button
             type="button"
+            key="stop"
             className="btn btn-primary talk-stop"
             title="Stop (Esc)"
             onClick={() => (replying ? stopReply() : stopTalkRun())}
@@ -306,6 +307,7 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
         ) : (
           <button
             type="submit"
+            key="send"
             className="btn btn-primary talk-send"
             data-spends=""
             aria-describedby="talk-hint"

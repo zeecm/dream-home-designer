@@ -598,6 +598,11 @@ async function runOption(
     }
     if (status !== 'failed') await act({ type: 'scopeNext', at: nowIso(), id: newId('turn') });
   }
+  // Nothing designed: no empty version stays on the plan (N3).
+  if (status === 'failed' && useTalk.getState().shown === `${p.id}:${letter}`) {
+    useTalk.setState({ shown: null });
+    useDesigner.setState({ previewing: false });
+  }
   if (useTalk.getState().live?.ctrl === ctrl) useTalk.setState({ live: null });
   const r = useDesigner.getState().run;
   if (r?.ctrl === ctrl) useDesigner.setState({ run: null });

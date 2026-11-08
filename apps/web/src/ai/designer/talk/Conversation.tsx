@@ -1,4 +1,4 @@
-import { type DesignBrief, spentOf } from '@dhd/core';
+import { type Bounds, type DesignBrief, roomShapes, spentOf } from '@dhd/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useEditor } from '../../../editor';
@@ -153,6 +153,23 @@ function OnTheTable() {
 }
 
 /** The menu (⋯): What I know about you, Decisions, AI settings, Close. */
+/** The rooms a card is about, with a margin: what the plan zooms to (null: the whole flat). */
+function scopeBox(key: string): Bounds | null {
+  const p = useTalk.getState().proposals.find((x) => key.startsWith(`${x.id}:`));
+  const level = talkLevel();
+  if (!p || p.scope.all || !level) return null;
+  const shapes = roomShapes(level);
+  const pts = p.scope.spaces
+    .flatMap((k) => k.split('+'))
+    .flatMap((id) => shapes.get(id)?.outer ?? []);
+  if (!pts.length) return null;
+  const m = 0.6;
+  return {
+    min: { x: Math.min(...pts.map((q) => q.x)) - m, y: Math.min(...pts.map((q) => q.y)) - m },
+    max: { x: Math.max(...pts.map((q) => q.x)) + m, y: Math.max(...pts.map((q) => q.y)) + m },
+  };
+}
+
 function Menu() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -324,12 +341,29 @@ export function TalkPanel() {
     };
   }, [previewOn]);
   useEffect(() => () => useEditor.getState().setPreview(null), []);
-  // The plan refits to the card when a new one goes on it.
+  // The plan zooms to a card's rooms the first time it goes on the plan (the whole flat, or a
+  // card shown again, fits the plan); the zoom ends with the preview.
+  const zoomed = useRef(new Set<string>());
+  const ourBox = useRef<Bounds | null>(null);
   useEffect(() => {
     if (!shown) return;
-    const f = requestAnimationFrame(() => useEditor.getState().requestFit(64));
+    const first = !zoomed.current.has(shown);
+    zoomed.current.add(shown);
+    const box = first ? scopeBox(shown) : null;
+    const f = requestAnimationFrame(() => {
+      if (!useEditor.getState().elevation) {
+        ourBox.current = box;
+        useEditor.setState({ fitBox: box });
+      }
+      useEditor.getState().requestFit(64);
+    });
     return () => cancelAnimationFrame(f);
   }, [shown]);
+  useEffect(() => {
+    if (previewOn || !ourBox.current) return;
+    if (useEditor.getState().fitBox === ourBox.current) useEditor.setState({ fitBox: null });
+    ourBox.current = null;
+  }, [previewOn]);
 
   // Esc stops a run (not while a dialog or a menu view wants it).
   useEffect(() => {

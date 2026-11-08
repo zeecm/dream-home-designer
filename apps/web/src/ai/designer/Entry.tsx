@@ -177,11 +177,14 @@ export function DesignerBar() {
       if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('dialog[open]'))
         return;
       if (useDesigner.getState().run || useEditor.getState().selection) return;
+      // Esc in a walk-through is the walk's own (it leaves the walk, N6): the preview stays.
+      if (useEditor.getState().walking) return;
       e.preventDefault();
       endPreview();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // Before the walk's own listener ends the walk, so the walk is still seen.
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [preview]);
   // Walking hides the bar: a small reminder in its place.
   if (preview && walking) {

@@ -332,6 +332,15 @@ test.describe('desktop', () => {
     await expect(log(page)).toContainText(
       /Designing Living and dining takes about US\$0\.\d\d \(at most US\$\d\.\d\d, up to \d fix-ups? included\)\. Go ahead\?/,
     );
+    // N2: focus stays in the conversation (never the page; never on a priced button).
+    const inTalk = () =>
+      page.evaluate(() => {
+        const a = document.activeElement;
+        return a?.closest('.talk') && !a.hasAttribute('data-spends')
+          ? 'in the conversation'
+          : `${a?.tagName} ${a?.className} ${a?.textContent?.slice(0, 40)}`;
+      });
+    await expect.poll(inTalk).toBe('in the conversation');
     await shot(page, 'cost-card');
     expect(m.calls).toHaveLength(0);
     await panel(page)
@@ -343,10 +352,13 @@ test.describe('desktop', () => {
     await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeDisabled();
     await expect(v1.getByText('Accept waits for the checks')).toBeVisible();
     expect(m.calls[0]?.body).toContain('More storage, please');
+    await panel(page).getByRole('button', { name: 'Stop' }).focus();
     release();
     await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
       timeout: 30_000,
     });
+    // The run's Stop went away with focus on it: focus stays in the conversation (N2).
+    await expect.poll(inTalk).toBe('in the conversation');
     await expect(page.locator('[data-testid="proposal-layer"] .pv-new').first()).toBeVisible();
     await expect(page.getByText('Previewing V1, not in your plan yet')).toBeVisible();
     await expect(panel(page).getByRole('region', { name: 'On the table' })).toContainText(
@@ -405,6 +417,8 @@ test.describe('desktop', () => {
     ).toBeVisible();
     // Focus goes to the line's Redo, never to the page.
     await expect(panel(page).getByRole('button', { name: 'Redo' })).toBeFocused();
+    // N5: what was accepted is ticked again, ready to accept again.
+    await expect(v1.getByText(`2 of ${names.length} ticked`)).toBeVisible();
     const back = await saved(page);
     expect(back.levels).toEqual(before.levels);
     expect(back.renovation).toBeUndefined();
@@ -448,9 +462,15 @@ test.describe('desktop', () => {
     await expect(v1.getByText(/Nothing was designed\.$/)).toBeVisible({ timeout: 40_000 });
     await expect(v1.getByText('Nothing was billed for it.')).toBeVisible();
     await expect(v1.getByRole('button', { name: /^Try again · about US\$/ })).toBeVisible();
-    // Never a passing card with nothing in it.
+    // Never a passing card with nothing in it, nor anything offered for it (N3).
     await expect(v1.getByText('Passes all checks')).toHaveCount(0);
     await expect(v1.getByRole('button', { name: /^Accept selected/ })).toHaveCount(0);
+    await expect(v1.getByRole('button', { name: 'Show in 3D' })).toHaveCount(0);
+    await expect(v1.getByRole('button', { name: /^Another idea/ })).toHaveCount(0);
+    await expect(v1.getByRole('button', { name: /on the plan$/ })).toHaveCount(0);
+    await expect(page.getByText('Previewing V1, not in your plan yet')).toHaveCount(0);
+    // A server's trouble is said politely, not as an alert.
+    await expect(v1.locator('.talk-failed[role="alert"]')).toHaveCount(0);
     await expect(panel(page).getByRole('region', { name: 'On the table' })).toContainText(
       'Didn’t finish',
     );

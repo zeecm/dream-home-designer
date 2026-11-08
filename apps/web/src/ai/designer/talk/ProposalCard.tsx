@@ -400,24 +400,26 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
       <h3 className="talk-card-title" id={`card-${card.key}`}>
         V{card.n} · {headLabel(project, card)}
       </h3>
-      <button
-        type="button"
-        className={onPlan ? 'btn btn-small talk-onplan on' : 'btn btn-small talk-onplan'}
-        aria-pressed={onPlan}
-        aria-label={`Show V${card.n} on the plan`}
-        onClick={() => {
-          // Pressed only while the plan really shows it (Esc or a walk may have ended it).
-          if (onPlan) {
-            useTalk.setState({ shown: null });
-            useDesigner.setState({ previewing: false });
-          } else {
-            useTalk.setState({ shown: card.key });
-            useDesigner.setState({ previewing: true });
-          }
-        }}
-      >
-        {onPlan ? 'On the plan' : 'Show on plan'}
-      </button>
+      {card.status !== 'failed' && (
+        <button
+          type="button"
+          className={onPlan ? 'btn btn-small talk-onplan on' : 'btn btn-small talk-onplan'}
+          aria-pressed={onPlan}
+          aria-label={`Show V${card.n} on the plan`}
+          onClick={() => {
+            // Pressed only while the plan really shows it (Esc or a walk may have ended it).
+            if (onPlan) {
+              useTalk.setState({ shown: null });
+              useDesigner.setState({ previewing: false });
+            } else {
+              useTalk.setState({ shown: card.key });
+              useDesigner.setState({ previewing: true });
+            }
+          }}
+        >
+          {onPlan ? 'On the plan' : 'Show on plan'}
+        </button>
+      )}
     </div>
   );
 
@@ -509,7 +511,12 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
         </div>
       )}
       {card.status === 'failed' && (
-        <div className="talk-failed" role="alert">
+        // An alert only for what the person must act on (a key, a quota, the limit, UX §10);
+        // a server's trouble is said politely.
+        <div
+          className="talk-failed"
+          {...(/key|quota|credit|limit/i.test(card.note ?? '') ? { role: 'alert' } : {})}
+        >
           <p className="talk-card-note negative">
             {card.note ?? 'The design didn’t work.'} Nothing was designed.
           </p>
@@ -910,17 +917,19 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
                 Compare
               </button>
             )}
-            <button
-              type="button"
-              className="link-btn"
-              onClick={() => {
-                useTalk.setState({ shown: card.key });
-                useDesigner.setState({ previewing: true });
-                useEditor.getState().setViewMode('3d');
-              }}
-            >
-              Show in 3D
-            </button>
+            {card.status !== 'failed' && (
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => {
+                  useTalk.setState({ shown: card.key });
+                  useDesigner.setState({ previewing: true });
+                  useEditor.getState().setViewMode('3d');
+                }}
+              >
+                Show in 3D
+              </button>
+            )}
             <span className="talk-more">
               <button
                 type="button"
@@ -967,7 +976,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
               )}
             </span>
           </span>
-          {card.proposal && another && (
+          {card.proposal && another && card.status !== 'failed' && (
             <button
               type="button"
               className="link-btn"

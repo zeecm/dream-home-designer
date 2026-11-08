@@ -1,4 +1,4 @@
-import { FACT_LABELS, QUESTION_KEYS, type QuestionKey, bedroomsOf, factText } from '@dhd/core';
+import { FACT_LABELS, QUESTION_KEYS, type QuestionKey, factText, peopleOf } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { FactEditor } from './Facts';
 import { Mark } from './Mark';
@@ -44,7 +44,9 @@ export function WhatIKnow() {
   const keys = QUESTION_KEYS.filter(
     (k) =>
       (k !== 'mobility' || b.household.elders.length > 0) &&
-      (k !== 'sleeping' || bedroomsOf(level, b).length > 0),
+      // Who sleeps where, whenever someone sleeps here: with no bedroom, it asks which rooms
+      // they sleep in (N1).
+      (k !== 'sleeping' || peopleOf(b).some((p) => p.kind !== 'helper')),
   );
   const save = (k: QuestionKey, brief: typeof b) => {
     void act({ type: 'editFact', key: k, brief, at: nowIso(), id: newId('turn'), level });

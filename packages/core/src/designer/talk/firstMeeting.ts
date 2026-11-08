@@ -276,7 +276,11 @@ export function sleepingWords(brief: DesignBrief, level: Level): string {
       `${andList(ps.map((p) => personLabel(p, brief)))} in ${level.rooms[id]?.name ?? 'a room'}`,
   );
   if (plan.unplaced.length) {
-    lines.push(`${andList(plan.unplaced.map((p) => personLabel(p, brief)))}: no room yet`);
+    lines.push(
+      `${andList(plan.unplaced.map((p) => personLabel(p, brief)))}: no room yet${
+        plan.rooms.size === 0 ? ' (the plan has no bedroom; say which rooms people sleep in)' : ''
+      }`,
+    );
   }
   return lines.join('; ') || 'Not said';
 }

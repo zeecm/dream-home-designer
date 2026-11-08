@@ -240,6 +240,28 @@ describe('the first meeting (criteria 20–22)', () => {
     expect(
       bedroomsOf(lvl, { ...five, rooms: { [id]: { use: 'bedroom', wish: '' } } }),
     ).toHaveLength(1);
+
+    // N1: Just design it on such a plan says nobody has a bed, and the offer waits for it.
+    const c0 = talk({} as Conversation, {
+      type: 'start',
+      id: 'conv1',
+      at: AT,
+      projectId: 'p1',
+      levelId: 'lvl',
+      brief: five,
+      beforeFp: 'fp0',
+      afterFp: null,
+      nextN: 1,
+      level: lvl,
+      form: null,
+      ids: ['n1', 'n2'],
+    });
+    const c1 = talk(c0, { type: 'justDesign', at: AT, ids: ['n3', 'n4'], level: lvl });
+    const said = c1.turns.find((t) => t.kind === 'designer' && t.lines.length);
+    expect(said?.kind === 'designer' && said.lines.join(' ')).toMatch(
+      /Parent, Child 1, Child 2, You and Partner: no room yet \(the plan has no bedroom/,
+    );
+    expect(sleepingConflict(c1.brief, lvl)).toEqual({ people: 5, bedrooms: 0 });
   });
 });
 
