@@ -140,7 +140,7 @@ export function nowOf(project: Project, levelId: string): { now: Level; before: 
 export function cardResult(project: Project, card: CardModel): DesignResult | null {
   const b = nowOf(project, card.levelId);
   if (!b) return null;
-  return readResult(b.now, b.before, card.input, designOpts(project, card.levelId));
+  return readResult(b.now, b.before, card.input, designOpts(project, card.levelId, card.at));
 }
 
 /** A card placed on the plan as it is now, waited for (an accept, a request's context). */
@@ -150,7 +150,7 @@ export async function cardResultNow(
 ): Promise<DesignResult | null> {
   const b = nowOf(project, card.levelId);
   if (!b) return null;
-  return requestResult(b.now, b.before, card.input, designOpts(project, card.levelId));
+  return requestResult(b.now, b.before, card.input, designOpts(project, card.levelId, card.at));
 }
 
 const changesMemo = new Map<string, Change[]>();
@@ -254,7 +254,7 @@ export function precheckOn(
     waived: [...card.waivers.map((w) => w.key), ...waived],
     renovation: !!project.renovation,
     rules: houseRulesFor(card.levelId),
-    kept: houseKeptFor(card.levelId),
+    kept: houseKeptFor(card.levelId, card.at),
   });
   return { failing: rep.failing, hdb: rep.failing.some((c) => !c.waivable), missing: false };
 }

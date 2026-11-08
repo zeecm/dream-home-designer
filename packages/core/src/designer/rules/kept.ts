@@ -43,6 +43,15 @@ export const keptHolds = (k: Kept, it: Item) =>
   Math.hypot(it.position.x - k.pose.x, it.position.z - k.pose.y) <= KEPT_GAP + 1e-6 &&
   turnDiff(it.rotationY, k.pose.rot) <= KEPT_ANGLE + 1e-6;
 
+/**
+ * The kept pieces a version made at `madeAt` is placed and checked with: those kept before it.
+ * Keep this places a piece again in later designs, never in the version it was kept from (that
+ * version, re-solved around a copy of its own piece, would move the original); no time (a new
+ * design) is all of them.
+ */
+export const keptBefore = (kept: readonly Kept[], madeAt?: string): readonly Kept[] =>
+  madeAt ? kept.filter((k) => k.at < madeAt) : kept;
+
 /** A kept piece in words ("the 3-seat sofa"). */
 export const keptName = (k: Kept) => {
   const kind = furnitureKind(k.assetId);

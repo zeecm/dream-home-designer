@@ -5,7 +5,7 @@ import { aliasesFor } from '../aliases';
 import { designChecks } from '../checks';
 import { SAMPLE_KEYS, sampleAnswers, sampleDesign, sampleLevel } from '../fixtures/sample';
 import { designResult } from '../result';
-import { type Kept, keptChecks } from '../rules/kept';
+import { type Kept, keptBefore, keptChecks } from '../rules/kept';
 import { defaultBrief } from '../schema';
 import { spacesOf } from '../spaces';
 import { REPLY_TEXT } from './fixtures/replies';
@@ -199,6 +199,15 @@ describe('Keep this (3a.3, no request)', () => {
     expect(c.brief.keep.items[sofa?.id ?? '']).toBeUndefined();
     const line = c.turns.find((t) => t.id === 'ev_k');
     expect(line?.kind === 'event' && line.event).toMatchObject({ type: 'kept', undone: true });
+  });
+
+  it('a version is placed with the pieces kept before it only; a new design with all', () => {
+    const a = kept({ id: 'kept_a', at: '2026-11-08T10:00:00.000Z' });
+    const b = kept({ id: 'kept_b', at: '2026-11-08T12:00:00.000Z' });
+    // V1, made at 11:00: its own piece kept at 12:00 is not placed again in V1 itself.
+    expect(keptBefore([a, b], '2026-11-08T11:00:00.000Z')).toEqual([a]);
+    expect(keptBefore([a, b], '2026-11-08T09:00:00.000Z')).toEqual([]);
+    expect(keptBefore([a, b])).toEqual([a, b]);
   });
 
   it('a kept piece moved fails its K check; kept where it is, it passes', () => {

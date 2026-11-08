@@ -1,4 +1,12 @@
-import type { Design, DesignBrief, DesignOptions, Kept, Project, Rule } from '@dhd/core';
+import {
+  type Design,
+  type DesignBrief,
+  type DesignOptions,
+  type Kept,
+  type Project,
+  type Rule,
+  keptBefore,
+} from '@dhd/core';
 import { create } from 'zustand';
 import { useRates } from '../../cost/estimate';
 import { useEditor } from '../../editor';
@@ -77,16 +85,19 @@ let houseKept: (levelId: string) => readonly Kept[] = () => [];
 export const setHouseKept = (f: (levelId: string) => readonly Kept[]) => {
   houseKept = f;
 };
-export const houseKeptFor = (levelId: string): readonly Kept[] => houseKept(levelId);
+/** The kept pieces a version made at `madeAt` is placed and checked with (`keptBefore`). */
+export const houseKeptFor = (levelId: string, madeAt?: string): readonly Kept[] =>
+  keptBefore(houseKept(levelId), madeAt);
 
 /**
  * What a version is placed and checked with: the rates, the site, the plan's own models and,
  * on `levelId`, the household's house rules (slice 3a: in the result's key, so a rule kept,
- * changed or deleted re-checks every card with no request).
+ * changed or deleted re-checks every card with no request), and the pieces kept before
+ * `madeAt` (a new design: all of them).
  */
-export const designOpts = (doc: Project, levelId?: string): DesignOptions => {
+export const designOpts = (doc: Project, levelId?: string, madeAt?: string): DesignOptions => {
   const rules = levelId ? houseRules(levelId) : [];
-  const kept = levelId ? houseKept(levelId) : [];
+  const kept = levelId ? houseKeptFor(levelId, madeAt) : [];
   return {
     rates: useRates.getState().rates,
     ...(doc.site ? { site: doc.site } : {}),

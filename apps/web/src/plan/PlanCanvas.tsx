@@ -633,7 +633,8 @@ export function PlanCanvas() {
       }, 150);
       hold.current.fire = window.setTimeout(() => {
         const t = touch.current;
-        if (t?.start !== start || t.moved || gesture.current || t.stopped) return endHold();
+        // Cancelled by a move (onTouchMove), a second finger or a stopped coast.
+        if (t?.start !== start || gesture.current || t.stopped) return endHold();
         hold.current.held = true;
         (navigator as Navigator & { vibrate?: (ms: number) => boolean }).vibrate?.(10);
         useHold.setState({ at: null, fired: true });
@@ -674,13 +675,15 @@ export function PlanCanvas() {
     const t = touch.current;
     if (!t || !ctx) return;
     const p = pointer(e);
-    if (!t.moved && Math.hypot(p.screen.x - t.start.screen.x, p.screen.y - t.start.screen.y) < 8) {
+    const far = Math.hypot(p.screen.x - t.start.screen.x, p.screen.y - t.start.screen.y) >= 8;
+    // A long-press is called off by a move of 8 px or more (it becomes a pan, as today).
+    if (far && !hold.current.held && (hold.current.cue || hold.current.fire)) endHold();
+    if (hold.current.held) return;
+    if (!t.moved && !far) {
       return;
     }
     if (!t.moved) {
       t.moved = true;
-      if (!hold.current.held) endHold();
-      if (hold.current.held) return;
       if (tool === 'select') {
         // Dragging a corner or a door moves it; dragging anything else pans the plan,
         // without selecting what the finger started on.

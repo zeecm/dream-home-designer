@@ -1,4 +1,4 @@
-import { type Vec2, entranceDoor, roomsBeside, wallStatus } from '@dhd/core';
+import { type Vec2, entranceDoor, pointPosition, roomsBeside, wallStatus } from '@dhd/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { useSheets } from '../../../comments/ui';
@@ -15,6 +15,7 @@ import {
   describe,
   keepTarget,
   keptOf,
+  levelWith,
   makePointer,
   shownLevel,
   unkeep,
@@ -48,7 +49,7 @@ function centreOf(sel: Selection): Vec2 | null {
   const l = shown?.level;
   if (!l) return null;
   if (sel.kind === 'item') {
-    const it = l.items[sel.id];
+    const it = levelWith(l, { kind: 'item', id: sel.id, at: { x: 0, y: 0 } }).items[sel.id];
     return it ? { x: it.position.x, y: it.position.z } : null;
   }
   if (sel.kind === 'wall' || sel.kind === 'opening') {
@@ -60,8 +61,11 @@ function centreOf(sel: Selection): Vec2 | null {
     return a && b ? { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t } : null;
   }
   if (sel.kind === 'point') {
-    const p = l.points?.[sel.id];
-    return p?.at ? { x: p.at.x, y: p.at.y } : null;
+    // A wall point (a socket, an aircon isolator) has no `at`: it is on its wall's face.
+    const pl = levelWith(l, { kind: 'point', id: sel.id, at: { x: 0, y: 0 } });
+    const p = pl.points?.[sel.id];
+    const at = p ? pointPosition(pl, p)?.at : null;
+    return at ? { ...at } : null;
   }
   if (sel.kind === 'room') {
     const r = l.rooms[sel.id];
@@ -191,7 +195,7 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
     if (!target) return null;
     const shown = shownLevel();
     if (!shown) return null;
-    const words = describe(shown.level, target);
+    const words = describe(levelWith(shown.level, target), target);
     const title = shown.version.kind === 'option' ? shown.version.title : null;
     const change =
       target.kind === 'item' && target.id

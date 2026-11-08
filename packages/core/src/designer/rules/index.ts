@@ -5,6 +5,7 @@ export {
   Kept,
   type KeptCheck,
   MAX_KEPT,
+  keptBefore,
   keptChecks,
   keptHolds,
   keptItem,

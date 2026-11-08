@@ -170,7 +170,7 @@ function useSubset(
               waived: [...card.waivers.map((w) => w.key), ...waive],
               renovation: !!project.renovation,
               rules: houseRulesFor(card.levelId),
-              kept: houseKeptFor(card.levelId),
+              kept: houseKeptFor(card.levelId, card.at),
             }),
           ),
         ),

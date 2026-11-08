@@ -8,7 +8,10 @@ import {
   type Vec2,
   entranceDoor,
   furnitureKind,
+  keptHolds,
   pieceName,
+  pointName,
+  pointPosition,
   roomIdAt,
   roomsBeside,
   whereOf,
@@ -54,14 +57,32 @@ export function shownLevel(): { level: Level; version: Pointer['version'] } | nu
   return level ? { level, version: { kind: 'plan' } } : null;
 }
 
+/**
+ * The level that has a target: the one shown, else the version's own result or the plan (a
+ * piece drawn from the card's result while the merged level catches up).
+ */
+export function levelWith(level: Level, t: Target): Level {
+  const id = t.id;
+  if ((t.kind !== 'item' && t.kind !== 'point') || !id) return level;
+  const has = (l: Level | null | undefined) =>
+    !!l && (t.kind === 'item' ? !!l.items[id] : !!l.points?.[id]);
+  if (has(level)) return level;
+  const target = useProposalView.getState().target;
+  if (target && has(target)) return target;
+  const plan = talkLevel();
+  return plan && has(plan) ? plan : level;
+}
+
 const centreOf = (level: Level, t: Target): Vec2 => {
   if (t.kind === 'item' && t.id) {
     const it = level.items[t.id];
     if (it) return { x: it.position.x, y: it.position.z };
   }
   if (t.kind === 'point' && t.id) {
+    // A wall point (a socket, an aircon isolator) is where it is on its wall's face.
     const p = level.points?.[t.id];
-    if (p?.at) return { x: p.at.x, y: p.at.y };
+    const at = p ? pointPosition(level, p)?.at : null;
+    if (at) return { ...at };
   }
   return t.at;
 };
@@ -143,7 +164,7 @@ export function describe(
     }
     case 'point': {
       const p = t.id ? level.points?.[t.id] : undefined;
-      const what = p ? cap(String(p.kind).replace(/-/g, ' ')) : 'Point';
+      const what = p ? cap(pointName(p)) : 'Point';
       return { label: `${what}${room ? ` · ${room}` : ''}`, room, where: '' };
     }
     case 'room':
@@ -171,7 +192,8 @@ export function describe(
 export function makePointer(t: Target): Pointer | null {
   const shown = shownLevel();
   if (!shown) return null;
-  const { level, version } = shown;
+  const { version } = shown;
+  const level = levelWith(shown.level, t);
   const words = describe(level, t);
   const levels = doc().levels;
   const levelId = designLevelId();
@@ -229,9 +251,8 @@ export async function addPointer(p: Pointer): Promise<boolean> {
     return false;
   }
   if (conv.draftPointers.length >= MAX_POINTERS) {
-    const text = `Up to ${MAX_POINTERS} at a time. Remove one to add ${shortName(p)}.`;
-    hint(text);
-    say(text);
+    // The hint is a live region, so it is read once (no say()).
+    hint(`Up to ${MAX_POINTERS} at a time. Remove one to add ${shortName(p)}.`);
     return false;
   }
   const next = await act({ type: 'pointerAdd', pointer: p });
@@ -258,7 +279,12 @@ export async function addSpot(p: Pointer): Promise<boolean> {
   return addPointer(p);
 }
 
-export const removePointer = (id: string) => act({ type: 'pointerRemove', id });
+/** A chip taken off by its ×: what the last refusal said no longer holds. */
+export const removePointer = (id: string) => {
+  if (hintTimer) clearTimeout(hintTimer);
+  usePointerUi.setState({ hint: null });
+  return act({ type: 'pointerRemove', id });
+};
 
 /** Whether a pointer's target is still there (UX §1.3: "(gone)"; never stored). */
 export function pointerGone(p: Pointer, project: Project = doc()): boolean {
@@ -324,7 +350,7 @@ export function showPointer(p: Pointer) {
 export function keptFrom(t: Target): Kept | null {
   const shown = shownLevel();
   if (!shown || t.kind !== 'item' || !t.id) return null;
-  const it = shown.level.items[t.id];
+  const it = levelWith(shown.level, t).items[t.id];
   if (!it) return null;
   const inPlan = !!talkLevel()?.items[t.id];
   return {
@@ -344,7 +370,7 @@ export async function keepTarget(t: Target): Promise<boolean> {
   const k = keptFrom(t);
   const shown = shownLevel();
   if (!k || !shown) return false;
-  const name = pieceName(shown.level.items[t.id ?? '']);
+  const name = pieceName(levelWith(shown.level, t).items[t.id ?? '']);
   const text =
     k.from === 'plan'
       ? `Kept: the ${name} where it is. Later ideas leave it there.`
@@ -367,14 +393,7 @@ export function keptOf(t: Target): Kept | null {
   const conv = useTalk.getState().conv;
   const shown = shownLevel();
   if (!conv || !shown || t.kind !== 'item' || !t.id) return null;
-  const it = shown.level.items[t.id];
+  const it = levelWith(shown.level, t).items[t.id];
   if (!it) return null;
-  return (
-    conv.kept.find((k) =>
-      k.itemId
-        ? k.itemId === it.id
-        : k.assetId === it.assetId &&
-          Math.hypot(k.pose.x - it.position.x, k.pose.y - it.position.z) < 0.05,
-    ) ?? null
-  );
+  return conv.kept.find((k) => (k.itemId ? k.itemId === it.id : keptHolds(k, it))) ?? null;
 }
