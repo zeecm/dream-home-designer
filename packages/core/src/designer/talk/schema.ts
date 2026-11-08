@@ -12,6 +12,11 @@ import { clean } from '../util';
 
 /** 2: the talk call (a person's Send, the designer's replies, hand edits). 1 is read as 2. */
 export const TALK_RECORD_VERSION = 2;
+/**
+ * 3: an option's second look (slice 3b). 1 and 2 are read as 3 (defaults only). A build that
+ * knows only 2 sees a 3 as newer and leaves it alone, so it never drops the look.
+ */
+export const PROPOSAL_RECORD_VERSION = 3;
 /** Turns kept in one conversation; the oldest go first. */
 export const MAX_TURNS = 500;
 /** Decisions kept, and how long each may be. */
@@ -400,6 +405,33 @@ export const Conversation = z.object({
 });
 export type Conversation = z.infer<typeof Conversation>;
 
+/** An option's second look (tech 3b §2.7), as the card shows it and case files read it. */
+export const OptionLook = z.object({
+  /** done: findings read; skipped: no picture or a model that can't see; failed; stopped. */
+  state: z.enum(['done', 'skipped', 'failed', 'stopped']),
+  /** The designer's one line on how it reads. */
+  summary: z.string().max(200).nullable().default(null),
+  /** "Designer's second look: …" notes, and what a round left as it was. */
+  notes: z.array(z.string().max(TALK_LIMITS.note)).max(12).default([]),
+  /** The findings as read (for case files), and those dropped with why. */
+  findings: z.array(z.unknown()).max(8).default([]),
+  dropped: z
+    .array(z.object({ line: z.string().max(200), why: z.string().max(40) }))
+    .max(8)
+    .default([]),
+  /** Suggested house rules: offered once the house rules vet them, never kept on their own. */
+  offers: z
+    .array(z.object({ rule: z.unknown(), line: z.string().max(200) }))
+    .max(8)
+    .default([]),
+  /** The round it took: none, kept (no worse), or left as it was. */
+  round: z.enum(['none', 'kept', 'refused']).default('none'),
+  /** Why it was skipped or failed, in the app's words. */
+  line: z.string().max(300).nullable().default(null),
+  at: z.string(),
+});
+export type OptionLook = z.infer<typeof OptionLook>;
+
 /** One option (A, B, C) of a proposal: a version as the runner builds it, not yet a version. */
 export const ProposalOption = z.object({
   letter: z.enum(['A', 'B', 'C']),
@@ -448,6 +480,8 @@ export const ProposalOption = z.object({
   waivers: z.array(z.object({ key: z.string(), text: z.string(), at: z.string() })).default([]),
   /** The version made by its first accept. */
   version: z.string().nullable().default(null),
+  /** Its second look (Thorough, a model that can see); null: none (yet). */
+  look: OptionLook.nullable().default(null),
 });
 export type ProposalOption = z.infer<typeof ProposalOption>;
 
@@ -455,7 +489,7 @@ export const Proposal = z.object({
   projectId: z.string(),
   id: z.string(),
   conversationId: z.string(),
-  recordVersion: z.number().int().min(1).max(TALK_RECORD_VERSION),
+  recordVersion: z.number().int().min(1).max(PROPOSAL_RECORD_VERSION),
   n: z.number().int().positive(),
   turnId: z.string(),
   at: z.string(),
@@ -478,7 +512,8 @@ export function conversationFromRecord(raw: unknown): Conversation | null {
 export function proposalFromRecord(raw: unknown): Proposal | null {
   const rec = raw as { recordVersion?: unknown } | null;
   if (!rec || typeof rec !== 'object') return null;
-  if (typeof rec.recordVersion === 'number' && rec.recordVersion > TALK_RECORD_VERSION) return null;
+  if (typeof rec.recordVersion === 'number' && rec.recordVersion > PROPOSAL_RECORD_VERSION)
+    return null;
   const r = Proposal.safeParse(raw);
-  return r.success ? { ...r.data, recordVersion: TALK_RECORD_VERSION } : null;
+  return r.success ? { ...r.data, recordVersion: PROPOSAL_RECORD_VERSION } : null;
 }

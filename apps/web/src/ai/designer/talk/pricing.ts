@@ -13,6 +13,7 @@ import {
   type TalkAsk,
   contextFor,
   estimateRun,
+  looksAt,
   planScope,
   plannedPrompts,
 } from '@dhd/core';
@@ -94,6 +95,8 @@ export function priceRequest(i: PriceInput): Priced {
     model: i.ai.model,
     quality: sp.brief.quality,
     prices: i.prices,
+    // Thorough with a model that can see ends with the second look, in the same figures.
+    look: looksAt(sp.brief, i.ai),
   });
   return { sp, est };
 }

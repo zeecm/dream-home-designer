@@ -115,13 +115,14 @@ for any plan.
   ("nothing in the corridor") that become checks on every proposal. [spec](docs/specs/ai-designer-v2.md)
 - AI interior designer v2, slice 3b: the storage lens is built (each proposal scored on the
   storage meter for who sleeps where, how much they own on the card, storage kept when a room is
-  short); the second look at each proposal is next.
+  short), and the second look (each Thorough proposal drawn as a plan and looked at once; what the
+  app's checks agree with is acted on, the rest are notes on the card).
 
 ### Planned
 1. Levels you can switch between in the editor: today it shows only the first level of a
    multi-level home (a maisonette), so the upper floor can't be drawn or designed.
-2. AI interior designer v2, slice 3b: a second look at each proposal (flow, focal point, a room
-   too empty or too full), regression cases from it, and asking the designer on a comment.
+2. AI interior designer v2, slice 3b: regression cases from the second look ("Save a case"), and
+   asking the designer on a comment.
 3. Elevations on the contractor sheet (elevation slice 2), with piece labels, the saved
    picture's font and the iPhone canvas size. [spec](docs/specs/elevation.md)
 4. Storage meter 1b: storage beds, a pantry and a bay seat. [spec](docs/specs/storage-meter.md)

@@ -1,3 +1,4 @@
+import { IMAGE_TOKENS } from './look/vision';
 import type { StepPrompt } from './prompts';
 import type { DesignBrief, Provider, Usage } from './schema';
 
@@ -97,8 +98,16 @@ export const OUTPUT: Record<
   DesignBrief['quality'],
   Record<StepPrompt['kind'], { typical: number; max: number }>
 > = {
-  thorough: { layout: { typical: 8000, max: 24_000 }, room: { typical: 5000, max: 16_000 } },
-  quick: { layout: { typical: 4000, max: 12_000 }, room: { typical: 2500, max: 8000 } },
+  thorough: {
+    layout: { typical: 8000, max: 24_000 },
+    room: { typical: 5000, max: 16_000 },
+    look: { typical: 600, max: 3000 },
+  },
+  quick: {
+    layout: { typical: 4000, max: 12_000 },
+    room: { typical: 2500, max: 8000 },
+    look: { typical: 600, max: 3000 },
+  },
 };
 
 /** How many times a room's answer is sent back when it fails a hard check, at most. */
@@ -110,6 +119,8 @@ export const fixRoundsFor = (quality: DesignBrief['quality']) =>
   quality === 'quick' ? 1 : FIX_ROUNDS;
 /** Tokens a fix round's prompt adds for the failures and where the pieces were placed. */
 const FIX_EXTRA = 600;
+/** Tokens of the second look's facts sheet and task, about. */
+const LOOK_FACTS = 1500;
 
 export interface StepEstimate {
   step: string;
@@ -154,13 +165,33 @@ export function estimateRun(
     model: string;
     quality: DesignBrief['quality'];
     prices?: Record<string, Price>;
+    /**
+     * The run ends with a second look (Thorough, a model that can see): one more request, its
+     * prompt the run's prefix (cached), the facts and the pictures, and at most one round of a
+     * room step's price in `fix` (it counts against the run's FIX_PER_RUN).
+     */
+    look?: boolean;
   },
 ): RunEstimate {
   const price = priceOf(opts.model, opts.prices);
+  const first = prompts[0];
+  const all = [...prompts];
+  if (opts.look && first) {
+    // The facts sheet and the task as characters; the pictures as the tokens they cost.
+    const extra = LOOK_FACTS * CHARS_PER_TOKEN + IMAGE_TOKENS[opts.provider] * CHARS_PER_TOKEN;
+    all.push({
+      ...first,
+      step: 'look',
+      kind: 'look',
+      shared: '',
+      tail: 'x'.repeat(Math.ceil(extra)),
+      maxTokens: OUTPUT[opts.quality].look.max,
+    });
+  }
   let room = 0;
   /** Each fix request the rooms may send, priced. */
   const fixOnes: number[] = [];
-  const steps = prompts.map((p): StepEstimate => {
+  const steps = all.map((p): StepEstimate => {
     const input = tokensOf(p.system.length + p.prefix.length + p.shared.length + p.tail.length);
     const cacheable = Math.min(
       input,
@@ -170,19 +201,20 @@ export function estimateRun(
     const n = p.kind === 'room' ? ++room : 0;
     // A room step may be sent back to be fixed, once or twice by quality.
     const rounds = p.kind === 'room' ? fixRoundsFor(opts.quality) : 0;
+    // The second look reads the run's prefix from the cache, like any step after the first.
+    const cached = n >= 2 || p.kind === 'look';
     let usd: StepEstimate['usd'] = null;
     if (price) {
-      const typical: Counts =
-        n >= 2
-          ? { input: input - cacheable, cachedInput: cacheable, cacheWrite: 0, output: out.typical }
-          : n === 1 && opts.provider === 'anthropic'
-            ? {
-                input: input - cacheable,
-                cachedInput: 0,
-                cacheWrite: cacheable,
-                output: out.typical,
-              }
-            : { input, cachedInput: 0, cacheWrite: 0, output: out.typical };
+      const typical: Counts = cached
+        ? { input: input - cacheable, cachedInput: cacheable, cacheWrite: 0, output: out.typical }
+        : n === 1 && opts.provider === 'anthropic'
+          ? {
+              input: input - cacheable,
+              cachedInput: 0,
+              cacheWrite: cacheable,
+              output: out.typical,
+            }
+          : { input, cachedInput: 0, cacheWrite: 0, output: out.typical };
       const high = usdOf({ input, cachedInput: 0, cacheWrite: 0, output: out.max }, price);
       // A fix round sends the prompt again with the answer and the failures (about a typical
       // answer's length more), and may write as much as the first.
@@ -202,8 +234,12 @@ export function estimateRun(
       usd,
     };
   });
+  // The second look's round is a room step sent again: the dearest room's fix request.
+  if (opts.look && price && fixOnes.length) fixOnes.push(Math.max(...fixOnes));
   const sum = (f: (s: StepEstimate) => number) => steps.reduce((t, s) => t + f(s), 0);
-  const roomFixes = steps.filter((s) => s.kind === 'room').length * fixRoundsFor(opts.quality);
+  const roomFixes =
+    steps.filter((s) => s.kind === 'room').length * fixRoundsFor(opts.quality) +
+    (opts.look && room ? 1 : 0);
   const fixes = Math.min(FIX_PER_RUN, roomFixes);
   return {
     requests: steps.length,

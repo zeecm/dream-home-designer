@@ -2,6 +2,7 @@ import {
   type Conversation,
   DRAFT_CHARS,
   type DraftDesign,
+  PROPOSAL_RECORD_VERSION,
   type Proposal,
   type ProposalOption,
   type RunEstimate,
@@ -18,6 +19,7 @@ import {
   atMostOf,
   cut,
   levelFingerprint,
+  looksAt,
   nextLetter,
   optionName,
   planScope,
@@ -26,6 +28,7 @@ import {
 import { meterSetting } from '../../../storage/store';
 import { useStore } from '../../../store';
 import { aiSettings } from '../../credentials';
+import { rasterise } from '../look';
 import { freshPrice, readPrice, trialResult } from '../results';
 import { blankStep, runDesign } from '../run';
 import { addUsage, capUsd, countRun, overLimit, priceTable, spent, usd } from '../spend';
@@ -455,7 +458,7 @@ async function run(
     projectId: project.id,
     id: proposalId,
     conversationId: conv.id,
-    recordVersion: TALK_RECORD_VERSION,
+    recordVersion: PROPOSAL_RECORD_VERSION,
     n: conv.nextN,
     turnId: ids.turn,
     at: nowIso(),
@@ -511,6 +514,7 @@ function newOption(
     accepted: [],
     waivers: [],
     version: null,
+    look: null,
     note: null,
   };
 }
@@ -565,12 +569,15 @@ async function runOption(
   const ended = new Promise<void>((resolve) => {
     endRun = resolve;
   });
+  // Thorough with a model that can see ends with the second look (priced in its figure).
+  const looks = looksAt(sp.brief, ai);
   const steps = [
     ...(sp.plan.layout ? [blankStep('layout', 'Layout and style', 'layout')] : []),
     ...(sp.plan.rooms === 'all'
       ? (sp.expected ?? [])
       : sp.plan.rooms.map((key) => ({ key, label: sp.draft.spaces[key]?.name ?? 'Room' }))
     ).map((r) => blankStep(r.key, r.label, 'room')),
+    ...(looks ? [blankStep('look', 'Second look', 'look')] : []),
   ];
   const running: Running = {
     designId: sp.draft.id,
@@ -646,7 +653,8 @@ async function runOption(
         : x,
     );
   };
-  const { state, design } = await runDesign({
+  const { state, design, look } = await runDesign({
+    ...(looks ? { look: { rasterise } } : {}),
     ai,
     ctx: sp.ctx,
     design: sp.draft,
@@ -712,6 +720,8 @@ async function runOption(
                     status,
                     // Named by the designer's summary (A keeps its room's name without one).
                     name: optionName(o, o.letter === 'A' ? o.name : undefined),
+                    // The second look's notes; a round it kept is in the rooms already saved.
+                    ...(look ? { look, spaces: structuredClone(design.spaces) } : {}),
                     note: cutNote(
                       state.halt?.message ??
                         (failed ? (state.steps.find((s) => s.error)?.error ?? null) : null),

@@ -36,7 +36,7 @@ import { clean, pt, r2 } from './util';
 export interface StepPrompt {
   /** 'layout', or the space's key. */
   step: string;
-  kind: 'layout' | 'room';
+  kind: 'layout' | 'room' | 'look';
   system: string;
   /** The same for every step of a run. */
   prefix: string;
@@ -47,6 +47,14 @@ export interface StepPrompt {
   schema: Record<string, unknown>;
   maxTokens: number;
   effort: 'high' | 'medium' | 'low';
+  /** Pictures sent before the tail (the second look's plan drawing, PNG, base64). */
+  images?: PromptImage[];
+}
+
+/** A picture in a request: base64 with no `data:` prefix. */
+export interface PromptImage {
+  mediaType: 'image/png' | 'image/jpeg';
+  data: string;
 }
 
 /** The user message: everything after the system prompt, stable parts first. */

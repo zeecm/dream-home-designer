@@ -204,6 +204,7 @@ describe('the accept precheck fails closed (tech lead)', () => {
         accepted: [],
         waivers: [],
         version: null,
+        look: null,
         note: null,
       },
     ],

@@ -404,11 +404,11 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
               const c = useTalk.getState().conv;
               if (c) void act({ type: 'setBrief', brief: { ...c.brief, quality: q } });
             }}
-            what={
+            what={`${
               t.scope.all
                 ? 'one for the layout and style, then one for each room'
                 : `one for ${t.scope.label}`
-            }
+            }${est.steps.some((x) => x.kind === 'look') ? ', and a second look at the result' : ''}`}
             action="Go ahead"
             anyway="Go ahead anyway"
             backLabel="Not now"

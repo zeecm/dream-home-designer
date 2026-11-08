@@ -100,6 +100,7 @@ describe('the level a conversation designs', () => {
           accepted: [],
           waivers: [],
           version: null,
+          look: null,
           note: null,
         },
       ],

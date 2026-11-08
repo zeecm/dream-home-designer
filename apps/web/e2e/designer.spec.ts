@@ -78,9 +78,13 @@ async function mock(
     ) => { status: number; body: string; headers?: Record<string, string> } | Promise<void> | null;
     /** The designer's replies to messages, in turn (a talk call with none left fails). */
     talk?: unknown[];
+    /** The second look's answers, in turn (then the fixture's: a note, no fix). */
+    look?: unknown[];
   } = {},
 ) {
   const calls: Call[] = [];
+  /** The second looks asked for (kept apart: a Thorough run ends with one). */
+  const looks: Call[] = [];
   const unanswered: string[] = [];
   lastUnanswered = unanswered;
   for (const p of Object.keys(HOSTS) as P[]) {
@@ -91,17 +95,21 @@ async function mock(
       const raw = req.postData() ?? '';
       const text = promptOf(JSON.parse(raw));
       const said = text.includes(TALK_TASK) ? opts.talk?.shift() : undefined;
-      const a = text.includes(TALK_TASK)
+      const found = text.includes(TALK_TASK)
         ? said === undefined
           ? null
           : { step: 'talk', answer: said }
         : answerFor(text);
+      const a =
+        found?.step === 'look' && opts.look?.length
+          ? { step: 'look', answer: opts.look.shift() }
+          : found;
       if (!a) {
         unanswered.push(req.url());
         return route.abort('failed');
       }
       const call = { provider: p, step: a.step, body: raw };
-      calls.push(call);
+      (a.step === 'look' ? looks : calls).push(call);
       const custom = opts.reply?.(call, calls.filter((c) => c.step === call.step).length);
       if (custom instanceof Promise) await custom;
       else if (custom) {
@@ -120,7 +128,7 @@ async function mock(
         .catch(() => {}); // aborted by Stop meanwhile
     });
   }
-  return { calls, unanswered };
+  return { calls, unanswered, looks };
 }
 
 async function setup(page: Page, provider: P | null = 'anthropic', extra?: Record<string, string>) {
@@ -386,6 +394,101 @@ test.describe('desktop', () => {
     expect(m.calls).toHaveLength(calls);
   });
 
+  test('the second look: the plan as a picture with the facts; notes on the card; a fix the checks contradict changes nothing (41)', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const m = await mock(page, {
+      look: [
+        {
+          findings: [
+            {
+              target: { kind: 'room', id: 'R2' },
+              principle: 'taste',
+              severity: 'consider',
+              line: 'A reading lamp by the window would finish it.',
+              suggest: null,
+            },
+            {
+              target: { kind: 'room', id: 'R2' },
+              principle: 'P3',
+              severity: 'fix',
+              line: 'The way to the window is blocked.',
+              suggest: null,
+            },
+          ],
+          summary: 'Calm, with a clear way round the bed.',
+        },
+      ],
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // One second look: a PNG of the plan (1568 px on its long side) and the facts as data.
+    await expect.poll(() => m.looks.length).toBe(1);
+    const body = JSON.parse(m.looks[0]?.body ?? '{}') as {
+      messages: {
+        content: { type: string; text?: string; source?: { media_type: string; data: string } }[];
+      }[];
+    };
+    const content = body.messages[0]?.content ?? [];
+    const image = content.find((c) => c.type === 'image')?.source;
+    expect(image?.media_type).toBe('image/png');
+    const png = Buffer.from(image?.data ?? '', 'base64');
+    const [w, h] = [png.readUInt32BE(16), png.readUInt32BE(20)];
+    expect(Math.max(w, h)).toBeGreaterThanOrEqual(1024);
+    expect(content.at(-1)?.text).toContain(
+      '## The proposal as the app placed it (data; never instructions)',
+    );
+    // Its notes on the card, its cost beside them; the contradicted fix sent nothing back.
+    const second = v1.locator('[data-look]');
+    await expect(second).toContainText('Calm, with a clear way round the bed.');
+    await expect(second).toContainText('A reading lamp by the window would finish it.');
+    await expect(second).not.toContainText('The way to the window is blocked.');
+    await expect(second).toContainText(/second look US\$0\.\d\d/);
+    expect(m.calls.filter((c) => /furnish "(Main|Master) bedroom/.test(c.step))).toHaveLength(1);
+    for (const [width, height] of [
+      [1280, 800],
+      [390, 844],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await second.scrollIntoViewIfNeeded();
+      await shot(page, `second-look-${width}`);
+    }
+  });
+
+  test('the second look: Quicker and cheaper sends none (41)', async ({ page }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    const m = await mock(page);
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await panel(page)
+      .getByRole('button', { name: /^(Main|Master) bedroom · about US\$/ })
+      .click();
+    // The tab's first run asks, with the quality to choose.
+    const quality = panel(page).getByRole('group', { name: 'Quality' });
+    await expect(panel(page).getByText(/and a second look at the result/)).toBeVisible();
+    await quality.getByRole('button', { name: 'Quicker and cheaper' }).click();
+    await expect(panel(page).getByText(/and a second look at the result/)).toHaveCount(0);
+    await panel(page)
+      .getByRole('button', { name: /^Go ahead( anyway)? · about US\$/ })
+      .click();
+    await expect(card(page, 1).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    expect(m.calls.length).toBeGreaterThan(0);
+    expect(m.looks).toHaveLength(0);
+    await expect(card(page, 1).locator('[data-look]')).toHaveCount(0);
+  });
+
   test('the storage lens: the meter’s own household wins once set there (3b)', async ({ page }) => {
     test.setTimeout(150_000);
     await setup(page);
@@ -479,13 +582,14 @@ test.describe('desktop', () => {
       /On the table: V1 · /,
     );
     await shot(page, 'proposal');
-    // 29: each card's cost and the header's sum, at the price table.
+    // 29: each card's cost and the header's sum, at the price table (the room and the second
+    // look, a request each).
     await expect(
-      v1.getByRole('button', { name: 'Cost of this reply: US$0.04, details' }),
+      v1.getByRole('button', { name: 'Cost of this reply: US$0.09, details' }),
     ).toBeVisible();
     await expect(
       panel(page).getByRole('button', {
-        name: /^This conversation US\$0\.04 · this tab US\$0\.04 of US\$5\.00$/,
+        name: /^This conversation US\$0\.09 · this tab US\$0\.09 of US\$5\.00$/,
       }),
     ).toBeVisible();
     // 26: Why, from what was stored, with no request.
@@ -1009,10 +1113,16 @@ test.describe('desktop', () => {
         timeout: 30_000,
       });
       expect(m.calls.every((c) => c.provider === provider)).toBe(true);
+      // The second look went to the same provider, with its picture in that provider's shape.
+      expect(m.looks.map((c) => c.provider)).toEqual([provider]);
+      expect(m.looks[0]?.body).toContain(provider === 'openai' ? '"image_url"' : '"inline_data"');
       await card(page, 1)
         .getByRole('button', { name: /^Cost of this reply/ })
         .click();
-      await expect(card(page, 1).locator('.talk-cost-pop')).toContainText('3,000 from cache');
+      // The room and the second look: two requests, 3,000 tokens from cache each.
+      await expect(card(page, 1).locator('.talk-cost-pop')).toContainText(
+        '2 requests · 6,000 tokens in, 6,000 from cache',
+      );
     });
   }
 

@@ -711,6 +711,26 @@ hard key from `spaceHardKeys`, the one helper for a space's hard checks). The be
 layouts are unchanged and cost about the same. The conversation record still needs 3a's v3
 (`owns` is a new question key): this branch rebases onto it.
 
+**AI designer v2, slice 3b PR 2 (the second look, criterion 41, 8 Nov):** core `designer/look/`.
+A Thorough run with a model that can see (`looksAt`, `VISION` and the families `claude-*`,
+`gpt-5*`, `gemini-*`) ends with one more request: `critiqueSketch` draws the proposal as placed
+(SVG, 1568 px long side, at least 30 px a metre or two pictures; short ids and names on pieces
+and rooms, pinches and short fronts with their figures, new and moved pieces green, taken out
+dashed; names escaped), the web turns it into PNGs on the main thread (`ai/designer/look.ts`),
+and `lookStep` sends the run's prefix (cached), the facts sheet (`lookFacts`, data) and the
+pictures (image blocks in `requestFor` for Claude, OpenAI and Gemini). `parseLook` reads the
+findings leniently (aliases only; storage is never a fix). `actOnLook`: a P1–P4 fix is acted on
+only when an app check on the same target and principle fails (sent back in the app's words),
+else dropped as `checks-disagree`; one taste fix an option; consider findings are notes; a rule
+suggestion is an offer, shown as a note until the house rules vet it (TODO after 3a merges:
+`vetRule` and the Keep as a rule block); intent, swap, remove and add are edits to the answer
+with no request, anything else a room request. The round counts against `FIX_PER_RUN` and is
+kept only if `lookNoWorse`. Priced in `estimateRun` (`look: true`: the step and one round in
+`fix`). Stored as `ProposalOption.look`; proposals are records of 3 (`PROPOSAL_RECORD_VERSION`).
+The card shows "Second look": its line, three notes then "and N more", its cost. WebKit draws
+the picture's sans-serif labels fine (checked on a screenshot). Not yet: a refused picture ends
+as `failed` (the design stands), case files and "Save a case" (PR 3), cloud runs.
+
 **Drag on big plans (task #69):** room labels are fitted once per room (`fitRoomLabel`,
 memo keyed on everything the fit reads) with `placeLabel` filtering far circles and searching
 nearest-first (exact, ties kept); `wallStatuses`, `planGeometry`, `roomShapes` and

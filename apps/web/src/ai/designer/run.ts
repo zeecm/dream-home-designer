@@ -8,23 +8,36 @@ import {
   FIX_PER_RUN,
   type FixRequest,
   type Level,
+  type LookImage,
+  type OptionLook,
   type ParseResult,
   type Price,
+  type PromptImage,
   type RunPlan,
   type SpaceDesign,
   type StepPrompt,
   type Usage,
+  actOnLook,
   aliasesFor,
+  applyLookEdit,
+  critiqueSketch,
   designResult,
   fixRoundsFor,
+  keptAsWas,
   layoutStep,
   lensOn,
+  lensReports,
   levelBounds,
+  lookFacts,
+  lookNoWorse,
+  lookStep,
   parseConcept,
+  parseLook,
   parseSpaceDesign,
   placedWords,
   priceOf,
   resolveAsset,
+  roomIdAt,
   roomStep,
   tokensOf,
   usageOf,
@@ -52,7 +65,7 @@ export interface StepState {
   /** 'layout', or the space's key. */
   key: string;
   label: string;
-  kind: 'layout' | 'room';
+  kind: 'layout' | 'room' | 'look';
   status: StepStatus;
   tokens: number;
   usd: number | null;
@@ -124,6 +137,12 @@ export interface RunOptions {
    * reached (a new figure set meanwhile); without it the rest of the run goes on past it.
    */
   askAgain?: boolean;
+  /**
+   * The second look (tech 3b §2): given, the run ends with one (Thorough, a model that can see;
+   * the caller decides). The device turns the core's plan drawings into PNGs: null when it
+   * can't (the look is skipped, nothing else fails).
+   */
+  look?: { rasterise: (images: LookImage[]) => Promise<PromptImage[] | null> };
 }
 
 export { NET_WAITS, QUIET_MS, classify } from './request';
@@ -191,7 +210,9 @@ function untilStopped<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-export async function runDesign(o: RunOptions): Promise<{ state: RunState; design: DraftDesign }> {
+export async function runDesign(
+  o: RunOptions,
+): Promise<{ state: RunState; design: DraftDesign; look: OptionLook | null }> {
   const { ai, ctx, plan } = o;
   // Placed and checked in the designer's worker when there is one; here otherwise. Stop always
   // ends the run, even while a check is out (a worker that hangs or dies says nothing).
@@ -214,6 +235,9 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
   const roomRows =
     plan.rooms === 'all' ? (o.expected ?? []) : plan.rooms.map((key) => ({ key, label: key }));
   for (const r of roomRows) state.steps.push(blank(r.key, r.label, 'room'));
+  if (o.look) state.steps.push(blank('look', 'Second look', 'look'));
+  /** The second look, once it has run (or why it didn't). */
+  let look: OptionLook | null = null;
 
   const update = () =>
     o.onUpdate?.({ ...state, steps: state.steps.map((s) => ({ ...s })), usage: [...state.usage] });
@@ -343,8 +367,139 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
   const ended = async (phase: RunState['phase']) => {
     finish(phase);
     await saving;
-    return { state, design };
+    return { state, design, look };
   };
+
+  /** Fix requests the run may still send (the estimate counts this many at most). */
+  let fixesLeft = FIX_PER_RUN;
+  // The storage lens's block in each room step (what the space should hold), unless it's off.
+  const storage = o.result && !lensOn(o.result, 'storage') ? false : o.result?.storage;
+
+  const blankLook = (): OptionLook => ({
+    state: 'done',
+    summary: null,
+    notes: [],
+    findings: [],
+    dropped: [],
+    offers: [],
+    round: 'none',
+    line: null,
+    at: new Date().toISOString(),
+  });
+
+  /** The second look at what this run designed (`designed`: the spaces it answered). */
+  async function secondLook(
+    st: StepState,
+    designed: { key: string; rooms: string[]; name: string }[],
+  ): Promise<OptionLook> {
+    const out = blankLook();
+    const before = await place(ctx.base, ctx.before, design, o.result);
+    design.aliases = aliasesFor(before.level, design.aliases);
+    const scope = plan.rooms === 'all' ? null : designed.flatMap((s) => s.rooms);
+    const facts = lookFacts(before, ctx.base, {
+      aliases: design.aliases,
+      scope,
+      brief: ctx.brief,
+      lenses: lensReports(before, ctx.base, ctx.brief, o.result ?? {}),
+      roomOf: (it) => roomIdAt(before.level, { x: it.position.x, y: it.position.z }),
+    });
+    const pictures = critiqueSketch(before, ctx.base, {
+      aliases: design.aliases,
+      scope,
+      north: ctx.site?.north ?? null,
+    });
+    const images = await untilStopped(
+      o.look?.rasterise(pictures) ?? Promise.resolve(null),
+      o.signal,
+    );
+    if (!images?.length) {
+      st.status = 'skipped';
+      return { ...out, state: 'skipped', line: 'The plan couldn’t be drawn for the second look.' };
+    }
+    st.label = 'Second look · Looking…';
+    update();
+    const answer = await step(lookStep(ctx, facts, images), st, parseLook);
+    st.label = 'Second look';
+    if (!answer) {
+      // A refused picture or an unreadable answer: the look ends there; the design stands.
+      return { ...out, state: 'failed', line: st.error };
+    }
+    out.summary = answer.summary;
+    out.findings = answer.findings;
+    const answers = Object.fromEntries(
+      designed.flatMap((s) => {
+        const d = design.spaces[s.key]?.design;
+        return d ? [[s.key, d]] : [];
+      }),
+    );
+    const acted = actOnLook(answer, { result: before, aliases: design.aliases, answers });
+    out.notes = acted.notes;
+    out.offers = acted.offers.map((x) => ({ rule: x.rule, line: x.line }));
+    out.dropped = acted.dropped.map((d) => ({ line: d.finding.line, why: d.why }));
+    if (!acted.edits.length && !acted.rounds.length) return out;
+
+    // The round: the edits made, and each space's request sent (while the run's few last).
+    const next: DraftDesign = structuredClone(design);
+    let changed = false;
+    acted.edits.forEach((e, n) => {
+      const entry = next.spaces[e.space];
+      if (!entry?.design) return;
+      entry.design = applyLookEdit(entry.design, e, n + 1);
+      changed = true;
+    });
+    const bounds = levelBounds(before.level);
+    for (const r of acted.rounds) {
+      if (fixesLeft <= 0 || !(await mayStart())) break;
+      const s = designed.find((x) => x.key === r.space);
+      const entry = next.spaces[r.space];
+      const space = before.spaces.find((x) => x.key === r.space);
+      if (!s || !entry?.design || !space) continue;
+      fixesLeft--;
+      st.fixing = { round: 1, problems: r.failures.length };
+      st.status = 'running';
+      say(`Second look: sending ${s.name} back once.`);
+      update();
+      const fix: FixRequest = {
+        round: (entry.fixes ?? 0) + 1,
+        failures: r.failures,
+        placed: placedWords(before.level, space, before.refs, design.aliases, ctx.site?.north ?? 0),
+      };
+      const again = await step(
+        roomStep(ctx, space, before.level, design.aliases, {
+          concept: design.concept,
+          ...(storage !== undefined ? { storage } : {}),
+          ...(plan.talk ? { talk: plan.talk } : {}),
+          locks: plan.locks ?? [],
+          previous: entry.design,
+          fix,
+        }),
+        st,
+        (raw) => parseSpaceDesign(raw, bounds),
+      );
+      st.fixing = null;
+      if (again) {
+        entry.design = mergeAnswer(
+          plan.previous?.[r.space],
+          again,
+          plan.keep?.[r.space] ?? [],
+          o.result,
+        );
+        changed = true;
+      }
+    }
+    st.status = 'done';
+    if (!changed) return out;
+    const after = await place(ctx.base, ctx.before, next, o.result);
+    if (lookNoWorse(before, after)) {
+      design.spaces = next.spaces;
+      return { ...out, round: 'kept' };
+    }
+    return {
+      ...out,
+      round: 'refused',
+      notes: [...out.notes, ...acted.acted.map(keptAsWas)].slice(0, 12),
+    };
+  }
 
   try {
     // 1. The layout and style.
@@ -383,7 +538,8 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     const spaces = r.spaces.filter((s) => wanted.includes(s.key));
     // The room rows as they really are.
     const layoutRow = state.steps.filter((s) => s.kind === 'layout');
-    state.steps = [...layoutRow, ...spaces.map((s) => blank(s.key, s.name, 'room'))];
+    const lookRow = state.steps.filter((s) => s.kind === 'look');
+    state.steps = [...layoutRow, ...spaces.map((s) => blank(s.key, s.name, 'room')), ...lookRow];
     for (const s of spaces) design.spaces[s.key] = { name: s.name, status: 'skipped' };
     if (plan.layout) await save();
     update();
@@ -418,10 +574,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     // A run-stopping error (a refused key, a quota): set before the first room's gate opens,
     // so no other room is sent after it.
     let runError: unknown = null;
-    /** Fix requests the run may still send (the estimate counts this many at most). */
-    let fixesLeft = FIX_PER_RUN;
-    // The storage lens's block in each room step (what the space should hold), unless it's off.
-    const storage = o.result && !lensOn(o.result, 'storage') ? false : o.result?.storage;
+
     const room = async (s: (typeof spaces)[number], onStart?: () => void) => {
       const st = state.steps.find((x) => x.key === s.key) as StepState;
       if (!(await mayStart())) {
@@ -535,6 +688,26 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       await firstDone;
       if (runError) throw runError;
     }
+
+    // 3. The second look: the proposal drawn as a plan, looked at once, what the app's checks
+    // agree with acted on in one round (counted in the run's fix requests), kept if no worse.
+    const lookSt = state.steps.find((x) => x.kind === 'look');
+    const designedHere = spaces.filter((s) => design.spaces[s.key]?.status === 'done');
+    if (o.look && lookSt && !stopping && !o.signal.aborted) {
+      if (!designedHere.length) lookSt.status = 'skipped';
+      else if (await mayStart()) {
+        try {
+          look = await secondLook(lookSt, designedHere);
+        } catch (e) {
+          look = { ...blankLook(), state: 'stopped' };
+          if (!(e instanceof Stopped)) throw e;
+        } finally {
+          update();
+          void save();
+        }
+      }
+    }
+    if (lookSt?.status === 'waiting') lookSt.status = 'skipped';
     const done = state.steps.filter((s) => s.status === 'done').length;
     if (stopping || o.signal.aborted) {
       say('Stopped. Finished steps are kept.');

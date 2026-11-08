@@ -1,6 +1,7 @@
 import {
   type Change,
   type DesignResult,
+  type OptionLook,
   type ResultCheck,
   type StorageAmount,
   type SubsetReport,
@@ -106,6 +107,53 @@ function OwnsChips({ amount, projectId }: { amount: StorageAmount; projectId: st
           </button>
         ))}
       </span>
+    </div>
+  );
+}
+
+/** How many of the second look's notes show before "and N more". */
+const LOOK_SHOWN = 3;
+
+/**
+ * The designer's second look on the card (tech 3b §2.7): its one line, its notes (three, then
+ * "and N more"), what a round it took did, and what it cost. Notes, never verdicts: the checks
+ * above say whether the proposal passes.
+ */
+function SecondLook({ look, usage }: { look: OptionLook; usage: CardModel['usage'] }) {
+  const cost = usage.filter((u) => u.step === 'look').reduce((t, u) => t + (u.usd ?? 0), 0);
+  const notes = look.notes;
+  const head = look.state === 'done' ? look.summary : look.line;
+  if (!head && !notes.length && look.round === 'none') return null;
+  return (
+    <div data-look="">
+      <dt>Second look</dt>
+      <dd>
+        {head && <span>{keepTogether(head)}</span>}
+        {look.round === 'kept' && (
+          <span className="talk-look-round">
+            {' '}
+            <Mark kind="check" /> Changed after it, no worse on the checks.
+          </span>
+        )}
+        {notes.length > 0 && (
+          <ul className="talk-look-notes">
+            {notes.slice(0, LOOK_SHOWN).map((n) => (
+              <li key={n}>{keepTogether(n.replace(/^Designer’s second look: /, ''))}</li>
+            ))}
+          </ul>
+        )}
+        {notes.length > LOOK_SHOWN && (
+          <details className="talk-already">
+            <summary>and {notes.length - LOOK_SHOWN} more</summary>
+            <ul>
+              {notes.slice(LOOK_SHOWN).map((n) => (
+                <li key={n}>{keepTogether(n.replace(/^Designer’s second look: /, ''))}</li>
+              ))}
+            </ul>
+          </details>
+        )}
+        {cost > 0 && <span className="muted talk-look-cost">second look {usd(cost)}</span>}
+      </dd>
     </div>
   );
 }
@@ -1006,6 +1054,9 @@ export const ProposalCard = memo(function ProposalCard({
                   : ''}
               </dd>
             </div>
+          )}
+          {!running && card.option?.look && (
+            <SecondLook look={card.option.look} usage={card.usage} />
           )}
         </dl>
       )}

@@ -7986,6 +7986,14 @@ textarea {
   cursor: pointer;
   color: var(--muted);
 }
+.talk-look-notes {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+.talk-look-cost {
+  display: block;
+  margin-top: 4px;
+}
 .talk-owns {
   display: flex;
   flex-wrap: wrap;

@@ -89,6 +89,7 @@ function option(letter: 'A' | 'B' | 'C', summary = ''): ProposalOption {
     note: null,
     waivers: [{ key: 'walkway:1', text: 'Corridor 0.80 m', at: AT }],
     version: null,
+    look: null,
   };
 }
 
@@ -184,6 +185,7 @@ describe('Bring this back (criterion 27)', () => {
       accepted: [],
       usage: [],
       version: null,
+      look: null,
       brief: today,
       base: { variant: 'after', fingerprint: 'fpNow' },
     });
