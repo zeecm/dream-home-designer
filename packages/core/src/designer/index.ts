@@ -44,6 +44,7 @@ export {
   sleepingPlan,
 } from './principles';
 export { briefData, compass, designContext, planForDesign, type ContextInput } from './describe';
+export * from './lenses';
 export { type WallLock, designLocks, wallLocks } from './locks';
 export {
   type AcceptOptions,

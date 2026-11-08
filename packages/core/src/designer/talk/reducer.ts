@@ -1235,11 +1235,11 @@ const label = (k: QuestionKey) =>
     mobility: 'getting about',
     cooking: 'cooking',
     wfh: 'working from home',
+    owns: 'how much you own',
     budget: 'budget',
     walls: 'walls',
     style: 'style',
     anything: 'anything else',
-    owns: 'what you own',
   })[k];
 
 /** The person's turn for a scope button: their words, or what they asked for. */

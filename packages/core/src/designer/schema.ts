@@ -92,6 +92,12 @@ export const DesignBrief = z.object({
   sleeping: z.record(z.array(z.string().max(20)).max(12)).default({}),
   /** What to call each person (by person key), for the checks' lines. */
   names: z.record(z.string().max(40)).default({}),
+  /**
+   * How much they own (What I know's "How much do you own?"), shared with the storage meter's
+   * own setting. Absent: not said (the meter's setting, Typical by default).
+   */
+  // Read tolerantly (records v3): a value from a later build is not said, not a lost record.
+  owns: z.enum(['few', 'typical', 'lots']).optional().catch(undefined),
   electrical: z.boolean(),
   start: z.enum(['after', 'before']),
   quality: z.enum(['thorough', 'quick']),

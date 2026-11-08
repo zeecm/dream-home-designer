@@ -24,6 +24,7 @@ import {
   ruleSentence,
   scopeCut,
 } from '@dhd/core';
+import { meterSetting } from '../../../storage/store';
 import { useStore } from '../../../store';
 import { aiSettings } from '../../credentials';
 import { freshPrice, readPrice, trialResult } from '../results';
@@ -163,6 +164,8 @@ function priceKey(req: PressRequest): string | null {
     designLevelId(),
     levels ? levelFingerprint(levels.before) : null,
     levels?.after ? levelFingerprint(levels.after) : null,
+    // The storage meter's setting: the room steps' storage block (and the results) read it.
+    meterSetting(doc().id),
     designs.map((d) => [d.id, d.accepted?.at ?? null]),
     useTalk
       .getState()

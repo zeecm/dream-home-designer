@@ -9,16 +9,18 @@ import { planGeometry } from '../plan';
 import { roomShapes } from '../rooms';
 import { ElecPoint } from '../schema';
 import type { Item, Level, Project, Site, Vec2 } from '../schema';
+import type { StorageSetting } from '../storage';
 import { SHELTER_ROOM } from '../structural';
 import { type Suggestion, roomKind, suggestPoints } from '../suggest';
 import { type WalkwayReport, walkwayReport } from '../walkway';
 import { aspectOf } from './accept';
 import { type AliasMap, resolveAlias } from './aliases';
 import { fixedSize, priorityOf, resolveAsset } from './catalogue';
-import { type DesignCheck, designChecks } from './checks';
+import { type CheckOptions, type DesignCheck, designChecks } from './checks';
 import { usesOf } from './checks';
 import { BED_ACCESS } from './checks';
 import { bathroomsHeld, heldAspects, wallsHeld } from './handEdits';
+import { type LensId, type Steer, steerFor, steerOnly } from './lenses';
 import { WET } from './locks';
 import {
   type SpaceIndex,
@@ -30,13 +32,13 @@ import {
   shape,
   spaceIndex,
 } from './place';
-import { ACCESS, type ProgrammeUse, peopleOf } from './principles';
+import { ACCESS, type ProgrammeUse, peopleOf, roleOf } from './principles';
 import { acceptResolve, piecesNoWorse } from './resolve';
 import { ruleKeepOuts } from './rules/check';
 import type { Rule } from './rules/schema';
 import type { Concept, DesignInput, DesignItem, RoomUse, SpaceDesign, SpaceStatus } from './schema';
 import type { Zone } from './schema';
-import { type Intent, type SolveOutcome, applySwap, solveSpace } from './solve';
+import { type Intent, type SolveOutcome, applySwap, solveSpace, storageLost } from './solve';
 import {
   type Face,
   type Space,
@@ -129,6 +131,13 @@ export interface DesignOptions {
   models?: Project['models'];
   /** false: pieces are left where first placed, not moved off the walkways (for tests). */
   walkways?: boolean;
+  /**
+   * The storage meter's own setting (per browser and project), which the storage lens reads
+   * with the brief (`storageSettingFor`). Absent: the meter's default.
+   */
+  storage?: StorageSetting;
+  /** The lenses switched on (DEFAULT_LENSES when absent): they score and steer, never gate. */
+  lenses?: LensId[];
   /**
    * The household's house rules for the version's level (slice 3a): checked as hard R checks,
    * and kept out of by the walkway re-solve. In the key, so a rule edit re-checks at no cost.
@@ -235,6 +244,14 @@ function work(
 ): DesignResult {
   const { brief, aliases, concept } = design;
   const rulesOpt = opts.rules?.length ? { rules: opts.rules } : {};
+  // What the house rules change in a space's outcome (only the fields the checks read, so a
+  // rename keeps the cache): the steered solve is kept only if no rule check gets worse, and a
+  // settled outcome comes from the rules' keep-outs. The plain first solve doesn't read them.
+  const ruleKey = opts.rules?.length
+    ? stableJson(opts.rules.map((r) => [r.id, r.subject, r.relation, r.target, r.n]))
+    : null;
+  /** A settled outcome's key: its first solve's, and the rules whose keep-outs it followed. */
+  const settledKeyOf = (first: string) => (ruleKey ? hash(stableJson([first, ruleKey])) : first);
   const repaired: Note[] = [];
   const dropped: Note[] = [];
   const notes: Note[] = (concept?.notes ?? []).map((text) => ({ text }));
@@ -476,33 +493,60 @@ function work(
       const fixedKey = ix.placed.map(
         (p) => `${p.id}:${p.fp.map((q) => q.x.toFixed(3) + q.y.toFixed(3)).join()}`,
       );
+      // What the lenses ask of the solver here (a short bedroom keeps its wardrobe): weights
+      // only, from the level as this space is about to be furnished, and only for the roles
+      // the answer has (a space with none solves as it would with no lens).
+      const steer = steerOnly(
+        steerFor({ level: { ...named, items: lvl.items }, space: s, brief, opts }),
+        new Set(intents.map((t) => roleOf(t.want.kind))),
+      );
+      /** The space's failing hard checks on a level, the space alone furnished (and `extra`). */
+      const hardOf = (l: Level, extra: Item[] = []) =>
+        spaceHardKeys(
+          l,
+          (it) => inRooms(s.rooms, centreOf(it)),
+          { brief, uses, ...rulesOpt },
+          extra,
+        );
+      /** Whether the first solve took the lenses' weights: its walkway re-solves keep them. */
+      let firstSteered = false;
       const solveWith = (
         keepOut: SpaceIndex['keepOut'],
         keepOutFor?: Set<string>,
         noWorseThan?: PieceCounts,
       ) => {
         ix.placed.length = base;
-        const memoKey = hash(
-          stableJson([
-            design.id,
-            s.key,
-            answer,
-            geomKey,
-            fixedKey,
-            s.rooms.map((id) => uses[id] ?? null),
-            brief.rooms,
-            keepOut.map((k) => k.poly),
-            [...(keepOutFor ?? [])].sort(),
-            opts.walkways !== false,
-            noWorseThan ?? null,
-          ]),
-        );
+        // The weights a solve takes: the first solve's look at them, and its re-solves keep
+        // them only if it took them.
+        const st = keepOut.length ? (firstSteered ? steer : null) : steer;
+        const keyOf = (with_: Steer | null) =>
+          hash(
+            stableJson([
+              design.id,
+              s.key,
+              answer,
+              geomKey,
+              fixedKey,
+              s.rooms.map((id) => uses[id] ?? null),
+              brief.rooms,
+              keepOut.map((k) => k.poly),
+              [...(keepOutFor ?? [])].sort(),
+              opts.walkways !== false,
+              noWorseThan ?? null,
+              with_,
+              // A steered outcome is chosen against the rules' hard checks.
+              with_ ? ruleKey : null,
+            ]),
+          );
+        const memoKey = keyOf(st);
         // A space moved off a walkway before is placed as it ended up.
         const hit =
-          (keepOut.length ? undefined : settledMemo.get(memoKey)) ?? solveMemo.get(memoKey);
+          (keepOut.length ? undefined : settledMemo.get(settledKeyOf(memoKey))) ??
+          solveMemo.get(memoKey);
         if (!keepOut.length) firstKey = memoKey;
         if (hit && !keepOut.length) {
           firstSwap = hit.swap;
+          firstSteered = steeredSolves.has(hit);
           if (hit.swapsTried)
             swaps.push({ space: s.key, tried: hit.swapsTried, taken: !!hit.swap });
         }
@@ -515,22 +559,59 @@ function work(
           return hit;
         }
         ix.keepOut = keepOut;
-        const solved = solveSpace({
-          ix,
-          faces,
-          // A re-solve keeps what the first solve swapped in.
-          intents: (keepOut.length && firstSwap?.intents) || intents,
-          zoneArea,
-          ways,
-          household: peopleOf(brief).filter((p) => p.kind !== 'helper').length,
-          // A walkway re-solve looks less far, and keeps the pieces the first solve chose.
-          ...(keepOut.length ? { budget: RESOLVE_BUDGET, swaps: false } : {}),
-          ...(keepOutFor ? { keepOutFor } : {}),
-          // It stops once it can only end worse in pieces than the solve it would replace.
-          ...(keepOut.length && noWorseThan
-            ? { noWorseThan: { ...noWorseThan, spare: firstSwap?.spare } }
-            : {}),
-        });
+        const solveBy = (st: Steer | null) =>
+          solveSpace({
+            ix,
+            faces,
+            // A re-solve keeps what the first solve swapped in.
+            intents: (keepOut.length && firstSwap?.intents) || intents,
+            zoneArea,
+            ways,
+            household: peopleOf(brief).filter((p) => p.kind !== 'helper').length,
+            // A walkway re-solve looks less far, and keeps the pieces the first solve chose.
+            ...(keepOut.length ? { budget: RESOLVE_BUDGET, swaps: false } : {}),
+            ...(keepOutFor ? { keepOutFor } : {}),
+            // It stops once it can only end worse in pieces than the solve it would replace.
+            ...(keepOut.length && noWorseThan
+              ? { noWorseThan: { ...noWorseThan, spare: firstSwap?.spare } }
+              : {}),
+            ...(st ? { steer: st } : {}),
+          });
+        let solved: SolveOutcome;
+        if (keepOut.length || !steer) solved = solveBy(st);
+        else {
+          // The first solve as it always was (kept under its own key, as with no lens). Only
+          // if it lost storage the lenses protect (a protected piece left out, a preferred one
+          // made narrower) is the space solved again with their weights, and that solve is
+          // kept only if it is no worse: no more pieces left out, short of room or turned
+          // (piecesNoWorse), and no hard check failing that the first passes.
+          const plainKey = keyOf(null);
+          let plain = solveMemo.get(plainKey);
+          if (!plain) {
+            plain = solveBy(null);
+            solveMemo.set(plainKey, plain);
+            if (solveMemo.size > 48) solveMemo.delete(solveMemo.keys().next().value as string);
+          }
+          solved = plain;
+          if (storageLost(plain, intents, steer)) {
+            ix.placed.length = base;
+            const steered = solveBy(steer);
+            if (!samePoses(plain, steered) && piecesNoWorse(countsOf(plain), countsOf(steered))) {
+              const was = hardOf({ ...named, items: lvl.items }, plain.items);
+              const now = hardOf({ ...named, items: lvl.items }, steered.items);
+              if (![...now].some((k) => !was.has(k))) {
+                solved = steered;
+                steeredSolves.add(steered);
+                firstSteered = true;
+              }
+            }
+          }
+          ix.placed.length = base;
+          for (const item of solved.items) {
+            const w = wantOf.get(item.id);
+            if (w) addToIndex(ix, item, furnitureKind(item.assetId) ?? w.kind);
+          }
+        }
         ix.keepOut = [];
         const out = keepOut.length && firstSwap ? applySwap(solved, firstSwap) : solved;
         if (!keepOut.length) {
@@ -575,20 +656,13 @@ function work(
         apply,
         unapply,
         settle: (o) => {
-          settledMemo.set(firstKey, o);
+          // A settled outcome keeps its first solve's weights for later walkway re-solves.
+          if (firstSteered) steeredSolves.add(o);
+          settledMemo.set(settledKeyOf(firstKey), o);
           if (settledMemo.size > 48) settledMemo.delete(settledMemo.keys().next().value as string);
         },
         // The hard checks with only this space furnished (the rest of the plan as it is).
-        spaceHard: (l: Level) => {
-          const items = Object.fromEntries(
-            Object.entries(l.items).filter(([, it]) => inRooms(s.rooms, centreOf(it))),
-          );
-          return new Set(
-            designChecks({ ...l, items }, { brief, uses, ...rulesOpt })
-              .filter((c) => c.hard)
-              .map((c) => c.key),
-          );
-        },
+        spaceHard: (l: Level) => hardOf(l),
       });
     } else {
       runs.push({ ix, wants, key: s.key });
@@ -1109,6 +1183,50 @@ function baseChecks(
 
 /** Pieces left out, short of room and turned from what they go with (piecesNoWorse). */
 type PieceCounts = { dropped: number; soft: number; broken: number };
+/** First solves that took the lenses' weights (their re-solves keep them). */
+const steeredSolves = new WeakSet<SolveOutcome>();
+
+/**
+ * A space's failing hard checks (their keys) on `level` with only the space furnished: its own
+ * pieces (`inSpace`) and `extra`, the rest of the plan as it is. One place, so whatever checks
+ * the space (house rules too) is threaded through once.
+ */
+function spaceHardKeys(
+  level: Level,
+  inSpace: (it: Item) => boolean,
+  opts: CheckOptions,
+  extra: Item[] = [],
+): Set<string> {
+  const items: Record<string, Item> = {};
+  for (const [id, it] of Object.entries(level.items)) if (inSpace(it)) items[id] = it;
+  for (const it of extra) items[it.id] = it;
+  return new Set(
+    designChecks({ ...level, items }, opts)
+      .filter((c) => c.hard)
+      .map((c) => c.key),
+  );
+}
+
+/** Two solves that place the same pieces in the same places. */
+const samePoses = (a: SolveOutcome, b: SolveOutcome) =>
+  a.items.length === b.items.length &&
+  a.items.every((it, i) => {
+    const o = b.items[i];
+    return (
+      !!o &&
+      o.id === it.id &&
+      o.assetId === it.assetId &&
+      Math.abs(o.position.x - it.position.x) < 1e-6 &&
+      Math.abs(o.position.z - it.position.z) < 1e-6 &&
+      Math.abs(o.rotationY - it.rotationY) < 1e-6 &&
+      Math.abs(o.scale.x - it.scale.x) < 1e-6
+    );
+  });
+const countsOf = (o: SolveOutcome): PieceCounts => ({
+  dropped: o.dropped.length,
+  soft: o.soft,
+  broken: o.broken,
+});
 
 /** How many times the walkways are checked again after moving pieces off them. */
 const WALK_ROUNDS = 3;

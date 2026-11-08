@@ -2,6 +2,7 @@ import {
   type Change,
   type DesignResult,
   type ResultCheck,
+  type StorageAmount,
   type SubsetReport,
   WARNING_TEXT,
   defaultTicks,
@@ -14,6 +15,7 @@ import { type ReactNode, memo, useEffect, useMemo, useRef, useState } from 'reac
 import { useRates } from '../../../cost/estimate';
 import { useEditor } from '../../../editor';
 import { warningsOf } from '../../../electrical/electrical';
+import { setMeterAmount, useStorage } from '../../../storage/store';
 import { useStore } from '../../../store';
 import { useAi } from '../../credentials';
 import { CaseDialog } from '../CaseDialog';
@@ -28,6 +30,7 @@ import { acceptCard, precheckNow } from './accept';
 import {
   type CardModel,
   cardChanges,
+  cardLens,
   cardResult,
   cardVerdict,
   headLabel,
@@ -62,6 +65,51 @@ const k = (v: number) => `${Math.round(v / 1000)}k`;
 /** "3–5k" (one unit for the range). */
 const kRange = (lo: number, hi: number) => `${Math.round(lo / 1000)}–${Math.round(hi / 1000)}k`;
 const sgd = (v: number) => `S$${Math.abs(Math.round(v)).toLocaleString('en-SG')}`;
+
+/** A lens line, its short parts ("+1.8 m hanging") kept on one line. */
+const lensLine = (line: string) =>
+  line
+    .split(' · ')
+    .map((p) => (p.length <= 24 ? p.replace(/ /g, '\u00a0') : keepTogether(p)))
+    .join(' · ');
+
+const MEASURED: Record<StorageAmount, string> = {
+  few: 'Measured for few things',
+  typical: 'Measured for typical amounts',
+  lots: 'Measured for lots of things',
+};
+const OWNS: { id: StorageAmount; label: string }[] = [
+  { id: 'few', label: 'Few' },
+  { id: 'typical', label: 'Typical' },
+  { id: 'lots', label: 'Lots' },
+];
+
+/**
+ * How much they own, on the storage line: free chips, one value with the storage meter's own
+ * setting and What I know's fact (useTalk keeps them in step and says the change in the log).
+ */
+function OwnsChips({ amount, projectId }: { amount: StorageAmount; projectId: string }) {
+  return (
+    <div className="talk-owns">
+      <span className="muted">{MEASURED[amount]}</span>
+      <span className="talk-choices" role="radiogroup" aria-label="How much you own">
+        {OWNS.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            // biome-ignore lint/a11y/useSemanticElements: chips that answer on tap, as a radio group
+            role="radio"
+            aria-checked={amount === o.id}
+            className="chip"
+            onClick={() => setMeterAmount(projectId, o.id)}
+          >
+            {o.label}
+          </button>
+        ))}
+      </span>
+    </div>
+  );
+}
 
 /** A tri-state checkbox (a group's tick). */
 function GroupTick({
@@ -240,6 +288,17 @@ export const ProposalCard = memo(function ProposalCard({
   const changes = useMemo(
     () => (r ? timed(() => cardChanges(project, card, r)) : []),
     [project, card, r],
+  );
+  // The storage meter's household and amount: the lens reads them (worked out again on change,
+  // with no request).
+  const meter = useStorage((s) => s.setting);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
+  const storage = useMemo(
+    () =>
+      active && r
+        ? (timed(() => cardLens(project, card))?.find((l) => l.id === 'storage') ?? null)
+        : null,
+    [active, r, project, card, tick, meter],
   );
   const ids = useMemo(() => new Set(changes.map((c) => c.id)), [changes]);
   const [ticks, setTicks] = useState<string[] | null>(card.ticks);
@@ -927,6 +986,30 @@ export const ProposalCard = memo(function ProposalCard({
                     ))}
                   </ul>
                 </details>
+              </dd>
+            </div>
+          )}
+          {storage?.line && (
+            <div data-lens="storage">
+              <dt>{storage.title}</dt>
+              <dd>
+                <span className={storage.tone === 'short' ? 'advise' : undefined}>
+                  {lensLine(storage.line)}
+                </span>
+                <OwnsChips
+                  amount={(storage.facts as { amount?: StorageAmount }).amount ?? 'typical'}
+                  projectId={project.id}
+                />
+                {storage.lines.length > 0 && (
+                  <details className="talk-already">
+                    <summary>How it is measured</summary>
+                    <ul>
+                      {storage.lines.map((l) => (
+                        <li key={l.text}>{keepTogether(l.text)}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
               </dd>
             </div>
           )}

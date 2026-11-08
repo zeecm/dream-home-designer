@@ -10,6 +10,7 @@ import {
   factText,
   greeting,
   nextQuestions,
+  questionText,
   sleepingConflict,
 } from './firstMeeting';
 import { type TalkAction, doneKeys, meetingOver, openQuestions, talk } from './reducer';
@@ -209,6 +210,15 @@ describe('the first meeting (criteria 20–22)', () => {
       'cooking',
       'wfh',
     ]);
+  });
+
+  it('never spends the first meeting on how much they own: Typical is assumed', () => {
+    const lvl = level();
+    const done = new Set<QuestionKey>(['who', 'sleeping', 'cooking', 'wfh', 'budget', 'walls']);
+    expect(nextQuestions(done, defaultBrief(), lvl)?.keys).toEqual(['style', 'anything']);
+    expect(questionText('owns', defaultBrief())).toBe('How much do you own?');
+    expect(factText('owns', defaultBrief(), lvl)).toBe('Typical');
+    expect(factText('owns', { ...defaultBrief(), owns: 'few' }, lvl)).toBe('Few things');
   });
 
   it('no bedrooms on the plan (B9): who sleeps where is still asked, and says so', () => {

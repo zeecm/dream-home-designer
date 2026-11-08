@@ -2,6 +2,7 @@ import type { Design, DesignBrief, DesignOptions, Project, Rule } from '@dhd/cor
 import { create } from 'zustand';
 import { useRates } from '../../cost/estimate';
 import { useEditor } from '../../editor';
+import { meterSetting } from '../../storage/store';
 import { setLeaveGuard, useStore } from '../../store';
 import { defaultPicks } from './compare';
 import { sharedQuestion } from './once';
@@ -85,6 +86,9 @@ export const designOpts = (doc: Project, levelId?: string): DesignOptions => {
     ...(doc.site ? { site: doc.site } : {}),
     ...(doc.models ? { models: doc.models } : {}),
     ...(rules.length ? { rules: [...rules] } : {}),
+    // The storage meter's own setting: its household wins when the person set it there (the
+    // storage lens, tech 3b §4.1). Part of the result key, so editing it re-scores the cards.
+    storage: meterSetting(doc.id),
   };
 };
 

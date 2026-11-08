@@ -3,6 +3,7 @@ import type { Level, Project } from '../../schema';
 import { aliasesFor } from '../aliases';
 import type { ContextInput } from '../describe';
 import { handEdits, lockCovers } from '../handEdits';
+import { lensOn } from '../lenses/lens';
 import { type StepPrompt, type TalkAsk, layoutStep, roomStep, runPrompts } from '../prompts';
 import { type DesignOptions, type DesignResult, designResult } from '../result';
 import type {
@@ -115,6 +116,12 @@ export function roomPrompts(
     .map((s) =>
       roomStep(ctx, s, r.level, aliases, {
         concept: design.concept,
+        // As the run sends it: the storage lens's block, unless the lens is off.
+        ...(!lensOn(opts, 'storage')
+          ? { storage: false as const }
+          : opts.storage
+            ? { storage: opts.storage }
+            : {}),
         ...(plan.feedback ? { feedback: plan.feedback } : {}),
         ...(plan.talk ? { talk: plan.talk } : {}),
         locks: plan.locks ?? [],

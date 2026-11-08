@@ -1,6 +1,7 @@
 import {
   DEFAULT_STORAGE,
   type People,
+  type StorageAmount,
   type StorageSetting,
   isDefaultStorage,
   parseStorageSetting,
@@ -24,6 +25,37 @@ export function loadStorage(projectId: string): StorageSetting {
   } catch {
     return structuredClone(DEFAULT_STORAGE);
   }
+}
+
+let read: { projectId: string; raw: string | null; setting: StorageSetting } | null = null;
+
+/**
+ * The meter's setting for a project, as the designer's lens reads it: the store's when it holds
+ * that project, else what this browser kept (read once per change, never written).
+ */
+export function meterSetting(projectId: string): StorageSetting {
+  const s = useStorage.getState();
+  if (s.projectId === projectId) return s.setting;
+  let raw: string | null = null;
+  try {
+    raw = window.localStorage.getItem(storageKey(projectId));
+  } catch {
+    raw = null;
+  }
+  if (read?.projectId !== projectId || read.raw !== raw) {
+    read = { projectId, raw, setting: parseStorageSetting(raw) };
+  }
+  return read.setting;
+}
+
+/**
+ * How much they own, set from the designer's "How much do you own?" (one value with the
+ * meter's own setting): the meter reads it at once, and it is kept for the project.
+ */
+export function setMeterAmount(projectId: string, amount: StorageAmount) {
+  const s = useStorage.getState();
+  if (s.projectId !== projectId) s.load(projectId);
+  if (useStorage.getState().setting.amount !== amount) useStorage.getState().set({ amount });
 }
 
 function saveStorage(projectId: string, s: StorageSetting) {

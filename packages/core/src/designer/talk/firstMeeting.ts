@@ -122,6 +122,9 @@ function applies(key: QuestionKey, brief: DesignBrief, level: Level): boolean {
   if (key === 'mobility') return brief.household.elders.length > 0;
   // With no bedrooms it is still asked: nobody is left without a bed in silence.
   if (key === 'sleeping') return sleepers(brief).length > 0;
+  // Never asked in the first meeting (its 8 questions are for the rest): Typical is assumed,
+  // and changed in What I know or with the chips on a card's storage line.
+  if (key === 'owns') return false;
   return true;
 }
 
@@ -174,6 +177,8 @@ export function questionText(key: QuestionKey, brief: DesignBrief): string {
       return 'How do you cook?';
     case 'wfh':
       return 'Does anyone work from home?';
+    case 'owns':
+      return 'How much do you own?';
     case 'budget':
       return 'What’s your renovation budget?';
     case 'walls':
@@ -182,8 +187,6 @@ export function questionText(key: QuestionKey, brief: DesignBrief): string {
       return 'Any style in mind?';
     case 'anything':
       return 'Anything you want to keep, or anything I should know?';
-    case 'owns':
-      return 'How much do you own?';
   }
 }
 
@@ -221,6 +224,12 @@ export const WFH_CHOICES: { id: DesignBrief['lifestyle']['wfh']; label: string }
   { id: 0, label: 'No one' },
   { id: 1, label: 'One of us' },
   { id: 2, label: 'Two of us' },
+];
+/** How much they own: the storage meter's own choices and words (shared with its setting). */
+export const OWNS_CHOICES: { id: NonNullable<DesignBrief['owns']>; label: string }[] = [
+  { id: 'few', label: 'Few things' },
+  { id: 'typical', label: 'Typical' },
+  { id: 'lots', label: 'Lots' },
 ];
 export const MOBILITY_CHOICES: { id: DesignBrief['household']['elders'][number]; label: string }[] =
   [
@@ -332,6 +341,8 @@ export function factText(key: QuestionKey, brief: DesignBrief, level: Level): st
       return COOKING_CHOICES.find((c) => c.id === brief.lifestyle.cooking)?.label ?? 'Every day';
     case 'wfh':
       return WFH_CHOICES.find((c) => c.id === brief.lifestyle.wfh)?.label ?? 'No one';
+    case 'owns':
+      return OWNS_CHOICES.find((c) => c.id === (brief.owns ?? 'typical'))?.label ?? 'Typical';
     case 'budget':
       return brief.budget ? budgetWords(brief.budget) : 'Not sure';
     case 'walls':
@@ -342,9 +353,6 @@ export function factText(key: QuestionKey, brief: DesignBrief, level: Level): st
       const t = [brief.keep.text, brief.household.text].filter((x) => x.trim()).join(' · ');
       return t || 'Nothing to add';
     }
-    case 'owns':
-      // Asked from slice 3b (the storage lens), which keeps the answer in the brief.
-      return 'Not said';
   }
 }
 
@@ -355,11 +363,11 @@ export const FACT_LABELS: Record<QuestionKey, string> = {
   mobility: 'Getting about',
   cooking: 'Cooking',
   wfh: 'Working from home',
+  owns: 'How much you own',
   budget: 'Budget',
   walls: 'Walls',
   style: 'Style',
   anything: 'Anything else',
-  owns: 'What you own',
 };
 
 /**
