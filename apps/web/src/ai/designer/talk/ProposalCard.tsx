@@ -176,6 +176,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
   const hover = useTalk((s) => (s.hover?.card === card.key ? s.hover.change : null));
   const planHover = useEditor((s) => (shown && s.hover?.kind === 'item' ? s.hover.id : null));
   const busy = useDesigner((s) => s.starting || !!s.run);
+  const [accepting, setAccepting] = useState(false);
   // A version to compare: this card's, once accepted (or an earlier design's).
   const versionId = card.design?.id ?? card.option?.version ?? null;
   const comparable = useDesigner((s) => !!versionId && s.designs.some((d) => d.id === versionId));
@@ -357,7 +358,8 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
       ),
   );
   const accept = async (w: { key: string; text: string }[]) => {
-    const line = await acceptCard(card, ticked, w);
+    setAccepting(true);
+    const line = await acceptCard(card, ticked, w).finally(() => setAccepting(false));
     setWaive([]);
     if (line) setTicks([]);
     if (line) {
@@ -830,7 +832,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
             type="button"
             className="btn btn-primary"
             data-accept-selected=""
-            disabled={running || tickedN === 0}
+            disabled={running || accepting || tickedN === 0}
             aria-describedby={`acc-${card.key}`}
             onClick={() => {
               // Worked out now, never from a check still pending: what the ticked changes fail
@@ -870,6 +872,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
                   <button
                     type="button"
                     className="btn btn-small"
+                    disabled={accepting}
                     onClick={() => {
                       const more = asking.checks.map((c) => ({ key: c.key, text: c.text }));
                       setAsking(null);

@@ -44,6 +44,8 @@ interface TalkState {
   memory: boolean;
   /** Waiting for the saved conversation (a slow IndexedDB open). */
   opening: boolean;
+  /** The saved conversation was written by a newer version of the app: read-only here. */
+  newer: boolean;
   view: TalkView;
   /** What I know opened at this fact. */
   knowAt: QuestionKey | null;
@@ -75,6 +77,7 @@ export const useTalk = create<TalkState>(() => ({
   proposals: [],
   memory: false,
   opening: false,
+  newer: false,
   view: 'log',
   knowAt: null,
   shown: null,
@@ -128,7 +131,7 @@ export async function loadTalk(projectId = doc().id) {
     proposals,
     memory: s.memory,
     ...(st.projectId !== projectId
-      ? { view: 'log' as const, shown: null, open: null, hover: null, note: null }
+      ? { view: 'log' as const, shown: null, open: null, hover: null, note: null, newer: false }
       : {}),
   }));
 }
@@ -211,8 +214,14 @@ export async function ensureConversation(): Promise<Conversation | null> {
   const level = talkLevel();
   if (!before || !level) return null;
   const s = await talkStore();
-  // One this build can't read is kept aside (never overwritten), and the log says so.
-  const aside = await s.setAside(project.id).catch(() => false);
+  // One this build can't read is kept aside (never overwritten), and the log says so; one a
+  // newer build wrote stays as it is, and this tab only says to reload.
+  const found = await s.setAside(project.id).catch(() => 'none' as const);
+  if (found === 'newer') {
+    useTalk.setState({ newer: true });
+    return null;
+  }
+  const aside = found === 'aside';
   // The plan's versions first: the next number follows them.
   await loadDesigns(project.id);
   const form = await getBrief(project.id);

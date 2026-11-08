@@ -222,6 +222,7 @@ export function TalkPanel() {
   const note = useTalk((s) => s.note);
   const memory = useTalk((s) => s.memory);
   const opening = useTalk((s) => s.opening);
+  const newer = useTalk((s) => s.newer);
   const settings = useTalk((s) => s.settings);
   const formOpen = useTalk((s) => s.formOpen);
   const shown = useTalk((s) => s.shown);
@@ -502,6 +503,11 @@ export function TalkPanel() {
         )}
       </header>
       {opening && <p className="field-hint talk-memory">Opening your saved conversation…</p>}
+      {newer && (
+        <p className="talk-memory talk-unsaved">
+          Opened in a newer version of the app; reload to continue.
+        </p>
+      )}
       {memory && (
         <p className="talk-memory talk-unsaved">
           Not saved on this device. This browser won’t keep the conversation, so it lasts until you
@@ -519,7 +525,7 @@ export function TalkPanel() {
           <Log key={fresh ? 'new' : 'old'} />
         )}
       </div>
-      {view === 'log' && (
+      {view === 'log' && !newer && (
         <Composer
           onFocus={() => {
             if (!sheet) return;

@@ -72,11 +72,24 @@ export function keepFocus(panel: HTMLElement): () => void {
     last = null;
     focusAfterLoss(panel, lost);
   };
+  // Focus the person moved elsewhere (the plan, the top bar, another window) is theirs: only a
+  // control removed while it had focus hands it on.
+  const onOut = (e: FocusEvent) => {
+    const to = e.relatedTarget as Node | null;
+    if (to && panel.contains(to)) return;
+    const from = e.target as Node;
+    // A browser may report a removed control's loss as a focusout too: that one stays handed on.
+    queueMicrotask(() => {
+      if (from.isConnected && last?.el === from) last = null;
+    });
+  };
   const mo = new MutationObserver(() => requestAnimationFrame(check));
   panel.addEventListener('focusin', onIn);
+  panel.addEventListener('focusout', onOut);
   mo.observe(panel, { childList: true, subtree: true });
   return () => {
     panel.removeEventListener('focusin', onIn);
+    panel.removeEventListener('focusout', onOut);
     mo.disconnect();
   };
 }

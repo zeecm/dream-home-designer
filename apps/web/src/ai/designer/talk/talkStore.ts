@@ -2,6 +2,7 @@ import {
   Conversation,
   Level,
   Proposal,
+  TALK_RECORD_VERSION,
   conversationFromRecord,
   levelFingerprint,
   proposalFromRecord,
@@ -44,10 +45,10 @@ export interface TalkStore {
   getLevel(projectId: string, fp: string): Promise<Level | null>;
   removeProject(projectId: string): Promise<void>;
   /**
-   * A conversation this build can't read is moved aside (kept in `bad`, never overwritten);
-   * true when there was one.
+   * A conversation this build can't read is moved aside (kept in `bad`, never overwritten):
+   * 'aside'. One a newer build wrote is left where it is: 'newer' (this tab stays read-only).
    */
-  setAside(projectId: string): Promise<boolean>;
+  setAside(projectId: string): Promise<'aside' | 'newer' | 'none'>;
 }
 
 /** A write the records' own schema refuses: nothing is written. */
@@ -133,7 +134,7 @@ export function memoryTalkStore(): TalkStore {
       for (const key of levels.keys()) if (key.startsWith(`${projectId}\u0000`)) levels.delete(key);
     },
     async setAside() {
-      return false;
+      return 'none' as const;
     },
   };
 }
@@ -240,13 +241,16 @@ function idbTalkStore(db: IDBDatabase): TalkStore {
       const tx = db.transaction(['conversations', 'bad'], 'readwrite');
       const ended = finished(tx);
       const raw = await done(tx.objectStore('conversations').get(projectId));
-      const bad = !!raw && !conversationFromRecord(raw);
+      // A newer build's record is that build's to read: never moved by an older tab.
+      const v = (raw as { recordVersion?: unknown } | undefined)?.recordVersion;
+      const newer = typeof v === 'number' && v > TALK_RECORD_VERSION;
+      const bad = !!raw && !newer && !conversationFromRecord(raw);
       if (bad) {
         tx.objectStore('bad').put({ projectId, raw, at: new Date().toISOString() });
         tx.objectStore('conversations').delete(projectId);
       }
       await ended;
-      return bad;
+      return newer ? 'newer' : bad ? 'aside' : 'none';
     },
   };
 }

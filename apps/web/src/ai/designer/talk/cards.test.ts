@@ -44,6 +44,21 @@ describe('cardScope: a card proposes only what it was asked about', () => {
     ]);
   });
 
+  it('a merge or split since: a group is in scope when any of its rooms is', () => {
+    const living = {
+      key: 'prp_d:A',
+      proposal: {
+        scope: { label: 'Living and dining', spaces: ['rm_dry+rm_living'], all: false },
+      },
+    } as unknown as CardModel;
+    const after = [
+      row('add:sofa', 'rm_living'),
+      row('add:table', 'rm_dining+rm_dry+rm_living'),
+      row('add:bed', 'rm_bed'),
+    ];
+    expect(cardScope(after, living, []).map((c) => c.id)).toEqual(['add:sofa', 'add:table']);
+  });
+
   it('a change already accepted from the card is never offered again', () => {
     expect(cardScope(rows, kitchenCard, ['add:fridge']).map((c) => c.id)).not.toContain(
       'add:fridge',

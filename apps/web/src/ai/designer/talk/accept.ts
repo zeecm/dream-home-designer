@@ -82,12 +82,37 @@ export async function acceptCard(
   ticked: string[],
   waive: { key: string; text: string }[],
 ): Promise<string | null> {
+  // One accept of a card at a time: a double click never accepts twice.
+  if (accepting.has(card.key)) return null;
+  accepting.add(card.key);
+  try {
+    return await acceptOnce(card, ticked, waive);
+  } finally {
+    accepting.delete(card.key);
+  }
+}
+
+const accepting = new Set<string>();
+const CHANGED = 'The plan changed since; check the card again.';
+
+/** Why nothing was accepted, as an app line (never silent). */
+const nothing = async (text: string) => {
+  await act({ type: 'event', id: newId('turn'), at: nowIso(), event: { type: 'note', text } });
+  return null;
+};
+
+async function acceptOnce(
+  card: CardModel,
+  ticked: string[],
+  waive: { key: string; text: string }[],
+): Promise<string | null> {
   const project = useStore.getState().editor.doc;
   const b = nowOf(project);
   const r = cardResult(project, card);
-  if (!b || !r) return null;
+  if (!b || !r) return nothing(CHANGED);
   const changes = cardChanges(project, card, r);
   let ok = allowedChanges(changes, ticked);
+  if (!ok.length) return nothing(CHANGED);
   // Never twice: rows another tab (or an earlier click) already put in, as the record has them.
   if (card.proposal && card.option) {
     const pid = card.proposal.id;
@@ -100,7 +125,7 @@ export async function acceptCard(
     );
     ok = ok.filter((c) => !already.has(c.id));
   }
-  if (!ok.length) return null;
+  if (!ok.length) return nothing('Already accepted in another tab.');
   const ids = ok.map((c) => c.id);
   // The waivers the accepted changes need: their own checks, or what they fail together.
   const pre = precheckAccept(card, ids, []);
@@ -109,7 +134,7 @@ export async function acceptCard(
     (w, i, all) => needed.has(w.key) && all.findIndex((x) => x.key === w.key) === i,
   );
   const unwaived = pre.failing.filter((c) => !waiving.some((w) => w.key === c.key));
-  if (pre.hdb || unwaived.length) return null;
+  if (pre.hdb || unwaived.length) return nothing(CHANGED);
   const prior = structuredClone(b.now);
   // The plan's history waits while a version is previewed: back to the plan first. Edits go to
   // the renovation, so its guards (the household shelter) apply to the accept.

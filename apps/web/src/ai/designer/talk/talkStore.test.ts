@@ -133,24 +133,43 @@ describe('the conversation store (dhd-talk)', () => {
     expect((await s.get('prj_a'))?.draft).toBe('');
   });
 
-  it('a record this build can’t read is set aside, never overwritten', async () => {
-    const idb = new IDBFactory();
-    const s = await openTalk(idb);
-    await s.apply('prj_a', () => started());
-    // A newer build's record, as it would be stored.
-    await new Promise<void>((resolve, reject) => {
+  const putRaw = (idb: IDBFactory, rec: unknown) =>
+    new Promise<void>((resolve, reject) => {
       const req = idb.open('dhd-talk', 1);
       req.onsuccess = () => {
         const tx = req.result.transaction('conversations', 'readwrite');
-        tx.objectStore('conversations').put({ ...started(), recordVersion: 9 });
-        tx.oncomplete = () => resolve();
+        tx.objectStore('conversations').put(rec);
+        tx.oncomplete = () => {
+          req.result.close();
+          resolve();
+        };
         tx.onerror = () => reject(tx.error);
       };
     });
+
+  it('a newer build’s record is kept as it is: never set aside, never overwritten', async () => {
+    const idb = new IDBFactory();
+    const s = await openTalk(idb);
+    await s.apply('prj_a', () => started());
+    // A newer build's record, as it would be stored (a tab of this build left open across a
+    // deploy).
+    await putRaw(idb, { ...started(), recordVersion: 9, draft: 'from the newer build' });
     expect(await s.get('prj_a')).toBeNull();
     await expect(s.apply('prj_a', () => started())).rejects.toBeInstanceOf(Unreadable);
-    expect(await s.setAside('prj_a')).toBe(true);
-    expect(await s.setAside('prj_a')).toBe(false);
+    expect(await s.setAside('prj_a')).toBe('newer');
+    expect(await s.setAside('prj_a')).toBe('newer');
+    await expect(s.apply('prj_a', () => started())).rejects.toBeInstanceOf(Unreadable);
+  });
+
+  it('an unreadable record of this version is set aside, kept, and a new one can start', async () => {
+    const idb = new IDBFactory();
+    const s = await openTalk(idb);
+    await s.apply('prj_a', () => started());
+    await putRaw(idb, { ...started(), turns: 'not a list' });
+    expect(await s.get('prj_a')).toBeNull();
+    await expect(s.apply('prj_a', () => started())).rejects.toBeInstanceOf(Unreadable);
+    expect(await s.setAside('prj_a')).toBe('aside');
+    expect(await s.setAside('prj_a')).toBe('none');
     expect((await s.apply('prj_a', () => started()))?.id).toBe('conv1');
   });
 });

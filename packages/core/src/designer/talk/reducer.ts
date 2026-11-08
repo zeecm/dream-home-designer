@@ -24,6 +24,7 @@ import {
   type Turn,
   type TurnOf,
   cut,
+  cutLines,
 } from './schema';
 
 /**
@@ -487,7 +488,7 @@ const label = (k: QuestionKey) =>
 
 /** The person's turn for a scope button: their words, or what they asked for. */
 const personText = (scope: ScopeRef, words: string) =>
-  cut(words.trim() ? words : `Design ${scope.all ? 'the whole flat' : scope.label}`, L.person);
+  cutLines(words.trim() ? words : `Design ${scope.all ? 'the whole flat' : scope.label}`, L.person);
 
 /** A scope as kept: its label cut. */
 export const scopeCut = (s: ScopeRef): ScopeRef => ({

@@ -137,12 +137,15 @@ export function cardScope(
   const scope = card.proposal?.scope;
   // Walls and room names belong to the proposal whatever its scope; furniture and finishes only
   // to the spaces it was asked about.
+  // A space is its rooms joined by `+`: after a merge or a split since the proposal, a group
+  // is in scope when any of its rooms is.
+  const rooms = new Set(scope?.spaces.flatMap((k) => k.split('+')) ?? []);
   const inScope = (c: Change) =>
     !scope ||
     scope.all ||
     c.group === 'walls' ||
     c.group === 'names' ||
-    scope.spaces.includes(c.group);
+    c.group.split('+').some((r) => rooms.has(r));
   const done = new Set(accepted);
   return changes.filter((c) => inScope(c) && !done.has(c.id));
 }

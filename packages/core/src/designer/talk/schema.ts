@@ -40,6 +40,19 @@ export const TALK_LIMITS = {
 /** A text cut to `max` (control characters out, an ellipsis where it was cut). */
 export const cut = (s: string, max: number) => clean(s, max);
 
+/** As `cut`, keeping the person's line breaks (at most one blank line between paragraphs). */
+export const cutLines = (s: string, max: number) => {
+  const lines = s
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((l) => clean(l, max));
+  const t = lines
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
+};
+
 /** The app's own first-meeting questions (UX §8.3), each a fact What I know holds. */
 export const QUESTION_KEYS = [
   'who',

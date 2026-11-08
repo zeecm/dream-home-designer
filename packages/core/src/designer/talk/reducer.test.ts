@@ -13,7 +13,13 @@ import {
   sleepingConflict,
 } from './firstMeeting';
 import { type TalkAction, doneKeys, meetingOver, openQuestions, talk } from './reducer';
-import { type Conversation, type QuestionKey, type TurnOf, conversationFromRecord } from './schema';
+import {
+  type Conversation,
+  type QuestionKey,
+  type TurnOf,
+  conversationFromRecord,
+  cutLines,
+} from './schema';
 
 const level = () => sampleFlatProject().levels[0] as Level;
 const AT = '2026-11-07T10:00:00.000Z';
@@ -384,6 +390,13 @@ describe('the reducer', () => {
 });
 
 describe('long texts (B1): every text is cut where it is made', () => {
+  it('the person’s words keep their line breaks; control characters still go', () => {
+    expect(cutLines('Kitchen first.\r\n\n\n\nThen\u0007 the study.', 400)).toBe(
+      'Kitchen first.\n\nThen  the study.',
+    );
+    expect(cutLines('a\nb'.repeat(300), 50)).toHaveLength(50);
+  });
+
   it('a 1000-character answer and a 120-character room name still read back', () => {
     const long = 'Mdm Koh’s quiet room by the window '.repeat(4).slice(0, 120);
     const base = level();
