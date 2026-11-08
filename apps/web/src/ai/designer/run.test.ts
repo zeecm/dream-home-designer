@@ -759,6 +759,29 @@ describe('the second look (41)', () => {
     expect(refused.calls.filter((c) => c.step === 'look')).toHaveLength(1);
   });
 
+  it('a refused key during the look: the look fails with its line, the design stands', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) =>
+        c.step === 'look'
+          ? new Response(
+              JSON.stringify({
+                type: 'error',
+                error: { type: 'authentication_error', message: 'invalid x-api-key' },
+              }),
+              { status: 401 },
+            )
+          : null,
+    });
+    const r = start('anthropic', { fetch: prov.fetch, look: { rasterise: async () => PNG } });
+    const { state, look, design } = await r.run;
+    expect(state.phase).toBe('done');
+    expect(state.halt).toBeNull();
+    expect(look?.state).toBe('failed');
+    expect(look?.line).toBeTruthy();
+    expect(Object.values(design.spaces).every((s) => s.status === 'done')).toBe(true);
+  });
+
   it('a run with no second look asked for sends none', async () => {
     const prov = provider('anthropic', { auto: true });
     const r = start('anthropic', { fetch: prov.fetch });

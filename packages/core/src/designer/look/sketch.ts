@@ -90,6 +90,25 @@ export function critiqueSketch(
   const level = result.level;
   const shapes = roomShapes(level);
   const geom = planGeometry(level);
+  return framesOf(level, o.scope).map((b) => draw(result, start, o, b, shapes, geom));
+}
+
+/** The size of each picture the second look draws of `scope` on `level` (as `critiqueSketch`). */
+export function lookPictureSizes(
+  level: Level,
+  scope: string[] | null,
+): { width: number; height: number }[] {
+  return framesOf(level, scope).map((b) => {
+    const k = LOOK_PX / Math.max(b.x1 - b.x0, b.y1 - b.y0);
+    return { width: Math.round((b.x1 - b.x0) * k), height: Math.round((b.y1 - b.y0) * k) };
+  });
+}
+
+/** The plan areas the pictures show: the scope and 1 m round it, in halves when too large. */
+function framesOf(level: Level, scope: string[] | null): Box[] {
+  const shapes = roomShapes(level);
+  const geom = planGeometry(level);
+  const o = { scope };
   const all: Vec2[] = [];
   for (const p of geom.pieces) all.push(...p.polygon);
   for (const s of shapes.values()) all.push(...s.outer);
@@ -113,7 +132,7 @@ export function critiqueSketch(
     const mid = box.y0 + h / 2;
     boxes.push({ ...box, y1: mid + 0.25 }, { ...box, y0: mid - 0.25 });
   }
-  return boxes.map((b) => draw(result, start, o, b, shapes, geom));
+  return boxes;
 }
 
 function draw(

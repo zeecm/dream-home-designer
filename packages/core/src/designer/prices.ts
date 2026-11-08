@@ -1,4 +1,4 @@
-import { IMAGE_TOKENS } from './look/vision';
+import { IMAGE_TOKENS, imageTokens } from './look/vision';
 import type { StepPrompt } from './prompts';
 import type { DesignBrief, Provider, Usage } from './schema';
 
@@ -168,9 +168,10 @@ export function estimateRun(
     /**
      * The run ends with a second look (Thorough, a model that can see): one more request, its
      * prompt the run's prefix (cached), the facts and the pictures, and at most one round of a
-     * room step's price in `fix` (it counts against the run's FIX_PER_RUN).
+     * room step's price in `fix` (it counts against the run's FIX_PER_RUN). With the sizes of
+     * the pictures it will send (`lookPictureSizes`), they are priced as drawn; else as one.
      */
-    look?: boolean;
+    look?: boolean | { pictures: { width: number; height: number }[] };
   },
 ): RunEstimate {
   const price = priceOf(opts.model, opts.prices);
@@ -178,7 +179,11 @@ export function estimateRun(
   const all = [...prompts];
   if (opts.look && first) {
     // The facts sheet and the task as characters; the pictures as the tokens they cost.
-    const extra = LOOK_FACTS * CHARS_PER_TOKEN + IMAGE_TOKENS[opts.provider] * CHARS_PER_TOKEN;
+    const pictures =
+      typeof opts.look === 'object'
+        ? opts.look.pictures.reduce((t, p) => t + imageTokens(opts.provider, p.width, p.height), 0)
+        : IMAGE_TOKENS[opts.provider];
+    const extra = LOOK_FACTS * CHARS_PER_TOKEN + pictures * CHARS_PER_TOKEN;
     all.push({
       ...first,
       step: 'look',

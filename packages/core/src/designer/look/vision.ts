@@ -25,24 +25,53 @@ const FAMILY: Record<Provider, RegExp> = {
   openai: /^gpt-5/,
   gemini: /^gemini-/,
 };
+/** Ids in those families that don't take a picture to read: embeddings, speech, live, images out. */
+const NOT_READING = /embed|tts|audio|live|realtime|transcri|image|imagen|veo|search/;
 
 /** Whether this model can look at the second look's picture. */
 export function canSee(provider: Provider, model: string): boolean {
   const id = model.trim().toLowerCase();
   const listed = VISION[id];
   if (listed !== undefined) return listed;
-  return FAMILY[provider].test(id);
+  return FAMILY[provider].test(id) && !NOT_READING.test(id);
 }
 
 /**
  * Tokens one picture of the second look costs, about (1568 px on its long side): Claude about
  * w·h/750 (≈ 2.1k for 1568 × 1000), OpenAI's high detail about 1.1k, Gemini 258 a 768 px tile.
+ * For a picture of a known size, `imageTokens`.
  */
 export const IMAGE_TOKENS: Record<Provider, number> = {
   anthropic: 2100,
   openai: 1100,
   gemini: 1032,
 };
+
+/**
+ * Tokens a picture of `width` × `height` px costs, by each provider's documented rule: Claude
+ * w·h/750 (after scaling to 1568 px on the long side at most); OpenAI's high detail scales to
+ * fit 2048 px and then 768 px on the short side, 170 a 512 px tile and 85; Gemini 258 a 768 px
+ * tile (258 for one up to 384 px a side).
+ */
+export function imageTokens(provider: Provider, width: number, height: number): number {
+  if (provider === 'anthropic') {
+    const k = Math.min(1, 1568 / Math.max(width, height));
+    return Math.ceil((width * k * (height * k)) / 750);
+  }
+  if (provider === 'openai') {
+    let w = width;
+    let h = height;
+    const fit = Math.min(1, 2048 / Math.max(w, h));
+    w *= fit;
+    h *= fit;
+    const short = Math.min(1, 768 / Math.min(w, h));
+    w *= short;
+    h *= short;
+    return 85 + 170 * Math.ceil(w / 512) * Math.ceil(h / 512);
+  }
+  if (width <= 384 && height <= 384) return 258;
+  return 258 * Math.ceil(width / 768) * Math.ceil(height / 768);
+}
 
 /** Whether a run has a second look: Thorough, with a model that can see (Quicker never). */
 export const looksAt = (

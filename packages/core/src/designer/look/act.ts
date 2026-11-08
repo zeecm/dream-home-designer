@@ -1,4 +1,6 @@
+import type { Project } from '../../schema';
 import { type AliasMap, resolveAlias } from '../aliases';
+import { categoriesFor, resolveAsset } from '../catalogue';
 import type { DesignResult } from '../result';
 import type { DesignItem, SpaceDesign } from '../schema';
 import { clean } from '../util';
@@ -18,7 +20,7 @@ import type { LookAnswer, LookFinding, LookSuggest } from './findings';
  * Whatever is acted on is kept only if the plan comes out no worse (`lookNoWorse`).
  */
 
-export type DropWhy = 'target' | 'checks-disagree' | 'taste-once' | 'not-designed';
+export type DropWhy = 'target' | 'checks-disagree' | 'taste-once' | 'not-designed' | 'suggest';
 
 export interface LookEdit {
   space: string;
@@ -44,6 +46,11 @@ export interface LookPlan {
   dropped: { finding: LookFinding; why: DropWhy }[];
   /** The lines of the findings acted on (for the note when they change nothing). */
   acted: string[];
+  /**
+   * The keys of the app's checks the round is for (P1–P4 fixes): it is kept only if each of
+   * them no longer fails, as well as the plan being no worse.
+   */
+  targets: string[];
 }
 
 export interface LookCtx {
@@ -51,6 +58,8 @@ export interface LookCtx {
   aliases: AliasMap;
   /** The spaces whose answers the run may change (designed by intent in this run). */
   answers: Record<string, SpaceDesign>;
+  /** The project's own furniture models (a swap or an addition may name one). */
+  models?: Project['models'];
 }
 
 const NOTE = (line: string) => `Designer’s second look: ${line}`;
@@ -66,7 +75,15 @@ const EXECUTES = new Set(['intent', 'swap', 'remove', 'add']);
 export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
   const { result, aliases } = ctx;
   const level = result.level;
-  const plan: LookPlan = { edits: [], rounds: [], notes: [], offers: [], dropped: [], acted: [] };
+  const plan: LookPlan = {
+    edits: [],
+    rounds: [],
+    notes: [],
+    offers: [],
+    dropped: [],
+    acted: [],
+    targets: [],
+  };
   let taste = false;
   const round = (space: string, f: LookRound['failures'][number]) => {
     const r = plan.rounds.find((x) => x.space === space);
@@ -98,12 +115,12 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
     }
     // A fix: P1–P4 only with a failing app check on the same target and principle.
     let failure: string;
+    let target: string | null = null;
     if (f.principle === 'taste') {
       if (taste) {
         plan.dropped.push({ finding: f, why: 'taste-once' });
         continue;
       }
-      taste = true;
       failure = `A suggestion from the designer’s second look (not a check): ${line}`;
     } else {
       const room = level.items[id] ? null : id;
@@ -118,6 +135,7 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
         continue;
       }
       failure = check.text;
+      target = check.key;
     }
     // Where it acts: the space of the piece it suggests about, else of its target.
     const about = f.suggest?.piece ? resolveAlias(aliases, f.suggest.piece) : null;
@@ -127,8 +145,22 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
       plan.dropped.push({ finding: f, why: 'not-designed' });
       continue;
     }
+    let s = f.suggest;
+    // A swap or an addition names a catalogue piece that suits the room (no bed in the living
+    // room), as a room step's answer would; one that doesn't is dropped.
+    if (s && (s.kind === 'swap' || s.kind === 'add')) {
+      const kind = s.kindId ? resolveAsset(s.kindId, ctx.models) : null;
+      const kinds = result.spaces.find((x) => x.key === space)?.kinds ?? [];
+      const allowed = new Set(categoriesFor(kinds));
+      if (!kind || !(allowed.has(kind.category) || allowed.has(kind.id))) {
+        plan.dropped.push({ finding: f, why: 'suggest' });
+        continue;
+      }
+      s = { ...s, kindId: kind.id };
+    }
+    if (f.principle === 'taste') taste = true;
+    if (target) plan.targets.push(target);
     plan.acted.push(line);
-    const s = f.suggest;
     const ref = about && level.items[about] ? (result.refs[about] ?? null) : null;
     if (s && EXECUTES.has(s.kind) && (s.kind === 'add' || ref)) {
       const refs: Record<string, string> = {};
@@ -197,9 +229,16 @@ export function applyLookEdit(d: SpaceDesign, e: LookEdit, n: number): SpaceDesi
 
 /**
  * Whether the plan after a second look's round is no worse than before it (the `acceptResolve`
- * idea): no hard check failing that didn't, no more soft ones, no more pieces left out.
+ * idea): no hard check failing that didn't, no more soft ones, no more pieces left out; and
+ * each check the round was for (`targets`) passes now.
  */
-export function lookNoWorse(before: DesignResult, after: DesignResult): boolean {
+export function lookNoWorse(
+  before: DesignResult,
+  after: DesignResult,
+  targets: readonly string[] = [],
+): boolean {
+  const still = new Set(after.checks.filter((c) => !c.already).map((c) => c.key));
+  if (targets.some((k) => still.has(k))) return false;
   const hard = (r: DesignResult) =>
     new Set(r.checks.filter((c) => c.hard && !c.already).map((c) => c.key));
   const soft = (r: DesignResult) => r.checks.filter((c) => !c.hard && !c.already).length;

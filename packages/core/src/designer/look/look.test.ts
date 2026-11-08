@@ -17,8 +17,8 @@ import { PROPOSAL_RECORD_VERSION, proposalFromRecord } from '../talk/schema';
 import { actOnLook, applyLookEdit, lookNoWorse } from './act';
 import { type LookAnswer, type LookFinding, MAX_FINDINGS, parseLook } from './findings';
 import { lookFacts, lookStep } from './prompt';
-import { LOOK_PX, MIN_PX_PER_M, critiqueSketch } from './sketch';
-import { IMAGE_TOKENS, canSee, looksAt } from './vision';
+import { LOOK_PX, MIN_PX_PER_M, critiqueSketch, lookPictureSizes } from './sketch';
+import { IMAGE_TOKENS, canSee, imageTokens, looksAt } from './vision';
 
 /**
  * The second look (tech 3b §2): the picture, the findings read leniently, and what the app
@@ -315,6 +315,66 @@ describe('what the app does with them (actOnLook): the checks always win', () =>
     expect(turned.items.find((i) => i.ref === 'sofa1')?.against).toBe('window-wall');
   });
 
+  it('a swap or an addition must be a catalogue piece that suits the room, else it is dropped', () => {
+    const base = {
+      piece: null,
+      against: null,
+      faces: null,
+      near: null,
+      zone: null,
+      kindId: null,
+      room: null,
+      rule: null,
+    } as const;
+    const fix = (suggest: LookFinding['suggest']) =>
+      finding({ target: { kind: 'piece', id: sofa }, severity: 'fix', line: 'x', suggest });
+    // A bed in the living room, a piece that doesn't exist: dropped.
+    const bed = actOnLook(
+      look([fix({ ...base, kind: 'add', kindId: 'bed-queen', room: 'R3' })]),
+      ctx,
+    );
+    expect(bed.edits).toEqual([]);
+    expect(bed.dropped.map((d) => d.why)).toEqual(['suggest']);
+    const none = actOnLook(
+      look([fix({ ...base, kind: 'swap', piece: sofa, kindId: 'hover-sofa-9000' })]),
+      ctx,
+    );
+    expect(none.dropped.map((d) => d.why)).toEqual(['suggest']);
+    // Written as a model might ("Floor Lamp"): resolved to the catalogue's id, as answers are.
+    const lamp = actOnLook(
+      look([fix({ ...base, kind: 'add', kindId: 'Floor Lamp', room: 'R3' })]),
+      ctx,
+    );
+    expect(lamp.edits[0]?.suggest.kindId).toBe('floor-lamp');
+    // The taste slot isn't spent on a suggestion that was dropped.
+    const after = actOnLook(
+      look([
+        fix({ ...base, kind: 'add', kindId: 'bed-queen', room: 'R3' }),
+        fix({ ...base, kind: 'swap', piece: sofa, kindId: 'sofa-2' }),
+      ]),
+      ctx,
+    );
+    expect(after.edits).toHaveLength(1);
+  });
+
+  it('a P1–P4 round is kept only once its check passes', () => {
+    const c = r0.checks.find((x) => !x.already && x.itemId && r0.refs[x.itemId]);
+    if (!c?.itemId) throw new Error('no check');
+    const plan = actOnLook(
+      look([
+        finding({
+          target: { kind: 'piece', id: of.get(c.itemId) as string },
+          principle: c.principle as 'P2',
+          severity: 'fix',
+        }),
+      ]),
+      ctx,
+    );
+    expect(plan.targets).toEqual([c.key]);
+    expect(lookNoWorse(r0, r0)).toBe(true);
+    expect(lookNoWorse(r0, r0, plan.targets)).toBe(false);
+  });
+
   it('a malicious finding does nothing it says: unknown targets dropped, a door is no piece, words stay words', () => {
     const plan = actOnLook(
       look([
@@ -394,6 +454,10 @@ describe('the request and its price', () => {
     expect(canSee('anthropic', 'claude-opus-5-5')).toBe(true);
     expect(canSee('openai', 'gpt-4o')).toBe(false);
     expect(canSee('gemini', 'gemini-3.5-flash')).toBe(true);
+    // Not every id of a family reads pictures.
+    for (const id of ['gemini-embedding-001', 'gemini-2.5-flash-image', 'gemini-live-2.5-flash'])
+      expect(canSee('gemini', id)).toBe(false);
+    expect(canSee('openai', 'gpt-5-tts')).toBe(false);
     expect(looksAt({ quality: 'quick' }, { provider: 'anthropic', model: 'claude-opus-5-5' })).toBe(
       false,
     );
@@ -418,6 +482,35 @@ describe('the request and its price', () => {
     });
     expect(IMAGE_TOKENS.anthropic).toBeGreaterThan(IMAGE_TOKENS.openai);
     expect(openai.steps.at(-1)?.input).toBeLessThan(withLook.steps.at(-1)?.input ?? 0);
+  });
+
+  it('the pictures are priced as drawn: a flat too large for one is two, each at its size', () => {
+    const one = lookPictureSizes(level, null);
+    expect(one).toHaveLength(1);
+    expect(Math.max(one[0]!.width, one[0]!.height)).toBe(LOOK_PX);
+    // The same flat six times the size: two pictures (a piece's label must stay legible).
+    const big: Level = {
+      ...level,
+      vertices: Object.fromEntries(
+        Object.entries(level.vertices).map(([id, v]) => [id, { ...v, x: v.x * 6, y: v.y * 6 }]),
+      ),
+    };
+    const two = lookPictureSizes(big, null);
+    expect(two).toHaveLength(2);
+    const prompts = [roomStep(ctxIn, spacesOf(level)[0]!, level, ctxIn.aliases)];
+    const base = {
+      provider: 'anthropic' as const,
+      model: 'claude-opus-5-5',
+      quality: 'thorough' as const,
+    };
+    const single = estimateRun(prompts, { ...base, look: { pictures: one } });
+    const split = estimateRun(prompts, { ...base, look: { pictures: two } });
+    expect(split.steps.at(-1)!.input).toBeGreaterThan(single.steps.at(-1)!.input);
+    expect(split.usd!.high).toBeGreaterThan(single.usd!.high);
+    // Each provider's own rule.
+    expect(imageTokens('anthropic', 1568, 1000)).toBe(Math.ceil((1568 * 1000) / 750));
+    expect(imageTokens('openai', 1568, 1000)).toBe(85 + 170 * 3 * 2);
+    expect(imageTokens('gemini', 1568, 1000)).toBe(258 * 3 * 2);
   });
 
   it('proposals are records of 3: a 2 reads with no look; a newer one is left alone', () => {

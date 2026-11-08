@@ -432,7 +432,12 @@ export async function runDesign(
         return d ? [[s.key, d]] : [];
       }),
     );
-    const acted = actOnLook(answer, { result: before, aliases: design.aliases, answers });
+    const acted = actOnLook(answer, {
+      result: before,
+      aliases: design.aliases,
+      answers,
+      ...(o.result?.models ? { models: o.result.models } : {}),
+    });
     out.notes = acted.notes;
     out.offers = acted.offers.map((x) => ({ rule: x.rule, line: x.line }));
     out.dropped = acted.dropped.map((d) => ({ line: d.finding.line, why: d.why }));
@@ -490,7 +495,8 @@ export async function runDesign(
     st.status = 'done';
     if (!changed) return out;
     const after = await place(ctx.base, ctx.before, next, o.result);
-    if (lookNoWorse(before, after)) {
+    // Kept only if no worse, and each app check a P1–P4 fix was for passes now.
+    if (lookNoWorse(before, after, acted.targets)) {
       design.spaces = next.spaces;
       return { ...out, round: 'kept' };
     }
@@ -699,8 +705,16 @@ export async function runDesign(
         try {
           look = await secondLook(lookSt, designedHere);
         } catch (e) {
-          look = { ...blankLook(), state: 'stopped' };
-          if (!(e instanceof Stopped)) throw e;
+          // A refused key or a spent quota during the look: the look failed, with its line; the
+          // rooms are done and checked, so the design stands.
+          if (e instanceof Halted) {
+            look = { ...blankLook(), state: 'failed', line: e.halt.message.slice(0, 300) };
+            lookSt.status = 'failed';
+            lookSt.error = e.halt.message;
+          } else {
+            look = { ...blankLook(), state: 'stopped' };
+            if (!(e instanceof Stopped)) throw e;
+          }
         } finally {
           update();
           void save();

@@ -13,6 +13,7 @@ import {
   type TalkAsk,
   contextFor,
   estimateRun,
+  lookPictureSizes,
   looksAt,
   planScope,
   plannedPrompts,
@@ -95,8 +96,16 @@ export function priceRequest(i: PriceInput): Priced {
     model: i.ai.model,
     quality: sp.brief.quality,
     prices: i.prices,
-    // Thorough with a model that can see ends with the second look, in the same figures.
-    look: looksAt(sp.brief, i.ai),
+    // Thorough with a model that can see ends with the second look, in the same figures: its
+    // pictures as they will be drawn (the scope's rooms, or the whole flat).
+    look: looksAt(sp.brief, i.ai)
+      ? {
+          pictures: lookPictureSizes(
+            sp.ctx.base,
+            sp.plan.rooms === 'all' ? null : sp.plan.rooms.flatMap((k) => k.split('+')),
+          ),
+        }
+      : false,
   });
   return { sp, est };
 }
