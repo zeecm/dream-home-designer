@@ -368,7 +368,7 @@ export function solveSpace(input: SolveInput): SolveOutcome {
     ) {
       continue;
     }
-    const shrunk = shrunkOf(input, out, swap.intents);
+    const shrunk = shrunkOf(input.steer, out, swap.intents);
     if (!best || shrunk < best.shrunk) best = { out, swap, shrunk };
     if (!shrunk) break;
   }
@@ -408,14 +408,29 @@ export function dropPriorityOf(kind: FurnitureKind, steer?: Steer | null): numbe
 }
 
 /** How many pieces a steer prefers whole (a wardrobe in a short room) a solve made narrower. */
-function shrunkOf(input: SolveInput, out: SolveOutcome, intents: Intent[]): number {
-  const prefer = new Set((input.steer?.prefer ?? []).map((p) => p.role));
+function shrunkOf(steer: Steer | undefined, out: SolveOutcome, intents: Intent[]): number {
+  const prefer = new Set((steer?.prefer ?? []).map((p) => p.role));
   if (!prefer.size) return 0;
   const wants = new Map(intents.map((t) => [t.want.id, t.want]));
   return out.items.filter((it) => {
     const w = wants.get(it.id);
     return !!w && prefer.has(roleOf(w.kind)) && itemSize(it, w.kind).w < w.w - 0.01;
   }).length;
+}
+
+/**
+ * Whether a solve lost storage the steer protects: a protected piece left out, or one it
+ * prefers whole made narrower. Only then is a space solved again with the steer.
+ */
+export function storageLost(out: SolveOutcome, intents: Intent[], steer: Steer): boolean {
+  const used = out.swap?.intents ?? intents;
+  const byRef = new Map(used.map((t) => [t.want.ref, t]));
+  const protect = new Set(steer.protect);
+  const dropped = out.dropped.some((n) => {
+    const t = n.ref ? byRef.get(n.ref) : undefined;
+    return !!t && protect.has(roleOf(t.want.kind));
+  });
+  return dropped || shrunkOf(steer, out, used) > 0;
 }
 
 /**

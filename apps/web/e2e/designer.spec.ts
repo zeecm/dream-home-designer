@@ -308,7 +308,7 @@ test.describe('desktop', () => {
     expect(m.calls.map((c) => c.step)).toEqual(['furnish "Living']);
   });
 
-  test('the storage lens: the card measures for who sleeps where; how much they own re-scores it, free (3b)', async ({
+  test('the storage lens: the card measures for who sleeps where; its chips for how much they own re-score it, free (3b)', async ({
     page,
   }) => {
     test.setTimeout(150_000);
@@ -326,7 +326,7 @@ test.describe('desktop', () => {
     // One lens line: what is short, what the version adds; advice, never a check.
     const lens = v1.locator('[data-lens="storage"]');
     await expect(lens.locator('dt')).toHaveText('Storage');
-    const line = lens.locator('dd');
+    const line = lens.locator('dd > span').first();
     await expect(line).toContainText(/^clothes \d+\.\d of \d+\.\d\u00a0m/);
     await expect(line).toContainText(/\+\d+\.\d\u00a0m\u00a0hanging/);
     await expect(v1.getByText('Passes all checks')).toBeVisible();
@@ -352,17 +352,31 @@ test.describe('desktop', () => {
     expect(promptOf(JSON.parse(room?.body ?? '{}'))).toContain('Storage the household needs');
     const calls = m.calls.length;
     const was = await line.textContent();
-    // How much they own, in What I know: free, and the storage meter takes the same value.
+    // How much they own: never asked in the first meeting, so Typical, assumed.
     await panel(page).getByRole('button', { name: 'Designer menu' }).click();
     await page.getByRole('menuitem', { name: 'What I know about you' }).click();
     const know = panel(page).getByRole('region', { name: 'What I know about you' });
-    await know.locator('[data-fact="owns"]').getByRole('button', { name: 'Change' }).click();
-    await know.getByRole('radio', { name: 'Lots' }).click();
-    await expect(know.locator('[data-fact="owns"]')).toContainText('Lots');
+    await expect(know.locator('[data-fact="owns"]')).toContainText('Typical');
+    await expect(know.locator('[data-fact="owns"]')).toContainText('Assumed.');
     await know.getByRole('button', { name: '‹ Conversation' }).click();
+    // The card's chips: free, and the storage meter and What I know take the same value.
+    const owns = lens.getByRole('radiogroup', { name: 'How much you own' });
+    await expect(lens).toContainText('Measured for typical amounts');
+    await expect(owns.getByRole('radio', { name: 'Typical' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await owns.getByRole('radio', { name: 'Lots' }).click();
     await expect(log(page)).toContainText('You changed: how much you own Typical → Lots.');
+    await expect(lens).toContainText('Measured for lots of things');
+    await expect(owns.getByRole('radio', { name: 'Lots' })).toHaveAttribute('aria-checked', 'true');
     await expect(line).not.toHaveText(was ?? '');
     await expect(line).toContainText(/short \d+\.\d\u00a0m/);
+    await panel(page).getByRole('button', { name: 'Designer menu' }).click();
+    await page.getByRole('menuitem', { name: 'What I know about you' }).click();
+    await expect(know.locator('[data-fact="owns"]')).toContainText('Lots');
+    await expect(know.locator('[data-fact="owns"]')).not.toContainText('Assumed.');
+    await know.getByRole('button', { name: '‹ Conversation' }).click();
     const kept = await page.evaluate(
       (pid) => window.localStorage.getItem(`dhd-storage-${pid}`),
       planId(page),

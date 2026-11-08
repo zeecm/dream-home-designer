@@ -112,9 +112,7 @@ const MESSAGES: QuestionKey[][] = [
   ['sleeping', 'mobility'],
   ['cooking', 'wfh'],
   ['budget', 'walls'],
-  // How much they own (the storage lens's amount) before "anything else": with the 8 at
-  // most, a household with an older parent is asked neither, and the meter's setting stands.
-  ['style', 'owns', 'anything'],
+  ['style', 'anything'],
 ];
 /** At most this many questions in the first meeting. */
 export const MAX_QUESTIONS = 8;
@@ -124,13 +122,9 @@ function applies(key: QuestionKey, brief: DesignBrief, level: Level): boolean {
   if (key === 'mobility') return brief.household.elders.length > 0;
   // With no bedrooms it is still asked: nobody is left without a bed in silence.
   if (key === 'sleeping') return sleepers(brief).length > 0;
-  // Only where the storage lens measures clothes (someone sleeps in a bedroom), and not once
-  // said (the storage meter's own amount, brought in by the app, says it too).
-  if (key === 'owns') {
-    return (
-      brief.owns === undefined && sleepers(brief).length > 0 && sleepRooms(level, brief).length > 0
-    );
-  }
+  // Never asked in the first meeting (its 8 questions are for the rest): Typical is assumed,
+  // and changed in What I know or with the chips on a card's storage line.
+  if (key === 'owns') return false;
   return true;
 }
 
@@ -409,7 +403,7 @@ export function assume(
     keys.push('style');
     lines.push('Style: my choice, warm and calm.');
   }
-  for (const k of ['who', 'mobility', 'cooking', 'wfh', 'owns'] as const) {
+  for (const k of ['who', 'mobility', 'cooking', 'wfh'] as const) {
     if (!open(k)) continue;
     keys.push(k);
     const fact = factText(k, next, level);

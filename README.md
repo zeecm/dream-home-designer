@@ -114,7 +114,7 @@ for any plan.
 - AI interior designer v2, slice 3a: point at the plan ("not here", "keep this") and house rules
   ("nothing in the corridor") that become checks on every proposal. [spec](docs/specs/ai-designer-v2.md)
 - AI interior designer v2, slice 3b: the storage lens is built (each proposal scored on the
-  storage meter for who sleeps where, "How much do you own?", storage kept when a room is
+  storage meter for who sleeps where, how much they own on the card, storage kept when a room is
   short); the second look at each proposal is next.
 
 ### Planned

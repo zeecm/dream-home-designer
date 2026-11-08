@@ -2,6 +2,7 @@ import {
   type Change,
   type DesignResult,
   type ResultCheck,
+  type StorageAmount,
   type SubsetReport,
   WARNING_TEXT,
   defaultTicks,
@@ -14,7 +15,7 @@ import { type ReactNode, memo, useEffect, useMemo, useRef, useState } from 'reac
 import { useRates } from '../../../cost/estimate';
 import { useEditor } from '../../../editor';
 import { warningsOf } from '../../../electrical/electrical';
-import { useStorage } from '../../../storage/store';
+import { setMeterAmount, useStorage } from '../../../storage/store';
 import { useStore } from '../../../store';
 import { useAi } from '../../credentials';
 import { CaseDialog } from '../CaseDialog';
@@ -70,6 +71,44 @@ const lensLine = (line: string) =>
     .split(' · ')
     .map((p) => (p.length <= 24 ? p.replace(/ /g, '\u00a0') : keepTogether(p)))
     .join(' · ');
+
+const MEASURED: Record<StorageAmount, string> = {
+  few: 'Measured for few things',
+  typical: 'Measured for typical amounts',
+  lots: 'Measured for lots of things',
+};
+const OWNS: { id: StorageAmount; label: string }[] = [
+  { id: 'few', label: 'Few' },
+  { id: 'typical', label: 'Typical' },
+  { id: 'lots', label: 'Lots' },
+];
+
+/**
+ * How much they own, on the storage line: free chips, one value with the storage meter's own
+ * setting and What I know's fact (useTalk keeps them in step and says the change in the log).
+ */
+function OwnsChips({ amount, projectId }: { amount: StorageAmount; projectId: string }) {
+  return (
+    <div className="talk-owns">
+      <span className="muted">{MEASURED[amount]}</span>
+      <span className="talk-choices" role="radiogroup" aria-label="How much you own">
+        {OWNS.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            // biome-ignore lint/a11y/useSemanticElements: chips that answer on tap, as a radio group
+            role="radio"
+            aria-checked={amount === o.id}
+            className="chip"
+            onClick={() => setMeterAmount(projectId, o.id)}
+          >
+            {o.label}
+          </button>
+        ))}
+      </span>
+    </div>
+  );
+}
 
 /** A tri-state checkbox (a group's tick). */
 function GroupTick({
@@ -935,6 +974,10 @@ export const ProposalCard = memo(function ProposalCard({
                 <span className={storage.tone === 'short' ? 'advise' : undefined}>
                   {lensLine(storage.line)}
                 </span>
+                <OwnsChips
+                  amount={(storage.facts as { amount?: StorageAmount }).amount ?? 'typical'}
+                  projectId={project.id}
+                />
                 {storage.lines.length > 0 && (
                   <details className="talk-already">
                     <summary>How it is measured</summary>

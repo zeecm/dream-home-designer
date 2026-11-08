@@ -158,10 +158,8 @@ describe('the first meeting (criteria 20–22)', () => {
         'cooking',
         'wfh',
         'mobility',
-        'owns',
       ]),
     );
-    expect(said.lines).toContain('How much you own: typical.');
     // The conflict is settled by the assumption; the open questions close as assumed.
     expect(sleepingConflict(c.brief, level())).toBeNull();
     expect(openQuestions(c)).toBeNull();
@@ -175,7 +173,6 @@ describe('the first meeting (criteria 20–22)', () => {
       'mobility',
       'cooking',
       'wfh',
-      'owns',
       'budget',
       'walls',
       'style',
@@ -215,15 +212,10 @@ describe('the first meeting (criteria 20–22)', () => {
     ]);
   });
 
-  it('asks how much they own with the style (the storage lens), unless it is said', () => {
+  it('never spends the first meeting on how much they own: Typical is assumed', () => {
     const lvl = level();
     const done = new Set<QuestionKey>(['who', 'sleeping', 'cooking', 'wfh', 'budget', 'walls']);
-    // Eight at most: "anything else" waits for the composer.
-    expect(nextQuestions(done, defaultBrief(), lvl)?.keys).toEqual(['style', 'owns']);
-    expect(nextQuestions(done, { ...defaultBrief(), owns: 'lots' }, lvl)?.keys).toEqual([
-      'style',
-      'anything',
-    ]);
+    expect(nextQuestions(done, defaultBrief(), lvl)?.keys).toEqual(['style', 'anything']);
     expect(questionText('owns', defaultBrief())).toBe('How much do you own?');
     expect(factText('owns', defaultBrief(), lvl)).toBe('Typical');
     expect(factText('owns', { ...defaultBrief(), owns: 'few' }, lvl)).toBe('Few things');

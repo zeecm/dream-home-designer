@@ -53,14 +53,16 @@ const peopleIn = (ps: Person[]): People => ({
  * The meter's setting for a level as the lens reads it. The storage meter's own household wins
  * when the person set it; else each bedroom holds who the brief says sleeps there (assumed as
  * the checks assume when it doesn't say), and anyone with no room lives here too. How much they
- * own is the brief's answer when it gives one, else the meter's.
+ * own is one value with the meter's: the meter's setting when there is one (the app keeps the
+ * two in step, and a card made before an answer reads it now), else the brief's (Typical).
  */
 export function storageSettingFor(
   level: Level,
   brief: DesignBrief,
-  setting: StorageSetting = DEFAULT_STORAGE,
+  meter?: StorageSetting,
 ): StorageHousehold {
-  const amount = brief.owns ?? setting.amount;
+  const setting = meter ?? DEFAULT_STORAGE;
+  const amount = meter ? meter.amount : (brief.owns ?? 'typical');
   if (householdEdited(setting)) return { setting: { ...setting, amount }, from: 'meter' };
   const rooms = bedroomsOf(level, brief).filter((r) => !SHELTER_ROOM.test(r.name));
   const plan = sleepingPlan(brief, rooms, (id) => !!level.rooms[id]);
@@ -248,7 +250,7 @@ export const storageLens: Lens = {
       });
     }
     lines.push({
-      text: `Measured for ${peopleWords(now.people)}, ${after.from === 'meter' ? 'as set in the storage meter' : 'from who sleeps where'}; ${now.amount === 'typical' ? 'a typical amount of things' : now.amount === 'few' ? 'few things' : 'lots of things'}.`,
+      text: `Measured for ${peopleWords(now.people)}, ${after.from === 'meter' ? 'as set in the storage meter' : 'from who sleeps where'}.`,
       tone: 'note',
     });
     const scores = STORAGE_MEASURES.map((m) => ratio(now.home[m])).filter(

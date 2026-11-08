@@ -90,13 +90,16 @@ describe('the storage lens: whose household', () => {
     expect(h.setting.people).toEqual(meter.people);
   });
 
-  it('how much they own is shared: the brief’s answer, else the meter’s, never the household', () => {
+  it('how much they own is one value with the meter’s, and never hands it the household', () => {
     const lots: StorageSetting = { ...DEFAULT_STORAGE, amount: 'lots' };
     expect(householdEdited(lots)).toBe(false);
     const fromMeter = storageSettingFor(level, ONGS, lots);
     expect(fromMeter.from).toBe('brief');
     expect(fromMeter.setting.amount).toBe('lots');
-    expect(storageSettingFor(level, { ...ONGS, owns: 'few' }, lots).setting.amount).toBe('few');
+    // The meter's is the live value (a card's brief may be older); with no meter, the brief's.
+    expect(storageSettingFor(level, { ...ONGS, owns: 'few' }, lots).setting.amount).toBe('lots');
+    expect(storageSettingFor(level, { ...ONGS, owns: 'few' }).setting.amount).toBe('few');
+    expect(storageSettingFor(level, ONGS).setting.amount).toBe('typical');
   });
 
   it('assumes as the checks do when the brief says nothing; a helper with no room lives here too', () => {
@@ -151,7 +154,7 @@ describe('the storage lens: the card line', () => {
     // Its own bedroom's clothes: for the two who sleep there, not the whole home's.
     expect(rep?.line).toMatch(/^clothes \d\.\d of 2\.0 m/);
     expect(rep?.lines.at(-1)?.text).toBe(
-      'Measured for 3 adults and 1 child, from who sleeps where; a typical amount of things.',
+      'Measured for 3 adults and 1 child, from who sleeps where.',
     );
     expect(rep?.lines.some((l) => l.roomId === MAIN)).toBe(true);
     expect(rep?.score.overall).toBeGreaterThan(0);
