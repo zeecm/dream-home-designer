@@ -1947,6 +1947,60 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     await expect(box).toHaveValue('');
   });
 
+  test('asked to design it from the 3D view: the proposal is on the plan, in sight, before Accept (owner, 8 Nov)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    // The sample flat, last seen in 3D.
+    await setup(page, 'anthropic', { 'dhd:view': '3d' });
+    await mock(page, { talk: [REPLY_PLAN] });
+    await page.goto('/');
+    await waitSaved(page);
+    await expect(page.locator('main.stage')).toHaveClass(/stage-3d/);
+    await page
+      .getByRole('button', { name: /Plan details|Show plan details/ })
+      .first()
+      .tap()
+      .catch(() => {});
+    await page.getByRole('button', { name: 'Talk to the designer' }).tap();
+    await panel(page).getByRole('button', { name: 'Just design it' }).tap();
+    const box = panel(page).getByRole('textbox', { name: 'Message the designer' });
+    await box.tap();
+    await box.fill('Please design the living room and the main bedroom.');
+    await panel(page)
+      .getByRole('button', { name: /^Send · about US\$/ })
+      .tap();
+    // The designer's plan asks first (the cost card takes the sheet to full height).
+    await panel(page)
+      .getByRole('button', { name: /^Go ahead · about US\$/ })
+      .tap();
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // Before Accept: the plan, not the 3D view, with the sheet folded to peek below it.
+    await expect(page.locator('main.stage')).toHaveClass(/stage-plan/);
+    await expect(panel(page)).toHaveClass(/talk-peek/);
+    await expect(v1.getByRole('button', { name: 'Show V1 on the plan' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(panel(page).getByText(/^On the table: V1/)).toBeInViewport();
+    // The new pieces are drawn on the plan, and no sheet covers them.
+    const marks = page.getByTestId('proposal-layer').locator('polygon.pv-new');
+    await expect(marks.first()).toBeVisible();
+    const inSight = await marks.evaluateAll(
+      (els) =>
+        els.filter((el) => {
+          const r = el.getBoundingClientRect();
+          const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+          return !!top?.closest('svg.plan-svg');
+        }).length,
+    );
+    expect(inSight).toBeGreaterThan(0);
+    await shot(page, 'phone-asked-proposal');
+  });
+
   test('first meeting, a proposal, accept part, Undo, the sheet’s three heights', async ({
     page,
   }) => {
@@ -1984,8 +2038,11 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     // The tools at the foot give way to the sheet; the plan above shows the proposal.
     await expect(page.locator('.palette')).toBeHidden();
     await shot(page, 'phone-proposal');
-    // Full height (the cost card took it there, its answers in sight), then smaller and
-    // folded to peek, each by its handle; and full again by the handle.
+    // The cost card took the sheet to full height; the proposal folded it to peek, so the plan
+    // shows it. Then full, smaller and full again, each by its handle.
+    await expect(panel(page)).toHaveClass(/talk-peek/);
+    await expect(page.getByTestId('proposal-layer')).toBeVisible();
+    await panel(page).getByRole('button', { name: 'Make the designer full height' }).tap();
     await expect(panel(page)).toHaveClass(/talk-full/);
     await panel(page).getByRole('button', { name: 'Make the designer smaller' }).tap();
     await expect(panel(page)).toHaveClass(/talk-half/);
@@ -2036,13 +2093,19 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
       timeout: 30_000,
     });
-    // The cost card took the sheet to full height; it stays there.
-    await expect(panel(page)).toHaveClass(/talk-full/);
+    // The proposal folded the sheet to peek, the plan showing it; full again by the handle.
+    await expect(panel(page)).toHaveClass(/talk-peek/);
+    const tall = panel(page).getByRole('button', { name: 'Make the designer full height' });
+    await tall.tap();
     await v1.getByRole('button', { name: /^Another idea · about US\$/ }).tap();
     const b = titled(page, 'V1B');
     await expect(b.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
       timeout: 30_000,
     });
+    // B going on the plan folds the sheet to peek again.
+    await expect(panel(page)).toHaveClass(/talk-peek/);
+    await tall.tap();
+    await expect(panel(page)).toHaveClass(/talk-full/);
     const calls = m.calls.length;
     const tabs = panel(page).getByRole('tablist', { name: 'V1: ideas' });
     // Letters only, each 44 px tall; the names are in the tabs' names and the card's title.
