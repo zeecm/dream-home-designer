@@ -1,5 +1,5 @@
-import { type Page, devices, expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { type Page, devices, expect, test } from './test';
 
 // Fingers only: taps, and drags and pinches as touch events. Nothing a phone can't send.
 // The iPhone's screen, touch and pixel ratio, in the Chromium the suite runs.

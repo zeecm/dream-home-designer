@@ -7,7 +7,6 @@ import {
   levelFingerprint,
   parseSpaceDesign,
 } from '@dhd/core';
-import { type Page, type Route, devices, expect, test } from '@playwright/test';
 import living from '../../../packages/core/src/designer/fixtures/room-living.json' with {
   type: 'json',
 };
@@ -26,6 +25,7 @@ import {
   openaiStream,
 } from '../src/ai/designer/fixtures/streams';
 import { waitSaved } from './helpers';
+import { type Page, type Route, devices, expect, test } from './test';
 
 /**
  * The AI designer's conversation (spec docs/specs/ai-designer-v2.md, slice 2, PR 1), against

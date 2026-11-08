@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
 import { clickImage, floorArea, imagePoint, newBlankPlan, waitSaved } from './helpers';
+import { expect, test } from './test';
 
 // The bundled sample plan is 1100 x 940 px at 80 px/m with the flat's centre lines from
 // (110, 110) to (990, 790); its 11000 mm dimension runs from x 110 to 990 at y 50.

@@ -1,7 +1,7 @@
-import { expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { expect, test } from './test';
 
-async function downloadFrom(page: import('@playwright/test').Page, item: string) {
+async function downloadFrom(page: import('./test').Page, item: string) {
   await page.getByRole('button', { name: 'Projects' }).click();
   const [file] = await Promise.all([
     page.waitForEvent('download', { timeout: 60_000 }),

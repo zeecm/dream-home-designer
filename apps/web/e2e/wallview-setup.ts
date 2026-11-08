@@ -1,5 +1,5 @@
-import { type Page, expect } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { type Page, expect } from './test';
 
 /**
  * The sample flat furnished for the wall view: the main bedroom's window wall (D) with a

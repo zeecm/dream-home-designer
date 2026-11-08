@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { expect, test } from './test';
 
 test('lighting: hang a ceiling light, turn north, light the 3D view by the hour', async ({
   page,

@@ -1,5 +1,5 @@
-import { devices, expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { devices, expect, test } from './test';
 
 test('the welcome page: drag the wall and the bedrooms are measured again; name a plan and start it', async ({
   page,

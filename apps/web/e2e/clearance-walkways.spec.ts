@@ -1,5 +1,5 @@
-import { type Page, devices, expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { type Page, devices, expect, test } from './test';
 
 // Clearance checks, slice 2: walkways from the main door, dining chairs, door clashes, the
 // labels on the plan and the drop's announcement. On the sample flat: the main door is at the

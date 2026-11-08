@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { expect, test } from './test';
 
 test('a view link only looks; an edit link saves to the owner’s plan until it is reset', async ({
   page,

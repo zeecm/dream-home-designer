@@ -125,7 +125,10 @@ describe('LevelMeshes', () => {
     // at the far ends of the two walls that tilt, and a door on one of them: about 16 parts
     // per step.
     expect(built / 40).toBeLessThanOrEqual(17);
-    expect(perStep).toBeLessThan(5);
+    // 5 ms is the bound (`PERF=1`); with other suites sharing the machine (pnpm test runs the
+    // packages in parallel, and CI is a loaded runner) the fastest run still reached 5.9 ms,
+    // so three times the bound otherwise, as the other timing tests allow.
+    expect(perStep).toBeLessThan(process.env.PERF ? 5 : 15);
   });
 });
 

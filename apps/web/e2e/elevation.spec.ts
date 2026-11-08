@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { type Page, devices, expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { type Page, devices, expect, test } from './test';
 import {
   BEDROOM_WALL,
   BETWEEN_BEDROOMS,

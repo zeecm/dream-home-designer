@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { expect, test } from './test';
 
 // Any binary glTF does; one of the app's own pieces is at hand.
 const dir = fileURLToPath(new URL('../public/models', import.meta.url));

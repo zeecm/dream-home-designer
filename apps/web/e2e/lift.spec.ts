@@ -1,5 +1,5 @@
-import { type Locator, type Page, devices, expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { type Locator, type Page, devices, expect, test } from './test';
 
 /**
  * The lift and an editable sofa diagonal (docs/specs/slice-2s.md, B1 criteria 9–15 and B2

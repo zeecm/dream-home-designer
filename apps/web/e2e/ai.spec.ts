@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { expect, test } from './test';
 
 const KEY = 'sk-test-not-a-real-key-123';
 
