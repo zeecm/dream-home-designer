@@ -313,6 +313,19 @@ test.describe('desktop', () => {
   }) => {
     test.setTimeout(120_000);
     await setup(page);
+    // A slow disk: each saved record comes back 300 ms late. A tick made before an earlier
+    // tick's record came back was taken back by it (a flake under load, a lost tick for real).
+    await page.addInitScript(() => {
+      const d = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, 'oncomplete');
+      Object.defineProperty(IDBTransaction.prototype, 'oncomplete', {
+        set(fn) {
+          d?.set?.call(this, fn ? (e: Event) => setTimeout(() => fn.call(this, e), 300) : fn);
+        },
+        get() {
+          return d?.get?.call(this);
+        },
+      });
+    });
     let release: () => void = () => {};
     const held = new Promise<void>((r) => {
       release = r;
