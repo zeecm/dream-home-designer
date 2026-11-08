@@ -14,7 +14,15 @@ import {
   sleepingConflict,
   spacesOf,
 } from '@dhd/core';
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useProject, useStore } from '../../../store';
 import { useAi } from '../../credentials';
 import { CostCheck } from '../CostCheck';
@@ -28,6 +36,7 @@ import { lineState, redoLine, undoLine } from './accept';
 import { type CardModel, designCard, optionCard } from './cards';
 import { dayMark } from './days';
 import { answerCost, cardRequest, pressPrice, pressScope, scopePrice } from './propose';
+import { toNewest } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { act, newId, nowIso, talkLevel, useTalk } from './useTalk';
 
@@ -481,17 +490,23 @@ export function Log() {
   const turns = conv?.turns ?? [];
   const lastQuestion = [...turns].reverse().find((t) => t.kind === 'app-question')?.id;
   const lastScope = [...turns].reverse().find((t) => t.kind === 'scope')?.id;
-  // Opening the panel: at the foot, at once.
+  // The log's own scrolls (to the newest turn) aren't the person scrolling away.
+  const moved = useRef(0);
+  const follow = useCallback((el: HTMLElement) => {
+    moved.current = Date.now();
+    toNewest(el);
+  }, []);
+  // Opening the panel: at the newest turn, at once.
   useLayoutEffect(() => {
     const el = list.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, []);
+    if (el) follow(el);
+  }, [follow]);
   // A new turn follows something the person did: the log goes to it.
   // biome-ignore lint/correctness/useExhaustiveDependencies: on a new turn
   useLayoutEffect(() => {
     const el = list.current;
     if (!el) return;
-    el.scrollTop = el.scrollHeight;
+    follow(el);
     pinned.current = true;
     setBehind(false);
   }, [turns.length]);
@@ -500,13 +515,14 @@ export function Log() {
   useLayoutEffect(() => {
     const el = list.current;
     if (!el || !live) return;
-    if (pinned.current) el.scrollTop = el.scrollHeight;
+    if (pinned.current) follow(el);
     else setBehind(true);
   }, [live?.state.steps, proposals]);
   useEffect(() => {
     const el = list.current;
     if (!el) return;
     const on = () => {
+      if (Date.now() - moved.current < 100) return; // our own scroll, not the person's
       pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
       if (pinned.current) setBehind(false);
     };

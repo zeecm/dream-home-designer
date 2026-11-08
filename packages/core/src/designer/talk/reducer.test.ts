@@ -5,6 +5,7 @@ import { tanBrief } from '../fixtures/sample';
 import { type DesignBrief, defaultBrief } from '../schema';
 import {
   assume,
+  bedroomCandidates,
   bedroomsOf,
   factText,
   greeting,
@@ -202,6 +203,37 @@ describe('the first meeting (criteria 20–22)', () => {
       'cooking',
       'wfh',
     ]);
+  });
+
+  it('no bedrooms on the plan (B9): who sleeps where is still asked, and says so', () => {
+    const lvl = structuredClone(level());
+    const names = ['Study', 'Store room', 'Office'];
+    let i = 0;
+    for (const r of Object.values(lvl.rooms)) {
+      if (/bed|master|mdm/i.test(r.name)) r.name = names[i++ % names.length] as string;
+    }
+    const five: DesignBrief = {
+      ...defaultBrief(),
+      household: {
+        ...defaultBrief().household,
+        adults: 2,
+        children: ['primary', 'teen'],
+        elders: ['walks'],
+      },
+    };
+    expect(bedroomsOf(lvl, five)).toEqual([]);
+    const q = nextQuestions(new Set(['who']), five, lvl);
+    expect(q?.keys).toContain('sleeping');
+    expect(q?.lead).toBe('Five people and no bedrooms, so this needs a decision.');
+    // What could be marked as a bedroom: the dry rooms, never the kitchen or a bathroom.
+    const can = bedroomCandidates(lvl).map((r) => r.name);
+    expect(can).toContain('Study');
+    expect(can.some((n) => /kitchen|bath|living/i.test(n))).toBe(false);
+    // Marked, it is a bedroom.
+    const id = bedroomCandidates(lvl)[0]?.id as string;
+    expect(
+      bedroomsOf(lvl, { ...five, rooms: { [id]: { use: 'bedroom', wish: '' } } }),
+    ).toHaveLength(1);
   });
 });
 

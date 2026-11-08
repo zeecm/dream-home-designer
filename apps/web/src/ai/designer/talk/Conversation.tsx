@@ -16,7 +16,7 @@ import { Decisions, WhatIKnow } from './Views';
 import { lineState, undoLine } from './accept';
 import { cardChanges, cardResult, cardVerdict, optionCard } from './cards';
 import { stopTalkRun } from './propose';
-import { focusInLog, scrollInLog } from './scroll';
+import { focusInLog, keepFocus, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { act, ensureConversation, newId, nowIso, talkLevel, useTalk } from './useTalk';
 import { useProposalView } from './view';
@@ -221,6 +221,7 @@ export function TalkPanel() {
   const said = useTalk((s) => s.said);
   const note = useTalk((s) => s.note);
   const memory = useTalk((s) => s.memory);
+  const opening = useTalk((s) => s.opening);
   const settings = useTalk((s) => s.settings);
   const formOpen = useTalk((s) => s.formOpen);
   const shown = useTalk((s) => s.shown);
@@ -228,7 +229,29 @@ export function TalkPanel() {
   const previewing = useDesigner((s) => s.previewing);
   const { spend, cap } = useSpend();
   const heading = useRef<HTMLHeadingElement>(null);
+  const aside = useRef<HTMLElement>(null);
   const [fresh, setFresh] = useState(false);
+
+  // Focus never falls to the page when the control that had it goes; `/` goes to the composer.
+  useEffect(() => {
+    const el = aside.current;
+    if (!el) return;
+    const off = keepFocus(el);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      const box = el.querySelector<HTMLTextAreaElement>('#talk-text');
+      if (!box) return;
+      e.preventDefault();
+      box.focus();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      off();
+      window.removeEventListener('keydown', onKey);
+    };
+  }, []);
 
   // Open: the conversation (started if new), with the key asked for once if there is none.
   useEffect(() => {
@@ -378,6 +401,7 @@ export function TalkPanel() {
   const isFolded = side && folded;
   return (
     <aside
+      ref={aside}
       className={`panel designer talk${sheet ? ` talk-sheet talk-${size}` : ''}${side ? ' talk-side' : ''}${isFolded ? ' talk-folded' : ''}`}
       aria-labelledby="designer-h"
     >
@@ -477,9 +501,11 @@ export function TalkPanel() {
           </button>
         )}
       </header>
+      {opening && <p className="field-hint talk-memory">Opening your saved conversation…</p>}
       {memory && (
-        <p className="field-hint talk-memory">
-          This conversation is kept only until you close the tab.
+        <p className="talk-memory talk-unsaved">
+          Not saved on this device. This browser won’t keep the conversation, so it lasts until you
+          close the tab.
         </p>
       )}
       {note && <p className="field-hint talk-memory">{note}</p>}

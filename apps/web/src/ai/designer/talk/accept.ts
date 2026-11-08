@@ -172,6 +172,20 @@ export async function acceptCard(
         : p,
     );
   }
+  // What was left out is a rejection the designer remembers (spec: Remembers), one line a time.
+  if (left.length) {
+    const names = left.map((c) => c.name);
+    const shown = names.slice(0, 3).join(', ');
+    const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
+    await act({
+      type: 'decisionAdd',
+      id: newId('dec'),
+      at,
+      kind: 'rejected',
+      text: cut(`Left out of V${n}: ${shown}${more}`, 160),
+      from: `V${n}`,
+    });
+  }
   for (const w of waiving) {
     await act({
       type: 'decisionAdd',

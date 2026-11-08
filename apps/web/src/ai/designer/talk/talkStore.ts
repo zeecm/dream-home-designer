@@ -14,7 +14,7 @@ import {
  * one plan share one copy). Never in the project, an export, a share link or a request to our
  * server, and never a key. Every write reads the record afresh in one transaction and applies
  * the change to it, so two tabs never clobber each other; other tabs hear of it on a
- * BroadcastChannel. Without IndexedDB (a private window, or it takes over 2 s to open) it
+ * BroadcastChannel. Without IndexedDB (a private window, or it takes over 10 s to open: a busy device is waited for) it
  * lives in memory for this tab.
  */
 
@@ -254,7 +254,7 @@ function idbTalkStore(db: IDBDatabase): TalkStore {
 /** Opens the store: IndexedDB, or memory if it can't be opened within `timeoutMs`. */
 export function openTalk(
   idb: IDBFactory | undefined = globalThis.indexedDB,
-  timeoutMs = 2000,
+  timeoutMs = 10_000,
 ): Promise<TalkStore> {
   if (!idb) return Promise.resolve(memoryTalkStore());
   return new Promise((resolve) => {
@@ -298,13 +298,20 @@ export function openTalk(
       }
     };
     req.onerror = () => give(memoryTalkStore());
-    req.onblocked = () => give(memoryTalkStore());
+    // Blocked by an older tab: it closes on versionchange, and this open then succeeds.
+    req.onblocked = () => {};
   });
 }
 
 let opened: Promise<TalkStore> | null = null;
+let ready = false;
 /** The store for this tab (opened once). */
 export const talkStore = (): Promise<TalkStore> => {
-  opened ??= openTalk();
+  opened ??= openTalk().then((s) => {
+    ready = true;
+    return s;
+  });
   return opened;
 };
+/** Whether the store is open yet (the panel says it's opening the conversation till then). */
+export const talkStoreReady = () => ready;

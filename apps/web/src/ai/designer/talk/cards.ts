@@ -176,3 +176,9 @@ export const planMoved = (project: Project, card: CardModel) => {
   const b = nowOf(project);
   return !!b && card.status !== 'running' && levelFingerprint(b.now) !== card.madeOn;
 };
+
+/** A card's head: on a plan of several levels it names the level it designs (the first). */
+export const headLabel = (project: Project, card: CardModel) =>
+  project.levels.length > 1 && project.levels[0]?.name
+    ? `${card.label} · ${project.levels[0].name}`
+    : card.label;

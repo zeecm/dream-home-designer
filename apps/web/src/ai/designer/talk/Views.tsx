@@ -177,8 +177,8 @@ export function Decisions() {
       )}
       {list.length === 0 ? (
         <p className="muted">
-          Nothing decided yet. When you accept, reject or ask for something to stay, it’s noted
-          here.
+          Nothing decided yet. What you leave out of a proposal, accept anyway or add here is kept,
+          and the designer goes by it.
         </p>
       ) : (
         <ul className="talk-decisions">

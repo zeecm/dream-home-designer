@@ -488,6 +488,75 @@ test.describe('desktop', () => {
     expect(m.calls.slice(n).map((c) => c.step)).toEqual(['furnish "Kitchen"']);
   });
 
+  test('the next room after a part or full accept: only that room, on the plan (QA B4, B8)', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await setup(page);
+    await mock(page);
+    await openSample(page);
+    await talk(page);
+    await panel(page).getByRole('button', { name: 'Just design it' }).click();
+    await expect(panel(page).getByText('Where shall we start?')).toBeVisible();
+    // B8: the answered control went; focus went to the next one, not the page.
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement?.closest('.talk') !== null))
+      .toBe(true);
+    await design(page, /^Living and dining · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // Part: the room unticked, one piece ticked.
+    await v1.getByRole('checkbox', { name: 'Accept all of Living and dining' }).uncheck();
+    await v1
+      .getByRole('checkbox', { name: /^Accept: / })
+      .first()
+      .check();
+    await v1.getByRole('button', { name: 'Accept selected (1)' }).click();
+    await expect(log(page).getByText(/^You accepted 1 of \d+ changes from V1\./)).toBeVisible();
+    // The kitchen next: none of the living room comes back, left out or accepted.
+    await design(page, /^Kitchen · about US\$/);
+    const v2 = card(page, 2);
+    await expect(v2.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    await expect(v2.getByRole('checkbox', { name: 'Accept all of Living and dining' })).toHaveCount(
+      0,
+    );
+    await expect(v2.getByRole('checkbox', { name: /^Accept: .*sofa/i })).toHaveCount(0);
+    // And it is on the plan, its toggle pressed while it is.
+    await expect(page.getByText('Previewing V2, not in your plan yet')).toBeVisible();
+    await expect(v2.getByRole('button', { name: 'Show V2 on the plan' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await shot(page, 'v2-kitchen-only');
+    // Full: everything of V2 in; the next room proposes neither room again.
+    await v2.getByRole('button', { name: /^Accept selected \(\d+\)$/ }).click();
+    await expect(log(page).getByText(/^You accepted \d+ changes from V2\.$/)).toBeVisible();
+    const before = Object.keys((await saved(page)).renovation.levels[0].items).sort();
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    const v3 = card(page, 3);
+    await expect(v3.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    await expect(v3.getByRole('checkbox', { name: 'Accept all of Kitchen' })).toHaveCount(0);
+    await expect(v3.getByRole('checkbox', { name: 'Accept all of Living and dining' })).toHaveCount(
+      0,
+    );
+    await expect(page.getByText('Previewing V3, not in your plan yet')).toBeVisible();
+    // Accepting V3 keeps every piece already in, with its id.
+    await v3.getByRole('button', { name: /^Accept selected \(\d+\)$/ }).click();
+    await expect(log(page).getByText(/^You accepted \d+ changes from V3\.$/)).toBeVisible();
+    const after = Object.keys((await saved(page)).renovation.levels[0].items);
+    for (const id of before) expect(after).toContain(id);
+    // What was left out of V1 is remembered in Decisions.
+    await panel(page).getByRole('button', { name: 'Designer menu' }).click();
+    await page.getByRole('menuitem', { name: 'Decisions' }).click();
+    await expect(panel(page).getByText(/^Left out of V1: /)).toBeVisible();
+  });
+
   test('the cost card’s Just Living and dining sends only that room; Not now sends nothing (30)', async ({
     page,
   }) => {

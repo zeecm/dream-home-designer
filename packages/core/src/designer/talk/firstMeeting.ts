@@ -43,6 +43,23 @@ export function bedroomsOf(
 const sleepRooms = (level: Level, brief: DesignBrief) =>
   bedroomsOf(level, brief).filter((r) => !SHELTER.test(r.name));
 
+/**
+ * Rooms that could be marked as bedrooms when the plan names none (a Study, an Office): the
+ * designed ones that aren't wet, a kitchen, a living room or a shelter. Largest first.
+ */
+export function bedroomCandidates(level: Level): { id: string; name: string }[] {
+  return Object.values(level.rooms)
+    .filter(
+      (r) =>
+        isDesigned(level, r.id) &&
+        !WET.test(r.name) &&
+        !SHELTER.test(r.name) &&
+        !['kitchen', 'living', 'none'].includes(roomKind(r.name)),
+    )
+    .sort((p, q) => roomArea(level, q) - roomArea(level, p) || (p.id < q.id ? -1 : 1))
+    .map((r) => ({ id: r.id, name: r.name }));
+}
+
 /** The household as the checks name it, with a helper only where the brief places one. */
 const sleepers = (brief: DesignBrief) => peopleOf(brief).filter((p) => p.kind !== 'helper');
 
@@ -103,7 +120,8 @@ export const MAX_QUESTIONS = 8;
 /** Whether a question applies to this household and plan. */
 function applies(key: QuestionKey, brief: DesignBrief, level: Level): boolean {
   if (key === 'mobility') return brief.household.elders.length > 0;
-  if (key === 'sleeping') return sleepers(brief).length > 0 && sleepRooms(level, brief).length > 0;
+  // With no bedrooms it is still asked: nobody is left without a bed in silence.
+  if (key === 'sleeping') return sleepers(brief).length > 0;
   return true;
 }
 

@@ -9,6 +9,7 @@ import {
   StyleId,
   WALL_CHOICES,
   WFH_CHOICES,
+  bedroomCandidates,
   bedroomsOf,
   guessSleeping,
   peopleOf,
@@ -230,7 +231,23 @@ function Who({ brief, onDone, doneLabel = 'Done', autoFocus }: FactProps) {
 }
 
 function Sleeping({ brief, level, onDone, doneLabel = 'Done', autoFocus }: FactProps) {
-  const b = brief;
+  // A plan with no bedrooms: first, which rooms people sleep in (marked as bedrooms).
+  const [marked, setMarked] = useState<string[]>([]);
+  const none = bedroomsOf(level, brief).filter((r) => !/shelter|bomb/i.test(r.name)).length === 0;
+  const b: DesignBrief = marked.length
+    ? {
+        ...brief,
+        rooms: {
+          ...brief.rooms,
+          ...Object.fromEntries(
+            marked.map((id) => [
+              id,
+              { use: 'bedroom' as const, wish: brief.rooms[id]?.wish ?? '' },
+            ]),
+          ),
+        },
+      }
+    : brief;
   const rooms = bedroomsOf(level, b);
   const shelter = (id: string) => /shelter|bomb/i.test(level.rooms[id]?.name ?? '');
   const people = peopleOf(b);
@@ -253,8 +270,41 @@ function Sleeping({ brief, level, onDone, doneLabel = 'Done', autoFocus }: FactP
     setMine(Object.fromEntries(Object.entries(next).filter(([, ps]) => ps.length)));
   };
   const unplaced = people.filter((p) => p.kind !== 'helper' && !inRoom(p.key));
+  const candidates = none ? bedroomCandidates(level) : [];
   return (
     <div className="talk-widget">
+      {none && (
+        <>
+          <p className="field-hint negative">
+            {candidates.length
+              ? 'Your plan has no room named as a bedroom. Which rooms do people sleep in?'
+              : 'Your plan has no room people could sleep in. Draw or rename a bedroom on the plan, then ask me again.'}
+          </p>
+          {candidates.length > 0 && (
+            // biome-ignore lint/a11y/useSemanticElements: a row of toggles
+            <div className="chip-row" role="group" aria-label="Rooms people sleep in">
+              {candidates.map((r, i) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  className="chip"
+                  aria-pressed={marked.includes(r.id)}
+                  // biome-ignore lint/a11y/noAutofocus: the next question of the message
+                  autoFocus={autoFocus && i === 0}
+                  onClick={() =>
+                    setMarked((m) =>
+                      m.includes(r.id) ? m.filter((x) => x !== r.id) : [...m, r.id],
+                    )
+                  }
+                >
+                  {marked.includes(r.id) && <Mark kind="check" />}
+                  {r.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
       {rooms.map((r, i) => (
         // biome-ignore lint/a11y/useSemanticElements: a row of toggles named by its room
         <div key={r.id} className="talk-sleep-row" role="group" aria-label={r.name}>
@@ -283,11 +333,13 @@ function Sleeping({ brief, level, onDone, doneLabel = 'Done', autoFocus }: FactP
         </div>
       ))}
       <p className={unplaced.length ? 'field-hint negative' : 'field-hint'}>
-        {unplaced.length
-          ? `${unplaced.map((p) => personLabel(p, b)).join(' and ')} would have no bed. Tap where each of them sleeps: two can share a room, a bunk bed sleeps two.`
-          : said
-            ? 'Each of them gets a bed there, and the checks make sure.'
-            : 'Dashed means my guess. Tap to change.'}
+        {!rooms.length
+          ? `${unplaced.map((p) => personLabel(p, b)).join(' and ')} would have no bed.`
+          : unplaced.length
+            ? `${unplaced.map((p) => personLabel(p, b)).join(' and ')} would have no bed. Tap where each of them sleeps: two can share a room, a bunk bed sleeps two.`
+            : said
+              ? 'Each of them gets a bed there, and the checks make sure.'
+              : 'Dashed means my guess. Tap to change.'}
       </p>
       <div className="talk-widget-foot">
         <button
@@ -296,7 +348,12 @@ function Sleeping({ brief, level, onDone, doneLabel = 'Done', autoFocus }: FactP
           onClick={() => {
             // Done on the guess keeps the guess, said.
             const final = sleeping;
-            onDone((cur) => ({ ...cur, sleeping: final }));
+            const bedrooms = b.rooms;
+            onDone((cur) => ({
+              ...cur,
+              sleeping: final,
+              rooms: marked.length ? { ...cur.rooms, ...bedrooms } : cur.rooms,
+            }));
           }}
         >
           {doneLabel}

@@ -12,7 +12,7 @@ import { create } from 'zustand';
 import { useStore } from '../../../store';
 import type { RunState } from '../run';
 import { getBrief, loadDesigns, putBrief, useDesigner } from '../state';
-import { onOtherTab, talkStore } from './talkStore';
+import { onOtherTab, talkStore, talkStoreReady } from './talkStore';
 
 /**
  * The open plan's conversation as the panel sees it: the record (mirrored from `dhd-talk`
@@ -42,6 +42,8 @@ interface TalkState {
   conv: Conversation | null;
   proposals: Proposal[];
   memory: boolean;
+  /** Waiting for the saved conversation (a slow IndexedDB open). */
+  opening: boolean;
   view: TalkView;
   /** What I know opened at this fact. */
   knowAt: QuestionKey | null;
@@ -72,6 +74,7 @@ export const useTalk = create<TalkState>(() => ({
   conv: null,
   proposals: [],
   memory: false,
+  opening: false,
   view: 'log',
   knowAt: null,
   shown: null,
@@ -114,7 +117,9 @@ export const say = (text: string) => useTalk.setState({ said: text });
 
 /** Loads the open plan's conversation and proposals (none yet: null). */
 export async function loadTalk(projectId = doc().id) {
+  if (!talkStoreReady()) useTalk.setState({ opening: true });
   const s = await talkStore();
+  useTalk.setState({ opening: false });
   const [conv, proposals] = await Promise.all([s.get(projectId), s.proposals(projectId)]);
   if (doc().id !== projectId) return;
   useTalk.setState((st) => ({

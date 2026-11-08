@@ -24,7 +24,15 @@ import { designerCannotUse } from '../stream';
 import { keepTogether } from '../words';
 import { Mark } from './Mark';
 import { acceptCard, precheckAccept } from './accept';
-import { type CardModel, cardChanges, cardResult, cardVerdict, nowOf, planMoved } from './cards';
+import {
+  type CardModel,
+  cardChanges,
+  cardResult,
+  cardVerdict,
+  headLabel,
+  nowOf,
+  planMoved,
+} from './cards';
 import { finishPrice, finishRooms, pressScope, scopePrice } from './propose';
 import { focusInLog, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
@@ -327,7 +335,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
           onClick={() => setExpanded(true)}
         >
           <span>
-            V{card.n} · {card.label}
+            V{card.n} · {headLabel(project, card)}
             {verdicts.get(card.key) ? ` · ${verdicts.get(card.key)}` : ''}
             {accepted0 && !verdicts.has(card.key) ? ` · Accepted ${accepted0}` : ''}
           </span>
@@ -388,7 +396,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
   const head = (
     <div className="talk-card-head">
       <h3 className="talk-card-title" id={`card-${card.key}`}>
-        V{card.n} · {card.label}
+        V{card.n} · {headLabel(project, card)}
       </h3>
       <button
         type="button"
@@ -427,7 +435,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
           onClick={() => setExpanded(true)}
         >
           <span>
-            V{card.n} · {card.label} · {allIn ? 'In your renovation' : verdict}
+            V{card.n} · {headLabel(project, card)} · {allIn ? 'In your renovation' : verdict}
             {acc}
           </span>
           <span className="talk-fold-show" aria-hidden="true">

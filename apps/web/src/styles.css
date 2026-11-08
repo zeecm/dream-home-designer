@@ -7463,6 +7463,11 @@ textarea {
   padding: 0 var(--pad) 6px;
   margin: 0;
 }
+.talk-unsaved {
+  font-size: var(--fs-small);
+  line-height: 18px;
+  color: var(--pill-warning-ink);
+}
 .talk-menu-wrap {
   position: relative;
 }
@@ -8147,6 +8152,21 @@ textarea {
 .talk-fact dd > .talk-styles {
   flex-basis: 100%;
   min-width: 0;
+}
+/* The style cards scroll sideways inside the question's frame, never past its border. */
+.talk-turn,
+.talk-question,
+.talk-widget {
+  min-width: 0;
+  max-width: 100%;
+}
+.talk-question {
+  grid-template-columns: minmax(0, 1fr);
+}
+.talk-styles {
+  max-width: 100%;
+  min-width: 0;
+  overscroll-behavior-x: contain;
 }
 .talk-assumed {
   font-size: var(--fs-hint);
