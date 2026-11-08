@@ -716,7 +716,7 @@ again with the steer (`Steer`, weights only: protected roles left out last, `dro
 preferred piece narrowed costs more and is looked at again at full width, gains a little against
 a wall; swaps go on to one that keeps it whole), kept only if no worse (`piecesNoWorse`, no new
 hard key from `spaceHardKeys`, the one helper for a space's hard checks). The benchmark's
-layouts are unchanged and cost about the same. `owns` is in 3a's conversation record v3.
+layouts are unchanged and cost about the same. The `owns` question key is in 3a's conversation record v3; the brief's `owns` field is new within v3 (no bump) and read tolerantly, so a 3a build writing a conversation drops it and the next load takes it back from the meter (`ownsFromMeter`). The solver's memo keys carry the house rules where a choice depends on them (the steered solve, a settled outcome); the plain first solve stays shared.
 
 **Drag on big plans (task #69):** room labels are fitted once per room (`fitRoomLabel`,
 memo keyed on everything the fit reads) with `placeLabel` filtering far circles and searching

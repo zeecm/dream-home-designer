@@ -11,6 +11,7 @@ import { roleOf } from '../principles';
 import { roomStep } from '../prompts';
 import { type DesignOptions, designResult } from '../result';
 import { type DesignBrief, type SpaceDesign, defaultBrief, parseSpaceDesign } from '../schema';
+import { Rule } from '../rules/schema';
 import { dropPriorityOf } from '../solve';
 import { spacesOf } from '../spaces';
 import { lensReports, steerFor } from './index';
@@ -269,6 +270,42 @@ describe('the storage lens: the solver’s weights', () => {
     expect(steered.dropped.length).toBe(plain.dropped.length);
     const hard = (r: typeof plain) => r.checks.filter((c) => c.hard && !c.already).length;
     expect(hard(steered)).toBeLessThanOrEqual(hard(plain));
+  });
+
+  it('the steered choice is remembered with the house rules it was made against', () => {
+    const answers = {
+      [SAMPLE_KEYS.main]: answerOf([
+        { ref: 'bed1', assetId: 'bed-queen' },
+        { ref: 'ward1', assetId: 'wardrobe' },
+        { ref: 'tv1', assetId: 'built-in-tv-console', width: 2.4 },
+        { ref: 'bw1', assetId: 'built-in-wardrobe', width: 2.0 },
+      ]),
+    };
+    const rules = [
+      Rule.parse({
+        id: 'rule_nobw',
+        name: 'No built-in wardrobe in the main bedroom',
+        subject: { kind: 'kind', kindId: 'built-in-wardrobe' },
+        relation: 'notIn',
+        target: { kind: 'room', roomId: MAIN },
+        n: null,
+        levelId: level.id,
+        at: '2026-11-08T00:00:00Z',
+        from: { turnId: 't1', version: null },
+      }),
+    ];
+    const ruleFails = (r: ReturnType<typeof place>) =>
+      r.checks.filter((c) => c.hard && c.key.startsWith('R|')).map((c) => c.key);
+    // Fresh, with the rule: the steered layout would break it, so the plain one is kept.
+    const fresh = place(answers, { rules }, ONGS, 'dsn_rule_fresh');
+    expect(placedRefs(fresh)).toEqual(['bed1', 'tv1']);
+    expect(ruleFails(fresh)).toEqual([]);
+    // Placed without the rule first, then with it (one session's caches): the same as fresh.
+    const id = 'dsn_rule_after';
+    expect(placedRefs(place(answers, {}, ONGS, id))).toEqual(['bed1', 'bw1']);
+    const after = place(answers, { rules }, ONGS, id);
+    expect(placedRefs(after)).toEqual(placedRefs(fresh));
+    expect(ruleFails(after)).toEqual([]);
   });
 
   it('a storage piece keeps its full width when another arrangement fits it', () => {

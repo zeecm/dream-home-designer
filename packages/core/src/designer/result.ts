@@ -244,6 +244,14 @@ function work(
 ): DesignResult {
   const { brief, aliases, concept } = design;
   const rulesOpt = opts.rules?.length ? { rules: opts.rules } : {};
+  // What the house rules change in a space's outcome (only the fields the checks read, so a
+  // rename keeps the cache): the steered solve is kept only if no rule check gets worse, and a
+  // settled outcome comes from the rules' keep-outs. The plain first solve doesn't read them.
+  const ruleKey = opts.rules?.length
+    ? stableJson(opts.rules.map((r) => [r.id, r.subject, r.relation, r.target, r.n]))
+    : null;
+  /** A settled outcome's key: its first solve's, and the rules whose keep-outs it followed. */
+  const settledKeyOf = (first: string) => (ruleKey ? hash(stableJson([first, ruleKey])) : first);
   const repaired: Note[] = [];
   const dropped: Note[] = [];
   const notes: Note[] = (concept?.notes ?? []).map((text) => ({ text }));
@@ -526,12 +534,15 @@ function work(
               opts.walkways !== false,
               noWorseThan ?? null,
               with_,
+              // A steered outcome is chosen against the rules' hard checks.
+              with_ ? ruleKey : null,
             ]),
           );
         const memoKey = keyOf(st);
         // A space moved off a walkway before is placed as it ended up.
         const hit =
-          (keepOut.length ? undefined : settledMemo.get(memoKey)) ?? solveMemo.get(memoKey);
+          (keepOut.length ? undefined : settledMemo.get(settledKeyOf(memoKey))) ??
+          solveMemo.get(memoKey);
         if (!keepOut.length) firstKey = memoKey;
         if (hit && !keepOut.length) {
           firstSwap = hit.swap;
@@ -645,7 +656,9 @@ function work(
         apply,
         unapply,
         settle: (o) => {
-          settledMemo.set(firstKey, o);
+          // A settled outcome keeps its first solve's weights for later walkway re-solves.
+          if (firstSteered) steeredSolves.add(o);
+          settledMemo.set(settledKeyOf(firstKey), o);
           if (settledMemo.size > 48) settledMemo.delete(settledMemo.keys().next().value as string);
         },
         // The hard checks with only this space furnished (the rest of the plan as it is).
