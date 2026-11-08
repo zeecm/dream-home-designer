@@ -696,6 +696,32 @@ window) to peek, and a phone showing only 3D switches to the plan, where the cha
 (`TalkPanel` in `talk/Conversation.tsx`). E2e: the phone test "asked to design it from the 3D
 view".
 
+**AI designer v2, slice 3b PR 1 (lenses and the storage lens, 8 Nov):** core
+`designer/lenses/` holds the `Lens` interface (`report`, optional `steer`; lenses never gate)
+and `storageLens`. The household it measures for (`storageSettingFor`): the storage meter's own
+household when the person set it there (people or others; how much they own doesn't count),
+else who sleeps where in the brief (assumed as the checks assume), the unplaced and a helper as
+"others". How much they own (the brief's `owns`, What I know's "How much do you own?") is never
+asked in the first meeting: it shows as Assumed (Typical) in What I know, and the card's storage
+line has free chips ("Measured for typical amounts · Few · Typical · Lots"). It is one value with
+the meter's amount, which the lens reads as the live value: `useTalk` writes the meter after a
+fact change and turns a meter change into an `editFact` line. `DesignOptions.storage` (the
+meter's setting, `designOpts`, also in `priceKey`) and `lenses` are in the result key, so a
+change re-scores the cards with no request. Cards show a Storage line ("clothes 1.8 of 2.0 m,
+short 0.2 m · +1.8 m hanging": the designed bedrooms' clothes, the home's other measures) from a
+worker `lens` ask (`readLens`). Room steps get a storage block in the tail (data). The solver:
+each space is solved as before (memoised as with no lens); only if that solve lost storage the
+lenses protect (`storageLost`: a protected piece left out, a preferred one narrowed) is it solved
+again with the steer (`Steer`, weights only: protected roles left out last, `dropPriorityOf`; a
+preferred piece narrowed costs more and is looked at again at full width, gains a little against
+a wall; swaps go on to one that keeps it whole), kept only if no worse (`piecesNoWorse`, no new
+hard key from `spaceHardKeys`, the one helper for a space's hard checks). The benchmark's
+layouts are unchanged and cost about the same. The `owns` question key is in 3a's conversation
+record v3; the brief's `owns` field is new within v3 (no bump) and read tolerantly, so a 3a build
+writing a conversation drops it and the next load takes it back from the meter (`ownsFromMeter`).
+The solver's memo keys carry the house rules where a choice depends on them (the steered solve, a
+settled outcome); the plain first solve stays shared.
+
 **Drag on big plans (task #69):** room labels are fitted once per room (`fitRoomLabel`,
 memo keyed on everything the fit reads) with `placeLabel` filtering far circles and searching
 nearest-first (exact, ties kept); `wallStatuses`, `planGeometry`, `roomShapes` and

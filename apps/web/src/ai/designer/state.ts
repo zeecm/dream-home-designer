@@ -10,6 +10,7 @@ import {
 import { create } from 'zustand';
 import { useRates } from '../../cost/estimate';
 import { useEditor } from '../../editor';
+import { meterSetting } from '../../storage/store';
 import { setLeaveGuard, useStore } from '../../store';
 import { defaultPicks } from './compare';
 import { sharedQuestion } from './once';
@@ -86,16 +87,20 @@ export const setHouseKept = (f: (levelId: string) => readonly Kept[]) => {
   houseKept = f;
 };
 /** The kept pieces a version made at `madeAt` is placed and checked with (`keptBefore`). */
-export const houseKeptFor = (levelId: string, madeAt?: string): readonly Kept[] =>
+export const houseKeptFor = (levelId: string, madeAt: string | 'new'): readonly Kept[] =>
   keptBefore(houseKept(levelId), madeAt);
 
 /**
  * What a version is placed and checked with: the rates, the site, the plan's own models and,
  * on `levelId`, the household's house rules (slice 3a: in the result's key, so a rule kept,
  * changed or deleted re-checks every card with no request), and the pieces kept before
- * `madeAt` (a new design: all of them).
+ * `madeAt`: a version's own time (its card's `at`), or 'new' for a design not made yet.
  */
-export const designOpts = (doc: Project, levelId?: string, madeAt?: string): DesignOptions => {
+export const designOpts = (
+  doc: Project,
+  levelId: string | undefined,
+  madeAt: string | 'new',
+): DesignOptions => {
   const rules = levelId ? houseRules(levelId) : [];
   const kept = levelId ? houseKeptFor(levelId, madeAt) : [];
   return {
@@ -104,6 +109,9 @@ export const designOpts = (doc: Project, levelId?: string, madeAt?: string): Des
     ...(doc.models ? { models: doc.models } : {}),
     ...(rules.length ? { rules: [...rules] } : {}),
     ...(kept.length ? { kept: [...kept] } : {}),
+    // The storage meter's own setting: its household wins when the person set it there (the
+    // storage lens, tech 3b §4.1). Part of the result key, so editing it re-scores the cards.
+    storage: meterSetting(doc.id),
   };
 };
 

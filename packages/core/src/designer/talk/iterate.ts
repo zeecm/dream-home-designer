@@ -217,11 +217,11 @@ export function conversationText(
   out.push('', 'What I know about you');
   const b = conv.brief;
   for (const k of QUESTION_KEYS) {
-    // Not asked yet: slice 3b's question.
-    if (k === 'owns') continue;
     if (k === 'mobility' && !b.household.elders.length) continue;
     if (k === 'sleeping' && !peopleOf(b).some((p) => p.kind !== 'helper')) continue;
-    const assumed = conv.assumed.includes(k) ? ' (assumed)' : '';
+    // How much they own is never asked in the first meeting: Typical until it is said.
+    const assumed =
+      conv.assumed.includes(k) || (k === 'owns' && b.owns === undefined) ? ' (assumed)' : '';
     out.push(`- ${FACT_LABELS[k]}: ${factText(k, b, level)}${assumed}`);
   }
   // Accepted rows still in the renovation, room by room, in the order they were accepted.

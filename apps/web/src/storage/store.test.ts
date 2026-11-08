@@ -19,7 +19,8 @@ const data = vi.hoisted(() => {
   return data;
 });
 
-const { STORAGE_SEEN_KEY, loadStorage, storageKey, useStorage } = await import('./store');
+const { STORAGE_SEEN_KEY, loadStorage, meterSetting, setMeterAmount, storageKey, useStorage } =
+  await import('./store');
 const { ageingKey } = await import('../ageing/store');
 
 const DEFAULT = {
@@ -54,6 +55,22 @@ describe('the storage household, per browser and project', () => {
     useStorage.getState().resetPeople();
     useStorage.getState().set({ amount: 'typical' });
     expect(data.has(storageKey('prj_1'))).toBe(false);
+  });
+
+  it('the designer reads a project’s setting whether or not the meter has it open, and sets how much they own', () => {
+    useStorage.getState().load('prj_5');
+    data.set(
+      storageKey('prj_6'),
+      JSON.stringify({ ...DEFAULT, people: { rm_a: { adults: 1, children: 0 } } }),
+    );
+    // Read from what this browser kept, never loaded into the meter.
+    expect(meterSetting('prj_6').people).toEqual({ rm_a: { adults: 1, children: 0 } });
+    expect(useStorage.getState().projectId).toBe('prj_5');
+    // "How much do you own?" answered in the designer: the meter's own amount, kept.
+    setMeterAmount('prj_6', 'lots');
+    expect(useStorage.getState().projectId).toBe('prj_6');
+    expect(meterSetting('prj_6').amount).toBe('lots');
+    expect(JSON.parse(data.get(storageKey('prj_6')) ?? '{}').amount).toBe('lots');
   });
 
   it('a room back to its beds drops its entry', () => {

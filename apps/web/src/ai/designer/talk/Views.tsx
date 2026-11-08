@@ -60,8 +60,6 @@ export function WhatIKnow() {
   const b = conv.brief;
   const keys = QUESTION_KEYS.filter(
     (k) =>
-      // Slice 3b asks it (the storage lens); until then What I know doesn't show it.
-      k !== 'owns' &&
       (k !== 'mobility' || b.household.elders.length > 0) &&
       // Who sleeps where, whenever someone sleeps here: with no bedroom, it asks which rooms
       // they sleep in (N1).
@@ -76,7 +74,8 @@ export function WhatIKnow() {
       <Back title="What I know about you" />
       <dl className="talk-facts">
         {keys.map((k) => {
-          const assumed = conv.assumed.includes(k);
+          // How much they own is never asked in the first meeting: Typical until it is said.
+          const assumed = conv.assumed.includes(k) || (k === 'owns' && b.owns === undefined);
           return (
             <div key={k} className="talk-fact" data-fact={k}>
               <dt>{FACT_LABELS[k]}</dt>
@@ -99,7 +98,11 @@ export function WhatIKnow() {
                         <button
                           type="button"
                           className="link-btn"
-                          onClick={() => void act({ type: 'confirmFact', key: k })}
+                          onClick={() =>
+                            k === 'owns'
+                              ? save(k, { ...b, owns: b.owns ?? 'typical' })
+                              : void act({ type: 'confirmFact', key: k })
+                          }
                         >
                           Yes
                         </button>

@@ -3,6 +3,7 @@ import { furnitureKind, itemSize } from '../furniture';
 import { planGeometry } from '../plan';
 import { roomArea, roomShapes } from '../rooms';
 import type { Level } from '../schema';
+import type { StorageSetting } from '../storage';
 import { aspectOf } from './accept';
 import { type AliasMap, aliasOf, resolveAlias } from './aliases';
 import { categoriesFor } from './catalogue';
@@ -10,6 +11,7 @@ import { roomNeeds } from './checks';
 import { type ContextInput, designContext } from './describe';
 import { compass } from './describe';
 import { heldAspects, lockCovers } from './handEdits';
+import { storageBlock } from './lenses/storage';
 import { OUTPUT } from './prices';
 import {
   AGAINST,
@@ -338,6 +340,11 @@ export function roomStep(
     concept?: Concept | null;
     previous?: SpaceDesign | null;
     fix?: FixRequest;
+    /**
+     * The storage meter's own setting, for the storage lens's block (what the space should
+     * hold); false when the lens is off. Absent: the meter's default.
+     */
+    storage?: StorageSetting | false;
   } = {},
 ): StepPrompt {
   const quality = ctx.brief.quality;
@@ -410,6 +417,9 @@ export function roomStep(
     }),
   );
   const needs = roomNeeds(level, space.rooms, { brief: ctx.brief, uses });
+  // The storage lens's block: data, in the tail (the run's shared prefix stays the same bytes).
+  const storage =
+    opts.storage === false ? '' : storageBlock(level, space, ctx.brief, opts.storage, a);
   const intent = opts.concept?.rooms
     .filter((r) => space.rooms.includes(resolveAlias(aliases, r.room) ?? ''))
     .map((r) => `${r.name} (${r.use}): ${r.intent}`)
@@ -419,7 +429,7 @@ export function roomStep(
 Its rooms (data): ${JSON.stringify(rooms)}
 Its wall faces, "face" and openings "along" in metres from each wall's end "a" (data): ${JSON.stringify(faces)}
 Pieces of the household's here (data; "bring" ones you may place again with keep = their id, "in-place" ones stay where they are): ${JSON.stringify(pieces)}
-${intent ? `What the layout intends here: ${JSON.stringify(clean(intent, 600))}\n` : ''}${needs.length ? `What it must have (the app checks): ${JSON.stringify(needs)}\n` : ''}${ways}Choose from these catalogue categories and ids: ${categoriesFor(space.kinds).join(', ')}, and the household's own pieces.
+${intent ? `What the layout intends here: ${JSON.stringify(clean(intent, 600))}\n` : ''}${needs.length ? `What it must have (the app checks): ${JSON.stringify(needs)}\n` : ''}${storage}${ways}Choose from these catalogue categories and ids: ${categoriesFor(space.kinds).join(', ')}, and the household's own pieces.
 - v: 2.
 - items: up to ${LIMITS.items} pieces. "ref" is your own short label (bed1). Say what each piece is for; the app places it:
   - "against": "wall", "window-wall" (a wall with a window, e.g. a desk), "not-door-wall", or "free" (away from the walls: a dining table, a coffee table, a rug, a floating sofa).

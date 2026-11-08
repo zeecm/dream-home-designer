@@ -207,7 +207,7 @@ describe('Keep this (3a.3, no request)', () => {
     // V1, made at 11:00: its own piece kept at 12:00 is not placed again in V1 itself.
     expect(keptBefore([a, b], '2026-11-08T11:00:00.000Z')).toEqual([a]);
     expect(keptBefore([a, b], '2026-11-08T09:00:00.000Z')).toEqual([]);
-    expect(keptBefore([a, b])).toEqual([a, b]);
+    expect(keptBefore([a, b], 'new')).toEqual([a, b]);
   });
 
   it('a kept piece moved fails its K check; kept where it is, it passes', () => {

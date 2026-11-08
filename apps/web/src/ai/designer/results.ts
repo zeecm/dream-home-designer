@@ -2,9 +2,11 @@ import {
   type DesignInput,
   type DesignOptions,
   type DesignResult,
+  type LensReport,
   type Level,
   designResult,
   designResultKey,
+  lensReports,
 } from '@dhd/core';
 import { freeze } from 'immer';
 import { create } from 'zustand';
@@ -217,6 +219,40 @@ export function readResult(
     return r;
   }
   void requestResult(base, before, design, opts).catch(() => {});
+  return null;
+}
+
+const lenses = new Map<string, LensReport[]>();
+const looking = new Set<string>();
+
+/**
+ * A version's lens lines (the storage meter's) on `base`, if they are here; else null, and
+ * they are asked for, keyed as its result (`useResultsTick` says when they land).
+ */
+export function readLens(
+  base: Level,
+  before: Level,
+  design: DesignInput,
+  opts: DesignOptions = {},
+): LensReport[] | null {
+  const key = designResultKey(base, before, design, opts);
+  const hit = lenses.get(key);
+  if (hit) return hit;
+  if (!getWorker()) {
+    const v = lensReports(designResult(base, before, design, opts), base, design.brief, opts);
+    keep(lenses, key, v);
+    return v;
+  }
+  if (looking.has(key)) return null;
+  looking.add(key);
+  send<LensReport[]>({ kind: 'lens', base, before, design, opts }).then(
+    (v) => {
+      keep(lenses, key, freeze(v, true));
+      looking.delete(key);
+      bump();
+    },
+    () => looking.delete(key),
+  );
   return null;
 }
 

@@ -46,11 +46,11 @@ export const keptHolds = (k: Kept, it: Item) =>
 /**
  * The kept pieces a version made at `madeAt` is placed and checked with: those kept before it.
  * Keep this places a piece again in later designs, never in the version it was kept from (that
- * version, re-solved around a copy of its own piece, would move the original); no time (a new
- * design) is all of them.
+ * version, re-solved around a copy of its own piece, would move the original); 'new' (a design
+ * not made yet) is all of them. Required, so no caller forgets which it is.
  */
-export const keptBefore = (kept: readonly Kept[], madeAt?: string): readonly Kept[] =>
-  madeAt ? kept.filter((k) => k.at < madeAt) : kept;
+export const keptBefore = (kept: readonly Kept[], madeAt: string | 'new'): readonly Kept[] =>
+  madeAt === 'new' ? kept : kept.filter((k) => k.at < madeAt);
 
 /** A kept piece in words ("the 3-seat sofa"). */
 export const keptName = (k: Kept) => {

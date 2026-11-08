@@ -11,6 +11,7 @@ import {
   talk,
 } from '@dhd/core';
 import { create } from 'zustand';
+import { meterSetting, setMeterAmount, useStorage } from '../../../storage/store';
 import { shownLevelId, useStore } from '../../../store';
 import type { RunState } from '../run';
 import {
@@ -248,7 +249,36 @@ export async function loadTalk(projectId = doc().id, fromOtherTab = false) {
       ? { view: 'log' as const, shown: null, open: null, hover: null, note: null, newer: false }
       : {}),
   }));
+  ownsFromMeter();
 }
+
+/**
+ * How much they own is one value with the storage meter's own setting (tech 3b §4.1): set on
+ * the meter (here or before the conversation was opened), it becomes What I know's fact, said
+ * in the log as any change is; answered here, the meter takes it (`act`). Free: no request.
+ */
+function ownsFromMeter() {
+  const { conv, projectId, newer } = useTalk.getState();
+  if (!conv || newer || !projectId || projectId !== doc().id) return;
+  const amount = meterSetting(projectId).amount;
+  const owns = conv.brief.owns;
+  if (owns === amount || (owns === undefined && amount === 'typical')) return;
+  const level = talkLevel();
+  if (!level) return;
+  void act({
+    type: 'editFact',
+    key: 'owns',
+    brief: { ...conv.brief, owns: amount },
+    at: nowIso(),
+    id: newId('turn'),
+    level,
+  });
+}
+useStorage.subscribe((s, p) => {
+  if (s.setting.amount !== p.setting.amount && s.projectId === useTalk.getState().projectId) {
+    ownsFromMeter();
+  }
+});
 
 let briefWritten = '';
 /** What I know goes back to the plan's brief too (v1's form opens with it). */
@@ -267,6 +297,7 @@ export const SET_ASIDE =
 /** Applies an action to the conversation as stored (one transaction), and mirrors it. */
 export async function act(action: TalkAction): Promise<Conversation | null> {
   const projectId = doc().id;
+  const ownsWas = useTalk.getState().conv?.brief.owns;
   const s = await talkStore();
   let out: Conversation | null = null;
   try {
@@ -285,6 +316,12 @@ export async function act(action: TalkAction): Promise<Conversation | null> {
   if (doc().id === projectId && out) {
     useTalk.setState({ conv: out, projectId });
     keepBrief(projectId, out.brief);
+    // "How much do you own?" answered or changed by this action: the storage meter reads the
+    // same (an action that didn't change it never writes the meter back).
+    const owns = out.brief.owns;
+    if (owns && owns !== ownsWas && owns !== meterSetting(projectId).amount) {
+      setMeterAmount(projectId, owns);
+    }
   }
   return out;
 }
