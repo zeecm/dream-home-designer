@@ -995,6 +995,7 @@ const label = (k: QuestionKey) =>
     mobility: 'getting about',
     cooking: 'cooking',
     wfh: 'working from home',
+    owns: 'how much you own',
     budget: 'budget',
     walls: 'walls',
     style: 'style',

@@ -5,6 +5,7 @@ import {
   type Level,
   PRICES,
   designResult,
+  lensReports,
   levelBounds,
   parseSpaceDesign,
   sampleFlatProject,
@@ -167,6 +168,18 @@ describe('designer results in a worker', () => {
     const viaWorker = a.ok ? a.value : null;
     expect(viaWorker).not.toBe(sync);
     expect(viaWorker).toEqual(sync);
+  });
+
+  it('works out the lenses’ lines beside the result: the storage line, as the main thread would', async () => {
+    const design = CASES[0]?.[1] as DesignInput;
+    const sync = lensReports(designResult(level, level, design, OPTS), level, design.brief, OPTS);
+    vi.resetModules();
+    const { handle } = await import('./resultsHandler');
+    const ask: Ask = { id: 2, kind: 'lens', base: level, before: level, design, opts: OPTS };
+    const a = across(handle(across(ask)));
+    expect(a.ok).toBe(true);
+    expect(a.ok ? a.value : null).toEqual(sync);
+    expect(sync.map((l) => l.id)).toEqual(['storage']);
   });
 
   it('reads through a worker: pending, then the same result, then kept', async () => {

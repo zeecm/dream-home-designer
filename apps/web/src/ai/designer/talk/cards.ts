@@ -3,6 +3,7 @@ import {
   type Design,
   type DesignInput,
   type DesignResult,
+  type LensReport,
   type Level,
   type Project,
   type Proposal,
@@ -17,7 +18,7 @@ import {
   optionTitle,
   subsetReport,
 } from '@dhd/core';
-import { readResult, requestResult } from '../results';
+import { readLens, readResult, requestResult } from '../results';
 import { designOpts } from '../state';
 
 /**
@@ -141,6 +142,16 @@ export function cardResult(project: Project, card: CardModel): DesignResult | nu
   const b = nowOf(project, card.levelId);
   if (!b) return null;
   return readResult(b.now, b.before, card.input, designOpts(project));
+}
+
+/**
+ * A card's lens lines (the storage meter, for the household it designs for) on the plan as it
+ * is now: null while the worker works them out.
+ */
+export function cardLens(project: Project, card: CardModel): LensReport[] | null {
+  const b = nowOf(project, card.levelId);
+  if (!b) return null;
+  return readLens(b.now, b.before, card.input, designOpts(project));
 }
 
 /** A card placed on the plan as it is now, waited for (an accept, a request's context). */

@@ -688,6 +688,25 @@ back is one Command and one undo step; `rememberPutBack`/`putBackMoves` keep car
 versions in step with real history moves only. Start over keeps numbering and sweeps unused
 levels. Folded cards compute nothing; a 20-card e2e keeps each round near 1-2 s.
 
+**AI designer v2, slice 3b PR 1 (lenses and the storage lens, 8 Nov):** core
+`designer/lenses/` holds the `Lens` interface (`report`, optional `steer`; lenses never gate)
+and `storageLens`. The household it measures for (`storageSettingFor`): the storage meter's own
+household when the person set it there (people or others; how much they own doesn't count),
+else who sleeps where in the brief (assumed as the checks assume), the unplaced and a helper as
+"others". How much they own is the brief's new `owns` ("How much do you own?", asked with the
+style when someone sleeps in a bedroom; Few things · Typical · Lots), one value with the meter's
+amount: `useTalk` writes the meter after an answer and turns a meter change into an `editFact`.
+`DesignOptions.storage` (the meter's setting, `designOpts`) and `lenses` are in the result key,
+so a change re-scores the cards with no request. Cards show a Storage line ("clothes 1.8 of
+2.0 m, short 0.2 m · +1.8 m hanging", the designed bedrooms' clothes, the home's other
+measures) from a worker `lens` ask (`readLens`). Room steps get a storage block in the tail
+(data). The solver's steer (`Steer`, weights only): protected storage roles are left out after
+anything else droppable (`dropPriorityOf`), a preferred one narrowed costs more and goes back
+for a full-width set, gains a little against a wall, and swaps go on to one that keeps it
+whole. A steered first solve that leaves something out is kept only if the unsteered one is no
+better (`piecesNoWorse`, no new hard key). The benchmark's layouts are unchanged; a heavy
+living room with a bookshelf pays one more solve (about +35% there).
+
 **Drag on big plans (task #69):** room labels are fitted once per room (`fitRoomLabel`,
 memo keyed on everything the fit reads) with `placeLabel` filtering far circles and searching
 nearest-first (exact, ties kept); `wallStatuses`, `planGeometry`, `roomShapes` and

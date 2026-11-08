@@ -4,6 +4,7 @@ import {
   type DesignBrief,
   type Level,
   MOBILITY_CHOICES,
+  OWNS_CHOICES,
   type QuestionKey,
   STYLE_NAMES,
   StyleId,
@@ -509,6 +510,17 @@ export function FactEditor(p: FactProps) {
           choices={WFH_CHOICES}
           value={b.lifestyle.wfh}
           onPick={(v) => p.onDone((c) => ({ ...c, lifestyle: { ...c.lifestyle, wfh: v } }))}
+          autoFocus={p.autoFocus}
+        />
+      );
+    case 'owns':
+      return (
+        <OneOf
+          label="How much you own"
+          choices={OWNS_CHOICES}
+          value={b.owns ?? 'typical'}
+          // One value with the storage meter's own setting (useTalk keeps the two in step).
+          onPick={(v) => p.onDone((c) => ({ ...c, owns: v }))}
           autoFocus={p.autoFocus}
         />
       );

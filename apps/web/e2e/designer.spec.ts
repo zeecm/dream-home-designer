@@ -308,6 +308,105 @@ test.describe('desktop', () => {
     expect(m.calls.map((c) => c.step)).toEqual(['furnish "Living']);
   });
 
+  test('the storage lens: the card measures for who sleeps where; how much they own re-scores it, free (3b)', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const m = await mock(page);
+    await openSample(page);
+    await talk(page);
+    await ongs(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // One lens line: what is short, what the version adds; advice, never a check.
+    const lens = v1.locator('[data-lens="storage"]');
+    await expect(lens.locator('dt')).toHaveText('Storage');
+    const line = lens.locator('dd');
+    await expect(line).toContainText(/^clothes \d+\.\d of \d+\.\d\u00a0m/);
+    await expect(line).toContainText(/\+\d+\.\d\u00a0m\u00a0hanging/);
+    await expect(v1.getByText('Passes all checks')).toBeVisible();
+    await lens.getByText('How it is measured').click();
+    await expect(lens).toContainText('from who sleeps where');
+    for (const [width, height] of [
+      [1280, 800],
+      [390, 844],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await lens.scrollIntoViewIfNeeded();
+      // It fits: no sideways scroll in the card.
+      const box = await lens.boundingBox();
+      const cardBox = await v1.boundingBox();
+      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(
+        (cardBox?.x ?? 0) + (cardBox?.width ?? 0) + 1,
+      );
+      await shot(page, `storage-lens-${width}`);
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // The room step was told what the room should hold, as data.
+    const room = m.calls.find((c) => /furnish "(Main|Master) bedroom/.test(c.step));
+    expect(promptOf(JSON.parse(room?.body ?? '{}'))).toContain('Storage the household needs');
+    const calls = m.calls.length;
+    const was = await line.textContent();
+    // How much they own, in What I know: free, and the storage meter takes the same value.
+    await panel(page).getByRole('button', { name: 'Designer menu' }).click();
+    await page.getByRole('menuitem', { name: 'What I know about you' }).click();
+    const know = panel(page).getByRole('region', { name: 'What I know about you' });
+    await know.locator('[data-fact="owns"]').getByRole('button', { name: 'Change' }).click();
+    await know.getByRole('radio', { name: 'Lots' }).click();
+    await expect(know.locator('[data-fact="owns"]')).toContainText('Lots');
+    await know.getByRole('button', { name: '‹ Conversation' }).click();
+    await expect(log(page)).toContainText('You changed: how much you own Typical → Lots.');
+    await expect(line).not.toHaveText(was ?? '');
+    await expect(line).toContainText(/short \d+\.\d\u00a0m/);
+    const kept = await page.evaluate(
+      (pid) => window.localStorage.getItem(`dhd-storage-${pid}`),
+      planId(page),
+    );
+    expect(JSON.parse(kept ?? '{}').amount).toBe('lots');
+    // Nothing asked a provider for any of it.
+    expect(m.calls).toHaveLength(calls);
+  });
+
+  test('the storage lens: the meter’s own household wins once set there (3b)', async ({ page }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const m = await mock(page);
+    await openSample(page);
+    // The person set the storage meter's household for this plan: one child in the main bedroom.
+    const pid = planId(page);
+    await page.evaluate((id) => {
+      const rooms = window.localStorage;
+      rooms.setItem(
+        `dhd-storage-${id}`,
+        JSON.stringify({
+          people: { 'rm_main-bedroom': { adults: 0, children: 1 } },
+          others: { adults: 0, children: 0 },
+          amount: 'typical',
+          shelter: true,
+        }),
+      );
+    }, pid);
+    await page.reload();
+    await waitSaved(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    const lens = v1.locator('[data-lens="storage"]');
+    await lens.getByText('How it is measured').click();
+    await expect(lens).toContainText('as set in the storage meter');
+    await expect(lens).toContainText('for 1 child');
+    expect(m.calls.filter((c) => c.step === 'layout')).toHaveLength(0);
+  });
+
   test('a scope button: the cost card, ghosts while placed, Why, 2 of 5 accepted as one step, Undo exact (23, 26, 29, 31)', async ({
     page,
   }) => {

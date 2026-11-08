@@ -9,6 +9,7 @@ import { planGeometry } from '../plan';
 import { roomShapes } from '../rooms';
 import { ElecPoint } from '../schema';
 import type { Item, Level, Project, Site, Vec2 } from '../schema';
+import type { StorageSetting } from '../storage';
 import { SHELTER_ROOM } from '../structural';
 import { type Suggestion, roomKind, suggestPoints } from '../suggest';
 import { type WalkwayReport, walkwayReport } from '../walkway';
@@ -19,6 +20,7 @@ import { type DesignCheck, designChecks } from './checks';
 import { usesOf } from './checks';
 import { BED_ACCESS } from './checks';
 import { bathroomsHeld, heldAspects, wallsHeld } from './handEdits';
+import { type LensId, type Steer, steerFor, steerOnly } from './lenses';
 import { WET } from './locks';
 import {
   type SpaceIndex,
@@ -29,7 +31,7 @@ import {
   placePiece,
   spaceIndex,
 } from './place';
-import { ACCESS, peopleOf } from './principles';
+import { ACCESS, peopleOf, roleOf } from './principles';
 import { acceptResolve, piecesNoWorse } from './resolve';
 import type { Concept, DesignInput, DesignItem, RoomUse, SpaceDesign, SpaceStatus } from './schema';
 import type { Zone } from './schema';
@@ -126,6 +128,13 @@ export interface DesignOptions {
   models?: Project['models'];
   /** false: pieces are left where first placed, not moved off the walkways (for tests). */
   walkways?: boolean;
+  /**
+   * The storage meter's own setting (per browser and project), which the storage lens reads
+   * with the brief (`storageSettingFor`). Absent: the meter's default.
+   */
+  storage?: StorageSetting;
+  /** The lenses switched on (DEFAULT_LENSES when absent): they score and steer, never gate. */
+  lenses?: LensId[];
 }
 
 const BEDROOM_USES = new Set<RoomUse>(['master', 'bedroom', 'kids', 'parents', 'guest']);
@@ -467,6 +476,25 @@ function work(
       const fixedKey = ix.placed.map(
         (p) => `${p.id}:${p.fp.map((q) => q.x.toFixed(3) + q.y.toFixed(3)).join()}`,
       );
+      // What the lenses ask of the solver here (a short bedroom keeps its wardrobe): weights
+      // only, from the level as this space is about to be furnished, and only for the roles
+      // the answer has (a space with none solves as it would with no lens).
+      const steer = steerOnly(
+        steerFor({ level: { ...named, items: lvl.items }, space: s, brief, opts }),
+        new Set(intents.map((t) => roleOf(t.want.kind))),
+      );
+      /** The space's failing hard checks with this solve in it (the space alone furnished). */
+      const hardWith = (o: SolveOutcome) => {
+        const items = Object.fromEntries(
+          Object.entries(lvl.items).filter(([, it]) => inRooms(s.rooms, centreOf(it))),
+        );
+        for (const it of o.items) items[it.id] = it;
+        return new Set(
+          designChecks({ ...named, items }, { brief, uses })
+            .filter((c) => c.hard)
+            .map((c) => c.key),
+        );
+      };
       const solveWith = (
         keepOut: SpaceIndex['keepOut'],
         keepOutFor?: Set<string>,
@@ -486,6 +514,7 @@ function work(
             [...(keepOutFor ?? [])].sort(),
             opts.walkways !== false,
             noWorseThan ?? null,
+            steer,
           ]),
         );
         // A space moved off a walkway before is placed as it ended up.
@@ -506,22 +535,43 @@ function work(
           return hit;
         }
         ix.keepOut = keepOut;
-        const solved = solveSpace({
-          ix,
-          faces,
-          // A re-solve keeps what the first solve swapped in.
-          intents: (keepOut.length && firstSwap?.intents) || intents,
-          zoneArea,
-          ways,
-          household: peopleOf(brief).filter((p) => p.kind !== 'helper').length,
-          // A walkway re-solve looks less far, and keeps the pieces the first solve chose.
-          ...(keepOut.length ? { budget: RESOLVE_BUDGET, swaps: false } : {}),
-          ...(keepOutFor ? { keepOutFor } : {}),
-          // It stops once it can only end worse in pieces than the solve it would replace.
-          ...(keepOut.length && noWorseThan
-            ? { noWorseThan: { ...noWorseThan, spare: firstSwap?.spare } }
-            : {}),
-        });
+        const solveBy = (st: Steer | null) =>
+          solveSpace({
+            ix,
+            faces,
+            // A re-solve keeps what the first solve swapped in.
+            intents: (keepOut.length && firstSwap?.intents) || intents,
+            zoneArea,
+            ways,
+            household: peopleOf(brief).filter((p) => p.kind !== 'helper').length,
+            // A walkway re-solve looks less far, and keeps the pieces the first solve chose.
+            ...(keepOut.length ? { budget: RESOLVE_BUDGET, swaps: false } : {}),
+            ...(keepOutFor ? { keepOutFor } : {}),
+            // It stops once it can only end worse in pieces than the solve it would replace.
+            ...(keepOut.length && noWorseThan
+              ? { noWorseThan: { ...noWorseThan, spare: firstSwap?.spare } }
+              : {}),
+            ...(st ? { steer: st } : {}),
+          });
+        let solved = solveBy(steer);
+        // A steered first solve that leaves a piece out, short of room or turned from what it
+        // goes with is kept only if the solve without the weights does no better: no fewer of
+        // those (piecesNoWorse), and no hard check failing that it passes.
+        if (steer && !keepOut.length && (solved.dropped.length || solved.soft || solved.broken)) {
+          ix.placed.length = base;
+          const plain = solveBy(null);
+          const same = samePoses(plain, solved);
+          if (!same && !piecesNoWorse(countsOf(plain), countsOf(solved))) solved = plain;
+          else if (!same) {
+            const was = hardWith(plain);
+            if ([...hardWith(solved)].some((k) => !was.has(k))) solved = plain;
+          }
+          ix.placed.length = base;
+          for (const item of solved.items) {
+            const w = wantOf.get(item.id);
+            if (w) addToIndex(ix, item, furnitureKind(item.assetId) ?? w.kind);
+          }
+        }
         ix.keepOut = [];
         const out = keepOut.length && firstSwap ? applySwap(solved, firstSwap) : solved;
         if (!keepOut.length) {
@@ -1055,6 +1105,26 @@ function baseChecks(
 
 /** Pieces left out, short of room and turned from what they go with (piecesNoWorse). */
 type PieceCounts = { dropped: number; soft: number; broken: number };
+/** Two solves that place the same pieces in the same places. */
+const samePoses = (a: SolveOutcome, b: SolveOutcome) =>
+  a.items.length === b.items.length &&
+  a.items.every((it, i) => {
+    const o = b.items[i];
+    return (
+      !!o &&
+      o.id === it.id &&
+      o.assetId === it.assetId &&
+      Math.abs(o.position.x - it.position.x) < 1e-6 &&
+      Math.abs(o.position.z - it.position.z) < 1e-6 &&
+      Math.abs(o.rotationY - it.rotationY) < 1e-6 &&
+      Math.abs(o.scale.x - it.scale.x) < 1e-6
+    );
+  });
+const countsOf = (o: SolveOutcome): PieceCounts => ({
+  dropped: o.dropped.length,
+  soft: o.soft,
+  broken: o.broken,
+});
 
 /** How many times the walkways are checked again after moving pieces off them. */
 const WALK_ROUNDS = 3;

@@ -3,6 +3,7 @@ import { type FurnitureKind, furnitureKind, itemFootprint, itemSize } from '../f
 import { pointInPolygon } from '../geometry';
 import type { Item, Vec2 } from '../schema';
 import { priorityOf } from './catalogue';
+import type { Steer } from './lenses/lens';
 import {
   BUILT_IN_MIN,
   type OnFace,
@@ -72,6 +73,12 @@ export interface SolveInput {
    * than the solve it would replace: it will be refused (piecesNoWorse).
    */
   noWorseThan?: { dropped: number; soft: number; broken: number; spare?: ReadonlySet<string> };
+  /**
+   * What the lenses ask (a short bedroom's wardrobe, lenses/storage.ts), as weights only: the
+   * roles protected are left out after anything else that may be, and the roles preferred
+   * keep their full width where they can and stand against a wall. Never a constraint.
+   */
+  steer?: Steer;
 }
 
 export interface SolveOutcome {
@@ -152,6 +159,12 @@ export const BUDGET = 12_000;
  */
 const SWAP_BUDGET = 10_000;
 const SWAP_EACH = 5000;
+/** A protected piece's priority when room runs out: after every other that may be left out. */
+const PROTECTED = 0.5;
+/** A preferred piece made narrower to fit costs this much more at full weight. */
+const NARROW_STEER = 2;
+/** A preferred piece against a wall, its front clear to use, gains this much at full weight. */
+const WALL_STEER = 0.5;
 const GRID = 0.25;
 const ALONG = 0.2;
 /** How far a dining chair reaches past its table's edge, tucked in. */
@@ -315,6 +328,15 @@ export function solveSpace(input: SolveInput): SolveOutcome {
   let spent = 0;
   let tries = first.tries;
   let tried = 0;
+  /**
+   * The swap taken so far, and how many storage pieces the steer prefers it made narrower:
+   * with a steer, the swaps go on to one that keeps them whole (a swap that keeps the wardrobe
+   * full width beats one that shrinks it), the first such taken; without one, the first that
+   * passes, as before.
+   */
+  let best: { out: SolveOutcome; swap: Swap; shrunk: number } | null = null;
+  /** The swap whose pieces the index holds now. */
+  let last: Swap | null = null;
   for (const swap of swapsFor(input)) {
     // At least two swaps are tried, however long each takes; then until the budget is spent.
     if (tried >= 2 && spent >= SWAP_BUDGET) break;
@@ -326,6 +348,7 @@ export function solveSpace(input: SolveInput): SolveOutcome {
       budget: Math.min(SWAP_EACH, SWAP_BUDGET - spent),
       abortTight: true,
     });
+    last = swap;
     spent += out.tries;
     tries += out.tries;
     out.tries = tries;
@@ -345,7 +368,22 @@ export function solveSpace(input: SolveInput): SolveOutcome {
     ) {
       continue;
     }
-    return { ...applySwap(out, swap), swapsTried: tried };
+    const shrunk = shrunkOf(input, out, swap.intents);
+    if (!best || shrunk < best.shrunk) best = { out, swap, shrunk };
+    if (!shrunk) break;
+  }
+  if (best) {
+    // The index holds the pieces of the last swap tried: an earlier one taken goes back in.
+    if (best.swap !== last) {
+      input.ix.placed.length = mark;
+      const kinds = new Map(best.swap.intents.map((t) => [t.want.id, t.want.kind]));
+      for (const item of best.out.items) {
+        const kind = kinds.get(item.id) ?? furnitureKind(item.assetId);
+        if (kind) addToIndex(input.ix, item, kind, fpOf(item, kind));
+      }
+    }
+    best.out.tries = tries;
+    return { ...applySwap(best.out, best.swap), swapsTried: tried };
   }
   // Nothing smaller helps: the first solve stands, and its checks fail.
   first.tries = tries;
@@ -357,6 +395,27 @@ export function solveSpace(input: SolveInput): SolveOutcome {
     if (kind) addToIndex(input.ix, item, kind, fpOf(item, kind));
   }
   return first;
+}
+
+/**
+ * A piece's priority when room runs out (lower goes first, catalogue.ts's `priorityOf`): a role
+ * the steer protects (a wardrobe in a short bedroom) goes after every other that may be left
+ * out, beds aside.
+ */
+export function dropPriorityOf(kind: FurnitureKind, steer?: Steer | null): number {
+  const p = priorityOf(kind);
+  return steer?.protect.includes(roleOf(kind)) ? Math.min(p, PROTECTED) : p;
+}
+
+/** How many pieces a steer prefers whole (a wardrobe in a short room) a solve made narrower. */
+function shrunkOf(input: SolveInput, out: SolveOutcome, intents: Intent[]): number {
+  const prefer = new Set((input.steer?.prefer ?? []).map((p) => p.role));
+  if (!prefer.size) return 0;
+  const wants = new Map(intents.map((t) => [t.want.id, t.want]));
+  return out.items.filter((it) => {
+    const w = wants.get(it.id);
+    return !!w && prefer.has(roleOf(w.kind)) && itemSize(it, w.kind).w < w.w - 0.01;
+  }).length;
 }
 
 /**
@@ -621,6 +680,8 @@ function solveOnce(input: SolveInput): SolveOutcome {
   let tries = 0;
   const byRef = new Map(intents.map((t) => [t.want.ref, t]));
   const roles = new Map(intents.map((t) => [t.want.ref, roleOf(t.want.kind)]));
+  const prefer = new Map((input.steer?.prefer ?? []).map((p) => [p.role, p.weight]));
+  const dropPriority = (t: Intent) => dropPriorityOf(t.want.kind, input.steer);
   const solids = ix.solid.map((x) => x.poly);
   /** Set false by `score` when a pose breaks one of the piece's relationships. */
   let related = true;
@@ -1177,9 +1238,13 @@ function solveOnce(input: SolveInput): SolveOutcome {
     p.room ??= {};
     const room = p.room;
     let s = soft ? -6 : 0;
-    // Made to a narrower width than asked: only if nothing full-width fits.
+    // Made to a narrower width than asked: only if nothing full-width fits. A storage piece in
+    // a room short of storage (the lenses' steer) costs more narrowed, and stands against a
+    // wall where it can (its front is clear to use: a pose short of that isn't a candidate).
+    const pw = prefer.get(role) ?? 0;
     room.narrow ??= Math.abs(itemSize(item, w.kind).w - w.w) > 0.01;
-    if (room.narrow) s -= 1.5;
+    if (room.narrow) s -= 1.5 + NARROW_STEER * pw;
+    if (pw && p.on) s += WALL_STEER * pw;
     // The designer's wishes: their wall, along it, or their spot.
     if (w.face) {
       if (room.onFace === undefined) {
@@ -1410,7 +1475,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
     return out;
   };
   /** A piece's weight when it is left out: a bed counts for more than any number of lamps. */
-  const weight = (t: Intent) => 10 ** (6 - Math.min(6, priorityOf(t.want.kind)));
+  const weight = (t: Intent) => 10 ** (6 - Math.min(6, dropPriority(t)));
   /**
    * How good the placements up to `i` are, worst first: a piece the room can't do without
    * left out (an essential piece short of room beats leaving it out, as ESSENTIAL says), then
@@ -1505,8 +1570,11 @@ function solveOnce(input: SolveInput): SolveOutcome {
     put(i, first);
     // Nowhere for it, or only short of room: try its anchor and the two pieces before it
     // elsewhere, the pieces after them placed again, and keep the whole set only if it is
-    // better. A more important piece is never left out to place a less important one.
-    if ((first && !first.soft) || tries >= budget) continue;
+    // better. A more important piece is never left out to place a less important one. So too
+    // for a piece the steer prefers whole (a wardrobe in a short room) made narrower: the set
+    // with it at full width is kept only if it scores better (its weights say how much).
+    const shrinks = !!first?.narrowed && (prefer.get(roles.get(t.want.ref) as Role) ?? 0) > 0;
+    if ((first && !first.soft && !shrinks) || tries >= budget) continue;
     let best = { cost: costOf(i), list: chosen.slice(0, i + 1), changed: false };
     const anchorIdx = order.findIndex((o) => o.want.ref === anchorOf.get(t.want.ref));
     const backs = [...new Set([anchorIdx, i - 1, i - 2].filter((j) => j >= 0 && j < i))];
@@ -1520,10 +1588,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
         put(j, alt);
         for (let m = j + 1; m <= i; m++) put(m, candidates(order[m] as Intent, placed)[0] ?? null);
         const dropsMore = was.some(
-          (c, n) =>
-            !!c &&
-            !chosen[j + n] &&
-            priorityOf((order[j + n] as Intent).want.kind) < priorityOf(t.want.kind),
+          (c, n) => !!c && !chosen[j + n] && dropPriority(order[j + n] as Intent) < dropPriority(t),
         );
         const cost = costOf(i);
         if (!dropsMore && better(cost, best.cost)) {

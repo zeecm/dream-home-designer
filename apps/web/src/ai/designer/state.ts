@@ -2,6 +2,7 @@ import type { Design, DesignBrief, DesignOptions, Project } from '@dhd/core';
 import { create } from 'zustand';
 import { useRates } from '../../cost/estimate';
 import { useEditor } from '../../editor';
+import { meterSetting } from '../../storage/store';
 import { setLeaveGuard, useStore } from '../../store';
 import { defaultPicks } from './compare';
 import { sharedQuestion } from './once';
@@ -70,6 +71,9 @@ export const designOpts = (doc: Project): DesignOptions => ({
   rates: useRates.getState().rates,
   ...(doc.site ? { site: doc.site } : {}),
   ...(doc.models ? { models: doc.models } : {}),
+  // The storage meter's own setting: its household wins when the person set it there (the
+  // storage lens, tech 3b §4.1). Part of the result key, so editing it re-scores the cards.
+  storage: meterSetting(doc.id),
 });
 
 const doc = () => useStore.getState().editor.doc;

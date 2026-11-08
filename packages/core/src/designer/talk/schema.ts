@@ -65,6 +65,7 @@ export const QUESTION_KEYS = [
   'mobility',
   'cooking',
   'wfh',
+  'owns',
   'budget',
   'walls',
   'style',

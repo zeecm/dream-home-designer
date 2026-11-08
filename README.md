@@ -113,12 +113,15 @@ for any plan.
 - The 3D view draws only when something changes (it redrew 60 times a second while idle).
 - AI interior designer v2, slice 3a: point at the plan ("not here", "keep this") and house rules
   ("nothing in the corridor") that become checks on every proposal. [spec](docs/specs/ai-designer-v2.md)
+- AI interior designer v2, slice 3b: the storage lens is built (each proposal scored on the
+  storage meter for who sleeps where, "How much do you own?", storage kept when a room is
+  short); the second look at each proposal is next.
 
 ### Planned
 1. Levels you can switch between in the editor: today it shows only the first level of a
    multi-level home (a maisonette), so the upper floor can't be drawn or designed.
 2. AI interior designer v2, slice 3b: a second look at each proposal (flow, focal point, a room
-   too empty or too full) and a storage lens scored on the storage meter.
+   too empty or too full), regression cases from it, and asking the designer on a comment.
 3. Elevations on the contractor sheet (elevation slice 2), with piece labels, the saved
    picture's font and the iPhone canvas size. [spec](docs/specs/elevation.md)
 4. Storage meter 1b: storage beds, a pantry and a bay seat. [spec](docs/specs/storage-meter.md)

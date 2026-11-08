@@ -14,6 +14,7 @@ import { type ReactNode, memo, useEffect, useMemo, useRef, useState } from 'reac
 import { useRates } from '../../../cost/estimate';
 import { useEditor } from '../../../editor';
 import { warningsOf } from '../../../electrical/electrical';
+import { useStorage } from '../../../storage/store';
 import { useStore } from '../../../store';
 import { useAi } from '../../credentials';
 import { CaseDialog } from '../CaseDialog';
@@ -28,6 +29,7 @@ import { acceptCard, precheckNow } from './accept';
 import {
   type CardModel,
   cardChanges,
+  cardLens,
   cardResult,
   cardVerdict,
   headLabel,
@@ -61,6 +63,13 @@ const k = (v: number) => `${Math.round(v / 1000)}k`;
 /** "3–5k" (one unit for the range). */
 const kRange = (lo: number, hi: number) => `${Math.round(lo / 1000)}–${Math.round(hi / 1000)}k`;
 const sgd = (v: number) => `S$${Math.abs(Math.round(v)).toLocaleString('en-SG')}`;
+
+/** A lens line, its short parts ("+1.8 m hanging") kept on one line. */
+const lensLine = (line: string) =>
+  line
+    .split(' · ')
+    .map((p) => (p.length <= 24 ? p.replace(/ /g, '\u00a0') : keepTogether(p)))
+    .join(' · ');
 
 /** A tri-state checkbox (a group's tick). */
 function GroupTick({
@@ -232,6 +241,17 @@ export const ProposalCard = memo(function ProposalCard({
   const changes = useMemo(
     () => (r ? timed(() => cardChanges(project, card, r)) : []),
     [project, card, r],
+  );
+  // The storage meter's household and amount: the lens reads them (worked out again on change,
+  // with no request).
+  const meter = useStorage((s) => s.setting);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
+  const storage = useMemo(
+    () =>
+      active && r
+        ? (timed(() => cardLens(project, card))?.find((l) => l.id === 'storage') ?? null)
+        : null,
+    [active, r, project, card, tick, meter],
   );
   const ids = useMemo(() => new Set(changes.map((c) => c.id)), [changes]);
   const [ticks, setTicks] = useState<string[] | null>(card.ticks);
@@ -905,6 +925,26 @@ export const ProposalCard = memo(function ProposalCard({
                     ))}
                   </ul>
                 </details>
+              </dd>
+            </div>
+          )}
+          {storage?.line && (
+            <div data-lens="storage">
+              <dt>{storage.title}</dt>
+              <dd>
+                <span className={storage.tone === 'short' ? 'advise' : undefined}>
+                  {lensLine(storage.line)}
+                </span>
+                {storage.lines.length > 0 && (
+                  <details className="talk-already">
+                    <summary>How it is measured</summary>
+                    <ul>
+                      {storage.lines.map((l) => (
+                        <li key={l.text}>{keepTogether(l.text)}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
               </dd>
             </div>
           )}

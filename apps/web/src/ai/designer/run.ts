@@ -18,6 +18,7 @@ import {
   designResult,
   fixRoundsFor,
   layoutStep,
+  lensOn,
   levelBounds,
   parseConcept,
   parseSpaceDesign,
@@ -419,6 +420,8 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     let runError: unknown = null;
     /** Fix requests the run may still send (the estimate counts this many at most). */
     let fixesLeft = FIX_PER_RUN;
+    // The storage lens's block in each room step (what the space should hold), unless it's off.
+    const storage = o.result && !lensOn(o.result, 'storage') ? false : o.result?.storage;
     const room = async (s: (typeof spaces)[number], onStart?: () => void) => {
       const st = state.steps.find((x) => x.key === s.key) as StepState;
       if (!(await mayStart())) {
@@ -427,6 +430,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       }
       const prompt = roomStep(ctx, s, r.level, design.aliases, {
         concept: design.concept,
+        ...(storage !== undefined ? { storage } : {}),
         ...(plan.feedback ? { feedback: plan.feedback } : {}),
         ...(plan.talk ? { talk: plan.talk } : {}),
         locks: plan.locks ?? [],
@@ -457,6 +461,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
             const again = await step(
               roomStep(ctx, s, r.level, design.aliases, {
                 concept: design.concept,
+                ...(storage !== undefined ? { storage } : {}),
                 ...(plan.feedback ? { feedback: plan.feedback } : {}),
                 ...(plan.talk ? { talk: plan.talk } : {}),
                 locks: plan.locks ?? [],
