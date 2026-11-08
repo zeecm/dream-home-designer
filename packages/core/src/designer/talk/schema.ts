@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Rule } from '../rules/schema';
 import { Concept, DesignBrief, Lock, SpaceDesign, SpaceStatus, Usage } from '../schema';
 import { clean } from '../util';
 
@@ -10,8 +11,16 @@ import { clean } from '../util';
  * own version and are checked on the way back in.
  */
 
-/** 2: the talk call (a person's Send, the designer's replies, hand edits). 1 is read as 2. */
-export const TALK_RECORD_VERSION = 2;
+/**
+ * 3: house rules (slice 3a: the conversation's rules, a reply's rule offer, a Decision's rule).
+ * 2: the talk call (a person's Send, the designer's replies, hand edits). 1 and 2 are read as 3.
+ * A build that knows only 2 sees a 3 as newer and goes read-only, so it never drops the rules.
+ */
+export const TALK_RECORD_VERSION = 3;
+/** Proposals are unchanged by house rules: still written as 2. */
+export const PROPOSAL_RECORD_VERSION = 2;
+/** Rules kept per conversation, the recently deleted (for Undo) included. */
+export const MAX_RULE_RECORDS = 40;
 /** Turns kept in one conversation; the oldest go first. */
 export const MAX_TURNS = 500;
 /** Decisions kept, and how long each may be. */
@@ -161,8 +170,33 @@ export const Decision = z.object({
   /** The proposal it came from ("V4"), when it did. */
   from: z.string().max(12).nullable(),
   deleted: z.boolean().default(false),
+  /** Kept from a rule offer with Just this once: Make this a rule reopens it, free. */
+  rule: Rule.optional(),
 });
 export type Decision = z.infer<typeof Decision>;
+
+/** A rule offer's verdict as stored with it (vetRule, when the reply landed). */
+export const RuleVet = z.object({
+  ok: z.boolean(),
+  why: z
+    .enum(['unfit', 'limit', 'duplicate', 'conflict', 'range', 'hdb', 'flat', 'needs', 'no-door'])
+    .nullable(),
+  text: z.string().max(400),
+  adjusted: z.object({ from: z.number(), to: z.number(), why: z.string().max(300) }).nullable(),
+  raises: z.object({ ruleId: z.string(), from: z.number(), to: z.number() }).nullable(),
+  planBreaks: z.array(z.string().max(300)).max(5),
+  /** The rule it contradicts or repeats (by id). */
+  with: z.string().nullable(),
+});
+export type RuleVet = z.infer<typeof RuleVet>;
+
+/** A designer's reply offering a rule (UX §3.3), and what the person did with it. */
+export const RuleOffer = z.object({
+  rule: Rule,
+  vet: RuleVet,
+  state: z.enum(['open', 'kept', 'once', 'refused', 'replaced', 'kept-yours']),
+});
+export type RuleOffer = z.infer<typeof RuleOffer>;
 
 /** An app line in the log (UX §6.6). */
 export const TalkEvent = z.discriminatedUnion('type', [
@@ -192,6 +226,13 @@ export const TalkEvent = z.discriminatedUnion('type', [
     lines: z.array(z.string().max(TALK_LIMITS.line)).max(3),
     more: z.number().int().min(0),
   }),
+  /** A house rule kept, changed, deleted or replaced: the app's line, with Your rules. */
+  z.object({
+    type: z.literal('rule'),
+    rule: z.string().max(80),
+    text: z.string().max(TALK_LIMITS.note),
+    ruleId: z.string().nullable().default(null),
+  }),
 ]);
 export type TalkEvent = z.infer<typeof TalkEvent>;
 
@@ -208,6 +249,8 @@ export const Turn = z.discriminatedUnion('kind', [
      * so the history a later request repeats is the same bytes (the provider's cache reads it).
      */
     sent: z.string().max(SENT_CHARS).optional(),
+    /** Make this a rule (UX §3.8): shown as the app's line, not a bubble. */
+    ruleAsk: z.object({ decisionId: z.string() }).optional(),
     /** Its reply: running, answered, failed (Try again), or cut off (Stop, a closed tab). */
     reply: z
       .object({
@@ -267,6 +310,8 @@ export const Turn = z.discriminatedUnion('kind', [
           .default([]),
         concern: TalkConcern.nullable().default(null),
         plan: TalkPlan.nullable().default(null),
+        /** A rule it offers to keep (slice 3a), with the app's verdict. */
+        offer: RuleOffer.nullable().default(null),
       })
       .optional(),
   }),
@@ -372,6 +417,11 @@ export const Conversation = z.object({
   draft: z.string().max(DRAFT_CHARS).default(''),
   /** Short names (R1, W3, P12) the talk calls use, never renamed once given. */
   aliases: z.record(z.string()).default({}),
+  /**
+   * The household's house rules (slice 3a): checked on every proposal, here only (never in the
+   * project, an export or a share link). At most 20 live; deleted ones stay a while for Undo.
+   */
+  rules: z.array(Rule).max(MAX_RULE_RECORDS).default([]),
   /** Notes for the household's ID: what isn't in the app (plumbing moves, lighting). */
   notes: z
     .array(z.object({ id: z.string(), text: z.string().max(TALK_LIMITS.note), turnId: z.string() }))
@@ -454,7 +504,7 @@ export const Proposal = z.object({
   projectId: z.string(),
   id: z.string(),
   conversationId: z.string(),
-  recordVersion: z.number().int().min(1).max(TALK_RECORD_VERSION),
+  recordVersion: z.number().int().min(1).max(PROPOSAL_RECORD_VERSION),
   n: z.number().int().positive(),
   turnId: z.string(),
   at: z.string(),
@@ -477,7 +527,8 @@ export function conversationFromRecord(raw: unknown): Conversation | null {
 export function proposalFromRecord(raw: unknown): Proposal | null {
   const rec = raw as { recordVersion?: unknown } | null;
   if (!rec || typeof rec !== 'object') return null;
-  if (typeof rec.recordVersion === 'number' && rec.recordVersion > TALK_RECORD_VERSION) return null;
+  if (typeof rec.recordVersion === 'number' && rec.recordVersion > PROPOSAL_RECORD_VERSION)
+    return null;
   const r = Proposal.safeParse(raw);
-  return r.success ? { ...r.data, recordVersion: TALK_RECORD_VERSION } : null;
+  return r.success ? { ...r.data, recordVersion: PROPOSAL_RECORD_VERSION } : null;
 }

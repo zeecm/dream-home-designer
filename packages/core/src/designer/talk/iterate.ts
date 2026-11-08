@@ -7,6 +7,7 @@ import { FACT_LABELS, factText } from './firstMeeting';
 import {
   Conversation,
   DRAFT_CHARS,
+  PROPOSAL_RECORD_VERSION,
   Proposal,
   type ProposalOption,
   QUESTION_KEYS,
@@ -176,7 +177,7 @@ export function broughtBack(
     projectId: from.projectId,
     id: a.id,
     conversationId: a.conversationId,
-    recordVersion: TALK_RECORD_VERSION,
+    recordVersion: PROPOSAL_RECORD_VERSION,
     n: a.n,
     turnId: a.turnId,
     at: a.at,

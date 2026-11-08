@@ -8,6 +8,7 @@ const memory = (m: Partial<{ decisions: unknown[]; facts: unknown[]; notes: unkn
   decisions: [],
   facts: [],
   notes: [],
+  rule: null,
   ...m,
 });
 

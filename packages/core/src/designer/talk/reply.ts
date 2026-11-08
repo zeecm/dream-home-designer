@@ -1,4 +1,6 @@
 import { type AliasMap, resolveAlias } from '../aliases';
+import { type RuleDraft, ruleFromReply } from '../rules/parse';
+import { RULE_RELATIONS, TARGET_KINDS } from '../rules/schema';
 import { AGAINST, type DesignBrief, StyleId } from '../schema';
 import { clean } from '../util';
 import { BUDGET_CHOICES, COOKING_CHOICES, WFH_CHOICES } from './firstMeeting';
@@ -113,6 +115,28 @@ export const TALK_SCHEMA = obj({
       }),
     ),
     notes: arr(str),
+    /**
+     * A lasting wish as a house rule (slice 3a): the app checks it, says it in its own words
+     * and offers it to the person to keep. Flat: every field required, unused ones null or [].
+     */
+    rule: nullable(
+      obj({
+        name: str,
+        subject: obj({
+          kind: { type: 'string', enum: ['any', 'category', 'kind', 'item'] },
+          id: nullable(str),
+        }),
+        relation: { type: 'string', enum: [...RULE_RELATIONS] },
+        target: obj({
+          kind: { type: 'string', enum: [...TARGET_KINDS] },
+          id: nullable(str),
+          rooms: arr(str),
+          at: nullable(point),
+          r: nullable(num),
+        }),
+        n: nullable(num),
+      }),
+    ),
   }),
   fold: nullable(str),
 });
@@ -150,6 +174,9 @@ export interface TalkReply {
     decisions: { kind: 'rejected' | 'keep' | 'wish'; text: string }[];
     facts: TalkFact[];
     notes: string[];
+    /** A rule offered (to be vetted), or a wish its object couldn't hold (noted, not checked). */
+    rule: RuleDraft | null;
+    unfit: string | null;
   };
   fold: string | null;
 }
@@ -159,6 +186,8 @@ export interface TalkParseContext {
   /** The plan's spaces: key, name and rooms (a plan names rooms; a run asks for spaces). */
   spaces: { key: string; name: string; rooms: string[] }[];
   walls: DesignBrief['walls'];
+  /** The main door's id, for a rule about it. */
+  mainDoor?: string | null;
 }
 
 export type TalkParse =
@@ -391,9 +420,21 @@ export function parseTalkReply(raw: unknown, ctx: TalkParseContext): TalkParse {
     .filter(Boolean)
     .slice(0, REPLY_LIMITS.notes);
   const fold = asStr(o.fold, REPLY_LIMITS.fold) || null;
+  const offered = ruleFromReply(m?.rule, { aliases: ctx.aliases, mainDoor: ctx.mainDoor ?? null });
+  const rule = offered && 'draft' in offered ? offered.draft : null;
+  // A rule object the vocabulary can't hold: the wish in its own words, noted and not checked.
+  const unfit = offered && 'unfit' in offered ? offered.name || cut(say, 160) || null : null;
   return {
     ok: true,
-    reply: { kind, say, questions, concern, plan, memory: { decisions, facts, notes }, fold },
+    reply: {
+      kind,
+      say,
+      questions,
+      concern,
+      plan,
+      memory: { decisions, facts, notes, rule, unfit },
+      fold,
+    },
     lines,
   };
 }

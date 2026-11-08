@@ -156,6 +156,8 @@ export interface TalkAsk {
   said: string;
   /** Decided in the conversation: never propose what was rejected. */
   decided: string[];
+  /** The household's house rules for this level, as the app says them (slice 3a). */
+  rules?: string[];
   /**
    * Another idea: the options already proposed for these rooms, in the designer's own words
    * ("A: Sofa by the wall…"), on a line of their own (never as the household's words).
@@ -195,6 +197,11 @@ ${
 }${
   decided.length
     ? `Decided in this conversation (data; don't propose what was rejected): ${JSON.stringify(decided)}
+`
+    : ''
+}${
+  t.rules?.length
+    ? `Rules this proposal must meet (data; the app checks them): ${JSON.stringify(t.rules.slice(0, 20).map((r) => clean(r, 200)))}
 `
     : ''
 }`;
