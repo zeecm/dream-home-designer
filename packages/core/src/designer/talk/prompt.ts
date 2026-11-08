@@ -210,7 +210,8 @@ export function pointersBlock(pointers: readonly Pointer[], aliases: AliasMap = 
         ? p.targetId
           ? (short.get(p.targetId) ?? null)
           : null
-        : `${p.version.title}:${clean(p.label, 80)}`,
+        : // A version's piece by its id there (four chairs alike are four refs), a spot by label.
+          `${p.version.title}:${p.targetId ? (short.get(p.targetId) ?? clean(p.targetId, 40)) : clean(p.label, 80)}`,
     kind: p.kind,
     label: clean(p.label, 80),
     room: p.room ? clean(p.room, 80) : null,

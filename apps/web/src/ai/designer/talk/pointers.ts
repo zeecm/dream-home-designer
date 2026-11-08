@@ -19,6 +19,7 @@ import {
 import { create } from 'zustand';
 import { useEditor } from '../../../editor';
 import { useStore } from '../../../store';
+import { useDesigner } from '../state';
 import { act, designLevelId, newId, nowIso, say, talkLevel, useTalk } from './useTalk';
 import { useProposalView } from './view';
 
@@ -44,14 +45,17 @@ const cap = (s: string) => `${s.charAt(0).toUpperCase()}${s.slice(1)}`;
 export function shownLevel(): { level: Level; version: Pointer['version'] } | null {
   const pv = useEditor.getState().preview;
   const view = useProposalView.getState();
-  if (pv && pv.side === 'version' && !pv.start && view.card) {
-    const [proposalId, letter] = view.card.split(':');
+  if (pv && pv.side === 'version' && !pv.start) {
+    const [proposalId, letter] = view.card?.split(':') ?? [];
     if (proposalId && letter && !proposalId.startsWith('d'))
       return {
         // What the plan shows (the version, with what is ticked): its ids are what is hit.
         level: pv.level,
         version: { kind: 'option', proposalId, letter, title: pv.label.slice(0, 8) },
       };
+    // A version from the list (d:) or none from the conversation: not something to point at
+    // (never "your plan", which isn't what is shown).
+    return null;
   }
   const level = talkLevel();
   return level ? { level, version: { kind: 'plan' } } : null;
@@ -206,10 +210,12 @@ export function makePointer(t: Target): Pointer | null {
     targetId: t.id,
     at: centreOf(level, t),
     levelId,
-    levelName,
+    // Cut to the record's limits, so a long room or level name never makes it unreadable.
+    levelName: levelName?.slice(0, 60) ?? null,
     version,
-    label: label.slice(0, 80),
-    room: words.room,
+    // Cut with "…" when longer than the record holds.
+    label: label.length > 80 ? `${label.slice(0, 79)}…` : label,
+    room: words.room?.slice(0, 80) ?? null,
     where: words.where.slice(0, 120),
     state: stateOf(t, title).slice(0, 80),
   };
@@ -337,11 +343,12 @@ export function lightPointer(p: Pointer | null, ms = 0) {
  * a gone one shows "Was here" (UX §1.3).
  */
 export function showPointer(p: Pointer) {
-  if (p.version.kind === 'option') {
+  if (p.version.kind === 'option' && !pointerGone(p)) {
     const key = `${p.version.proposalId}:${p.version.letter}`;
-    if (useTalk.getState().shown !== key && !pointerGone(p)) {
-      useTalk.setState({ shown: key });
-    }
+    // Back on the plan, as its card's Show on plan does (also after Back to my plan, when
+    // it is still the card shown but the plan isn't showing it).
+    if (useTalk.getState().shown !== key) useTalk.setState({ shown: key });
+    if (!useDesigner.getState().previewing) useDesigner.setState({ previewing: true });
   }
   lightPointer(p, 2000);
 }
@@ -376,8 +383,10 @@ export async function keepTarget(t: Target): Promise<boolean> {
       ? `Kept: the ${name} where it is. Later ideas leave it there.`
       : `Kept: the ${name} where it is in ${k.from}. Later ideas leave it there.`;
   const next = await act({ type: 'keepItem', kept: k, id: newId('turn'), at: nowIso(), text });
-  if (next) say(text);
-  return !!next;
+  // Refused (already kept, or 30 kept): nothing is said as if it were.
+  const done = !!next?.kept.some((x) => x.id === k.id);
+  if (done) say(text);
+  return done;
 }
 
 /** Let the designer move it: the kept piece let go, said in the log. */

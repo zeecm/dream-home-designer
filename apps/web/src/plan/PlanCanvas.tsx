@@ -16,7 +16,13 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { AgeingAnnouncement, AgeingLayer } from '../ageing/ageing';
 import { TraceDraftLayer } from '../ai/DraftLayer';
 import { DesignFocusLayer } from '../ai/designer/focus';
-import { PlanPopover, openPopover, targetOf } from '../ai/designer/talk/PlanPopover';
+import {
+  PlanPopover,
+  openPopover,
+  popoverOn,
+  targetOf,
+  targetOfSelection,
+} from '../ai/designer/talk/PlanPopover';
 import { addSpot, makePointer } from '../ai/designer/talk/pointers';
 import { type PixelBox, inkBounds } from '../assets';
 import { ClearanceAnnouncement, ClearanceLayer } from '../clearance/clearance';
@@ -37,6 +43,7 @@ import { currentLevel, useLevel, useProject, useStore } from '../store';
 import { Compass, describeNorth } from '../ui/Compass';
 import { uploadPlanImage, usePlanImage, useUploadPicker } from '../ui/PlanImage';
 import { RenovationMarks } from '../ui/Renovation';
+import { dialogHasKeys } from '../ui/dialogs';
 import { icons } from '../ui/icons';
 import { HoldRing, PointerLayer, useHold } from './PointerLayer';
 import { ProposalLayer, ProposalLegend } from './ProposalLayer';
@@ -104,7 +111,7 @@ function useElementSize<T extends Element>() {
 
 const isTyping = (t: EventTarget | null) =>
   // While a dialog is open, keys are the dialog's, not the plan's shortcuts.
-  !!document.querySelector('dialog[open]') ||
+  dialogHasKeys() ||
   (t instanceof HTMLElement &&
     (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)));
 
@@ -542,6 +549,12 @@ export function PlanCanvas() {
     hold.current = {};
     if (useHold.getState().at) useHold.setState({ at: null, fired: false });
   };
+  // The long-press's timers end with the plan, and when the version leaves it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: endHold reads only refs
+  useEffect(() => {
+    if (!previewing) endHold();
+    return endHold;
+  }, [previewing]);
   /** Empty floor in a room under a press: Here may go there. */
   const emptyFloor = (p: PlanPointer) =>
     (!p.hit || p.hit.kind === 'room') && !!level && !!roomIdAt(level, p.world);
@@ -556,7 +569,7 @@ export function PlanCanvas() {
   const contextAt = (p: PlanPointer) => {
     if (p.hit && p.hit.kind !== 'vertex' && p.hit.kind !== 'room') {
       useEditor.getState().select(p.hit);
-      openPopover(targetOf(p.hit, p.world));
+      openPopover(targetOf(p.hit, p.world), true);
       return;
     }
     if (emptyFloor(p)) {
@@ -904,6 +917,34 @@ export function PlanCanvas() {
         if (e.target === svgRef.current) setRing(true);
       }
       if (isTyping(e.target)) return;
+      // Enter, Shift+F10 or the context-menu key on the plan, while the designer is pointing:
+      // the selected object's popover with its first row focused, or Here mid-view.
+      const menuKey = e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey);
+      if (
+        (menuKey || (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.altKey)) &&
+        e.target === svgRef.current &&
+        tool === 'select' &&
+        popoverOn()
+      ) {
+        const sel = useEditor.getState().selection;
+        const t = sel ? targetOfSelection(sel) : null;
+        if (t) {
+          e.preventDefault();
+          openPopover(t, true);
+          return;
+        }
+        if (!sel && previewing) {
+          const mid = { x: v.cx, y: v.cy };
+          if (level && roomIdAt(level, mid)) {
+            e.preventDefault();
+            here(mid);
+            requestAnimationFrame(() =>
+              document.querySelector<HTMLTextAreaElement>('#talk-text')?.focus(),
+            );
+            return;
+          }
+        }
+      }
       if (e.code === 'Space') {
         space.current = true;
         e.preventDefault();
@@ -981,7 +1022,12 @@ export function PlanCanvas() {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerCancel={(e) => (e.pointerType === 'touch' ? onTouchCancel(e) : onPointerUp(e))}
+        onPointerCancel={(e) => {
+          if (e.pointerType === 'touch') return onTouchCancel(e);
+          // A cancelled mouse or pen press is never a context click.
+          rightDown.current = null;
+          onPointerUp(e);
+        }}
         onContextMenu={(e) => e.preventDefault()}
         // A tap's mouse events, after it opened the comment composer, would take its focus
         // (and close a phone's keyboard).

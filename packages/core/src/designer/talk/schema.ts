@@ -13,11 +13,14 @@ import { clean } from '../util';
  */
 
 /**
+ * 4: pointing at the plan (slice 3a: the composer's chips, a sent message's pointers, kept
+ * pieces and their 'kept' log line, the tips seen).
  * 3: house rules (slice 3a: the conversation's rules, a reply's rule offer, a Decision's rule).
- * 2: the talk call (a person's Send, the designer's replies, hand edits). 1 and 2 are read as 3.
- * A build that knows only 2 sees a 3 as newer and goes read-only, so it never drops the rules.
+ * 2: the talk call (a person's Send, the designer's replies, hand edits). 1 to 3 are read as 4,
+ * with the newer parts empty. A build that knows only 3 sees a 4 as newer and goes read-only,
+ * so it never drops kept pieces (while the brief still holds them in place) or the chips.
  */
-export const TALK_RECORD_VERSION = 3;
+export const TALK_RECORD_VERSION = 4;
 /** Proposals are unchanged by house rules: still written as 2. */
 export const PROPOSAL_RECORD_VERSION = 2;
 /** Rules kept per conversation, the recently deleted (for Undo) included. */
@@ -500,6 +503,14 @@ export const Conversation = z.object({
     .array(z.unknown())
     .transform((items) => readable(Kept, items).slice(-MAX_KEPT))
     .default([]),
+  /**
+   * Kept pieces let go (with `until`): versions made while they were kept are still placed
+   * with them, so letting go never rewrites a version already made. The newest 30.
+   */
+  keptGone: z
+    .array(z.unknown())
+    .transform((items) => readable(Kept, items).slice(-MAX_KEPT))
+    .default([]),
   /** One-time tips seen (the pointing tip). */
   tips: z
     .array(z.string())
@@ -545,6 +556,12 @@ export type Conversation = z.infer<typeof Conversation>;
 /** One option (A, B, C) of a proposal: a version as the runner builds it, not yet a version. */
 export const ProposalOption = z.object({
   letter: z.enum(['A', 'B', 'C']),
+  /**
+   * When this option was asked for (Another idea comes after the card): what was kept by then
+   * is what it is placed with. Absent on older records: the proposal's own time. (Added with
+   * talk records 4: a build that knows 3 is read-only on these, so never drops it.)
+   */
+  madeAt: z.string().optional(),
   name: z.string().max(TALK_LIMITS.name),
   /** The id its pieces are seeded with, and its version's id once accepted. */
   designId: z.string(),

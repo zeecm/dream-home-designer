@@ -34,6 +34,7 @@ import { useSuggest } from '../electrical/suggest';
 import { roomLabelBoxes } from '../plan/layers';
 import { type Size, type View, fitBounds } from '../plan/view';
 import { canEdit, useLevel, useProject, useStore } from '../store';
+import { dialogHasKeys } from '../ui/dialogs';
 import { Segmented } from '../ui/fields';
 import { icons } from '../ui/icons';
 import { useStorage } from './store';
@@ -641,7 +642,7 @@ export function StoragePanel() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
-      if (useEditor.getState().selection || document.querySelector('dialog[open]')) return;
+      if (useEditor.getState().selection || dialogHasKeys()) return;
       if (useEditor.getState().tool !== 'select') return;
       e.preventDefault();
       close();

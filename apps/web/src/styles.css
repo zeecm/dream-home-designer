@@ -9041,8 +9041,10 @@ html[data-proposal] .plan-svg g.clearance {
 }
 .talk-pchip-x {
   display: grid;
+  flex: none;
   place-items: center;
   width: 24px;
+  min-width: 24px;
   height: 24px;
   margin-right: 4px;
   border: 0;
@@ -9069,6 +9071,7 @@ html[data-proposal] .plan-svg g.clearance {
   }
   .talk-pchip-x {
     width: 44px;
+    min-width: 44px;
     height: 44px;
     margin-right: 0;
   }
@@ -9091,6 +9094,9 @@ html[data-proposal] .plan-svg g.clearance {
   border-radius: var(--radius-card);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
 }
+.talk-pop-sheet::backdrop {
+  background: rgba(0, 0, 0, 0.12);
+}
 .talk-pop-sheet {
   position: fixed;
   top: auto;
@@ -9109,6 +9115,11 @@ html[data-proposal] .plan-svg g.clearance {
     right: auto;
     width: min(420px, 60vw);
     max-height: calc(100vh - 16px);
+  }
+  /* What was tapped is on the left: the sheet takes the right. */
+  .talk-pop-sheet.talk-pop-right {
+    left: auto;
+    right: 0;
   }
 }
 .talk-pop-head {
@@ -9135,6 +9146,10 @@ html[data-proposal] .plan-svg g.clearance {
 .talk-pop-rows {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 .talk-pop-row {
   display: flex;
@@ -9275,6 +9290,11 @@ html[data-proposal] .plan-svg g.clearance {
   flex-wrap: wrap;
   gap: 8px;
   align-items: flex-start;
+}
+@media (pointer: coarse) {
+  .talk-ask-btn {
+    height: 44px;
+  }
 }
 .talk-kept-tag {
   font-size: var(--fs-small);

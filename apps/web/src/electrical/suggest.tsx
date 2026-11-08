@@ -21,6 +21,7 @@ import { useEditor } from '../editor';
 import { MAX_ZOOM, MIN_ZOOM, type Size, fitBounds } from '../plan/view';
 import { useStorage } from '../storage/store';
 import { currentLevel, useLevel, useStore } from '../store';
+import { dialogHasKeys } from '../ui/dialogs';
 import { icons } from '../ui/icons';
 import { KindIcon, glyphRadius, useElectricalOn } from './electrical';
 import { ElecGlyph, GLYPH_DEPTH } from './glyph';
@@ -304,7 +305,7 @@ export function SuggestPanel() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
-      if (useEditor.getState().selection || document.querySelector('dialog[open]')) return;
+      if (useEditor.getState().selection || dialogHasKeys()) return;
       e.preventDefault();
       useSuggest.getState().close();
       returnFocus();

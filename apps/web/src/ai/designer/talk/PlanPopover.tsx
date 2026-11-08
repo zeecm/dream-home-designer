@@ -1,10 +1,20 @@
-import { type Vec2, entranceDoor, pointPosition, roomsBeside, wallStatus } from '@dhd/core';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type Level,
+  type Project,
+  type Vec2,
+  entranceDoor,
+  itemFootprint,
+  roomsBeside,
+  wallStatus,
+} from '@dhd/core';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { useSheets } from '../../../comments/ui';
 import { type Selection, useEditor } from '../../../editor';
+import { objectPoint } from '../../../plan/keyboard';
 import { type Size, type View, worldToScreen } from '../../../plan/view';
 import { useStore } from '../../../store';
+import { FLOAT_DIALOG } from '../../../ui/dialogs';
 import { useAi } from '../../credentials';
 import { usd } from '../spend';
 import { useDesigner } from '../state';
@@ -21,7 +31,7 @@ import {
   unkeep,
 } from './pointers';
 import { sendMessage, sendPrice } from './turn';
-import { actProposal, useBusy, useTalk } from './useTalk';
+import { actProposal, talkLevel, useBusy, useTalk } from './useTalk';
 import { useProposalView } from './view';
 
 /**
@@ -31,9 +41,18 @@ import { useProposalView } from './view';
  * two paid rows send a message with the chip, priced as Send is.
  */
 
-export const usePopover = create<{ target: Target | null }>(() => ({ target: null }));
-export const openPopover = (target: Target | null) => usePopover.setState({ target });
-export const closePopover = () => usePopover.setState({ target: null });
+export const usePopover = create<{ target: Target | null; focus: boolean }>(() => ({
+  target: null,
+  focus: false,
+}));
+/**
+ * Opens the popover on a target. `focus`: opened from the keyboard or a context click, so its
+ * first row takes the focus (and it goes back where it was on close); a plain click leaves the
+ * focus on the plan.
+ */
+export const openPopover = (target: Target | null, focus = false) =>
+  usePopover.setState({ target, focus });
+export const closePopover = () => usePopover.setState({ target: null, focus: false });
 
 const doc = () => useStore.getState().editor.doc;
 
@@ -43,50 +62,54 @@ export function targetOf(sel: Selection, at: Vec2): Target | null {
   return { kind: sel.kind, id: sel.id, at };
 }
 
-/** Where a selection is on the level shown (for the popover and the pointer). */
-function centreOf(sel: Selection): Vec2 | null {
-  const shown = shownLevel();
-  const l = shown?.level;
-  if (!l) return null;
-  if (sel.kind === 'item') {
-    const it = levelWith(l, { kind: 'item', id: sel.id, at: { x: 0, y: 0 } }).items[sel.id];
-    return it ? { x: it.position.x, y: it.position.z } : null;
-  }
-  if (sel.kind === 'wall' || sel.kind === 'opening') {
-    const wallId = sel.kind === 'wall' ? sel.id : l.openings[sel.id]?.wallId;
-    const w = wallId ? l.walls[wallId] : undefined;
-    const a = w && l.vertices[w.a];
-    const b = w && l.vertices[w.b];
-    const t = sel.kind === 'opening' ? (l.openings[sel.id]?.t ?? 0.5) : 0.5;
-    return a && b ? { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t } : null;
-  }
-  if (sel.kind === 'point') {
-    // A wall point (a socket, an aircon isolator) has no `at`: it is on its wall's face.
-    const pl = levelWith(l, { kind: 'point', id: sel.id, at: { x: 0, y: 0 } });
-    const p = pl.points?.[sel.id];
-    const at = p ? pointPosition(pl, p)?.at : null;
-    return at ? { ...at } : null;
-  }
-  if (sel.kind === 'room') {
-    const r = l.rooms[sel.id];
-    if (!r) return null;
-    const pts: Vec2[] = r.loop.flatMap((id) => {
-      const v = l.vertices[id];
-      return v ? [{ x: v.x, y: v.y }] : [];
-    });
-    const n = pts.length || 1;
-    return { x: pts.reduce((t, p) => t + p.x, 0) / n, y: pts.reduce((t, p) => t + p.y, 0) / n };
-  }
-  return null;
+/**
+ * A selection's target on the level shown, at its centre (a room's label spot, inside an
+ * L-shape; a wall point on its wall's face), or null. The plan's own `objectPoint`, on the
+ * level that has it (a piece drawn from the card's result while the merged level catches up).
+ */
+export function targetOfSelection(sel: Selection): Target | null {
+  const l = shownLevel()?.level;
+  if (!l || sel.kind === 'vertex') return null;
+  const at = objectPoint(levelWith(l, { kind: sel.kind, id: sel.id, at: { x: 0, y: 0 } }), sel);
+  return at ? targetOf(sel, at) : null;
 }
 
 /** Whether the popover opens now: a version on the plan, or the designer open on your plan. */
-const popoverOn = () => {
+export const popoverOn = () => {
   const pv = useEditor.getState().preview;
   if (pv?.start) return false;
-  if (pv) return pv.side === 'version';
+  if (pv) return pv.side === 'version' && !!shownLevel();
   return useDesigner.getState().panel && useStore.getState().role !== 'viewer';
 };
+
+/** What a target is in the plan (by reference, so any change to it shows): none if not there. */
+function touchOf(project: Project, t: Target): unknown[] {
+  if (!t.id) return [];
+  const id = t.id;
+  return project.levels.flatMap((l): unknown[] => {
+    switch (t.kind) {
+      case 'item':
+        return [l.items[id]];
+      case 'point':
+        return [l.points?.[id]];
+      case 'opening': {
+        const o = l.openings[id];
+        const w = o && l.walls[o.wallId];
+        return [o, w && l.vertices[w.a], w && l.vertices[w.b]];
+      }
+      case 'wall': {
+        const w = l.walls[id];
+        return [w, w && l.vertices[w.a], w && l.vertices[w.b]];
+      }
+      case 'room': {
+        const r = l.rooms[id];
+        return [r, ...(r?.loop ?? []).map((v) => l.vertices[v])];
+      }
+      default:
+        return [];
+    }
+  });
+}
 
 /**
  * Opens the popover on a still click or tap (the selection changing to a target), and closes
@@ -103,9 +126,7 @@ export function usePopoverOnSelect() {
           return;
         }
         if (!popoverOn()) return;
-        const at = centreOf(sel);
-        const t = at ? targetOf(sel, at) : null;
-        openPopover(t);
+        openPopover(targetOfSelection(sel));
       }),
     [],
   );
@@ -113,49 +134,78 @@ export function usePopoverOnSelect() {
     () =>
       useStore.subscribe((s, prev) => {
         const t = usePopover.getState().target;
-        if (!t || t.kind !== 'item' || !t.id || s.editor.doc === prev.editor.doc) return;
-        // The piece moved by hand (a drag started): editing is never in its way.
-        const lvls = (l: typeof s.editor.doc) => l.levels.map((x) => x.items[t.id ?? '']);
-        const a = lvls(s.editor.doc).find(Boolean);
-        const b = lvls(prev.editor.doc).find(Boolean);
-        if (a && b && (a.position.x !== b.position.x || a.position.z !== b.position.z))
-          closePopover();
+        if (!t || s.editor.doc === prev.editor.doc) return;
+        // Its target changed in the plan (a drag started, a nudge, Delete, an undo): editing
+        // is never in its way, and it never shows what is no longer so.
+        const a = touchOf(s.editor.doc, t);
+        const b = touchOf(prev.editor.doc, t);
+        if (a.length !== b.length || a.some((x, i) => x !== b[i])) closePopover();
       }),
     [],
   );
+  // The preview ending (or another version shown) closes it too: it spoke of what was shown.
+  useEffect(() => {
+    const shownKey = (p: ReturnType<typeof useEditor.getState>['preview']) =>
+      p ? `${p.side}|${p.label}|${p.start ? 1 : 0}` : '';
+    return useEditor.subscribe((s, prev) => {
+      if (shownKey(s.preview) !== shownKey(prev.preview)) closePopover();
+    });
+  }, []);
 }
 
 const M = 8;
 const W = 280;
-/** Beside the target, never over it: right, left, below, above, else a corner. */
-function place(at: Vec2, size: Size, h: number): React.CSSProperties {
+/** A box on the screen: the target's own extent. */
+interface Box {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+/** Beside the target's box, never over any of it: right, left, below, above, else a corner. */
+function place(box: Box, size: Size, h: number): React.CSSProperties {
   const w = Math.min(W, size.width - 2 * M);
   const height = Math.min(h || 320, size.height - 2 * M);
+  const cx = (box.x0 + box.x1) / 2;
+  const cy = (box.y0 + box.y1) / 2;
   const tries = [
-    { left: at.x + 24, top: at.y - 40 },
-    { left: at.x - 24 - w, top: at.y - 40 },
-    { left: at.x - w / 2, top: at.y + 24 },
-    { left: at.x - w / 2, top: at.y - 24 - height },
+    { left: box.x1 + 12, top: cy - 40 },
+    { left: box.x0 - 12 - w, top: cy - 40 },
+    { left: cx - w / 2, top: box.y1 + 12 },
+    { left: cx - w / 2, top: box.y0 - 12 - height },
   ].map((c) => ({
     left: Math.max(M, Math.min(c.left, size.width - M - w)),
     top: Math.max(M, Math.min(c.top, size.height - M - height)),
   }));
   const clear = (c: { left: number; top: number }) =>
-    !(
-      at.x > c.left - 12 &&
-      at.x < c.left + w + 12 &&
-      at.y > c.top - 12 &&
-      at.y < c.top + height + 12
-    );
+    box.x1 < c.left - 8 ||
+    box.x0 > c.left + w + 8 ||
+    box.y1 < c.top - 8 ||
+    box.y0 > c.top + height + 8;
   const best = tries.find(clear) ?? {
-    left: at.x > size.width / 2 ? M : size.width - M - w,
-    top: at.y > size.height / 2 ? M : size.height - M - height,
+    left: cx > size.width / 2 ? M : size.width - M - w,
+    top: cy > size.height / 2 ? M : size.height - M - height,
   };
   return { left: best.left, top: best.top, width: w, maxHeight: size.height - 2 * M };
 }
 
+/** The target's extent on the screen: a piece's footprint, else a small box round its spot. */
+function boxOf(level: Level, t: Target, view: View, size: Size): Box {
+  const it = t.kind === 'item' && t.id ? level.items[t.id] : undefined;
+  const pts = (it ? itemFootprint(it) : [t.at]).map((p) => worldToScreen(view, size, p));
+  const r = it ? 0 : 14;
+  return {
+    x0: Math.min(...pts.map((p) => p.x)) - r,
+    y0: Math.min(...pts.map((p) => p.y)) - r,
+    x1: Math.max(...pts.map((p) => p.x)) + r,
+    y1: Math.max(...pts.map((p) => p.y)) + r,
+  };
+}
+
 interface Row {
   label: string;
+  /** What shows right under it (Why here?'s reason). */
+  after?: React.ReactNode;
   /** Priced rows: the figure. */
   price?: string;
   act: () => void;
@@ -169,27 +219,85 @@ interface Row {
 export function PlanPopover({ view, size }: { view: View; size: Size }) {
   usePopoverOnSelect();
   const target = usePopover((s) => s.target);
+  const focusFirst = usePopover((s) => s.focus);
   const sheets = useSheets();
   const busy = useBusy();
   const ai = useAi();
   const conv = useTalk((s) => s.conv);
   const pv = useProposalView();
   const [why, setWhy] = useState(false);
-  const box = useRef<HTMLDialogElement>(null);
+  const [box, setBox] = useState<HTMLDialogElement | null>(null);
   const [h, setH] = useState(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new target starts closed
   useEffect(() => setWhy(false), [target?.kind, target?.id]);
+  // Esc closes it, unless it is meant for a field being typed in (the composer).
   useEffect(() => {
-    if (!target) return;
+    if (!target || sheets) return;
     const esc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closePopover();
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      const el = e.target;
+      const typing =
+        el instanceof HTMLElement &&
+        (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
+      if (typing && !box?.contains(el)) return;
+      closePopover();
+    };
+    // A press outside it (the composer, the panel) closes it; one on the plan is the plan's.
+    const outside = (e: PointerEvent) => {
+      const el = e.target;
+      if (!(el instanceof Node) || box?.contains(el)) return;
+      if (el instanceof Element && el.closest('.plan')) return;
+      closePopover();
     };
     window.addEventListener('keydown', esc);
-    return () => window.removeEventListener('keydown', esc);
-  }, [target]);
+    window.addEventListener('pointerdown', outside, true);
+    return () => {
+      window.removeEventListener('keydown', esc);
+      window.removeEventListener('pointerdown', outside, true);
+    };
+  }, [target, sheets, box]);
+  // Its height, for placing it beside the target, as it changes (Why here? opening).
   useEffect(() => {
-    if (box.current) setH(box.current.offsetHeight);
-  });
+    if (!box) return;
+    setH(box.offsetHeight);
+    const ro = new ResizeObserver(() => setH(box.offsetHeight));
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, [box]);
+  // A phone's action sheet is modal (the page behind is inert, the focus stays in it); on a
+  // computer it floats beside the target and the plan keeps the keys.
+  useLayoutEffect(() => {
+    if (!box || !sheets || box.open) return;
+    try {
+      box.showModal();
+    } catch {
+      box.setAttribute('open', '');
+    }
+  }, [box, sheets]);
+  // Opened from the keyboard or a context click: the first row has the focus, and it goes back
+  // where it was on close.
+  const back = useRef<Element | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on a new target
+  useEffect(() => {
+    if (!box || !target || !(focusFirst || sheets)) return;
+    if (!back.current) back.current = document.activeElement;
+    box.querySelector<HTMLButtonElement>('.talk-pop-row:not(:disabled)')?.focus();
+  }, [box, target?.kind, target?.id, focusFirst]);
+  useEffect(() => {
+    if (target) return;
+    const el = back.current;
+    back.current = null;
+    // Only when the focus went with it (Esc, ×, a row), never away from where a click put it.
+    if (document.activeElement && document.activeElement !== document.body) return;
+    // Back where it was, else to the plan, on its object.
+    if (
+      (el instanceof HTMLElement || el instanceof SVGElement) &&
+      el.isConnected &&
+      el !== document.body
+    )
+      el.focus();
+    else document.querySelector<SVGElement>('.plan svg[tabindex]')?.focus();
+  }, [target]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: worked out per target and plan
   const info = useMemo(() => {
     if (!target) return null;
@@ -220,11 +328,13 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
         : busy
           ? 'Wait for the reply, or Stop'
           : null;
+  const pointer = () => makePointer(target);
+  // Priced as it goes: the message with this one chip (the composer's stay where they are).
+  const one = pointer();
   const price = (text: string) => {
-    const est = sendPrice(text);
+    const est = sendPrice(text, one ? [one] : []);
     return est?.usd ? `about ${usd(est.usd.typical)}` : est ? 'about a few tokens' : '';
   };
-  const pointer = () => makePointer(target);
   const ask = (text: string) => {
     const p = pointer();
     closePopover();
@@ -244,7 +354,9 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
     : title
       ? target.kind === 'item'
         ? `In your plan, not changed in ${title}`
-        : `In ${title}`
+        : target.kind === 'point' && target.id && !talkLevel()?.points?.[target.id]
+          ? `Added in ${title}`
+          : `In ${title}`
       : 'In your plan';
   const state = kept ? 'Kept: later ideas leave it here' : verb;
   // Locked: what can't be taken out, and why (free).
@@ -286,7 +398,27 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
     },
   ];
   if (change?.why)
-    free.push({ label: 'Why here?', act: () => setWhy(!why), stays: true, pressed: why });
+    free.push({
+      label: 'Why here?',
+      act: () => setWhy(!why),
+      stays: true,
+      pressed: why,
+      after: why && (
+        <p className="talk-pop-why">
+          {change.why}{' '}
+          <button
+            type="button"
+            className="link-btn"
+            onClick={() => {
+              if (pv.card) useTalk.setState({ open: { card: pv.card, change: change.id } });
+              closePopover();
+            }}
+          >
+            In {title}’s changes ›
+          </button>
+        </p>
+      ),
+    });
   if (target.kind === 'item') {
     free.push(
       kept
@@ -337,35 +469,66 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
   const head = `${words.label}${title ? ` · ${title}` : ''}`;
   const rowsOf = (rows: Row[]) =>
     rows.map((r) => (
-      <button
-        key={r.label}
-        type="button"
-        role="menuitem"
-        className="talk-pop-row"
-        disabled={r.paid ? !!cantPay : false}
-        aria-pressed={r.pressed}
-        aria-label={r.price ? `${r.label}, ${r.price}` : undefined}
-        {...(r.paid ? { 'data-spends': '' } : {})}
-        onClick={() => {
-          r.act();
-          if (!r.stays && !r.paid) closePopover();
-        }}
-      >
-        <span>{r.label}</span>
-        {r.price && <span className="talk-pop-price num">{r.price}</span>}
-      </button>
+      <Fragment key={r.label}>
+        <button
+          type="button"
+          className="talk-pop-row"
+          disabled={r.paid ? !!cantPay : false}
+          aria-pressed={r.pressed}
+          aria-label={r.price ? `${r.label}, ${r.price}` : undefined}
+          {...(r.paid ? { 'data-spends': '' } : {})}
+          onClick={() => {
+            r.act();
+            if (!r.stays && !r.paid) closePopover();
+          }}
+        >
+          <span>{r.label}</span>
+          {r.price && <span className="talk-pop-price num">{r.price}</span>}
+        </button>
+        {r.after}
+      </Fragment>
     ));
-  const at = worldToScreen(view, size, target.at);
-  const style = sheets ? undefined : place(at, size, h);
+  // ↑ and ↓ move between the rows (Home and End to the ends).
+  const onRowsKey = (e: React.KeyboardEvent<HTMLFieldSetElement>) => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+    const rows = [
+      ...e.currentTarget.querySelectorAll<HTMLButtonElement>('.talk-pop-row:not(:disabled)'),
+    ];
+    const i = rows.indexOf(document.activeElement as HTMLButtonElement);
+    const next =
+      e.key === 'Home'
+        ? 0
+        : e.key === 'End'
+          ? rows.length - 1
+          : (i + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
+    rows[next]?.focus();
+    e.preventDefault();
+  };
+  const tbox = boxOf(levelWith(level, target), target, view, size);
+  // Off the stage (panned away): not drawn, back when it is in sight again.
+  const offStage = tbox.x1 < 0 || tbox.y1 < 0 || tbox.x0 > size.width || tbox.y0 > size.height;
+  if (!sheets && offStage) return null;
+  // A phone on its side: the sheet takes the half away from what was tapped.
+  const side =
+    sheets && size.width > size.height && (tbox.x0 + tbox.x1) / 2 < size.width / 2
+      ? 'talk-pop-sheet talk-pop-right'
+      : 'talk-pop-sheet';
+  const style = sheets ? undefined : place(tbox, size, h);
   return (
     <dialog
-      open
-      ref={box}
-      className={sheets ? 'talk-pop talk-pop-sheet' : 'talk-pop'}
+      // A new element when it changes between floating and the sheet (modal is set on open).
+      key={sheets ? 'sheet' : 'float'}
+      open={sheets ? undefined : true}
+      ref={setBox}
+      className={sheets ? `talk-pop ${side}` : `talk-pop ${FLOAT_DIALOG}`}
       style={style}
       aria-label={head}
-      aria-modal={sheets ? true : undefined}
       data-testid="plan-popover"
+      onCancel={(e) => {
+        // Esc on the sheet: closed the app's way (the target let go), not only the element.
+        e.preventDefault();
+        closePopover();
+      }}
     >
       <div className="talk-pop-head">
         <h3 className="talk-pop-title">{head}</h3>
@@ -379,27 +542,13 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
         </button>
       </div>
       <p className={info.failing ? 'talk-pop-state negative' : 'talk-pop-state'}>{state}</p>
-      <div className="talk-pop-rows" role="menu" aria-label={head}>
+      <fieldset className="talk-pop-rows" onKeyDown={onRowsKey}>
+        <legend className="visually-hidden">{head}</legend>
         {rowsOf(free)}
-        {why && change?.why && (
-          <p className="talk-pop-why">
-            {change.why}{' '}
-            <button
-              type="button"
-              className="link-btn"
-              onClick={() => {
-                if (pv.card) useTalk.setState({ open: { card: pv.card, change: change.id } });
-                closePopover();
-              }}
-            >
-              In {title}’s changes ›
-            </button>
-          </p>
-        )}
         <hr className="talk-pop-rule" />
         {rowsOf(paid)}
         {locked && <p className="talk-pop-note">{locked}</p>}
-      </div>
+      </fieldset>
       {cantPay && <p className="talk-pop-foot field-hint">{cantPay}</p>}
     </dialog>
   );

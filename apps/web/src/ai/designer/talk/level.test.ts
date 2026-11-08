@@ -6,7 +6,7 @@ import {
   pointPosition,
   twoLevelProject,
 } from '@dhd/core';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { create } from 'zustand';
 
 /**
@@ -69,6 +69,11 @@ describe('pointers carry their level (3a.12) and say when their target is gone (
     useTalk.setState({ conv: { levelId: upper.id, draftPointers: [] } as unknown as Conversation });
     const wall = Object.values(upper.walls)[0];
     if (!wall) throw new Error('no wall');
+    // On the shared fixture for this test only: put back as it was after.
+    const was = upper.points;
+    onTestFinished(() => {
+      upper.points = was;
+    });
     upper.points = {
       ...upper.points,
       pt_wall: {

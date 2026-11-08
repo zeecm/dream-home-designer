@@ -2336,23 +2336,23 @@ test.describe('pointing at the plan (slice 3a, PR B)', () => {
     await expect(pop.getByRole('heading')).toHaveText(/ · V1$/);
     await expect(pop).toContainText(/Added in V1|In your plan, not changed in V1/);
     // Why here? and Keep this cost nothing.
-    const whyRow = pop.getByRole('menuitem', { name: 'Why here?' });
+    const whyRow = pop.getByRole('button', { name: 'Why here?' });
     if (await whyRow.isVisible()) {
       await whyRow.click();
       await expect(pop.locator('.talk-pop-why')).toBeVisible();
     }
-    await pop.getByRole('menuitem', { name: 'Keep this' }).click();
+    await pop.getByRole('button', { name: 'Keep this' }).click();
     await expect(
       log(page).getByText(/^Kept: the .+ where it is in V1\. Later ideas leave it there\./),
     ).toBeVisible();
-    await expect(pop.getByRole('menuitem', { name: 'Let the designer move it' })).toBeVisible();
+    await expect(pop.getByRole('button', { name: 'Let the designer move it' })).toBeVisible();
     await expect(
-      pop.getByRole('menuitem', { name: /^Something else here, about US\$\d\.\d\d$/ }),
+      pop.getByRole('button', { name: /^Something else here, about US\$\d\.\d\d$/ }),
     ).toBeEnabled();
     await shot(page, 'popover');
     expect(m.calls.length).toBe(calls);
     // Comment: the chip, named with its room and version.
-    await pop.getByRole('menuitem', { name: 'Comment' }).click();
+    await pop.getByRole('button', { name: 'Comment' }).click();
     await expect(pop).toBeHidden();
     const chips = composerChips(page);
     await expect(chips.getByRole('listitem')).toHaveCount(1);
@@ -2369,7 +2369,7 @@ test.describe('pointing at the plan (slice 3a, PR B)', () => {
       await rightClick(page, await roomAt(page, room, fx, fy));
     }
     await expect(chips.getByRole('listitem')).toHaveCount(5);
-    await expect(chips).toContainText('Here · Bedroom · V1');
+    await expect(chips).toContainText('Here 1 · Bedroom · V1');
     await expect(page.getByTestId('pointer-layer').locator('.ptr-pin')).toHaveCount(4);
     // A sixth is refused, with the reason.
     await rightClick(page, await roomAt(page, 'rm_bedroom', 0.5, 0.2));
@@ -2377,7 +2377,10 @@ test.describe('pointing at the plan (slice 3a, PR B)', () => {
     await expect(chips.getByRole('listitem')).toHaveCount(5);
     await shot(page, 'five-chips');
     // One taken off by its ×, then the message with the chips.
-    await chips.getByRole('button', { name: 'Remove Here from your message' }).last().click();
+    await chips
+      .getByRole('button', { name: /^Remove Here( \d)? from your message$/ })
+      .last()
+      .click();
     await expect(chips.getByRole('listitem')).toHaveCount(4);
     // On the device only: never in the saved plan.
     expect(await dumpIdb(page)).toContain('Here · Bedroom · V1');
@@ -2441,11 +2444,15 @@ test.describe('pointing at the plan (slice 3a, PR B)', () => {
     const pop = page.getByTestId('plan-popover');
     await expect(pop).toBeVisible();
     await expect(pop.getByRole('heading')).not.toHaveText(/ · V\d+$/);
-    await pop.getByRole('menuitem', { name: 'Comment' }).click();
+    await pop.getByRole('button', { name: 'Comment' }).click();
     await expect(chips.getByRole('listitem')).toHaveCount(2);
-    // Deleted by hand before Send: the chip says so, and still goes.
+    // Deleted by hand before Send, with its popover up (the plan keeps its keys, B3): the
+    // popover goes, and the chip says so and still goes.
+    await page.keyboard.press('Escape');
     await page.locator(`[data-hit="${hit}"]`).first().click({ force: true });
+    await expect(pop).toBeVisible();
     await page.keyboard.press('Delete');
+    await expect(pop).toBeHidden();
     await expect(chips.getByRole('listitem').last()).toContainText('(gone)');
     await expect(chips.getByRole('button', { name: /, gone\. Show where it was$/ })).toBeVisible();
     await chips.getByRole('button', { name: /, gone\. Show where it was$/ }).click();
@@ -2453,6 +2460,71 @@ test.describe('pointing at the plan (slice 3a, PR B)', () => {
     await shot(page, 'chip-gone');
     await send(page, 'What about these?');
     await expect.poll(() => m.calls.filter((c) => c.step === 'talk').length).toBe(1);
+  });
+
+  test('3a.1 with no key: the popover on your plan, its free rows working, the paid ones saying why', async ({
+    page,
+  }) => {
+    await setup(page, null);
+    await openSample(page);
+    // As QA did: Ask the designer from the Inspector first (no meeting yet), then the plan.
+    const doors = page.locator('[data-hit^="opening:"]');
+    await doors.nth(1).click({ force: true });
+    await page.getByRole('button', { name: 'Ask the designer' }).click();
+    const settings = page.getByRole('dialog', { name: 'AI assistant' });
+    if (await settings.isVisible().catch(() => false))
+      await settings.getByRole('button', { name: 'Close' }).click();
+    await expect(composerChips(page).getByRole('listitem')).toHaveCount(1);
+    // A door of the sample (it has no furniture yet).
+    await doors.first().click({ force: true });
+    const pop = page.getByTestId('plan-popover');
+    await expect(pop).toBeVisible();
+    await expect(pop.getByRole('button', { name: 'Comment' })).toBeEnabled();
+    await expect(pop.getByRole('button', { name: /^Another door here/ })).toBeDisabled();
+    await expect(pop).toContainText('Add your AI key to ask for other ideas.');
+    await pop.getByRole('button', { name: 'Comment' }).click();
+    await expect(composerChips(page).getByRole('listitem')).toHaveCount(2);
+  });
+
+  test('S4, M6: the keyboard: Tab keeps cycling, Enter opens it on its first row, ↑↓ move, Esc goes back', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    await mock(page, { talk: [REPLY_TEXT] });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^Living and dining · about US\$/);
+    await expect(card(page, 1).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    const plan = page.getByRole('application', { name: 'Floor plan' });
+    await plan.focus();
+    const pop = page.getByTestId('plan-popover');
+    // Tab moves through the plan's objects: each opens its popover, the focus stays on the plan.
+    await page.keyboard.press('Tab');
+    await expect(pop).toBeVisible();
+    const first = await pop.getByRole('heading').textContent();
+    await expect(plan).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(plan).toBeFocused();
+    await expect(pop.getByRole('heading')).not.toHaveText(first ?? '');
+    // Enter: its first row has the focus; the arrows move between rows.
+    await page.keyboard.press('Enter');
+    await expect(pop.getByRole('button', { name: 'Comment' })).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(pop.getByRole('button', { name: 'Comment' })).not.toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(pop.getByRole('button', { name: 'Comment' })).toBeFocused();
+    // Esc: closed, the focus back on the plan.
+    await page.keyboard.press('Escape');
+    await expect(pop).toBeHidden();
+    await expect(plan).toBeFocused();
+    // Shift+F10 opens it again.
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Shift+F10');
+    await expect(pop.getByRole('button', { name: 'Comment' })).toBeFocused();
   });
 });
 
@@ -2514,10 +2586,14 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     await expect(panel(page)).toHaveClass(/talk-peek/);
     const chips = composerChips(page);
     const floor = await roomAt(page, 'rm_bedroom');
-    // A quick tap: no chip.
+    // A quick tap: no chip (the room's own sheet, modal, closed again).
     const tap = await finger(page, floor);
     await page.waitForTimeout(150);
     await tap.lift();
+    const roomSheet = page.getByTestId('plan-popover');
+    await expect(roomSheet).toBeVisible();
+    await roomSheet.getByRole('button', { name: 'Close' }).tap();
+    await expect(roomSheet).toBeHidden();
     // A press that moves 8 px or more: a pan, no chip.
     const pan = await finger(page, floor);
     await pan.moveTo({ x: floor.x + 30, y: floor.y }, 5);

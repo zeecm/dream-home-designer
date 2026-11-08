@@ -1,5 +1,6 @@
 import {
   type Decision,
+  type Kept,
   MAX_RULES,
   type Rule,
   type TurnOf,
@@ -439,8 +440,12 @@ export function YourRules({ Back }: { Back: (p: { title: string }) => JSX.Elemen
 }
 
 /** Kept as they are (UX §3.4, §2.4): pieces kept where they are, with Show and Let go. */
+const NO_KEPT: readonly Kept[] = [];
+/** The pieces kept on the conversation's level (a stable empty list: no render loop). */
 function KeptList() {
-  const kept = useTalk((s) => s.conv?.kept ?? []);
+  const all = useTalk((s) => s.conv?.kept ?? NO_KEPT);
+  const levelId = useTalk((s) => s.conv?.levelId);
+  const kept = useMemo(() => all.filter((k) => k.levelId === levelId), [all, levelId]);
   if (!kept.length) return null;
   return (
     <section className="talk-kept" aria-label="Kept as they are">
@@ -471,7 +476,10 @@ function KeptList() {
                       levelId: k.levelId,
                       levelName: null,
                       version: { kind: 'plan' },
-                      label: keptName(k),
+                      // Its name on the pin (never "Here": it's a piece, not a spot).
+                      label: keptName(k)
+                        .replace(/^the /, '')
+                        .replace(/^./, (c) => c.toUpperCase()),
                       room: null,
                       where: '',
                       state: '',

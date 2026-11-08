@@ -92,7 +92,8 @@ export function optionCard(p: Proposal, o: ProposalOption, levelId: string): Car
     status: o.status,
     note: o.note,
     words: p.words,
-    at: p.at,
+    // An alternative is placed with what was kept when it was asked for.
+    at: o.madeAt ?? p.at,
     madeOn: o.base.fingerprint,
     proposal: p,
     option: o,

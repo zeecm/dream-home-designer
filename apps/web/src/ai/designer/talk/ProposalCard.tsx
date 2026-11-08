@@ -177,16 +177,19 @@ export function TurnCost({ usage, fixes = 0 }: { usage: CardModel['usage']; fixe
 }
 
 const NO_IDS: string[] = [];
-/** The ids of pieces kept where they are on the card's result (for the Kept tag). */
-function useKeptIds(levelId: string): string[] {
-  const kept = useTalk((s) => (s.conv?.levelId === levelId ? s.conv.kept : null));
-  const view = useProposalView();
+/**
+ * The ids of pieces kept where they are on the card's result (for the Kept tag): only the card
+ * on the plan reads it, so a folded card never re-renders as the view changes.
+ */
+function useKeptIds(levelId: string, shown: boolean): string[] {
+  const kept = useTalk((s) => (shown && s.conv?.levelId === levelId ? s.conv.kept : null));
+  const target = useProposalView((s) => (shown ? s.target : null));
   return useMemo(() => {
-    if (!kept?.length || !view.target) return NO_IDS;
-    return Object.values(view.target.items)
+    if (!kept?.length || !target) return NO_IDS;
+    return Object.values(target.items)
       .filter((it) => kept.some((k) => (k.itemId ? k.itemId === it.id : keptHolds(k, it))))
       .map((it) => it.id);
-  }, [kept, view.target]);
+  }, [kept, target]);
 }
 
 /** The plan as the ticked changes would make it, and what that fails and costs (150 ms). */
@@ -293,7 +296,7 @@ export const ProposalCard = memo(function ProposalCard({
   const active = expanded || shown;
   // The pointing tip, once per conversation; kept pieces tag their rows.
   const tipSeen = useTalk((s) => !!s.conv?.tips.includes('point'));
-  const keptIds = useKeptIds(card.levelId);
+  const keptIds = useKeptIds(card.levelId, shown);
   const tick = useResultsTickN();
   // A rule kept, changed or deleted re-checks the card, with no request (3a.5).
   const rulesKey = useRulesKey(card.levelId);

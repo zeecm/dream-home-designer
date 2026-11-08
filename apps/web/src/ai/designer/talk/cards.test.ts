@@ -224,6 +224,15 @@ describe('the accept precheck fails closed (tech lead)', () => {
     ],
   };
   const card = optionCard(proposal, proposal.options[0] as Proposal['options'][number], level.id);
+  it('an alternative is timed when it was asked for (what was kept by then goes in)', () => {
+    expect(card.at).toBe(proposal.at);
+    const b = {
+      ...(proposal.options[0] as Proposal['options'][number]),
+      letter: 'B' as const,
+      madeAt: '2026-11-08T11:00:00.000Z',
+    };
+    expect(optionCard(proposal, b, level.id).at).toBe('2026-11-08T11:00:00.000Z');
+  });
   it('with no result to check with: missing, never "nothing fails"', () => {
     expect(precheckOn(project, card, ['x'], [], null, TYPICAL_RATES)).toEqual({
       failing: [],

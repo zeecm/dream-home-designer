@@ -373,7 +373,6 @@ describe('records version 3', () => {
     const { rules: _, ...v2 } = { ...conv, recordVersion: 2 };
     const read = conversationFromRecord(JSON.parse(JSON.stringify(v2)));
     expect(read?.recordVersion).toBe(TALK_RECORD_VERSION);
-    expect(TALK_RECORD_VERSION).toBe(3);
     expect(read?.rules).toEqual([]);
     expect(conversationFromRecord({ ...conv, recordVersion: TALK_RECORD_VERSION + 1 })).toBeNull();
   });

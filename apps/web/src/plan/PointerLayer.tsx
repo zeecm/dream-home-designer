@@ -103,7 +103,15 @@ export const PointerLayer = memo(function PointerLayer({
           </text>
         </g>
       )}
-      {lit && !gone && lit.kind === 'spot' && sameVersion(lit, label) && pin(lit.at, 'lit', 'Here')}
+      {lit &&
+        !gone &&
+        lit.kind === 'spot' &&
+        sameVersion(lit, label) &&
+        pin(
+          lit.at,
+          'lit',
+          lit.label.startsWith('Here') ? 'Here' : (lit.label.split(' · ')[0] ?? 'Here'),
+        )}
       {pins.map((p, i) => pin(p.at, p.id, pins.length > 1 ? `Here ${i + 1}` : 'Here'))}
     </g>
   );

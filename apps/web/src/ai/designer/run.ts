@@ -430,6 +430,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       }
       const prompt = roomStep(ctx, s, r.level, design.aliases, {
         concept: design.concept,
+        ...(o.result?.kept?.length ? { kept: o.result.kept } : {}),
         ...(storage !== undefined ? { storage } : {}),
         ...(plan.feedback ? { feedback: plan.feedback } : {}),
         ...(plan.talk ? { talk: plan.talk } : {}),
@@ -461,6 +462,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
             const again = await step(
               roomStep(ctx, s, r.level, design.aliases, {
                 concept: design.concept,
+                ...(o.result?.kept?.length ? { kept: o.result.kept } : {}),
                 ...(storage !== undefined ? { storage } : {}),
                 ...(plan.feedback ? { feedback: plan.feedback } : {}),
                 ...(plan.talk ? { talk: plan.talk } : {}),

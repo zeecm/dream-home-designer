@@ -1,5 +1,5 @@
 import type { Pointer } from '@dhd/core';
-import { useRef } from 'react';
+import { type KeyboardEvent, useEffect, useRef } from 'react';
 import { lightPointer, pointerGone, removePointer, showPointer, usePointerUi } from './pointers';
 import { useTalk } from './useTalk';
 
@@ -28,13 +28,34 @@ function Glyph({ kind }: { kind: Pointer['kind'] }) {
 
 const name = (p: Pointer) => p.label.split(' · ').join(', ');
 
+/** ← and → move between the chips, from the label or the ×. */
+function arrows(e: KeyboardEvent<HTMLButtonElement>) {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return false;
+  const li = e.currentTarget.closest('li');
+  const to = e.key === 'ArrowRight' ? li?.nextElementSibling : li?.previousElementSibling;
+  to?.querySelector<HTMLButtonElement>('.talk-pchip-label')?.focus();
+  e.preventDefault();
+  return true;
+}
+
 /** One chip: the label lights or shows its target; × (in the composer) takes it off. */
-function Chip({ p, removable, last }: { p: Pointer; removable: boolean; last?: boolean }) {
+function Chip({
+  p,
+  removable,
+  last,
+  text = p.label,
+}: {
+  p: Pointer;
+  removable: boolean;
+  last?: boolean;
+  /** What it reads (a Here numbered as its pin is). */
+  text?: string;
+}) {
   // Proposals read so "(gone)" follows a version deleted.
   useTalk((s) => s.proposals);
   const gone = pointerGone(p);
   const ring = usePointerUi((s) => s.ring === p.id);
-  const full = `${p.label}${gone ? ' (gone)' : ''}`;
+  const full = `${text}${gone ? ' (gone)' : ''}`;
   return (
     <li
       className={`talk-pchip${gone ? ' gone' : ''}${ring ? ' ring' : ''}`}
@@ -50,13 +71,8 @@ function Chip({ p, removable, last }: { p: Pointer; removable: boolean; last?: b
         onBlur={() => lightPointer(null)}
         onClick={() => showPointer(p)}
         onKeyDown={(e) => {
-          if (!removable) return;
+          if (!removable || arrows(e)) return;
           const li = e.currentTarget.closest('li');
-          if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-            const to = e.key === 'ArrowRight' ? li?.nextElementSibling : li?.previousElementSibling;
-            to?.querySelector<HTMLButtonElement>('.talk-pchip-label')?.focus();
-            e.preventDefault();
-          }
           if (e.key === 'Delete' || e.key === 'Backspace') {
             e.preventDefault();
             const next =
@@ -68,7 +84,7 @@ function Chip({ p, removable, last }: { p: Pointer; removable: boolean; last?: b
         }}
       >
         <Glyph kind={p.kind} />
-        <span className="talk-pchip-text">{p.label}</span>
+        <span className="talk-pchip-text">{text}</span>
         {gone && <span className="talk-pchip-gone"> (gone)</span>}
       </button>
       {removable && (
@@ -76,7 +92,8 @@ function Chip({ p, removable, last }: { p: Pointer; removable: boolean; last?: b
           type="button"
           className="talk-pchip-x"
           data-last-chip={last ? '' : undefined}
-          aria-label={`Remove ${p.label.split(' · ')[0]} from your message`}
+          aria-label={`Remove ${text.split(' · ')[0]} from your message`}
+          onKeyDown={arrows}
           onClick={() => {
             lightPointer(null);
             void removePointer(p.id);
@@ -101,6 +118,21 @@ export function PointerChips({
   removable: boolean;
 }) {
   const list = useRef<HTMLUListElement>(null);
+  // A chip just added is scrolled into sight (the row scrolls sideways on a phone).
+  const count = useRef(pointers.length);
+  useEffect(() => {
+    if (removable && pointers.length > count.current)
+      list.current?.lastElementChild?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    count.current = pointers.length;
+  }, [pointers.length, removable]);
+  // In the composer, Here chips are numbered as their pins are on the plan (per version).
+  const texts = pointers.map((p) => {
+    if (!removable || p.kind !== 'spot') return p.label;
+    const same = pointers.filter(
+      (q) => q.kind === 'spot' && JSON.stringify(q.version) === JSON.stringify(p.version),
+    );
+    return same.length > 1 ? p.label.replace(/^Here/, `Here ${same.indexOf(p) + 1}`) : p.label;
+  });
   if (!pointers.length) return null;
   return (
     <ul
@@ -109,7 +141,13 @@ export function PointerChips({
       aria-label="Pointing at"
     >
       {pointers.map((p, i) => (
-        <Chip key={p.id} p={p} removable={removable} last={i === pointers.length - 1} />
+        <Chip
+          key={p.id}
+          p={p}
+          removable={removable}
+          last={i === pointers.length - 1}
+          text={texts[i] ?? p.label}
+        />
       ))}
     </ul>
   );

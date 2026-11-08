@@ -10,6 +10,8 @@ export {
   keptHolds,
   keptItem,
   keptName,
+  placeKept,
+  withKept,
 } from './kept';
 export { type OfferCtx, revet, ruleOffer, storedVet } from './offer';
 export { ROLE_NAMES, type RuleDraft, type RuleParseContext, ruleFromReply } from './parse';

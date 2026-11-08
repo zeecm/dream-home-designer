@@ -5,20 +5,27 @@ import { aliasesFor } from '../aliases';
 import { designChecks } from '../checks';
 import { SAMPLE_KEYS, sampleAnswers, sampleDesign, sampleLevel } from '../fixtures/sample';
 import { designResult } from '../result';
-import { type Kept, keptBefore, keptChecks } from '../rules/kept';
+import { type Kept, keptBefore, keptChecks, keptHolds } from '../rules/kept';
 import { defaultBrief } from '../schema';
 import { spacesOf } from '../spaces';
 import { REPLY_TEXT } from './fixtures/replies';
 import { echoOf, eventsSince, historyFor, sentText, talkPrompt } from './prompt';
 import { talk } from './reducer';
 import { parseTalkReply } from './reply';
-import { type Conversation, MAX_POINTERS, type Pointer, conversationFromRecord } from './schema';
+import {
+  type Conversation,
+  MAX_POINTERS,
+  type Pointer,
+  TALK_RECORD_VERSION,
+  conversationFromRecord,
+} from './schema';
 
 /**
  * Pointing at the plan (slice 3a criteria 36, 37, 3a.3, 3a.4, 3a.9, 3a.10, 3a.12): the
  * composer's chips, what the message carries, kept pieces and their checks.
  */
 const level = furnishedSample();
+const keptHoldsAt = (it: Level['items'][string], k: Kept) => keptHolds(k, it);
 const aliases = aliasesFor(level);
 const AT = '2026-11-08T10:00:00.000Z';
 let n = 0;
@@ -95,6 +102,27 @@ describe('chips in the composer (37)', () => {
     // Kept with the conversation: read back as written.
     expect(conversationFromRecord(JSON.parse(JSON.stringify(c)))).toEqual(c);
   });
+
+  it('a popover’s paid row sends its own chip and leaves the composer’s words and chips', () => {
+    let c = met();
+    const mine = pointer({ id: 'ptr_mine' });
+    c = talk(c, { type: 'pointerAdd', pointer: mine });
+    c = talk(c, { type: 'draft', text: 'Half a thought' });
+    const pop = pointer({ id: 'ptr_pop', targetId: 'it_other' });
+    c = talk(c, {
+      type: 'send',
+      id: 'tu_p',
+      at: AT,
+      text: 'Something else here.',
+      sent: sentText('Something else here.', [], [pop], aliases),
+      pointers: [pop],
+      keepDraft: true,
+    });
+    const t = c.turns.find((x) => x.id === 'tu_p');
+    expect(t?.kind === 'person' && t.pointers?.map((x) => x.id)).toEqual(['ptr_pop']);
+    expect(c.draft).toBe('Half a thought');
+    expect(c.draftPointers.map((x) => x.id)).toEqual(['ptr_mine']);
+  });
 });
 
 describe('what the message carries (36, 3a.10, 3a.12)', () => {
@@ -116,6 +144,14 @@ describe('what the message carries (36, 3a.10, 3a.12)', () => {
       `"ref":"${aliasesFor(level) && Object.entries(aliases).find(([, v]) => v === sofa?.id)?.[0]}"`,
     );
     expect(text).toContain('"level":"Level 1"');
+  });
+
+  it('two alike pieces of a version are two refs (four chairs are not one)', () => {
+    const a = pointer({ targetId: 'it_chair1', label: 'Dining chair · Living and dining · V4' });
+    const b = pointer({ targetId: 'it_chair2', label: 'Dining chair · Living and dining · V4' });
+    const text = sentText('Fewer chairs', [], [a, b], {});
+    expect(text).toContain('"ref":"V4:it_chair1"');
+    expect(text).toContain('"ref":"V4:it_chair2"');
   });
 
   it('a label or a room reading like an instruction stays a quoted string', () => {
@@ -174,6 +210,24 @@ describe('what the message carries (36, 3a.10, 3a.12)', () => {
   });
 });
 
+describe('records version 4 (slice 3a, pointing)', () => {
+  it('a version 3 record reads with no chips, kept pieces or tips; a newer one is not read', () => {
+    const conv = met();
+    const { draftPointers: _p, kept: _k, tips: _t, ...v3 } = { ...conv, recordVersion: 3 };
+    const read = conversationFromRecord(JSON.parse(JSON.stringify(v3)));
+    expect(TALK_RECORD_VERSION).toBe(4);
+    expect(read?.recordVersion).toBe(4);
+    expect(read).toMatchObject({ draftPointers: [], kept: [], tips: [] });
+    expect(read?.turns).toEqual(conv.turns);
+    expect(conversationFromRecord({ ...conv, recordVersion: 5 })).toBeNull();
+  });
+
+  it('a record written by this build says 4, so a build that knows 3 goes read-only', () => {
+    const c = talk(met(), { type: 'pointerAdd', pointer: pointer() });
+    expect(JSON.parse(JSON.stringify(c)).recordVersion).toBe(4);
+  });
+});
+
 describe('Keep this (3a.3, no request)', () => {
   const kept = (patch: Partial<Kept> = {}): Kept => ({
     id: 'kept1',
@@ -196,9 +250,26 @@ describe('Keep this (3a.3, no request)', () => {
     );
     c = talk(c, { type: 'unkeepItem', keptId: 'kept1', id: 'ev_u', at: AT, text: 'Let go.' });
     expect(c.kept).toEqual([]);
+    expect(c.keptGone).toMatchObject([{ id: 'kept1', until: AT }]);
     expect(c.brief.keep.items[sofa?.id ?? '']).toBeUndefined();
     const line = c.turns.find((t) => t.id === 'ev_k');
     expect(line?.kind === 'event' && line.event).toMatchObject({ type: 'kept', undone: true });
+  });
+
+  it('letting a piece go puts back what the brief said of it before (bring, or in place)', () => {
+    const id = sofa?.id ?? '';
+    for (const before of ['bring', 'in-place'] as const) {
+      const m = met();
+      let c: Conversation = {
+        ...m,
+        brief: { ...m.brief, keep: { ...m.brief.keep, items: { [id]: before } } },
+      };
+      c = talk(c, { type: 'keepItem', kept: kept(), id: 'ev_k', at: AT, text: 'Kept.' });
+      expect(c.brief.keep.items[id]).toBe('in-place');
+      expect(c.kept[0]?.prior).toBe(before);
+      c = talk(c, { type: 'unkeepItem', keptId: 'kept1', id: 'ev_u', at: AT, text: 'Let go.' });
+      expect(c.brief.keep.items[id]).toBe(before);
+    }
   });
 
   it('a version is placed with the pieces kept before it only; a new design with all', () => {
@@ -208,6 +279,12 @@ describe('Keep this (3a.3, no request)', () => {
     expect(keptBefore([a, b], '2026-11-08T11:00:00.000Z')).toEqual([a]);
     expect(keptBefore([a, b], '2026-11-08T09:00:00.000Z')).toEqual([]);
     expect(keptBefore([a, b], 'new')).toEqual([a, b]);
+    // Let go at 13:00: a version made at 12:30, while it was kept, is still placed with it;
+    // one made after, and a new design, are not.
+    const gone = { ...b, until: '2026-11-08T13:00:00.000Z' };
+    expect(keptBefore([a, gone], '2026-11-08T12:30:00.000Z')).toEqual([a, gone]);
+    expect(keptBefore([a, gone], '2026-11-08T13:30:00.000Z')).toEqual([a]);
+    expect(keptBefore([a, gone], 'new')).toEqual([a]);
   });
 
   it('a kept piece moved fails its K check; kept where it is, it passes', () => {
@@ -271,6 +348,72 @@ describe('Keep this (3a.3, no request)', () => {
         (i) => i.assetId === 'plant' && Math.abs(i.position.x - 9.6) < 0.01,
       ),
     ).toBe(false);
+  });
+
+  // The living room designed again, on `base`, with `keep` kept.
+  const living = (base: Level, keep: Kept[]) =>
+    designResult(
+      base,
+      base,
+      {
+        ...sampleDesign({
+          answers: {
+            [SAMPLE_KEYS.living]: sampleAnswers(base)[SAMPLE_KEYS.living] as never,
+          },
+          concept: null,
+          id: 'dsn_again',
+        }),
+        aliases: aliasesFor(base),
+      },
+      { kept: keep },
+    );
+
+  it('a kept piece stays held once its version is accepted, and through a redesign', () => {
+    const k = kept({
+      id: 'kept_v4',
+      itemId: null,
+      assetId: 'plant',
+      pose: { x: 9.6, y: 2.0, rot: 0 },
+      from: 'V4',
+    });
+    // V4 accepted: the plan has the piece where it was kept, under the plan's own id.
+    const first = living(sampleLevel(), [k]);
+    const placed = Object.values(first.level.items).find((i) => keptHoldsAt(i, k));
+    expect(placed).toBeTruthy();
+    const accepted = structuredClone(sampleLevel());
+    if (placed) accepted.items.it_accepted = { ...structuredClone(placed), id: 'it_accepted' };
+    // Designed again: the room is cleared but for it, and no copy is added.
+    const again = living(accepted, [k]);
+    expect(again.level.items.it_accepted).toBeTruthy();
+    expect(Object.values(again.level.items).filter((i) => keptHoldsAt(i, k))).toHaveLength(1);
+    expect(again.checks.find((c) => c.key === 'K|kept_v4')).toBeUndefined();
+  });
+
+  it('a plan piece kept where a version moved it is moved there in later designs', () => {
+    const base = structuredClone(level);
+    const own = sofa && base.items[sofa.id];
+    if (!own) throw new Error('no sofa');
+    const k = kept({
+      id: 'kept_moved',
+      itemId: own.id,
+      assetId: own.assetId,
+      pose: { x: own.position.x + 0.4, y: own.position.z, rot: own.rotationY },
+      from: 'V2',
+    });
+    const r = living(base, [k]);
+    const it = r.level.items[own.id];
+    expect(it?.position.x).toBeCloseTo(own.position.x + 0.4, 3);
+    expect(r.checks.find((c) => c.key === 'K|kept_moved')).toBeUndefined();
+  });
+
+  it('a proposal’s kept piece not placed fails its K check as the version’s own', () => {
+    const k = kept({ id: 'kept_far', itemId: null, assetId: 'not-a-piece', from: 'V4' });
+    const r = living(sampleLevel(), [k]);
+    expect(r.checks.find((c) => c.key === 'K|kept_far')).toMatchObject({
+      hard: true,
+      already: false,
+    });
+    expect(r.passes).toBe(false);
   });
 
   it('kept pieces are in the prompt’s tail as data', () => {

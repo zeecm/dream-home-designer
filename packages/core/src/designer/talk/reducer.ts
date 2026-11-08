@@ -188,6 +188,11 @@ export type TalkAction =
       ruleAsk?: { decisionId: string };
       /** What it points at (the composer's chips, or a popover's one). */
       pointers?: Pointer[];
+      /**
+       * Sent from outside the composer (a popover's paid row, Make this a rule): what is
+       * typed there and its chips stay for the person's own message.
+       */
+      keepDraft?: boolean;
     }
   /** The text streamed so far, kept as the tab hides (a phone may kill it). */
   | { type: 'checkpoint'; turnId: string; text: string; chars: number }
@@ -307,6 +312,7 @@ export function newConversation(a: Extract<TalkAction, { type: 'start' }>): Conv
     aside: { usd: 0, tokens: 0, estimated: false },
     rules: (a.rules ?? []).slice(0, MAX_RULES),
     kept: (a.keptPieces ?? []).slice(0, MAX_KEPT),
+    keptGone: [],
     draftPointers: [],
     tips: [],
   };
@@ -713,8 +719,7 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
       return push(
         {
           ...conv,
-          draft: '',
-          draftPointers: [],
+          ...(a.keepDraft ? {} : { draft: '', draftPointers: [] }),
           lastSentAt: a.at,
           ...(a.aliases ? { aliases: a.aliases } : {}),
         },
@@ -927,6 +932,7 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
         (x) => x.id === k.id || (k.itemId ? x.itemId === k.itemId : keptSame(x, k)),
       );
       if (already || conv.kept.length >= MAX_KEPT) return conv;
+      const prior = k.itemId ? (conv.brief.keep.items[k.itemId] ?? null) : null;
       const brief = k.itemId
         ? {
             ...conv.brief,
@@ -937,7 +943,7 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
           }
         : conv.brief;
       return push(
-        { ...conv, brief, kept: [...conv.kept, k] },
+        { ...conv, brief, kept: [...conv.kept, k.itemId ? { ...k, prior } : k] },
         {
           kind: 'event',
           id: a.id,
@@ -950,11 +956,16 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
       const k = conv.kept.find((x) => x.id === a.keptId);
       if (!k) return conv;
       const items = { ...conv.brief.keep.items };
-      if (k.itemId && items[k.itemId] === 'in-place') delete items[k.itemId];
+      // What the brief said before (the person's own 'bring' or 'in-place') comes back.
+      if (k.itemId && items[k.itemId] === 'in-place') {
+        if (k.prior) items[k.itemId] = k.prior;
+        else delete items[k.itemId];
+      }
       const next: Conversation = {
         ...conv,
         brief: { ...conv.brief, keep: { ...conv.brief.keep, items } },
         kept: conv.kept.filter((x) => x.id !== k.id),
+        keptGone: [...conv.keptGone, { ...k, until: a.at }].slice(-MAX_KEPT),
         turns: conv.turns.map((t) =>
           t.kind === 'event' && t.event.type === 'kept' && t.event.keptId === k.id
             ? { ...t, event: { ...t.event, undone: true } }

@@ -512,6 +512,7 @@ function newOption(
 ): ProposalOption {
   return {
     letter,
+    madeAt: nowIso(),
     name: cut(
       letter === 'A' ? (scope.all ? 'Whole flat' : scope.label) : `Idea ${letter}`,
       TALK_LIMITS.name,
@@ -671,8 +672,12 @@ async function runOption(
     plan: sp.plan,
     signal: ctrl.signal,
     prices: priceTable(),
-    // Placed as its card will be: with the pieces kept before the proposal was made.
-    result: designOpts(project, designLevelId(), p.at),
+    // Placed as its card will be: with the pieces kept when this option was asked for.
+    result: designOpts(
+      project,
+      designLevelId(),
+      p.options.find((o) => o.letter === letter)?.madeAt ?? p.at,
+    ),
     results: trialResult,
     ...(sp.expected ? { expected: sp.expected } : {}),
     onUpdate: (st) => {

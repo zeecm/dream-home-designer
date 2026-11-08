@@ -35,7 +35,7 @@ import {
 import { ACCESS, type ProgrammeUse, peopleOf, roleOf } from './principles';
 import { acceptResolve, piecesNoWorse } from './resolve';
 import { ruleKeepOuts } from './rules/check';
-import { type Kept, keptHolds, keptItem } from './rules/kept';
+import { type Kept, placeKept } from './rules/kept';
 import type { Rule } from './rules/schema';
 import type { Concept, DesignInput, DesignItem, RoomUse, SpaceDesign, SpaceStatus } from './schema';
 import type { Zone } from './schema';
@@ -280,15 +280,8 @@ function work(
     design.id,
   );
   const lvl: Level = structuredClone(walls.level);
-  // Pieces kept from earlier proposals stand where they were kept, before anything is placed.
-  const keptIds = new Set<string>();
-  for (const k of opts.kept ?? []) {
-    if (k.itemId) continue;
-    const it = keptItem(k, lvl.ceilingHeight);
-    if (!it || Object.values(lvl.items).some((x) => keptHolds(k, x))) continue;
-    lvl.items[it.id] = it;
-    keptIds.add(it.id);
-  }
+  // Kept pieces stand where they were kept, before anything is placed, and are never cleared.
+  const keptIds = placeKept(lvl, opts.kept ?? []);
   const geomLevel = walls.level;
   const geom = planGeometry(geomLevel);
   const sides = new Map(Object.keys(lvl.walls).map((id) => [id, roomsBeside(geomLevel, id)]));
@@ -1041,8 +1034,10 @@ function work(
     // In the plan before and not the version's doing: a piece it didn't touch, a room it
     // didn't furnish, or what furnishing can't change (a window, the bedroom count).
     // Someone with nowhere to sleep is always the version's to answer for.
+    // A proposal's kept piece (no plan id) is never in the plan before: always the version's.
     const already =
       !c.key.startsWith('P1|unplaced') &&
+      !(c.key.startsWith('K|') && !c.itemId) &&
       baseKeys.has(c.itemId ? swapSegment(c.key, c.itemId, twinOf(c.itemId)) : c.key) &&
       (c.itemId
         ? unchanged(c.itemId)

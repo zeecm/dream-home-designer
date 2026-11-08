@@ -196,7 +196,7 @@ const warm = (conv: Conversation) =>
 
 const priceMemo = new Map<string, TalkEstimate | null>();
 /** What a Send would cost now (Send · about US$0.03), memoised on the conversation and words. */
-export function sendPrice(text: string): TalkEstimate | null {
+export function sendPrice(text: string, pointers?: readonly Pointer[]): TalkEstimate | null {
   const ai = aiSettings();
   const conv = useTalk.getState().conv;
   if (!ai || !conv || designerCannotUse(ai)) return null;
@@ -204,12 +204,14 @@ export function sendPrice(text: string): TalkEstimate | null {
     conv.id,
     conv.rev,
     text.length,
+    // A popover's own chip (its words; its id is new each time), else the composer's.
+    pointers ? pointers.map((p) => [p.kind, p.label, p.where, p.state]) : null,
     ai.model,
     priceTable()[ai.model] ?? null,
   ]);
   if (priceMemo.has(key)) return priceMemo.get(key) ?? null;
   // Send's figure leaves out the table's few lines (a send prices itself afresh, in full).
-  const input = inputFor(conv, text, []);
+  const input = inputFor(conv, text, [], undefined, pointers ?? conv.draftPointers);
   const est = input
     ? estimateTalk(talkChars(talkPrompt(input)), {
         provider: ai.provider,
@@ -283,6 +285,8 @@ export async function sendMessage(
     const conv = useTalk.getState().conv ?? conv0;
     if (pendingReply(conv)) return;
     const pointers = pointersGiven ?? (ruleAsk ? [] : conv.draftPointers);
+    // Not from the composer: what is typed there, and its chips, stay.
+    const keepDraft = !!ruleAsk || !!pointersGiven;
     const input = inputFor(conv, words, await onTable(conv), undefined, pointers);
     if (!input) return;
     const prompt = talkPrompt(input);
@@ -297,10 +301,11 @@ export async function sendMessage(
       aliases: input.aliases,
       ...(ruleAsk ? { ruleAsk } : {}),
       ...(pointers.length ? { pointers } : {}),
+      ...(keepDraft ? { keepDraft } : {}),
     });
     if (!next || pendingReply(next)?.id !== id) return;
     sent = true;
-    if (!ruleAsk) await clearTyped();
+    if (!keepDraft) await clearTyped();
     say('Designer is replying.');
     await replyNow(id, prompt);
   });

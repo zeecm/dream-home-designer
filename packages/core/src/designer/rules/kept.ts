@@ -29,6 +29,13 @@ export const Kept = z.object({
   from: z.string().max(12),
   levelId: z.string(),
   at: z.string(),
+  /**
+   * What the brief said of a plan piece before it was kept ('bring', or 'in-place' the person
+   * chose themselves): put back when it is let go, never simply deleted. Set by the reducer.
+   */
+  prior: z.enum(['bring', 'in-place']).nullable().optional(),
+  /** When it was let go (Let the designer move it): in `keptGone` only. */
+  until: z.string().optional(),
 });
 export type Kept = z.infer<typeof Kept>;
 
@@ -46,11 +53,14 @@ export const keptHolds = (k: Kept, it: Item) =>
 /**
  * The kept pieces a version made at `madeAt` is placed and checked with: those kept before it.
  * Keep this places a piece again in later designs, never in the version it was kept from (that
- * version, re-solved around a copy of its own piece, would move the original); 'new' (a design
- * not made yet) is all of them. Required, so no caller forgets which it is.
+ * version, re-solved around a copy of its own piece, would move the original), and still kept
+ * then (one let go after it was made stays in it: a version, once made, stays as it was); 'new'
+ * (a design not made yet) is those kept now. Required, so no caller forgets which it is.
  */
 export const keptBefore = (kept: readonly Kept[], madeAt: string | 'new'): readonly Kept[] =>
-  madeAt === 'new' ? kept : kept.filter((k) => k.at < madeAt);
+  madeAt === 'new'
+    ? kept.filter((k) => !k.until)
+    : kept.filter((k) => k.at < madeAt && (!k.until || k.until > madeAt));
 
 /** A kept piece in words ("the 3-seat sofa"). */
 export const keptName = (k: Kept) => {
@@ -98,4 +108,44 @@ export function keptItem(k: Kept, ceiling: number): Item | null {
   if (!kind) return null;
   const it = newItem(`kept_${k.id}`, kind, { x: k.pose.x, y: k.pose.y }, k.pose.rot, ceiling);
   return k.scale ? { ...it, scale: { ...k.scale } } : it;
+}
+
+/**
+ * Puts the kept pieces on `level` (changed in place) and returns the ids of the pieces that
+ * stand for them, which nothing clears or moves: a plan piece by its id, moved to where it was
+ * kept if a version had moved it; a proposal's piece the plan already has there (its version
+ * accepted); else the piece placed again. One place for the result and the room steps' prompt.
+ */
+export function placeKept(level: Level, kept: readonly Kept[]): Set<string> {
+  const ids = new Set<string>();
+  for (const k of kept) {
+    if (k.itemId) {
+      const own = level.items[k.itemId];
+      if (!own) continue;
+      if (!keptHolds(k, own)) {
+        own.position.x = k.pose.x;
+        own.position.z = k.pose.y;
+        own.rotationY = k.pose.rot;
+      }
+      ids.add(own.id);
+      continue;
+    }
+    const holder = Object.values(level.items).find((x) => keptHolds(k, x));
+    if (holder) {
+      ids.add(holder.id);
+      continue;
+    }
+    const it = keptItem(k, level.ceilingHeight);
+    if (!it) continue;
+    level.items[it.id] = it;
+    ids.add(it.id);
+  }
+  return ids;
+}
+
+/** `level` with the kept pieces on it (a copy), and the ids that stand for them. */
+export function withKept(level: Level, kept: readonly Kept[]): { level: Level; ids: Set<string> } {
+  if (!kept.length) return { level, ids: new Set() };
+  const copy = structuredClone(level);
+  return { level: copy, ids: placeKept(copy, kept) };
 }

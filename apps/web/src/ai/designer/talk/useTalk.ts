@@ -198,7 +198,10 @@ export const rulesOn = (levelId: string) => {
 setHouseRules(rulesOn);
 setHouseKept((levelId) => {
   const c = useTalk.getState().conv;
-  return c && c.levelId === levelId ? c.kept.filter((k) => k.levelId === levelId) : [];
+  // Those let go too: a version made while one was kept is still placed with it (keptBefore).
+  return c && c.levelId === levelId
+    ? [...c.keptGone, ...c.kept].filter((k) => k.levelId === levelId)
+    : [];
 });
 
 /** A key that changes when the live rules do (a card re-reads its result then). */

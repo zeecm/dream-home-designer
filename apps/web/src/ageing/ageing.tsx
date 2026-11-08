@@ -32,6 +32,7 @@ import { type Size, type View, fitBounds } from '../plan/view';
 import { useStorageChipBoxes } from '../storage/storage';
 import { useStorage } from '../storage/store';
 import { useLevel, useProject, useStore } from '../store';
+import { dialogHasKeys } from '../ui/dialogs';
 import { Segmented } from '../ui/fields';
 import { icons } from '../ui/icons';
 import { formatLength } from '../units';
@@ -463,7 +464,7 @@ export function AgeingPanel() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
-      if (useEditor.getState().selection || document.querySelector('dialog[open]')) return;
+      if (useEditor.getState().selection || dialogHasKeys()) return;
       e.preventDefault();
       useAgeing.getState().closeList();
       returnFocus();
