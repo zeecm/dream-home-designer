@@ -707,7 +707,6 @@ async function runOption(
     endRun = resolve;
   });
   const runId = from?.run.id ?? newId('run');
-  const hold = from?.hold ?? (await takeRunLock(runId)) ?? { release: () => {} };
   const now = nowIso();
   const prior = from?.run;
   // Carried on: the steps that were in flight when the page went count as spent at their most
@@ -874,6 +873,8 @@ async function runOption(
       run,
     }));
   };
+  // Its lock, taken once the run shows here (never a moment shown as a run with no owner).
+  const hold = from?.hold ?? (await takeRunLock(runId)) ?? { release: () => {} };
   // Stop (or another plan opened): marked stopped before the requests are aborted, so a page
   // that goes before the run's end is written never carries it on.
   setLive({
