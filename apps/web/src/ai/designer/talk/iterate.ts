@@ -8,6 +8,7 @@ import {
   copiedLine,
   costEstimate,
   defaultBrief,
+  handEditCount,
   handEdits,
   lastAccepted,
   levelFingerprint,
@@ -163,7 +164,8 @@ export function putBackWords(start: Level, day: string): string {
   const conv = useTalk.getState().conv;
   const after = doc().renovation?.levels[0];
   const last = lastAccepted(useDesigner.getState().designs, after);
-  const hand = after ? handEdits(last?.accepted?.level ?? start, after).length : 0;
+  // Each piece added, removed or moved by hand counts (three sofas are three; QA R1).
+  const hand = after ? handEditCount(last?.accepted?.level ?? start, after) : 0;
   const byHand = hand ? `${hand} ${hand === 1 ? 'change' : 'changes'} you made by hand` : '';
   const what = !conv?.start.afterFp
     ? `The whole renovation goes${byHand ? `, with the ${byHand}` : ''}`

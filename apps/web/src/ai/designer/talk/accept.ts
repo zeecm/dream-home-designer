@@ -470,6 +470,42 @@ async function applyPutBack(pb: PutBack, out: boolean) {
   );
 }
 
+/** What an undone version had accepted, for its Redo (this tab only, as the history is). */
+const undoneVersions = new Map<string, Design['accepted']>();
+
+/**
+ * A version follows its accept lines (QA R3): once every line of it is undone it is no longer
+ * "Accepted" (in Versions, for the next request's hand edits), and a Redo makes it so again.
+ */
+async function followVersion(
+  e: { proposalId: string; letter: string },
+  out: boolean,
+): Promise<void> {
+  const p = useTalk.getState().proposals.find((x) => x.id === e.proposalId);
+  const o = p?.options.find((x) => x.letter === e.letter);
+  const id = o ? (o.version ?? o.designId) : e.proposalId;
+  const stillIn = (useTalk.getState().conv?.turns ?? []).some(
+    (t) =>
+      t.kind === 'event' &&
+      t.event.type === 'accepted' &&
+      t.event.proposalId === e.proposalId &&
+      t.event.letter === e.letter &&
+      !t.event.undone,
+  );
+  const projectId = useStore.getState().editor.doc.id;
+  const s = await designStore();
+  const d = (await s.list(projectId)).find((x) => x.id === id);
+  if (!d) return;
+  if (out && !stillIn && d.accepted) {
+    undoneVersions.set(id, d.accepted);
+    await s.put({ ...d, accepted: null });
+  } else if (!out && !d.accepted && undoneVersions.has(id)) {
+    await s.put({ ...d, accepted: undoneVersions.get(id) ?? null });
+    undoneVersions.delete(id);
+  } else return;
+  await loadDesigns(projectId);
+}
+
 /** A Put it back undone (or redone) by the toolbar or Ctrl+Z: what it took out follows. */
 async function syncPutBacks() {
   const moves = putBackMoves(putBacks, useStore.getState().editor.history);
@@ -498,10 +534,12 @@ async function syncLines() {
         if (st === 'redo' && !t.event.undone) {
           await act({ type: 'undone', eventId: t.id });
           await markRows(t, true);
+          await followVersion(t.event, true);
           say(`Undone: the changes from ${lineTitle(t.event)} are out of your renovation.`);
         } else if (st === 'undo' && t.event.undone) {
           await act({ type: 'redone', eventId: t.id });
           await markRows(t, false);
+          await followVersion(t.event, false);
           say(`Redone: the changes from ${lineTitle(t.event)} are back in your renovation.`);
         }
       }

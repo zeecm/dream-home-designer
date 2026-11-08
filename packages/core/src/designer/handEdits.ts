@@ -14,6 +14,25 @@ import { type Space, roomIdAt, roomsBeside, spaceOfRoom, spacesOf } from './spac
  * next iteration keeps it (and the person can unlock it).
  */
 export function handEdits(accepted: Level, now: Level): Lock[] {
+  // One lock per space, aspect and label.
+  const seen = new Set<string>();
+  return handEditList(accepted, now).filter((l) => {
+    const k = `${l.space}|${l.aspect}|${l.label}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+/**
+ * How many changes the person made by hand: each piece added, removed, moved or resized, each
+ * wall face repainted, each floor changed, and the walls and doors as one (three sofas added
+ * are three, though they keep one lock).
+ */
+export const handEditCount = (accepted: Level, now: Level): number =>
+  handEditList(accepted, now).length;
+
+function handEditList(accepted: Level, now: Level): Lock[] {
   const spaces = spacesOf(now);
   const out: Lock[] = [];
   const add = (space: Space | undefined, aspect: Lock['aspect'], label: string) => {
@@ -87,14 +106,7 @@ export function handEdits(accepted: Level, now: Level): Lock[] {
   ) {
     out.push({ space: '*', aspect: 'walls', by: 'hand-edit', label: 'Walls and doors (changed)' });
   }
-  // One lock per space, aspect and label.
-  const seen = new Set<string>();
-  return out.filter((l) => {
-    const k = `${l.space}|${l.aspect}|${l.label}`;
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
+  return out;
 }
 
 /** Whether a lock is on a space whose rooms are `rooms` (by a room in common: keys can change). */

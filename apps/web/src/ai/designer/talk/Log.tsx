@@ -235,15 +235,17 @@ function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
         : [],
     [level],
   );
-  // Prices without the person's words (they add little), once per plan, brief and prices.
+  // Prices without the person's words (they add little), once per plan, brief, versions (an
+  // accept or its Undo changes what a press would do) and prices.
   const tick = useResultsTickN();
+  const designs = useDesigner((s) => s.designs);
   // biome-ignore lint/correctness/useExhaustiveDependencies: on what the prices read
   const priced = useMemo(
     () =>
       latest && ai
         ? timed(() => scopes.map((s) => ({ s, ...pressPriceState(scopeRequest(s)) })))
         : [],
-    [latest, ai, scopes, conv.brief, prices, project, tick],
+    [latest, ai, scopes, conv.brief, prices, project, tick, designs],
   );
   const conflict = level ? sleepingConflict(conv.brief, level) : null;
   const cant = ai && designerCannotUse(ai);

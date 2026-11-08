@@ -175,7 +175,19 @@ interface Props {
 }
 
 /** What a folded card last said of itself (its checks need the plan worked out again). */
-const verdicts = new Map<string, string>();
+const verdicts = new Map<string, { text: string; total: number }>();
+
+/**
+ * A folded card's line: its checks as last worked out, and what is in the renovation as the
+ * record says now (an Undo or a Put it back since takes rows out; QA R2).
+ */
+function foldedLine(card: CardModel): string {
+  const said = verdicts.get(card.key);
+  const inNow = card.accepted.filter((a) => !a.out).length;
+  if (!said) return inNow ? ` · Accepted ${inNow}` : '';
+  if (inNow && inNow >= said.total) return ' · In your renovation';
+  return ` · ${said.text}${inNow ? ` · Accepted ${inNow} of ${said.total}` : ''}`;
+}
 
 export const ProposalCard = memo(function ProposalCard({
   card,
@@ -259,8 +271,10 @@ export const ProposalCard = memo(function ProposalCard({
   const accepted = card.accepted.filter((a) => !a.out);
   const allIn = !running && changes.length === 0 && accepted.length > 0;
   const acceptBtn = useRef<HTMLButtonElement>(null);
-  // Another idea's price: once per plan (settled), scope and prices; never per keystroke.
+  // Another idea's price: once per plan (settled), scope, versions and prices; never per
+  // keystroke.
   const proposal = card.proposal;
+  const designs = useDesigner((s) => s.designs);
   // biome-ignore lint/correctness/useExhaustiveDependencies: on what the price reads
   const another = useMemo(
     () =>
@@ -270,7 +284,7 @@ export const ProposalCard = memo(function ProposalCard({
             card.status === 'failed' ? scopePrice(proposal.scope) : anotherPrice(proposal),
           )
         : null,
-    [expanded, running, proposal, ai, project, prices, tick, card.status],
+    [expanded, running, proposal, ai, project, prices, tick, card.status, designs],
   );
   // A sideways swipe of at least 60 px on the change list; a mostly vertical one scrolls.
   const swipe = useRef<{ x: number; y: number } | null>(null);
@@ -356,7 +370,6 @@ export const ProposalCard = memo(function ProposalCard({
     });
   }, [shown, changes, card.key, card.title]);
 
-  const accepted0 = card.accepted.filter((a) => !a.out).length;
   if (!expanded && !r) {
     // Folded and not on the plan: what it said last (nothing is worked out for it).
     return (
@@ -370,8 +383,7 @@ export const ProposalCard = memo(function ProposalCard({
         >
           <span>
             {card.title} · {headLabel(project, card)}
-            {verdicts.get(card.key) ? ` · ${verdicts.get(card.key)}` : ''}
-            {accepted0 && !verdicts.has(card.key) ? ` · Accepted ${accepted0}` : ''}
+            {foldedLine(card)}
           </span>
           <span className="talk-fold-show" aria-hidden="true">
             Show ›
@@ -468,11 +480,8 @@ export const ProposalCard = memo(function ProposalCard({
     </div>
   );
 
-  // What the folded line will say.
-  const acc = accepted.length
-    ? ` · Accepted ${accepted.length} of ${accepted.length + changes.length}`
-    : '';
-  verdicts.set(card.key, `${allIn ? 'In your renovation' : verdict}${acc}`);
+  // What the folded line will say (with what is in the renovation then, as the record has it).
+  verdicts.set(card.key, { text: verdict, total: accepted.length + changes.length });
   if (!expanded) {
     return (
       <article className="talk-card talk-card-folded" aria-labelledby={`card-${card.key}`}>
@@ -484,8 +493,8 @@ export const ProposalCard = memo(function ProposalCard({
           onClick={() => setExpanded(true)}
         >
           <span>
-            {card.title} · {headLabel(project, card)} · {allIn ? 'In your renovation' : verdict}
-            {acc}
+            {card.title} · {headLabel(project, card)}
+            {foldedLine(card)}
           </span>
           <span className="talk-fold-show" aria-hidden="true">
             Show ›

@@ -164,7 +164,9 @@ function OnTheTable() {
                 </button>
               )
             : last.status !== 'running' &&
-              last.status !== 'failed' && (
+              last.status !== 'failed' &&
+              // Nothing to accept (the plan already has it all): no Accept… to press.
+              remaining > 0 && (
                 <button type="button" className="btn btn-small" onClick={() => go(true)}>
                   Accept…
                 </button>

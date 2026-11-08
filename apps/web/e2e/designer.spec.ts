@@ -1610,6 +1610,54 @@ test.describe('iterating (slice 2, PR 3)', () => {
     await expect(version).toContainText('Accepted');
   });
 
+  test('an accept undone, or put back: the folded card and Versions say so; Redo says accepted again (QA R2, R3)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    await mock(page);
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^Living and dining · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    await v1.getByRole('button', { name: /^Accept selected/ }).click();
+    await expect(log(page).getByText(/^You accepted \d+ changes from V1\./)).toBeVisible();
+    const version = panel(page).locator('[data-version="V1"]');
+    const versionSays = async () => {
+      await menu(page, 'Versions');
+      await expect(version).toBeVisible();
+      const text = (await version.textContent()) ?? '';
+      await panel(page).getByRole('button', { name: '‹ Conversation' }).click();
+      return text;
+    };
+    expect(await versionSays()).toContain('Accepted');
+    // R3: the line's Undo: Versions no longer says Accepted; its Redo says so again.
+    await panel(page).getByRole('button', { name: 'Undo' }).first().click();
+    await expect(log(page).getByText(/^Undone: the \d+ changes from V1/)).toBeVisible();
+    await expect.poll(versionSays).not.toContain('Accepted');
+    await panel(page).getByRole('button', { name: 'Redo' }).first().click();
+    await expect(log(page).getByText(/^You accepted \d+ changes from V1\./)).toBeVisible();
+    await expect.poll(versionSays).toContain('Accepted');
+    // R2: V1 folds under V2; after Put it back its line no longer says it is in the renovation.
+    await design(page, /^Kitchen · about US\$/);
+    await expect(card(page, 2).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    const folded = panel(page).getByRole('button', { name: /^V1 · Living and dining/ });
+    await expect(folded).toContainText('In your renovation');
+    await menu(page, 'My plan before the designer');
+    const bar = page.locator('.designer-bar-start');
+    await bar.getByRole('button', { name: 'Put it back' }).click();
+    await bar.getByRole('button', { name: 'Put it back' }).click();
+    await expect(log(page).getByText(/^You put your plan back as it was on /)).toBeVisible();
+    await expect(folded).not.toContainText('In your renovation');
+    await expect(folded).not.toContainText('Accepted');
+  });
+
   test('Copy as text and Download conversation: the decisions, facts, accepted changes; no key', async ({
     page,
     context,
