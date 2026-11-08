@@ -9,9 +9,10 @@ import {
   greeting as greetingText,
   nextQuestions,
 } from './firstMeeting';
+import { spentOf } from './price';
 import type { ProbeLines } from './probe';
 import { mechanicalSummary } from './prompt';
-import { type TalkReply, applyFacts } from './reply';
+import { type TalkReply, applyFacts, confirmText, factQuestion, widens } from './reply';
 import {
   type Conversation,
   DECISION_CHARS,
@@ -193,6 +194,8 @@ export type TalkAction =
       brief?: DesignBrief;
       key?: QuestionKey;
     }
+  /** A widening fact the reply asked about, answered Yes (applied) or No. */
+  | { type: 'talkConfirm'; turnId: string; index: number; yes: boolean; id: string; at: string }
   /** Changes made by hand since the last accept, said once each. */
   | { type: 'handEdits'; id: string; at: string; labels: string[] }
   | { type: 'decisionDelete'; id: string }
@@ -224,6 +227,7 @@ export function newConversation(a: Extract<TalkAction, { type: 'start' }>): Conv
     foldMisses: 0,
     lastSentAt: null,
     handSeen: [],
+    aside: { usd: 0, tokens: 0, estimated: false },
   };
   const date = a.form ? dayOf(a.form.at) : '';
   const greet: Turn = {
@@ -644,6 +648,11 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
       const t = findTurn(conv, a.turnId, 'person');
       if (!t?.reply || (t.reply.state !== 'failed' && t.reply.state !== 'cut')) return conv;
       if (pendingReply(conv)) return conv;
+      // Only the newest message sent: an older one would answer out of turn.
+      const newest = [...conv.turns]
+        .reverse()
+        .find((x) => x.kind === 'person' && x.sent !== undefined);
+      if (newest?.id !== t.id) return conv;
       return replaceTurn(
         { ...conv, lastSentAt: a.at },
         { ...t, reply: { ...t.reply, state: 'pending', error: null, startedAt: a.at } },
@@ -652,10 +661,31 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
     case 'unsend': {
       const t = findTurn(conv, a.turnId, 'person');
       if (!t?.reply || t.reply.state === 'pending' || t.reply.state === 'done') return conv;
-      const turns = conv.turns.filter(
-        (x) => x.id !== t.id && !(x.kind === 'designer' && x.talk?.replyTo === t.id),
+      const gone = (x: Turn) =>
+        x.id === t.id || (x.kind === 'designer' && x.talk?.replyTo === t.id);
+      const spentHere = spentOf(
+        conv.turns
+          .filter(gone)
+          .flatMap((x) =>
+            x.kind === 'person'
+              ? (x.reply?.usage ?? [])
+              : x.kind === 'designer'
+                ? (x.talk?.usage ?? [])
+                : [],
+          ),
       );
-      return { ...conv, turns, draft: t.text.slice(0, DRAFT_CHARS) };
+      const aside = {
+        usd:
+          conv.aside.usd === null || spentHere.usd === null ? null : conv.aside.usd + spentHere.usd,
+        tokens: conv.aside.tokens + spentHere.tokens,
+        estimated: conv.aside.estimated || spentHere.estimated,
+      };
+      return {
+        ...conv,
+        aside,
+        turns: conv.turns.filter((x) => !gone(x)),
+        draft: t.text.slice(0, DRAFT_CHARS),
+      };
     }
     case 'talkAnswer': {
       const t = findTurn(conv, a.turnId, 'designer');
@@ -675,6 +705,31 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
           }
         : next;
       return push(known, { kind: 'person', id: a.id, at: a.at, text: words });
+    }
+    case 'talkConfirm': {
+      const t = findTurn(conv, a.turnId, 'designer');
+      const c = t?.talk?.confirms[a.index];
+      if (!t?.talk || !c || c.answer !== null) return conv;
+      const confirms = t.talk.confirms.map((x, k) =>
+        k === a.index ? { ...x, answer: a.yes ? ('yes' as const) : ('no' as const) } : x,
+      );
+      let next = replaceTurn(conv, { ...t, talk: { ...t.talk, confirms } });
+      if (a.yes) {
+        const f = applyFacts(next.brief, [
+          { key: c.key, text: c.text, number: c.number, choice: c.choice },
+        ]);
+        next = {
+          ...next,
+          brief: f.brief,
+          assumed: next.assumed.filter((k) => k !== factQuestion(c.key)),
+        };
+      }
+      return push(next, {
+        kind: 'person',
+        id: a.id,
+        at: a.at,
+        text: cut(`${a.yes ? 'Yes' : 'No'}: ${c.ask}`, L.person),
+      });
     }
     case 'handEdits': {
       const fresh = a.labels.filter((l) => !conv.handSeen.includes(l));
@@ -735,6 +790,7 @@ function cutTurn(
       noted: [],
       questions: [],
       answered: {},
+      confirms: [],
       concern: null,
       plan: null,
     },
@@ -771,8 +827,11 @@ function replyDone(
       noted.push({ kind: 'decision', text: cut(`Noted in Decisions: ${d.text}`, 300), ref: id });
     }
   }
-  if (r.memory.facts.length) {
-    const f = applyFacts(next.brief, r.memory.facts);
+  // What would widen the next paid run (walls loosened, a higher budget) is asked, not done.
+  const wide = r.memory.facts.filter((x) => widens(next.brief, x));
+  const facts = r.memory.facts.filter((x) => !wide.includes(x));
+  if (facts.length) {
+    const f = applyFacts(next.brief, facts);
     next = { ...next, brief: f.brief, assumed: next.assumed.filter((k) => !f.keys.includes(k)) };
     f.lines.forEach((l, k) =>
       noted.push({
@@ -814,6 +873,14 @@ function replyDone(
       noted: noted.slice(0, 12),
       questions: r.questions,
       answered: {},
+      confirms: wide.slice(0, 6).map((x) => ({
+        key: x.key,
+        text: cut(x.text, 200),
+        number: x.number,
+        choice: x.choice,
+        ask: cut(confirmText(x), 200),
+        answer: null,
+      })),
       concern,
       plan: r.plan,
     },

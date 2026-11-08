@@ -36,7 +36,7 @@ import {
 import { finishPrice, finishRooms, pressScope, scopePrice } from './propose';
 import { focusInLog, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
-import { type LiveRun, actProposal, useTalk } from './useTalk';
+import { type LiveRun, actProposal, useBusy, useTalk } from './useTalk';
 import { EMPTY_VIEW, useProposalView } from './view';
 
 /**
@@ -175,7 +175,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
   const onPlan = useEditor((s) => shown && !!s.preview && s.preview.side === 'version');
   const hover = useTalk((s) => (s.hover?.card === card.key ? s.hover.change : null));
   const planHover = useEditor((s) => (shown && s.hover?.kind === 'item' ? s.hover.id : null));
-  const busy = useDesigner((s) => s.starting || !!s.run);
+  const busy = useBusy();
   const [accepting, setAccepting] = useState(false);
   // A version to compare: this card's, once accepted (or an earlier design's).
   const versionId = card.design?.id ?? card.option?.version ?? null;

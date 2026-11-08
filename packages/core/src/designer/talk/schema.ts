@@ -248,6 +248,23 @@ export const Turn = z.discriminatedUnion('kind', [
         questions: z.array(TalkQuestion).max(3).default([]),
         /** Each question answered with a free chip (its words), by index. */
         answered: z.record(z.string().max(TALK_LIMITS.words)).default({}),
+        /**
+         * Facts that would widen the next paid run (walls loosened, the budget raised): never
+         * applied by the reply, asked of the person as a free Yes / No.
+         */
+        confirms: z
+          .array(
+            z.object({
+              key: FactKey,
+              text: z.string().max(200),
+              number: z.number().nullable(),
+              choice: z.string().max(40).nullable(),
+              ask: z.string().max(200),
+              answer: z.enum(['yes', 'no']).nullable().default(null),
+            }),
+          )
+          .max(6)
+          .default([]),
         concern: TalkConcern.nullable().default(null),
         plan: TalkPlan.nullable().default(null),
       })
@@ -366,6 +383,14 @@ export const Conversation = z.object({
   lastSentAt: z.string().nullable().default(null),
   /** Hand edits already said in the log, by label (each is said once). */
   handSeen: z.array(z.string().max(200)).max(200).default([]),
+  /** Spending of turns taken out (Edit): still counted, so the total never under-reports. */
+  aside: z
+    .object({
+      usd: z.number().min(0).nullable(),
+      tokens: z.number().min(0),
+      estimated: z.boolean(),
+    })
+    .default({ usd: 0, tokens: 0, estimated: false }),
 });
 export type Conversation = z.infer<typeof Conversation>;
 

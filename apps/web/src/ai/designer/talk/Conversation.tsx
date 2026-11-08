@@ -430,7 +430,8 @@ export function TalkPanel() {
 
   // Every turn that spent: the proposals' runs, the replies, and messages not answered.
   const turns = useTalk((s) => s.conv?.turns);
-  const totals = useMemo(
+  const setAside = useTalk((s) => s.conv?.aside);
+  const totals0 = useMemo(
     () =>
       spentOf([
         ...proposals.flatMap((p) => p.options.flatMap((o) => o.usage)),
@@ -443,6 +444,18 @@ export function TalkPanel() {
         ),
       ]),
     [proposals, turns],
+  );
+  // What was spent on turns taken out (Edit) still counts.
+  const totals = useMemo(
+    () =>
+      setAside
+        ? {
+            usd: totals0.usd === null || setAside.usd === null ? null : totals0.usd + setAside.usd,
+            tokens: totals0.tokens + setAside.tokens,
+            estimated: totals0.estimated || setAside.estimated,
+          }
+        : totals0,
+    [totals0, setAside],
   );
   const spendLine =
     totals.usd === null

@@ -112,6 +112,13 @@ export const useTalk = create<TalkState>(() => ({
   why: null,
 }));
 
+/** A priced press must wait: a design runs or starts, or a reply streams in. */
+export const useBusy = (): boolean => {
+  const run = useDesigner((s) => s.starting || !!s.run);
+  const replying = useTalk((s) => !!s.reply);
+  return run || replying;
+};
+
 /** What the person has typed, now. */
 export const typedNow = () => useTalk.getState().typed ?? useTalk.getState().conv?.draft ?? '';
 /** What was typed went with a design: the composer and its draft empty. */

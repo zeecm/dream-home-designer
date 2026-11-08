@@ -93,6 +93,12 @@ export function spentOf(usage: readonly Usage[]): {
   return { usd, tokens, estimated };
 }
 
+/**
+ * A talk call may be billed in full twice: an unreadable answer is asked for once more, and an
+ * answer cut at its limit once more at lower effort (a refused or busy request isn't billed).
+ */
+export const TALK_ATTEMPTS = 2;
+
 /** What a talk reply typically writes (thinking included), by quality. */
 export const TALK_OUTPUT = { thorough: 900, quick: 600 } as const;
 
@@ -127,14 +133,28 @@ export function estimateTalk(
     : o.provider === 'anthropic'
       ? { input: input - cacheable, cachedInput: 0, cacheWrite: cacheable, output: out }
       : { input, cachedInput: 0, cacheWrite: 0, output: out };
+  // The worst of one attempt: all of it uncached, or (Claude, cold) its history written to the
+  // cache at the write rate; then the answer at its limit.
+  const one = price
+    ? Math.max(
+        usdOf({ input, cachedInput: 0, cacheWrite: 0, output: o.maxTokens }, price),
+        o.provider === 'anthropic' && !o.warm
+          ? usdOf(
+              {
+                input: input - cacheable,
+                cachedInput: 0,
+                cacheWrite: cacheable,
+                output: o.maxTokens,
+              },
+              price,
+            )
+          : 0,
+      )
+    : null;
   return {
-    tokens: { typical: input + out, high: input + o.maxTokens },
-    usd: price
-      ? {
-          typical: usdOf(typical, price),
-          high: usdOf({ input, cachedInput: 0, cacheWrite: 0, output: o.maxTokens }, price),
-        }
-      : null,
+    tokens: { typical: input + out, high: (input + o.maxTokens) * TALK_ATTEMPTS },
+    usd:
+      price && one !== null ? { typical: usdOf(typical, price), high: one * TALK_ATTEMPTS } : null,
   };
 }
 

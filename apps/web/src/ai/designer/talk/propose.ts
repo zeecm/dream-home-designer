@@ -142,7 +142,7 @@ export const finishPrice = (p: Proposal, letter: string, rooms: string[]) =>
 /** One priced press at a time, from the first tap (a double tap starts one run). */
 let starting = false;
 function begin(): boolean {
-  if (starting || useDesigner.getState().run) return false;
+  if (starting || useDesigner.getState().run || useTalk.getState().reply) return false;
   starting = true;
   useDesigner.setState({ starting: true });
   return true;
@@ -191,7 +191,8 @@ export async function pressPlan(plan: TalkPlan, said: string) {
  * asks with Go ahead, Just {room} and Not now.
  */
 export async function followPlan(plan: TalkPlan, said: string, replyTo: string) {
-  if (!begin()) return;
+  // A run going on (or starting): the plan is never dropped; its card asks for later.
+  const started = begin();
   try {
     const req = planRequest(plan, said);
     const made = planOf(req, newId('dsn'));
@@ -205,7 +206,7 @@ export async function followPlan(plan: TalkPlan, said: string, replyTo: string) 
       return;
     }
     const ask = rule(made.est, false);
-    if (ask === 'go') {
+    if (ask === 'go' && started) {
       await run(req, made, atMostOf(made.est), { person: null, turn: newId('turn') });
       return;
     }
@@ -216,13 +217,13 @@ export async function followPlan(plan: TalkPlan, said: string, replyTo: string) 
       ids: [newId('turn'), newId('turn')],
       scope: req.scope,
       words: said,
-      reason: ask,
+      reason: ask === 'go' ? 'ask-threshold' : ask,
       estimate: u ? { typical: u.typical, high: u.high, fix: u.fix } : null,
       talk: { replyTo, title: plan.title, intent: plan.intent },
       just: plan.just,
     });
   } finally {
-    end();
+    if (started) end();
   }
 }
 

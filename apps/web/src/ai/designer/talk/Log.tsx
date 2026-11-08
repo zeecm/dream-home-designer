@@ -39,7 +39,7 @@ import { dayMark } from './days';
 import { answerCost, cardRequest, pressPrice, pressScope, scopePrice } from './propose';
 import { toNewest } from './scroll';
 import { timed, useSettledProject } from './settle';
-import { act, newId, nowIso, talkLevel, useTalk } from './useTalk';
+import { act, newId, nowIso, talkLevel, useBusy, useTalk } from './useTalk';
 
 /**
  * The conversation's log (UX §5.3, §6): your turns in a bubble on the right, the designer's
@@ -206,7 +206,7 @@ function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
   const project = useSettledProject();
   const conv = useTalk((s) => s.conv) as Conversation;
   const ai = useAi();
-  const busy = useDesigner((s) => s.starting || !!s.run);
+  const busy = useBusy();
   const { prices } = useSpend();
   const level = project.renovation?.levels[0] ?? project.levels[0];
   const scopes = useMemo<ScopeRef[]>(
@@ -297,7 +297,7 @@ function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
 
 function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
   const ai = useAi();
-  const busy = useDesigner((s) => s.starting || !!s.run);
+  const busy = useBusy();
   const project = useSettledProject();
   const { prices } = useSpend();
   const level = project.renovation?.levels[0] ?? project.levels[0];

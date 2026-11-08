@@ -16,7 +16,7 @@ import { scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { useThreshold } from './threshold';
 import { sendMessage, sendPrice, stopReply } from './turn';
-import { act, newId, nowIso, talkLevel, typedNow, useTalk } from './useTalk';
+import { act, newId, nowIso, talkLevel, typedNow, useBusy, useTalk } from './useTalk';
 
 /**
  * The composer (UX §5.4): quick replies, the textarea (kept per plan across closes and
@@ -59,7 +59,7 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
   const newest = useNewest();
   const project = useSettledProject();
   const { prices } = useSpend();
-  const busy = useDesigner((s) => s.starting || !!s.run);
+  const busy = useBusy();
   // biome-ignore lint/correctness/useExhaustiveDependencies: on what the price reads
   const price = useMemo(
     () => (newest ? timed(() => scopePrice(newest.scope)) : null),

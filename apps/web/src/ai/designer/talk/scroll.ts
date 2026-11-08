@@ -86,13 +86,16 @@ export function keepFocus(panel: HTMLElement): () => void {
     const el = last.el as HTMLButtonElement;
     const gone = !el.isConnected;
     const off = !gone && el.disabled;
+    const a = document.activeElement;
+    const onPage = !a || a === document.body || a === document.documentElement;
     if (!gone && !off) {
+      // Enabled again (its press done) with focus left on the page: hand it on now.
+      if (waiting && onPage) return hand();
       if (waiting) clearTimeout(waiting.timer);
       waiting = null;
       return;
     }
-    const a = document.activeElement;
-    if (a && a !== document.body && a !== document.documentElement && a !== el) {
+    if (!onPage && a !== el) {
       last = null;
       return;
     }

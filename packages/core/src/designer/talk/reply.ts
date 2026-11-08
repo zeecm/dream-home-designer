@@ -303,7 +303,9 @@ function factOf(raw: unknown): TalkFact | null {
           : k === 'cooking'
             ? COOKING_CHOICES.some((c) => c.id === lower(choice))
             : k === 'wfh'
-              ? WFH_CHOICES.some((c) => c.id === (number ?? Number(choice)))
+              ? // One of the two must say it: a missing figure is never "No one".
+                (number !== null || (choice !== null && choice.trim() !== '')) &&
+                WFH_CHOICES.some((c) => c.id === (number ?? Number(choice)))
               : !!text;
   if (!ok) return null;
   return { key: k, text, number, choice: choice ? cut(choice, 40) : null };
@@ -379,13 +381,49 @@ export function parseTalkReply(raw: unknown, ctx: TalkParseContext): TalkParse {
   };
 }
 
+const WALLS_ORDER: DesignBrief['walls'][] = ['keep', 'allowed', 'structural'];
+
+/**
+ * Whether a fact would widen what the next paid run may do: walls loosened (keep to allowed or
+ * structural) or the budget raised. The model never does that by itself: the person confirms
+ * it with a free chip.
+ */
+export function widens(brief: DesignBrief, f: TalkFact): boolean {
+  if (f.key === 'walls') {
+    const to = lower(f.choice) as DesignBrief['walls'];
+    return WALLS_ORDER.indexOf(to) > WALLS_ORDER.indexOf(brief.walls);
+  }
+  if (f.key === 'budget') {
+    const c = BUDGET_CHOICES.find((x) => x.id === f.choice);
+    const high = c ? (c.v?.high ?? null) : f.number;
+    // Not sure (no figure) or a higher one, over a budget given: wider.
+    return !!brief.budget && (high === null || high > brief.budget.high);
+  }
+  return false;
+}
+
+/** The question a widening fact asks the person ("Allow structural changes?"). */
+export function confirmText(f: TalkFact): string {
+  if (f.key === 'walls') {
+    const to = lower(f.choice);
+    return to === 'structural'
+      ? 'Allow structural changes too (they need HDB approval and an engineer)?'
+      : 'Allow the wall changes HDB normally allows?';
+  }
+  const c = BUDGET_CHOICES.find((x) => x.id === f.choice);
+  const high = c ? (c.v?.high ?? null) : f.number;
+  return high === null ? 'Take the budget off?' : `Raise the budget to ${sgd(high)}?`;
+}
+
 /** The What I know fact a reply's fact is about (Assumed comes off it once noted). */
 export const factQuestion = (k: FactKey): QuestionKey =>
   k === 'budget' || k === 'walls' || k === 'style' || k === 'cooking' || k === 'wfh'
     ? k
     : 'anything';
 
-const sgd = (n: number) => `S$${n >= 1000 ? `${Math.round(n / 1000)}k` : Math.round(n)}`;
+function sgd(n: number) {
+  return `S$${n >= 1000 ? `${Math.round(n / 1000)}k` : Math.round(n)}`;
+}
 
 /** A reply's facts on the brief, with the lines that say so ("Noted in What I know: …"). */
 export function applyFacts(

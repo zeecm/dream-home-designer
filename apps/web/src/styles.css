@@ -8644,3 +8644,17 @@ html[data-proposal] .plan-svg g.clearance {
 .talk-why {
   color: var(--text);
 }
+
+/* A short window without touch (844 x 390 on a computer): the sheet at half height left the
+   log no room. There it opens taller, without quick replies, and the log keeps a few lines. */
+@media (max-width: 900px) and (max-height: 500px) {
+  .workspace-designer > .talk-half {
+    height: calc(100dvh - 48px);
+  }
+  .talk-sheet .talk-quick {
+    display: none;
+  }
+  .talk-sheet .talk-log {
+    min-height: 96px;
+  }
+}

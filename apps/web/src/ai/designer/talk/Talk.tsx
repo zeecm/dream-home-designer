@@ -8,7 +8,7 @@ import { TurnCost } from './ProposalCard';
 import { planRequest, pressPlan, pressPrice } from './propose';
 import { timed, useSettledProject } from './settle';
 import { answerChip, chipLabel, editTurn, retryPrice, retryTurn } from './turn';
-import { useTalk } from './useTalk';
+import { act, newId, nowIso, useBusy, useTalk } from './useTalk';
 
 /**
  * The talk turns in the log (UX §6.1, §6.2, §6.5, §9, §10): a message's state under its bubble
@@ -108,6 +108,39 @@ export function ReplyParts({ t }: { t: TurnOf<'designer'> }) {
         </p>
       )}
       {k.questions.length > 0 && <Asked t={t} />}
+      {k.confirms.some((c) => c.answer === null) && (
+        <div className="talk-question">
+          {k.confirms.map((c, i) =>
+            c.answer === null ? (
+              <section key={c.ask} className="talk-q" aria-label={c.ask}>
+                <h4 className="talk-q-label">{c.ask}</h4>
+                <p className="field-hint">Only you can widen what the designer may do.</p>
+                <div className="button-row">
+                  {(['Yes', 'No'] as const).map((w) => (
+                    <button
+                      key={w}
+                      type="button"
+                      className="chip"
+                      onClick={() =>
+                        void act({
+                          type: 'talkConfirm',
+                          turnId: t.id,
+                          index: i,
+                          yes: w === 'Yes',
+                          id: newId('turn'),
+                          at: nowIso(),
+                        })
+                      }
+                    >
+                      {w}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ) : null,
+          )}
+        </div>
+      )}
       {k.concern && <Concern t={t} />}
       {k.noted.length > 0 && (
         <ul className="talk-noted">
@@ -188,7 +221,7 @@ function Asked({ t }: { t: TurnOf<'designer'> }) {
 function Concern({ t }: { t: TurnOf<'designer'> }) {
   const c = t.talk?.concern;
   const conv = useTalk((s) => s.conv);
-  const busy = useDesigner((s) => s.starting || !!s.run);
+  const busy = useBusy();
   const project = useSettledProject();
   const { prices } = useSpend();
   const said = useMemo(() => {

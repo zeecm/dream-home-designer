@@ -37,6 +37,8 @@ export interface TalkCallOptions {
   onStatus?: (st: RequestState) => void;
   onUsage?: (u: Usage) => void;
   paintMs?: number;
+  /** Before an attempt after the first: why not (the tab's limit), or null to go on. */
+  mayRetry?: () => string | null;
 }
 
 export type TalkCallResult =
@@ -84,6 +86,7 @@ export async function talkCall(o: TalkCallOptions): Promise<TalkCallResult> {
       promptChars: chars.all,
       maxTokens: prompt.maxTokens,
       st,
+      ...(o.mayRetry ? { mayRetry: o.mayRetry } : {}),
       update: () => o.onStatus?.({ ...st }),
       meter: (sink, ms, finished) => {
         const outputChars = sink.text.length + sink.thinking.length;

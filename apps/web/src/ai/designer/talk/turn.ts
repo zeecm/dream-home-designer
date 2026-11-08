@@ -26,6 +26,7 @@ import {
   probeLines,
   spacesOf,
   tableLines,
+  talkAsks,
   talkChars,
   talkPrompt,
   tokensOf,
@@ -33,7 +34,7 @@ import {
 } from '@dhd/core';
 import { useStore } from '../../../store';
 import { aiSettings } from '../../credentials';
-import { addUsage, priceTable, usd } from '../spend';
+import { addUsage, capUsd, overLimit, priceTable, spent, usd } from '../spend';
 import { designOpts, useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
 import { cardChanges, cardResult, cardVerdict, optionCard } from './cards';
@@ -195,55 +196,93 @@ export function sendPrice(text: string): TalkEstimate | null {
   return est;
 }
 
+/** A message's figure, built from the request about to go (never a stale estimate). */
+function priceOfPrompt(prompt: TalkPrompt, conv: Conversation): TalkEstimate | null {
+  const ai = aiSettings();
+  return ai
+    ? estimateTalk(talkChars(prompt), {
+        provider: ai.provider,
+        model: ai.model,
+        quality: conv.brief.quality,
+        maxTokens: prompt.maxTokens,
+        warm: warm(conv),
+        prices: priceTable(),
+      })
+    : null;
+}
+
+/** Would pass the tab's limit: said as an app line, and nothing goes. */
+async function pastLimit(prompt: TalkPrompt, conv: Conversation): Promise<boolean> {
+  const est = priceOfPrompt(prompt, conv);
+  const cap = capUsd();
+  if (!est || !talkAsks(est, spent().usd, cap) || cap === null) return false;
+  await act({
+    type: 'event',
+    id: newId('turn'),
+    at: nowIso(),
+    event: {
+      type: 'note',
+      text: `This message may cost up to ${usd(est.usd?.high ?? 0)}, which would pass your ${usd(cap)} limit for this tab. Raise the limit in AI settings to send it.`,
+    },
+  });
+  return true;
+}
+
 /** Sends the composer's words to the designer. */
 export async function sendMessage(text: string): Promise<boolean> {
   const words = text.trim();
   const ai = aiSettings();
-  let conv = useTalk.getState().conv;
-  if (!words || !ai || !conv || designerCannotUse(ai)) return false;
-  if (pendingReply(conv) || useTalk.getState().reply) return false;
-  if (await otherTabReplying(conv.projectId)) return false;
-  await noteHandEdits();
-  conv = useTalk.getState().conv ?? conv;
-  const input = inputFor(conv, words);
-  if (!input) return false;
-  const prompt = talkPrompt(input);
-  const id = newId('turn');
-  const next = await act({
-    type: 'send',
-    id,
-    at: nowIso(),
-    text: words,
-    sent: prompt.sent,
-    aliases: input.aliases,
+  const conv0 = useTalk.getState().conv;
+  if (!words || !ai || !conv0 || designerCannotUse(ai)) return false;
+  if (pendingReply(conv0) || useTalk.getState().reply) return false;
+  let sent = false;
+  // The lock first: a tab opening the panel meanwhile can't take this reply for a dead one.
+  const got = await withReplyLock(conv0.projectId, async () => {
+    await noteHandEdits();
+    const conv = useTalk.getState().conv ?? conv0;
+    if (pendingReply(conv)) return;
+    const input = inputFor(conv, words);
+    if (!input) return;
+    const prompt = talkPrompt(input);
+    if (await pastLimit(prompt, conv)) return;
+    const id = newId('turn');
+    const next = await act({
+      type: 'send',
+      id,
+      at: nowIso(),
+      text: words,
+      sent: prompt.sent,
+      aliases: input.aliases,
+    });
+    if (!next || pendingReply(next)?.id !== id) return;
+    sent = true;
+    await clearTyped();
+    say('Designer is replying.');
+    await replyNow(id, prompt);
   });
-  if (!next || pendingReply(next)?.id !== id) return false;
-  await clearTyped();
-  say('Designer is replying.');
-  void reply(id, prompt);
-  return true;
+  if (got === 'busy') say('Another tab is waiting for a reply.');
+  return sent;
 }
 
-/** Try again: the same message, sent as it was the first time (the same bytes). */
+/** Try again: the newest message, sent as it was the first time (the same bytes). */
 export async function retryTurn(turnId: string) {
-  const conv = useTalk.getState().conv;
-  const t = conv?.turns.find((x) => x.id === turnId);
-  if (!conv || t?.kind !== 'person' || t.sent === undefined || useTalk.getState().reply) return;
-  if (await otherTabReplying(conv.projectId)) return;
-  const next = await act({ type: 'retry', turnId, at: nowIso() });
-  if (!next || pendingReply(next)?.id !== turnId) return;
-  // History before it only: the turn itself and what came after it aren't repeated.
-  const before = {
-    ...next,
-    turns: next.turns.slice(
-      0,
-      next.turns.findIndex((x) => x.id === turnId),
-    ),
-  };
-  const input = inputFor(before, t.text, t.sent);
-  if (!input) return;
-  say('Designer is replying.');
-  void reply(turnId, talkPrompt(input));
+  const conv0 = useTalk.getState().conv;
+  const t = conv0?.turns.find((x) => x.id === turnId);
+  if (!conv0 || t?.kind !== 'person' || t.sent === undefined || useTalk.getState().reply) return;
+  const got = await withReplyLock(conv0.projectId, async () => {
+    const conv = useTalk.getState().conv ?? conv0;
+    const at = conv.turns.findIndex((x) => x.id === turnId);
+    // History before it only: the turn itself and what came after it aren't repeated.
+    const input = inputFor({ ...conv, turns: conv.turns.slice(0, at) }, t.text, t.sent);
+    if (!input || at < 0) return;
+    const prompt = talkPrompt(input);
+    if (await pastLimit(prompt, conv)) return;
+    const next = await act({ type: 'retry', turnId, at: nowIso() });
+    if (!next || pendingReply(next)?.id !== turnId) return;
+    say('Designer is replying.');
+    await replyNow(turnId, prompt);
+  });
+  if (got === 'busy') say('Another tab is waiting for a reply.');
 }
 
 /** The price of Try again (its request built again). */
@@ -316,30 +355,56 @@ if (typeof window !== 'undefined') {
   window.addEventListener('pagehide', checkpoint);
 }
 
-/** Runs one talk call for a person's turn, under the plan's reply lock. */
-async function reply(turnId: string, prompt: TalkPrompt) {
-  const projectId = doc().id;
+/** Whatever fails after a reply (pricing its plan, saving) is said, never retried. */
+async function guarded(fn: () => Promise<void>) {
+  try {
+    await fn();
+  } catch (e) {
+    await act({
+      type: 'event',
+      id: newId('turn'),
+      at: nowIso(),
+      event: {
+        type: 'note',
+        text: `Couldn’t finish after the reply: ${e instanceof Error ? e.message : 'something went wrong'}.`,
+      },
+    }).catch(() => {});
+  }
+}
+
+/**
+ * Runs `fn` holding this plan's reply lock: one reply at a time across tabs. 'busy' when another
+ * tab holds it. Without Web Locks (very old browsers) one tab is assumed, and so it is when the
+ * Locks API fails before it ever runs `fn`; once `fn` has run, nothing runs it again (B1: a
+ * second run would be billed and never shown).
+ */
+export async function withReplyLock(
+  projectId: string,
+  fn: () => Promise<void>,
+): Promise<'ran' | 'busy'> {
   const l = locks();
-  if (!l) return replyNow(turnId, prompt);
+  if (!l) {
+    await guarded(fn);
+    return 'ran';
+  }
+  let entered = false;
+  let busy = false;
   try {
     await l.request(lockName(projectId), { ifAvailable: true }, async (lock) => {
+      entered = true;
       if (!lock) {
-        await act({
-          type: 'replyFailed',
-          turnId,
-          id: newId('turn'),
-          at: nowIso(),
-          error: 'Another tab is waiting for a reply.',
-          text: '',
-          usage: [],
-        });
+        busy = true;
         return;
       }
-      await replyNow(turnId, prompt);
+      await guarded(fn);
     });
   } catch {
-    await replyNow(turnId, prompt);
+    if (!entered) {
+      await guarded(fn);
+      return 'ran';
+    }
   }
+  return busy ? 'busy' : 'ran';
 }
 
 async function replyNow(turnId: string, prompt: TalkPrompt) {
@@ -367,6 +432,7 @@ async function replyNow(turnId: string, prompt: TalkPrompt) {
       signal: ctrl.signal,
       prices: priceTable(),
       onText: (t) => set({ say: t.say, kind: t.kind }),
+      mayRetry: () => (overLimit() ? 'stopped at your limit for this tab.' : null),
       onStatus: (st) => set({ thinking: st.thinking, wait: st.wait }),
       onUsage: addUsage,
     });
@@ -431,7 +497,19 @@ async function replyNow(turnId: string, prompt: TalkPrompt) {
     const person = after?.turns.find((x) => x.id === turnId);
     if (t?.kind === 'designer' && t.talk?.plan && person?.kind === 'person') {
       useTalk.setState({ reply: null });
-      await followPlan(t.talk.plan, person.text, id);
+      try {
+        await followPlan(t.talk.plan, person.text, id);
+      } catch (e) {
+        await act({
+          type: 'event',
+          id: newId('turn'),
+          at: nowIso(),
+          event: {
+            type: 'note',
+            text: `Couldn’t price the plan: ${e instanceof Error ? e.message : 'something went wrong'}.`,
+          },
+        });
+      }
     }
   } finally {
     const r = useTalk.getState().reply;

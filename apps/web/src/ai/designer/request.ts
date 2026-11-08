@@ -153,6 +153,8 @@ export interface RequestOptions<T> {
   onDelta?: (sink: StepSink) => void;
   /** Thinking lines repaint at most four times a second, across a run's requests. */
   throttle?: { last: number };
+  /** Before trying again: why not (the tab's limit reached), or null to go on. */
+  mayRetry?: () => string | null;
 }
 
 /** One request, retried as the rules say: its answer, or null when it failed (`st.error`). */
@@ -174,8 +176,11 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
   let net = 0;
   let unreadable = 0;
   let long = 0;
+  let attempt = 0;
   for (;;) {
     if (o.signal.aborted) throw new Stopped(ABORT_TEXT);
+    const no = attempt++ > 0 ? (o.mayRetry?.() ?? null) : null;
+    if (no) return fail(`${st.label}: ${no}`);
     const ctrl = new AbortController();
     const signal = anySignal([o.signal, ctrl.signal]);
     let quiet = false;

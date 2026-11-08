@@ -363,6 +363,118 @@ describe('the reducer: a message and its reply', () => {
     expect(prompt(c).messages.at(-1)?.blocks.at(-1)?.text).not.toContain('Changed by hand');
   });
 
+  it('a reply never loosens the walls or raises the budget: the person confirms, free', () => {
+    const m0 = met();
+    const tight = talk(m0, {
+      type: 'setBrief',
+      brief: { ...m0.brief, walls: 'keep', budget: { low: 30000, high: 40000 } },
+    });
+    const c = exchange(tight, 'Knock the wall down', {
+      ...REPLY_TEXT,
+      memory: {
+        decisions: [],
+        facts: [
+          { key: 'walls', text: 'structural too', number: null, choice: 'structural' },
+          { key: 'budget', text: 'about S$80k', number: 80000, choice: null },
+          { key: 'cooking', text: 'a lot', number: null, choice: 'heavy' },
+        ],
+        notes: [],
+      },
+    });
+    expect(c.brief.walls).toBe('keep');
+    expect(c.brief.budget?.high).toBe(40000);
+    expect(c.brief.lifestyle.cooking).toBe('heavy');
+    const d = c.turns.at(-1);
+    if (d?.kind !== 'designer' || !d.talk) throw new Error('no reply');
+    expect(d.talk.confirms.map((x) => x.ask)).toEqual([
+      'Allow structural changes too (they need HDB approval and an engineer)?',
+      'Raise the budget to S$80k?',
+    ]);
+    const yes = talk(c, {
+      type: 'talkConfirm',
+      turnId: d.id,
+      index: 0,
+      yes: true,
+      id: id(),
+      at: AT,
+    });
+    expect(yes.brief.walls).toBe('structural');
+    expect(
+      talk(yes, { type: 'talkConfirm', turnId: d.id, index: 0, yes: false, id: id(), at: AT }),
+    ).toBe(yes);
+    const no = talk(c, {
+      type: 'talkConfirm',
+      turnId: d.id,
+      index: 1,
+      yes: false,
+      id: id(),
+      at: AT,
+    });
+    expect(no.brief.budget?.high).toBe(40000);
+    // Tightening is fine without asking: walls kept, a lower budget.
+    const loose = talk(m0, { type: 'setBrief', brief: { ...m0.brief, walls: 'structural' } });
+    const t2 = exchange(loose, 'Keep the walls', {
+      ...REPLY_TEXT,
+      memory: {
+        decisions: [],
+        facts: [{ key: 'walls', text: '', number: null, choice: 'keep' }],
+        notes: [],
+      },
+    });
+    expect(t2.brief.walls).toBe('keep');
+  });
+
+  it('wfh needs a figure or a choice; Try again only for the newest message; Edit keeps the spend', () => {
+    const r = parsed({
+      ...REPLY_TEXT,
+      memory: {
+        decisions: [],
+        facts: [{ key: 'wfh', text: 'x', number: null, choice: null }],
+        notes: [],
+      },
+    });
+    expect(r.reply.memory.facts).toEqual([]);
+    const usage = [
+      {
+        step: 'talk',
+        provider: 'anthropic' as const,
+        model: 'claude-opus-5-5',
+        input: 100,
+        cachedInput: 0,
+        cacheWrite: 0,
+        output: 100,
+        reasoning: null,
+        estimated: false,
+        usd: 0.02,
+        ms: 1,
+      },
+    ];
+    let c = talk(met(), { type: 'send', id: 'p1', at: AT, text: 'Hi', sent: 'x' });
+    c = talk(c, {
+      type: 'replyFailed',
+      turnId: 'p1',
+      id: 'd1',
+      at: AT,
+      error: 'Down',
+      text: '',
+      usage,
+    });
+    c = talk(c, { type: 'send', id: 'p2', at: AT, text: 'Again', sent: 'y' });
+    c = talk(c, {
+      type: 'replyFailed',
+      turnId: 'p2',
+      id: 'd2',
+      at: AT,
+      error: 'Down',
+      text: '',
+      usage,
+    });
+    expect(talk(c, { type: 'retry', turnId: 'p1', at: AT })).toBe(c);
+    expect(pendingReply(talk(c, { type: 'retry', turnId: 'p2', at: AT }))?.id).toBe('p2');
+    const edited = talk(c, { type: 'unsend', turnId: 'p2' });
+    expect(edited.aside).toEqual({ usd: 0.02, tokens: 200, estimated: false });
+  });
+
   it('L10: trimming the oldest turns never starts the first meeting again', () => {
     let c = met();
     expect(meetingOver(c)).toBe(true);
@@ -556,7 +668,9 @@ describe('probeLines and estimateTalk', () => {
     });
     expect(warm.usd?.typical).toBeLessThan(cold.usd?.typical ?? 0);
     expect(cold.usd?.high).toBeGreaterThan(cold.usd?.typical ?? 0);
-    expect(cold.usd?.high).toBeLessThan(0.15);
+    // Two attempts at their limit, the cold one's history written to the cache (Claude).
+    expect(cold.usd?.high).toBeLessThan(0.25);
+    expect(cold.usd?.high).toBeGreaterThan(warm.usd?.high ?? 0);
     expect(
       estimateTalk(chars, {
         provider: 'anthropic',
