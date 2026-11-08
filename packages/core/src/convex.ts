@@ -41,39 +41,57 @@ export const near = (p: readonly Vec2[], q: readonly Vec2[], pad = 0) => {
 
 export const dot = (a: Vec2, b: Vec2) => a.x * b.x + a.y * b.y;
 
-function axes(poly: readonly Vec2[]): Vec2[] {
-  const out: Vec2[] = [];
-  for (let i = 0; i < poly.length; i++) {
-    const p = poly[i] as Vec2;
-    const q = poly[(i + 1) % poly.length] as Vec2;
-    const len = Math.hypot(q.x - p.x, q.y - p.y);
-    if (len > 1e-9) out.push({ x: -(q.y - p.y) / len, y: (q.x - p.x) / len });
+/** A polygon's bounding box, not kept (for a polygon made for one test). */
+function boundsOf(poly: readonly Vec2[]): Box {
+  const b = {
+    x0: Number.POSITIVE_INFINITY,
+    y0: Number.POSITIVE_INFINITY,
+    x1: Number.NEGATIVE_INFINITY,
+    y1: Number.NEGATIVE_INFINITY,
+  };
+  for (const p of poly) {
+    b.x0 = Math.min(b.x0, p.x);
+    b.y0 = Math.min(b.y0, p.y);
+    b.x1 = Math.max(b.x1, p.x);
+    b.y1 = Math.max(b.y1, p.y);
   }
-  return out;
+  return b;
 }
 
-/** How far two convex polygons overlap (the least push to part them); 0 when apart. */
+/**
+ * How far two convex polygons overlap (the least push to part them); 0 when apart. Each
+ * edge's normal of either polygon is an axis (no arrays made: it runs for every pose tried).
+ */
 export function overlapDepth(p: readonly Vec2[], q: readonly Vec2[]): number {
   if (!near(p, q)) return 0;
   let least = Number.POSITIVE_INFINITY;
-  for (const n of [...axes(p), ...axes(q)]) {
-    let p0 = Number.POSITIVE_INFINITY;
-    let p1 = Number.NEGATIVE_INFINITY;
-    let q0 = Number.POSITIVE_INFINITY;
-    let q1 = Number.NEGATIVE_INFINITY;
-    for (const v of p) {
-      const d = dot(v, n);
-      p0 = Math.min(p0, d);
-      p1 = Math.max(p1, d);
+  for (let s = 0; s < 2; s++) {
+    const poly = s === 0 ? p : q;
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i] as Vec2;
+      const b = poly[(i + 1) % poly.length] as Vec2;
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      if (!(len > 1e-9)) continue;
+      const nx = -(b.y - a.y) / len;
+      const ny = (b.x - a.x) / len;
+      let p0 = Number.POSITIVE_INFINITY;
+      let p1 = Number.NEGATIVE_INFINITY;
+      let q0 = Number.POSITIVE_INFINITY;
+      let q1 = Number.NEGATIVE_INFINITY;
+      for (const v of p) {
+        const d = v.x * nx + v.y * ny;
+        p0 = Math.min(p0, d);
+        p1 = Math.max(p1, d);
+      }
+      for (const v of q) {
+        const d = v.x * nx + v.y * ny;
+        q0 = Math.min(q0, d);
+        q1 = Math.max(q1, d);
+      }
+      const o = Math.min(p1, q1) - Math.max(p0, q0);
+      if (o <= 0) return 0;
+      least = Math.min(least, o);
     }
-    for (const v of q) {
-      const d = dot(v, n);
-      q0 = Math.min(q0, d);
-      q1 = Math.max(q1, d);
-    }
-    const o = Math.min(p1, q1) - Math.max(p0, q0);
-    if (o <= 0) return 0;
-    least = Math.min(least, o);
   }
   return Number.isFinite(least) ? least : 0;
 }
@@ -175,20 +193,43 @@ export function polygonGap(
   p: readonly Vec2[],
   q: readonly Vec2[],
 ): { d: number; a: Vec2; b: Vec2 } {
-  let best = { d: Number.POSITIVE_INFINITY, a: p[0] as Vec2, b: q[0] as Vec2 };
-  if (overlapDepth(p, q) > 0) return { d: 0, a: best.a, b: best.a };
-  const one = (from: readonly Vec2[], to: readonly Vec2[], flip: boolean) => {
+  if (overlapDepth(p, q) > 0) return { d: 0, a: p[0] as Vec2, b: p[0] as Vec2 };
+  // The nearest so far: the vertex, and the point on the other's edge (no objects made per pair:
+  // it runs for every pose tried).
+  let bestD = Number.POSITIVE_INFINITY;
+  let bestV: Vec2 | null = null;
+  let wx = 0;
+  let wy = 0;
+  let flipped = false;
+  for (let k = 0; k < 2; k++) {
+    const from = k === 0 ? p : q;
+    const to = k === 0 ? q : p;
     for (const v of from) {
       for (let i = 0; i < to.length; i++) {
-        const w = nearestOnSegment(v, to[i] as Vec2, to[(i + 1) % to.length] as Vec2);
-        const d = Math.hypot(w.x - v.x, w.y - v.y);
-        if (d < best.d) best = flip ? { d, a: w, b: v } : { d, a: v, b: w };
+        // nearestOnSegment(v, a, b), inline.
+        const a = to[i] as Vec2;
+        const b = to[(i + 1) % to.length] as Vec2;
+        const ex = b.x - a.x;
+        const ey = b.y - a.y;
+        const len2 = ex * ex + ey * ey;
+        const t =
+          len2 < 1e-18 ? 0 : Math.max(0, Math.min(1, ((v.x - a.x) * ex + (v.y - a.y) * ey) / len2));
+        const x = a.x + ex * t;
+        const y = a.y + ey * t;
+        const d = Math.hypot(x - v.x, y - v.y);
+        if (d < bestD) {
+          bestD = d;
+          bestV = v;
+          wx = x;
+          wy = y;
+          flipped = k === 1;
+        }
       }
     }
-  };
-  one(p, q, false);
-  one(q, p, true);
-  return best;
+  }
+  if (!bestV) return { d: Number.POSITIVE_INFINITY, a: p[0] as Vec2, b: q[0] as Vec2 };
+  const w = { x: wx, y: wy };
+  return flipped ? { d: bestD, a: w, b: bestV } : { d: bestD, a: bestV, b: w };
 }
 
 // --- the area off one side of a piece -----------------------------------------------------
@@ -229,9 +270,10 @@ export function roomOff(s: Side, need: number, obstacles: Vec2[][]): number {
   // A wall or piece only touching the side's ends (a corner) isn't in front of it.
   const e = 0.01;
   let have = need;
-  const zone = zoneOf(s, need);
+  const zb = boundsOf(zoneOf(s, need));
   for (const poly of obstacles) {
-    if (!near(zone, poly)) continue;
+    const b = box(poly);
+    if (!(zb.x0 <= b.x1 && b.x0 <= zb.x1 && zb.y0 <= b.y1 && b.y0 <= zb.y1)) continue;
     let c = clipHalf(poly, (p) => u(p) - e);
     c = clipHalf(c, (p) => s.width - e - u(p));
     c = clipHalf(c, (p) => v(p) + 0.005);

@@ -1,6 +1,6 @@
 import { CLEARANCE_RULES, DINING_CHAIRS, PULL_BACK, doorSweep, ruleSide } from '../clearance';
 import { frontReach } from '../clearance-doors';
-import { overlapDepth, roomOff, sideOf, zoneOf } from '../convex';
+import { overlapDepth, box as polyBox, roomOff, sideOf, zoneOf } from '../convex';
 import { type FurnitureKind, furnitureLayer, itemFootprint, itemSize, newItem } from '../furniture';
 import { pointInPolygon } from '../geometry';
 import type { PlanGeometry } from '../plan';
@@ -198,8 +198,35 @@ export interface OnFace {
  * What blocks a piece at this position whatever else is placed: outside the rooms, a wall, a
  * doorway, a door's sweep, a way kept clear, a window. Null: nothing.
  */
-export function fixedHit(ix: SpaceIndex, item: Item, kind: FurnitureKind, on?: OnFace): Hit | null {
-  const fp = itemFootprint(item, kind);
+export function fixedHit(
+  ix: SpaceIndex,
+  item: Item,
+  kind: FurnitureKind,
+  on?: OnFace,
+  fp = itemFootprint(item, kind),
+): Hit | null {
+  return fixedHitOf(ix, item, kind, on, fp, ix.keepOut);
+}
+
+/**
+ * Whether a footprint stands on a way kept clear: fixedHit's keep-out test alone (with
+ * `fixedHit(ix minus its keepOut)` it makes up fixedHit, for a pose tried with and without).
+ */
+export function keepOutHit(keepOut: Shape[], kind: FurnitureKind, fp: Vec2[]): boolean {
+  if (!keepOut.length || !blocksFloor(kind)) return false;
+  const box = boxOf(fp);
+  return keepOut.some((s) => !apart(s.box, box) && overlapDepth(fp, s.poly) > 0.01);
+}
+
+/** fixedHit, with the ways kept clear given (none: what blocks a pose whatever is kept clear). */
+export function fixedHitOf(
+  ix: SpaceIndex,
+  item: Item,
+  kind: FurnitureKind,
+  on: OnFace | undefined,
+  fp: Vec2[],
+  keepOut: Shape[],
+): Hit | null {
   if (!inset(fp).every((p) => inRooms(ix, p))) return { kind: 'outside' };
   if (on) {
     for (const o of on.face.openings) {
@@ -217,7 +244,7 @@ export function fixedHit(ix: SpaceIndex, item: Item, kind: FurnitureKind, on?: O
   if (hit(ix.solid, 0.01)) return { kind: 'wall' };
   if (hit(ix.doorways, 0.01)) return { kind: 'doorway' };
   if (hit(ix.sweeps, 0.005)) return { kind: 'door' };
-  if (hit(ix.keepOut, 0.01)) return { kind: 'keep-out' };
+  if (hit(keepOut, 0.01)) return { kind: 'keep-out' };
   if (!UNDER_WINDOW.has(roleOf(kind))) {
     const top = sillTop(kind, itemSize(item, kind).h);
     const high = ix.windows.filter((w) => top > w.sill - FIT.sill);
@@ -228,7 +255,7 @@ export function fixedHit(ix: SpaceIndex, item: Item, kind: FurnitureKind, on?: O
 
 /**
  * What a piece at this position runs into (empty: it can stand there). `fixedChecked`: its
- * fixed hits (fixedHit) are known to be none.
+ * fixed hits (fixedHit) are known to be none. `fp`: its footprint, when already worked out.
  */
 export function hitsOf(
   ix: SpaceIndex,
@@ -236,12 +263,12 @@ export function hitsOf(
   kind: FurnitureKind,
   on?: OnFace,
   fixedChecked = false,
+  fp = itemFootprint(item, kind),
 ): Hit[] {
-  const fp = itemFootprint(item, kind);
   const out: Hit[] = [];
   // What blocks it outright: the first reason is enough (it is the one said).
   if (!fixedChecked) {
-    const fixed = fixedHit(ix, item, kind, on);
+    const fixed = fixedHit(ix, item, kind, on, fp);
     if (fixed) return [fixed];
   }
   if (!blocksFloor(kind)) return out;
@@ -313,7 +340,7 @@ export function hitsOf(
   const low = LOW_ROLES.has(roleOf(kind));
   for (const p of ix.placed) {
     if (!p.zones.length || tuckedWith(p) || (p.view && low)) continue;
-    if (p.zones.some((z) => !apart(boxOf(z), box) && overlapDepth(fp, z) > 0.01)) {
+    if (p.zones.some((z) => !apart(polyBox(z), box) && overlapDepth(fp, z) > 0.01)) {
       out.push({ kind: 'in-zone', otherId: p.id, otherName: p.name });
       break;
     }
@@ -391,9 +418,13 @@ export function keepOutOf(path: Vec2[], pinch: [Vec2, Vec2] | null, need: number
 }
 
 /** Adds a piece to the index, for the pieces after it to keep clear of. */
-export function addToIndex(ix: SpaceIndex, item: Item, kind: FurnitureKind) {
+export function addToIndex(
+  ix: SpaceIndex,
+  item: Item,
+  kind: FurnitureKind,
+  fp = itemFootprint(item, kind),
+) {
   if (!blocksFloor(kind)) return;
-  const fp = itemFootprint(item, kind);
   ix.placed.push({
     id: item.id,
     assetId: item.assetId,
@@ -468,7 +499,10 @@ const MOVE = 0.4;
 const STEP = 0.05;
 const NARROW = [0.95, 0.9, 0.85, 0.8];
 
-/** The item for a piece at a pose. */
+/**
+ * The item for a piece at a pose. Items made here are cached with their pose and reused across
+ * solves, then deep-frozen in results: never mutate one after it is made.
+ */
 export function itemAt(want: Want, at: Vec2, rotation: number, w: number): Item {
   const k = want.kind;
   const base = want.brought

@@ -458,7 +458,11 @@ function work(
       const fixedKey = ix.placed.map(
         (p) => `${p.id}:${p.fp.map((q) => q.x.toFixed(3) + q.y.toFixed(3)).join()}`,
       );
-      const solveWith = (keepOut: SpaceIndex['keepOut'], keepOutFor?: Set<string>) => {
+      const solveWith = (
+        keepOut: SpaceIndex['keepOut'],
+        keepOutFor?: Set<string>,
+        noWorseThan?: PieceCounts,
+      ) => {
         ix.placed.length = base;
         const memoKey = hash(
           stableJson([
@@ -472,6 +476,7 @@ function work(
             keepOut.map((k) => k.poly),
             [...(keepOutFor ?? [])].sort(),
             opts.walkways !== false,
+            noWorseThan ?? null,
           ]),
         );
         // A space moved off a walkway before is placed as it ended up.
@@ -503,6 +508,10 @@ function work(
           // A walkway re-solve looks less far, and keeps the pieces the first solve chose.
           ...(keepOut.length ? { budget: RESOLVE_BUDGET, swaps: false } : {}),
           ...(keepOutFor ? { keepOutFor } : {}),
+          // It stops once it can only end worse in pieces than the solve it would replace.
+          ...(keepOut.length && noWorseThan
+            ? { noWorseThan: { ...noWorseThan, spare: firstSwap?.spare } }
+            : {}),
         });
         ix.keepOut = [];
         const out = keepOut.length && firstSwap ? applySwap(solved, firstSwap) : solved;
@@ -1035,6 +1044,9 @@ function baseChecks(
   return keys;
 }
 
+/** Pieces left out, short of room and turned from what they go with (piecesNoWorse). */
+type PieceCounts = { dropped: number; soft: number; broken: number };
+
 /** How many times the walkways are checked again after moving pieces off them. */
 const WALK_ROUNDS = 3;
 
@@ -1048,7 +1060,15 @@ interface Run {
   key: string;
   ix: SpaceIndex;
   wants: Want[];
-  solveWith?: (keepOut: SpaceIndex['keepOut'], keepOutFor?: Set<string>) => SolveOutcome;
+  /**
+   * Solves the space again keeping out of `keepOut`; with `noWorseThan`, it stops (aborted) once
+   * it can only end with more pieces left out, short of room or turned than that.
+   */
+  solveWith?: (
+    keepOut: SpaceIndex['keepOut'],
+    keepOutFor?: Set<string>,
+    noWorseThan?: PieceCounts,
+  ) => SolveOutcome;
   /** By id: pieces that stand free (moved off a walkway before the wall pieces). */
   free?: Set<string>;
   /** The solve in the level now, and how to put a solve in or take it out. */
@@ -1106,15 +1126,16 @@ function keepWalkwaysClear(
     }
     for (const run of again) {
       const was = run.outcome;
-      const out = run.solveWith?.(kept.get(run) ?? [], keptFor.get(run));
-      if (!out || !was || !run.apply || !run.unapply) continue;
       // Taken whole, and only if strictly better and no worse in any way (acceptResolve).
-      const pieces = (o: SolveOutcome) => ({
+      const pieces = (o: SolveOutcome): PieceCounts => ({
         dropped: o.dropped.length,
         soft: o.soft,
         broken: o.broken,
       });
-      if (!piecesNoWorse(pieces(was), pieces(out)) || !run.spaceHard) {
+      // A re-solve that can only end worse in pieces stops early (aborted): refused as it would be.
+      const out = run.solveWith?.(kept.get(run) ?? [], keptFor.get(run), was && pieces(was));
+      if (!out || !was || !run.apply || !run.unapply) continue;
+      if (out.aborted || !piecesNoWorse(pieces(was), pieces(out)) || !run.spaceHard) {
         rejected.add(run);
         continue;
       }
