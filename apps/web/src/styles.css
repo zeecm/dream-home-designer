@@ -8363,6 +8363,12 @@ textarea {
   html[data-talk-sheet] .designer-bar .designer-bar-text {
     display: none;
   }
+  /* My plan before the designer: what the bar is and what Put it back does stay said. */
+  html[data-talk-sheet] .designer-bar-start .designer-bar-text {
+    display: block;
+    order: -1;
+    font-size: var(--fs-hint);
+  }
   html[data-talk-sheet="full"] .reno-bar.designer-bar {
     display: none;
   }

@@ -434,6 +434,12 @@ export function TalkPanel() {
     const t = s.conv?.turns.at(-1);
     return t?.kind === 'cost-ask' && t.state === 'open' ? t.id : null;
   });
+  // My plan before the designer on a phone: the stage's bar (Put it back) is hidden at full
+  // height, so the sheet goes to half, with the plan above it.
+  const startShown = useEditor((s) => !!s.preview?.start);
+  useEffect(() => {
+    if (sheet && startShown) setSize((s) => (s === 'full' ? 'half' : s));
+  }, [sheet, startShown]);
   useEffect(() => {
     if (!sheet || !costCard) return;
     before.current = null;
