@@ -185,6 +185,21 @@ function roomLabel(level: Level, roomId: string): Vec2 {
 
 const memo = new Map<string, DesignResult>();
 
+/** What a result is kept by: the same version on the same plans, with the same options. */
+export const designResultKey = (
+  baseLevel: Level,
+  beforeLevel: Level,
+  design: DesignInput,
+  opts: DesignOptions = {},
+): string =>
+  [
+    design.id,
+    levelFingerprint(baseLevel),
+    levelFingerprint(beforeLevel),
+    hash(stableJson(design)),
+    hash(stableJson(opts)),
+  ].join('|');
+
 /**
  * The result, kept per version and plan: the same version on the same plan (the preview, the
  * Accept dialog, Compare) is worked out once. Frozen: treat it as read-only.
@@ -195,13 +210,7 @@ export function designResult(
   design: DesignInput,
   opts: DesignOptions = {},
 ): DesignResult {
-  const key = [
-    design.id,
-    levelFingerprint(baseLevel),
-    levelFingerprint(beforeLevel),
-    hash(stableJson(design)),
-    hash(stableJson(opts)),
-  ].join('|');
+  const key = designResultKey(baseLevel, beforeLevel, design, opts);
   const hit = memo.get(key);
   if (hit) return hit;
   const out = freeze(work(baseLevel, beforeLevel, design, opts), true);
