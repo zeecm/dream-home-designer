@@ -1,6 +1,7 @@
 import { type Price, priceOf, tokensOf, usdOf } from '@dhd/core';
-import { type AiSettings, PROVIDERS } from '../credentials';
-import { anySignal, failure } from '../providers';
+import { anySignal, failure } from './errors';
+import type { Page } from './page';
+import { type AiSettings, PROVIDERS } from './providers';
 import { type Effort, HttpFail, type StepSink, type StreamHooks, newSink } from './stream';
 
 /**
@@ -49,22 +50,29 @@ export class Interrupted extends Error {
 }
 
 /**
- * When the page last went out of view (ms since the epoch), and how long it was away the last
- * time it came back, for the document watched.
+ * When a page last went out of view (ms since the epoch), and how long it was away the last
+ * time it came back: watched from its first request on. A server has no page, never away.
  */
-let watched: Document | null = null;
-let hiddenAt = Number.NEGATIVE_INFINITY;
-let awayFor = 0;
-const isHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
-function watchPage() {
-  if (typeof document === 'undefined' || watched === document) return;
-  watched = document;
-  hiddenAt = isHidden() ? Date.now() : Number.NEGATIVE_INFINITY;
-  awayFor = 0;
-  document.addEventListener('visibilitychange', () => {
-    if (isHidden()) hiddenAt = Date.now();
-    else awayFor = Date.now() - hiddenAt;
+interface Away {
+  hiddenAt: number;
+  awayFor: number;
+}
+const watched = new WeakMap<Page, Away>();
+const NEVER_AWAY: Readonly<Away> = { hiddenAt: Number.NEGATIVE_INFINITY, awayFor: 0 };
+function watchPage(page: Page | undefined): Readonly<Away> {
+  if (!page) return NEVER_AWAY;
+  const known = watched.get(page);
+  if (known) return known;
+  const away: Away = {
+    hiddenAt: page.hidden() ? Date.now() : Number.NEGATIVE_INFINITY,
+    awayFor: 0,
+  };
+  watched.set(page, away);
+  page.onVisibility(() => {
+    if (page.hidden()) away.hiddenAt = Date.now();
+    else away.awayFor = Date.now() - away.hiddenAt;
   });
+  return away;
 }
 export interface Halt {
   kind: 'quota' | 'key' | 'offline' | 'network';
@@ -80,16 +88,14 @@ export class Halted extends Error {
  * Resolves once the page is in view and online (a phone suspends a hidden tab's requests,
  * so trying while it is hidden only fails again), or after BACK_MS.
  */
-function backOnline(signal: AbortSignal, limit = BACK_MS): Promise<void> {
-  const ready = () =>
-    (typeof document === 'undefined' || document.visibilityState !== 'hidden') &&
-    (typeof navigator === 'undefined' || navigator.onLine !== false);
-  if (ready()) return Promise.resolve();
+function backOnline(page: Page | undefined, signal: AbortSignal, limit = BACK_MS): Promise<void> {
+  const ready = () => !page || (!page.hidden() && !page.offline());
+  if (!page || ready()) return Promise.resolve();
   return new Promise((resolve) => {
     const done = () => {
       clearTimeout(timer);
-      document.removeEventListener('visibilitychange', check);
-      window.removeEventListener('online', check);
+      stopVisibility();
+      stopOnline();
       signal.removeEventListener('abort', done);
       resolve();
     };
@@ -98,8 +104,8 @@ function backOnline(signal: AbortSignal, limit = BACK_MS): Promise<void> {
     };
     // (A delay past 2^31 ms fires at once: no limit means no timer.)
     const timer = Number.isFinite(limit) ? setTimeout(done, limit) : undefined;
-    document.addEventListener('visibilitychange', check);
-    window.addEventListener('online', check);
+    const stopVisibility = page.onVisibility(check);
+    const stopOnline = page.onOnline(check);
     signal.addEventListener('abort', done);
   });
 }
@@ -183,6 +189,8 @@ export interface RequestState {
 export interface RequestOptions<T> {
   ai: AiSettings;
   signal: AbortSignal;
+  /** The browser page it runs in (out of view, offline); none on a server. */
+  page?: Page;
   prices?: Record<string, Price>;
   /** Sends one attempt, streaming into `sink`. */
   send: (effort: Effort, sink: StepSink, signal: AbortSignal, hooks: StreamHooks) => Promise<void>;
@@ -223,7 +231,9 @@ export interface RequestOptions<T> {
 export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
   const { ai, st } = o;
   const name = PROVIDERS[ai.provider].short;
-  watchPage();
+  const page = o.page;
+  const away = watchPage(page);
+  const isHidden = () => !!page?.hidden();
   // This request's own count (a row's fix round is a request of its own: timed apart); the
   // row's total, which the cap counts, goes on.
   st.resent = 0;
@@ -316,12 +326,12 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
       // Cut off while out of view (a locked phone, another app; a stream that went quiet
       // meanwhile too): not a bad connection. Once the page is back and online it goes again
       // at once, as often as that happens.
-      if (o.resumeOnReturn && !(error instanceof HttpFail) && (isHidden() || hiddenAt >= t0)) {
+      if (o.resumeOnReturn && !(error instanceof HttpFail) && (isHidden() || away.hiddenAt >= t0)) {
         st.wait = { seconds: 0, attempt: 0, away: true };
         o.update();
-        await backOnline(o.signal, Number.POSITIVE_INFINITY);
+        await backOnline(page, o.signal, Number.POSITIVE_INFINITY);
         if (o.signal.aborted) throw new Stopped(ABORT_TEXT);
-        if (awayFor > AWAY_MS) throw new Interrupted('away');
+        if (away.awayFor > AWAY_MS) throw new Interrupted('away');
         if ((st.resentAll ?? 0) >= RESENDS) throw new Interrupted('resent');
         if (o.mayRetry?.()) throw new Interrupted('limit');
         st.resent = (st.resent ?? 0) + 1;
@@ -378,7 +388,7 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
         st.retries++;
         st.wait = { seconds, attempt: net, net: true };
         o.update();
-        await backOnline(o.signal);
+        await backOnline(page, o.signal);
         for (let s = seconds; s > 0; s--) {
           st.wait = { seconds: s, attempt: net, net: true };
           o.update();
@@ -386,7 +396,7 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
         }
         continue;
       }
-      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      const offline = !!page?.offline();
       throw new Halted({
         kind: offline ? 'offline' : 'network',
         message: offline ? 'You’re offline.' : `Couldn’t reach ${name}, even after trying again.`,

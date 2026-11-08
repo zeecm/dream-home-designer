@@ -52,6 +52,28 @@
       }
     },
     {
+      "include": ["packages/ai/src/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": [
+                  "document",
+                  "window",
+                  "navigator",
+                  "localStorage",
+                  "sessionStorage",
+                  "indexedDB"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "include": ["apps/web/e2e/**"],
       "ignore": ["apps/web/e2e/test.ts"],
       "linter": {

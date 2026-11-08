@@ -1,155 +1,25 @@
-import {
-  type DesignBrief,
-  type Level,
-  PRICES,
-  type ProposalOption,
-  type RunCheckpoint,
-  aliasesFor,
-  defaultBrief,
-  designResult,
-  sampleFlatProject,
-  usageTotals,
-} from '@dhd/core';
+import { type DesignBrief, designResult, usageTotals } from '@dhd/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AiSettings, Provider } from '../credentials';
-import { answerFor, promptOf } from './fixtures/sample';
-import { type FixtureUsage, anthropicStream, geminiStream, openaiStream } from './fixtures/streams';
-import { type DraftDesign, QUIET_MS, type RunOptions, type RunState, runDesign } from './run';
-import { designerCannotUse, requestFor } from './stream';
 import {
-  approvedLeft,
-  figureHolds,
-  priceRequest,
-  resumeFigure,
-  spentWithInflight,
-} from './talk/pricing';
-
-const level = sampleFlatProject('prj_test').levels[0] as Level;
-const brief: DesignBrief = {
-  ...defaultBrief(),
-  household: { ...defaultBrief().household, elders: ['frame'] },
-  budget: { low: 40_000, high: 60_000 },
-};
-const aliases = aliasesFor(level);
-const ctx = { base: level, before: level, brief, aliases };
-const AI: Record<Provider, AiSettings> = {
-  anthropic: { provider: 'anthropic', key: 'sk-ant-test-0000', model: 'claude-opus-5-5' },
-  openai: { provider: 'openai', key: 'sk-test-0000', model: 'gpt-5' },
-  gemini: { provider: 'gemini', key: 'AIzaTest0000', model: 'gemini-2.5-pro' },
-};
-const USAGE: FixtureUsage = { input: 1000, cached: 3000, output: 2000, thoughts: 500 };
-const STREAMS = { anthropic: anthropicStream, openai: openaiStream, gemini: geminiStream };
-
-const fresh = (): DraftDesign => ({
-  id: 'dsn_run',
+  AI,
+  type Phone,
+  USAGE,
+  away as awayOn,
   brief,
-  aliases,
-  concept: null,
-  spaces: {},
-  usage: [],
-});
-
-interface Call {
-  step: string;
-  body: Record<string, unknown>;
-  headers: Record<string, string>;
-  signal: AbortSignal;
-  release: () => void;
-  /** Cuts its stream off part-way, as a locked phone or a dropped connection does. */
-  cut: () => void;
-  done: boolean;
-}
-
-/**
- * A provider that streams each answer's first event at once and the rest when released
- * (`auto` releases at once); `reply` can answer a call itself (a 429, say).
- */
-function provider(
-  p: Provider,
-  opts: { auto?: boolean; reply?: (c: Call, n: number) => Response | null } = {},
-) {
-  const calls: Call[] = [];
-  const fn = async (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    const a = answerFor(promptOf(body));
-    if (!a) throw new Error('no fixture answers this request');
-    let release: () => void = () => {};
-    const gate = new Promise<void>((r) => {
-      release = r;
-    });
-    const call: Call = {
-      step: a.step,
-      body,
-      headers: init?.headers as Record<string, string>,
-      signal: init?.signal as AbortSignal,
-      release,
-      cut: () => {},
-      done: false,
-    };
-    calls.push(call);
-    const custom = opts.reply?.(call, calls.filter((c) => c.step === call.step).length);
-    if (custom) {
-      call.done = true;
-      return custom;
-    }
-    if (opts.auto) release();
-    const text = STREAMS[p](a.answer, USAGE);
-    const end = /\r?\n\r?\n/.exec(text);
-    const cut = end ? end.index + end[0].length : text.length;
-    const bytes = new TextEncoder();
-    const stream = new ReadableStream<Uint8Array>({
-      async start(ctrl) {
-        const abort = () => {
-          call.done = true;
-          ctrl.error(new DOMException('The operation was aborted.', 'AbortError'));
-        };
-        if (call.signal.aborted) return abort();
-        call.signal.addEventListener('abort', abort, { once: true });
-        call.cut = () => {
-          if (call.done) return;
-          call.done = true;
-          ctrl.error(new TypeError('network error'));
-        };
-        ctrl.enqueue(bytes.encode(text.slice(0, cut)));
-        await gate;
-        if (call.signal.aborted || call.done) return;
-        ctrl.enqueue(bytes.encode(text.slice(cut)));
-        call.done = true;
-        ctrl.close();
-      },
-    });
-    return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } });
-  };
-  return { calls, fetch: fn as typeof fetch };
-}
-
-/** Lets streams and promises run (timers stay put unless asked). */
-async function until(cond: () => boolean, what = 'condition') {
-  for (let i = 0; i < 400; i++) {
-    if (cond()) return;
-    await vi.advanceTimersByTimeAsync(0);
-  }
-  throw new Error(`never: ${what}`);
-}
-
-function start(p: Provider, extra: Partial<RunOptions> & { fetch: typeof fetch }) {
-  const ctrl = new AbortController();
-  const states: RunState[] = [];
-  const saved: DraftDesign[] = [];
-  const run = runDesign({
-    ai: AI[p],
-    ctx,
-    design: fresh(),
-    plan: { layout: {}, rooms: 'all' },
-    signal: ctrl.signal,
-    onUpdate: (s) => states.push(s),
-    onSave: (d) => {
-      saved.push(d);
-    },
-    ...extra,
-  });
-  return { run, ctrl, states, saved, last: () => states[states.length - 1] };
-}
+  ctx,
+  fakePhone,
+  fresh,
+  midRun as midRunOn,
+  provider,
+  rowOf,
+  start,
+  until,
+} from './fixtures/runner';
+import { answerFor, promptOf } from './fixtures/sample';
+import { anthropicStream } from './fixtures/streams';
+import { QUIET_MS } from './request';
+import { type RunOptions, runDesign } from './run';
+import { designerCannotUse, requestFor } from './stream';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -679,7 +549,7 @@ describe('the requests', () => {
   };
 
   it('Claude: streamed, JSON schema, adaptive thinking, the stable prefix cached', () => {
-    const r = requestFor(AI.anthropic, prompt);
+    const r = requestFor(AI.anthropic, prompt, undefined, { browser: true });
     expect(r.url).toBe('https://api.anthropic.com/v1/messages');
     expect(r.headers['anthropic-version']).toBe('2026-10-21');
     expect(r.headers['anthropic-dangerous-direct-browser-access']).toBe('true');
@@ -749,53 +619,44 @@ describe('the requests', () => {
       generationConfig: { thinkingConfig: { thinkingLevel: 'low' } },
     });
   });
+
+  it('tells Claude it comes from a browser only from one: a server sends the same request without', () => {
+    const header = 'anthropic-dangerous-direct-browser-access';
+    const server = requestFor(AI.anthropic, prompt);
+    const browser = requestFor(AI.anthropic, prompt, undefined, { browser: true });
+    expect(server.headers[header]).toBeUndefined();
+    expect(browser.headers).toEqual({ ...server.headers, [header]: 'true' });
+    expect(browser.body).toEqual(server.body);
+    // Only Claude's requests carry it.
+    for (const p of ['openai', 'gemini'] as const) {
+      expect(requestFor(AI[p], prompt, undefined, { browser: true })).toEqual(
+        requestFor(AI[p], prompt),
+      );
+    }
+  });
+
+  it('a run sends the browser header from its page only', async () => {
+    const header = 'anthropic-dangerous-direct-browser-access';
+    for (const page of [fakePhone().page, undefined]) {
+      const prov = provider('anthropic', { auto: true });
+      const { state } = await start('anthropic', { fetch: prov.fetch, ...(page ? { page } : {}) })
+        .run;
+      expect(state.phase).toBe('done');
+      expect(prov.calls).toHaveLength(5);
+      for (const c of prov.calls) expect(c.headers[header]).toBe(page ? 'true' : undefined);
+    }
+  });
 });
 
 describe('a locked phone: a step cut off while away goes again on return (locked-phone runs, part 1)', () => {
-  class Page extends EventTarget {
-    visibilityState: 'visible' | 'hidden' = 'visible';
-  }
-  let page: Page;
+  let phone: Phone;
   beforeEach(() => {
-    page = new Page();
-    vi.stubGlobal('document', page);
-    vi.stubGlobal('window', new EventTarget());
+    phone = fakePhone();
   });
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-  const turn = (to: 'visible' | 'hidden') => {
-    page.visibilityState = to;
-    page.dispatchEvent(new Event('visibilitychange'));
-  };
-
-  /** A whole flat with rooms 1 and 2 done, rooms 3 and 4 in flight; room 3's label. */
-  async function midRun(extra: Partial<RunOptions> = {}) {
-    const prov = provider('anthropic');
-    const r = start('anthropic', { fetch: prov.fetch, ...extra });
-    await until(() => prov.calls.length === 1, 'layout');
-    prov.calls[0]?.release();
-    await until(() => prov.calls.length === 4, 'rooms 1 to 3');
-    prov.calls[1]?.release();
-    prov.calls[2]?.release();
-    await until(() => prov.calls.length === 5, 'room 4');
-    const room3 = prov.calls[3]?.step as string;
-    const of = (step: string) => prov.calls.filter((c) => c.step === step);
-    return { prov, r, room3, of };
-  }
-  /** A step's row, by the fixture's step name ('furnish "Living' is Living and dining). */
-  const rowOf = (state: RunState, step: string) => {
-    const name = step.replace(/^furnish "/, '').replace(/"$/, '');
-    return state.steps.find((s) => s.label.startsWith(name));
-  };
-
-  /** Cut off while hidden, and away `ms` before the page is back. */
-  async function away(r: Awaited<ReturnType<typeof midRun>>['r'], cut: () => void, ms: number) {
-    turn('hidden');
-    cut();
-    await until(() => !!r.last()?.steps.some((s) => s.wait?.away), 'waiting for the page');
-    await vi.advanceTimersByTimeAsync(ms);
-  }
+  const turn = (to: 'visible' | 'hidden') => phone.turn(to);
+  const midRun = (extra: Partial<RunOptions> = {}) => midRunOn(phone, extra);
+  const away = (r: Awaited<ReturnType<typeof midRun>>['r'], cut: () => void, ms: number) =>
+    awayOn(phone, r, cut, ms);
 
   it('the step in flight is sent again once the page is back; four returns in a run carry on; finished steps never (criteria 1, 2)', async () => {
     const resent: string[] = [];
@@ -882,6 +743,7 @@ describe('a locked phone: a step cut off while away goes again on return (locked
     let rooms = 0;
     const prov = provider('anthropic');
     const r = start('anthropic', {
+      page: phone.page,
       fetch: prov.fetch,
       onUsage: (u) => {
         spent += u.usd ?? 0;
@@ -962,113 +824,5 @@ describe('a locked phone: a step cut off while away goes again on return (locked
         .map((s) => s.status)
         .sort(),
     ).toEqual(['done', 'done', 'skipped', 'skipped']);
-  });
-
-  it('killed mid-step, then carried on from its checkpoint: only the room left is asked for', async () => {
-    const { prov, r, room3, of } = await midRun();
-    await away(r, () => of(room3)[0]?.cut(), 11 * 60_000);
-    turn('visible');
-    for (const c of prov.calls) c.release();
-    await r.run;
-    // What the page kept: the version as last saved, and the checkpoint written with it.
-    const d = r.saved.at(-1) as DraftDesign;
-    const project = sampleFlatProject('prj_test');
-    const option: ProposalOption = {
-      letter: 'A',
-      name: 'Whole flat',
-      designId: d.id,
-      brief: d.brief,
-      aliases: d.aliases,
-      concept: d.concept,
-      spaces: d.spaces,
-      locks: [],
-      usage: d.usage,
-      base: { variant: 'before', fingerprint: 'fp' },
-      status: 'running',
-      ticks: null,
-      accepted: [],
-      note: null,
-      waivers: [],
-      version: null,
-    };
-    const run: RunCheckpoint = {
-      id: 'run_test',
-      startedAt: new Date().toISOString(),
-      at: new Date().toISOString(),
-      provider: 'anthropic',
-      model: 'claude-opus-5-5',
-      plan: { layout: {}, rooms: 'all' },
-      layout: 'done',
-      rooms: Object.keys(d.spaces),
-      fixesLeft: 2,
-      approved: null,
-      spent: 0,
-      inflight: [],
-      stopped: false,
-      paused: null,
-      times: [],
-    };
-    const scope = { label: 'Whole flat', spaces: [], all: true };
-    const priced = priceRequest({
-      project,
-      levelId: project.levels[0]?.id ?? '',
-      designs: [],
-      brief: d.brief,
-      scope,
-      words: '',
-      resume: { option, run, scope },
-      designId: d.id,
-      opts: {},
-      ai: { provider: 'anthropic', model: 'claude-opus-5-5' },
-      prices: PRICES,
-    });
-    const left = Object.entries(d.spaces)
-      .filter(([, s]) => s.status !== 'done')
-      .map(([k]) => k);
-    const key0 = left[0] as string;
-    expect(left).toHaveLength(2);
-    expect(priced?.sp.plan).toMatchObject({ layout: null, rooms: left });
-    // Priced for what is left only: those two rooms' requests.
-    expect(priced?.est.steps).toHaveLength(2);
-    // Carry on's figure (criterion 6): those steps at their high, and the fix rounds left.
-    const est = priced?.est;
-    if (!est?.usd) throw new Error('not priced');
-    const high = est.steps.reduce((t, s) => t + (s.usd?.high ?? 0), 0);
-    expect(est.usd.high).toBeCloseTo(high, 6);
-    expect(resumeFigure(est, run.fixesLeft)).toBeCloseTo(
-      high + (est.usd.fix * run.fixesLeft) / est.fixes,
-      6,
-    );
-    expect(resumeFigure(est, 0)).toBeCloseTo(high, 6);
-    // Bound to the figure its button showed: priced higher now, it asks again.
-    expect(figureHolds(0.4, 0.4)).toBe(true);
-    expect(figureHolds(0.4, 0.39)).toBe(true);
-    expect(figureHolds(0.4, 0.41)).toBe(false);
-    expect(figureHolds(null, 0.4)).toBe(false);
-    // By itself it may spend what is left of its figure, less what it spent and the steps
-    // that were in flight at their most (a page that died mid-step never metered them).
-    const cut = { ...run, approved: 1, spent: 0.2, inflight: [{ step: key0, high: 0.3 }] };
-    expect(spentWithInflight(cut)).toBeCloseTo(0.5, 9);
-    expect(approvedLeft(cut)).toBeCloseTo(0.5, 9);
-    expect(approvedLeft({ ...cut, spent: 0.9 })).toBe(0);
-    expect(approvedLeft({ ...cut, approved: null })).toBeNull();
-    const prov2 = provider('anthropic', { auto: true });
-    const again = await runDesign({
-      ai: AI.anthropic,
-      ctx: priced?.sp.ctx as RunOptions['ctx'],
-      design: priced?.sp.draft as DraftDesign,
-      plan: priced?.sp.plan as RunOptions['plan'],
-      signal: new AbortController().signal,
-      fetch: prov2.fetch,
-      fixesLeft: run.fixesLeft,
-    });
-    // Only the two rooms left: never the layout or a finished room again.
-    expect(prov2.calls).toHaveLength(2);
-    expect(prov2.calls.map((c) => c.step)).toContain(room3);
-    expect(prov2.calls.some((c) => c.step === 'layout')).toBe(false);
-    expect(again.state.phase).toBe('done');
-    expect(Object.values(again.design.spaces).every((s) => s.status === 'done')).toBe(true);
-    // Its earlier usage is kept with it, the new requests' added.
-    expect(again.design.usage.length).toBe(d.usage.length + 2);
   });
 });

@@ -8,6 +8,13 @@ import {
   levelFingerprint,
   parseSpaceDesign,
 } from '@dhd/core';
+import { answerFor, promptOf } from '../../../packages/ai/src/fixtures/sample';
+import {
+  type FixtureUsage,
+  anthropicStream,
+  geminiStream,
+  openaiStream,
+} from '../../../packages/ai/src/fixtures/streams';
 import living from '../../../packages/core/src/designer/fixtures/room-living.json' with {
   type: 'json',
 };
@@ -23,13 +30,6 @@ import {
   REPLY_WISH,
   ruleReply,
 } from '../../../packages/core/src/designer/talk/fixtures/rule-wordings';
-import { answerFor, promptOf } from '../src/ai/designer/fixtures/sample';
-import {
-  type FixtureUsage,
-  anthropicStream,
-  geminiStream,
-  openaiStream,
-} from '../src/ai/designer/fixtures/streams';
 import { waitSaved } from './helpers';
 import { type Page, type Route, devices, expect, test } from './test';
 

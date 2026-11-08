@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { failure, inSettings, providerMessage, redact } from './providers';
+import { failure, inSettings, providerMessage, redact } from './errors';
 
 describe('provider error messages', () => {
   it('reads error.message from each provider’s error body', () => {

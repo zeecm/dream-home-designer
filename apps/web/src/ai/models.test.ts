@@ -1,3 +1,4 @@
+import { AiError } from '@dhd/ai';
 import { describe, expect, it } from 'vitest';
 import { afterEach, vi } from 'vitest';
 import { priceNote } from './credentials';
@@ -13,7 +14,6 @@ import {
   parseOpenAi,
   recommended,
 } from './models';
-import { AiError } from './providers';
 
 /** Trimmed from Gemini's `GET /v1beta/models` answer. */
 const gemini = {

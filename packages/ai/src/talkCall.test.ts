@@ -12,10 +12,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   REPLY_PLAN as REPLY_PLAN_FIXTURE,
   REPLY_TEXT as REPLY_TEXT_FIXTURE,
-} from '../../../../../../packages/core/src/designer/talk/fixtures/replies';
-import type { AiSettings } from '../../credentials';
-import { anthropicStream } from '../fixtures/streams';
-import { NET_WAITS } from '../request';
+} from '../../core/src/designer/talk/fixtures/replies';
+import { anthropicStream } from './fixtures/streams';
+import type { AiSettings } from './providers';
+import { NET_WAITS } from './request';
 import { type TalkCallResult, talkCall } from './talkCall';
 
 const level = sampleFlatProject('prj_t').levels[0] as Level;

@@ -1,3 +1,4 @@
+import { designerCannotUse } from '@dhd/ai';
 import {
   DRAFT_CHARS,
   type ScopeRef,
@@ -11,7 +12,6 @@ import { useAi } from '../../credentials';
 import { useResultsTickN } from '../results';
 import { capUsd, spent, tokens, usd, useSpend } from '../spend';
 import { useDesigner } from '../state';
-import { designerCannotUse } from '../stream';
 import { pressScope, scopePrice, stopTalkRun } from './propose';
 import { scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';

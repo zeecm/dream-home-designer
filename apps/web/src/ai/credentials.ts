@@ -1,3 +1,4 @@
+import { type AiSettings, PROVIDERS, type Provider } from '@dhd/ai';
 import { useSyncExternalStore } from 'react';
 
 /**
@@ -7,52 +8,6 @@ import { useSyncExternalStore } from 'react';
  * browser. One provider is the one in use for reading plans; renders use one that can make
  * pictures (OpenAI or Gemini).
  */
-export type Provider = 'anthropic' | 'openai' | 'gemini';
-
-export interface AiSettings {
-  provider: Provider;
-  key: string;
-  /** Reads plans and suggests layouts. */
-  model: string;
-  /** Makes pictures (OpenAI and Gemini); the provider's default when not chosen. */
-  imageModel?: string;
-  /** Kept on this device (localStorage); otherwise only until the tab closes. */
-  remember?: boolean;
-}
-
-export const PROVIDERS: Record<
-  Provider,
-  {
-    name: string;
-    /** In sentences: "Gemini turned the request down". */
-    short: string;
-    model: string;
-    keyHint: string;
-    /** The picture model when none was chosen (a key saved before the choice existed). */
-    imageModel?: string;
-  }
-> = {
-  anthropic: {
-    name: 'Claude (Anthropic)',
-    short: 'Claude',
-    model: 'claude-opus-5-5',
-    keyHint: 'sk-ant-…',
-  },
-  openai: {
-    name: 'OpenAI',
-    short: 'OpenAI',
-    model: 'gpt-5',
-    keyHint: 'sk-…',
-    imageModel: 'gpt-image-1',
-  },
-  gemini: {
-    name: 'Gemini (Google)',
-    short: 'Gemini',
-    model: 'gemini-3-pro',
-    keyHint: 'AIza…',
-    imageModel: 'gemini-2.5-flash-image',
-  },
-};
 
 /**
  * The models to offer when the provider's own list can't be had (a network or key problem),

@@ -30,8 +30,9 @@ import {
   usageOf,
   usdOf,
 } from '@dhd/core';
-import { type AiSettings, PROVIDERS } from '../credentials';
-import { AiError } from '../providers';
+import { AiError } from './errors';
+import type { Page } from './page';
+import { type AiSettings, PROVIDERS } from './providers';
 import {
   type Halt,
   Halted,
@@ -120,6 +121,11 @@ export interface RunOptions {
   design: DraftDesign;
   plan: RunPlan;
   signal: AbortSignal;
+  /**
+   * The browser page it runs in: a step cut off while it was out of view goes again on its
+   * return. None on a server (no page to wait for, no browser-only header).
+   */
+  page?: Page;
   prices?: Record<string, Price>;
   result?: DesignOptions;
   /** Labels for the room rows before the layout is known. */
@@ -164,8 +170,6 @@ export interface RunOptions {
    */
   askAgain?: boolean;
 }
-
-export { NET_WAITS, QUIET_MS, classify } from './request';
 
 /** Furniture or built-ins: which part an answer's piece is. */
 function aspectOfAnswer(assetId: string, o: DesignOptions | undefined): Aspect {
@@ -374,9 +378,10 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     return requestStep({
       ai,
       signal: o.signal,
+      ...(o.page ? { page: o.page } : {}),
       ...(o.prices ? { prices: o.prices } : {}),
       send: (effort, sink, signal, hooks) =>
-        streamStep(ai, p, effort, sink, signal, hooks, doFetch),
+        streamStep(ai, p, effort, sink, signal, hooks, doFetch, { browser: !!o.page }),
       effort: p.effort,
       promptChars: p.system.length + p.prefix.length + p.shared.length + p.tail.length,
       maxTokens: p.maxTokens,

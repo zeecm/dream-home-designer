@@ -1,3 +1,4 @@
+import type { RunState } from '@dhd/ai';
 import {
   type Conversation,
   type DesignBrief,
@@ -13,7 +14,6 @@ import {
 import { create } from 'zustand';
 import { meterSetting, setMeterAmount, useStorage } from '../../../storage/store';
 import { shownLevelId, useStore } from '../../../store';
-import type { RunState } from '../run';
 import { getBrief, loadDesigns, putBrief, setHouseRules, useDesigner } from '../state';
 import { onOtherTab, talkStore, talkStoreReady } from './talkStore';
 import type { TimeLeft } from './timeLeft';

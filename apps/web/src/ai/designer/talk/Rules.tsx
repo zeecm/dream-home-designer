@@ -1,3 +1,4 @@
+import { designerCannotUse } from '@dhd/ai';
 import {
   type Decision,
   MAX_RULES,
@@ -14,7 +15,6 @@ import { LengthField } from '../../../ui/fields';
 import { useAi } from '../../credentials';
 import { useResultsTickN } from '../results';
 import { tokens, usd } from '../spend';
-import { designerCannotUse } from '../stream';
 import { Mark } from './Mark';
 import { cardResult } from './cards';
 import {
