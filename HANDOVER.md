@@ -646,6 +646,19 @@ would replace (`noWorseThan`: it could only be refused). Layouts unchanged. Next
 Slice 2 (the conversation) is designed: `designer-v2/slice2-ux.md` and `slice2-tech.md` in
 the session scratchpad, decisions folded into the build; PR 1 is being built.
 
+**AI designer v2, slice 2 PR 1 (the conversation, 8 Nov):** core `designer/talk/` (zod records
+with `TALK_LIMITS`, the reducer, first meeting, change sets and `acceptChanges`/`putPlanBack`
+Commands in `talk/changes.ts`, pricing `askRule`/`estimatePlan`); web `apps/web/src/ai/designer/talk/`
+(panel and phone sheet, cards, scope buttons, cost cards, IndexedDB `dhd-talk`, separate from
+`dhd-designs`, records checked before every write, a newer build's record never touched). Money
+only leaves from a priced button; Go ahead is bound to the figure shown. Cards compute from the
+project once edits pause (`useSettledProject`), folded cards not at all. Known gaps for PR 2:
+designing levels other than the first; on a no-bedroom plan "Just design it" leaves nobody a bed
+with no row to change it; a failed card still offers Show in 3D and Another idea; focus after a
+cost card or a finished run; after Undo the card's ticks reset; the "Updated from another tab"
+line never shows; the plan doesn't zoom to the proposal's room. Design docs: `slice2-ux.md`,
+`slice2-tech.md`; QA results `s2pr1-qa.md` (session scratchpad).
+
 **Drag on big plans (task #69):** room labels are fitted once per room (`fitRoomLabel`,
 memo keyed on everything the fit reads) with `placeLabel` filtering far circles and searching
 nearest-first (exact, ties kept); `wallStatuses`, `planGeometry`, `roomShapes` and

@@ -98,9 +98,11 @@ for any plan.
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
-- AI interior designer v2: a designer you talk to. Slice 2 being built: a conversation panel
-  (a sheet on the phone) that greets you from your plan, asks what it needs, and proposes room by
-  room, with each change accepted on its own and every paid step priced first.
+- AI interior designer v2: a designer you talk to. Slice 2, part 1 built: a conversation panel
+  (a sheet on the phone) that greets you from your plan, asks who lives here and who sleeps
+  where, and proposes room by room at a price shown first; each change is ticked and accepted on
+  its own, with Undo, and the conversation is kept on your device. Next: free typing with
+  streamed replies (part 2), then alternatives and versions (part 3).
   [spec](docs/specs/ai-designer-v2.md)
 - Storage meter, slice 1 built: clothes, shoes, kitchen and everything else against who lives
   here, room by room, with shortfalls priced as built-in carpentry; next storage beds, a pantry
