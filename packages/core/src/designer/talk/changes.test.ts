@@ -299,6 +299,38 @@ describe('mergeChanges and acceptChanges (criterion 23)', () => {
     expect(s2.doc.renovation).toBeUndefined();
     expect(undo(s2).doc).toEqual(s1.doc);
   });
+
+  it('putPlanBack puts the lights back too, and a level changed only in its lights still counts', () => {
+    const two = twoLevelProject();
+    const [ground, upper] = two.levels as [Level, Level];
+    const copy = (l: Level) => ({ ...structuredClone(l), id: `${l.id}${AFTER_SUFFIX}` });
+    const light = {
+      id: 'lt_1',
+      kind: 'point' as const,
+      position: { x: 1, y: 2.4, z: 1 },
+      color: '#ffffff',
+      intensity: 1,
+    };
+    const gAfter = { ...copy(ground), lights: { lt_1: light } };
+    const uAfter = { ...copy(upper), lights: { lt_1: light } };
+    const s0: EditorDoc = {
+      doc: { ...two, renovation: { levels: [gAfter, uAfter] } },
+      history: emptyHistory(),
+    };
+    const s1 = dispatch(s0, putPlanBack(upper.id, null));
+    const after = s1.doc.renovation?.levels ?? [];
+    expect(after.find((l) => l.id === uAfter.id)?.lights).toEqual(upper.lights);
+    // Ground differs only in a light: the renovation stays.
+    expect(after.find((l) => l.id === gAfter.id)?.lights).toEqual({ lt_1: light });
+    const s2 = dispatch(s1, putPlanBack(ground.id, null));
+    expect(s2.doc.renovation).toBeUndefined();
+    // From a start snapshot with its own lights: those, exactly.
+    const start = { ...structuredClone(upper), lights: { lt_1: light } };
+    const s3 = dispatch({ doc: two, history: emptyHistory() }, putPlanBack(upper.id, start));
+    expect(s3.doc.renovation?.levels.find((l) => l.id === uAfter.id)?.lights).toEqual({
+      lt_1: light,
+    });
+  });
 });
 
 describe('subsetReport', () => {

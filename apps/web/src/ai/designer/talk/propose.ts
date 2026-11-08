@@ -38,6 +38,7 @@ import {
   actProposal,
   clearTyped,
   designLevelId,
+  levelGone,
   newId,
   nowIso,
   say,
@@ -97,7 +98,7 @@ export const planRequest = (plan: TalkPlan, said: string, scope?: ScopeRef): Pre
 function priceInput(req: PressRequest, designId: string): Omit<PriceInput, 'designs'> | null {
   const conv = useTalk.getState().conv;
   const ai = aiSettings();
-  if (!conv || !ai || designerCannotUse(ai)) return null;
+  if (!conv || !ai || designerCannotUse(ai) || levelGone()) return null;
   const project = doc();
   let finish: PriceInput['finish'];
   if (req.finish) {
@@ -198,6 +199,8 @@ export const finishPrice = (p: Proposal, letter: string, rooms: string[]) =>
 let starting = false;
 function begin(): boolean {
   if (starting || useDesigner.getState().run || useTalk.getState().reply) return false;
+  // Its level gone from the plan: nothing runs (the panel says why).
+  if (levelGone()) return false;
   starting = true;
   useDesigner.setState({ starting: true });
   return true;

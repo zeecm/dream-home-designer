@@ -699,7 +699,6 @@ export function useLevel(): Level | undefined {
   return level;
 }
 
-/** useLevel outside React, as it is now. */
 /**
  * The id (in the plan as it is) of the level the editor shows: what the designer designs when
  * a conversation starts.
@@ -709,6 +708,7 @@ export const shownLevelId = (): string | undefined => {
   return l ? beforeId(l.id) : undefined;
 };
 
+/** useLevel outside React, as it is now. */
 export const currentLevel = (): Level | undefined => {
   const { preview, variant } = useEditor.getState();
   if (preview) return preview.side === 'before' ? preview.before : preview.level;

@@ -29,6 +29,8 @@ import {
   act,
   actProposal,
   designLevelId,
+  levelGone,
+  levelGoneText,
   loadTalk,
   newId,
   nowIso,
@@ -74,6 +76,15 @@ export async function bringBack(src: BringSource): Promise<string | null> {
 }
 
 async function bringBackOnce(src: BringSource): Promise<string | null> {
+  if (levelGone()) {
+    toast(levelGoneText());
+    return null;
+  }
+  // A version of another level is never brought back onto this one.
+  if (src.kind === 'design' && src.design.levelId !== designLevelId()) {
+    toast(`${titleOf(src)} designs another level; it can't be brought back here.`);
+    return null;
+  }
   const conv = useTalk.getState().conv;
   const project = doc();
   const b = nowOf(project, designLevelId());
@@ -146,6 +157,10 @@ export const startDay = () => {
  * on the stage, in a preview (nothing changes until Put it back).
  */
 export async function showStart() {
+  if (levelGone()) {
+    toast(levelGoneText());
+    return;
+  }
   const level = await startLevel();
   const before = talkLevels()?.before;
   if (!level || !before) {
@@ -194,6 +209,11 @@ export function putBackWords(start: Level, day: string): string {
  * none), as one undo step; the app line offers Undo through the toolbar's history.
  */
 export async function putItBack(): Promise<boolean> {
+  // The start snapshot is of the conversation's level: only ever put back onto it.
+  if (levelGone()) {
+    toast(levelGoneText());
+    return false;
+  }
   const conv = useTalk.getState().conv;
   const before = talkLevels()?.before;
   if (!conv || !before) return false;

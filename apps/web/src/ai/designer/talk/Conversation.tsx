@@ -32,9 +32,11 @@ import {
   act,
   designLevelId,
   ensureConversation,
+  levelGoneText,
   newId,
   nowIso,
   talkLevel,
+  useLevelGone,
   useTalk,
 } from './useTalk';
 import { useProposalView } from './view';
@@ -200,7 +202,16 @@ function OtherLevel() {
   const project = useProject();
   useEditor((s) => s.variant);
   const mine = useTalk((s) => s.conv?.levelId);
+  const gone = useLevelGone();
   const shown = shownLevelId();
+  // Its level gone: read only (nothing is placed, accepted or run) until Start over.
+  if (gone) {
+    return (
+      <p className="field-hint talk-memory talk-unsaved" data-level-gone="">
+        {levelGoneText()}
+      </p>
+    );
+  }
   if (!mine || !shown || mine === shown) return null;
   const name = (id: string) => designLevels(project, id)?.before.name ?? 'another level';
   return (
@@ -321,6 +332,7 @@ export function TalkPanel() {
   const aside = useRef<HTMLElement>(null);
   const [fresh, setFresh] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  const gone = useLevelGone();
 
   // Focus never falls to the page when the control that had it goes; `/` goes to the composer.
   useEffect(() => {
@@ -691,7 +703,7 @@ export function TalkPanel() {
           <Log key={fresh ? 'new' : 'old'} />
         )}
       </div>
-      {view === 'log' && !newer && (
+      {view === 'log' && !newer && !gone && (
         <Composer
           onFocus={() => {
             if (!sheet) return;

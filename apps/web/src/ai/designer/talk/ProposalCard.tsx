@@ -411,9 +411,13 @@ export const ProposalCard = memo(function ProposalCard({
         <h3 className="talk-card-title" id={`card-${card.key}`}>
           {card.title} · {headLabel(project, card)}
         </h3>
-        <p className="talk-card-note muted" aria-busy="true">
-          Checking it on your plan…
-        </p>
+        {nowOf(project, card.levelId) ? (
+          <p className="talk-card-note muted" aria-busy="true">
+            Checking it on your plan…
+          </p>
+        ) : (
+          <p className="talk-card-note muted">Its level is no longer in the plan.</p>
+        )}
       </article>
     );
   }

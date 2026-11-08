@@ -32,7 +32,17 @@ import {
 import { focusInLog } from './scroll';
 import { talkStore } from './talkStore';
 import { lineTitle } from './titles';
-import { act, actProposal, newId, nowIso, say, useTalk } from './useTalk';
+import {
+  act,
+  actProposal,
+  designLevelId,
+  levelGone,
+  levelGoneText,
+  newId,
+  nowIso,
+  say,
+  useTalk,
+} from './useTalk';
 
 /**
  * Accept selected (UX §7.4): the ticked changes go into the renovation through one Command,
@@ -78,6 +88,20 @@ export function precheckAccept(
   );
 }
 
+/**
+ * Why a card can't be accepted on account of its level: the conversation's has gone from the
+ * plan, or the card designs another level than the one this conversation merges into.
+ */
+export function levelRefusal(card: CardModel): string | null {
+  if (levelGone()) return levelGoneText();
+  if (card.levelId !== designLevelId()) {
+    const project = useStore.getState().editor.doc;
+    const name = designLevels(project, card.levelId)?.before.name ?? 'another level';
+    return `${card.title} designs ${name}, not the level this conversation designs, so nothing was accepted.`;
+  }
+  return null;
+}
+
 /** Why nothing was accepted when the card couldn't be checked on the plan as it is. */
 export const NOT_CHECKED =
   'Couldn’t check these changes on your plan as it is, so nothing was accepted. Try again.';
@@ -92,6 +116,11 @@ export async function precheckNow(
   ticked: string[],
   waived: readonly string[],
 ): Promise<{ failing: ResultCheck[]; hdb: boolean } | null> {
+  const refused = levelRefusal(card);
+  if (refused) {
+    await nothing(refused);
+    return null;
+  }
   const r = await cardResultNow(useStore.getState().editor.doc, card).catch(() => null);
   const pre = precheckAccept(card, ticked, waived, r);
   if (pre.missing) {
@@ -136,6 +165,8 @@ async function acceptOnce(
   ticked: string[],
   waive: { key: string; text: string }[],
 ): Promise<string | null> {
+  const refused = levelRefusal(card);
+  if (refused) return nothing(refused);
   const project = useStore.getState().editor.doc;
   const b = nowOf(project, card.levelId);
   const r = await cardResultNow(project, card);

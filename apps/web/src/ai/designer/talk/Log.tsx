@@ -51,7 +51,16 @@ import {
 import { toNewest } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { lineTitle, versionTitle } from './titles';
-import { act, designLevelId, newId, nowIso, talkLevel, useBusy, useTalk } from './useTalk';
+import {
+  act,
+  designLevelId,
+  newId,
+  nowIso,
+  talkLevel,
+  useBusy,
+  useLevelGone,
+  useTalk,
+} from './useTalk';
 
 /**
  * The conversation's log (UX §5.3, §6): your turns in a bubble on the right, the designer's
@@ -250,6 +259,8 @@ function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
   );
   const conflict = level ? sleepingConflict(conv.brief, level) : null;
   const cant = ai && designerCannotUse(ai);
+  // Its level gone from the plan: nothing to offer (the panel says why).
+  const gone = useLevelGone();
   return (
     <article className="talk-turn talk-designer" aria-labelledby={`h-${t.id}`}>
       <h3 id={`h-${t.id}`} className="visually-hidden">
@@ -283,7 +294,7 @@ function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
           </button>
         </p>
       )}
-      {latest && ai && !cant && (
+      {latest && ai && !cant && !gone && (
         <ul className="talk-scopes">
           {priced.map(({ s, est, pending }) => (
             <li key={s.label}>
@@ -310,7 +321,7 @@ function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
           ))}
         </ul>
       )}
-      {latest && ai && !cant && (
+      {latest && ai && !cant && !gone && (
         <p className="talk-text muted">
           Or tell me what you’d like below; your words go with the room you pick.
         </p>

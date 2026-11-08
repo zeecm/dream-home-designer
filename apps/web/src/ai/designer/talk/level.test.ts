@@ -26,7 +26,9 @@ vi.mock('../state', () => ({
 }));
 vi.mock('../results', () => ({}));
 
-const { designLevelId, talkLevel, talkLevels, useTalk } = await import('./useTalk');
+const { designLevelId, levelGone, levelGoneText, talkLevel, talkLevels, useTalk } = await import(
+  './useTalk'
+);
 const { headLabel, nowOf, optionCard } = await import('./cards');
 
 describe('the level a conversation designs', () => {
@@ -50,9 +52,28 @@ describe('the level a conversation designs', () => {
     });
   });
 
-  it('a level gone from the plan: the level shown', () => {
+  it('a level gone from the plan: read only, never moved onto the level shown', () => {
     useTalk.setState({ conv: { levelId: 'lvl_gone' } as Conversation });
-    expect(designLevelId()).toBe(ground.id);
+    expect(designLevelId()).toBe('lvl_gone');
+    expect(levelGone()).toBe(true);
+    expect(talkLevel()).toBeUndefined();
+    expect(talkLevels()).toBeNull();
+    expect(levelGoneText()).toBe(
+      'This conversation’s level is no longer in the plan. Start over to design Ground.',
+    );
+  });
+
+  it('an accept is refused on a card of another level, or once the level has gone', async () => {
+    const { levelRefusal } = await import('./accept');
+    const card = (levelId: string) =>
+      ({ levelId, title: 'V2' }) as Parameters<typeof levelRefusal>[0];
+    useTalk.setState({ conv: { levelId: ground.id } as Conversation });
+    expect(levelRefusal(card(ground.id))).toBeNull();
+    expect(levelRefusal(card(upper.id))).toBe(
+      'V2 designs Upper, not the level this conversation designs, so nothing was accepted.',
+    );
+    useTalk.setState({ conv: { levelId: 'lvl_gone' } as Conversation });
+    expect(levelRefusal(card('lvl_gone'))).toMatch(/^This conversation’s level is no longer/);
   });
 
   it('each card names its level, and is placed on it', () => {

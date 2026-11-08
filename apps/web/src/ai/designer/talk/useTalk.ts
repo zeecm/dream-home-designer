@@ -144,13 +144,30 @@ const doc = () => useStore.getState().editor.doc;
 
 /**
  * The level the conversation designs (a home of several levels is designed a level at a time):
- * its own, set from the level shown when it started. Before one starts, or if its level has
- * gone from the plan, the level shown.
+ * its own, set from the level shown when it started; before one starts, the level shown. It
+ * never moves to another level: if its own has gone from the plan, the conversation is read
+ * only (`levelGone`) until Start over.
  */
-export const designLevelId = (): string => {
+export const designLevelId = (): string => useTalk.getState().conv?.levelId ?? shownLevelId() ?? '';
+
+/** The conversation's level is no longer in the plan: nothing is placed, accepted or run. */
+export const levelGone = (): boolean => {
   const id = useTalk.getState().conv?.levelId;
-  if (id && designLevels(doc(), id)) return id;
-  return shownLevelId() ?? '';
+  return !!id && !designLevels(doc(), id);
+};
+
+/** `levelGone`, re-rendering as the plan or the conversation changes. */
+export const useLevelGone = (): boolean => {
+  const id = useTalk((s) => s.conv?.levelId);
+  const levels = useStore((s) => s.editor.doc.levels);
+  return !!id && !levels.some((l) => l.id === id);
+};
+
+/** What says the conversation is read only (its level gone), naming the level to start on. */
+export const levelGoneText = () => {
+  const shown = shownLevelId();
+  const name = (shown && designLevels(doc(), shown)?.before.name) || 'the level shown';
+  return `This conversation’s level is no longer in the plan. Start over to design ${name}.`;
 };
 
 /** That level as the designer works on it: its renovation when there is one, else as it is. */
