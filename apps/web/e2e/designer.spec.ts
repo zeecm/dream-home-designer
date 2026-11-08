@@ -1755,7 +1755,11 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     // The tools at the foot give way to the sheet; the plan above shows the proposal.
     await expect(page.locator('.palette')).toBeHidden();
     await shot(page, 'phone-proposal');
-    // Full height, then fold to peek, each by its handle.
+    // Full height (the cost card took it there, its answers in sight), then smaller and
+    // folded to peek, each by its handle; and full again by the handle.
+    await expect(panel(page)).toHaveClass(/talk-full/);
+    await panel(page).getByRole('button', { name: 'Make the designer smaller' }).tap();
+    await expect(panel(page)).toHaveClass(/talk-half/);
     await panel(page).getByRole('button', { name: 'Make the designer full height' }).tap();
     await expect(panel(page)).toHaveClass(/talk-full/);
     await expect(page.locator('.reno-bar.designer-bar')).toBeHidden();
