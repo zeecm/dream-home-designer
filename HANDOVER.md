@@ -751,6 +751,18 @@ Idle frames in 5 s (SwiftShader, 1440 × 900): 3D view 34 → 0, Split 87 → 0.
 idle for long and the contexts tests leave open were already closed (§7); a page left open
 in 3D or Split no longer costs anything, only one left walking.
 
+**AI runs that survive a locked phone, part 1 (8 Nov):** spec `docs/specs/locked-phone-runs.md`.
+A design run checkpoints after every finished step (`ProposalOption.run` in `dhd-talk`) and holds
+the Web Lock `dhd-run:{id}`. A step cut off while the page was hidden goes again on return, not as
+a network retry; away over 10 min, or after a reload, the card carries on by itself (within 10 min,
+plan unchanged, within the approved figure and the tab's limit, same model) or asks once: Carry on
+· at most US$x, or Keep as it is. Another tab holding the run shows "Designing in another tab" and
+queues for the lock. A screen wake lock is held while it runs (`talk/wakeLock.ts`); the card says
+the time left (`talk/timeLeft.ts`), on phones with "Keep this screen open". Money guards (tech-lead
+review): a step is sent again at most twice and never past the figure or the tab's limit; spending
+and the steps in flight (at their most) are written as they happen and counted on carrying on;
+Stop or another plan opened marks the checkpoint stopped and writes the end by plan id.
+
 ## 5. Owner to-dos
 
 - **Before the repo goes public:** `apps/web/public/samples/hdb-3room-type4.pdf` (and its PNG

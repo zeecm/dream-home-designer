@@ -21,10 +21,51 @@ const SERVER_WAIT = 10;
 export const NET_WAITS = [3, 10];
 /** Longest wait for the tab to be in view and online again before a try, ms. */
 const BACK_MS = 10 * 60_000;
+/**
+ * A design step cut off while the page was out of view (a locked phone) is sent again on
+ * return, if the page was away no longer than this; past it, the run is interrupted and the
+ * card asks before anything more is spent.
+ */
+export const AWAY_MS = 10 * 60_000;
+/**
+ * How many times one step is sent again after the page came back: each time pays for its
+ * prompt again, so a third cut-off interrupts the run (its card asks before more is spent).
+ */
+export const RESENDS = 2;
 const LOWER: Record<Effort, Effort | null> = { high: 'medium', medium: 'low', low: null };
 const ABORT_TEXT = 'Stopped.';
 
 export class Stopped extends Error {}
+/**
+ * Why a run stopped where it may carry on from: away too long, a step cut off more often
+ * than RESENDS, or no room left in its figure (or the tab's limit) to send a step again.
+ */
+export type InterruptReason = 'away' | 'resent' | 'limit';
+/** A run that ends here, ready to carry on when asked (its card says why). */
+export class Interrupted extends Error {
+  constructor(readonly reason: InterruptReason) {
+    super(reason);
+  }
+}
+
+/**
+ * When the page last went out of view (ms since the epoch), and how long it was away the last
+ * time it came back, for the document watched.
+ */
+let watched: Document | null = null;
+let hiddenAt = Number.NEGATIVE_INFINITY;
+let awayFor = 0;
+const isHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
+function watchPage() {
+  if (typeof document === 'undefined' || watched === document) return;
+  watched = document;
+  hiddenAt = isHidden() ? Date.now() : Number.NEGATIVE_INFINITY;
+  awayFor = 0;
+  document.addEventListener('visibilitychange', () => {
+    if (isHidden()) hiddenAt = Date.now();
+    else awayFor = Date.now() - hiddenAt;
+  });
+}
 export interface Halt {
   kind: 'quota' | 'key' | 'offline' | 'network';
   message: string;
@@ -39,7 +80,7 @@ export class Halted extends Error {
  * Resolves once the page is in view and online (a phone suspends a hidden tab's requests,
  * so trying while it is hidden only fails again), or after BACK_MS.
  */
-function backOnline(signal: AbortSignal): Promise<void> {
+function backOnline(signal: AbortSignal, limit = BACK_MS): Promise<void> {
   const ready = () =>
     (typeof document === 'undefined' || document.visibilityState !== 'hidden') &&
     (typeof navigator === 'undefined' || navigator.onLine !== false);
@@ -55,7 +96,8 @@ function backOnline(signal: AbortSignal): Promise<void> {
     const check = () => {
       if (ready()) done();
     };
-    const timer = setTimeout(done, BACK_MS);
+    // (A delay past 2^31 ms fires at once: no limit means no timer.)
+    const timer = Number.isFinite(limit) ? setTimeout(done, limit) : undefined;
     document.addEventListener('visibilitychange', check);
     window.addEventListener('online', check);
     signal.addEventListener('abort', done);
@@ -122,9 +164,20 @@ export interface RequestState {
   status: 'waiting' | 'running' | 'done' | 'failed' | 'cancelled' | 'skipped';
   thinking: string;
   error: string | null;
-  wait: { seconds: number; attempt: number; net?: boolean; server?: boolean } | null;
+  wait: {
+    seconds: number;
+    attempt: number;
+    net?: boolean;
+    server?: boolean;
+    /** Cut off while the page was out of view: waiting for it to come back (and be online). */
+    away?: boolean;
+  } | null;
   retries: number;
   cutOffHigh: number | null;
+  /** This request's sends again after the page came back (a locked phone): not a retry. */
+  resent?: number;
+  /** The row's sends again, across its requests (its fix rounds too): never reset. */
+  resentAll?: number;
 }
 
 export interface RequestOptions<T> {
@@ -155,12 +208,25 @@ export interface RequestOptions<T> {
   throttle?: { last: number };
   /** Before trying again: why not (the tab's limit reached), or null to go on. */
   mayRetry?: () => string | null;
+  /**
+   * A design run's step: cut off while the page was out of view, it is sent again at once
+   * when the page is back (not counted as a network retry), at most RESENDS times and only
+   * while `mayRetry` allows (the run's figure and the tab's limit); else, or when the page was
+   * away more than AWAY_MS, the run is interrupted (`Interrupted`). A talk call leaves this off.
+   */
+  resumeOnReturn?: boolean;
+  /** Sent again after the page came back. */
+  onResent?: () => void;
 }
 
 /** One request, retried as the rules say: its answer, or null when it failed (`st.error`). */
 export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
   const { ai, st } = o;
   const name = PROVIDERS[ai.provider].short;
+  watchPage();
+  // This request's own count (a row's fix round is a request of its own: timed apart); the
+  // row's total, which the cap counts, goes on.
+  st.resent = 0;
   const throttle = o.throttle ?? { last: 0 };
   const fail = (text: string): null => {
     st.status = 'failed';
@@ -180,6 +246,9 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
   for (;;) {
     if (o.signal.aborted) throw new Stopped(ABORT_TEXT);
     const no = attempt++ > 0 ? (o.mayRetry?.() ?? null) : null;
+    // A design run's step isn't failed for it (it would never be asked for again): the run is
+    // interrupted with the step left to do, and its card asks.
+    if (no && o.resumeOnReturn) throw new Interrupted('limit');
     if (no) return fail(`${st.label}: ${no}`);
     const ctrl = new AbortController();
     const signal = anySignal([o.signal, ctrl.signal]);
@@ -243,6 +312,23 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
         st.thinking = '';
         o.update();
         throw new Stopped(ABORT_TEXT);
+      }
+      // Cut off while out of view (a locked phone, another app; a stream that went quiet
+      // meanwhile too): not a bad connection. Once the page is back and online it goes again
+      // at once, as often as that happens.
+      if (o.resumeOnReturn && !(error instanceof HttpFail) && (isHidden() || hiddenAt >= t0)) {
+        st.wait = { seconds: 0, attempt: 0, away: true };
+        o.update();
+        await backOnline(o.signal, Number.POSITIVE_INFINITY);
+        if (o.signal.aborted) throw new Stopped(ABORT_TEXT);
+        if (awayFor > AWAY_MS) throw new Interrupted('away');
+        if ((st.resentAll ?? 0) >= RESENDS) throw new Interrupted('resent');
+        if (o.mayRetry?.()) throw new Interrupted('limit');
+        st.resent = (st.resent ?? 0) + 1;
+        st.resentAll = (st.resentAll ?? 0) + 1;
+        st.wait = null;
+        o.onResent?.();
+        continue;
       }
       if (quiet) return fail(`${st.label}: the model went quiet for two minutes.`);
       if (error instanceof HttpFail) {

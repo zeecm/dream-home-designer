@@ -80,7 +80,11 @@ async function mock(
     reply?: (
       c: Call,
       n: number,
-    ) => { status: number; body: string; headers?: Record<string, string> } | Promise<void> | null;
+    ) =>
+      | { status: number; body: string; headers?: Record<string, string> }
+      // Waited on, then answered; resolved with 'abort', cut off instead.
+      | Promise<unknown>
+      | null;
     /** The designer's replies to messages, in turn (a talk call with none left fails). */
     talk?: unknown[];
   } = {},
@@ -108,8 +112,10 @@ async function mock(
       const call = { provider: p, step: a.step, body: raw };
       calls.push(call);
       const custom = opts.reply?.(call, calls.filter((c) => c.step === call.step).length);
-      if (custom instanceof Promise) await custom;
-      else if (custom) {
+      if (custom instanceof Promise) {
+        // Held, then cut off (a locked phone's dropped request), or answered.
+        if ((await custom) === 'abort') return route.abort('failed').catch(() => {});
+      } else if (custom) {
         return route.fulfill({
           status: custom.status,
           headers: { 'content-type': 'application/json', ...CORS, ...custom.headers },
@@ -2572,4 +2578,522 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     await expect(titled(page, 'V1A')).toBeVisible();
     expect(m.calls.length).toBe(calls);
   });
+});
+
+/**
+ * A design run that survives a locked phone (docs/specs/locked-phone-runs.md, part 1): the
+ * page hidden and its request cut off, a reload mid-run, a plan changed meanwhile, two tabs,
+ * the screen's wake lock and the time left.
+ */
+test.describe('a locked phone: resume and the wake lock (locked-phone runs, part 1)', () => {
+  /** The page out of view (a locked phone) or back. */
+  const setHidden = (page: Page, hidden: boolean) =>
+    page.evaluate((h) => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => (h ? 'hidden' : 'visible'),
+      });
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => h });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }, hidden);
+
+  /** A stubbed screen wake lock (or none), its calls in `window.__wake`. */
+  const stubWake = (page: Page, present = true) =>
+    page.addInitScript((has) => {
+      const log: string[] = [];
+      (window as unknown as { __wake: string[] }).__wake = log;
+      const api = has
+        ? {
+            request: async (type: string) => {
+              log.push(`request ${type}`);
+              return {
+                release: async () => {
+                  log.push('release');
+                },
+                addEventListener: () => {},
+              };
+            },
+          }
+        : undefined;
+      Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: api });
+    }, present);
+  const wake = (page: Page) =>
+    page.evaluate(() => (window as unknown as { __wake: string[] }).__wake);
+
+  /** A room's own requests (not its fix rounds). */
+  const asked = (calls: Call[], step: string) =>
+    calls.filter((c) => c.step === step && !c.body.includes('Where the app placed your pieces'));
+  const KITCHEN = 'furnish "Kitchen"';
+
+  /** The whole flat, its Kitchen held on its first `held` requests until told what to do. */
+  async function wholeFlat(page: Page, held = 1) {
+    const waits: ((v: undefined | 'abort') => void)[] = [];
+    const m = await mock(page, {
+      reply: (c, n) =>
+        c.step === KITCHEN && n <= held
+          ? new Promise<undefined | 'abort'>((r) => waits.push(r))
+          : null,
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^The whole flat · about US\$/);
+    await expect.poll(() => waits.length, { timeout: 30_000 }).toBe(1);
+    // Every other room saved as done: only the kitchen is left (a reload now loses only it).
+    await expect
+      .poll(() => savedSpaces(page), { timeout: 30_000 })
+      .toEqual({ done: 3, other: ['rm_kitchen'] });
+    return { m, waits };
+  }
+
+  /** The running option's rooms as saved: how many done, and which are not. */
+  const savedSpaces = (page: Page) =>
+    page.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const r = indexedDB.open('dhd-talk');
+        r.onsuccess = () => resolve(r.result);
+        r.onerror = () => reject(r.error);
+      });
+      const all = await new Promise<
+        { options: { status: string; spaces: Record<string, { status: string }> }[] }[]
+      >((resolve) => {
+        const q = db.transaction('proposals', 'readonly').objectStore('proposals').getAll();
+        q.onsuccess = () => resolve(q.result);
+      });
+      db.close();
+      const o = all.flatMap((p) => p.options).find((x) => x.status === 'running');
+      const entries = Object.entries(o?.spaces ?? {});
+      return {
+        done: entries.filter(([, x]) => x.status === 'done').length,
+        other: entries.filter(([, x]) => x.status !== 'done').map(([k]) => k),
+      };
+    });
+
+  /** Every request to our server, with its body (none may carry the run or the key). */
+  const apiLog = (page: Page) => {
+    const sent: string[] = [];
+    page.on('request', (r) => {
+      if (new URL(r.url()).pathname.startsWith('/api/'))
+        sent.push(`${r.url()} ${r.postData() ?? ''}`);
+    });
+    return sent;
+  };
+
+  type RunRecord = {
+    at: string;
+    approved: number | null;
+    spent: number;
+    inflight: { step: string; high: number }[];
+    stopped: boolean;
+  };
+  /**
+   * The run checkpoints in `dhd-talk` as saved (`patch` merged into each first, as if the
+   * page had saved them so).
+   */
+  const runs = (page: Page, patch: Partial<RunRecord> | null = null) =>
+    page.evaluate(async (more) => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const r = indexedDB.open('dhd-talk');
+        r.onsuccess = () => resolve(r.result);
+        r.onerror = () => reject(r.error);
+      });
+      const store = db
+        .transaction('proposals', more ? 'readwrite' : 'readonly')
+        .objectStore('proposals');
+      const all = await new Promise<{ options: { run?: Record<string, unknown> }[] }[]>(
+        (resolve) => {
+          const q = store.getAll();
+          q.onsuccess = () => resolve(q.result);
+        },
+      );
+      const out: unknown[] = [];
+      for (const p of all) {
+        for (const o of p.options) {
+          if (!o.run) continue;
+          if (more) Object.assign(o.run, more);
+          out.push(o.run);
+        }
+        if (more) store.put(p);
+      }
+      await new Promise((r) => {
+        store.transaction.oncomplete = r;
+      });
+      db.close();
+      return out as RunRecord[];
+    }, patch);
+  /** Reopens the plan's conversation (after a reload). */
+  const reopen = async (page: Page) => {
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    await page.getByRole('button', { name: /^Designer · V1 on the table$/ }).click();
+  };
+
+  test('hidden mid-step, its request cut off, shown again: only that step goes again, twice at most, then it asks (1, 2, 7, 8, 13)', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await setup(page);
+    await stubWake(page);
+    const sent = apiLog(page);
+    const { m, waits } = await wholeFlat(page, 3);
+    const v1 = card(page, 1);
+    // 8: on a computer, how long, and no "Keep this screen open".
+    await expect(
+      v1.getByText(/^Designing · (about \d+ min left|less than a minute left|almost done)$/),
+    ).toBeVisible();
+    await expect(v1.getByText('Keep this screen open')).toHaveCount(0);
+    for (let cycle = 1; cycle <= 3; cycle++) {
+      await expect.poll(() => waits.length, { timeout: 30_000 }).toBe(cycle);
+      await setHidden(page, true);
+      waits[cycle - 1]?.('abort');
+      await expect(v1.getByText(/Paused while you’re away/)).toBeVisible();
+      // Nothing is sent while the page is away.
+      await page.waitForTimeout(500);
+      expect(asked(m.calls, KITCHEN)).toHaveLength(cycle);
+      await setHidden(page, false);
+      // Sent again twice; the third cut-off is one too many: it asks, sending nothing.
+      if (cycle < 3) await expect.poll(() => asked(m.calls, KITCHEN).length).toBe(cycle + 1);
+    }
+    await expect(
+      v1.getByText(
+        /^This design stopped: a step was cut off again and again while the screen was off\./,
+      ),
+    ).toBeVisible();
+    await page.waitForTimeout(500);
+    expect(asked(m.calls, KITCHEN)).toHaveLength(3);
+    await v1.getByRole('button', { name: /^Carry on · at most US\$\d+\.\d\d$/ }).click();
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // 1: the layout and the finished rooms asked for once each; the kitchen three times, and
+    // once more on Carry on.
+    const steps = [...new Set(m.calls.map((c) => c.step))];
+    for (const s of steps) expect(asked(m.calls, s)).toHaveLength(s === KITCHEN ? 4 : 1);
+    await expect(
+      log(page)
+        .getByText(/^Back\. Carrying on from Kitchen: \d of \d rooms done, not paid for again\.$/)
+        .first(),
+    ).toBeVisible();
+    // The cut-off attempts are counted at their most: "up to" on the cost, and in its detail.
+    const cost = v1.getByRole('button', { name: /^Cost of this reply: up to US\$/ });
+    await expect(cost).toBeVisible();
+    await cost.click();
+    await expect(
+      v1
+        .getByText(/Kitchen was cut off and sent again: up to US\$\d\.\d\d extra may be billed\./)
+        .first(),
+    ).toBeVisible();
+    // 7: the screen kept on at the start and after each return; let go at the end.
+    const w = await wake(page);
+    expect(w.filter((x) => x === 'request screen').length).toBeGreaterThanOrEqual(4);
+    expect(w.at(-1)).toBe('release');
+    // 13: nothing of the run (nor the key) in any request to our server.
+    expect(sent.some((x) => /fixesLeft|dhd-run|"run":/.test(x) || x.includes(KEY))).toBe(false);
+    const dump = await dumpIdb(page);
+    expect(dump).not.toContain('fixesLeft'); // ended: its checkpoint went with it
+  });
+
+  test('reloaded mid-step: back within 10 minutes, it picks up with no tap and asks nothing again (3)', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await setup(page);
+    const { m, waits } = await wholeFlat(page);
+    const before = m.calls.length;
+    const done = new Set(m.calls.filter((c) => c.step !== KITCHEN).map((c) => c.step));
+    // What it spent is saved as each request is metered, with the kitchen in flight at its most.
+    await expect
+      .poll(async () => (await runs(page))[0]?.inflight.map((x) => x.step) ?? [])
+      .toEqual(['rm_kitchen']);
+    const [saved] = await runs(page);
+    expect(saved?.spent).toBeGreaterThan(0);
+    expect(saved?.inflight[0]?.high).toBeGreaterThan(0);
+    await page.reload();
+    waits[0]?.(undefined);
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    await page.getByRole('button', { name: /^Designer · V1 on the table$/ }).click();
+    await expect(
+      log(page).getByText(
+        /^Picked up where it stopped: \d of \d rooms done, not paid for again\.$/,
+      ),
+    ).toBeVisible();
+    await expect(card(page, 1).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // Only the room cut off went again: never the layout or a finished room.
+    const after = m.calls.slice(before).map((c) => c.step);
+    expect(after).toContain(KITCHEN);
+    for (const s of after) expect(done.has(s)).toBe(false);
+  });
+
+  test('reloaded, then a wall moved before reopening: it asks once, and sends nothing until Carry on (4, 6)', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await setup(page);
+    const { m, waits } = await wholeFlat(page);
+    await page.reload();
+    waits[0]?.(undefined);
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    // A wall nudged 1 cm: the plan is not the one it was designing.
+    const wall = await page.locator('[data-hit^="wall:"]').first().boundingBox();
+    if (!wall) throw new Error('no wall');
+    await page.mouse.click(wall.x + wall.width / 2, wall.y + wall.height / 2);
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Escape');
+    await waitSaved(page);
+    const n = m.calls.length;
+    await page.getByRole('button', { name: /^Designer · V1 on the table$/ }).click();
+    const v1 = card(page, 1);
+    await expect(
+      v1.getByText(
+        /This design stopped when the page closed\. \d of \d rooms are done and kept\. Your plan has changed since\./,
+      ),
+    ).toBeVisible();
+    const carry = v1.getByRole('button', {
+      name: /^Carry on with the plan as it is now · at most US\$\d+\.\d\d$/,
+    });
+    await expect(carry).toBeVisible();
+    await page.waitForTimeout(1000);
+    expect(m.calls.length).toBe(n);
+    await carry.click();
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    expect(m.calls.slice(n).map((c) => c.step)).toEqual([KITCHEN]);
+  });
+
+  test('back after more than 10 minutes: it asks; Keep as it is leaves today’s stopped card (5, 12)', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await setup(page);
+    const { m, waits } = await wholeFlat(page);
+    await page.reload();
+    waits[0]?.(undefined);
+    await waitSaved(page);
+    // Its last progress 11 minutes ago.
+    await runs(page, { at: new Date(Date.now() - 11 * 60_000).toISOString() });
+    await page.reload();
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    const n = m.calls.length;
+    await page.getByRole('button', { name: /^Designer · V1 on the table$/ }).click();
+    const v1 = card(page, 1);
+    await expect(
+      v1.getByText(
+        /^This design stopped when the page closed\. \d of \d rooms are done and kept\.$/,
+      ),
+    ).toBeVisible();
+    await expect(
+      v1.getByRole('button', { name: /^Carry on · at most US\$\d+\.\d\d$/ }),
+    ).toBeVisible();
+    await v1.getByRole('button', { name: 'Keep as it is' }).click();
+    await expect(
+      v1.getByText(/^Stopped before Kitchen was placed\. What’s here is checked\.$/),
+    ).toBeVisible();
+    await expect(
+      v1.getByRole('button', { name: /^Design Kitchen too · about US\$/ }),
+    ).toBeVisible();
+    expect(m.calls.length).toBe(n);
+    // 12: ended, so a reload carries nothing on and asks nothing.
+    await page.reload();
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    await page.getByRole('button', { name: /^Designer · V1 on the table$/ }).click();
+    await expect(card(page, 1).getByRole('button', { name: /^Design Kitchen too/ })).toBeVisible();
+    await expect(panel(page).getByText(/stopped when the page closed|Picked up where/)).toHaveCount(
+      0,
+    );
+    expect(await dumpIdb(page)).not.toContain('fixesLeft');
+    expect(m.calls.length).toBe(n);
+  });
+
+  test('Stop, then reload: nothing carries on, nothing asks, no checkpoint is left (12)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    const { m } = await wholeFlat(page);
+    await panel(page).getByRole('button', { name: 'Stop' }).click();
+    await expect(card(page, 1).getByText(/^Stopped before/)).toBeVisible();
+    const n = m.calls.length;
+    await page.reload();
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    await page.getByRole('button', { name: /^Designer · V1 on the table$/ }).click();
+    await expect(card(page, 1).getByText(/^Stopped before/)).toBeVisible();
+    await page.waitForTimeout(1000);
+    await expect(panel(page).getByText(/stopped when the page closed|Picked up where/)).toHaveCount(
+      0,
+    );
+    expect(await dumpIdb(page)).not.toContain('fixesLeft');
+    expect(m.calls.length).toBe(n);
+  });
+
+  test('what was in flight when the page went counts as spent: past its figure so, it asks', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await setup(page);
+    const { m, waits } = await wholeFlat(page);
+    await page.reload();
+    waits[0]?.(undefined);
+    await waitSaved(page);
+    // Within its figure by what was metered; past it once the kitchen in flight counts.
+    const [saved] = await runs(page);
+    await runs(page, {
+      approved: (saved?.spent ?? 0) + 2,
+      inflight: [{ step: 'rm_kitchen', high: 2 }],
+    });
+    await page.reload();
+    const n = m.calls.length;
+    await reopen(page);
+    await expect(
+      card(page, 1).getByRole('button', { name: /^Carry on · at most US\$\d+\.\d\d$/ }),
+    ).toBeVisible();
+    await page.waitForTimeout(1000);
+    expect(m.calls.length).toBe(n);
+    await expect(log(page).getByText(/^Picked up where it stopped/)).toHaveCount(0);
+  });
+
+  test('another plan opened mid-run: the run stops for good, and its plan never carries it on', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await setup(page);
+    const { m, waits } = await wholeFlat(page);
+    const first = planId(page);
+    await page.getByRole('button', { name: 'Projects' }).click();
+    await page.getByRole('button', { name: 'New copy of the sample flat' }).click();
+    await page
+      .getByRole('dialog', { name: 'Stop designing and open the other plan?' })
+      .getByRole('button', { name: 'Stop and open' })
+      .click();
+    await waitSaved(page);
+    await expect.poll(() => planId(page)).not.toBe(first);
+    waits[0]?.(undefined);
+    const n = m.calls.length;
+    // Its end was written into its own plan's record, though another plan was open.
+    await expect.poll(async () => (await dumpIdb(page)).includes('fixesLeft')).toBe(false);
+    await page.goto(`/?p=${first}`);
+    await reopen(page);
+    await expect(card(page, 1).getByText(/^Stopped before .+ placed\./)).toBeVisible();
+    await page.waitForTimeout(1000);
+    await expect(panel(page).getByText(/stopped when the page closed|Picked up where/)).toHaveCount(
+      0,
+    );
+    expect(m.calls.length).toBe(n);
+  });
+
+  test('a checkpoint marked stopped (the page went right after Stop) is ended, never carried on', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await setup(page);
+    const { m, waits } = await wholeFlat(page);
+    await page.reload();
+    waits[0]?.(undefined);
+    await waitSaved(page);
+    await runs(page, { stopped: true });
+    await page.reload();
+    const n = m.calls.length;
+    await reopen(page);
+    await expect(card(page, 1).getByText(/^Stopped before .+ placed\./)).toBeVisible();
+    await expect(panel(page).getByText(/stopped when the page closed|Picked up where/)).toHaveCount(
+      0,
+    );
+    expect(await runs(page)).toEqual([]);
+    expect(m.calls.length).toBe(n);
+  });
+
+  test('two tabs: the second sends nothing while the first runs; once it closes, one carries on (11)', async ({
+    page,
+    context,
+  }) => {
+    test.setTimeout(180_000);
+    await setup(page);
+    const { m, waits } = await wholeFlat(page);
+    const url = page.url();
+    const other = await context.newPage();
+    await setup(other);
+    const m2 = await mock(other);
+    await other.goto(url);
+    await waitSaved(other);
+    await other.keyboard.press('1');
+    await other.getByRole('button', { name: /^Designer · V1 on the table$/ }).click();
+    await expect(card(other, 1).getByText('Designing in another tab.')).toBeVisible();
+    await other.waitForTimeout(1000);
+    expect(m2.calls).toHaveLength(0);
+    const first = m.calls.length;
+    await page.close();
+    waits[0]?.(undefined);
+    await expect(log(other).getByText(/^Picked up where it stopped/)).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(card(other, 1).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    expect(m2.calls.map((c) => c.step)).toEqual([KITCHEN]);
+    expect(m.calls.length).toBe(first);
+  });
+});
+
+test.describe('a locked phone, on a phone (locked-phone runs, part 1)', () => {
+  const { defaultBrowserType: _webkit, ...iPhone } = devices['iPhone 13'];
+  test.use({ ...iPhone, viewport: { width: 390, height: 844 } });
+
+  for (const has of [true, false]) {
+    test(`the running card: keep this screen open, with the time left${has ? '' : '; no wake lock: the refused copy, the run unaffected'} (${has ? 8 : 9})`, async ({
+      page,
+    }) => {
+      test.setTimeout(120_000);
+      await setup(page);
+      await page.addInitScript((present) => {
+        const api = present
+          ? { request: async () => ({ release: async () => {}, addEventListener: () => {} }) }
+          : undefined;
+        Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: api });
+      }, has);
+      const held: (() => void)[] = [];
+      await mock(page, {
+        reply: (c, n) =>
+          c.step === 'furnish "Kitchen"' && n === 1 ? new Promise<void>((r) => held.push(r)) : null,
+      });
+      await page.goto('/');
+      await waitSaved(page);
+      await page
+        .getByRole('button', { name: /Plan details|Show plan details/ })
+        .first()
+        .tap()
+        .catch(() => {});
+      await page.getByRole('button', { name: 'Talk to the designer' }).tap();
+      await panel(page).getByRole('button', { name: 'Just design it' }).tap();
+      await panel(page)
+        .getByRole('button', { name: /^The whole flat · about US\$/ })
+        .tap();
+      const go = panel(page).getByRole('button', { name: /^Go ahead( anyway)? · about US\$/ });
+      await go.tap();
+      await expect.poll(() => held.length, { timeout: 30_000 }).toBe(1);
+      const line = panel(page).locator('[data-time-left]');
+      await expect(line).toContainText(
+        /Keep this screen open · (about \d+ min left|less than a minute left|almost done)/,
+      );
+      if (has) {
+        await expect(line).toContainText(
+          'Locking your phone pauses the design. It carries on when you come back.',
+        );
+      } else {
+        await expect(line).toContainText(
+          'Your screen may turn off on its own: tap it now and then.',
+        );
+      }
+      for (const r of held) r();
+      await expect(card(page, 1).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+        timeout: 30_000,
+      });
+    });
+  }
 });
