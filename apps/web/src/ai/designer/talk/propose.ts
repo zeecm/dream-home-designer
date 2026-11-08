@@ -21,11 +21,12 @@ import {
 } from '@dhd/core';
 import { useStore } from '../../../store';
 import { aiSettings } from '../../credentials';
-import { contextFor, estimateFor, plannedPrompts } from '../plan';
+import { freshPrice, readPrice, requestResult } from '../results';
 import { blankStep, runDesign } from '../run';
 import { addUsage, capUsd, countRun, overLimit, priceTable, spent, usd } from '../spend';
 import { type Running, designOpts, useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
+import type { PriceInput, Priced } from './pricing';
 import { talkStore } from './talkStore';
 import { threshold } from './threshold';
 import { act, actProposal, clearTyped, newId, nowIso, say, typedNow, useTalk } from './useTalk';
@@ -39,35 +40,6 @@ import { act, actProposal, clearTyped, newId, nowIso, say, typedNow, useTalk } f
  */
 
 const doc = () => useStore.getState().editor.doc;
-
-const memo = new Map<string, RunEstimate | null>();
-/** What a plan would cost (memoised per plan, brief, scope, rooms, model, prices and words). */
-export function estimateScope(sp: ScopePlan): RunEstimate | null {
-  const ai = aiSettings();
-  if (!ai) return null;
-  const key = JSON.stringify([
-    ai.model,
-    sp.brief,
-    sp.scope,
-    sp.plan.rooms,
-    !!sp.plan.layout,
-    sp.plan.feedback ?? '',
-    sp.plan.talk ?? null,
-    Object.keys(sp.draft.spaces).sort(),
-    levelFingerprint(sp.ctx.base),
-    priceTable()[ai.model] ?? null,
-  ]);
-  if (memo.has(key)) return memo.get(key) ?? null;
-  const est = estimateFor(
-    ai,
-    plannedPrompts(sp.ctx, sp.draft, sp.plan, designOpts(doc())),
-    sp.brief.quality,
-    priceTable(),
-  );
-  memo.set(key, est);
-  if (memo.size > 40) memo.delete(memo.keys().next().value as string);
-  return est;
-}
 
 /** What a priced press asks for: a new proposal for a scope, or a stopped one's missing rooms. */
 export interface PressRequest {
@@ -104,36 +76,79 @@ export const planRequest = (plan: TalkPlan, said: string, scope?: ScopeRef): Pre
   talk: { intent: plan.intent, said, decided: decided() },
 });
 
-/** The plan and price of a request, on the plan as it is now. */
-function planOf(req: PressRequest, designId: string): { sp: ScopePlan; est: RunEstimate } | null {
+/** What pricing a request needs, as plain data (what the worker is sent). */
+function priceInput(req: PressRequest, designId: string): Omit<PriceInput, 'designs'> | null {
   const conv = useTalk.getState().conv;
   const ai = aiSettings();
   if (!conv || !ai || designerCannotUse(ai)) return null;
+  const project = doc();
+  let finish: PriceInput['finish'];
   if (req.finish) {
     const f = req.finish;
     const p = useTalk.getState().proposals.find((x) => x.id === f.proposalId);
-    const sp = p ? finishPlan(p, f.letter, f.rooms) : null;
-    const est = sp ? estimateScope(sp) : null;
-    return sp && est ? { sp, est } : null;
+    const o = p?.options.find((x) => x.letter === f.letter);
+    if (!p || !o) return null;
+    finish = { option: o, rooms: f.rooms, words: p.words, scope: p.scope };
   }
-  const project = doc();
-  const sp = planScope(
-    req.scope,
-    conv.brief,
+  return {
     project,
-    useDesigner.getState().designs,
-    req.words,
+    brief: conv.brief,
+    scope: req.scope,
+    words: req.words,
+    ...(req.talk ? { talk: req.talk } : {}),
+    ...(finish ? { finish } : {}),
     designId,
-    designOpts(project),
-    req.talk,
-  );
-  const est = sp ? estimateScope(sp) : null;
-  return sp && est ? { sp, est } : null;
+    opts: designOpts(project),
+    ai: { provider: ai.provider, model: ai.model },
+    prices: priceTable(),
+  };
 }
 
-/** A request's price, for its button or its cost card. */
-export const pressPrice = (req: PressRequest): RunEstimate | null =>
-  planOf(req, 'dsn_est')?.est ?? null;
+/** What a shown price is kept by: the plan, what is asked, the brief, the versions, the prices. */
+function priceKey(req: PressRequest): string | null {
+  const conv = useTalk.getState().conv;
+  const ai = aiSettings();
+  if (!conv || !ai) return null;
+  const project = doc();
+  const after = project.renovation?.levels[0];
+  const designs = useDesigner.getState().designs;
+  return JSON.stringify([
+    ai.model,
+    priceTable()[ai.model] ?? null,
+    conv.brief,
+    req,
+    project.levels[0] ? levelFingerprint(project.levels[0]) : null,
+    after ? levelFingerprint(after) : null,
+    designs.map((d) => [d.id, d.accepted?.at ?? null]),
+    useTalk
+      .getState()
+      .proposals.find((x) => x.id === req.finish?.proposalId)
+      ?.options.map((o) => o.usage.length) ?? null,
+  ]);
+}
+
+/**
+ * The plan and price of a request, worked out afresh in the worker on the plan as it is now:
+ * what a press goes ahead with (never a price shown earlier).
+ */
+async function planOf(req: PressRequest, designId: string): Promise<Priced> {
+  const input = priceInput(req, designId);
+  return input ? freshPrice(input).catch(() => null) : null;
+}
+
+/** A request's price for its button or card: null while it is worked out, or when it can't be. */
+export const pressPrice = (req: PressRequest): RunEstimate | null => pressPriceState(req).est;
+
+/** The price and whether it is still being worked out (a skeleton shows meanwhile). */
+export function pressPriceState(req: PressRequest): { est: RunEstimate | null; pending: boolean } {
+  const key = priceKey(req);
+  if (!key) return { est: null, pending: false };
+  const v = readPrice(key, () => priceInput(req, 'dsn_est'));
+  return { est: v?.est ?? null, pending: v === undefined };
+}
+
+/** A scope button's request (without the person's words: they add little to its price). */
+export const scopeRequest = (scope: ScopeRef): PressRequest => ({ scope, words: '', finish: null });
 
 /** A scope's price for its button (without the person's words: they add little). */
 export const scopePrice = (scope: ScopeRef): RunEstimate | null =>
@@ -209,7 +224,7 @@ export async function followPlan(plan: TalkPlan, said: string, replyTo: string) 
   const started = begin();
   try {
     const req = planRequest(plan, said);
-    const made = planOf(req, newId('dsn'));
+    const made = await planOf(req, newId('dsn'));
     if (!made) {
       await act({
         type: 'event',
@@ -251,9 +266,14 @@ const rule = (est: RunEstimate, pressedPriced: boolean) =>
   });
 
 async function askOrRun(req: PressRequest) {
-  const made = planOf(req, newId('dsn'));
-  if (!made) return;
-  const ask = rule(made.est, true);
+  // The button's price, then the price now: a press never goes on a stale or missing one.
+  const shown = pressPrice(req);
+  const made = await planOf(req, newId('dsn'));
+  if (!made || !shown) return;
+  const was = atMostOf(shown);
+  const now = atMostOf(made.est);
+  const dearer = was !== null && now !== null && now > was + 0.005;
+  const ask = dearer ? 'ask-threshold' : rule(made.est, true);
   if (ask === 'go') {
     await run(req, made, atMostOf(made.est), { person: newId('turn'), turn: newId('turn') });
     return;
@@ -292,12 +312,6 @@ export const cardRequest = (card: TurnOf<'cost-ask'>, cheaper?: ScopeRef): Press
           : {}),
       };
 
-/** A card's figure as the price would be now (to keep the card and its cost check alike). */
-export function cardEstimate(card: TurnOf<'cost-ask'>): TurnOf<'cost-ask'>['estimate'] {
-  const u = pressPrice(cardRequest(card))?.usd;
-  return u ? { typical: u.typical, high: u.high, fix: u.fix } : null;
-}
-
 /**
  * The answer to a cost card: Go ahead, Just {room}, or Not now. Go ahead binds the figure the
  * card showed: if the price has gone up since, the card shows the new one and asks again. Only
@@ -311,7 +325,7 @@ export async function answerCost(
   if (!begin()) return;
   try {
     const req = cardRequest(card, answer === 'cheaper' ? cheaper : undefined);
-    const made = answer === 'not-now' ? null : planOf(req, newId('dsn'));
+    const made = answer === 'not-now' ? null : await planOf(req, newId('dsn'));
     if (answer !== 'not-now' && !made) return;
     const shown = card.estimate ? card.estimate.high + card.estimate.fix : null;
     const fresh = made ? atMostOf(made.est) : null;
@@ -412,29 +426,6 @@ async function run(
   useDesigner.setState({ previewing: true });
   say(`Designing V${proposal.n}, ${option.name}.`);
   void runOption(proposal, 'A', sp, made.est, approved);
-}
-
-/** The plan for the rooms a stopped option lacks, into the same option. */
-function finishPlan(p: Proposal, letter: string, rooms: string[]): ScopePlan | null {
-  const o = p.options.find((x) => x.letter === letter);
-  const ctx = o && contextFor(doc(), o.brief, o.aliases);
-  if (!o || !ctx) return null;
-  const plan: RunPlan = {
-    layout: null,
-    rooms,
-    ...(p.words.trim() ? { feedback: p.words.trim() } : {}),
-    locks: structuredClone(o.locks),
-  };
-  const draft: DraftDesign = structuredClone({
-    id: o.designId,
-    brief: o.brief,
-    aliases: o.aliases,
-    concept: o.concept,
-    spaces: o.spaces,
-    usage: o.usage,
-    request: { locks: o.locks },
-  });
-  return { scope: p.scope, brief: o.brief, plan, draft, ctx, locks: structuredClone(o.locks) };
 }
 
 const cutNote = (s: string | null) => (s ? cut(s, 300) : null);
@@ -545,6 +536,7 @@ async function runOption(
     signal: ctrl.signal,
     prices: priceTable(),
     result: designOpts(project),
+    results: requestResult,
     ...(sp.expected ? { expected: sp.expected } : {}),
     onUpdate: (st) => {
       setLive({ state: st });

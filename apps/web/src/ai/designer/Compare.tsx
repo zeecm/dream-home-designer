@@ -5,7 +5,8 @@ import { useProject } from '../../store';
 import { Segmented } from '../../ui/fields';
 import { MiniLayout, sharedBox } from '../MiniLayout';
 import { ordered, problemsInOrder, togglePick } from './compare';
-import { changedText, onPlanNow, resultFor } from './plan';
+import { baseOf, changedText, onPlanNow } from './plan';
+import { readResult, useResultsTickN } from './results';
 import { closeCompare, designOpts, previewFrom, useDesigner } from './state';
 import { humanize, problemRoom } from './words';
 
@@ -42,6 +43,8 @@ function CompareView({ picks, designs }: { picks: string[]; designs: Design[] })
   const before = project.levels[0];
   const heading = useRef<HTMLHeadingElement>(null);
   const shown = ordered(designs, picks).join();
+  const tick = useResultsTickN();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
   const columns = useMemo<Column[]>(() => {
     if (!before) return [];
     const out: Column[] = [
@@ -57,7 +60,10 @@ function CompareView({ picks, designs }: { picks: string[]; designs: Design[] })
     ];
     for (const id of shown ? shown.split(',') : []) {
       const d = designs.find((x) => x.id === id);
-      const r = d ? resultFor(project, onPlanNow(d, designs, project), designOpts(project)) : null;
+      // Placed by the designer's worker: a column waits for it, calmly.
+      const v = d ? onPlanNow(d, designs, project) : null;
+      const b = v ? baseOf(project, v.base.variant) : null;
+      const r = v && b ? readResult(b.base, b.before, v, designOpts(project)) : null;
       if (!d || !r) continue;
       // Against the flat as it is, as the drawing and the cost are (whatever it was made on).
       const changes = renovationChanges(before, r.level).filter(
@@ -74,7 +80,7 @@ function CompareView({ picks, designs }: { picks: string[]; designs: Design[] })
       });
     }
     return out;
-  }, [project, before, designs, shown]);
+  }, [project, before, designs, shown, tick]);
   const box = useMemo(() => sharedBox(columns.map((c) => c.level)), [columns]);
   // The phone's one column; the last version picked to start with.
   const [on, setOn] = useState<string>(columns[columns.length - 1]?.key ?? 'before');

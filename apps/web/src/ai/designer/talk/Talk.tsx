@@ -1,6 +1,7 @@
 import { type TurnOf, cut } from '@dhd/core';
 import { useMemo, useState } from 'react';
 import { useAi } from '../../credentials';
+import { useResultsTickN } from '../results';
 import { tokens, usd, useSpend } from '../spend';
 import { useDesigner } from '../state';
 import { Mark } from './Mark';
@@ -280,10 +281,11 @@ function Concern({ t }: { t: TurnOf<'designer'> }) {
   const busy = useBusy();
   const project = useSettledProject();
   const { prices } = useSpend();
+  const tick = useResultsTickN();
   // biome-ignore lint/correctness/useExhaustiveDependencies: on what the price reads
   const est = useMemo(
     () => (c?.alt ? timed(() => pressPrice(altRequest(c.alt as NonNullable<typeof c.alt>))) : null),
-    [c?.alt, project, prices],
+    [c?.alt, project, prices, tick],
   );
   if (!c) return null;
   return (

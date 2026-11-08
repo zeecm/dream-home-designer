@@ -8,6 +8,7 @@ import { AiSettingsDialog } from '../../AiSettingsDialog';
 import { aiSettings } from '../../credentials';
 import { BriefDialog } from '../BriefDialog';
 import { failingChecks } from '../parts';
+import { useResultsTickN } from '../results';
 import { tokens, usd, useSpend } from '../spend';
 import { closePanel, useDesigner } from '../state';
 import { Composer } from './Composer';
@@ -73,7 +74,12 @@ function OnTheTable() {
     const o = proposal?.options[0];
     return proposal && o ? optionCard(proposal, o) : null;
   }, [proposal]);
-  const r = useMemo(() => (last ? timed(() => cardResult(project, last)) : null), [project, last]);
+  const tick = useResultsTickN();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
+  const r = useMemo(
+    () => (last ? timed(() => cardResult(project, last)) : null),
+    [project, last, tick],
+  );
   const remaining = useMemo(
     () => (last && r ? timed(() => cardChanges(project, last, r)).length : 0),
     [project, last, r],
@@ -93,7 +99,15 @@ function OnTheTable() {
       f.waived.map((c) => c.key),
     ).failing.length;
   }, [r, last, project]);
-  if (!last || !r) return null;
+  if (!last) return null;
+  if (!r) {
+    // Being placed and checked by the designer's worker: said calmly, nothing to press yet.
+    return (
+      <section className="talk-table" aria-label="On the table" aria-busy="true">
+        <span className="talk-table-text">On the table: V{last.n} · Checking…</span>
+      </section>
+    );
+  }
   const go = (accept: boolean) => {
     const el = document.querySelector(`[data-card="${CSS.escape(last.key)}"]`);
     if (accept) focusInLog(el?.querySelector<HTMLButtonElement>('[data-accept-selected]'));

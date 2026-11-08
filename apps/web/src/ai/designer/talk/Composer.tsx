@@ -8,6 +8,7 @@ import {
 } from '@dhd/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAi } from '../../credentials';
+import { useResultsTickN } from '../results';
 import { capUsd, spent, tokens, usd, useSpend } from '../spend';
 import { useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
@@ -60,10 +61,11 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
   const project = useSettledProject();
   const { prices } = useSpend();
   const busy = useBusy();
+  const tick = useResultsTickN();
   // biome-ignore lint/correctness/useExhaustiveDependencies: on what the price reads
   const price = useMemo(
     () => (newest ? timed(() => scopePrice(newest.scope)) : null),
-    [newest, project, prices],
+    [newest, project, prices, tick],
   );
   const area = useRef<HTMLTextAreaElement>(null);
   const saved = conv?.draft ?? '';

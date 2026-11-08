@@ -9,9 +9,9 @@ import {
   type ProposalOption,
   type Usage,
   changeSet,
-  designResult,
   levelFingerprint,
 } from '@dhd/core';
+import { readResult, requestResult } from '../results';
 import { designOpts } from '../state';
 
 /**
@@ -102,11 +102,24 @@ export function nowOf(project: Project): { now: Level; before: Level } | null {
   return { now: project.renovation?.levels[0] ?? before, before };
 }
 
-/** A card placed on the plan as it is now (worked out once per card and plan). */
+/**
+ * A card placed on the plan as it is now, if it is ready: null while the designer's worker
+ * works it out (a calm "Checking…" shows; `useResultsTick` re-renders when it lands).
+ */
 export function cardResult(project: Project, card: CardModel): DesignResult | null {
   const b = nowOf(project);
   if (!b) return null;
-  return designResult(b.now, b.before, card.input, designOpts(project));
+  return readResult(b.now, b.before, card.input, designOpts(project));
+}
+
+/** A card placed on the plan as it is now, waited for (an accept, a request's context). */
+export async function cardResultNow(
+  project: Project,
+  card: CardModel,
+): Promise<DesignResult | null> {
+  const b = nowOf(project);
+  if (!b) return null;
+  return requestResult(b.now, b.before, card.input, designOpts(project));
 }
 
 const changesMemo = new Map<string, Change[]>();
