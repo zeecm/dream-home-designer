@@ -208,7 +208,7 @@ describe('the accept precheck fails closed (tech lead)', () => {
       },
     ],
   };
-  const card = optionCard(proposal, proposal.options[0] as Proposal['options'][number]);
+  const card = optionCard(proposal, proposal.options[0] as Proposal['options'][number], level.id);
   it('with no result to check with: missing, never "nothing fails"', () => {
     expect(precheckOn(project, card, ['x'], [], null, TYPICAL_RATES)).toEqual({
       failing: [],

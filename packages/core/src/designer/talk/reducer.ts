@@ -70,6 +70,8 @@ export type TalkAction =
       id: string;
       at: string;
       keep: boolean;
+      /** The level the new conversation designs (the one shown); else the same as before. */
+      levelId?: string;
       brief: DesignBrief;
       beforeFp: string;
       afterFp: string | null;
@@ -391,7 +393,7 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
         id: a.id,
         at: a.at,
         projectId: conv.projectId,
-        levelId: conv.levelId,
+        levelId: a.levelId ?? conv.levelId,
         brief: a.keep ? conv.brief : a.brief,
         beforeFp: a.beforeFp,
         afterFp: a.afterFp,

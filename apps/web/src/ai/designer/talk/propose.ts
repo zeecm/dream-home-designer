@@ -33,7 +33,19 @@ import { designerCannotUse } from '../stream';
 import type { PriceInput, Priced } from './pricing';
 import { talkStore } from './talkStore';
 import { threshold } from './threshold';
-import { act, actProposal, clearTyped, newId, nowIso, say, typedNow, useTalk } from './useTalk';
+import {
+  act,
+  actProposal,
+  clearTyped,
+  designLevelId,
+  levelGone,
+  newId,
+  nowIso,
+  say,
+  talkLevels,
+  typedNow,
+  useTalk,
+} from './useTalk';
 
 /**
  * A design run from the conversation: a scope button ("Living and dining · about US$0.20"),
@@ -86,7 +98,7 @@ export const planRequest = (plan: TalkPlan, said: string, scope?: ScopeRef): Pre
 function priceInput(req: PressRequest, designId: string): Omit<PriceInput, 'designs'> | null {
   const conv = useTalk.getState().conv;
   const ai = aiSettings();
-  if (!conv || !ai || designerCannotUse(ai)) return null;
+  if (!conv || !ai || designerCannotUse(ai) || levelGone()) return null;
   const project = doc();
   let finish: PriceInput['finish'];
   if (req.finish) {
@@ -106,6 +118,7 @@ function priceInput(req: PressRequest, designId: string): Omit<PriceInput, 'desi
   const talk = of && !req.talk ? anotherAsk(of, words, decided()) : req.talk;
   return {
     project,
+    levelId: designLevelId(),
     brief: conv.brief,
     scope: req.scope,
     words,
@@ -123,16 +136,16 @@ function priceKey(req: PressRequest): string | null {
   const conv = useTalk.getState().conv;
   const ai = aiSettings();
   if (!conv || !ai) return null;
-  const project = doc();
-  const after = project.renovation?.levels[0];
+  const levels = talkLevels();
   const designs = useDesigner.getState().designs;
   return JSON.stringify([
     ai.model,
     priceTable()[ai.model] ?? null,
     conv.brief,
     req,
-    project.levels[0] ? levelFingerprint(project.levels[0]) : null,
-    after ? levelFingerprint(after) : null,
+    designLevelId(),
+    levels ? levelFingerprint(levels.before) : null,
+    levels?.after ? levelFingerprint(levels.after) : null,
     designs.map((d) => [d.id, d.accepted?.at ?? null]),
     useTalk
       .getState()
@@ -186,6 +199,8 @@ export const finishPrice = (p: Proposal, letter: string, rooms: string[]) =>
 let starting = false;
 function begin(): boolean {
   if (starting || useDesigner.getState().run || useTalk.getState().reply) return false;
+  // Its level gone from the plan: nothing runs (the panel says why).
+  if (levelGone()) return false;
   starting = true;
   useDesigner.setState({ starting: true });
   return true;

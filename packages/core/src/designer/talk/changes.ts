@@ -1,4 +1,4 @@
-import { current, isDraft } from 'immer';
+import { type Draft, current, isDraft } from 'immer';
 import { type CostEstimate, type Rates, TYPICAL_RATES, costEstimate } from '../../cost';
 import { furnitureKind, itemSize } from '../../furniture';
 import type { Command } from '../../history';
@@ -15,7 +15,7 @@ import type { DesignResult, ResultCheck } from '../result';
 import type { DesignBrief, DesignInput, DesignItem } from '../schema';
 import { BATHROOMS } from '../schema';
 import { roomIdAt, roomsBeside } from '../spaces';
-import { settled } from '../util';
+import { levelFingerprint, settled, stableJson } from '../util';
 
 /**
  * A proposal as changes the household can tick one by one (UX §6.3): what it adds, moves,
@@ -755,14 +755,30 @@ export function acceptChanges(
 
 /**
  * "Put it back": the renovation of level `levelId` as it was when the conversation started
- * (`level`, After then), or no renovation when there was none. One undo step.
+ * (`level`, After then), or, when there was none, that level unchanged in it; the renovation
+ * goes once no level of it is changed (another level's own changes stay). One undo step.
  */
 export function putPlanBack(levelId: string, level: Level | null): Command {
+  /** `after` made `next` (its id kept): everything the plan draws of it, its lights too. */
+  const putBack = (after: Draft<Level>, next: Level) => {
+    applyLevel(after, { ...next, id: after.id }, { items: true });
+    after.lights = structuredClone(next.lights ?? {});
+  };
+  /** A level's whole content, without its id (the renovation's copy has another). */
+  const content = (l: Level) => stableJson({ ...l, id: null });
   return {
     label: 'Put the plan back',
     recipe: (d) => {
       if (!level) {
-        delete d.renovation;
+        if (!d.renovation) return;
+        const before = d.levels.find((l) => l.id === levelId);
+        const after = d.renovation.levels.find((l) => l.id === `${levelId}${AFTER_SUFFIX}`);
+        if (before && after) putBack(after, structuredClone(current(before)));
+        const changed = d.renovation.levels.some((a) => {
+          const b = d.levels.find((l) => `${l.id}${AFTER_SUFFIX}` === a.id);
+          return !b || content(current(a)) !== content(current(b));
+        });
+        if (!changed) delete d.renovation;
         return;
       }
       if (!d.renovation) {
@@ -773,8 +789,7 @@ export function putPlanBack(levelId: string, level: Level | null): Command {
           })),
         };
       }
-      const after = draftLevel(d, `${levelId}${AFTER_SUFFIX}`);
-      applyLevel(after, { ...level, id: `${levelId}${AFTER_SUFFIX}` }, { items: true });
+      putBack(draftLevel(d, `${levelId}${AFTER_SUFFIX}`), level);
     },
   };
 }

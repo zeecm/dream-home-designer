@@ -6,6 +6,7 @@ import {
   FURNITURE,
   type Level,
   type Project,
+  beforeId,
   blankProject,
   canRedo,
   canUndo,
@@ -697,6 +698,15 @@ export function useLevel(): Level | undefined {
   if (preview) return preview.side === 'before' ? preview.before : preview.level;
   return level;
 }
+
+/**
+ * The id (in the plan as it is) of the level the editor shows: what the designer designs when
+ * a conversation starts.
+ */
+export const shownLevelId = (): string | undefined => {
+  const l = variantLevels(useStore.getState().editor.doc, useEditor.getState().variant)[0];
+  return l ? beforeId(l.id) : undefined;
+};
 
 /** useLevel outside React, as it is now. */
 export const currentLevel = (): Level | undefined => {

@@ -345,7 +345,7 @@ function VersionVerdict({ d }: { d: Design }) {
   const tick = useResultsTickN();
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
   const v = useMemo(() => {
-    const b = nowOf(project);
+    const b = nowOf(project, d.levelId);
     if (!b) return null;
     const r = timed(() => readResult(b.now, b.before, d, designOpts(project)));
     if (!r) return { text: 'Checking…', tone: 'pending' };

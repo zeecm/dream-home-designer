@@ -24,6 +24,8 @@ import {
 
 export interface PriceInput {
   project: Project;
+  /** The level designed (the conversation's). */
+  levelId: string;
   designs: Design[];
   brief: DesignBrief;
   scope: ScopeRef;
@@ -44,7 +46,7 @@ function finishPlan(
   i: PriceInput & { finish: NonNullable<PriceInput['finish']> },
 ): ScopePlan | null {
   const o = i.finish.option;
-  const ctx = contextFor(i.project, o.brief, o.aliases);
+  const ctx = contextFor(i.project, o.brief, i.levelId, o.aliases);
   if (!ctx) return null;
   const plan: RunPlan = {
     layout: null,
@@ -75,7 +77,17 @@ function finishPlan(
 export function priceRequest(i: PriceInput): Priced {
   const sp = i.finish
     ? finishPlan(i as PriceInput & { finish: NonNullable<PriceInput['finish']> })
-    : planScope(i.scope, i.brief, i.project, i.designs, i.words, i.designId, i.opts, i.talk);
+    : planScope(
+        i.scope,
+        i.brief,
+        i.project,
+        i.levelId,
+        i.designs,
+        i.words,
+        i.designId,
+        i.opts,
+        i.talk,
+      );
   if (!sp) return null;
   const est = estimateRun(plannedPrompts(sp.ctx, sp.draft, sp.plan, i.opts), {
     provider: i.ai.provider,

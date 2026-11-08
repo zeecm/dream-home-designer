@@ -1,10 +1,12 @@
 import {
   type DesignBrief,
   type Level,
+  type Project,
   type RoomUse,
   STYLE_NAMES,
   StyleId,
   defaultBrief,
+  designLevels,
   furnitureKind,
   isDesigned,
   peopleOf,
@@ -13,7 +15,7 @@ import {
   sleepingPlan,
 } from '@dhd/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useProject } from '../../store';
+import { shownLevelId, useProject } from '../../store';
 import { Segmented } from '../../ui/fields';
 import { icons } from '../../ui/icons';
 import { WISHES } from '../layouts';
@@ -143,6 +145,9 @@ function summaryOf(id: SectionId, b: DesignBrief, level: Level): string {
 }
 
 /** True for a phone-sized screen (the brief becomes a stepped sheet). */
+/** Whether the level shown has a renovation (the brief starts from it then). */
+const renovated = (project: Project) => !!designLevels(project, shownLevelId() ?? '')?.after;
+
 function useNarrow(px = 600): boolean {
   const q = `(max-width: ${px}px)`;
   const [narrow, setNarrow] = useState(() => window.matchMedia?.(q).matches ?? false);
@@ -210,7 +215,7 @@ export function BriefDialog({
   const ref = useRef<HTMLDialogElement>(null);
   const project = useProject();
   const [brief, setBriefState] = useState<DesignBrief>(
-    () => initial ?? { ...defaultBrief(), start: project.renovation ? 'after' : 'before' },
+    () => initial ?? { ...defaultBrief(), start: renovated(project) ? 'after' : 'before' },
   );
   const [loaded, setLoaded] = useState(!!initial);
   const [open, setOpen] = useState<Set<SectionId>>(new Set(['who', 'rooms']));
@@ -227,20 +232,21 @@ export function BriefDialog({
     let live = true;
     void getBrief(project.id).then((b) => {
       if (!live) return;
-      if (b) setBriefState({ ...b, start: project.renovation ? b.start : 'before' });
+      if (b) setBriefState({ ...b, start: renovated(project) ? b.start : 'before' });
       setLoaded(true);
     });
     return () => {
       live = false;
     };
-  }, [project.id, project.renovation, initial]);
+  }, [project, initial]);
   const setBrief = (b: DesignBrief) => {
     setBriefState(b);
     void putBrief(project.id, b);
   };
   const close = () => ref.current?.close();
 
-  const ctx = useMemo(() => contextFor(project, brief), [project, brief]);
+  // The level shown (a home of several levels is designed a level at a time).
+  const ctx = useMemo(() => contextFor(project, brief, shownLevelId() ?? ''), [project, brief]);
   const level = ctx?.base;
 
   if (!level) return null;
