@@ -6,6 +6,7 @@ import {
   designResult,
   designResultKey,
 } from '@dhd/core';
+import { freeze } from 'immer';
 import { create } from 'zustand';
 import { useStore } from '../../store';
 import { type Answer, type Ask, handle } from './resultsHandler';
@@ -32,6 +33,16 @@ const waiting = new Map<number, Waiting>();
 let seq = 0;
 let worker: Worker | null | undefined;
 
+/**
+ * An ask answered here, on the main thread (no worker, or it failed): a price is worked out
+ * against the versions as they are now, which the worker would have been sent.
+ */
+function here(ask: Ask): Answer {
+  if (ask.kind === 'price')
+    handle({ id: 0, kind: 'designs', designs: useDesigner.getState().designs });
+  return handle(ask);
+}
+
 function answered(a: Answer) {
   const w = waiting.get(a.id);
   waiting.delete(a.id);
@@ -53,7 +64,7 @@ function getWorker(): Worker | null {
     // A worker that fails: what it was asked is answered here, and so is all that follows.
     w.onerror = () => {
       worker = null;
-      for (const x of [...waiting.values()]) answered(handle(x.ask));
+      for (const x of [...waiting.values()]) answered(here(x.ask));
     };
     worker = w;
     tell({ kind: 'models', models: useStore.getState().editor.doc.models });
@@ -81,7 +92,7 @@ function send<T>(ask: Unsent): Promise<T> {
   const full = { ...ask, id: ++seq } as Ask;
   const w = getWorker();
   if (!w) {
-    const a = handle(full);
+    const a = here(full);
     return a.ok ? Promise.resolve(a.value as T) : Promise.reject(new Error(a.error));
   }
   return new Promise<T>((resolve, reject) => {
@@ -113,7 +124,10 @@ export function requestResult(
   const going = placing.get(key);
   if (going) return going;
   const p = send<DesignResult>({ kind: 'result', base, before, design, opts }).then(
-    (r) => {
+    (sent) => {
+      // Frozen again, as designResult leaves it (a clone isn't): what reads it on this side
+      // (room shapes, the changes, the checks) keeps its own memos on frozen levels.
+      const r = freeze(sent, true);
       keep(results, key, r);
       placing.delete(key);
       bump();
@@ -170,6 +184,13 @@ export function readPrice(
   if (pricing.has(key)) return undefined;
   const i = input();
   if (!i) return null;
+  if (!getWorker()) {
+    // Worked out at once, as it always was.
+    const a = here({ id: 0, kind: 'price', input: i });
+    const v = a.ok ? (a.value as Priced) : null;
+    keep(priced, key, v);
+    return v;
+  }
   const p = freshPrice(i).then(
     (v) => {
       keep(priced, key, v);
@@ -185,8 +206,7 @@ export function readPrice(
     },
   );
   pricing.set(key, p);
-  // Answered here at once (no worker): read it now.
-  return priced.has(key) ? (priced.get(key) ?? null) : undefined;
+  return undefined;
 }
 
 /** Re-renders when an answer lands (put it in the deps of what reads the cache). */
