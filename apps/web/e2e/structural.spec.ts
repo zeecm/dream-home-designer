@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
 import { newBlankPlan, waitSaved } from './helpers';
+import { expect, test } from './test';
 
 const SHELTER = '[data-hit="wall:w_household-shelter_living-and-dining"]';
 const STRUCTURAL = '[data-hit="wall:w_bedroom_living-and-dining-2"]';

@@ -1313,6 +1313,15 @@ affordance as major:
 The e2e suite follows the same rules for the phone (`mobile.spec.ts` checks the first wall's
 preview mid-drag and drags its end).
 
+**E2e specs import `test` and `expect` from `e2e/test.ts`, not `@playwright/test` (8 Nov; Biome
+refuses the latter in `e2e/`).** Its `test` closes every browser context a test opens itself
+(a second person on a share link). Playwright closes only the one behind `page`, and each one
+left open stays in the worker's browser for the rest of the run; in Split or 3D view its 3D
+view draws every frame in SwiftShader. That was why `main` went red after #41: with two such
+pages in its browser the exact render's first sample never came (36 s without them); a view
+link's first paint missed its 10 s and the guide's close click hung for 60 s (2.4 s without).
+`contexts.spec.ts` checks that a context a test leaves open is gone by the next test.
+
 - Every document mutation goes through a `Command` in `packages/core/src/commands.ts`.
   UI code never mutates the project directly.
 - Generate ids outside the recipe (as `addWall` does) so recipes are deterministic and

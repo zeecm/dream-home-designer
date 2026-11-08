@@ -1,5 +1,5 @@
-import { type Page, devices, expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { type Page, devices, expect, test } from './test';
 
 /**
  * Aircon trunking run as a fitter runs it: every leg square to the walls, hugging them; a

@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type Locator, type Page, devices, expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { type Locator, type Page, devices, expect, test } from './test';
 
 // The storage meter, slice 1, on core's furnished sample (written out; a web unit test keeps
 // it in step): a queen bed and a 1.20 m wardrobe in Main bedroom, a single bed in Bedroom, a

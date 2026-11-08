@@ -1,5 +1,5 @@
-import { type Locator, type Page, devices, expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { type Locator, type Page, devices, expect, test } from './test';
 
 /**
  * Suggested electrical points (docs/specs/slice-2s.md, A): criteria 18–24, on a desktop and on

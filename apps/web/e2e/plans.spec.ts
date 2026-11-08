@@ -1,5 +1,5 @@
-import { type Page, expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { type Page, expect, test } from './test';
 
 const openId = (page: Page) => new URL(page.url()).searchParams.get('p') ?? '';
 

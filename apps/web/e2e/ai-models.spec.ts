@@ -1,5 +1,5 @@
-import { type Page, expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { type Page, expect, test } from './test';
 
 const KEY = 'AIza-test-not-a-real-key-123456';
 const GEMINI = 'https://generativelanguage.googleapis.com/v1beta';

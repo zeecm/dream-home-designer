@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
 import { floorArea, waitSaved } from './helpers';
+import { expect, test } from './test';
 
 test('a first visit opens its own copy of the sample flat, saved on the server', async ({
   page,

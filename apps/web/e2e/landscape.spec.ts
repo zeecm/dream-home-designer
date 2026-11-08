@@ -1,5 +1,5 @@
-import { devices, expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { devices, expect, test } from './test';
 
 // A phone on its side: wide, but only about 340 px tall. A small one is narrower than the
 // portrait phone breakpoint (720 px), so both sets of rules meet there.

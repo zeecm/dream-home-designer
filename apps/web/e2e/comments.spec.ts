@@ -1,5 +1,5 @@
-import { type Page, expect, test } from '@playwright/test';
 import { centre, placeFridge, waitSaved } from './helpers';
+import { type Page, expect, test } from './test';
 
 /** Shots for looking at, when SHOTS is set to a folder. */
 const shot = async (page: Page, name: string) => {

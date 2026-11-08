@@ -1,5 +1,5 @@
-import { type Page, expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { type Page, expect, test } from './test';
 
 /**
  * A render from the orbit view (high up, rooms looking big) starts from eye height in the

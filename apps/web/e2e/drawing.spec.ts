@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
 import { floorArea, newBlankPlan, waitSaved } from './helpers';
+import { expect, test } from './test';
 
 test('with a mouse, a drag draws a wall from where it starts, and a room corner to corner', async ({
   page,

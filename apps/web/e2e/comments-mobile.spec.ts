@@ -1,5 +1,5 @@
-import { type Page, devices, expect, test } from '@playwright/test';
 import { placeFridge, waitSaved } from './helpers';
+import { type Page, devices, expect, test } from './test';
 
 // A 390 px phone, by finger only.
 const { defaultBrowserType: _webkit, ...iPhone } = devices['iPhone 13'];

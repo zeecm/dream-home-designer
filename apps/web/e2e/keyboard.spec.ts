@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
 import { centre, waitSaved } from './helpers';
+import { expect, test } from './test';
 
 test('the plan works from the keyboard: Tab selects, Enter renames, arrows nudge', async ({
   page,

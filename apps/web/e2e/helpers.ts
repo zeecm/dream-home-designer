@@ -1,4 +1,4 @@
-import { type Page, expect } from '@playwright/test';
+import { type Page, expect } from './test';
 
 export async function waitSaved(page: Page) {
   // The first load probes the API, which can take a while under a busy parallel run.
