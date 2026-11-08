@@ -113,6 +113,20 @@ describe('changeSet', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
+  it('the same room again after a full accept: no Turn or Move rows for pieces where they are (QA P4-6)', () => {
+    const s1 = dispatch(fresh(), acceptDesign(lvl.id, r.level, allParts(r.level), { base: lvl }));
+    const after = reno(s1);
+    const again = sampleDesign({ level: lvl, id: 'dsn_again' });
+    // Facing the same way said as 0 or 2π, and a hair apart: still the same.
+    const turned = structuredClone(after);
+    for (const it of Object.values(turned.items)) it.rotationY += 2 * Math.PI + 1e-5;
+    for (const now of [after, turned]) {
+      const r2 = designResult(now, lvl, again);
+      const rows = changeSet(now, r2, again).filter((c) => c.verb === 'turn' || c.verb === 'move');
+      expect(rows.map((c) => c.text)).toEqual([]);
+    }
+  });
+
   it('rows of a space reshaped by the walls need the walls', () => {
     const concept: Concept = { ...sampleConcept(), walls: SPLIT_BEDROOM };
     const d = sampleDesign({ level: lvl, concept, answers: sampleAnswers() });
