@@ -335,10 +335,19 @@ async function markRows(ev: TurnOf<'event'>, out: boolean) {
     p
       ? {
           ...p,
-          options: p.options.map((o) => ({
-            ...o,
-            accepted: o.accepted.map((a) => (a.event === ev.id ? { ...a, out } : a)),
-          })),
+          options: p.options.map((o) => {
+            const mine = o.accepted.filter((a) => a.event === ev.id).map((a) => a.id);
+            if (!mine.length) return o;
+            // Undone, the subset that was accepted is ticked again (N5); redone, it is in.
+            const ticks = out
+              ? [...new Set([...(o.ticks ?? []), ...mine])]
+              : (o.ticks ?? []).filter((id) => !mine.includes(id));
+            return {
+              ...o,
+              ticks,
+              accepted: o.accepted.map((a) => (a.event === ev.id ? { ...a, out } : a)),
+            };
+          }),
         }
       : p,
   );

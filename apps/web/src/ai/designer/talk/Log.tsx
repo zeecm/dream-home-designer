@@ -32,13 +32,14 @@ import { designerCannotUse } from '../stream';
 import { FactEditor } from './Facts';
 import { Mark, type MarkKind } from './Mark';
 import { ProposalCard } from './ProposalCard';
+import { ReplyParts, ReplyText, SentState, Streaming } from './Talk';
 import { lineState, redoLine, undoLine } from './accept';
 import { type CardModel, designCard, optionCard } from './cards';
 import { dayMark } from './days';
 import { answerCost, cardRequest, pressPrice, pressScope, scopePrice } from './propose';
 import { toNewest } from './scroll';
 import { timed, useSettledProject } from './settle';
-import { act, newId, nowIso, talkLevel, useTalk } from './useTalk';
+import { act, newId, nowIso, talkLevel, useBusy, useTalk } from './useTalk';
 
 /**
  * The conversation's log (UX §5.3, §6): your turns in a bubble on the right, the designer's
@@ -52,6 +53,30 @@ const areaOf = (level: Level, rooms: string[]) =>
     return t + (r ? roomArea(level, r) : 0);
   }, 0);
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * Changes made by hand, said once (UX §6.6): "You moved the 3-seat sofa yourself; it stays
+ * where you put it." A label is "3-seat sofa (moved)".
+ */
+export function handText(lines: readonly string[], more: number): string {
+  const one = (l: string) => {
+    const m = /^(.*) \((moved|resized|added|removed|repainted)\)$/.exec(l);
+    return m ? { what: m[1] as string, how: m[2] as string } : { what: l, how: 'changed' };
+  };
+  const items = lines.map(one);
+  const first = items[0];
+  if (items.length === 1 && !more && first) {
+    const it =
+      first.how === 'removed'
+        ? 'it stays out'
+        : first.how === 'moved' || first.how === 'added'
+          ? 'it stays where you put it'
+          : 'it stays as you made it';
+    return `You ${first.how} the ${first.what.charAt(0).toLowerCase()}${first.what.slice(1)} yourself; ${it}.`;
+  }
+  const list = items.map((x) => `${x.what.charAt(0).toLowerCase()}${x.what.slice(1)} (${x.how})`);
+  return `You changed these yourself: ${list.join(', ')}${more ? ` and ${more} more` : ''}. They stay as you left them.`;
+}
 function Person({ t }: { t: TurnOf<'person'> }) {
   return (
     <article className="talk-turn talk-you" aria-labelledby={`h-${t.id}`}>
@@ -61,6 +86,7 @@ function Person({ t }: { t: TurnOf<'person'> }) {
       <p className="talk-bubble" title={new Date(t.at).toLocaleString()}>
         {t.text}
       </p>
+      <SentState t={t} />
     </article>
   );
 }
@@ -72,7 +98,7 @@ function Designer({ t, named }: { t: TurnOf<'designer'>; named: boolean }) {
         Designer
         <span className="visually-hidden"> said</span>
       </h3>
-      <p className="talk-text">{t.text}</p>
+      {t.talk ? <ReplyText text={t.text} /> : <p className="talk-text">{t.text}</p>}
       {t.lines.length > 0 && (
         <ul className="talk-lines">
           {t.lines.map((l) => (
@@ -81,6 +107,7 @@ function Designer({ t, named }: { t: TurnOf<'designer'>; named: boolean }) {
         </ul>
       )}
       {t.after && <p className="talk-text">{t.after}</p>}
+      <ReplyParts t={t} />
     </article>
   );
 }
@@ -179,7 +206,7 @@ function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
   const project = useSettledProject();
   const conv = useTalk((s) => s.conv) as Conversation;
   const ai = useAi();
-  const busy = useDesigner((s) => s.starting || !!s.run);
+  const busy = useBusy();
   const { prices } = useSpend();
   const level = project.renovation?.levels[0] ?? project.levels[0];
   const scopes = useMemo<ScopeRef[]>(
@@ -223,7 +250,20 @@ function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
         </p>
       )}
       {latest && cant && <p className="field-hint">{cant}</p>}
-      {latest && conflict && <p className="field-hint negative">Answer who sleeps where first.</p>}
+      {latest && conflict && (
+        <p className="field-hint negative">
+          {conflict.bedrooms === 0
+            ? 'Nobody has a bed yet: your plan has no bedroom. Say which rooms people sleep in first. '
+            : 'Answer who sleeps where first. '}
+          <button
+            type="button"
+            className="link-btn"
+            onClick={() => useTalk.setState({ view: 'know', knowAt: 'sleeping' })}
+          >
+            Who sleeps where
+          </button>
+        </p>
+      )}
       {latest && ai && !cant && (
         <ul className="talk-scopes">
           {priced.map(({ s, est }) => (
@@ -257,18 +297,19 @@ function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
 
 function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
   const ai = useAi();
-  const busy = useDesigner((s) => s.starting || !!s.run);
+  const busy = useBusy();
   const project = useSettledProject();
   const { prices } = useSpend();
   const level = project.renovation?.levels[0] ?? project.levels[0];
   const first = useMemo<ScopeRef | null>(() => {
+    if (t.just) return t.just;
     if (!t.scope.all || !level) return null;
     // The largest space first (the living room, as a rule): the one most worth starting with.
     const s = [...spacesOf(level)].sort(
       (p, q) => areaOf(level, q.rooms) - areaOf(level, p.rooms),
     )[0];
     return s ? { label: s.name, spaces: [s.key], all: false } : null;
-  }, [t.scope.all, level]);
+  }, [t.scope.all, t.just, level]);
   const open = t.state === 'open';
   // The price as it is now: the card's figure follows it, so the sentence and the cost check
   // below always say the same (and Go ahead binds what they say).
@@ -291,7 +332,11 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
     }
   }, [open, est, t.estimate, t.id]);
   const cap = capUsd();
-  const what = t.scope.all ? 'Designing the whole flat' : `Designing ${t.scope.label}`;
+  const what = t.talk
+    ? `“${t.talk.title}” (${t.scope.all ? 'the whole flat' : t.scope.label})`
+    : t.scope.all
+      ? 'Designing the whole flat'
+      : `Designing ${t.scope.label}`;
   // Answered: your bubble says it ("Not now"), and the card that follows shows the run.
   if (t.state !== 'open') return null;
   return (
@@ -390,6 +435,9 @@ function Event({ t }: { t: TurnOf<'event'> }) {
   } else if (e.type === 'stopped') {
     icon = 'stop';
     text = `Stopped. What’s done is kept.${e.usd ? ` Up to about ${usd(e.usd)} may still be billed.` : ''}`;
+  } else if (e.type === 'hand-edits') {
+    icon = 'edit';
+    text = handText(e.lines, e.more);
   } else {
     icon = e.type === 'fact' ? 'edit' : /^Couldn’t/.test(e.text) ? 'warn' : 'dot';
     text = e.text;
@@ -490,6 +538,7 @@ export function Log() {
   const turns = conv?.turns ?? [];
   const lastQuestion = [...turns].reverse().find((t) => t.kind === 'app-question')?.id;
   const lastScope = [...turns].reverse().find((t) => t.kind === 'scope')?.id;
+  const replyTo = useTalk((s) => s.reply?.turnId ?? null);
   // The log's own scrolls (to the newest turn) aren't the person scrolling away.
   const moved = useRef(0);
   const follow = useCallback((el: HTMLElement) => {
@@ -518,6 +567,23 @@ export function Log() {
     if (pinned.current) follow(el);
     else setBehind(true);
   }, [live?.state.steps, proposals]);
+  // A turn changed in place (a message not answered gains its line): followed if at the foot,
+  // so the newest is never cut off at the bottom (P3-1).
+  const rev = useTalk((st) => st.conv?.rev ?? 0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on each write
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (el && pinned.current) follow(el);
+  }, [rev]);
+  // A reply streaming in: followed only if the log was at its foot.
+  const replySay = useTalk((st) => st.reply?.say.length ?? 0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on the reply's text
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (!el || !replySay) return;
+    if (pinned.current) follow(el);
+    else setBehind(true);
+  }, [replySay]);
   useEffect(() => {
     const el = list.current;
     if (!el) return;
@@ -580,6 +646,11 @@ export function Log() {
                 <li className={`talk-li talk-li-${speaker}${named ? ' talk-li-named' : ''}`}>
                   {body}
                 </li>
+                {replyTo === t.id && (
+                  <li className="talk-li talk-li-designer talk-li-named">
+                    <Streaming named />
+                  </li>
+                )}
               </Fragment>
             );
           })}

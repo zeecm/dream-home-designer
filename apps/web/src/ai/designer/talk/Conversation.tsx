@@ -1,4 +1,4 @@
-import { type DesignBrief, spentOf } from '@dhd/core';
+import { type Bounds, type DesignBrief, roomShapes, spentOf } from '@dhd/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useEditor } from '../../../editor';
@@ -18,6 +18,7 @@ import { cardChanges, cardResult, cardVerdict, optionCard } from './cards';
 import { stopTalkRun } from './propose';
 import { focusInLog, keepFocus, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
+import { recoverPending, stopReply } from './turn';
 import { act, ensureConversation, newId, nowIso, talkLevel, useTalk } from './useTalk';
 import { useProposalView } from './view';
 
@@ -30,7 +31,9 @@ import { useProposalView } from './view';
  */
 
 const SHEET_Q = '(max-width: 900px)';
-const SIDE_Q = '(pointer: coarse) and (max-height: 500px)';
+// A phone on its side, or any short wide window (P2-5): the column, never a sheet over the plan.
+const SIDE_Q =
+  '(orientation: landscape) and (max-height: 500px) and (pointer: coarse), (orientation: landscape) and (max-height: 500px) and (min-width: 721px)';
 const sheetNow = () =>
   !!window.matchMedia?.(SHEET_Q).matches && !window.matchMedia?.(SIDE_Q).matches;
 const sideNow = () => !!window.matchMedia?.(SIDE_Q).matches;
@@ -152,6 +155,23 @@ function OnTheTable() {
 }
 
 /** The menu (⋯): What I know about you, Decisions, AI settings, Close. */
+/** The rooms a card is about, with a margin: what the plan zooms to (null: the whole flat). */
+function scopeBox(key: string): Bounds | null {
+  const p = useTalk.getState().proposals.find((x) => key.startsWith(`${x.id}:`));
+  const level = talkLevel();
+  if (!p || p.scope.all || !level) return null;
+  const shapes = roomShapes(level);
+  const pts = p.scope.spaces
+    .flatMap((k) => k.split('+'))
+    .flatMap((id) => shapes.get(id)?.outer ?? []);
+  if (!pts.length) return null;
+  const m = 0.6;
+  return {
+    min: { x: Math.min(...pts.map((q) => q.x)) - m, y: Math.min(...pts.map((q) => q.y)) - m },
+    max: { x: Math.max(...pts.map((q) => q.x)) + m, y: Math.max(...pts.map((q) => q.y)) + m },
+  };
+}
+
 function Menu() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -260,6 +280,8 @@ export function TalkPanel() {
     const had = !!useTalk.getState().conv && useTalk.getState().projectId === project.id;
     void ensureConversation().then((c) => {
       if (!live || !c) return;
+      // A reply cut off when a tab closed is said, and its text kept.
+      void recoverPending();
       const isNew = !had && c.turns.length <= 2 && !c.turns.some((t) => t.kind === 'person');
       setFresh(isNew);
       requestAnimationFrame(() => {
@@ -321,12 +343,29 @@ export function TalkPanel() {
     };
   }, [previewOn]);
   useEffect(() => () => useEditor.getState().setPreview(null), []);
-  // The plan refits to the card when a new one goes on it.
+  // The plan zooms to a card's rooms the first time it goes on the plan (the whole flat, or a
+  // card shown again, fits the plan); the zoom ends with the preview.
+  const zoomed = useRef(new Set<string>());
+  const ourBox = useRef<Bounds | null>(null);
   useEffect(() => {
     if (!shown) return;
-    const f = requestAnimationFrame(() => useEditor.getState().requestFit(64));
+    const first = !zoomed.current.has(shown);
+    zoomed.current.add(shown);
+    const box = first ? scopeBox(shown) : null;
+    const f = requestAnimationFrame(() => {
+      if (!useEditor.getState().elevation) {
+        ourBox.current = box;
+        useEditor.setState({ fitBox: box });
+      }
+      useEditor.getState().requestFit(64);
+    });
     return () => cancelAnimationFrame(f);
   }, [shown]);
+  useEffect(() => {
+    if (previewOn || !ourBox.current) return;
+    if (useEditor.getState().fitBox === ourBox.current) useEditor.setState({ fitBox: null });
+    ourBox.current = null;
+  }, [previewOn]);
 
   // Esc stops a run (not while a dialog or a menu view wants it).
   useEffect(() => {
@@ -339,7 +378,10 @@ export function TalkPanel() {
         useTalk.setState({ view: 'log' });
         return;
       }
-      if (useTalk.getState().live) {
+      if (useTalk.getState().reply) {
+        e.preventDefault();
+        stopReply();
+      } else if (useTalk.getState().live) {
         e.preventDefault();
         stopTalkRun();
       }
@@ -388,9 +430,34 @@ export function TalkPanel() {
   const drag = useRef<number | null>(null);
   const moved = useRef(false);
 
+  // Every turn that spent: the proposals' runs, the replies, and messages not answered.
+  const turns = useTalk((s) => s.conv?.turns);
+  const setAside = useTalk((s) => s.conv?.aside);
+  const totals0 = useMemo(
+    () =>
+      spentOf([
+        ...proposals.flatMap((p) => p.options.flatMap((o) => o.usage)),
+        ...(turns ?? []).flatMap((t) =>
+          t.kind === 'designer'
+            ? (t.talk?.usage ?? [])
+            : t.kind === 'person'
+              ? (t.reply?.usage ?? [])
+              : [],
+        ),
+      ]),
+    [proposals, turns],
+  );
+  // What was spent on turns taken out (Edit) still counts.
   const totals = useMemo(
-    () => spentOf(proposals.flatMap((p) => p.options.flatMap((o) => o.usage))),
-    [proposals],
+    () =>
+      setAside
+        ? {
+            usd: totals0.usd === null || setAside.usd === null ? null : totals0.usd + setAside.usd,
+            tokens: totals0.tokens + setAside.tokens,
+            estimated: totals0.estimated || setAside.estimated,
+          }
+        : totals0,
+    [totals0, setAside],
   );
   const spendLine =
     totals.usd === null

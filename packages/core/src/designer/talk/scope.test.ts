@@ -1,6 +1,6 @@
-import { defaultBrief, sampleFlatProject } from '@dhd/core';
 import { describe, expect, it } from 'vitest';
-import { planScope } from './scope';
+import { defaultBrief, sampleFlatProject } from '../../index';
+import { planScope } from './plan';
 
 const project = sampleFlatProject('prj_a');
 const living = {

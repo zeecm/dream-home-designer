@@ -1,25 +1,31 @@
 import {
   DRAFT_CHARS,
+  type DraftDesign,
   type Proposal,
   type ProposalOption,
   type RunEstimate,
+  type RunPlan,
+  type ScopePlan,
   type ScopeRef,
   TALK_LIMITS,
+  TALK_RECORD_VERSION,
+  type TalkAsk,
+  type TalkPlan,
   type TurnOf,
   askRule,
   atMostOf,
   cut,
   levelFingerprint,
+  planScope,
   scopeCut,
 } from '@dhd/core';
 import { useStore } from '../../../store';
 import { aiSettings } from '../../credentials';
 import { contextFor, estimateFor, plannedPrompts } from '../plan';
-import { type DraftDesign, type RunPlan, blankStep, runDesign } from '../run';
+import { blankStep, runDesign } from '../run';
 import { addUsage, capUsd, countRun, overLimit, priceTable, spent, usd } from '../spend';
 import { type Running, designOpts, useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
-import { type ScopePlan, planScope } from './scope';
 import { talkStore } from './talkStore';
 import { threshold } from './threshold';
 import { act, actProposal, clearTyped, newId, nowIso, say, typedNow, useTalk } from './useTalk';
@@ -46,6 +52,7 @@ export function estimateScope(sp: ScopePlan): RunEstimate | null {
     sp.plan.rooms,
     !!sp.plan.layout,
     sp.plan.feedback ?? '',
+    sp.plan.talk ?? null,
     Object.keys(sp.draft.spaces).sort(),
     levelFingerprint(sp.ctx.base),
     priceTable()[ai.model] ?? null,
@@ -67,7 +74,35 @@ export interface PressRequest {
   scope: ScopeRef;
   words: string;
   finish: { proposalId: string; letter: string; rooms: string[] } | null;
+  /** From a designer's plan: what it is for, the household's words, the decisions. */
+  talk?: TalkAsk;
+  /** The designer's name for it ("A console by the door"). */
+  title?: string;
 }
+
+/** The decisions as a run's talk block carries them. */
+const decided = () =>
+  (useTalk.getState().conv?.decisions ?? []).filter((d) => !d.deleted).map((d) => d.text);
+
+/**
+ * A pushback's alternative as a run asks for it (P2-2): the designer's own suggestion is what it
+ * is for; the person's words, which asked for what was pushed back on, don't go with it.
+ */
+export const altRequest = (plan: TalkPlan): PressRequest => ({
+  scope: plan.scope,
+  words: '',
+  finish: null,
+  title: plan.title,
+  talk: { intent: plan.intent, said: '', decided: decided() },
+});
+
+/** A designer's plan (or a concern's alternative) as a run asks for it. */
+export const planRequest = (plan: TalkPlan, said: string, scope?: ScopeRef): PressRequest => ({
+  scope: scope ?? plan.scope,
+  words: said,
+  finish: null,
+  talk: { intent: plan.intent, said, decided: decided() },
+});
 
 /** The plan and price of a request, on the plan as it is now. */
 function planOf(req: PressRequest, designId: string): { sp: ScopePlan; est: RunEstimate } | null {
@@ -90,6 +125,7 @@ function planOf(req: PressRequest, designId: string): { sp: ScopePlan; est: RunE
     req.words,
     designId,
     designOpts(project),
+    req.talk,
   );
   const est = sp ? estimateScope(sp) : null;
   return sp && est ? { sp, est } : null;
@@ -120,7 +156,7 @@ export const finishPrice = (p: Proposal, letter: string, rooms: string[]) =>
 /** One priced press at a time, from the first tap (a double tap starts one run). */
 let starting = false;
 function begin(): boolean {
-  if (starting || useDesigner.getState().run) return false;
+  if (starting || useDesigner.getState().run || useTalk.getState().reply) return false;
   starting = true;
   useDesigner.setState({ starting: true });
   return true;
@@ -153,16 +189,71 @@ export async function finishRooms(p: Proposal, letter: string, rooms: string[]) 
   }
 }
 
-async function askOrRun(req: PressRequest) {
-  const made = planOf(req, newId('dsn'));
-  if (!made) return;
-  const ask = askRule(made.est, {
+/** A priced button that runs a designer's idea (a concern's alternative), priced as shown. */
+export async function pressPlan(plan: TalkPlan) {
+  if (!begin()) return;
+  try {
+    await askOrRun(altRequest(plan));
+  } finally {
+    end();
+  }
+}
+
+/**
+ * The run after a designer's plan (tech §2.5): priced here, free; it runs at once unless a rule
+ * applies (the per-reply threshold too, now that no price was shown yet), else its cost card
+ * asks with Go ahead, Just {room} and Not now.
+ */
+export async function followPlan(plan: TalkPlan, said: string, replyTo: string) {
+  // A run going on (or starting): the plan is never dropped; its card asks for later.
+  const started = begin();
+  try {
+    const req = planRequest(plan, said);
+    const made = planOf(req, newId('dsn'));
+    if (!made) {
+      await act({
+        type: 'event',
+        id: newId('turn'),
+        at: nowIso(),
+        event: { type: 'note', text: 'Couldn’t work out what the designer’s plan would cost.' },
+      });
+      return;
+    }
+    const ask = rule(made.est, false);
+    if (ask === 'go' && started) {
+      await run(req, made, atMostOf(made.est), { person: null, turn: newId('turn') });
+      return;
+    }
+    const u = made.est.usd;
+    await act({
+      type: 'ask',
+      at: nowIso(),
+      ids: [newId('turn'), newId('turn')],
+      scope: req.scope,
+      words: said,
+      reason: ask === 'go' ? 'ask-threshold' : ask,
+      estimate: u ? { typical: u.typical, high: u.high, fix: u.fix } : null,
+      talk: { replyTo, title: plan.title, intent: plan.intent },
+      just: plan.just,
+    });
+  } finally {
+    if (started) end();
+  }
+}
+
+const rule = (est: RunEstimate, pressedPriced: boolean) =>
+  askRule(est, {
     spentTab: spent().usd,
     cap: capUsd(),
     threshold: threshold(),
     designRunsThisTab: spent().runs,
-    pressedPriced: true,
+    pressedPriced,
   });
+
+async function askOrRun(req: PressRequest) {
+  const made = planOf(req, newId('dsn'));
+  if (!made) return;
+  const ask = rule(made.est, true);
   if (ask === 'go') {
     await run(req, made, atMostOf(made.est), { person: newId('turn'), turn: newId('turn') });
     return;
@@ -177,15 +268,29 @@ async function askOrRun(req: PressRequest) {
     reason: ask,
     estimate: u ? { typical: u.typical, high: u.high, fix: u.fix } : null,
     finish: req.finish,
+    // A designer's idea keeps what it is for through its card (P2-2).
+    ...(req.talk
+      ? {
+          talk: { replyTo: '', title: req.title ?? req.scope.label, intent: req.talk.intent },
+          just: null,
+        }
+      : {}),
   });
-  if (!req.finish) await clearTyped();
+  if (!req.finish && !req.talk) await clearTyped();
 }
 
 /** The request a cost card stands for (or its cheaper room). */
 export const cardRequest = (card: TurnOf<'cost-ask'>, cheaper?: ScopeRef): PressRequest =>
   card.finish
     ? { scope: card.scope, words: '', finish: card.finish }
-    : { scope: cheaper ?? card.scope, words: card.words, finish: null };
+    : {
+        scope: cheaper ?? card.scope,
+        words: card.words,
+        finish: null,
+        ...(card.talk
+          ? { talk: { intent: card.talk.intent, said: card.words, decided: decided() } }
+          : {}),
+      };
 
 /** A card's figure as the price would be now (to keep the card and its cost check alike). */
 export function cardEstimate(card: TurnOf<'cost-ask'>): TurnOf<'cost-ask'>['estimate'] {
@@ -291,7 +396,7 @@ async function run(
     projectId: project.id,
     id: proposalId,
     conversationId: conv.id,
-    recordVersion: 1,
+    recordVersion: TALK_RECORD_VERSION,
     n: conv.nextN,
     turnId: ids.turn,
     at: nowIso(),
@@ -514,6 +619,11 @@ async function runOption(
       });
     }
     if (status !== 'failed') await act({ type: 'scopeNext', at: nowIso(), id: newId('turn') });
+  }
+  // Nothing designed: no empty version stays on the plan (N3).
+  if (status === 'failed' && useTalk.getState().shown === `${p.id}:${letter}`) {
+    useTalk.setState({ shown: null });
+    useDesigner.setState({ previewing: false });
   }
   if (useTalk.getState().live?.ctrl === ctrl) useTalk.setState({ live: null });
   const r = useDesigner.getState().run;

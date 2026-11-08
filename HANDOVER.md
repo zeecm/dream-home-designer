@@ -659,6 +659,18 @@ cost card or a finished run; after Undo the card's ticks reset; the "Updated fro
 line never shows; the plan doesn't zoom to the proposal's room. Design docs: `slice2-ux.md`,
 `slice2-tech.md`; QA results `s2pr1-qa.md` (session scratchpad).
 
+**AI designer v2, slice 2 PR 2 (talk to it, 8 Nov):** core `designer/talk/` adds `plan.ts`
+(`planScope`, `changePlan`, `changeFrom`, moved from web), `parseTalkReply` (salvaging), the
+`partialTalk` streaming scanner, `talkPrompt` (byte-stable history, cache marks, summaries) and
+record version 2. Web `talk/turn.ts`: Send, Try again (newest message only), Edit, Stop; one
+reply per plan through a Web Lock (`withReplyLock` never re-runs a callback, so no double call);
+a dead reply in another tab is detected by re-querying the lock. A reply may tighten but never
+loosen the walls brief or raise the budget: those become a free Yes/No (`talkConfirm`). Talk
+calls stop retrying once they've spent their priced at-most or reach the tab limit. Not done:
+`designResult` in a Web Worker (needs async pricing on every priced button; about 800 lines,
+its own PR); A/B/C alternatives (PR 3); the phone cost card that needs scrolling; "about S$40k"
+stored as S$32-40k. QA results: `s2pr2-qa.md` (session scratchpad).
+
 **Drag on big plans (task #69):** room labels are fitted once per room (`fitRoomLabel`,
 memo keyed on everything the fit reads) with `placeLabel` filtering far circles and searching
 nearest-first (exact, ties kept); `wallStatuses`, `planGeometry`, `roomShapes` and

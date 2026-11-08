@@ -6,6 +6,7 @@ import { LARGE_INPUT, MAX_STEP_INPUT } from './plan';
 import { tokens, usd, useSpend } from './spend';
 import { useDesigner } from './state';
 import { designerCannotUse } from './stream';
+import { useTalk } from './talk/useTalk';
 
 /**
  * The cost check before a run: about how much, at most how much, against what this tab has
@@ -81,7 +82,8 @@ export function CostCheck(p: CostCheckProps) {
   const unsupported = designerCannotUse(p.ai);
   // Pressed once: it waits while the run starts (a double click starts one run).
   const [pressed, setPressed] = useState(false);
-  const busy = useDesigner((s) => s.starting || !!s.run) || pressed;
+  const replying = useTalk((s) => !!s.reply);
+  const busy = useDesigner((s) => s.starting || !!s.run) || replying || pressed;
   const provider = PROVIDERS[p.ai.provider];
   const label =
     typical === null ? p.action : `${over ? p.anyway : p.action} · about ${usd(typical)}`;

@@ -21,6 +21,10 @@ import { SWATCHES } from '../BriefDialog';
 import { Mark } from './Mark';
 import { focusInLog } from './scroll';
 
+/** "You, Partner, Child 1 and Child 2" (N4). */
+const andList = (xs: string[]) =>
+  xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
+
 /**
  * The app's own questions as widgets (UX §6.5): steppers for who lives here, people chips per
  * bedroom for who sleeps where, chips for the rest, style cards. Free: the answer is recorded by
@@ -334,9 +338,9 @@ function Sleeping({ brief, level, onDone, doneLabel = 'Done', autoFocus }: FactP
       ))}
       <p className={unplaced.length ? 'field-hint negative' : 'field-hint'}>
         {!rooms.length
-          ? `${unplaced.map((p) => personLabel(p, b)).join(' and ')} would have no bed.`
+          ? `${andList(unplaced.map((p) => personLabel(p, b)))} would have no bed.`
           : unplaced.length
-            ? `${unplaced.map((p) => personLabel(p, b)).join(' and ')} would have no bed. Tap where each of them sleeps: two can share a room, a bunk bed sleeps two.`
+            ? `${andList(unplaced.map((p) => personLabel(p, b)))} would have no bed. Tap where each of them sleeps: two can share a room, a bunk bed sleeps two.`
             : said
               ? 'Each of them gets a bed there, and the checks make sure.'
               : 'Dashed means my guess. Tap to change.'}

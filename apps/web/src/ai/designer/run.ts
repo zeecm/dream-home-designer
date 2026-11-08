@@ -1,14 +1,13 @@
 import {
   type Aspect,
-  type Concept,
   type ContextInput,
-  type DesignInput,
   type DesignOptions,
+  type DraftDesign,
   FIX_PER_RUN,
   type FixRequest,
-  type Lock,
   type ParseResult,
   type Price,
+  type RunPlan,
   type SpaceDesign,
   type StepPrompt,
   type Usage,
@@ -28,8 +27,9 @@ import {
   usdOf,
 } from '@dhd/core';
 import { type AiSettings, PROVIDERS } from '../credentials';
-import { AiError, anySignal, failure } from '../providers';
-import { type Effort, HttpFail, type StepSink, newSink, streamStep } from './stream';
+import { AiError } from '../providers';
+import { type Halt, Halted, Stopped, requestStep } from './request';
+import { type StepSink, streamStep } from './stream';
 
 /**
  * The designer's runner: the layout-and-style step for the whole flat, then one step per
@@ -70,10 +70,7 @@ export interface StepState {
   fixing: { round: number; problems: number } | null;
 }
 
-export interface Halt {
-  kind: 'quota' | 'key' | 'offline' | 'network';
-  message: string;
-}
+export type { Halt };
 
 export interface RunState {
   steps: StepState[];
@@ -88,23 +85,8 @@ export interface RunState {
   said: string;
 }
 
-/** A version as the runner builds it. */
-export type DraftDesign = DesignInput & { usage: Usage[] };
-
-export interface RunPlan {
-  /** Run the layout-and-style step first; null keeps the version's concept. */
-  layout: { previous?: Concept | null } | null;
-  /** The spaces to furnish: every space of the level after the layout, or these keys. */
-  rooms: 'all' | string[];
-  /** Spaces not to ask for (everything in them kept). */
-  skip?: string[];
-  feedback?: string;
-  locks?: Lock[];
-  /** The answers being changed, by space key. */
-  previous?: Record<string, SpaceDesign>;
-  /** Per space, what stays as the previous answer had it (locked, or not asked for). */
-  keep?: Record<string, Aspect[]>;
-}
+/** A version as the runner builds it, and what a run asks for (core's). */
+export type { DraftDesign, RunPlan };
 
 export interface RunOptions {
   ai: AiSettings;
@@ -133,106 +115,7 @@ export interface RunOptions {
   askAgain?: boolean;
 }
 
-/** How long a step may go without a single event. */
-export const QUIET_MS = 120_000;
-/** Waits after a rate limit when the provider doesn't say how long. */
-const RATE_WAITS = [15, 30];
-const SERVER_WAIT = 10;
-/** Seconds before each try again after the connection dropped (a phone locked, a blip). */
-export const NET_WAITS = [3, 10];
-/** Longest wait for the tab to be in view and online again before a try, ms. */
-const BACK_MS = 10 * 60_000;
-
-/**
- * Resolves once the page is in view and online (a phone suspends a hidden tab's requests,
- * so trying while it is hidden only fails again), or after BACK_MS.
- */
-function backOnline(signal: AbortSignal): Promise<void> {
-  const ready = () =>
-    (typeof document === 'undefined' || document.visibilityState !== 'hidden') &&
-    (typeof navigator === 'undefined' || navigator.onLine !== false);
-  if (ready()) return Promise.resolve();
-  return new Promise((resolve) => {
-    const done = () => {
-      clearTimeout(timer);
-      document.removeEventListener('visibilitychange', check);
-      window.removeEventListener('online', check);
-      signal.removeEventListener('abort', done);
-      resolve();
-    };
-    const check = () => {
-      if (ready()) done();
-    };
-    const timer = setTimeout(done, BACK_MS);
-    document.addEventListener('visibilitychange', check);
-    window.addEventListener('online', check);
-    signal.addEventListener('abort', done);
-  });
-}
-const LOWER: Record<Effort, Effort | null> = { high: 'medium', medium: 'low', low: null };
-
-class Stopped extends Error {}
-class Halted extends Error {
-  constructor(readonly halt: Halt) {
-    super(halt.message);
-  }
-}
-
-type Obj = Record<string, unknown>;
-const obj = (v: unknown): Obj | undefined =>
-  v && typeof v === 'object' && !Array.isArray(v) ? (v as Obj) : undefined;
-
-/** What a refused request means for the run. */
-export function classify(
-  ai: AiSettings,
-  f: HttpFail,
-): 'quota' | 'key' | 'rate' | 'server' | 'other' {
-  const first = Array.isArray(f.body) ? f.body[0] : f.body;
-  const err = obj(obj(first)?.error);
-  const msg = typeof err?.message === 'string' ? err.message : '';
-  // Quota first: OpenAI's insufficient_quota comes as a 429, like a rate limit.
-  if (
-    ai.provider === 'openai' &&
-    (err?.code === 'insufficient_quota' || err?.type === 'insufficient_quota')
-  )
-    return 'quota';
-  if (
-    ai.provider === 'anthropic' &&
-    (f.status === 402 || err?.type === 'billing_error' || /credit balance|billing/i.test(msg))
-  )
-    return 'quota';
-  if (ai.provider === 'gemini' && f.status === 429) {
-    const details = Array.isArray(err?.details) ? err.details : [];
-    const daily = details.some((d) =>
-      (Array.isArray(obj(d)?.violations) ? (obj(d)?.violations as unknown[]) : []).some((v) =>
-        /PerDay/i.test(String(obj(v)?.quotaId ?? '')),
-      ),
-    );
-    if (daily) return 'quota';
-  }
-  if (failure(ai.provider, f.status, f.body, ai.key).kind === 'key') return 'key';
-  if (f.status === 429) return 'rate';
-  if (f.status >= 500) return 'server';
-  return 'other';
-}
-
-const ABORT_TEXT = 'Stopped.';
-
-/** Waits `ms`, or rejects as stopped when `signal` aborts. */
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) return reject(new Stopped(ABORT_TEXT));
-    const t = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(t);
-      reject(new Stopped(ABORT_TEXT));
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
-}
+export { NET_WAITS, QUIET_MS, classify } from './request';
 
 /** Furniture or built-ins: which part an answer's piece is. */
 function aspectOfAnswer(assetId: string, o: DesignOptions | undefined): Aspect {
@@ -352,7 +235,6 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
   };
 
   let cap = 2;
-  let lastThought = 0;
 
   /** Meters one request (`finished`: its answer came to an end, with its own usage). */
   const meter = (p: StepPrompt, sink: StepSink, st: StepState, ms: number, finished: boolean) => {
@@ -380,196 +262,45 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     o.onUsage?.(u);
   };
 
-  const fail = (st: StepState, text: string): null => {
-    st.status = 'failed';
-    st.error = text;
-    st.thinking = '';
-    st.wait = null;
-    say(`${text}`);
-    update();
-    return null;
-  };
-
+  const throttle = { last: 0 };
   /** One step, retried as the rules say; its parsed answer, or null when it failed. */
-  async function step<T>(
+  function step<T>(
     p: StepPrompt,
     st: StepState,
     parse: (raw: unknown) => ParseResult<T>,
     onStart?: () => void,
   ): Promise<T | null> {
-    let effort = p.effort;
-    let waits = 0;
-    let server = 0;
-    let net = 0;
-    let unreadable = 0;
-    let long = 0;
-    for (;;) {
-      if (o.signal.aborted) throw new Stopped(ABORT_TEXT);
-      const ctrl = new AbortController();
-      const signal = anySignal([o.signal, ctrl.signal]);
-      let quiet = false;
-      let timer = setTimeout(() => {
-        quiet = true;
-        ctrl.abort();
-      }, QUIET_MS);
-      const bump = () => {
-        clearTimeout(timer);
-        timer = setTimeout(() => {
-          quiet = true;
-          ctrl.abort();
-        }, QUIET_MS);
-      };
-      const sink = newSink();
-      const t0 = Date.now();
-      st.status = 'running';
-      st.wait = null;
-      update();
-      let error: unknown = null;
-      try {
-        await streamStep(
-          ai,
-          p,
-          effort,
-          sink,
-          signal,
-          {
-            onStart: () => onStart?.(),
-            onEvent: bump,
-            onThinking: (line) => {
-              if (line === st.thinking) return;
-              st.thinking = line;
-              // At most four repaints a second while it thinks.
-              const now = Date.now();
-              if (now - lastThought >= 250) {
-                lastThought = now;
-                update();
-              }
-            },
-          },
-          doFetch,
-        );
-      } catch (e) {
-        error = e;
-      } finally {
-        clearTimeout(timer);
-      }
-      // Refused before it began: nothing billed. Anything that streamed is metered.
-      const refused = error instanceof HttpFail && sink.events.length === 0;
-      if (!refused) meter(p, sink, st, Date.now() - t0, !error && sink.stop !== null);
-      if (error) {
-        if (o.signal.aborted) {
-          st.status = 'cancelled';
-          const price = priceOf(ai.model, o.prices);
-          st.cutOffHigh = price
-            ? usdOf(
-                {
-                  input: tokensOf(
-                    p.system.length + p.prefix.length + p.shared.length + p.tail.length,
-                  ),
-                  cachedInput: 0,
-                  cacheWrite: 0,
-                  output: p.maxTokens,
-                },
-                price,
-              )
-            : null;
-          st.thinking = '';
-          update();
-          throw new Stopped(ABORT_TEXT);
+    return requestStep({
+      ai,
+      signal: o.signal,
+      ...(o.prices ? { prices: o.prices } : {}),
+      send: (effort, sink, signal, hooks) =>
+        streamStep(ai, p, effort, sink, signal, hooks, doFetch),
+      effort: p.effort,
+      promptChars: p.system.length + p.prefix.length + p.shared.length + p.tail.length,
+      maxTokens: p.maxTokens,
+      st,
+      update: () => {
+        if (st.status === 'failed' && st.error) say(st.error);
+        update();
+      },
+      meter: (sink, ms, finished) => meter(p, sink, st, ms, finished),
+      parse: (text) => {
+        let raw: unknown;
+        try {
+          raw = JSON.parse(text);
+        } catch {
+          return null;
         }
-        if (quiet) return fail(st, `${st.label}: the model went quiet for two minutes.`);
-        if (error instanceof HttpFail) {
-          const kind = classify(ai, error);
-          const said = failure(ai.provider, error.status, error.body, ai.key);
-          if (kind === 'quota') {
-            throw new Halted({
-              kind: 'quota',
-              message:
-                'Your key has run out of quota or credit. Top up with your provider, then go on.',
-            });
-          }
-          if (kind === 'key') throw new Halted({ kind: 'key', message: said.message });
-          if (kind === 'rate') {
-            cap = 1;
-            if (waits < RATE_WAITS.length) {
-              const seconds = Math.max(1, error.retryAfter ?? RATE_WAITS[waits] ?? 30);
-              waits++;
-              st.retries++;
-              for (let s = seconds; s > 0; s--) {
-                st.wait = { seconds: s, attempt: waits };
-                update();
-                await sleep(1000, o.signal);
-              }
-              continue;
-            }
-            return fail(st, `${st.label}: ${name} is still limiting requests from your key.`);
-          }
-          if (kind === 'server' && server < 1) {
-            server++;
-            st.retries++;
-            // The wait is shown, a second at a time, as a rate limit's is.
-            for (let s = SERVER_WAIT; s > 0; s--) {
-              st.wait = { seconds: s, attempt: server, server: true };
-              update();
-              await sleep(1000, o.signal);
-            }
-            continue;
-          }
-          return fail(st, `${st.label}: ${said.message}`);
-        }
-        // The connection dropped (a phone locked, a blip): once back in view and online,
-        // try again a couple of times before stopping.
-        if (net < NET_WAITS.length) {
-          const seconds = NET_WAITS[net] ?? 10;
-          net++;
-          st.retries++;
-          st.wait = { seconds, attempt: net, net: true };
-          update();
-          await backOnline(o.signal);
-          for (let s = seconds; s > 0; s--) {
-            st.wait = { seconds: s, attempt: net, net: true };
-            update();
-            await sleep(1000, o.signal);
-          }
-          continue;
-        }
-        const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-        throw new Halted({
-          kind: offline ? 'offline' : 'network',
-          message: offline ? 'You’re offline.' : `Couldn’t reach ${name}, even after trying again.`,
-        });
-      }
-      if (sink.stop === 'refusal') return fail(st, `${st.label}: the model declined this request.`);
-      if (sink.stop === 'length') {
-        const lower = LOWER[effort];
-        if (long < 1 && lower) {
-          long++;
-          st.retries++;
-          effort = lower;
-          continue;
-        }
-        return fail(st, `${st.label}: the answer was too long for one step.`);
-      }
-      let raw: unknown;
-      try {
-        raw = JSON.parse(sink.text);
-      } catch {
-        raw = undefined;
-      }
-      const r = raw === undefined ? null : parse(raw);
-      if (!r || !r.ok) {
-        if (unreadable < 1) {
-          unreadable++;
-          st.retries++;
-          continue;
-        }
-        return fail(st, `${st.label}: the model’s answer couldn’t be read.`);
-      }
-      st.status = 'done';
-      st.thinking = '';
-      st.wait = null;
-      return r.value;
-    }
+        const r = parse(raw);
+        return r.ok ? r.value : null;
+      },
+      ...(onStart ? { onStart } : {}),
+      onRate: () => {
+        cap = 1;
+      },
+      throttle,
+    });
   }
 
   const finish = (phase: RunState['phase']) => {
@@ -598,6 +329,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       const bounds = levelBounds(ctx.base);
       const prompt = layoutStep(ctx, {
         ...(plan.feedback ? { feedback: plan.feedback } : {}),
+        ...(plan.talk ? { talk: plan.talk } : {}),
         locks: plan.locks ?? [],
         previous: plan.layout.previous ?? null,
       });
@@ -672,6 +404,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       const prompt = roomStep(ctx, s, r.level, design.aliases, {
         concept: design.concept,
         ...(plan.feedback ? { feedback: plan.feedback } : {}),
+        ...(plan.talk ? { talk: plan.talk } : {}),
         locks: plan.locks ?? [],
         previous: plan.previous?.[s.key] ?? null,
       });
@@ -701,6 +434,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
               roomStep(ctx, s, r.level, design.aliases, {
                 concept: design.concept,
                 ...(plan.feedback ? { feedback: plan.feedback } : {}),
+                ...(plan.talk ? { talk: plan.talk } : {}),
                 locks: plan.locks ?? [],
                 previous: current,
                 fix,

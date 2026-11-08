@@ -173,15 +173,26 @@ export function DesignerBar() {
   // Esc leaves the preview (when nothing else wants it).
   useEffect(() => {
     if (!preview) return;
+    let walkEnded = 0;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('dialog[open]'))
         return;
       if (useDesigner.getState().run || useEditor.getState().selection) return;
+      // Esc in a walk-through is the walk's own (it leaves the walk, N6): the preview stays. So
+      // does the Esc just after it (a second Esc pressed to leave a pointer-locked walk).
+      if (useEditor.getState().walking || Date.now() - walkEnded < 1500) return;
       e.preventDefault();
       endPreview();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const off = useEditor.subscribe((st, was) => {
+      if (was.walking && !st.walking) walkEnded = Date.now();
+    });
+    // Before the walk's own listener ends the walk, so the walk is still seen.
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      off();
+      window.removeEventListener('keydown', onKey, true);
+    };
   }, [preview]);
   // Walking hides the bar: a small reminder in its place.
   if (preview && walking) {

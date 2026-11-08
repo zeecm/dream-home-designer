@@ -1,4 +1,4 @@
-import type { StepPrompt } from '@dhd/core';
+import type { StepPrompt, TalkPrompt } from '@dhd/core';
 import type { AiSettings, Provider } from '../credentials';
 import { errorBody } from '../providers';
 import { readSse } from './sse';
@@ -42,6 +42,8 @@ export interface StreamHooks {
   onEvent?: () => void;
   /** The latest line of the model's thinking summary. */
   onThinking?: (line: string) => void;
+  /** After each event is read (the answer's text may have grown). */
+  onDelta?: () => void;
 }
 
 /** Claude's smallest cacheable prefix, in tokens, by model (the claude-api reference). */
@@ -97,12 +99,118 @@ export function cacheKey(text: string): string {
   return `dhd-${(h >>> 0).toString(36)}`;
 }
 
+export interface ProviderRequest {
+  url: string;
+  headers: Record<string, string>;
+  body: Record<string, unknown>;
+}
+
+const anthropicHeaders = (ai: AiSettings, fallback: boolean): Record<string, string> => ({
+  'x-api-key': ai.key,
+  'anthropic-version': ANTHROPIC_VERSION,
+  ...(fallback ? { 'anthropic-beta': FALLBACK_BETA } : {}),
+  // The person's own key in their own browser: what this header is for.
+  'anthropic-dangerous-direct-browser-access': 'true',
+});
+
+/**
+ * A talk call's request (tech §2.3): the system prompt, then the conversation's messages in
+ * turn, Claude's cache marks where the prompt up to them is long enough to cache at all.
+ */
+export function talkRequestFor(
+  ai: AiSettings,
+  p: TalkPrompt,
+  effort: Effort = p.effort,
+): ProviderRequest {
+  const text = (m: TalkPrompt['messages'][number]) => m.blocks.map((b) => b.text).join('');
+  if (ai.provider === 'anthropic') {
+    const fallback = FALLBACK.test(ai.model.trim());
+    const min = minCacheable(ai.model) * 3.2;
+    let chars = p.system.length;
+    let marks = 0;
+    const messages = p.messages.map((m) => ({
+      role: m.role,
+      content: m.blocks.map((b) => {
+        chars += b.text.length;
+        const mark = b.cache && chars >= min && marks < 4;
+        if (mark) marks++;
+        return {
+          type: 'text',
+          text: b.text,
+          ...(mark ? { cache_control: { type: 'ephemeral' as const } } : {}),
+        };
+      }),
+    }));
+    return {
+      url: 'https://api.anthropic.com/v1/messages',
+      headers: anthropicHeaders(ai, fallback),
+      body: {
+        model: ai.model,
+        max_tokens: p.maxTokens,
+        stream: true,
+        system: [{ type: 'text', text: p.system }],
+        messages,
+        thinking: { type: 'adaptive', display: 'summarized' },
+        output_config: { effort, format: { type: 'json_schema', schema: p.schema } },
+        ...(fallback ? { fallbacks: 'default' } : {}),
+      },
+    };
+  }
+  if (ai.provider === 'openai') {
+    const first = p.messages[0]?.blocks[0]?.text ?? '';
+    return {
+      url: 'https://api.openai.com/v1/chat/completions',
+      headers: { authorization: `Bearer ${ai.key}` },
+      body: {
+        model: ai.model,
+        stream: true,
+        stream_options: { include_usage: true },
+        max_completion_tokens: p.maxTokens,
+        ...(REASONING.test(ai.model) ? { reasoning_effort: effort } : {}),
+        prompt_cache_key: cacheKey(first),
+        response_format: {
+          type: 'json_schema',
+          json_schema: { name: 'talk', strict: true, schema: p.schema },
+        },
+        messages: [
+          { role: 'system', content: p.system },
+          ...p.messages.map((m) => ({ role: m.role, content: text(m) })),
+        ],
+      },
+    };
+  }
+  const older = /^gemini-2/.test(ai.model);
+  const budget = { high: 16_384, medium: 8192, low: 2048 }[effort];
+  return {
+    url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(ai.model)}:streamGenerateContent?alt=sse`,
+    headers: { 'x-goog-api-key': ai.key },
+    body: {
+      systemInstruction: { parts: [{ text: p.system }] },
+      contents: p.messages.map((m) => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: text(m) }],
+      })),
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseJsonSchema: p.schema,
+        maxOutputTokens: p.maxTokens,
+        thinkingConfig: {
+          includeThoughts: true,
+          ...(older
+            ? { thinkingBudget: Math.min(budget, Math.floor(p.maxTokens / 2)) }
+            : { thinkingLevel: effort === 'low' ? 'low' : 'high' }),
+        },
+      },
+    },
+  };
+}
+
 /** The request for one step: where it goes, its headers and its body. */
 export function requestFor(
   ai: AiSettings,
   p: StepPrompt,
   effort: Effort = p.effort,
-): { url: string; headers: Record<string, string>; body: Record<string, unknown> } {
+): ProviderRequest {
   const stable = `${p.prefix}${p.shared}`;
   if (ai.provider === 'anthropic') {
     const fallback = FALLBACK.test(ai.model.trim());
@@ -119,13 +227,7 @@ export function requestFor(
     ];
     return {
       url: 'https://api.anthropic.com/v1/messages',
-      headers: {
-        'x-api-key': ai.key,
-        'anthropic-version': ANTHROPIC_VERSION,
-        ...(fallback ? { 'anthropic-beta': FALLBACK_BETA } : {}),
-        // The person's own key in their own browser: what this header is for.
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
+      headers: anthropicHeaders(ai, fallback),
       body: {
         model: ai.model,
         max_tokens: p.maxTokens,
@@ -216,7 +318,7 @@ export function retryAfterOf(headers: Headers | null, body: unknown): number | n
  * Sends one step and reads its stream into `sink`. Resolves when the answer ends; throws
  * `HttpFail` for a refused request, and whatever fetch throws (an abort, being offline).
  */
-export async function streamStep(
+export function streamStep(
   ai: AiSettings,
   p: StepPrompt,
   effort: Effort,
@@ -225,7 +327,18 @@ export async function streamStep(
   hooks: StreamHooks = {},
   doFetch: typeof fetch = fetch,
 ): Promise<void> {
-  const req = requestFor(ai, p, effort);
+  return streamRequest(ai, requestFor(ai, p, effort), sink, signal, hooks, doFetch);
+}
+
+/** Sends a request and reads its stream into `sink` (as `streamStep`). */
+export async function streamRequest(
+  ai: AiSettings,
+  req: ProviderRequest,
+  sink: StepSink,
+  signal: AbortSignal,
+  hooks: StreamHooks = {},
+  doFetch: typeof fetch = fetch,
+): Promise<void> {
   const res = await doFetch(req.url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...req.headers },
@@ -260,6 +373,7 @@ export async function streamStep(
     }
     sink.events.push(data);
     read(obj(data) ?? {}, sink, { start, think });
+    hooks.onDelta?.();
   });
 }
 

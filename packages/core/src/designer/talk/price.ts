@@ -1,5 +1,5 @@
-import type { RunEstimate } from '../prices';
-import type { Usage } from '../schema';
+import { type Price, type RunEstimate, priceOf, tokensOf, usdOf } from '../prices';
+import type { DesignBrief, Provider, Usage } from '../schema';
 
 /**
  * When the designer asks before spending (UX §9.4, tech §3.3): one pure rule for every
@@ -92,3 +92,72 @@ export function spentOf(usage: readonly Usage[]): {
   }
   return { usd, tokens, estimated };
 }
+
+/**
+ * A talk call may be billed in full twice: an unreadable answer is asked for once more, and an
+ * answer cut at its limit once more at lower effort (a refused or busy request isn't billed).
+ */
+export const TALK_ATTEMPTS = 2;
+
+/** What a talk reply typically writes (thinking included), by quality. */
+export const TALK_OUTPUT = { thorough: 900, quick: 600 } as const;
+
+/** A talk call's figure: its prompt as built, cached when warm (Claude writes it when cold). */
+export interface TalkEstimate {
+  tokens: { typical: number; high: number };
+  usd: { typical: number; high: number } | null;
+}
+
+/**
+ * What a Send costs (tech §3.1): typically the prompt (its history read from the cache when the
+ * last request went under five minutes ago) and a typical reply; at most the whole prompt
+ * uncached and the reply at its limit.
+ */
+export function estimateTalk(
+  chars: { all: number; cacheable: number },
+  o: {
+    provider: Provider;
+    model: string;
+    quality: DesignBrief['quality'];
+    maxTokens: number;
+    warm: boolean;
+    prices?: Record<string, Price>;
+  },
+): TalkEstimate {
+  const input = tokensOf(chars.all);
+  const cacheable = Math.min(input, tokensOf(chars.cacheable));
+  const out = TALK_OUTPUT[o.quality];
+  const price = priceOf(o.model, o.prices);
+  const typical = o.warm
+    ? { input: input - cacheable, cachedInput: cacheable, cacheWrite: 0, output: out }
+    : o.provider === 'anthropic'
+      ? { input: input - cacheable, cachedInput: 0, cacheWrite: cacheable, output: out }
+      : { input, cachedInput: 0, cacheWrite: 0, output: out };
+  // The worst of one attempt: all of it uncached, or (Claude, cold) its history written to the
+  // cache at the write rate; then the answer at its limit.
+  const one = price
+    ? Math.max(
+        usdOf({ input, cachedInput: 0, cacheWrite: 0, output: o.maxTokens }, price),
+        o.provider === 'anthropic' && !o.warm
+          ? usdOf(
+              {
+                input: input - cacheable,
+                cachedInput: 0,
+                cacheWrite: cacheable,
+                output: o.maxTokens,
+              },
+              price,
+            )
+          : 0,
+      )
+    : null;
+  return {
+    tokens: { typical: input + out, high: (input + o.maxTokens) * TALK_ATTEMPTS },
+    usd:
+      price && one !== null ? { typical: usdOf(typical, price), high: one * TALK_ATTEMPTS } : null,
+  };
+}
+
+/** A Send asks first only when it would pass the tab's limit (D5). */
+export const talkAsks = (est: TalkEstimate, spentTab: number, cap: number | null): boolean =>
+  cap !== null && est.usd !== null && spentTab + est.usd.high > cap;

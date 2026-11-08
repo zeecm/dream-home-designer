@@ -26,8 +26,9 @@ export function focusInLog(el: HTMLElement | null | undefined) {
   scrollInLog(el, 'nearest');
 }
 
+/** A control focus may move to: never one that spends (UX §9.4: none is pre-focused). */
 const CONTROL =
-  'input:not([disabled]):not([type="hidden"]), [role="radio"][tabindex="0"], button:not([disabled]), textarea:not([disabled])';
+  'input:not([disabled]):not([type="hidden"]), [role="radio"][tabindex="0"], button:not([disabled]):not([data-spends]), textarea:not([disabled])';
 
 /**
  * Where focus goes when the control that had it went away (an answered question, Just design
@@ -47,6 +48,12 @@ export function focusAfterLoss(panel: HTMLElement, lost: { label: string }) {
     const c = t.querySelector<HTMLElement>(CONTROL);
     if (c) return focusInLog(c);
   }
+  // A turn with only priced buttons (a cost card): the turn itself, read from its start.
+  const newest = turns[turns.length - 1];
+  if (newest && lost.label !== 'Stop') {
+    newest.tabIndex = -1;
+    return focusInLog(newest);
+  }
   // On a phone's sheet the composer would fold the sheet and raise the keyboard: the heading.
   const to = panel.classList.contains('talk-sheet')
     ? panel.querySelector<HTMLElement>('#designer-h')
@@ -64,33 +71,70 @@ export function keepFocus(panel: HTMLElement): () => void {
     const el = e.target as HTMLElement;
     last = { el, label: el.textContent?.trim() ?? '' };
   };
-  const check = () => {
-    if (!last || last.el.isConnected) return;
-    const a = document.activeElement;
-    if (a && a !== document.body && a !== document.documentElement) return;
+  /** A disabled control's wait for what its press brings (a cost card, a proposal). */
+  let waiting: { turns: number; timer: ReturnType<typeof setTimeout> } | null = null;
+  const turnsNow = () => panel.querySelectorAll('.talk-li').length;
+  const hand = () => {
     const lost = last;
     last = null;
-    focusAfterLoss(panel, lost);
+    if (waiting) clearTimeout(waiting.timer);
+    waiting = null;
+    if (lost) focusAfterLoss(panel, lost);
+  };
+  const check = () => {
+    if (!last) return;
+    const el = last.el as HTMLButtonElement;
+    const gone = !el.isConnected;
+    const off = !gone && el.disabled;
+    const a = document.activeElement;
+    const onPage = !a || a === document.body || a === document.documentElement;
+    if (!gone && !off) {
+      // Enabled again (its press done) with focus left on the page: hand it on now.
+      if (waiting && onPage) return hand();
+      if (waiting) clearTimeout(waiting.timer);
+      waiting = null;
+      return;
+    }
+    if (!onPage && a !== el) {
+      last = null;
+      return;
+    }
+    if (off) {
+      // A priced button disabled as its press starts: focus goes on once what it brings
+      // lands (a cost card, a proposal), or after a moment.
+      if (!waiting) {
+        waiting = { turns: turnsNow(), timer: setTimeout(() => last && hand(), 800) };
+        return;
+      }
+      if (turnsNow() <= waiting.turns) return;
+    }
+    hand();
   };
   // Focus the person moved elsewhere (the plan, the top bar, another window) is theirs: only a
-  // control removed while it had focus hands it on.
+  // control removed or disabled while it had focus hands it on.
   const onOut = (e: FocusEvent) => {
     const to = e.relatedTarget as Node | null;
     if (to && panel.contains(to)) return;
-    const from = e.target as Node;
-    // A browser may report a removed control's loss as a focusout too: that one stays handed on.
+    const from = e.target as HTMLButtonElement;
+    // A browser may report a removed or disabled control's loss as a focusout too.
     queueMicrotask(() => {
-      if (from.isConnected && last?.el === from) last = null;
+      if (from.isConnected && !from.disabled && last?.el === from) last = null;
     });
   };
   const mo = new MutationObserver(() => requestAnimationFrame(check));
   panel.addEventListener('focusin', onIn);
   panel.addEventListener('focusout', onOut);
-  mo.observe(panel, { childList: true, subtree: true });
+  mo.observe(panel, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['disabled'],
+  });
   return () => {
     panel.removeEventListener('focusin', onIn);
     panel.removeEventListener('focusout', onOut);
     mo.disconnect();
+    if (waiting) clearTimeout(waiting.timer);
   };
 }
 

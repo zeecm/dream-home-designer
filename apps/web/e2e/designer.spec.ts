@@ -11,6 +11,13 @@ import { type Page, type Route, devices, expect, test } from '@playwright/test';
 import living from '../../../packages/core/src/designer/fixtures/room-living.json' with {
   type: 'json',
 };
+import {
+  REPLY_CONCERN,
+  REPLY_PLAN,
+  REPLY_QUESTION,
+  REPLY_REJECT,
+  REPLY_TEXT,
+} from '../../../packages/core/src/designer/talk/fixtures/replies';
 import { answerFor, promptOf } from '../src/ai/designer/fixtures/sample';
 import {
   type FixtureUsage,
@@ -58,6 +65,9 @@ interface Call {
  * Mocks the three providers. `reply` may answer a call itself (a 429, say) or return a
  * promise to wait on first (a slow room).
  */
+/** A talk call's task, as its request says it. */
+const TALK_TASK = "Answer the household's message above as their designer";
+
 async function mock(
   page: Page,
   opts: {
@@ -65,6 +75,8 @@ async function mock(
       c: Call,
       n: number,
     ) => { status: number; body: string; headers?: Record<string, string> } | Promise<void> | null;
+    /** The designer's replies to messages, in turn (a talk call with none left fails). */
+    talk?: unknown[];
   } = {},
 ) {
   const calls: Call[] = [];
@@ -76,7 +88,13 @@ async function mock(
       if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
       if (req.method() !== 'POST') return route.abort('blockedbyclient');
       const raw = req.postData() ?? '';
-      const a = answerFor(promptOf(JSON.parse(raw)));
+      const text = promptOf(JSON.parse(raw));
+      const said = text.includes(TALK_TASK) ? opts.talk?.shift() : undefined;
+      const a = text.includes(TALK_TASK)
+        ? said === undefined
+          ? null
+          : { step: 'talk', answer: said }
+        : answerFor(text);
       if (!a) {
         unanswered.push(req.url());
         return route.abort('failed');
@@ -314,6 +332,15 @@ test.describe('desktop', () => {
     await expect(log(page)).toContainText(
       /Designing Living and dining takes about US\$0\.\d\d \(at most US\$\d\.\d\d, up to \d fix-ups? included\)\. Go ahead\?/,
     );
+    // N2: focus stays in the conversation (never the page; never on a priced button).
+    const inTalk = () =>
+      page.evaluate(() => {
+        const a = document.activeElement;
+        return a?.closest('.talk') && !a.hasAttribute('data-spends')
+          ? 'in the conversation'
+          : `${a?.tagName} ${a?.className} ${a?.textContent?.slice(0, 40)}`;
+      });
+    await expect.poll(inTalk).toBe('in the conversation');
     await shot(page, 'cost-card');
     expect(m.calls).toHaveLength(0);
     await panel(page)
@@ -325,10 +352,13 @@ test.describe('desktop', () => {
     await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeDisabled();
     await expect(v1.getByText('Accept waits for the checks')).toBeVisible();
     expect(m.calls[0]?.body).toContain('More storage, please');
+    await panel(page).getByRole('button', { name: 'Stop' }).focus();
     release();
     await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
       timeout: 30_000,
     });
+    // The run's Stop went away with focus on it: focus stays in the conversation (N2).
+    await expect.poll(inTalk).toBe('in the conversation');
     await expect(page.locator('[data-testid="proposal-layer"] .pv-new').first()).toBeVisible();
     await expect(page.getByText('Previewing V1, not in your plan yet')).toBeVisible();
     await expect(panel(page).getByRole('region', { name: 'On the table' })).toContainText(
@@ -387,6 +417,8 @@ test.describe('desktop', () => {
     ).toBeVisible();
     // Focus goes to the line's Redo, never to the page.
     await expect(panel(page).getByRole('button', { name: 'Redo' })).toBeFocused();
+    // N5: what was accepted is ticked again, ready to accept again.
+    await expect(v1.getByText(`2 of ${names.length} ticked`)).toBeVisible();
     const back = await saved(page);
     expect(back.levels).toEqual(before.levels);
     expect(back.renovation).toBeUndefined();
@@ -430,9 +462,15 @@ test.describe('desktop', () => {
     await expect(v1.getByText(/Nothing was designed\.$/)).toBeVisible({ timeout: 40_000 });
     await expect(v1.getByText('Nothing was billed for it.')).toBeVisible();
     await expect(v1.getByRole('button', { name: /^Try again · about US\$/ })).toBeVisible();
-    // Never a passing card with nothing in it.
+    // Never a passing card with nothing in it, nor anything offered for it (N3).
     await expect(v1.getByText('Passes all checks')).toHaveCount(0);
     await expect(v1.getByRole('button', { name: /^Accept selected/ })).toHaveCount(0);
+    await expect(v1.getByRole('button', { name: 'Show in 3D' })).toHaveCount(0);
+    await expect(v1.getByRole('button', { name: /^Another idea/ })).toHaveCount(0);
+    await expect(v1.getByRole('button', { name: /on the plan$/ })).toHaveCount(0);
+    await expect(page.getByText('Previewing V1, not in your plan yet')).toHaveCount(0);
+    // A server's trouble is said politely, not as an alert.
+    await expect(v1.locator('.talk-failed[role="alert"]')).toHaveCount(0);
     await expect(panel(page).getByRole('region', { name: 'On the table' })).toContainText(
       'Didn’t finish',
     );
@@ -874,6 +912,470 @@ test.describe('desktop', () => {
   });
 });
 
+/** Sends a message with Send (its price on it). */
+async function send(page: Page, text: string) {
+  await panel(page).getByRole('textbox', { name: 'Message the designer' }).fill(text);
+  await panel(page)
+    .getByRole('button', { name: /^Send · about US\$\d\.\d\d$/ })
+    .click();
+}
+
+/**
+ * Talk calls held open by the test (criterion 31): a fetch wrapper, for the test only, gives
+ * the app a stream the test feeds a piece at a time (route.fulfill can't stream a body).
+ */
+async function holdTalk(page: Page) {
+  await page.addInitScript(() => {
+    const w = window as unknown as {
+      __talk: { held: boolean; aborted: boolean; started: number };
+      __feed?: (t: string) => void;
+      __end?: () => void;
+    };
+    w.__talk = { held: false, aborted: false, started: 0 };
+    const orig = window.fetch.bind(window);
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const body = typeof init?.body === 'string' ? init.body : '';
+      if (
+        w.__talk.held &&
+        url.startsWith('https://api.anthropic.com/') &&
+        body.includes("Answer the household's message above")
+      ) {
+        const enc = new TextEncoder();
+        w.__talk.started++;
+        const stream = new ReadableStream<Uint8Array>({
+          start(c) {
+            w.__feed = (t) => c.enqueue(enc.encode(t));
+            w.__end = () => c.close();
+            init?.signal?.addEventListener('abort', () => {
+              w.__talk.aborted = true;
+              c.error(new DOMException('The operation was aborted.', 'AbortError'));
+            });
+          },
+        });
+        return new Response(stream, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        });
+      }
+      return orig(input, init);
+    };
+  });
+}
+/** Feeds the held reply, once its request has gone. */
+async function feed(page: Page, text: string) {
+  await page.waitForFunction(
+    () => typeof (window as unknown as { __feed?: unknown }).__feed === 'function',
+  );
+  await page.evaluate(
+    (t) => (window as unknown as { __feed: (x: string) => void }).__feed(t),
+    text,
+  );
+}
+const endFeed = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __end: () => void }).__end());
+/** A reply's stream, cut in the middle of its words. */
+function halves(answer: unknown): [string, string] {
+  const text = anthropicStream(answer, USAGE);
+  const at = text.indexOf('text_delta');
+  const second = text.indexOf('text_delta', at + 10);
+  const cut = text.indexOf('\n\n', second) + 2;
+  return [text.slice(0, cut), text.slice(cut)];
+}
+
+test.describe('talking to the designer (slice 2, PR 2)', () => {
+  test('Send streams the reply; its cost shows, and the header is the sum (29, 31)', async ({
+    page,
+  }) => {
+    await setup(page);
+    await holdTalk(page);
+    await mock(page);
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await page.evaluate(() => {
+      (window as unknown as { __talk: { held: boolean } }).__talk.held = true;
+    });
+    // 29: Send shows its estimate; the hint, the guarantee.
+    await expect(panel(page).getByText('Asks before anything over US$0.25')).toBeVisible();
+    await send(page, 'Is a 2.4 m sofa too big for the living room?');
+    await expect(log(page)).toContainText('Is a 2.4 m sofa too big for the living room?');
+    await expect(panel(page).locator('.talk-streaming')).toContainText('Thinking…');
+    await expect(panel(page).getByRole('button', { name: 'Stop' })).toBeVisible();
+    const [head, rest] = halves(REPLY_TEXT);
+    await feed(page, head);
+    // 31: the first words show before the stream ends.
+    const streaming = panel(page).locator('.talk-streaming .talk-text');
+    await expect(streaming).toHaveText(/^A 2\.4 m/);
+    const part = (await streaming.innerText()).trim();
+    expect(REPLY_TEXT.say.startsWith(part)).toBe(true);
+    expect(part.length).toBeLessThan(REPLY_TEXT.say.length);
+    await shot(page, 'talk-streaming');
+    await feed(page, rest);
+    await endFeed(page);
+    await expect(log(page).getByText(REPLY_TEXT.say)).toBeVisible();
+    await expect(panel(page).locator('.talk-streaming')).toHaveCount(0);
+    // Each reply shows its cost; the header is the sum of the turns.
+    await expect(
+      log(page).getByRole('button', { name: 'Cost of this reply: US$0.04, details' }),
+    ).toBeVisible();
+    await expect(
+      panel(page).getByRole('button', { name: /^This conversation US\$0\.04 · this tab/ }),
+    ).toBeVisible();
+    await expect(panel(page).getByRole('button', { name: /^Send · about/ })).toBeVisible();
+    await shot(page, 'talk-reply');
+  });
+
+  test('Stop mid-stream keeps the text, aborts the request and records a ~ cost (31)', async ({
+    page,
+  }) => {
+    await setup(page);
+    await holdTalk(page);
+    await mock(page);
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await page.evaluate(() => {
+      (window as unknown as { __talk: { held: boolean } }).__talk.held = true;
+    });
+    await send(page, 'Is a 2.4 m sofa too big?');
+    const [head] = halves(REPLY_TEXT);
+    await feed(page, head);
+    await expect(panel(page).locator('.talk-streaming .talk-text')).toHaveText(/^A 2\.4 m/);
+    await panel(page).getByRole('button', { name: 'Stop' }).click();
+    await expect(log(page).getByText(/^Stopped\. The text so far is kept\./)).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { __talk: { aborted: boolean } }).__talk.aborted,
+      ),
+    ).toBe(true);
+    await expect(log(page).getByText('Stopped · the text so far is kept')).toBeVisible();
+    await expect(log(page).locator('.talk-designer .talk-text').last()).toHaveText(/^A 2\.4 m/);
+    await expect(
+      log(page).getByRole('button', { name: /^Cost of this reply: ~US\$/ }),
+    ).toBeVisible();
+    await expect(log(page).getByRole('button', { name: /^Try again · about US\$/ })).toBeVisible();
+  });
+
+  test('a rejection goes into Decisions; the next request carries it; editing or deleting it changes it (24)', async ({
+    page,
+  }) => {
+    await setup(page);
+    const m = await mock(page, { talk: [REPLY_REJECT, REPLY_TEXT, REPLY_TEXT, REPLY_TEXT] });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await send(page, 'Not the sofa under the window, please.');
+    await expect(log(page).getByText('Noted in Decisions: No sofa under the window')).toBeVisible();
+    await expect(log(page).getByText('Noted in What I know: budget up to S$40k')).toBeVisible();
+    await expect(log(page).getByText(/^Noted for your ID: Move the WC/)).toBeVisible();
+    await send(page, 'And the kitchen?');
+    await expect(log(page).getByText('And the kitchen?')).toBeVisible();
+    await expect.poll(() => m.calls.length).toBe(2);
+    expect(m.calls[1]?.body).toContain('No sofa under the window');
+    // Edit, from the line under the reply: Decisions opens.
+    await log(page)
+      .locator('.talk-noted li')
+      .filter({ hasText: 'Noted in Decisions' })
+      .first()
+      .getByRole('button', { name: 'Edit' })
+      .click();
+    const view = panel(page).getByRole('region', { name: 'Decisions' });
+    await view.getByRole('button', { name: 'Edit' }).first().click();
+    await view.getByRole('textbox', { name: 'Decision' }).fill('No sofa under any window');
+    await view.getByRole('button', { name: 'Save' }).click();
+    await view.getByRole('button', { name: '‹ Conversation' }).click();
+    await send(page, 'What about the bedroom?');
+    await expect.poll(() => m.calls.length).toBe(3);
+    expect(m.calls[2]?.body).toContain('No sofa under any window');
+    await panel(page).getByRole('button', { name: 'Designer menu' }).click();
+    await page.getByRole('menuitem', { name: 'Decisions' }).click();
+    await panel(page)
+      .getByRole('region', { name: 'Decisions' })
+      .getByRole('button', { name: 'Delete' })
+      .first()
+      .click();
+    await panel(page).getByRole('button', { name: '‹ Conversation' }).click();
+    await send(page, 'And now?');
+    await expect.poll(() => m.calls.length).toBe(4);
+    expect(m.calls[3]?.body).not.toContain('No sofa under any window');
+  });
+
+  test('a plan is priced before it runs: Just the first room sends only it; Go ahead sends the plan (30)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    const m = await mock(page, { talk: [REPLY_PLAN, REPLY_PLAN] });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await send(page, 'Move the sofa off the window and redo the main bedroom.');
+    await expect(log(page).getByText(REPLY_PLAN.say)).toBeVisible();
+    await expect(log(page).getByText('You eat at the table most days')).toBeVisible();
+    // The design run waits for Go ahead: priced, the tab's first run.
+    await expect(log(page)).toContainText(
+      /“Sofa off the window, dining by the kitchen” \(Living and dining, and Main bedroom\) takes about US\$\d\.\d\d \(at most US\$\d+\.\d\d/,
+    );
+    expect(m.calls.map((c) => c.step)).toEqual(['talk']);
+    await panel(page)
+      .getByRole('button', { name: /^Just Living and dining · about US\$\d\.\d\d$/ })
+      .click();
+    await expect(card(page, 1).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    expect(m.calls.map((c) => c.step)).toEqual(['talk', 'furnish "Living']);
+    // The run carries the designer's plan and the household's words (the talk block).
+    expect(m.calls[1]?.body).toContain('What this proposal is for');
+    expect(m.calls[1]?.body).toContain('Sofa on the wall facing the TV');
+    await send(page, 'Now both, please.');
+    await expect(panel(page).getByRole('button', { name: /^Go ahead · about US\$/ })).toBeVisible();
+    await panel(page)
+      .getByRole('button', { name: /^Go ahead · about US\$/ })
+      .click();
+    await expect(card(page, 2).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    expect(
+      m.calls
+        .slice(3)
+        .map((c) => c.step)
+        .sort(),
+    ).toEqual(['furnish "Living', 'furnish "Main bedroom"'].sort());
+  });
+
+  test('a question back answers free from a chip; a pushback shows the app’s own line', async ({
+    page,
+  }) => {
+    await setup(page);
+    const m = await mock(page, {
+      talk: [
+        REPLY_QUESTION,
+        {
+          ...REPLY_CONCERN,
+          say: 'That wall belongs to the household shelter.',
+          concern: { rule: 'shelter', wall: 'W21', probe: null },
+          plan: null,
+        },
+      ],
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await send(page, 'Redo the kitchen');
+    const q = log(page).getByRole('region', { name: 'How do you cook?' });
+    // A fact's chips read as What I know says them.
+    await q.getByRole('button', { name: 'A lot: big meals, wok' }).click();
+    await expect(log(page).locator('.talk-bubble').last()).toHaveText('A lot: big meals, wok');
+    expect(m.calls).toHaveLength(1);
+    await panel(page).getByRole('button', { name: 'Designer menu' }).click();
+    await page.getByRole('menuitem', { name: 'What I know about you' }).click();
+    await expect(panel(page).getByRole('region', { name: 'What I know about you' })).toContainText(
+      'A lot: big meals, wok',
+    );
+    await panel(page).getByRole('button', { name: '‹ Conversation' }).click();
+    // A chip that isn't a fact goes into the composer (the priced Send carries it).
+    await log(page)
+      .getByRole('region', { name: 'Do you want a breakfast counter?' })
+      .getByRole('button', { name: 'Yes' })
+      .click();
+    await expect(panel(page).getByRole('textbox', { name: 'Message the designer' })).toHaveValue(
+      'Do you want a breakfast counter: Yes.',
+    );
+    expect(m.calls).toHaveLength(1);
+    await send(page, 'Can we hack the wall by the bomb shelter?');
+    await expect(
+      log(page).getByText('HDB doesn’t allow this: household shelter walls can’t be changed.'),
+    ).toBeVisible();
+  });
+
+  test('a hand move between turns is said, and the next request has it as fixed (32)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    const m = await mock(page, { talk: [REPLY_TEXT] });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^Living and dining · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    await v1.getByRole('button', { name: /^Accept selected/ }).click();
+    await expect(log(page).getByText(/^You accepted \d+ changes from V1\.$/)).toBeVisible();
+    const piece = page.locator('[data-hit^="item:"]').first();
+    const box = await piece.boundingBox();
+    if (!box) throw new Error('no piece to move');
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    for (let i = 1; i <= 10; i++) {
+      await page.mouse.move(box.x + box.width / 2 + i * 3, box.y + box.height / 2 + i * 2);
+    }
+    await page.mouse.up();
+    await waitSaved(page);
+    await send(page, 'Thanks, how does it look?');
+    await expect(
+      log(page).getByText(/^You moved the .+ yourself; it stays where you put it\.$/),
+    ).toBeVisible();
+    await expect.poll(() => m.calls.filter((c) => c.step === 'talk').length).toBe(1);
+    expect(m.calls.find((c) => c.step === 'talk')?.body).toContain(
+      'Changed by hand, so it stays as they put it (fixed)',
+    );
+  });
+
+  test('a pushback measures the ask; its alternative designs the designer’s idea, not the ask (P2-2, P2-4)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    const m = await mock(page, { talk: [REPLY_CONCERN] });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await send(page, 'Put a dining table in the corridor');
+    // The app's own measure of the ask, under the designer's words.
+    await expect(
+      log(page).getByText(
+        /^The dining table, 6 seats narrows the way through to 0\.\d\d m: 0\.90 m needed\.$/,
+      ),
+    ).toBeVisible();
+    await log(page)
+      .getByRole('button', { name: /^Show me a console by the door · about US\$/ })
+      .click();
+    await panel(page)
+      .getByRole('button', { name: /^Go ahead · about US\$/ })
+      .click();
+    await expect(card(page, 1).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    const run = m.calls.find((c) => c.step !== 'talk');
+    expect(run?.body).toContain('A 0.30 m-deep console by the main door; dining stays.');
+    expect(run?.body).not.toContain('Put a dining table in the corridor');
+    expect(run?.body).not.toContain('What the household asks for this time');
+    await expect(card(page, 1).getByText(/Your words/)).toHaveCount(0);
+  });
+
+  test('near the tab’s limit: Send anyway when its usual figure fits (P2-6)', async ({ page }) => {
+    await setup(page, 'anthropic', { 'dhd-ai-cap': '0.05' });
+    const m = await mock(page, { talk: [REPLY_TEXT] });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await panel(page).getByRole('textbox', { name: 'Message the designer' }).fill('Is it too big?');
+    const anyway = panel(page).getByRole('button', { name: /^Send anyway · up to US\$\d\.\d\d$/ });
+    await expect(anyway).toBeEnabled();
+    await expect(panel(page).getByRole('button', { name: 'Spending' })).toBeVisible();
+    await anyway.click();
+    await expect(log(page).getByText(REPLY_TEXT.say)).toBeVisible();
+    expect(m.calls.filter((c) => c.step === 'talk')).toHaveLength(1);
+    // Focus stays in the composer after Send (P2-7).
+    await expect(panel(page).getByRole('textbox', { name: 'Message the designer' })).toBeFocused();
+  });
+
+  test('leaving a walk-through with Esc keeps the proposal on the plan (N6)', async ({ page }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    await mock(page);
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^Living and dining · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    await v1.getByRole('button', { name: 'Show in 3D' }).click();
+    await page.getByRole('button', { name: 'Walk through' }).click();
+    await expect(page.getByRole('button', { name: 'Leave walk' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: 'Leave walk' })).toHaveCount(0);
+    await expect(page.getByText('Previewing V1, not in your plan yet')).toBeVisible();
+    await expect(v1.getByRole('button', { name: 'Show V1 on the plan' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  test('two messages not answered: only the newest offers Try again, and it is in view (P3-1)', async ({
+    page,
+  }) => {
+    await setup(page);
+    const m = await mock(page, {
+      talk: [REPLY_TEXT, REPLY_TEXT],
+      reply: (c) =>
+        c.step === 'talk'
+          ? {
+              status: 400,
+              body: JSON.stringify({
+                type: 'error',
+                error: { type: 'invalid_request_error', message: 'Bad request' },
+              }),
+            }
+          : null,
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await send(page, 'First question');
+    const tries = log(page).getByRole('button', { name: /^Try again · about US\$/ });
+    await expect(tries).toHaveCount(1);
+    await send(page, 'Second question');
+    await expect.poll(() => m.calls.filter((c) => c.step === 'talk').length).toBe(2);
+    await expect(log(page).getByText(/^Not answered/)).toHaveCount(2);
+    // One Try again, on the newest; the older is history (its Edit stays).
+    await expect(tries).toHaveCount(1);
+    const second = log(page).locator('article.talk-you').filter({ hasText: 'Second question' });
+    await expect(second.getByRole('button', { name: /^Try again/ })).toBeVisible();
+    const first = log(page).locator('article.talk-you').filter({ hasText: 'First question' });
+    await expect(first.getByRole('button', { name: /^Try again/ })).toHaveCount(0);
+    await expect(first.getByRole('button', { name: 'Edit' })).toBeVisible();
+    // The newest failure is scrolled fully into view.
+    await expect(second.locator('.talk-sent-state')).toBeInViewport({ ratio: 1 });
+  });
+
+  test('a reply cut off by a closed tab is said after reload; Try again answers it', async ({
+    page,
+  }) => {
+    await setup(page);
+    await holdTalk(page);
+    await mock(page, { talk: [REPLY_TEXT] });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await page.evaluate(() => {
+      (window as unknown as { __talk: { held: boolean } }).__talk.held = true;
+    });
+    await send(page, 'Is the sofa too big?');
+    const [head] = halves(REPLY_TEXT);
+    await feed(page, head);
+    await expect(panel(page).locator('.talk-streaming .talk-text')).toHaveText(/^A 2\.4 m/);
+    // The phone kills the tab: what streamed was kept as it hid.
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await page.waitForTimeout(300);
+    await page.reload();
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    await page.getByRole('button', { name: /^Designer · \d+ messages?$/ }).click();
+    await expect(
+      log(page).getByText(
+        /^The last reply was cut off when the tab closed\. It may have been billed/,
+      ),
+    ).toBeVisible();
+    await expect(log(page).locator('.talk-designer .talk-text').last()).toHaveText(/^A 2\.4 m/);
+    await expect(log(page).getByText(/^Not answered/)).toBeVisible();
+    await log(page)
+      .getByRole('button', { name: /^Try again · about US\$/ })
+      .click();
+    await expect(log(page).getByText(REPLY_TEXT.say)).toBeVisible();
+  });
+});
+
 test.describe('phone, 390 px, fingers only (35)', () => {
   const { defaultBrowserType: _webkit, ...iPhone } = devices['iPhone 13'];
   test.use({ ...iPhone, viewport: { width: 390, height: 844 } });
@@ -901,6 +1403,32 @@ test.describe('phone, 390 px, fingers only (35)', () => {
       );
     expect(small).toEqual([]);
   };
+
+  test('one tap on Send sends, with the sheet at peek while typing (P2-1)', async ({ page }) => {
+    await setup(page);
+    const m = await mock(page, { talk: [REPLY_TEXT] });
+    await page.goto('/');
+    await waitSaved(page);
+    await page
+      .getByRole('button', { name: /Plan details|Show plan details/ })
+      .first()
+      .tap()
+      .catch(() => {});
+    await page.getByRole('button', { name: 'Talk to the designer' }).tap();
+    await panel(page).getByRole('button', { name: 'Just design it' }).tap();
+    const box = panel(page).getByRole('textbox', { name: 'Message the designer' });
+    await box.tap();
+    await expect(panel(page)).toHaveClass(/talk-peek/);
+    await box.fill('Is a 2.4 m sofa too big?');
+    // The textarea a finger can hit.
+    expect((await box.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await panel(page)
+      .getByRole('button', { name: /^Send · about US\$/ })
+      .tap();
+    await expect(log(page).getByText('Is a 2.4 m sofa too big?')).toBeVisible();
+    await expect.poll(() => m.calls.filter((c) => c.step === 'talk').length).toBe(1);
+    await expect(box).toHaveValue('');
+  });
 
   test('first meeting, a proposal, accept part, Undo, the sheet’s three heights', async ({
     page,

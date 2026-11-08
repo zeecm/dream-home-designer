@@ -44,6 +44,25 @@ export function catalogueText(models: Project['models'] = {}): string {
   ].join('\n');
 }
 
+/**
+ * The catalogue for a talk call: ids and names only, by category (about 400 tokens). A talk
+ * call picks no sizes; it names a piece only for a pushback's probe.
+ */
+export function catalogueIds(models: Project['models'] = {}): string {
+  const by = new Map<string, string[]>();
+  for (const k of FURNITURE) {
+    if (NEVER.has(k.category)) continue;
+    by.set(k.category, [...(by.get(k.category) ?? []), k.id]);
+  }
+  const own = Object.values(models ?? {})
+    .sort((a, b) => (a.id < b.id ? -1 : 1))
+    .map((m) => `${customKind(m).id} (${clean(customKind(m).name, 40)})`);
+  return [
+    ...[...by].map(([c, ids]) => `${c}: ${ids.join(', ')}`),
+    ...(own.length ? [`Their own: ${own.join(', ')}`] : []),
+  ].join('\n');
+}
+
 /** The categories (and built-ins) that suit a space, by the kinds of its rooms. */
 export function categoriesFor(kinds: RoomKind[]): string[] {
   const out = new Set<string>();

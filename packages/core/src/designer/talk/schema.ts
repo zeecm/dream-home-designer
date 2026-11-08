@@ -10,7 +10,8 @@ import { clean } from '../util';
  * own version and are checked on the way back in.
  */
 
-export const TALK_RECORD_VERSION = 1;
+/** 2: the talk call (a person's Send, the designer's replies, hand edits). 1 is read as 2. */
+export const TALK_RECORD_VERSION = 2;
 /** Turns kept in one conversation; the oldest go first. */
 export const MAX_TURNS = 500;
 /** Decisions kept, and how long each may be. */
@@ -18,6 +19,10 @@ export const MAX_DECISIONS = 40;
 export const DECISION_CHARS = 160;
 /** The composer's limit, and when its counter shows. */
 export const DRAFT_CHARS = 2000;
+/** A sent message or a reply's echo as kept for the history (events and quoting included). */
+export const SENT_CHARS = 16_000;
+/** A summary of older messages. */
+export const SUMMARY_CHARS = 1200;
 
 /**
  * How long each text of a record may be. Every text is cut to these where it is made (`cut`),
@@ -74,8 +79,79 @@ export const ScopeRef = z.object({
   /** Space keys; empty with `all`. */
   spaces: z.array(z.string()).max(30),
   all: z.boolean(),
+  /** With `all`: false for furniture, built-ins and finishes only (the walls stay). */
+  walls: z.boolean().optional(),
 });
 export type ScopeRef = z.infer<typeof ScopeRef>;
+
+/**
+ * The facts a designer's reply may note in What I know (tech §2.2). Household counts and who
+ * sleeps where are never among them: those come only from the app's own widgets.
+ */
+export const FACT_KEYS = [
+  'budget',
+  'walls',
+  'style',
+  'cooking',
+  'wfh',
+  'household-note',
+  'wish',
+  'keep',
+] as const;
+export const FactKey = z.enum(FACT_KEYS);
+export type FactKey = z.infer<typeof FactKey>;
+
+/** A question the designer asked back, as kept (1–3 a reply). */
+export const TalkQuestion = z.object({
+  text: z.string().max(200),
+  /** The What I know fact it asks about: its chips are free (the app records them). */
+  fact: FactKey.nullable(),
+  pick: z.enum(['one', 'many', 'text']),
+  choices: z.array(z.string().max(40)).max(6),
+});
+export type TalkQuestion = z.infer<typeof TalkQuestion>;
+
+/** A plan of intent (or a concern's one alternative): what a design run would do, resolved. */
+export const TalkPlan = z.object({
+  title: z.string().max(60),
+  scope: ScopeRef,
+  /** The designer's first room alone ("Just Living and dining"), when the plan names more. */
+  just: ScopeRef.nullable(),
+  /** What the proposal is for, in the designer's words (the run's talk block). */
+  intent: z.string().max(600),
+  assumptions: z.array(z.string().max(200)).max(5),
+});
+export type TalkPlan = z.infer<typeof TalkPlan>;
+
+/** A pushback: the app's own measured lines under the designer's words, and the alternative. */
+export const TalkConcern = z.object({
+  rule: z.enum([
+    'walkway',
+    'bed',
+    'window',
+    'fit',
+    'structural',
+    'shelter',
+    'wet',
+    'budget',
+    'other',
+  ]),
+  /** In the app's words ("Corridor: 0.90 m needed to walk through, 0.60 m left."). */
+  lines: z.array(z.string().max(300)).max(4),
+  /** An HDB rule: no way to accept it. */
+  hdb: z.boolean(),
+  alt: TalkPlan.nullable(),
+});
+export type TalkConcern = z.infer<typeof TalkConcern>;
+
+/** A reply's line under the message: "Noted in Decisions: …", "Noted for your ID: …". */
+export const TalkNoted = z.object({
+  kind: z.enum(['decision', 'fact', 'note']),
+  text: z.string().max(300),
+  /** The decision's id (its Edit), or the fact's key. */
+  ref: z.string().nullable(),
+});
+export type TalkNoted = z.infer<typeof TalkNoted>;
 
 export const Decision = z.object({
   id: z.string(),
@@ -110,6 +186,12 @@ export const TalkEvent = z.discriminatedUnion('type', [
     key: QuestionKey,
     text: z.string().max(TALK_LIMITS.note),
   }),
+  /** Pieces and finishes changed by hand since the last accept: kept where the person put them. */
+  z.object({
+    type: z.literal('hand-edits'),
+    lines: z.array(z.string().max(TALK_LIMITS.line)).max(3),
+    more: z.number().int().min(0),
+  }),
 ]);
 export type TalkEvent = z.infer<typeof TalkEvent>;
 
@@ -117,7 +199,29 @@ const base = { id: z.string(), at: z.string() };
 
 export const Turn = z.discriminatedUnion('kind', [
   /** What the person said or chose, in words. */
-  z.object({ ...base, kind: z.literal('person'), text: z.string().max(TALK_LIMITS.person) }),
+  z.object({
+    ...base,
+    kind: z.literal('person'),
+    text: z.string().max(TALK_LIMITS.person),
+    /**
+     * A message sent to the designer: the exact text it went as (its events frozen with it),
+     * so the history a later request repeats is the same bytes (the provider's cache reads it).
+     */
+    sent: z.string().max(SENT_CHARS).optional(),
+    /** Its reply: running, answered, failed (Try again), or cut off (Stop, a closed tab). */
+    reply: z
+      .object({
+        state: z.enum(['pending', 'done', 'failed', 'cut']),
+        error: z.string().max(300).nullable().default(null),
+        /** The text streamed so far, kept when the tab was hidden (a phone may kill it). */
+        checkpoint: z.string().max(TALK_LIMITS.designer).default(''),
+        chars: z.number().int().min(0).default(0),
+        startedAt: z.string(),
+        /** What it spent with no reply to show it on (failed, or stopped before any text). */
+        usage: z.array(Usage).max(8).default([]),
+      })
+      .optional(),
+  }),
   /**
    * The designer's words. In this slice every one is the app's own (the greeting, the
    * assumptions), so `lines` are its bullets; a model's reply comes with the talk call.
@@ -129,6 +233,42 @@ export const Turn = z.discriminatedUnion('kind', [
     lines: z.array(z.string().max(TALK_LIMITS.line)).max(12).default([]),
     /** The last line, after the bullets ("These are in What I know about you…"). */
     after: z.string().max(TALK_LIMITS.after).default(''),
+    /** A model's reply (a talk call), and what came of it. */
+    talk: z
+      .object({
+        /** The person's turn it answers. */
+        replyTo: z.string(),
+        kind: z.enum(['reply', 'question', 'concern', 'plan']),
+        /** The reply as later requests repeat it (compact JSON; never rebuilt). */
+        echo: z.string().max(SENT_CHARS),
+        usage: z.array(Usage).max(8).default([]),
+        /** Cut off: by Stop, a dropped connection or a closed tab (its text so far kept). */
+        cut: z.enum(['stopped', 'network', 'tab']).nullable().default(null),
+        noted: z.array(TalkNoted).max(12).default([]),
+        questions: z.array(TalkQuestion).max(3).default([]),
+        /** Each question answered with a free chip (its words), by index. */
+        answered: z.record(z.string().max(TALK_LIMITS.words)).default({}),
+        /**
+         * Facts that would widen the next paid run (walls loosened, the budget raised): never
+         * applied by the reply, asked of the person as a free Yes / No.
+         */
+        confirms: z
+          .array(
+            z.object({
+              key: FactKey,
+              text: z.string().max(200),
+              number: z.number().nullable(),
+              choice: z.string().max(40).nullable(),
+              ask: z.string().max(200),
+              answer: z.enum(['yes', 'no']).nullable().default(null),
+            }),
+          )
+          .max(6)
+          .default([]),
+        concern: TalkConcern.nullable().default(null),
+        plan: TalkPlan.nullable().default(null),
+      })
+      .optional(),
   }),
   /** One message of the app's own questions, 1–3 of them, each answered or skipped on its own. */
   z.object({
@@ -173,6 +313,17 @@ export const Turn = z.discriminatedUnion('kind', [
       })
       .nullable()
       .default(null),
+    /** A designer's plan it prices (Go ahead runs it with its intent): its turn and words. */
+    talk: z
+      .object({
+        replyTo: z.string(),
+        title: z.string().max(60),
+        intent: z.string().max(600),
+      })
+      .nullable()
+      .default(null),
+    /** "Just {room}": the plan's first room alone. */
+    just: ScopeRef.nullable().default(null),
   }),
   z.object({ ...base, kind: z.literal('proposal'), proposalId: z.string() }),
   z.object({ ...base, kind: z.literal('event'), event: TalkEvent }),
@@ -184,7 +335,8 @@ export type TurnOf<K extends TurnKind> = Extract<Turn, { kind: K }>;
 export const Conversation = z.object({
   projectId: z.string(),
   id: z.string(),
-  recordVersion: z.literal(TALK_RECORD_VERSION),
+  /** Read from 1 up to this build's; always written as this build's. */
+  recordVersion: z.number().int().min(1).max(TALK_RECORD_VERSION),
   /** Bumped by every write, so another tab knows to read it again. */
   rev: z.number().int().min(0),
   startedAt: z.string(),
@@ -198,6 +350,12 @@ export const Conversation = z.object({
   assumed: z.array(QuestionKey).default([]),
   /** Facts a form told before the first meeting: not asked again. */
   known: z.array(QuestionKey).default([]),
+  /**
+   * The first meeting is over, and the questions settled in it: kept apart from the turns, so
+   * trimming the oldest turns never starts the meeting again.
+   */
+  met: z.boolean().default(false),
+  settled: z.array(QuestionKey).default([]),
   /** The next proposal's number: one sequence with the plan's versions (V1, V4, V7). */
   nextN: z.number().int().positive(),
   decisions: z
@@ -207,6 +365,32 @@ export const Conversation = z.object({
   turns: z.array(Turn).max(MAX_TURNS),
   /** The composer, kept across closes and reloads. */
   draft: z.string().max(DRAFT_CHARS).default(''),
+  /** Short names (R1, W3, P12) the talk calls use, never renamed once given. */
+  aliases: z.record(z.string()).default({}),
+  /** Notes for the household's ID: what isn't in the app (plumbing moves, lighting). */
+  notes: z
+    .array(z.object({ id: z.string(), text: z.string().max(TALK_LIMITS.note), turnId: z.string() }))
+    .max(60)
+    .default([]),
+  /** Older messages summed up: requests send this in place of the turns up to `upTo`. */
+  summary: z
+    .object({ upTo: z.string(), text: z.string().max(SUMMARY_CHARS) })
+    .nullable()
+    .default(null),
+  /** Replies running that were asked for a summary and gave none (mechanical after 3). */
+  foldMisses: z.number().int().min(0).default(0),
+  /** When the last request went (a warm prompt cache is cheaper). */
+  lastSentAt: z.string().nullable().default(null),
+  /** Hand edits already said in the log, by label (each is said once). */
+  handSeen: z.array(z.string().max(200)).max(200).default([]),
+  /** Spending of turns taken out (Edit): still counted, so the total never under-reports. */
+  aside: z
+    .object({
+      usd: z.number().min(0).nullable(),
+      tokens: z.number().min(0),
+      estimated: z.boolean(),
+    })
+    .default({ usd: 0, tokens: 0, estimated: false }),
 });
 export type Conversation = z.infer<typeof Conversation>;
 
@@ -265,7 +449,7 @@ export const Proposal = z.object({
   projectId: z.string(),
   id: z.string(),
   conversationId: z.string(),
-  recordVersion: z.literal(TALK_RECORD_VERSION),
+  recordVersion: z.number().int().min(1).max(TALK_RECORD_VERSION),
   n: z.number().int().positive(),
   turnId: z.string(),
   at: z.string(),
@@ -282,7 +466,7 @@ export function conversationFromRecord(raw: unknown): Conversation | null {
   if (!rec || typeof rec !== 'object') return null;
   if (typeof rec.recordVersion === 'number' && rec.recordVersion > TALK_RECORD_VERSION) return null;
   const r = Conversation.safeParse(raw);
-  return r.success ? r.data : null;
+  return r.success ? { ...r.data, recordVersion: TALK_RECORD_VERSION } : null;
 }
 
 export function proposalFromRecord(raw: unknown): Proposal | null {
@@ -290,5 +474,5 @@ export function proposalFromRecord(raw: unknown): Proposal | null {
   if (!rec || typeof rec !== 'object') return null;
   if (typeof rec.recordVersion === 'number' && rec.recordVersion > TALK_RECORD_VERSION) return null;
   const r = Proposal.safeParse(raw);
-  return r.success ? r.data : null;
+  return r.success ? { ...r.data, recordVersion: TALK_RECORD_VERSION } : null;
 }

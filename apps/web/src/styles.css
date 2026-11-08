@@ -8367,8 +8367,10 @@ textarea {
     display: none;
   }
 }
-/* A phone on its side: a column on the right that folds to a tab. */
-@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+/* A phone on its side, or a short wide window on a computer (844 x 390, P2-5): a column on the
+   right that folds to a tab, the plan beside it. */
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse),
+  (orientation: landscape) and (max-height: 500px) and (min-width: 721px) {
   .workspace-designer {
     grid-template-columns: var(--palette-width) minmax(0, 1fr) 360px;
   }
@@ -8590,4 +8592,102 @@ html[data-proposal] .elec-warn circle {
 /* While a proposal is shown, the plan's own problem marks step back: red means the proposal. */
 html[data-proposal] .plan-svg g.clearance {
   opacity: 0.4;
+}
+
+/* Slice 2, PR 2: talk. Send keeps to one line; the hint gives way. */
+.talk-send {
+  flex: none;
+  white-space: nowrap;
+}
+.talk-send-row .field-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* What a reply noted: lines under its words, their Edit beside them (on touch too). */
+.talk-noted {
+  display: grid;
+  gap: 2px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.talk-noted .talk-app-text .link-btn {
+  display: inline-flex;
+  margin-left: 4px;
+}
+.talk-meta {
+  margin: 4px 0 0;
+}
+.talk-concern {
+  margin-top: 6px;
+}
+.talk-concern .talk-app-icon {
+  color: var(--pill-warning-ink);
+}
+.talk-alt {
+  margin-top: 8px;
+}
+.talk-status,
+.talk-cut {
+  margin: 4px 0 0;
+}
+.talk-sent-state {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  margin-top: 4px;
+}
+.talk-sent-state p {
+  margin: 0;
+}
+.talk-error {
+  color: var(--negative);
+}
+.talk-why {
+  color: var(--text);
+}
+
+/* A short window that is no landscape one (the column takes those): the sheet opens taller,
+   and the log keeps a few lines. */
+@media (max-width: 900px) and (max-height: 500px) {
+  .workspace-designer > .talk-half {
+    height: calc(100dvh - 48px);
+  }
+  .talk-sheet .talk-log {
+    min-height: 96px;
+  }
+}
+
+/* PR 2, QA: a long reply folds behind More; a message's state sits under its bubble; the
+   textarea is a finger's height on touch. */
+.talk-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  line-clamp: 6;
+  overflow: hidden;
+}
+.talk-you {
+  flex-direction: column;
+  align-items: flex-end;
+}
+@media (pointer: coarse) {
+  .talk-textarea {
+    min-height: 44px;
+  }
+}
+
+/* A short wide window on a computer (844 x 390, 900 x 450, P2-5): the designer is the column at
+   the right, as on a phone on its side, and the plan stays in view beside it. */
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse),
+  (orientation: landscape) and (max-height: 500px) and (min-width: 721px) {
+  .workspace-designer {
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .workspace-designer > .designer {
+    grid-column: 3;
+    grid-row: 1;
+    height: auto;
+    max-height: none;
+  }
 }

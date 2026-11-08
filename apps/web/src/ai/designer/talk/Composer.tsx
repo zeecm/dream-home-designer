@@ -1,19 +1,34 @@
-import { DRAFT_CHARS, type ScopeRef, meetingOver } from '@dhd/core';
+import {
+  DRAFT_CHARS,
+  type ScopeRef,
+  type TalkEstimate,
+  meetingOver,
+  pendingReply,
+  talkAsks,
+} from '@dhd/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { usd, useSpend } from '../spend';
+import { useAi } from '../../credentials';
+import { capUsd, spent, tokens, usd, useSpend } from '../spend';
 import { useDesigner } from '../state';
+import { designerCannotUse } from '../stream';
 import { pressScope, scopePrice, stopTalkRun } from './propose';
 import { scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
-import { act, newId, nowIso, talkLevel, typedNow, useTalk } from './useTalk';
+import { useThreshold } from './threshold';
+import { recheckElsewhere, sendMessage, sendPrice, stopReply } from './turn';
+import { act, newId, nowIso, talkLevel, typedNow, useBusy, useTalk } from './useTalk';
 
 /**
  * The composer (UX §5.4): quick replies, the textarea (kept per plan across closes and
- * reloads), and Stop while a design runs. What is typed here goes with the next design asked
- * for, as the household's words; the free-form reply comes in the next slice. Until then a
- * quick reply that would need the designer is a priced Another idea ("Cheaper · about
- * US$0.13"), and "Why this layout?" opens the reasons stored with the newest proposal, free.
+ * reloads), and Send, priced ("Send · about US$0.03"), which becomes Stop while a reply or a
+ * design runs. Enter sends on a computer (Shift+Enter is a new line); on touch Return is a new
+ * line and the button sends; Ctrl or Cmd+Enter sends everywhere. The words also go with a
+ * scope button pressed instead. The hint says the guarantee: "Asks before anything over
+ * US$0.25", or why Send can't go.
  */
+
+const coarse = () =>
+  typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches === true;
 
 /** The newest proposal's card and scope. */
 function useNewest(): { key: string; scope: ScopeRef } | null {
@@ -32,11 +47,19 @@ function useNewest(): { key: string; scope: ScopeRef } | null {
 export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: () => void }) {
   const conv = useTalk((s) => s.conv);
   const running = useTalk((s) => !!s.live);
+  const replying = useTalk((s) => !!s.reply);
+  const ai = useAi();
+  const level = useThreshold();
+  const [online, setOnline] = useState(() =>
+    typeof navigator === 'undefined' ? true : navigator.onLine !== false,
+  );
+  const [flash, setFlash] = useState(false);
+  const [est, setEst] = useState<TalkEstimate | null>(null);
   const [text, setText] = useState(conv?.draft ?? '');
   const newest = useNewest();
   const project = useSettledProject();
   const { prices } = useSpend();
-  const busy = useDesigner((s) => s.starting || !!s.run);
+  const busy = useBusy();
   // biome-ignore lint/correctness/useExhaustiveDependencies: on what the price reads
   const price = useMemo(
     () => (newest ? timed(() => scopePrice(newest.scope)) : null),
@@ -52,13 +75,39 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
     last.current = saved;
     if (document.activeElement !== area.current) setText(saved);
   }, [saved]);
-  // Emptied when what was typed went with a design.
+  // Emptied when what was typed went with a design or a message.
   const cleared = useTalk((s) => s.cleared);
   useEffect(() => {
     if (!cleared) return;
     last.current = '';
     setText('');
   }, [cleared]);
+  // Filled from elsewhere: a designer's question's chip, Edit on a message not answered.
+  const filled = useTalk((s) => s.fill);
+  useEffect(() => {
+    if (!filled) return;
+    setText((t) => (filled.replace || !t.trim() ? filled.text : `${t.trim()} ${filled.text}`));
+    requestAnimationFrame(() => {
+      const el = area.current;
+      el?.focus();
+      el?.setSelectionRange(el.value.length, el.value.length);
+    });
+  }, [filled]);
+  useEffect(() => {
+    const on = () => setOnline(navigator.onLine !== false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', on);
+    return () => {
+      window.removeEventListener('online', on);
+      window.removeEventListener('offline', on);
+    };
+  }, []);
+  // Send's figure, 300 ms after typing stops (it builds the request, which is cheap).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on what the price reads
+  useEffect(() => {
+    const t = setTimeout(() => setEst(timed(() => sendPrice(text))), 300);
+    return () => clearTimeout(t);
+  }, [text, conv?.rev, project, prices, ai]);
   // Kept 300 ms after typing stops (and known at once to a priced button).
   useEffect(() => {
     useTalk.setState({ typed: text });
@@ -77,8 +126,25 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 144)}px`;
   }, [text]);
+  // Another tab's reply: checked again (its tab may have closed, P2-3) when that tab writes, when
+  // this one is seen again, and every few seconds while it is said here.
+  const waitingElsewhere = useTalk((st) => !!st.conv && !!pendingReply(st.conv) && !st.reply);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: again when the other tab writes
+  useEffect(() => {
+    if (!waitingElsewhere) return;
+    const again = () => void recheckElsewhere();
+    const t = setInterval(again, 3000);
+    window.addEventListener('focus', again);
+    document.addEventListener('visibilitychange', again);
+    again();
+    return () => {
+      clearInterval(t);
+      window.removeEventListener('focus', again);
+      document.removeEventListener('visibilitychange', again);
+    };
+  }, [waitingElsewhere, conv?.rev]);
   if (!conv) return null;
-  const level = talkLevel();
+  const lvl = talkLevel();
   const first = !meetingOver(conv);
   const proposed = conv.turns.some((t) => t.kind === 'proposal');
   const lastAccept = [...conv.turns]
@@ -101,12 +167,12 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
         {
           label: 'Just design it',
           act: () => {
-            if (level)
+            if (lvl)
               void act({
                 type: 'justDesign',
                 at: nowIso(),
                 ids: [newId('turn'), newId('turn')],
-                level,
+                level: lvl,
               });
           },
         },
@@ -139,11 +205,62 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
           })),
         ].slice(0, 6)
       : [];
+  const elsewhere = !!pendingReply(conv) && !replying;
+  const cant = ai ? designerCannotUse(ai) : null;
+  const cap = capUsd();
+  const passes = !!est && talkAsks(est, spent().usd, cap);
+  // Its usual figure fits the limit, only its most doesn't: Send anyway, never a dead end (P2-6).
+  const typicalFits = !!est?.usd && cap !== null && spent().usd + est.usd.typical <= cap;
+  const anyway = passes && typicalFits;
+  const why = !ai
+    ? 'Add your AI key to send messages.'
+    : cant
+      ? cant
+      : !online
+        ? 'You’re offline. Your message is kept.'
+        : elsewhere
+          ? 'Another tab is waiting for a reply.'
+          : passes && cap !== null && !anyway
+            ? `This would pass your ${usd(cap)} limit for this tab.`
+            : null;
+  const send = () => {
+    if (why || replying || running) return;
+    if (!text.trim()) {
+      setFlash(true);
+      setTimeout(() => setFlash(false), 1600);
+      return;
+    }
+    void sendMessage(text, anyway);
+  };
+  const hint =
+    text.length >= 1800
+      ? `${text.length.toLocaleString('en-US')} of ${DRAFT_CHARS.toLocaleString('en-US')}`
+      : flash
+        ? 'Write a message first'
+        : replying || running
+          ? 'Wait for the reply, or Stop'
+          : (why ??
+            (anyway && cap !== null
+              ? `At most it would pass your ${usd(cap)} limit; it usually costs ${usd(est?.usd?.typical ?? 0)}.`
+              : typeof level === 'number'
+                ? `Asks before anything over ${usd(level)}`
+                : ''));
+  const sendLabel =
+    anyway && est?.usd
+      ? `Send anyway · up to ${usd(est.usd.high)}`
+      : est?.usd
+        ? `Send · about ${usd(est.usd.typical)}`
+        : est
+          ? `Send · about ${tokens(est.tokens.typical)} tokens`
+          : 'Send';
   return (
     <form
       className="talk-composer"
       aria-label="Message the designer"
-      onSubmit={(e) => e.preventDefault()}
+      onSubmit={(e) => {
+        e.preventDefault();
+        send();
+      }}
     >
       {chips.length > 0 && (
         <div className="chip-row chip-scroll talk-quick">
@@ -174,23 +291,75 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
         aria-describedby="talk-hint"
         value={text}
         onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+          // Ctrl or Cmd+Enter sends everywhere; Enter alone on a computer (Shift: a new line).
+          if (e.metaKey || e.ctrlKey || (!e.shiftKey && !coarse())) {
+            e.preventDefault();
+            send();
+          }
+        }}
         onFocus={onFocus}
         onBlur={onBlur}
       />
       <div className="talk-send-row">
-        <span id="talk-hint" className="field-hint">
-          {text.length >= 1800
-            ? `${text.length.toLocaleString('en-US')} of ${DRAFT_CHARS.toLocaleString('en-US')}`
-            : 'Goes with the next design: a room above, or Another idea.'}
+        <span
+          id="talk-hint"
+          className={why ? 'field-hint talk-why' : 'field-hint'}
+          aria-live="polite"
+        >
+          {hint}
+          {!ai && (
+            <>
+              {' '}
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => useTalk.setState({ settings: 'key' })}
+              >
+                AI settings
+              </button>
+            </>
+          )}
+          {(passes || anyway) && ai && (
+            <>
+              {' '}
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => useTalk.setState({ settings: 'spending' })}
+              >
+                Spending
+              </button>
+            </>
+          )}
         </span>
-        {running && (
+        {replying || running ? (
           <button
             type="button"
+            key="stop"
             className="btn btn-primary talk-stop"
+            onPointerDown={(e) => e.preventDefault()}
+            onMouseDown={(e) => e.preventDefault()}
             title="Stop (Esc)"
-            onClick={stopTalkRun}
+            onClick={() => (replying ? stopReply() : stopTalkRun())}
           >
             Stop
+          </button>
+        ) : (
+          <button
+            type="submit"
+            key="send"
+            className="btn btn-primary talk-send"
+            // A tap keeps the textarea's focus (P2-1): blurring it first resized the phone's
+            // sheet under the finger, and the tap missed. Focus stays in the composer after.
+            onPointerDown={(e) => e.preventDefault()}
+            onMouseDown={(e) => e.preventDefault()}
+            data-spends=""
+            aria-describedby="talk-hint"
+            disabled={!!why}
+          >
+            {sendLabel}
           </button>
         )}
       </div>
