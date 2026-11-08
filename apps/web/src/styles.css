@@ -8339,6 +8339,14 @@ textarea {
   color: var(--text);
   pointer-events: none;
 }
+/* A short stage (a phone on its side): at the top, clear of the plan's middle and the Key. */
+@media (max-height: 600px) {
+  .rule-caption {
+    top: 12px;
+    bottom: auto;
+    max-width: calc(100% - 96px);
+  }
+}
 
 .talk-mark {
   display: inline-block;

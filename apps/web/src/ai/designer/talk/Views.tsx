@@ -60,6 +60,8 @@ export function WhatIKnow() {
   const b = conv.brief;
   const keys = QUESTION_KEYS.filter(
     (k) =>
+      // Slice 3b asks it (the storage lens); until then What I know doesn't show it.
+      k !== 'owns' &&
       (k !== 'mobility' || b.household.elders.length > 0) &&
       // Who sleeps where, whenever someone sleeps here: with no bedroom, it asks which rooms
       // they sleep in (N1).

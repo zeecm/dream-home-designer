@@ -217,6 +217,8 @@ export function conversationText(
   out.push('', 'What I know about you');
   const b = conv.brief;
   for (const k of QUESTION_KEYS) {
+    // Not asked yet: slice 3b's question.
+    if (k === 'owns') continue;
     if (k === 'mobility' && !b.household.elders.length) continue;
     if (k === 'sleeping' && !peopleOf(b).some((p) => p.kind !== 'helper')) continue;
     const assumed = conv.assumed.includes(k) ? ' (assumed)' : '';

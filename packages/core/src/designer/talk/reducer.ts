@@ -1239,6 +1239,7 @@ const label = (k: QuestionKey) =>
     walls: 'walls',
     style: 'style',
     anything: 'anything else',
+    owns: 'what you own',
   })[k];
 
 /** The person's turn for a scope button: their words, or what they asked for. */

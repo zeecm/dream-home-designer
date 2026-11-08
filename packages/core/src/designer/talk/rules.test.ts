@@ -315,6 +315,34 @@ describe('records version 3', () => {
     expect(conversationFromRecord({ ...conv, recordVersion: TALK_RECORD_VERSION + 1 })).toBeNull();
   });
 
+  it('a question key a newer build added is dropped, never a reason to refuse the record', () => {
+    const conv = met();
+    const raw = JSON.parse(JSON.stringify(conv));
+    raw.assumed = ['budget', 'pets-future'];
+    raw.known = ['who', 'pets-future'];
+    raw.settled = ['pets-future', 'walls'];
+    const q = raw.turns.find((t: { kind: string }) => t.kind === 'app-question');
+    if (q) q.keys = ['pets-future'];
+    raw.turns.push({
+      kind: 'event',
+      id: 'ev_future',
+      at: AT,
+      event: { type: 'fact', key: 'pets-future', text: 'You changed: pets.' },
+    });
+    const read = conversationFromRecord(raw);
+    expect(read).not.toBeNull();
+    expect(read?.assumed).toEqual(['budget']);
+    expect(read?.known).toEqual(['who']);
+    expect(read?.settled).toEqual(['walls']);
+    if (q) expect(read?.turns.find((t) => t.id === q.id)).toMatchObject({ keys: [] });
+    expect(read?.turns.find((t) => t.id === 'ev_future')).toMatchObject({
+      event: { type: 'note', text: 'You changed: pets.' },
+    });
+    // The owns question (slice 3b) is a key this build knows.
+    raw.known = ['owns'];
+    expect(conversationFromRecord(raw)?.known).toEqual(['owns']);
+  });
+
   it('round trip: rules, an offer and a Decision’s rule come back as written', () => {
     const { conv, turn } = exchange(met(), 'Never anything in the corridor', REPLY_RULE);
     const kept = talk(conv, { type: 'ruleKeep', turnId: turn.id, id: id(), at: AT });

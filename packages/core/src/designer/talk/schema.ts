@@ -78,9 +78,20 @@ export const QUESTION_KEYS = [
   'walls',
   'style',
   'anything',
+  /** How much the household owns (slice 3b's storage lens). */
+  'owns',
 ] as const;
 export const QuestionKey = z.enum(QUESTION_KEYS);
 export type QuestionKey = z.infer<typeof QuestionKey>;
+
+const isQuestionKey = (v: unknown): v is QuestionKey =>
+  typeof v === 'string' && (QUESTION_KEYS as readonly string[]).includes(v);
+
+/**
+ * Question keys as a record keeps them, read tolerantly (from version 3): strings, and a key this
+ * build doesn't know (a newer build's question) is dropped, never a reason to refuse the record.
+ */
+export const QuestionKeys = z.array(z.string()).transform((keys) => keys.filter(isQuestionKey));
 
 /** What a proposal is about: the whole flat, or some spaces (by key), in words. */
 export const ScopeRef = z.object({
@@ -236,6 +247,14 @@ export const TalkEvent = z.discriminatedUnion('type', [
 ]);
 export type TalkEvent = z.infer<typeof TalkEvent>;
 
+/** An app line as a record keeps it: a fact about a question this build doesn't know is a note. */
+const StoredEvent = z.preprocess((v) => {
+  const e = v as { type?: unknown; key?: unknown; text?: unknown } | null;
+  return e && e.type === 'fact' && !isQuestionKey(e.key)
+    ? { type: 'note', text: typeof e.text === 'string' ? e.text : '' }
+    : v;
+}, TalkEvent);
+
 const base = { id: z.string(), at: z.string() };
 
 export const Turn = z.discriminatedUnion('kind', [
@@ -320,7 +339,8 @@ export const Turn = z.discriminatedUnion('kind', [
     ...base,
     kind: z.literal('app-question'),
     lead: z.string().max(TALK_LIMITS.lead).nullable(),
-    keys: z.array(QuestionKey).min(1).max(3),
+    // Read tolerantly: a newer build's question drops out (an empty message reads as done).
+    keys: QuestionKeys.pipe(z.array(QuestionKey).max(3)),
     /** Each question once answered (its answer in words), skipped, or assumed by Just design it. */
     done: z
       .record(
@@ -376,7 +396,7 @@ export const Turn = z.discriminatedUnion('kind', [
       .default(null),
   }),
   z.object({ ...base, kind: z.literal('proposal'), proposalId: z.string() }),
-  z.object({ ...base, kind: z.literal('event'), event: TalkEvent }),
+  z.object({ ...base, kind: z.literal('event'), event: StoredEvent }),
 ]);
 export type Turn = z.infer<typeof Turn>;
 export type TurnKind = Turn['kind'];
@@ -397,15 +417,15 @@ export const Conversation = z.object({
   /** What I know about you. */
   brief: DesignBrief,
   /** Facts the app assumed (Just design it, Skip): marked "Assumed" until confirmed or changed. */
-  assumed: z.array(QuestionKey).default([]),
+  assumed: QuestionKeys.default([]),
   /** Facts a form told before the first meeting: not asked again. */
-  known: z.array(QuestionKey).default([]),
+  known: QuestionKeys.default([]),
   /**
    * The first meeting is over, and the questions settled in it: kept apart from the turns, so
    * trimming the oldest turns never starts the meeting again.
    */
   met: z.boolean().default(false),
-  settled: z.array(QuestionKey).default([]),
+  settled: QuestionKeys.default([]),
   /** The next proposal's number: one sequence with the plan's versions (V1, V4, V7). */
   nextN: z.number().int().positive(),
   decisions: z
