@@ -1,6 +1,7 @@
 import {
   type Change,
   type Design,
+  type DesignResult,
   type HistoryEntry,
   type Level,
   type ResultCheck,
@@ -19,7 +20,14 @@ import { useEditor } from '../../../editor';
 import { useStore } from '../../../store';
 import { loadDesigns, useDesigner } from '../state';
 import { designStore } from '../storage';
-import { type CardModel, cardChanges, cardResult, cardResultNow, nowOf } from './cards';
+import {
+  type CardModel,
+  cardChanges,
+  cardResultNow,
+  nowOf,
+  precheckOn,
+  putBackMoves,
+} from './cards';
 import { focusInLog } from './scroll';
 import { talkStore } from './talkStore';
 import { lineTitle } from './titles';
@@ -57,19 +65,39 @@ export function precheckAccept(
   card: CardModel,
   ticked: string[],
   waived: readonly string[],
-): { failing: ResultCheck[]; hdb: boolean } {
-  const project = useStore.getState().editor.doc;
-  const b = nowOf(project);
-  const r = cardResult(project, card);
-  if (!b || !r) return { failing: [], hdb: false };
-  const changes = cardChanges(project, card, r);
-  const merged = mergeChanges(b.now, r.level, changes, ticked);
-  const rep = subsetReport(b.now, b.before, r, merged, card.input.brief, {
-    rates: useRates.getState().rates,
-    waived: [...card.waivers.map((w) => w.key), ...waived],
-    renovation: !!project.renovation,
-  });
-  return { failing: rep.failing, hdb: rep.failing.some((c) => !c.waivable) };
+  r: DesignResult | null,
+): { failing: ResultCheck[]; hdb: boolean; missing: boolean } {
+  return precheckOn(
+    useStore.getState().editor.doc,
+    card,
+    ticked,
+    waived,
+    r,
+    useRates.getState().rates,
+  );
+}
+
+/** Why nothing was accepted when the card couldn't be checked on the plan as it is. */
+export const NOT_CHECKED =
+  'Couldn’t check these changes on your plan as it is, so nothing was accepted. Try again.';
+
+/**
+ * Accept selected's question first (the button): the ticked changes checked on the plan as it
+ * is, waited for, never read from a check still pending; refused, with a line, when there is
+ * no result to check them with.
+ */
+export async function precheckNow(
+  card: CardModel,
+  ticked: string[],
+  waived: readonly string[],
+): Promise<{ failing: ResultCheck[]; hdb: boolean } | null> {
+  const r = await cardResultNow(useStore.getState().editor.doc, card).catch(() => null);
+  const pre = precheckAccept(card, ticked, waived, r);
+  if (pre.missing) {
+    await nothing(NOT_CHECKED);
+    return null;
+  }
+  return pre;
 }
 
 /**
@@ -129,7 +157,8 @@ async function acceptOnce(
   if (!ok.length) return nothing('Already accepted in another tab.');
   const ids = ok.map((c) => c.id);
   // The waivers the accepted changes need: their own checks, or what they fail together.
-  const pre = precheckAccept(card, ids, []);
+  const pre = precheckAccept(card, ids, [], r);
+  if (pre.missing) return nothing(NOT_CHECKED);
   const needed = new Set([...ok.flatMap((c) => c.checks), ...pre.failing.map((c) => c.key)]);
   const waiving = waive.filter(
     (w, i, all) => needed.has(w.key) && all.findIndex((x) => x.key === w.key) === i,
@@ -443,11 +472,10 @@ async function applyPutBack(pb: PutBack, out: boolean) {
 
 /** A Put it back undone (or redone) by the toolbar or Ctrl+Z: what it took out follows. */
 async function syncPutBacks() {
-  const past = useStore.getState().editor.history.past;
-  for (const pb of putBacks) {
-    const applied = past.some((e) => e.patches === pb.patches);
-    if (applied !== pb.out) await applyPutBack(pb, applied);
-  }
+  const moves = putBackMoves(putBacks, useStore.getState().editor.history);
+  // A step trimmed from the history moved nowhere: what it took out stays as it is.
+  for (const pb of moves.gone) putBacks.splice(putBacks.indexOf(pb), 1);
+  for (const { item, out } of moves.apply) await applyPutBack(item, out);
 }
 
 // The toolbar's Undo and Redo (and Ctrl+Z) move a line's accept too: the line follows. A

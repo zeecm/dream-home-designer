@@ -1,6 +1,33 @@
-import type { Change, Design } from '@dhd/core';
+import {
+  type Change,
+  type Design,
+  type Level,
+  type Proposal,
+  TYPICAL_RATES,
+  designResult,
+  levelBounds,
+  parseSpaceDesign,
+  sampleFlatProject,
+} from '@dhd/core';
 import { describe, expect, it, vi } from 'vitest';
-import { type CardModel, cardScope, cardVerdict, earlierDesign, versionKey } from './cards';
+import living from '../../../../../../packages/core/src/designer/fixtures/room-living.json' with {
+  type: 'json',
+};
+import {
+  SAMPLE_KEYS,
+  parsed,
+  sampleDesign,
+} from '../../../../../../packages/core/src/designer/fixtures/sample';
+import {
+  type CardModel,
+  cardScope,
+  cardVerdict,
+  earlierDesign,
+  optionCard,
+  precheckOn,
+  putBackMoves,
+  versionKey,
+} from './cards';
 
 // The cards read the app's design options and results; these tests need neither.
 vi.mock('../state', () => ({ designOpts: () => ({}) }));
@@ -114,5 +141,90 @@ describe('versions in the conversation', () => {
     expect(earlierDesign(v(), 'c1')).toBe(true);
     expect(earlierDesign(v(mine), 'c2')).toBe(true);
     expect(earlierDesign(v(mine), 'c1')).toBe(false);
+  });
+});
+
+describe('Put it back follows its history step (tech lead)', () => {
+  const step = { patches: [] as unknown[] };
+  const other = { patches: [] as unknown[] };
+  const pb = (out: boolean) => ({ patches: step.patches, out });
+  it('out while in past, in while in future', () => {
+    expect(putBackMoves([pb(false)], { past: [step], future: [] }).apply).toEqual([
+      { item: pb(false), out: true },
+    ]);
+    expect(putBackMoves([pb(true)], { past: [], future: [step] }).apply).toEqual([
+      { item: pb(true), out: false },
+    ]);
+    expect(putBackMoves([pb(true)], { past: [other, step], future: [] }).apply).toEqual([]);
+  });
+  it('trimmed from the history (200 steps on): left as it is and no longer followed', () => {
+    const trimmed = { past: Array.from({ length: 200 }, () => other), future: [] };
+    const item = pb(true);
+    const moves = putBackMoves([item], trimmed);
+    expect(moves.apply).toEqual([]);
+    expect(moves.gone).toEqual([item]);
+  });
+});
+
+describe('the accept precheck fails closed (tech lead)', () => {
+  const project = sampleFlatProject('prj_pre');
+  const level = project.levels[0] as Level;
+  // The sofa on the long wall: it narrows the way through, a hard check fails.
+  const room = parsed(
+    parseSpaceDesign(
+      { ...living, items: living.items.map((it, i) => (i === 0 ? { ...it, along: 2.4 } : it)) },
+      levelBounds(level),
+    ),
+  );
+  const design = sampleDesign({ level, concept: null, answers: { [SAMPLE_KEYS.living]: room } });
+  const proposal: Proposal = {
+    projectId: project.id,
+    id: 'prop1',
+    conversationId: 'c1',
+    recordVersion: 2,
+    n: 1,
+    turnId: 't',
+    at: '2026-11-08T10:00:00.000Z',
+    scope: { label: 'Living and dining', spaces: [SAMPLE_KEYS.living], all: false },
+    words: '',
+    options: [
+      {
+        letter: 'A',
+        name: 'Living and dining',
+        designId: design.id,
+        brief: design.brief,
+        aliases: design.aliases,
+        concept: null,
+        spaces: design.spaces,
+        locks: [],
+        usage: [],
+        base: { variant: 'before', fingerprint: 'fp0' },
+        status: 'checked',
+        ticks: null,
+        accepted: [],
+        waivers: [],
+        version: null,
+        note: null,
+      },
+    ],
+  };
+  const card = optionCard(proposal, proposal.options[0] as Proposal['options'][number]);
+  it('with no result to check with: missing, never "nothing fails"', () => {
+    expect(precheckOn(project, card, ['x'], [], null, TYPICAL_RATES)).toEqual({
+      failing: [],
+      hdb: false,
+      missing: true,
+    });
+  });
+  it('with the result waited for: what the ticked rows fail together', async () => {
+    const { changeSet } = await import('@dhd/core');
+    const r = designResult(level, level, card.input);
+    const all = changeSet(level, r, card.input).map((c) => c.id);
+    const pre = precheckOn(project, card, all, [], r, TYPICAL_RATES);
+    expect(pre.missing).toBe(false);
+    expect(pre.failing.length).toBeGreaterThan(0);
+    // Accepted anyway: those no longer stop it.
+    const waived = pre.failing.map((c) => c.key);
+    expect(precheckOn(project, card, all, waived, r, TYPICAL_RATES).failing).toEqual([]);
   });
 });

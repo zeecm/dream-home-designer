@@ -24,7 +24,7 @@ import { openCompare, useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
 import { keepTogether } from '../words';
 import { Mark } from './Mark';
-import { acceptCard, precheckAccept } from './accept';
+import { acceptCard, precheckNow } from './accept';
 import {
   type CardModel,
   cardChanges,
@@ -913,16 +913,18 @@ export const ProposalCard = memo(function ProposalCard({
             onClick={() => {
               // Worked out now, never from a check still pending: what the ticked changes fail
               // together is asked about first, and an HDB rule refused.
-              const pre = precheckAccept(
+              void precheckNow(
                 card,
                 ticked,
                 waive.map((w) => w.key),
-              );
-              if (pre.failing.length) {
-                setAsking({ checks: pre.failing, hdb: pre.hdb });
-                return;
-              }
-              void accept(waive);
+              ).then((pre) => {
+                if (!pre) return;
+                if (pre.failing.length) {
+                  setAsking({ checks: pre.failing, hdb: pre.hdb });
+                  return;
+                }
+                void accept(waive);
+              });
             }}
           >
             Accept selected ({tickedN})
