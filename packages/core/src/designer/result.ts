@@ -27,10 +27,13 @@ import {
   keepOutOf,
   nameOf,
   placePiece,
+  shape,
   spaceIndex,
 } from './place';
-import { ACCESS, peopleOf } from './principles';
+import { ACCESS, type ProgrammeUse, peopleOf } from './principles';
 import { acceptResolve, piecesNoWorse } from './resolve';
+import { ruleKeepOuts } from './rules/check';
+import type { Rule } from './rules/schema';
 import type { Concept, DesignInput, DesignItem, RoomUse, SpaceDesign, SpaceStatus } from './schema';
 import type { Zone } from './schema';
 import { type Intent, type SolveOutcome, applySwap, solveSpace } from './solve';
@@ -126,6 +129,11 @@ export interface DesignOptions {
   models?: Project['models'];
   /** false: pieces are left where first placed, not moved off the walkways (for tests). */
   walkways?: boolean;
+  /**
+   * The household's house rules for the version's level (slice 3a): checked as hard R checks,
+   * and kept out of by the walkway re-solve. In the key, so a rule edit re-checks at no cost.
+   */
+  rules?: readonly Rule[];
 }
 
 const BEDROOM_USES = new Set<RoomUse>(['master', 'bedroom', 'kids', 'parents', 'guest']);
@@ -226,6 +234,7 @@ function work(
   opts: DesignOptions,
 ): DesignResult {
   const { brief, aliases, concept } = design;
+  const rulesOpt = opts.rules?.length ? { rules: opts.rules } : {};
   const repaired: Note[] = [];
   const dropped: Note[] = [];
   const notes: Note[] = (concept?.notes ?? []).map((text) => ({ text }));
@@ -575,7 +584,7 @@ function work(
             Object.entries(l.items).filter(([, it]) => inRooms(s.rooms, centreOf(it))),
           );
           return new Set(
-            designChecks({ ...l, items }, { brief, uses })
+            designChecks({ ...l, items }, { brief, uses, ...rulesOpt })
               .filter((c) => c.hard)
               .map((c) => c.key),
           );
@@ -744,7 +753,19 @@ function work(
   // from the main door (or to a bed) is moved off it where it can be, else left for the
   // checks to say.
   const resolves: DesignResult['resolves'] = [];
-  const walked = opts.walkways === false ? null : keepWalkwaysClear(lvl, runs, repaired, resolves);
+  const walked =
+    opts.walkways === false
+      ? null
+      : keepWalkwaysClear(lvl, runs, repaired, resolves, {
+          rules: opts.rules ?? [],
+          usesOf: (id) => usesOf(lvl, id, { brief, uses }),
+          hard: (l, walk) =>
+            new Set(
+              designChecks(l, { brief, uses, ...rulesOpt, ...(walk ? { walk } : {}) })
+                .filter((c) => c.hard)
+                .map((c) => c.key),
+            ),
+        });
   // The notes of each space solved by intent, as finally placed.
   for (const run of runs) {
     if (!run.outcome) continue;
@@ -889,10 +910,24 @@ function work(
   const designedRooms = new Set(
     resultSpaces.filter((s) => s.storedKey && s.status !== 'missing').flatMap((s) => s.rooms),
   );
-  const baseKeys = baseChecks(start, brief, uses);
+  const baseKeys = baseChecks(start, brief, uses, opts.rules);
+  // A piece the version copied (an earlier version's room, placed again) has a new id but the
+  // plan's pose: it is the plan's piece, its checks keyed as the plan's.
+  const poseKey = (it: {
+    assetId: string;
+    position: { x: number; z: number };
+    rotationY: number;
+  }) =>
+    `${it.assetId}|${it.position.x.toFixed(3)}|${it.position.z.toFixed(3)}|${it.rotationY.toFixed(3)}`;
+  const startByPose = new Map(Object.values(start.items).map((it) => [poseKey(it), it.id]));
+  const twinOf = (id: string): string => {
+    if (start.items[id]) return id;
+    const a = level.items[id];
+    return (a && startByPose.get(poseKey(a))) ?? id;
+  };
   const unchanged = (id: string) => {
     const a = level.items[id];
-    const b = start.items[id];
+    const b = start.items[twinOf(id)];
     return (
       !!a &&
       !!b &&
@@ -909,13 +944,14 @@ function work(
     uses,
     clearance: issues,
     walk,
+    ...rulesOpt,
   }).map((c) => {
     // In the plan before and not the version's doing: a piece it didn't touch, a room it
     // didn't furnish, or what furnishing can't change (a window, the bedroom count).
     // Someone with nowhere to sleep is always the version's to answer for.
     const already =
       !c.key.startsWith('P1|unplaced') &&
-      baseKeys.has(c.key) &&
+      baseKeys.has(c.itemId ? swapSegment(c.key, c.itemId, twinOf(c.itemId)) : c.key) &&
       (c.itemId
         ? unchanged(c.itemId)
         : c.roomId
@@ -1015,6 +1051,14 @@ function remember<T>(memo: Map<string, T>, key: string, value: T): T {
 }
 const settledMemo = new Map<string, SolveOutcome>();
 
+/** What the walkway step knows of the house rules, and every hard check's key on a level. */
+interface House {
+  rules: readonly Rule[];
+  usesOf: (roomId: string) => ProgrammeUse[];
+  /** The hard checks' keys (the design checks with the rules, as `spaceHard` counts them). */
+  hard: (level: Level, walk?: WalkwayReport) => Set<string>;
+}
+
 /** The hard failures on a level the walkway step can change: walkways, clearances. */
 function hardCount(level: Level, walk?: WalkwayReport): number {
   const w = (walk ?? walkwayReport({ ...level, items: { ...level.items } })).issues.filter(
@@ -1033,6 +1077,13 @@ function hardCount(level: Level, walk?: WalkwayReport): number {
   return w + c;
 }
 
+/** A check's key with one `|`-delimited segment (a piece's id) swapped for another. */
+export const swapSegment = (key: string, from: string, to: string) =>
+  key
+    .split('|')
+    .map((part) => (part === from ? to : part))
+    .join('|');
+
 const baseMemo = new WeakMap<Level, Map<string, Set<string>>>();
 
 /** The checks' keys on the plan a version was made on (kept per plan and brief). */
@@ -1040,14 +1091,17 @@ function baseChecks(
   start: Level,
   brief: DesignInput['brief'],
   uses: Record<string, RoomUse>,
+  rules?: readonly Rule[],
 ): Set<string> {
-  const k = stableJson([brief, uses]);
+  const k = stableJson([brief, uses, rules ?? []]);
   const per = baseMemo.get(start) ?? new Map<string, Set<string>>();
   baseMemo.set(start, per);
   const hit = per.get(k);
   if (hit) return hit;
   // The version's room uses, so the same failure has the same key on both.
-  const keys = new Set(designChecks(start, { brief, uses }).map((c) => c.key));
+  const keys = new Set(
+    designChecks(start, { brief, uses, ...(rules?.length ? { rules } : {}) }).map((c) => c.key),
+  );
   per.set(k, keys);
   if (per.size > 4) per.delete(per.keys().next().value as string);
   return keys;
@@ -1095,6 +1149,7 @@ function keepWalkwaysClear(
   runs: Run[],
   repaired: Note[],
   resolves: DesignResult['resolves'],
+  house: House,
 ): WalkwayReport | null {
   const moved = new Set<string>();
   const kept = new Map<Run, SpaceIndex['keepOut']>();
@@ -1110,8 +1165,23 @@ function keepWalkwaysClear(
         (!moved.has(i.itemId) ||
           runs.some((r) => r.solveWith && r.wants.some((w) => w.id === i.itemId))),
     );
-    if (!blamed.length) return report;
+    // House rules that keep pieces out of somewhere (nothing in the way, keep a spot clear):
+    // their failing pieces are kept out of it the same way (slice 3a §3.4).
+    const ruled = house.rules.length
+      ? ruleKeepOuts(house.rules, {
+          // A fresh object: the walkway passes are cached per level.
+          level: { ...lvl, items: { ...lvl.items } },
+          usesOf: house.usesOf,
+        }).filter(
+          (k) =>
+            !moved.has(k.itemId) ||
+            runs.some((r) => r.solveWith && r.wants.some((w) => w.id === k.itemId)),
+        )
+      : [];
+    if (!blamed.length && !ruled.length) return report;
     let changed = false;
+    /** The hard checks' keys on the level as it is this round (for a rule move). */
+    let roundHard: Set<string> | null = null;
     // Spaces placed by intent are solved again, keeping out of every way they narrowed.
     const again = new Set<Run>();
     // Of the pieces narrowing one way, those standing free move; the wall pieces only if none do.
@@ -1131,6 +1201,14 @@ function keepWalkwaysClear(
       for (const id of ids) moved.add(id);
       kept.set(run, [...(kept.get(run) ?? []), ...keepOutOf(issue.path, issue.pinch, issue.need)]);
       keptFor.set(run, new Set([...(keptFor.get(run) ?? []), ...(free.length ? free : ids)]));
+      again.add(run);
+    }
+    for (const k of ruled) {
+      const run = runs.find((r) => r.solveWith && r.wants.some((w) => w.id === k.itemId));
+      if (!run || rejected.has(run)) continue;
+      moved.add(k.itemId);
+      kept.set(run, [...(kept.get(run) ?? []), ...k.polys.map(shape)]);
+      keptFor.set(run, new Set([...(keptFor.get(run) ?? []), k.itemId]));
       again.add(run);
     }
     for (const run of again) {
@@ -1193,6 +1271,43 @@ function keepWalkwaysClear(
       changed = true;
       repaired.push({
         text: `Moved the ${nameOf(want.kind)} out of the way through: it left ${issue.have.toFixed(2)} m where ${issue.need.toFixed(2)} m is needed.`,
+        ref: want.ref,
+        itemId: out.item.id,
+        space: run.key,
+      });
+    }
+    for (const k of ruled) {
+      const run = runs.find((r) => !r.solveWith && r.wants.some((w) => w.id === k.itemId));
+      const want = run?.wants.find((w) => w.id === k.itemId);
+      if (!run || !want || !lvl.items[k.itemId] || moved.has(k.itemId)) continue;
+      moved.add(k.itemId);
+      const ix = run.ix;
+      const placed = ix.placed;
+      ix.placed = placed.filter((p) => p.id !== k.itemId);
+      ix.keepOut = k.polys.map(shape);
+      const out = placePiece(ix, want);
+      ix.keepOut = [];
+      if (!out.item) {
+        ix.placed = placed;
+        continue;
+      }
+      // Taken only if the rule now holds for it and no hard check is added, the design checks
+      // included (as acceptResolve). The level before is worked out once a round.
+      const copy = (l: Level) => ({ ...l, items: { ...l.items } });
+      roundHard ??= house.hard(copy(lvl), changed ? undefined : report);
+      const before = roundHard;
+      const was = lvl.items[k.itemId];
+      lvl.items[out.item.id] = out.item;
+      const after = house.hard(copy(lvl));
+      if (after.has(k.key) || [...after].some((x) => !before.has(x))) {
+        if (was) lvl.items[k.itemId] = was;
+        ix.placed = placed;
+        continue;
+      }
+      roundHard = after;
+      changed = true;
+      repaired.push({
+        text: `Moved the ${nameOf(want.kind)} to keep your rule “${k.ruleName}”.`,
         ref: want.ref,
         itemId: out.item.id,
         space: run.key,

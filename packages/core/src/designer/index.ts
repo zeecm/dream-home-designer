@@ -159,3 +159,4 @@ export { type UsageOpts, usageOf, usageTotals } from './usage';
 export { clean, levelFingerprint } from './util';
 export { KEEP_TEXT, LOCK_TEXT, type Note, applyDesignWalls, canonicalIds } from './walls';
 export * from './talk';
+export * from './rules';

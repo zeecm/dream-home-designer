@@ -7,12 +7,13 @@ import {
   defaultBrief,
   designLevels,
   levelFingerprint,
+  liveRules,
   talk,
 } from '@dhd/core';
 import { create } from 'zustand';
 import { shownLevelId, useStore } from '../../../store';
 import type { RunState } from '../run';
-import { getBrief, loadDesigns, putBrief, useDesigner } from '../state';
+import { getBrief, loadDesigns, putBrief, setHouseRules, useDesigner } from '../state';
 import { onOtherTab, talkStore, talkStoreReady } from './talkStore';
 
 /**
@@ -49,7 +50,7 @@ export interface LiveReply {
   ctrl: AbortController;
 }
 
-export type TalkView = 'log' | 'know' | 'decisions' | 'versions';
+export type TalkView = 'log' | 'know' | 'decisions' | 'versions' | 'rules';
 
 interface TalkState {
   projectId: string | null;
@@ -181,6 +182,24 @@ export const talkLevels = () => designLevels(doc(), designLevelId());
 
 export const say = (text: string) => useTalk.setState({ said: text });
 
+/** The conversation's live house rules on a level (none on another level). */
+export const rulesOn = (levelId: string) => {
+  const c = useTalk.getState().conv;
+  return c && c.levelId === levelId ? liveRules(c).filter((r) => r.levelId === levelId) : [];
+};
+setHouseRules(rulesOn);
+
+/** A key that changes when the live rules do (a card re-reads its result then). */
+export const useRulesKey = (levelId: string) =>
+  useTalk((s) =>
+    s.conv && s.conv.levelId === levelId
+      ? s.conv.rules
+          .filter((r) => !r.deleted && r.levelId === levelId)
+          .map((r) => `${r.id}:${r.n}:${r.name}`)
+          .join('|')
+      : '',
+  );
+
 const OTHER_TAB = 'Updated with messages from another tab.';
 /** Says once, for a few seconds, that another tab's messages came in. */
 function otherTabNote() {
@@ -299,6 +318,12 @@ export async function ensureConversation(): Promise<Conversation | null> {
   if (!levels || !level) return null;
   const { before, after } = levels;
   const s = await talkStore();
+  // One set aside before that this build can read now goes back first (nothing is lost).
+  if (await s.restore(project.id).catch(() => false)) {
+    await loadTalk(project.id);
+    const back = useTalk.getState().conv;
+    if (back) return back;
+  }
   // One this build can't read is kept aside (never overwritten), and the log says so; one a
   // newer build wrote stays as it is, and this tab only says to reload.
   const found = await s.setAside(project.id).catch(() => 'none' as const);
