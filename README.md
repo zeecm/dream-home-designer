@@ -88,6 +88,18 @@ for any plan.
 - Exact render, slice 1: a photo-real picture drawn on your device from the 3D model itself
   (daylight through the windows, lamps, soft shadows), so nothing is added or moved; free, no
   key. [spec](docs/specs/exact-render.md)
+- AI interior designer v2, slice 2: a designer you talk to. A conversation panel (a sheet on
+  the phone) that greets you from your plan, asks who lives here and who sleeps where, and
+  proposes room by room at a price shown first; you type to it and it streams its reply, asks
+  back, pushes back with the app's own measurements, and says what it plans before a paid run;
+  Decisions you can edit; each change accepted on its own with Undo; alternatives A/B/C, a
+  Versions list, Bring this back, Put it back, Copy, Download and Start over. The layout work runs
+  in a background worker. [spec](docs/specs/ai-designer-v2.md)
+- Storage meter, slice 1: clothes, shoes, kitchen and everything else against who lives here,
+  room by room, with shortfalls priced as built-in carpentry. [spec](docs/specs/storage-meter.md)
+- A wall seen straight on (elevation), slice 1: any wall drawn to scale with its finish, openings,
+  pieces and points, dimensions in mm and notes, Before and After, saved as a picture.
+  [spec](docs/specs/elevation.md)
 - AI interior designer v2, slice 1: layouts that pass the app's checks. The designer says what
   it intends (against which wall, facing what, near what) and a solver places the pieces; a bed
   for everyone, seating that faces the room, 0.60 m between dining and lounge, clear walkways,
@@ -98,31 +110,32 @@ for any plan.
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
-- AI interior designer v2: a designer you talk to. Slice 2, parts 1 and 2 built: a conversation
-  panel (a sheet on the phone) that greets you from your plan, asks who lives here and who sleeps
-  where, and proposes room by room at a price shown first; you type to it and it streams its
-  reply, asks back, pushes back with the app's own measurements, and says what it plans before a
-  paid design run ("Go ahead?"); what you tell it is kept as Decisions you can edit; each change
-  is ticked and accepted on its own, with Undo. The layout work runs in a background worker, so phones
-  stay responsive. Part 3: alternatives A/B/C for a room or two, a Versions list, Bring this
-  back, your plan before the designer with Put it back, Copy as text, Download and Start over. [spec](docs/specs/ai-designer-v2.md)
-- Storage meter, slice 1 built: clothes, shoes, kitchen and everything else against who lives
-  here, room by room, with shortfalls priced as built-in carpentry; next storage beds, a pantry
-  and a bay seat (1b), and the household saved in the project (2). [spec](docs/specs/storage-meter.md)
-- A wall seen straight on (elevation), slice 1 built: any wall of a room drawn to scale with its
-  finish, openings, the pieces against it and its points, dimensions in mm and notes (a socket
-  behind a wardrobe, a low wall cabinet), stepping round the room, Before and After, saved as a
-  picture; next dragging heights in it (1b) and pages on the contractor sheet (2).
-  [spec](docs/specs/elevation.md)
+- The designer works on the level you are looking at (a multi-level home designed the lower
+  floor whatever was shown).
+- The 3D view draws only when something changes (it redrew 60 times a second while idle).
+- AI interior designer v2, slice 3a: point at the plan ("not here", "keep this") and house rules
+  ("nothing in the corridor") that become checks on every proposal. [spec](docs/specs/ai-designer-v2.md)
 
 ### Planned
-1. Exact render, slice 2: quality settings, real textures, AI polish; daylight bounced up off
-   the ground outside (rooms facing away from the sun can read up to a quarter too dark), and
-   dark dots seen through a far window.
+1. AI interior designer v2, slice 3b: a second look at each proposal (flow, focal point, a room
+   too empty or too full) and a storage lens scored on the storage meter.
+2. Elevations on the contractor sheet (elevation slice 2), with piece labels, the saved
+   picture's font and the iPhone canvas size. [spec](docs/specs/elevation.md)
+3. Storage meter 1b: storage beds, a pantry and a bay seat. [spec](docs/specs/storage-meter.md)
+4. AI interior designer v2, slice 4: sharing a conversation.
+5. Exact render, slice 2: quality settings, real textures, AI polish; daylight bounced up off
+   the ground outside, and dark dots seen through a far window.
+6. Elevation 1b: dragging heights in the wall view.
+7. Storage meter slice 2: the household saved in the project.
+
+### Waiting on the owner
+- Google sign-in keys ([#21](https://github.com/zeecm/dream-home-designer/issues/21)) and the
+  desk socket height ([#42](https://github.com/zeecm/dream-home-designer/issues/42)).
 
 ### On hold (owner, 7 Nov)
 - Ageing parents check (the "Older person" check): slice 1 is built and shipped; grab bars
-  (1b) and steps and ramps (2) are paused. [spec](docs/specs/ageing-parents.md)
+  (1b) and steps and ramps (2) are paused, and so is the designer's Older person lens.
+  [spec](docs/specs/ageing-parents.md)
 
 More ideas: [`docs/specs/ideas.md`](docs/specs/ideas.md).
 
