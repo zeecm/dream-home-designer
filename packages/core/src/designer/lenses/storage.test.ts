@@ -10,8 +10,8 @@ import { SAMPLE_KEYS, parsed, sampleAnswers, sampleDesign, sampleLevel } from '.
 import { roleOf } from '../principles';
 import { roomStep } from '../prompts';
 import { type DesignOptions, designResult } from '../result';
-import { type DesignBrief, type SpaceDesign, defaultBrief, parseSpaceDesign } from '../schema';
 import { Rule } from '../rules/schema';
+import { type DesignBrief, type SpaceDesign, defaultBrief, parseSpaceDesign } from '../schema';
 import { dropPriorityOf } from '../solve';
 import { spacesOf } from '../spaces';
 import { lensReports, steerFor } from './index';
