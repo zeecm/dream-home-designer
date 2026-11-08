@@ -8367,8 +8367,10 @@ textarea {
     display: none;
   }
 }
-/* A phone on its side: a column on the right that folds to a tab. */
-@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+/* A phone on its side, or a short wide window on a computer (844 x 390, P2-5): a column on the
+   right that folds to a tab, the plan beside it. */
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse),
+  (orientation: landscape) and (max-height: 500px) and (min-width: 721px) {
   .workspace-designer {
     grid-template-columns: var(--palette-width) minmax(0, 1fr) 360px;
   }
@@ -8645,16 +8647,47 @@ html[data-proposal] .plan-svg g.clearance {
   color: var(--text);
 }
 
-/* A short window without touch (844 x 390 on a computer): the sheet at half height left the
-   log no room. There it opens taller, without quick replies, and the log keeps a few lines. */
+/* A short window that is no landscape one (the column takes those): the sheet opens taller,
+   and the log keeps a few lines. */
 @media (max-width: 900px) and (max-height: 500px) {
   .workspace-designer > .talk-half {
     height: calc(100dvh - 48px);
   }
-  .talk-sheet .talk-quick {
-    display: none;
-  }
   .talk-sheet .talk-log {
     min-height: 96px;
+  }
+}
+
+/* PR 2, QA: a long reply folds behind More; a message's state sits under its bubble; the
+   textarea is a finger's height on touch. */
+.talk-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  line-clamp: 6;
+  overflow: hidden;
+}
+.talk-you {
+  flex-direction: column;
+  align-items: flex-end;
+}
+@media (pointer: coarse) {
+  .talk-textarea {
+    min-height: 44px;
+  }
+}
+
+/* A short wide window on a computer (844 x 390, 900 x 450, P2-5): the designer is the column at
+   the right, as on a phone on its side, and the plan stays in view beside it. */
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse),
+  (orientation: landscape) and (max-height: 500px) and (min-width: 721px) {
+  .workspace-designer {
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .workspace-designer > .designer {
+    grid-column: 3;
+    grid-row: 1;
+    height: auto;
+    max-height: none;
   }
 }

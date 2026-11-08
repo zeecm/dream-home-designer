@@ -1,6 +1,10 @@
-import { furnitureKind } from '../../furniture';
-import type { Level, Project } from '../../schema';
+import { type FurnitureKind, furnitureKind, newItem, placeFurniture } from '../../furniture';
+import { polygonCentroid } from '../../geometry';
+import { planGeometry } from '../../plan';
+import { roomShapes } from '../../rooms';
+import type { Level, Project, Vec2 } from '../../schema';
 import { aliasOf, aliasesFor } from '../aliases';
+import { designChecks } from '../checks';
 import { designLocks } from '../locks';
 import { type DesignResult, designResult } from '../result';
 import type { DesignBrief } from '../schema';
@@ -60,10 +64,57 @@ export function probeLines(
   return { lines: lines.slice(0, 4).map((l) => cut(l, 300)), hdb };
 }
 
-/** The one piece placed in its room's space, the rest of that space kept where it is. */
+const lowerFirst = (t: string) => (t ? `${t[0]?.toLowerCase()}${t.slice(1)}` : t);
+
+/**
+ * Where the person asked for it (a point, or a wall and how far along it): the piece put
+ * exactly there, and what that breaks, measured. Null when the ask gave no place.
+ */
+function exactLines(p: ProbeAsk, i: ProbeInput, kind: FurnitureKind): string[] | null {
+  const room = i.level.rooms[p.roomId];
+  let at: Vec2 | null = p.at;
+  if (!at && p.wallId && p.along !== null) {
+    const w = i.level.walls[p.wallId];
+    const a = w && i.level.vertices[w.a];
+    const b = w && i.level.vertices[w.b];
+    const shape = roomShapes(i.level).get(p.roomId);
+    if (a && b && shape) {
+      const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      const t = Math.min(1, Math.max(0, p.along / len));
+      const on = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+      const c = polygonCentroid(shape.outer);
+      const d = Math.hypot(c.x - on.x, c.y - on.y) || 1;
+      // A step into the room, then onto the wall's face as a piece dropped there would go.
+      at = { x: on.x + ((c.x - on.x) / d) * 0.3, y: on.y + ((c.y - on.y) / d) * 0.3 };
+    }
+  }
+  if (!at || !room) return null;
+  const placed = placeFurniture(planGeometry(i.level), kind, at, 0);
+  const trial = structuredClone(i.level) as Level;
+  const id = 'it_probe';
+  trial.items[id] = newItem(id, kind, placed.at, placed.rotation, i.level.ceilingHeight);
+  const before = new Set(designChecks(i.level, { brief: i.brief }).map((c) => c.key));
+  const caused = designChecks(trial, { brief: i.brief }).filter(
+    (c) => c.hard && !before.has(c.key) && (c.itemId === id || !!c.issue),
+  );
+  if (!caused.length) {
+    return [`Where you asked, the ${lowerFirst(kind.name)} passes the app’s checks.`];
+  }
+  return caused
+    .map((c) => c.text)
+    .filter((t, k, all) => all.indexOf(t) === k)
+    .slice(0, 3);
+}
+
+/**
+ * The one piece asked about: where the person asked for it if they said (measured there), else
+ * placed by the app in its room's space, the rest kept where it is, and said either way.
+ */
 function pieceLines(p: ProbeAsk, i: ProbeInput): string[] {
   const kind = furnitureKind(p.assetId) ?? null;
-  if (!kind) return [];
+  if (!kind) return [`I couldn’t find “${cut(p.assetId, 40)}” in the catalogue.`];
+  const exact = exactLines(p, i, kind);
+  if (exact) return exact;
   const spaces = spacesOf(i.level);
   const space = spaceOfRoom(spaces, p.roomId);
   if (!space) return [];
@@ -124,15 +175,25 @@ function pieceLines(p: ProbeAsk, i: ProbeInput): string[] {
     return [];
   }
   const probeId = Object.entries(r.refs).find(([, ref]) => ref === 'probe')?.[0] ?? null;
+  const name = lowerFirst(kind.name);
   if (!probeId) {
     const why = r.dropped.find((n) => n.ref === 'probe')?.text;
-    return [cut(`The ${kind.name.toLowerCase()} doesn’t fit there${why ? `: ${why}` : '.'}`, 300)];
+    return [cut(`The ${name} doesn’t fit in ${space.name}${why ? `: ${why}` : '.'}`, 300)];
+  }
+  // Placed as something else (a smaller size): said of the piece asked about, never the other.
+  const got = r.level.items[probeId]?.assetId;
+  if (got && got !== kind.id) {
+    return [cut(`The app would use a smaller piece than the ${name} in ${space.name}.`, 300)];
   }
   // What the piece causes: its own checks, and the walkways and clearances it narrows (a
   // room's own needs, as "no dining table", are about the rest of the room, not the ask).
-  return r.checks
+  const lines = r.checks
     .filter((c) => c.hard && !c.already && (c.itemId === probeId || !!c.issue))
     .map((c) => c.text)
     .filter((t, k, all) => all.indexOf(t) === k)
     .slice(0, 3);
+  // Nothing fails where the app put it: said, so the designer's own number isn't the only one.
+  return lines.length
+    ? lines
+    : [`The app found room for the ${name} in ${space.name}, placed where it fits.`];
 }

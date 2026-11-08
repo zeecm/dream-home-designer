@@ -15,7 +15,7 @@ import { pressScope, scopePrice, stopTalkRun } from './propose';
 import { scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { useThreshold } from './threshold';
-import { sendMessage, sendPrice, stopReply } from './turn';
+import { recheckElsewhere, sendMessage, sendPrice, stopReply } from './turn';
 import { act, newId, nowIso, talkLevel, typedNow, useBusy, useTalk } from './useTalk';
 
 /**
@@ -126,6 +126,23 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 144)}px`;
   }, [text]);
+  // Another tab's reply: checked again (its tab may have closed, P2-3) when that tab writes, when
+  // this one is seen again, and every few seconds while it is said here.
+  const waitingElsewhere = useTalk((st) => !!st.conv && !!pendingReply(st.conv) && !st.reply);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: again when the other tab writes
+  useEffect(() => {
+    if (!waitingElsewhere) return;
+    const again = () => void recheckElsewhere();
+    const t = setInterval(again, 3000);
+    window.addEventListener('focus', again);
+    document.addEventListener('visibilitychange', again);
+    again();
+    return () => {
+      clearInterval(t);
+      window.removeEventListener('focus', again);
+      document.removeEventListener('visibilitychange', again);
+    };
+  }, [waitingElsewhere, conv?.rev]);
   if (!conv) return null;
   const lvl = talkLevel();
   const first = !meetingOver(conv);
@@ -192,6 +209,9 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
   const cant = ai ? designerCannotUse(ai) : null;
   const cap = capUsd();
   const passes = !!est && talkAsks(est, spent().usd, cap);
+  // Its usual figure fits the limit, only its most doesn't: Send anyway, never a dead end (P2-6).
+  const typicalFits = !!est?.usd && cap !== null && spent().usd + est.usd.typical <= cap;
+  const anyway = passes && typicalFits;
   const why = !ai
     ? 'Add your AI key to send messages.'
     : cant
@@ -200,7 +220,7 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
         ? 'You’re offline. Your message is kept.'
         : elsewhere
           ? 'Another tab is waiting for a reply.'
-          : passes && cap !== null
+          : passes && cap !== null && !anyway
             ? `This would pass your ${usd(cap)} limit for this tab.`
             : null;
   const send = () => {
@@ -210,7 +230,7 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
       setTimeout(() => setFlash(false), 1600);
       return;
     }
-    void sendMessage(text);
+    void sendMessage(text, anyway);
   };
   const hint =
     text.length >= 1800
@@ -219,12 +239,20 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
         ? 'Write a message first'
         : replying || running
           ? 'Wait for the reply, or Stop'
-          : (why ?? (typeof level === 'number' ? `Asks before anything over ${usd(level)}` : ''));
-  const sendLabel = est?.usd
-    ? `Send · about ${usd(est.usd.typical)}`
-    : est
-      ? `Send · about ${tokens(est.tokens.typical)} tokens`
-      : 'Send';
+          : (why ??
+            (anyway && cap !== null
+              ? `At most it would pass your ${usd(cap)} limit; it usually costs ${usd(est?.usd?.typical ?? 0)}.`
+              : typeof level === 'number'
+                ? `Asks before anything over ${usd(level)}`
+                : ''));
+  const sendLabel =
+    anyway && est?.usd
+      ? `Send anyway · up to ${usd(est.usd.high)}`
+      : est?.usd
+        ? `Send · about ${usd(est.usd.typical)}`
+        : est
+          ? `Send · about ${tokens(est.tokens.typical)} tokens`
+          : 'Send';
   return (
     <form
       className="talk-composer"
@@ -293,12 +321,26 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
               </button>
             </>
           )}
+          {(passes || anyway) && ai && (
+            <>
+              {' '}
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => useTalk.setState({ settings: 'spending' })}
+              >
+                Spending
+              </button>
+            </>
+          )}
         </span>
         {replying || running ? (
           <button
             type="button"
             key="stop"
             className="btn btn-primary talk-stop"
+            onPointerDown={(e) => e.preventDefault()}
+            onMouseDown={(e) => e.preventDefault()}
             title="Stop (Esc)"
             onClick={() => (replying ? stopReply() : stopTalkRun())}
           >
@@ -309,6 +351,10 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
             type="submit"
             key="send"
             className="btn btn-primary talk-send"
+            // A tap keeps the textarea's focus (P2-1): blurring it first resized the phone's
+            // sheet under the finger, and the tap missed. Focus stays in the composer after.
+            onPointerDown={(e) => e.preventDefault()}
+            onMouseDown={(e) => e.preventDefault()}
             data-spends=""
             aria-describedby="talk-hint"
             disabled={!!why}

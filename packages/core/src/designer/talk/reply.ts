@@ -198,7 +198,14 @@ function scopeOf(
   const named = keys.map(
     (k) => ctx.spaces.find((s) => s.key === k) as TalkParseContext['spaces'][number],
   );
-  const label = cut(named.map((s) => s.name).join(' and '), 80);
+  // Commas between names that have "and" in them: "Living and dining, and Main bedroom".
+  const names = named.map((s) => s.name);
+  const label = cut(
+    names.length <= 1
+      ? (names[0] ?? '')
+      : `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`,
+    80,
+  );
   const first = named[0] as TalkParseContext['spaces'][number];
   return {
     scope: { label, spaces: keys, all: false },
@@ -343,6 +350,13 @@ export function parseTalkReply(raw: unknown, ctx: TalkParseContext): TalkParse {
     const rule = (RULES as readonly string[]).includes(lower(c?.rule))
       ? (lower(c?.rule) as TalkConcern['rule'])
       : 'other';
+    // A room or a wall the plan doesn't have: said plainly (never a silent pushback).
+    const missing = (v: unknown) =>
+      typeof v === 'string' && v.trim() && !resolveAlias(ctx.aliases, v) ? cut(v, 12) : null;
+    const probeRaw = asObj(c?.probe);
+    for (const m of [missing(c?.wall), missing(probeRaw?.room), missing(probeRaw?.wall)]) {
+      if (m) lines.push(`I couldn’t find ${m} in the plan.`);
+    }
     concern = c
       ? {
           rule,

@@ -76,11 +76,25 @@ export interface PressRequest {
   finish: { proposalId: string; letter: string; rooms: string[] } | null;
   /** From a designer's plan: what it is for, the household's words, the decisions. */
   talk?: TalkAsk;
+  /** The designer's name for it ("A console by the door"). */
+  title?: string;
 }
 
 /** The decisions as a run's talk block carries them. */
 const decided = () =>
   (useTalk.getState().conv?.decisions ?? []).filter((d) => !d.deleted).map((d) => d.text);
+
+/**
+ * A pushback's alternative as a run asks for it (P2-2): the designer's own suggestion is what it
+ * is for; the person's words, which asked for what was pushed back on, don't go with it.
+ */
+export const altRequest = (plan: TalkPlan): PressRequest => ({
+  scope: plan.scope,
+  words: '',
+  finish: null,
+  title: plan.title,
+  talk: { intent: plan.intent, said: '', decided: decided() },
+});
 
 /** A designer's plan (or a concern's alternative) as a run asks for it. */
 export const planRequest = (plan: TalkPlan, said: string, scope?: ScopeRef): PressRequest => ({
@@ -176,10 +190,10 @@ export async function finishRooms(p: Proposal, letter: string, rooms: string[]) 
 }
 
 /** A priced button that runs a designer's idea (a concern's alternative), priced as shown. */
-export async function pressPlan(plan: TalkPlan, said: string) {
+export async function pressPlan(plan: TalkPlan) {
   if (!begin()) return;
   try {
-    await askOrRun(planRequest(plan, said));
+    await askOrRun(altRequest(plan));
   } finally {
     end();
   }
@@ -254,8 +268,15 @@ async function askOrRun(req: PressRequest) {
     reason: ask,
     estimate: u ? { typical: u.typical, high: u.high, fix: u.fix } : null,
     finish: req.finish,
+    // A designer's idea keeps what it is for through its card (P2-2).
+    ...(req.talk
+      ? {
+          talk: { replyTo: '', title: req.title ?? req.scope.label, intent: req.talk.intent },
+          just: null,
+        }
+      : {}),
   });
-  if (!req.finish) await clearTyped();
+  if (!req.finish && !req.talk) await clearTyped();
 }
 
 /** The request a cost card stands for (or its cheaper room). */

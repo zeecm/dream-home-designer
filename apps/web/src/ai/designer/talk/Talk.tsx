@@ -1,11 +1,11 @@
 import { type TurnOf, cut } from '@dhd/core';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useAi } from '../../credentials';
 import { tokens, usd, useSpend } from '../spend';
 import { useDesigner } from '../state';
 import { Mark } from './Mark';
 import { TurnCost } from './ProposalCard';
-import { planRequest, pressPlan, pressPrice } from './propose';
+import { altRequest, pressPlan, pressPrice } from './propose';
 import { timed, useSettledProject } from './settle';
 import { answerChip, chipLabel, editTurn, retryPrice, retryTurn } from './turn';
 import { act, newId, nowIso, useBusy, useTalk } from './useTalk';
@@ -17,6 +17,29 @@ import { act, newId, nowIso, useBusy, useTalk } from './useTalk';
  * priced alternative, and what the reply noted (Decisions, What I know, notes for the ID),
  * each with Edit. The designer's words are plain text: never Markdown, never a link.
  */
+
+const keyTrouble = (e: string) => /\bkey\b|quota|credit|limit/i.test(e);
+
+/** A reply's words, folded past six lines behind More (P2-7). */
+export function ReplyText({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > 480 || text.split('\n').length > 6;
+  return (
+    <>
+      <p className={long && !open ? 'talk-text talk-clamp' : 'talk-text'}>{text}</p>
+      {long && (
+        <button
+          type="button"
+          className="link-btn talk-more-text"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          {open ? 'Less' : 'More'}
+        </button>
+      )}
+    </>
+  );
+}
 
 /** Under a message: why it wasn't answered, and the ways on. */
 export function SentState({ t }: { t: TurnOf<'person'> }) {
@@ -35,7 +58,27 @@ export function SentState({ t }: { t: TurnOf<'person'> }) {
   const stopped = state === 'cut' && !t.reply?.error;
   return (
     <div className="talk-sent-state">
-      {t.reply?.error && <p className="field-hint talk-error">{t.reply.error}</p>}
+      {t.reply?.error && (
+        // A refused key or a spent quota needs the person (UX §10): an alert, and the way there.
+        <p
+          className="field-hint talk-error"
+          {...(keyTrouble(t.reply.error) ? { role: 'alert' } : {})}
+        >
+          {t.reply.error}
+          {keyTrouble(t.reply.error) && (
+            <>
+              {' '}
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => useTalk.setState({ settings: 'key' })}
+              >
+                AI settings
+              </button>
+            </>
+          )}
+        </p>
+      )}
       <p className="field-hint">
         {stopped ? 'Cut off' : 'Not answered'} ·{' '}
         <button
@@ -220,21 +263,13 @@ function Asked({ t }: { t: TurnOf<'designer'> }) {
 /** A pushback: the app's own lines, and the one alternative as a priced button. */
 function Concern({ t }: { t: TurnOf<'designer'> }) {
   const c = t.talk?.concern;
-  const conv = useTalk((s) => s.conv);
   const busy = useBusy();
   const project = useSettledProject();
   const { prices } = useSpend();
-  const said = useMemo(() => {
-    const p = conv?.turns.find((x) => x.id === t.talk?.replyTo);
-    return p?.kind === 'person' ? p.text : '';
-  }, [conv, t.talk?.replyTo]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: on what the price reads
   const est = useMemo(
-    () =>
-      c?.alt
-        ? timed(() => pressPrice(planRequest(c.alt as NonNullable<typeof c.alt>, said)))
-        : null,
-    [c?.alt, said, project, prices],
+    () => (c?.alt ? timed(() => pressPrice(altRequest(c.alt as NonNullable<typeof c.alt>))) : null),
+    [c?.alt, project, prices],
   );
   if (!c) return null;
   return (
@@ -255,7 +290,7 @@ function Concern({ t }: { t: TurnOf<'designer'> }) {
           className="btn talk-alt"
           data-spends=""
           disabled={busy}
-          onClick={() => c.alt && void pressPlan(c.alt, said)}
+          onClick={() => c.alt && void pressPlan(c.alt)}
         >
           {cut(`Show me ${c.alt.title.charAt(0).toLowerCase()}${c.alt.title.slice(1)}`, 80)}
           {est.usd ? ` · about ${usd(est.usd.typical)}` : ''}

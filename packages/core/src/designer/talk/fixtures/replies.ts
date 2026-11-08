@@ -56,7 +56,15 @@ export const REPLY_CONCERN = {
   concern: {
     rule: 'walkway',
     wall: null,
-    probe: { room: 'R3', assetId: 'dining-6', against: 'free', wall: null, along: null, at: null },
+    // The person's ask, where they asked for it: the corridor strip by the bedrooms.
+    probe: {
+      room: 'R3',
+      assetId: 'dining-6',
+      against: 'free',
+      wall: null,
+      along: null,
+      at: { x: 5.05, y: 3.67 },
+    },
   },
   plan: {
     title: 'A console by the door',

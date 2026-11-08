@@ -32,7 +32,7 @@ import { designerCannotUse } from '../stream';
 import { FactEditor } from './Facts';
 import { Mark, type MarkKind } from './Mark';
 import { ProposalCard } from './ProposalCard';
-import { ReplyParts, SentState, Streaming } from './Talk';
+import { ReplyParts, ReplyText, SentState, Streaming } from './Talk';
 import { lineState, redoLine, undoLine } from './accept';
 import { type CardModel, designCard, optionCard } from './cards';
 import { dayMark } from './days';
@@ -98,7 +98,7 @@ function Designer({ t, named }: { t: TurnOf<'designer'>; named: boolean }) {
         Designer
         <span className="visually-hidden"> said</span>
       </h3>
-      <p className="talk-text">{t.text}</p>
+      {t.talk ? <ReplyText text={t.text} /> : <p className="talk-text">{t.text}</p>}
       {t.lines.length > 0 && (
         <ul className="talk-lines">
           {t.lines.map((l) => (

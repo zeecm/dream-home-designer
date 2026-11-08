@@ -31,7 +31,9 @@ import { useProposalView } from './view';
  */
 
 const SHEET_Q = '(max-width: 900px)';
-const SIDE_Q = '(pointer: coarse) and (max-height: 500px)';
+// A phone on its side, or any short wide window (P2-5): the column, never a sheet over the plan.
+const SIDE_Q =
+  '(orientation: landscape) and (max-height: 500px) and (pointer: coarse), (orientation: landscape) and (max-height: 500px) and (min-width: 721px)';
 const sheetNow = () =>
   !!window.matchMedia?.(SHEET_Q).matches && !window.matchMedia?.(SIDE_Q).matches;
 const sideNow = () => !!window.matchMedia?.(SIDE_Q).matches;

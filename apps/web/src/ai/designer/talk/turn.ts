@@ -79,7 +79,11 @@ export async function otherTabReplying(projectId: string): Promise<boolean> {
   if (!l) return false;
   try {
     const q = await l.query();
-    return (q.held ?? []).some((x) => x.name === lockName(projectId)) && !useTalk.getState().reply;
+    return (
+      !holding &&
+      !useTalk.getState().reply &&
+      (q.held ?? []).some((x) => x.name === lockName(projectId))
+    );
   } catch {
     return false;
   }
@@ -212,10 +216,13 @@ function priceOfPrompt(prompt: TalkPrompt, conv: Conversation): TalkEstimate | n
 }
 
 /** Would pass the tab's limit: said as an app line, and nothing goes. */
-async function pastLimit(prompt: TalkPrompt, conv: Conversation): Promise<boolean> {
+async function pastLimit(prompt: TalkPrompt, conv: Conversation, anyway = false): Promise<boolean> {
   const est = priceOfPrompt(prompt, conv);
   const cap = capUsd();
-  if (!est || !talkAsks(est, spent().usd, cap) || cap === null) return false;
+  if (!est?.usd || cap === null) return false;
+  // Sent anyway (P2-6): only its typical figure must fit; the limit still stops a second try.
+  const over = anyway ? spent().usd + est.usd.typical > cap : talkAsks(est, spent().usd, cap);
+  if (!over) return false;
   await act({
     type: 'event',
     id: newId('turn'),
@@ -229,7 +236,7 @@ async function pastLimit(prompt: TalkPrompt, conv: Conversation): Promise<boolea
 }
 
 /** Sends the composer's words to the designer. */
-export async function sendMessage(text: string): Promise<boolean> {
+export async function sendMessage(text: string, anyway = false): Promise<boolean> {
   const words = text.trim();
   const ai = aiSettings();
   const conv0 = useTalk.getState().conv;
@@ -244,7 +251,7 @@ export async function sendMessage(text: string): Promise<boolean> {
     const input = inputFor(conv, words);
     if (!input) return;
     const prompt = talkPrompt(input);
-    if (await pastLimit(prompt, conv)) return;
+    if (await pastLimit(prompt, conv, anyway)) return;
     const id = newId('turn');
     const next = await act({
       type: 'send',
@@ -285,6 +292,16 @@ export async function retryTurn(turnId: string) {
   if (got === 'busy') say('Another tab is waiting for a reply.');
 }
 
+/**
+ * Whether a reply another tab was waiting for has gone (that tab closed): its turn is then said
+ * as cut off, and Send here works again (P2-3).
+ */
+export async function recheckElsewhere() {
+  const conv = useTalk.getState().conv;
+  if (!conv || !pendingReply(conv) || useTalk.getState().reply) return;
+  await recoverPending();
+}
+
 /** The price of Try again (its request built again). */
 export function retryPrice(turnId: string): TalkEstimate | null {
   const ai = aiSettings();
@@ -323,8 +340,10 @@ export const stopReply = () => useTalk.getState().reply?.ctrl.abort();
 export async function recoverPending() {
   const conv = useTalk.getState().conv;
   const t = conv && pendingReply(conv);
-  if (!conv || !t?.reply || useTalk.getState().reply) return;
+  // This tab's own reply (about to start, or running) is never taken for a dead one.
+  if (!conv || !t?.reply || useTalk.getState().reply || holding) return;
   if (await otherTabReplying(conv.projectId)) return;
+  if (holding || useTalk.getState().reply) return;
   const price = aiSettings() ? priceOf(aiSettings()?.model ?? '', priceTable()) : null;
   const out = tokensOf(t.reply.chars || t.reply.checkpoint.length);
   const cost = price
@@ -355,8 +374,12 @@ if (typeof window !== 'undefined') {
   window.addEventListener('pagehide', checkpoint);
 }
 
+/** This tab holds the reply lock (a reply of its own on its way, or about to be). */
+let holding = false;
+
 /** Whatever fails after a reply (pricing its plan, saving) is said, never retried. */
 async function guarded(fn: () => Promise<void>) {
+  holding = true;
   try {
     await fn();
   } catch (e) {
@@ -369,6 +392,8 @@ async function guarded(fn: () => Promise<void>) {
         text: `Couldn’t finish after the reply: ${e instanceof Error ? e.message : 'something went wrong'}.`,
       },
     }).catch(() => {});
+  } finally {
+    holding = false;
   }
 }
 

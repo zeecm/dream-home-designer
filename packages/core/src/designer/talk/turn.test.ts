@@ -120,7 +120,7 @@ describe('parseTalkReply: recorded replies', () => {
     expect(c.concern?.alt?.scope.spaces).toEqual([LIVING]);
     const p = parsed(REPLY_PLAN).reply.plan;
     expect(p?.scope).toEqual({
-      label: 'Living and dining and Main bedroom',
+      label: 'Living and dining, and Main bedroom',
       spaces: [LIVING, 'rm_main-bedroom'],
       all: false,
     });
@@ -624,14 +624,23 @@ describe('probeLines and estimateTalk', () => {
     expect(s.hdb).toBe(false);
   });
 
-  it('a probe: what the one piece breaks, in the app’s words; nothing when the app can fit it', () => {
+  it('a probe is measured where the person asked; else placed where it fits, and said', () => {
     const c = parsed(REPLY_CONCERN).reply.concern;
-    const fits = probeLines(
+    const asked = probeLines(
       { wallId: null, probe: c?.probe ?? null },
       { level, before: level, brief: defaultBrief() },
     );
-    // The app found a place for the table: the designer's sentence stands, with no line.
-    expect(fits).toEqual({ lines: [], hdb: false });
+    // The table across the corridor strip: the app's own measure (P2-4).
+    expect(asked.lines.join(' ')).toMatch(
+      /The dining table, 6 seats narrows the way through to 0\.\d\d m: 0\.90 m needed\./,
+    );
+    const anywhere = probeLines(
+      { wallId: null, probe: { ...(c?.probe as NonNullable<typeof c>['probe'] & {}), at: null } },
+      { level, before: level, brief: defaultBrief() },
+    );
+    expect(anywhere.lines).toEqual([
+      'The app would use a smaller piece than the dining table, 6 seats in Living and dining.',
+    ]);
     const bunk = probeLines(
       {
         wallId: null,
@@ -647,6 +656,29 @@ describe('probeLines and estimateTalk', () => {
       { level, before: level, brief: defaultBrief() },
     );
     expect(bunk.lines).toEqual(['The bunk bed, two singles doesn’t belong in Living and dining.']);
+  });
+
+  it('a concern naming a room or a wall the plan doesn’t have says so', () => {
+    const r = parsed({
+      ...REPLY_CONCERN,
+      concern: {
+        rule: 'walkway',
+        wall: 'W999',
+        probe: {
+          room: 'R99',
+          assetId: 'dining-6',
+          against: 'free',
+          wall: null,
+          along: null,
+          at: null,
+        },
+      },
+    });
+    expect(r.lines).toEqual([
+      'I couldn’t find W999 in the plan.',
+      'I couldn’t find R99 in the plan.',
+    ]);
+    expect(r.reply.concern?.probe).toBeNull();
   });
 
   it('a Send: about its prompt and a typical reply, at most the whole prompt and its limit', () => {
