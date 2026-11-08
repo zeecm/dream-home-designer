@@ -351,11 +351,14 @@ export function parseTalkReply(raw: unknown, ctx: TalkParseContext): TalkParse {
       ? (lower(c?.rule) as TalkConcern['rule'])
       : 'other';
     // A room or a wall the plan doesn't have: said plainly (never a silent pushback).
+    // Said in words, never by its short id (the designer's R99 means nothing to the person).
     const missing = (v: unknown) =>
-      typeof v === 'string' && v.trim() && !resolveAlias(ctx.aliases, v) ? cut(v, 12) : null;
+      typeof v === 'string' && !!v.trim() && !resolveAlias(ctx.aliases, v);
     const probeRaw = asObj(c?.probe);
-    for (const m of [missing(c?.wall), missing(probeRaw?.room), missing(probeRaw?.wall)]) {
-      if (m) lines.push(`I couldn’t find ${m} in the plan.`);
+    if (missing(probeRaw?.room))
+      lines.push('I couldn’t find the room the designer meant in this plan.');
+    if (missing(c?.wall) || missing(probeRaw?.wall)) {
+      lines.push('I couldn’t find the wall the designer meant in this plan.');
     }
     concern = c
       ? {

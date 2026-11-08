@@ -66,6 +66,14 @@ export function probeLines(
 
 const lowerFirst = (t: string) => (t ? `${t[0]?.toLowerCase()}${t.slice(1)}` : t);
 
+/** A catalogue name as said: "Dining table, 6 seats" is "6-seat dining table". */
+export function pieceWords(name: string): string {
+  const m = /^(.*), (\d+) seats?$/.exec(name.trim());
+  return m ? `${m[2]}-seat ${lowerFirst(m[1] as string)}` : lowerFirst(name.trim());
+}
+const an = (w: string) => (/^[aeiou8]|^11-|^18-/i.test(w) ? `an ${w}` : `a ${w}`);
+const cap = (t: string) => (t ? `${t[0]?.toUpperCase()}${t.slice(1)}` : t);
+
 /**
  * Where the person asked for it (a point, or a wall and how far along it): the piece put
  * exactly there, and what that breaks, measured. Null when the ask gave no place.
@@ -98,7 +106,7 @@ function exactLines(p: ProbeAsk, i: ProbeInput, kind: FurnitureKind): string[] |
     (c) => c.hard && !before.has(c.key) && (c.itemId === id || !!c.issue),
   );
   if (!caused.length) {
-    return [`Where you asked, the ${lowerFirst(kind.name)} passes the app’s checks.`];
+    return [`Where you asked, the ${pieceWords(kind.name)} passes the app’s checks.`];
   }
   return caused
     .map((c) => c.text)
@@ -175,7 +183,7 @@ function pieceLines(p: ProbeAsk, i: ProbeInput): string[] {
     return [];
   }
   const probeId = Object.entries(r.refs).find(([, ref]) => ref === 'probe')?.[0] ?? null;
-  const name = lowerFirst(kind.name);
+  const name = pieceWords(kind.name);
   if (!probeId) {
     const why = r.dropped.find((n) => n.ref === 'probe')?.text;
     return [cut(`The ${name} doesn’t fit in ${space.name}${why ? `: ${why}` : '.'}`, 300)];
@@ -183,7 +191,13 @@ function pieceLines(p: ProbeAsk, i: ProbeInput): string[] {
   // Placed as something else (a smaller size): said of the piece asked about, never the other.
   const got = r.level.items[probeId]?.assetId;
   if (got && got !== kind.id) {
-    return [cut(`The app would use a smaller piece than the ${name} in ${space.name}.`, 300)];
+    const other = furnitureKind(got);
+    return [
+      cut(
+        `${cap(an(name))} doesn’t fit in ${space.name}; the app would use ${other ? an(pieceWords(other.name)) : 'a smaller one'}.`,
+        300,
+      ),
+    ];
   }
   // What the piece causes: its own checks, and the walkways and clearances it narrows (a
   // room's own needs, as "no dining table", are about the rest of the room, not the ask).

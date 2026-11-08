@@ -1299,6 +1299,43 @@ test.describe('talking to the designer (slice 2, PR 2)', () => {
     );
   });
 
+  test('two messages not answered: only the newest offers Try again, and it is in view (P3-1)', async ({
+    page,
+  }) => {
+    await setup(page);
+    const m = await mock(page, {
+      talk: [REPLY_TEXT, REPLY_TEXT],
+      reply: (c) =>
+        c.step === 'talk'
+          ? {
+              status: 400,
+              body: JSON.stringify({
+                type: 'error',
+                error: { type: 'invalid_request_error', message: 'Bad request' },
+              }),
+            }
+          : null,
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await send(page, 'First question');
+    const tries = log(page).getByRole('button', { name: /^Try again · about US\$/ });
+    await expect(tries).toHaveCount(1);
+    await send(page, 'Second question');
+    await expect.poll(() => m.calls.filter((c) => c.step === 'talk').length).toBe(2);
+    await expect(log(page).getByText(/^Not answered/)).toHaveCount(2);
+    // One Try again, on the newest; the older is history (its Edit stays).
+    await expect(tries).toHaveCount(1);
+    const second = log(page).locator('article.talk-you').filter({ hasText: 'Second question' });
+    await expect(second.getByRole('button', { name: /^Try again/ })).toBeVisible();
+    const first = log(page).locator('article.talk-you').filter({ hasText: 'First question' });
+    await expect(first.getByRole('button', { name: /^Try again/ })).toHaveCount(0);
+    await expect(first.getByRole('button', { name: 'Edit' })).toBeVisible();
+    // The newest failure is scrolled fully into view.
+    await expect(second.locator('.talk-sent-state')).toBeInViewport({ ratio: 1 });
+  });
+
   test('a reply cut off by a closed tab is said after reload; Try again answers it', async ({
     page,
   }) => {

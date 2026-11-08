@@ -48,10 +48,19 @@ export function SentState({ t }: { t: TurnOf<'person'> }) {
   const { prices } = useSpend();
   const state = t.reply?.state;
   const off = state === 'failed' || state === 'cut';
+  // Only the newest message sent may be tried again (P3-1); an older one is history.
+  const newest = useTalk((s) => {
+    const turns = s.conv?.turns ?? [];
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const x = turns[i];
+      if (x?.kind === 'person' && x.sent !== undefined) return x.id === t.id;
+    }
+    return false;
+  });
   // biome-ignore lint/correctness/useExhaustiveDependencies: on what the price reads
   const est = useMemo(
-    () => (off && ai ? timed(() => retryPrice(t.id)) : null),
-    [off, ai, prices, t.id],
+    () => (off && newest && ai ? timed(() => retryPrice(t.id)) : null),
+    [off, newest, ai, prices, t.id],
   );
   if (!off) return null;
   // A reply stopped by the person was answered as far as it went: only Try again.
@@ -80,21 +89,26 @@ export function SentState({ t }: { t: TurnOf<'person'> }) {
         </p>
       )}
       <p className="field-hint">
-        {stopped ? 'Cut off' : 'Not answered'} ·{' '}
-        <button
-          type="button"
-          className="link-btn"
-          data-spends=""
-          disabled={replying || !ai}
-          onClick={() => void retryTurn(t.id)}
-        >
-          Try again
-          {est?.usd
-            ? ` · about ${usd(est.usd.typical)}`
-            : est
-              ? ` · about ${tokens(est.tokens.typical)} tokens`
-              : ''}
-        </button>
+        {stopped ? 'Cut off' : 'Not answered'}
+        {newest && (
+          <>
+            {' · '}
+            <button
+              type="button"
+              className="link-btn"
+              data-spends=""
+              disabled={replying || !ai}
+              onClick={() => void retryTurn(t.id)}
+            >
+              Try again
+              {est?.usd
+                ? ` · about ${usd(est.usd.typical)}`
+                : est
+                  ? ` · about ${tokens(est.tokens.typical)} tokens`
+                  : ''}
+            </button>
+          </>
+        )}
         {!stopped && (
           <>
             {' · '}

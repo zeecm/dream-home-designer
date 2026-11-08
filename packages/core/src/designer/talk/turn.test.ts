@@ -17,7 +17,7 @@ import {
 } from './fixtures/replies';
 import { partialTalk } from './partial';
 import { estimateTalk, talkAsks } from './price';
-import { probeLines } from './probe';
+import { pieceWords, probeLines } from './probe';
 import {
   HISTORY_MAX,
   echoOf,
@@ -639,7 +639,7 @@ describe('probeLines and estimateTalk', () => {
       { level, before: level, brief: defaultBrief() },
     );
     expect(anywhere.lines).toEqual([
-      'The app would use a smaller piece than the dining table, 6 seats in Living and dining.',
+      'A 6-seat dining table doesn’t fit in Living and dining; the app would use a 2-seat wall-side table with bench.',
     ]);
     const bunk = probeLines(
       {
@@ -658,6 +658,14 @@ describe('probeLines and estimateTalk', () => {
     expect(bunk.lines).toEqual(['The bunk bed, two singles doesn’t belong in Living and dining.']);
   });
 
+  it('pieces are named as said: a 6-seat dining table', () => {
+    expect(pieceWords('Dining table, 6 seats')).toBe('6-seat dining table');
+    expect(pieceWords('Wall-side table with bench, 2 seats')).toBe(
+      '2-seat wall-side table with bench',
+    );
+    expect(pieceWords('3-seat sofa')).toBe('3-seat sofa');
+  });
+
   it('a concern naming a room or a wall the plan doesn’t have says so', () => {
     const r = parsed({
       ...REPLY_CONCERN,
@@ -674,10 +682,12 @@ describe('probeLines and estimateTalk', () => {
         },
       },
     });
+    // In words, never the designer's short ids.
     expect(r.lines).toEqual([
-      'I couldn’t find W999 in the plan.',
-      'I couldn’t find R99 in the plan.',
+      'I couldn’t find the room the designer meant in this plan.',
+      'I couldn’t find the wall the designer meant in this plan.',
     ]);
+    expect(r.lines.join(' ')).not.toMatch(/\b[RWDP]\d+\b/);
     expect(r.reply.concern?.probe).toBeNull();
   });
 

@@ -567,6 +567,14 @@ export function Log() {
     if (pinned.current) follow(el);
     else setBehind(true);
   }, [live?.state.steps, proposals]);
+  // A turn changed in place (a message not answered gains its line): followed if at the foot,
+  // so the newest is never cut off at the bottom (P3-1).
+  const rev = useTalk((st) => st.conv?.rev ?? 0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on each write
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (el && pinned.current) follow(el);
+  }, [rev]);
   // A reply streaming in: followed only if the log was at its foot.
   const replySay = useTalk((st) => st.reply?.say.length ?? 0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: on the reply's text
