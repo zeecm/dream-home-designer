@@ -104,7 +104,8 @@ for any plan.
   reply, asks back, pushes back with the app's own measurements, and says what it plans before a
   paid design run ("Go ahead?"); what you tell it is kept as Decisions you can edit; each change
   is ticked and accepted on its own, with Undo. The layout work runs in a background worker, so phones
-  stay responsive. Next: alternatives and versions (part 3). [spec](docs/specs/ai-designer-v2.md)
+  stay responsive. Part 3: alternatives A/B/C for a room or two, a Versions list, Bring this
+  back, your plan before the designer with Put it back, Copy as text, Download and Start over. [spec](docs/specs/ai-designer-v2.md)
 - Storage meter, slice 1 built: clothes, shoes, kitchen and everything else against who lives
   here, room by room, with shortfalls priced as built-in carpentry; next storage beds, a pantry
   and a bay seat (1b), and the household saved in the project (2). [spec](docs/specs/storage-meter.md)
