@@ -55,6 +55,9 @@
       "include": ["packages/ai/src/**"],
       "linter": {
         "rules": {
+          "correctness": {
+            "noNodejsModules": "error"
+          },
           "style": {
             "noRestrictedGlobals": {
               "level": "error",
@@ -65,7 +68,9 @@
                   "navigator",
                   "localStorage",
                   "sessionStorage",
-                  "indexedDB"
+                  "indexedDB",
+                  "process",
+                  "Buffer"
                 ]
               }
             }

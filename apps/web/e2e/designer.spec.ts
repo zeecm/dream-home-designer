@@ -65,6 +65,8 @@ interface Call {
   provider: P;
   step: string;
   body: string;
+  /** Claude's browser header, as sent (a server run sends none; this browser must). */
+  browser: string | null;
 }
 
 /**
@@ -109,7 +111,8 @@ async function mock(
         unanswered.push(req.url());
         return route.abort('failed');
       }
-      const call = { provider: p, step: a.step, body: raw };
+      const browser = req.headers()['anthropic-dangerous-direct-browser-access'] ?? null;
+      const call = { provider: p, step: a.step, body: raw, browser };
       calls.push(call);
       const custom = opts.reply?.(call, calls.filter((c) => c.step === call.step).length);
       if (custom instanceof Promise) {
@@ -1305,6 +1308,8 @@ test.describe('talking to the designer (slice 2, PR 2)', () => {
       timeout: 30_000,
     });
     expect(m.calls.map((c) => c.step)).toEqual(['talk', 'furnish "Living']);
+    // From this browser, Claude is told so: the talk reply and the design run alike.
+    expect(m.calls.map((c) => c.browser)).toEqual(['true', 'true']);
     // The run carries the designer's plan and the household's words (the talk block).
     expect(m.calls[1]?.body).toContain('What this proposal is for');
     expect(m.calls[1]?.body).toContain('Sofa on the wall facing the TV');

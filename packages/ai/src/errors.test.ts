@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { failure, inSettings, providerMessage, redact } from './errors';
+import { failure, providerMessage, redact } from './errors';
 
 describe('provider error messages', () => {
   it('reads error.message from each provider’s error body', () => {
@@ -115,14 +115,6 @@ describe('provider error messages', () => {
     expect(failure('openai', 403, { error: { message: 'x', code: 'invalid_api_key' } }).kind).toBe(
       'key',
     );
-  });
-
-  it('leaves out the pointer to AI settings inside AI settings', () => {
-    const e = failure('openai', 401, {});
-    expect(e.message).toBe('The key was refused. Check it in AI settings.');
-    expect(inSettings(e)).toBe('The key was refused.');
-    const other = failure('gemini', 404, { error: { message: 'Not found' } });
-    expect(inSettings(other)).toBe(other.message);
   });
 
   it('takes Gemini’s 400 for a bad key as a key error', () => {

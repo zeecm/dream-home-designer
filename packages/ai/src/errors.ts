@@ -91,11 +91,8 @@ function saysBadKey(body: unknown): boolean {
   );
 }
 
-/** What the AI-settings errors point to; left off inside AI settings (`inSettings`). */
-const TO_SETTINGS = ' Check it in AI settings.';
-
-/** An error's words as shown inside AI settings, where pointing to them is no help. */
-export const inSettings = (e: AiError) => e.message.replace(TO_SETTINGS, '');
+/** What the AI-settings errors point to; the web leaves it off inside AI settings. */
+export const TO_SETTINGS = ' Check it in AI settings.';
 
 /** `text` ending as a sentence, so words of ours can follow it. */
 const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);

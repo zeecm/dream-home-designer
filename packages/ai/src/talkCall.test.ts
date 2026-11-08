@@ -13,6 +13,7 @@ import {
   REPLY_PLAN as REPLY_PLAN_FIXTURE,
   REPLY_TEXT as REPLY_TEXT_FIXTURE,
 } from '../../core/src/designer/talk/fixtures/replies';
+import { fakePhone } from './fixtures/runner';
 import { anthropicStream } from './fixtures/streams';
 import type { AiSettings } from './providers';
 import { NET_WAITS } from './request';
@@ -52,6 +53,7 @@ const parseCtx = {
 
 interface Held {
   body: Record<string, unknown>;
+  headers: Record<string, string>;
   signal: AbortSignal;
   release: () => void;
 }
@@ -71,7 +73,12 @@ function provider(
     const gate = new Promise<void>((r) => {
       release = r;
     });
-    const call: Held = { body, signal: init?.signal as AbortSignal, release };
+    const call: Held = {
+      body,
+      headers: init?.headers as Record<string, string>,
+      signal: init?.signal as AbortSignal,
+      release,
+    };
     calls.push(call);
     const custom = opts.reply?.(calls.length);
     if (custom instanceof Error) throw custom;
@@ -169,6 +176,26 @@ describe('talkCall', () => {
       expect(b.max_tokens).toBe(4000);
       p.calls[0]?.release();
     });
+  });
+
+  it('from a browser page Claude is told so; from a server (no page), not', async () => {
+    const header = 'anthropic-dangerous-direct-browser-access';
+    for (const page of [fakePhone().page, undefined]) {
+      const p = provider(REPLY_TEXT_FIXTURE);
+      const ctrl = new AbortController();
+      const done = talkCall({
+        ai: AI,
+        prompt,
+        parseCtx,
+        signal: ctrl.signal,
+        fetch: p.fetch,
+        ...(page ? { page } : {}),
+      });
+      await until(() => p.calls.length > 0, 'the request');
+      expect(p.calls[0]?.headers[header]).toBe(page ? 'true' : undefined);
+      p.calls[0]?.release();
+      expect((await done).status).toBe('done');
+    }
   });
 
   it('Stop: the request is aborted, the text so far kept, its cost estimated (~)', async () => {

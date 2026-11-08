@@ -1,4 +1,4 @@
-import { AiError, type AiSettings, anySignal, errorBody, failure } from '@dhd/ai';
+import { AiError, type AiSettings, TO_SETTINGS, anySignal, errorBody, failure } from '@dhd/ai';
 
 /** An image for a model: base64 (no data: prefix) and its type. */
 export interface ModelImage {
@@ -91,6 +91,9 @@ function toAiError(e: unknown, ai: AiSettings): AiError {
     'Couldn’t reach the model. Check your connection, or try again in a moment.',
   );
 }
+
+/** An error's words as shown inside AI settings, where pointing to them is no help. */
+export const inSettings = (e: AiError) => e.message.replace(TO_SETTINGS, '');
 
 /** A non-OK response, with the body the provider sent (its JSON, or its text). */
 export class HttpError extends Error {

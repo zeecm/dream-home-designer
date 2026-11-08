@@ -767,12 +767,12 @@ Stop or another plan opened marks the checkpoint stopped and writes the end by p
 designer's provider requests moved out of the web app, unchanged, so the edge can run them too
 (cloud runs, tech §2): `run.ts` (`runDesign`), `request.ts` (`requestStep`, the retry, resend and
 interrupt rules), `stream.ts` and `sse.ts`, `talkCall.ts`, `errors.ts` (`AiError`, `failure`,
-`redact`, `providerMessage`, `errorBody`, `anySignal`, `inSettings`, from the web's
-`providers.ts`) and `providers.ts` (`Provider`, `AiSettings`, `PROVIDERS`, from
+`redact`, `providerMessage`, `errorBody`, `anySignal`, `TO_SETTINGS`, from the web's
+`providers.ts`, which keeps `inSettings`) and `providers.ts` (`Provider`, `AiSettings`, `PROVIDERS`, from
 `credentials.ts`; key storage stays in the web). It is runtime-neutral TS: no DOM, checked by
 its tsconfig (no `dom` lib) and by Biome (`noRestrictedGlobals`: `document`, `window`,
-`navigator`, storage, IndexedDB). What the request rules need of the browser comes in as a
-`Page` (`hidden`, `offline`, `onVisibility`, `onOnline`): the web passes `browserPage()`
+`navigator`, storage, IndexedDB, `process`, `Buffer`; `noNodejsModules`). What the request rules need of the browser comes in as a
+`Page` (`hidden`, `offline`, `onVisibility`, `onOnline`; long-lived, one per document): the web passes `browserPage()`
 (`ai/designer/page.ts`) to `runDesign` and `talkCall`; a server passes none, so nothing is ever
 away and no `anthropic-dangerous-direct-browser-access` header goes (`requestFor(…, { browser })`).
 Its tests run in Node and in workerd (`vitest.workers.config.ts`, `@cloudflare/vitest-pool-workers`),
