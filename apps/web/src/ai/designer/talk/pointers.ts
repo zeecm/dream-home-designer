@@ -123,7 +123,11 @@ export function describe(
       const label = main
         ? 'Main door'
         : `${o?.kind === 'window' ? 'Window' : 'Door'}${sides[0] ? ` · ${sides[0]}` : ''}`;
-      return { label, room: sides[0] ?? null, where: sides.length > 1 ? `between ${sides.join(' and ')}` : '' };
+      return {
+        label,
+        room: sides[0] ?? null,
+        where: sides.length > 1 ? `between ${sides.join(' and ')}` : '',
+      };
     }
     case 'wall': {
       const sides = t.id
@@ -171,8 +175,7 @@ export function makePointer(t: Target): Pointer | null {
   const words = describe(level, t);
   const levels = doc().levels;
   const levelId = designLevelId();
-  const levelName =
-    levels.length > 1 ? (levels.find((l) => l.id === levelId)?.name ?? null) : null;
+  const levelName = levels.length > 1 ? (levels.find((l) => l.id === levelId)?.name ?? null) : null;
   const title = version.kind === 'option' ? version.title : null;
   const label = `${words.label}${levelName ? ` · ${levelName}` : ''}${title ? ` · ${title}` : ''}`;
   return {
@@ -295,7 +298,11 @@ let litTimer: ReturnType<typeof setTimeout> | null = null;
 /** Lights a pointer's target (hover: until let go; a tap or click: 2 s). */
 export function lightPointer(p: Pointer | null, ms = 0) {
   if (litTimer) clearTimeout(litTimer);
-  usePointing.setState({ pointer: p, gone: p ? pointerGone(p) : false, until: ms ? Date.now() + ms : 0 });
+  usePointing.setState({
+    pointer: p,
+    gone: p ? pointerGone(p) : false,
+    until: ms ? Date.now() + ms : 0,
+  });
   if (p && ms) litTimer = setTimeout(() => usePointing.setState({ pointer: null }), ms);
 }
 
@@ -366,7 +373,8 @@ export function keptOf(t: Target): Kept | null {
     conv.kept.find((k) =>
       k.itemId
         ? k.itemId === it.id
-        : k.assetId === it.assetId && Math.hypot(k.pose.x - it.position.x, k.pose.y - it.position.z) < 0.05,
+        : k.assetId === it.assetId &&
+          Math.hypot(k.pose.x - it.position.x, k.pose.y - it.position.z) < 0.05,
     ) ?? null
   );
 }

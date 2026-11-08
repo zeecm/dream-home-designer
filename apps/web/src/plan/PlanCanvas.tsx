@@ -16,6 +16,8 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { AgeingAnnouncement, AgeingLayer } from '../ageing/ageing';
 import { TraceDraftLayer } from '../ai/DraftLayer';
 import { DesignFocusLayer } from '../ai/designer/focus';
+import { PlanPopover, openPopover, targetOf } from '../ai/designer/talk/PlanPopover';
+import { addSpot, makePointer } from '../ai/designer/talk/pointers';
 import { type PixelBox, inkBounds } from '../assets';
 import { ClearanceAnnouncement, ClearanceLayer } from '../clearance/clearance';
 import { CommentsOnPlan } from '../comments/PlanPins';
@@ -36,8 +38,6 @@ import { Compass, describeNorth } from '../ui/Compass';
 import { uploadPlanImage, usePlanImage, useUploadPicker } from '../ui/PlanImage';
 import { RenovationMarks } from '../ui/Renovation';
 import { icons } from '../ui/icons';
-import { PlanPopover, openPopover, targetOf } from '../ai/designer/talk/PlanPopover';
-import { addSpot, makePointer } from '../ai/designer/talk/pointers';
 import { HoldRing, PointerLayer, useHold } from './PointerLayer';
 import { ProposalLayer, ProposalLegend } from './ProposalLayer';
 import { RuleCaption, RuleLayer } from './RuleLayer';

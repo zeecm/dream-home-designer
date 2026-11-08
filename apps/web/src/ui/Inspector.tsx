@@ -54,6 +54,7 @@ import { wallpaperCanvas } from '@dhd/render';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AgeingBack, AgeingPanel, ItemAgeing, OlderPersonSection } from '../ageing/ageing';
 import { useAgeing } from '../ageing/store';
+import { AskDesigner } from '../ai/designer/talk/AskDesigner';
 import {
   doorIssueLines,
   doorsWithIssues,
@@ -73,7 +74,6 @@ import { DIAGONAL_FIELD, GettingItIn } from '../delivery/delivery';
 import { useEditor } from '../editor';
 import { ElectricalSummary, PointInspector } from '../electrical/electrical';
 import { SuggestPanel, useSuggest } from '../electrical/suggest';
-import { AskDesigner } from '../ai/designer/talk/AskDesigner';
 import { RoomViewEntry, ThingViewEntry, ViewerWallEntry, WallViewEntry } from '../elevation/Entry';
 import { ageingEnabled } from '../features';
 import { roomsBeside } from '../plan/keyboard';

@@ -111,7 +111,7 @@ export function usePopoverOnSelect() {
         const t = usePopover.getState().target;
         if (!t || t.kind !== 'item' || !t.id || s.editor.doc === prev.editor.doc) return;
         // The piece moved by hand (a drag started): editing is never in its way.
-        const lvls = (l: typeof s.editor.doc) => l.levels.map((x) => x.items[t.id ?? ''])
+        const lvls = (l: typeof s.editor.doc) => l.levels.map((x) => x.items[t.id ?? '']);
         const a = lvls(s.editor.doc).find(Boolean);
         const b = lvls(prev.editor.doc).find(Boolean);
         if (a && b && (a.position.x !== b.position.x || a.position.z !== b.position.z))
@@ -137,7 +137,12 @@ function place(at: Vec2, size: Size, h: number): React.CSSProperties {
     top: Math.max(M, Math.min(c.top, size.height - M - height)),
   }));
   const clear = (c: { left: number; top: number }) =>
-    !(at.x > c.left - 12 && at.x < c.left + w + 12 && at.y > c.top - 12 && at.y < c.top + height + 12);
+    !(
+      at.x > c.left - 12 &&
+      at.x < c.left + w + 12 &&
+      at.y > c.top - 12 &&
+      at.y < c.top + height + 12
+    );
   const best = tries.find(clear) ?? {
     left: at.x > size.width / 2 ? M : size.width - M - w,
     top: at.y > size.height / 2 ? M : size.height - M - height,
@@ -166,7 +171,7 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
   const conv = useTalk((s) => s.conv);
   const pv = useProposalView();
   const [why, setWhy] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLDialogElement>(null);
   const [h, setH] = useState(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new target starts closed
   useEffect(() => setWhy(false), [target?.kind, target?.id]);
@@ -191,7 +196,8 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
     const change =
       target.kind === 'item' && target.id
         ? (pv.changes.find(
-            (c) => c.items.target.includes(target.id ?? '') || c.items.now.includes(target.id ?? ''),
+            (c) =>
+              c.items.target.includes(target.id ?? '') || c.items.now.includes(target.id ?? ''),
           ) ?? null)
         : null;
     const failing = target.kind === 'item' && target.id ? pv.failing.includes(target.id) : false;
@@ -255,7 +261,9 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
     const o = level.openings[target.id];
     const shelterDoor =
       !!o &&
-      roomsBeside(level, o.wallId).some((r) => !!r && /shelter|bomb/i.test(level.rooms[r]?.name ?? ''));
+      roomsBeside(level, o.wallId).some(
+        (r) => !!r && /shelter|bomb/i.test(level.rooms[r]?.name ?? ''),
+      );
     if (target.id === entranceDoor(level) || o?.kind === 'window' || shelterDoor)
       locked = 'The main door, windows and the shelter door stay where they are.';
   }
@@ -273,7 +281,8 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
       },
     },
   ];
-  if (change?.why) free.push({ label: 'Why here?', act: () => setWhy(!why), stays: true, pressed: why });
+  if (change?.why)
+    free.push({ label: 'Why here?', act: () => setWhy(!why), stays: true, pressed: why });
   if (target.kind === 'item') {
     free.push(
       kept
@@ -313,7 +322,12 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
   paid.push({ label: other, price: price(`${other}.`), act: () => ask(`${other}.`), paid: true });
   if (target.kind !== 'room' && !locked) {
     const remove = target.kind === 'wall' ? 'Take this wall down' : 'Remove this';
-    paid.push({ label: remove, price: price(`${remove}.`), act: () => ask(`${remove}.`), paid: true });
+    paid.push({
+      label: remove,
+      price: price(`${remove}.`),
+      act: () => ask(`${remove}.`),
+      paid: true,
+    });
   }
   if (info.failing) paid.reverse();
   const head = `${words.label}${title ? ` · ${title}` : ''}`;
@@ -340,18 +354,23 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
   const at = worldToScreen(view, size, target.at);
   const style = sheets ? undefined : place(at, size, h);
   return (
-    <div
+    <dialog
+      open
       ref={box}
       className={sheets ? 'talk-pop talk-pop-sheet' : 'talk-pop'}
       style={style}
-      role="dialog"
       aria-label={head}
       aria-modal={sheets ? true : undefined}
       data-testid="plan-popover"
     >
       <div className="talk-pop-head">
         <h3 className="talk-pop-title">{head}</h3>
-        <button type="button" className="icon-btn talk-pop-x" aria-label="Close" onClick={closePopover}>
+        <button
+          type="button"
+          className="icon-btn talk-pop-x"
+          aria-label="Close"
+          onClick={closePopover}
+        >
           ×
         </button>
       </div>
@@ -378,6 +397,6 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
         {locked && <p className="talk-pop-note">{locked}</p>}
       </div>
       {cantPay && <p className="talk-pop-foot field-hint">{cantPay}</p>}
-    </div>
+    </dialog>
   );
 }

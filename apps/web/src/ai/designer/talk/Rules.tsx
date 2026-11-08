@@ -12,13 +12,13 @@ import {
 } from '@dhd/core';
 import { useEffect, useMemo, useState } from 'react';
 import { LengthField } from '../../../ui/fields';
-import { lightPointer, unkeep } from './pointers';
 import { useAi } from '../../credentials';
 import { useResultsTickN } from '../results';
 import { tokens, usd } from '../spend';
 import { designerCannotUse } from '../stream';
 import { Mark } from './Mark';
 import { cardResult } from './cards';
+import { lightPointer, unkeep } from './pointers';
 import {
   changeRule,
   deleteRule,
@@ -449,7 +449,9 @@ function KeptList() {
         {kept.map((k) => (
           <li key={k.id}>
             <span>
-              {keptName(k).replace(/^the /, '').replace(/^./, (c) => c.toUpperCase())}
+              {keptName(k)
+                .replace(/^the /, '')
+                .replace(/^./, (c) => c.toUpperCase())}
               <span className="muted">
                 {' '}
                 · {k.from === 'plan' ? 'in your plan' : `from ${k.from}`}

@@ -32,9 +32,8 @@ import { useResultsTickN } from '../results';
 import { capUsd, usd, useSpend } from '../spend';
 import { useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
-import { FactEditor } from './Facts';
 import { PointerChips } from './Chips';
-import { unkeep } from './pointers';
+import { FactEditor } from './Facts';
 import { Mark, type MarkKind } from './Mark';
 import { ProposalTurn } from './Options';
 import { ProposalCard } from './ProposalCard';
@@ -42,6 +41,7 @@ import { ReplyParts, ReplyText, SentState, Streaming } from './Talk';
 import { lineState, redoLine, undoLine } from './accept';
 import { type CardModel, designCard, earlierDesign, nowOf, optionCard } from './cards';
 import { dayMark } from './days';
+import { unkeep } from './pointers';
 import {
   answerCost,
   cardRequest,

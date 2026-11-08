@@ -50,7 +50,10 @@ function shapeOf(level: Level, p: Pointer): { poly?: Vec2[]; line?: [Vec2, Vec2]
   }
 }
 
-export const PointerLayer = memo(function PointerLayer({ level, zoom }: { level: Level; zoom: number }) {
+export const PointerLayer = memo(function PointerLayer({
+  level,
+  zoom,
+}: { level: Level; zoom: number }) {
   const lit = usePointing((s) => s.pointer);
   const gone = usePointing((s) => s.gone);
   const draft = useTalk((s) => s.conv?.draftPointers);
@@ -76,7 +79,12 @@ export const PointerLayer = memo(function PointerLayer({ level, zoom }: { level:
     </g>
   );
   return (
-    <g className="pointer-layer" data-export="skip" data-testid="pointer-layer" pointerEvents="none">
+    <g
+      className="pointer-layer"
+      data-export="skip"
+      data-testid="pointer-layer"
+      pointerEvents="none"
+    >
       {shape?.poly && <polygon className="ptr-lit" points={pts(shape.poly)} />}
       {shape?.line && (
         <line
@@ -102,7 +110,10 @@ export const PointerLayer = memo(function PointerLayer({ level, zoom }: { level:
 });
 
 /** The long-press cue: where the finger is held, from 150 ms (UX §2.2). */
-export const useHold = create<{ at: Vec2 | null; fired: boolean }>(() => ({ at: null, fired: false }));
+export const useHold = create<{ at: Vec2 | null; fired: boolean }>(() => ({
+  at: null,
+  fired: false,
+}));
 
 /** The ring that fills while a finger is held still on empty floor, over the plan. */
 export function HoldRing() {

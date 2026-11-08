@@ -36,7 +36,10 @@ function Chip({ p, removable, last }: { p: Pointer; removable: boolean; last?: b
   const ring = usePointerUi((s) => s.ring === p.id);
   const full = `${p.label}${gone ? ' (gone)' : ''}`;
   return (
-    <li className={`talk-pchip${gone ? ' gone' : ''}${ring ? ' ring' : ''}`} title={`${full}. ${p.where}`}>
+    <li
+      className={`talk-pchip${gone ? ' gone' : ''}${ring ? ' ring' : ''}`}
+      title={`${full}. ${p.where}`}
+    >
       <button
         type="button"
         className="talk-pchip-label"

@@ -449,7 +449,11 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
         form: null,
         ids: a.ids,
         ...(a.keep
-          ? { kept: { known, assumed: conv.assumed }, rules: liveRules(conv), keptPieces: conv.kept }
+          ? {
+              kept: { known, assumed: conv.assumed },
+              rules: liveRules(conv),
+              keptPieces: conv.kept,
+            }
           : {}),
       });
     }
@@ -924,7 +928,13 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
       );
       if (already || conv.kept.length >= MAX_KEPT) return conv;
       const brief = k.itemId
-        ? { ...conv.brief, keep: { ...conv.brief.keep, items: { ...conv.brief.keep.items, [k.itemId]: 'in-place' as const } } }
+        ? {
+            ...conv.brief,
+            keep: {
+              ...conv.brief.keep,
+              items: { ...conv.brief.keep.items, [k.itemId]: 'in-place' as const },
+            },
+          }
         : conv.brief;
       return push(
         { ...conv, brief, kept: [...conv.kept, k] },

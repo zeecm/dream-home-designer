@@ -13,12 +13,12 @@ import { useResultsTickN } from '../results';
 import { capUsd, spent, tokens, usd, useSpend } from '../spend';
 import { useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
+import { PointerChips } from './Chips';
+import { usePointerUi } from './pointers';
 import { pressScope, scopePrice, stopTalkRun } from './propose';
 import { scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { useThreshold } from './threshold';
-import { PointerChips } from './Chips';
-import { usePointerUi } from './pointers';
 import { recheckElsewhere, sendMessage, sendPrice, stopReply } from './turn';
 import { act, newId, nowIso, talkLevel, typedNow, useBusy, useTalk } from './useTalk';
 
@@ -256,13 +256,13 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
         : pointerHint
           ? pointerHint
           : replying || running
-          ? 'Wait for the reply, or Stop'
-          : (why ??
-            (anyway && cap !== null
-              ? `At most it would pass your ${usd(cap)} limit; it usually costs ${usd(est?.usd?.typical ?? 0)}.`
-              : typeof level === 'number'
-                ? `Asks before anything over ${usd(level)}`
-                : ''));
+            ? 'Wait for the reply, or Stop'
+            : (why ??
+              (anyway && cap !== null
+                ? `At most it would pass your ${usd(cap)} limit; it usually costs ${usd(est?.usd?.typical ?? 0)}.`
+                : typeof level === 'number'
+                  ? `Asks before anything over ${usd(level)}`
+                  : ''));
   const sendLabel =
     anyway && est?.usd
       ? `Send anyway · up to ${usd(est.usd.high)}`

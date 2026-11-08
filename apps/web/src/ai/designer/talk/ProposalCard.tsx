@@ -5,8 +5,8 @@ import {
   type SubsetReport,
   WARNING_TEXT,
   defaultTicks,
-  mergeChanges,
   keptHolds,
+  mergeChanges,
   spentOf,
   subsetReport,
   usageTotals,
@@ -393,7 +393,7 @@ export const ProposalCard = memo(function ProposalCard({
     },
     [card.key],
   );
-  // A piece tapped on the plan opens its row (slice 2's Why); one that didn't change says so.
+  // A piece tapped on the plan opens its row (slice 2's Why); the popover says the rest.
   useEffect(() => {
     if (!shown) return;
     return useEditor.subscribe((s, prev) => {
@@ -413,7 +413,7 @@ export const ProposalCard = memo(function ProposalCard({
       }
       // Not changed in it: the popover says so (slice 3a), no toast.
     });
-  }, [shown, changes, card.key, card.title]);
+  }, [shown, changes, card.key]);
 
   if (!expanded && !r) {
     // Folded and not on the plan: what it said last (nothing is worked out for it).
@@ -971,25 +971,25 @@ export const ProposalCard = memo(function ProposalCard({
         </dl>
       )}
       {onPlan && !tipSeen && (
-          <p className="talk-app-line talk-tip">
-            <span className="talk-app-icon">
-              <Mark kind="dot" />
+        <p className="talk-app-line talk-tip">
+          <span className="talk-app-icon">
+            <Mark kind="dot" />
+          </span>
+          <span className="talk-app-text">
+            <span>
+              {window.matchMedia?.('(pointer: coarse)').matches
+                ? 'Tap a piece on the plan to comment on it or ask why it’s there. Press and hold empty floor to point at a spot.'
+                : 'Click a piece on the plan to comment on it or ask why it’s there. Right-click empty floor to point at a spot.'}
             </span>
-            <span className="talk-app-text">
-              <span>
-                {window.matchMedia?.('(pointer: coarse)').matches
-                  ? 'Tap a piece on the plan to comment on it or ask why it’s there. Press and hold empty floor to point at a spot.'
-                  : 'Click a piece on the plan to comment on it or ask why it’s there. Right-click empty floor to point at a spot.'}
-              </span>
-              <button
-                type="button"
-                className="link-btn"
-                onClick={() => void act({ type: 'tipSeen', tip: 'point' })}
-              >
-                Got it
-              </button>
-            </span>
-          </p>
+            <button
+              type="button"
+              className="link-btn"
+              onClick={() => void act({ type: 'tipSeen', tip: 'point' })}
+            >
+              Got it
+            </button>
+          </span>
+        </p>
       )}
       {!allIn && card.status !== 'failed' && (changes.length > 0 || running) && (
         <div className="talk-actions">
