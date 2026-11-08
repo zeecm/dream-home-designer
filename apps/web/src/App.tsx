@@ -6,8 +6,8 @@ import { AgeingSync } from './ageing/ageing';
 import { TraceBar } from './ai/TracePanel';
 import { DesignerCompare } from './ai/designer/Compare';
 import { DesignerBar, DesignerDialogs } from './ai/designer/Entry';
-import { DesignerPanel } from './ai/designer/Panel';
 import { useDesigner } from './ai/designer/state';
+import { TalkPanel } from './ai/designer/talk/Conversation';
 import { mayComment, useCanComment, useComments } from './comments/store';
 import { CommentsLive, CommentsPanel, useCommentsLink } from './comments/ui';
 import { type Tool, type ViewMode, useEditor } from './editor';
@@ -210,11 +210,17 @@ function ViewOnlyBanner() {
 function SampleBanner() {
   const name = useProject().name;
   const role = useStore((s) => s.role);
+  // While the designer is open the plan needs the room: one short line.
+  const designer = useDesigner((s) => s.panel);
   const { createProject } = useStore.getState();
   if (!name.endsWith('(sample)') || role === 'viewer') return null;
   return (
-    <div className="sample-banner">
-      <span>You’re exploring a sample flat. Edits are saved to your own copy.</span>
+    <div className={designer ? 'sample-banner sample-banner-short' : 'sample-banner'}>
+      <span>
+        {designer
+          ? 'Sample flat'
+          : 'You’re exploring a sample flat. Edits are saved to your own copy.'}
+      </span>
       <button
         type="button"
         className="btn btn-small btn-primary"
@@ -393,7 +399,7 @@ export function App() {
           </div>
           {designerOpen && <DesignerCompare />}
         </main>
-        {commentsOpen ? <CommentsPanel /> : designerOpen ? <DesignerPanel /> : <Inspector />}
+        {commentsOpen ? <CommentsPanel /> : designerOpen ? <TalkPanel /> : <Inspector />}
       </div>
       <CommentsLive />
       {/* The Older person check is on hold (owner): it runs only with its flag. */}

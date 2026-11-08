@@ -2,6 +2,7 @@ import { renameProject, variantLevels } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { signInUrl, useAccount } from '../account';
 import { AiSettingsDialog } from '../ai/AiSettingsDialog';
+import { DesignerButton } from '../ai/designer/Entry';
 import { CommentsButton } from '../comments/ui';
 import { type ViewMode, useEditor } from '../editor';
 import {
@@ -323,6 +324,7 @@ export function TopBar() {
       </div>
       <div className="topbar-right">
         <AccountButton />
+        <DesignerButton />
         <CommentsButton />
         <ShareMenu />
         <button

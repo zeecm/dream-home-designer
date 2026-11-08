@@ -136,6 +136,7 @@ export const LIMITS = {
   ref: 12,
   why: 120,
   id: 40,
+  spaceSummary: 160,
 } as const;
 
 /** Enum fields matched in any case (a model may answer "Remove_Wall" or "SWING"). */
@@ -351,6 +352,8 @@ const spaceSchemas = (ctx: Ctx) => {
     items: list(ctx, Item, LIMITS.items, 'pieces'),
     faces: list(ctx, Face, LIMITS.faces, 'wall finishes'),
     notes: list(ctx, text(ctx, LIMITS.note), LIMITS.roomNotes, 'notes'),
+    /** One line on what the layout does, in the household's words (absent in older answers). */
+    summary: text(ctx, LIMITS.spaceSummary).default(''),
   });
   return { Item, SpaceDesign };
 };
@@ -484,6 +487,10 @@ export const Design = z.object({
    * Never an HDB rule. Absent in versions kept before.
    */
   waivers: z.array(z.object({ key: z.string(), text: z.string(), at: z.string() })).default([]),
+  /** The conversation's proposal it was accepted from (absent: made by v1's form). */
+  from: z
+    .object({ conversationId: z.string(), proposalId: z.string(), letter: z.string().max(1) })
+    .optional(),
   /**
    * After as accepted (`level`), and as it was just before (`prior`: what the accept itself
    * changed is the difference; records from before it was kept have none).

@@ -1,4 +1,5 @@
 import { PRICES, PRICES_AS_OF, type Price, priceOf } from '@dhd/core';
+import { THRESHOLDS, type Threshold } from '@dhd/core';
 import { type MutableRefObject, useEffect, useRef, useState } from 'react';
 import {
   CAPS,
@@ -11,6 +12,7 @@ import {
   usd,
   useSpend,
 } from './spend';
+import { setThreshold, useThreshold } from './talk/threshold';
 
 /**
  * In AI settings: the tab's limit and what it has spent, and the prices used for the model
@@ -27,6 +29,7 @@ export function SpendSettings({
   commitRef?: MutableRefObject<(() => boolean) | null>;
 }) {
   const { spend, cap, prices } = useSpend();
+  const ask = useThreshold();
   const price = priceOf(model, prices);
   const listed = priceOf(model, PRICES);
   const ref = useRef<HTMLFieldSetElement>(null);
@@ -110,9 +113,28 @@ export function SpendSettings({
           </span>
         </div>
       </div>
+      <label className="field">
+        <span className="field-label">Ask me before a reply that may cost more than</span>
+        <select
+          className="input"
+          value={String(ask)}
+          onChange={(e) => {
+            const v = e.target.value;
+            setThreshold(v === 'always' || v === 'never' ? v : (Number(v) as Threshold));
+          }}
+        >
+          {THRESHOLDS.map((t) => (
+            <option key={String(t)} value={String(t)}>
+              {t === 'always' ? 'Always ask' : t === 'never' ? 'Never ask' : usd(t)}
+            </option>
+          ))}
+        </select>
+      </label>
       <p className="field-hint">
-        The designer warns before a run that could pass the limit, and pauses at it. Renders aren’t
-        counted.
+        The designer warns before a run that could pass the limit, and pauses at it. A button that
+        shows its price asks again only for the tab’s first design, one that may cost US$0.50 or
+        more, or one past the limit. The per-reply figure is used once you can message the designer.
+        Renders aren’t counted.
       </p>
       <fieldset ref={ref} className="price-table" id="ai-prices">
         <legend className="field-label">Prices per million tokens for {model} (US$)</legend>

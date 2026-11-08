@@ -10,25 +10,21 @@ import {
   peopleOf,
   roomArea,
   roomKind,
-  runPrompts,
   sleepingPlan,
-  spacesOf,
 } from '@dhd/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProject } from '../../store';
 import { Segmented } from '../../ui/fields';
 import { icons } from '../../ui/icons';
-import { AiSettingsDialog } from '../AiSettingsDialog';
-import { type AiSettings, useAi } from '../credentials';
 import { WISHES } from '../layouts';
-import { CostCheck } from './CostCheck';
-import { contextFor, estimateFor } from './plan';
-import { useSpend } from './spend';
-import { getBrief, putBrief, startDesign } from './state';
+import { contextFor } from './plan';
+import { getBrief, putBrief } from './state';
 
 /**
- * Design my flat: the brief (seven sections; a stepped sheet on a phone), then the cost
- * check in the same dialog. Remembered per plan in this browser. Enter never moves on.
+ * The form ("Fill in a form instead", and in What I know): the brief in seven sections (a
+ * stepped sheet on a phone), v1's, for people who'd rather fill in a form than answer the
+ * designer's questions. Remembered per plan in this browser. Enter never moves on; Save gives
+ * the brief back.
  */
 
 const CHILD = { baby: 'Baby', preschool: 'Preschool', primary: 'Primary', teen: 'Teen' } as const;
@@ -55,7 +51,7 @@ const USE_NAMES: Record<RoomUse | 'keep' | 'designer', string> = {
   store: 'Store',
 };
 /** Three colours each style is known by, for its card. */
-const SWATCHES: Record<StyleId | 'designer', [string, string, string]> = {
+export const SWATCHES: Record<StyleId | 'designer', [string, string, string]> = {
   designer: ['#e9e4dc', '#b9c3b0', '#4b4e52'],
   scandinavian: ['#f4f1ea', '#d9c8ad', '#8fa3ad'],
   japandi: ['#efe4d2', '#c49a6c', '#4b4e52'],
@@ -201,21 +197,25 @@ function Stepper({
   );
 }
 
-export function BriefDialog({ onClose }: { onClose: () => void }) {
+export function BriefDialog({
+  onClose,
+  initial,
+  onSave,
+}: {
+  onClose: () => void;
+  /** The brief to start from (What I know); else the one this plan had last time. */
+  initial?: DesignBrief | undefined;
+  onSave?: (b: DesignBrief) => void;
+}) {
   const ref = useRef<HTMLDialogElement>(null);
   const project = useProject();
-  const ai = useAi();
-  const [brief, setBriefState] = useState<DesignBrief>(() => ({
-    ...defaultBrief(),
-    start: project.renovation ? 'after' : 'before',
-  }));
-  const [loaded, setLoaded] = useState(false);
+  const [brief, setBriefState] = useState<DesignBrief>(
+    () => initial ?? { ...defaultBrief(), start: project.renovation ? 'after' : 'before' },
+  );
+  const [loaded, setLoaded] = useState(!!initial);
   const [open, setOpen] = useState<Set<SectionId>>(new Set(['who', 'rooms']));
-  const [stage, setStage] = useState<'brief' | 'cost'>('brief');
   const [step, setStep] = useState(0);
-  const [settings, setSettings] = useState<null | 'key' | 'prices'>(null);
   const narrow = useNarrow();
-  const { prices } = useSpend();
 
   useEffect(() => {
     const d = ref.current;
@@ -223,6 +223,7 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
   }, []);
   // The brief this plan had last time.
   useEffect(() => {
+    if (initial) return;
     let live = true;
     void getBrief(project.id).then((b) => {
       if (!live) return;
@@ -232,7 +233,7 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
     return () => {
       live = false;
     };
-  }, [project.id, project.renovation]);
+  }, [project.id, project.renovation, initial]);
   const setBrief = (b: DesignBrief) => {
     setBriefState(b);
     void putBrief(project.id, b);
@@ -241,11 +242,6 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
 
   const ctx = useMemo(() => contextFor(project, brief), [project, brief]);
   const level = ctx?.base;
-  const est = useMemo(() => {
-    if (!ai || !ctx || stage !== 'cost') return null;
-    return estimateFor(ai, runPrompts(ctx, spacesOf(ctx.base), ctx.aliases), brief.quality, prices);
-  }, [ai, ctx, brief.quality, prices, stage]);
-  const rooms = level ? spacesOf(level).length : 0;
 
   if (!level) return null;
   const h = brief.household;
@@ -793,16 +789,9 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const toCost = () => {
-    if (!ai) {
-      setSettings('key');
-      return;
-    }
-    setStage('cost');
-  };
-  const start = (a: AiSettings) => {
+  const save = () => {
     void putBrief(project.id, brief);
-    startDesign(a, brief, est?.usd?.typical ?? null);
+    onSave?.(brief);
     close();
   };
   const current = SECTIONS[step] ?? SECTIONS[0];
@@ -819,25 +808,12 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
       }}
     >
       <header className="dialog-head">
-        <h2 id="brief-h">{stage === 'cost' ? 'Check the cost' : 'Design my flat'}</h2>
+        <h2 id="brief-h">About your household</h2>
         <button type="button" className="icon-btn" aria-label="Close" onClick={close}>
           {icons.close}
         </button>
       </header>
-      {stage === 'cost' && ai && est ? (
-        <CostCheck
-          ai={ai}
-          est={est}
-          quality={brief.quality}
-          onQuality={(q) => setBrief({ ...brief, quality: q })}
-          what={`one for the layout and style, then one for each of ${plural(rooms, 'room')}`}
-          action="Design my flat"
-          anyway="Design anyway"
-          onBack={() => setStage('brief')}
-          onStart={() => start(ai)}
-          onEditPrices={() => setSettings('prices')}
-        />
-      ) : narrow ? (
+      {narrow ? (
         <>
           <div className="dialog-body brief-body">
             <p className="brief-step-count">
@@ -856,15 +832,15 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
               >
                 Back
               </button>
-              <button type="button" className="link-btn" onClick={toCost}>
-                Check the cost
+              <button type="button" className="link-btn" onClick={save}>
+                Save
               </button>
               <button
                 type="button"
                 className="btn btn-primary"
-                onClick={() => (step < SECTIONS.length - 1 ? setStep(step + 1) : toCost())}
+                onClick={() => (step < SECTIONS.length - 1 ? setStep(step + 1) : save())}
               >
-                Next
+                {step < SECTIONS.length - 1 ? 'Next' : 'Save'}
               </button>
             </div>
           </footer>
@@ -911,23 +887,12 @@ export function BriefDialog({ onClose }: { onClose: () => void }) {
               <button type="button" className="btn" onClick={close}>
                 Cancel
               </button>
-              <button type="button" className="btn btn-primary" onClick={toCost}>
-                Next: check the cost
+              <button type="button" className="btn btn-primary" onClick={save}>
+                Save
               </button>
             </div>
           </footer>
         </>
-      )}
-      {settings && (
-        <AiSettingsDialog
-          {...(settings === 'prices' ? { focus: 'prices' as const } : {})}
-          onClose={() => {
-            const was = settings;
-            setSettings(null);
-            // A key saved from Next: on to the cost.
-            if (was === 'key') setStage('cost');
-          }}
-        />
       )}
     </dialog>
   );

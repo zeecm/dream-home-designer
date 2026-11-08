@@ -61,7 +61,7 @@ export interface StepState {
    * Waiting out a rate limit, or for the connection to come back: seconds left, and which
    * wait of two.
    */
-  wait: { seconds: number; attempt: number; net?: boolean } | null;
+  wait: { seconds: number; attempt: number; net?: boolean; server?: boolean } | null;
   /** Requests made again (an unreadable answer, a step too long, a busy server). */
   retries: number;
   /** Cut off by Stop: the most it may still be billed (its prompt, and output to its limit). */
@@ -126,6 +126,11 @@ export interface RunOptions {
   overLimit?: () => boolean;
   /** The limit was reached: true to finish the design, false to stop here. */
   confirmOver?: () => Promise<boolean>;
+  /**
+   * After "finish", go on only while `overLimit` says so, and ask again the next time it is
+   * reached (a new figure set meanwhile); without it the rest of the run goes on past it.
+   */
+  askAgain?: boolean;
 }
 
 /** How long a step may go without a single event. */
@@ -251,6 +256,7 @@ export function mergeAnswer(
     ],
     faces: keep.includes('finishes') ? previous.faces : next.faces,
     notes: next.notes,
+    summary: next.summary,
   };
 }
 
@@ -332,8 +338,10 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       update();
       asking = (o.confirmOver?.() ?? Promise.resolve(false)).then((go) => {
         state.phase = 'running';
-        if (go) allowOver = true;
-        else stopping = true;
+        if (go && !o.askAgain) allowOver = true;
+        if (!go) stopping = true;
+        // Asked once for this figure; the next one is asked afresh.
+        if (go && o.askAgain) asking = null;
         update();
         return go;
       });
@@ -499,7 +507,12 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
           if (kind === 'server' && server < 1) {
             server++;
             st.retries++;
-            await sleep(SERVER_WAIT * 1000, o.signal);
+            // The wait is shown, a second at a time, as a rate limit's is.
+            for (let s = SERVER_WAIT; s > 0; s--) {
+              st.wait = { seconds: s, attempt: server, server: true };
+              update();
+              await sleep(1000, o.signal);
+            }
             continue;
           }
           return fail(st, `${st.label}: ${said.message}`);

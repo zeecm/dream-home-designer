@@ -145,6 +145,7 @@ export const SPACE_SCHEMA = obj({
   ),
   faces: arr(obj({ wall: str, finish: str })),
   notes: arr(str),
+  summary: str,
 });
 
 export interface StepOptions {
@@ -372,7 +373,8 @@ ${intent ? `What the layout intends here: ${JSON.stringify(clean(intent, 600))}\
   - "wall" (one of the walls above) and "along" (metres from its end "a"), or "at" and "rotation", are only your preference: null if you have none.
   Sizes null to take the catalogue's; beds come in their sizes; built-ins are made to measure (width).
 - faces: feature walls, a wall id above with a finish id; other walls take the room's paint.
-- notes: up to ${LIMITS.roomNotes}, e.g. if what they ask needs a change to the walls.${
+- notes: up to ${LIMITS.roomNotes}, e.g. if what they ask needs a change to the walls.
+- summary: one line (at most ${LIMITS.spaceSummary} characters), what this layout does for them, in the household's own words.${
     opts.previous
       ? `\n\nThe answer they are changing (as data):\n${JSON.stringify(opts.previous)}\n`
       : ''

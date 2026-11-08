@@ -38,7 +38,7 @@ export const aspectOf = (it: Item): Aspect =>
   furnitureKind(it.assetId)?.carpentry ? 'built-ins' : 'furniture';
 
 /** A piece a design made: its id is seeded (`it_d` and seven characters), never random. */
-export const isDesignedId = (id: string) => /^it_d[0-9a-z]{7}$/.test(id);
+const isDesignedId = (id: string) => /^it_d[0-9a-z]{7}$/.test(id);
 
 /** A room's doors, windows and openings, by where they are: kind, width and both ends. */
 function openingsOf(level: Level, roomId: string): string[] {
@@ -93,35 +93,7 @@ export function mergeDesign(now: Level, target: Level, parts: Part[], opts: Acce
   const has = (space: string, aspect: Part['aspect']) =>
     ok.some((p) => 'space' in p && p.space === space && p.aspect === aspect);
   const out: Level = structuredClone(now);
-  if (walls) {
-    out.vertices = structuredClone(target.vertices);
-    out.openings = structuredClone(target.openings);
-    // Walls as the version has them, finished as they are now (finishes are their own part).
-    out.walls = Object.fromEntries(
-      Object.values(target.walls).map((w) => {
-        const was = now.walls[w.id];
-        return [
-          w.id,
-          {
-            ...structuredClone(w),
-            materialLeft: was?.materialLeft ?? 'paint-white',
-            materialRight: was?.materialRight ?? 'paint-white',
-          },
-        ];
-      }),
-    );
-    const matched = matchRooms(now, target);
-    out.rooms = Object.fromEntries(
-      Object.values(target.rooms).map((r) => {
-        const was = now.rooms[matched.get(r.id) ?? r.id];
-        return [r.id, { ...structuredClone(r), floorMaterial: was?.floorMaterial ?? 'wood-oak' }];
-      }),
-    );
-    // Points on walls that are gone go with them.
-    out.points = Object.fromEntries(
-      Object.entries(now.points ?? {}).filter(([, p]) => !p.wall || !!out.walls[p.wall.wallId]),
-    );
-  }
+  if (walls) takeWalls(out, now, target);
 
   const spaces = spacesOf(target);
   const shapes = roomShapes(target);
@@ -179,8 +151,42 @@ export function mergeDesign(now: Level, target: Level, parts: Part[], opts: Acce
   return out;
 }
 
+/**
+ * The walls part into `out` (a copy of `now`): the version's walls, doors and room names,
+ * finished as `now` has them (finishes are their own part); points on walls that go, go too.
+ */
+export function takeWalls(out: Level, now: Level, target: Level) {
+  out.vertices = structuredClone(target.vertices);
+  out.openings = structuredClone(target.openings);
+  // Walls as the version has them, finished as they are now (finishes are their own part).
+  out.walls = Object.fromEntries(
+    Object.values(target.walls).map((w) => {
+      const was = now.walls[w.id];
+      return [
+        w.id,
+        {
+          ...structuredClone(w),
+          materialLeft: was?.materialLeft ?? 'paint-white',
+          materialRight: was?.materialRight ?? 'paint-white',
+        },
+      ];
+    }),
+  );
+  const matched = matchRooms(now, target);
+  out.rooms = Object.fromEntries(
+    Object.values(target.rooms).map((r) => {
+      const was = now.rooms[matched.get(r.id) ?? r.id];
+      return [r.id, { ...structuredClone(r), floorMaterial: was?.floorMaterial ?? 'wood-oak' }];
+    }),
+  );
+  // Points on walls that are gone go with them.
+  out.points = Object.fromEntries(
+    Object.entries(now.points ?? {}).filter(([, p]) => !p.wall || !!out.walls[p.wall.wallId]),
+  );
+}
+
 /** Floors of `rooms` and the wall faces towards them, as `target` has them. */
-function finishRooms(out: Level, target: Level, rooms: string[]) {
+export function finishRooms(out: Level, target: Level, rooms: string[]) {
   const set = new Set(rooms);
   for (const id of rooms) {
     const r = target.rooms[id];
@@ -197,7 +203,7 @@ function finishRooms(out: Level, target: Level, rooms: string[]) {
 }
 
 /** A wall point's place on the plan, just off its face. */
-function wallPointAt(
+export function wallPointAt(
   level: Level,
   wall: { wallId: string; t: number; side: 'left' | 'right' } | undefined,
 ) {

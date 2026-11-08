@@ -1,30 +1,37 @@
 import { usageTotals } from '@dhd/core';
 import { useEffect, useId, useRef, useState } from 'react';
+import { useComments } from '../../comments/store';
 import { useEditor } from '../../editor';
 import { useStore } from '../../store';
 import { Segmented } from '../../ui/fields';
-import { AiSettingsDialog } from '../AiSettingsDialog';
 import { LayoutsDialog } from '../LayoutsDialog';
-import { aiSettings } from '../credentials';
-import { BriefDialog } from './BriefDialog';
 import { usd } from './spend';
-import { acceptedNow, endPreview, openPanel, useDesigner } from './state';
+import { closePanel, endPreview, openPanel, useDesigner } from './state';
+import { stopTalkRun } from './talk/propose';
+import { loadTalk, useTalk } from './talk/useTalk';
 
 /**
- * Where the designer starts (Plan details ▸ Renovation): Design my flat (or the versions
- * there are), and Suggest layouts. Not on a view-only link.
+ * Where the designer starts (Plan details ▸ Renovation, and the top bar on a computer): Talk
+ * to the designer, or the conversation there is ("Designer · V4 on the table"), and Suggest
+ * layouts. Not on a view-only link; not before there are rooms.
  */
 export function DesignerEntry() {
   const viewer = useStore((s) => s.role === 'viewer');
   const hasRooms = useStore((s) => Object.keys(s.editor.doc.levels[0]?.rooms ?? {}).length > 0);
-  const designs = useDesigner((s) => s.designs.length);
+  const projectId = useStore((s) => s.editor.doc.id);
+  const conv = useTalk((s) => (s.projectId === projectId ? s.conv : null));
+  const proposals = useTalk((s) => s.proposals);
   const [layouts, setLayouts] = useState(false);
   const hint = useId();
+  // What the button says depends on the conversation this plan has.
+  useEffect(() => {
+    if (!viewer && useTalk.getState().projectId !== projectId) void loadTalk(projectId);
+  }, [viewer, projectId]);
   if (viewer) return null;
-  const design = () => {
-    if (designs) openPanel();
-    else openBrief();
-  };
+  const onTable = [...(conv?.turns ?? [])].reverse().find((t) => t.kind === 'proposal');
+  const n =
+    onTable?.kind === 'proposal' ? proposals.find((p) => p.id === onTable.proposalId)?.n : null;
+  const said = conv?.turns.filter((t) => t.kind === 'person').length ?? 0;
   return (
     <div className="designer-entry">
       <button
@@ -32,10 +39,14 @@ export function DesignerEntry() {
         className="btn btn-block"
         disabled={!hasRooms}
         aria-describedby={!hasRooms ? hint : undefined}
-        onClick={design}
+        onClick={openTalk}
         data-designer-open=""
       >
-        {designs ? `Designs (${designs})` : 'Design my flat with AI'}
+        {n
+          ? `Designer · V${n} on the table`
+          : said
+            ? `Designer · ${said} ${said === 1 ? 'message' : 'messages'}`
+            : 'Talk to the designer'}
       </button>
       {!hasRooms && (
         <span id={hint} className="field-hint">
@@ -46,33 +57,50 @@ export function DesignerEntry() {
         Suggest layouts with AI
       </button>
       <p className="field-hint">
-        Layouts: walls only, a few cents. Design: walls, furniture, paint and cost, about
-        US$0.30–1.50 (the cost is shown before it runs).
+        Ask questions free. Designs use your AI key; the cost shows before anything runs.
       </p>
       {layouts && (
         <LayoutsDialog
           onClose={() => setLayouts(false)}
-          {...(hasRooms ? { onDesign: openBrief } : {})}
+          {...(hasRooms ? { onDesign: openTalk } : {})}
         />
       )}
     </div>
   );
 }
 
-/** Opens the brief (AI settings first, if there's no key: saving it goes on to the brief). */
-export function openBrief() {
-  useDesigner.setState({ briefOpen: true });
+/** Opens the conversation (the comments panel gives way to it). */
+export function openTalk() {
+  useComments.getState().setPanel(false);
+  openPanel();
 }
 
-/** The brief and the key, mounted once for the app. */
+/** The top bar's Designer button, on a computer (UX §4.1). */
+export function DesignerButton() {
+  const viewer = useStore((s) => s.role === 'viewer');
+  const hasRooms = useStore((s) => Object.keys(s.editor.doc.levels[0]?.rooms ?? {}).length > 0);
+  const open = useDesigner((s) => s.panel);
+  const comments = useComments((s) => s.panelOpen);
+  if (viewer) return null;
+  const on = open && !comments;
+  return (
+    <button
+      type="button"
+      className="btn btn-small designer-top-btn"
+      aria-pressed={on}
+      disabled={!hasRooms}
+      title={hasRooms ? undefined : 'Draw rooms first.'}
+      onClick={() => (on ? closePanel() : openTalk())}
+    >
+      Designer
+    </button>
+  );
+}
+
+/** Mounted once for the app: the question before another plan opens mid-run. */
 export function DesignerDialogs() {
   const leaving = useDesigner((s) => s.leaving);
-  return (
-    <>
-      <BriefDialogs />
-      {leaving && <LeaveDialog answer={leaving} />}
-    </>
-  );
+  return leaving ? <LeaveDialog answer={leaving} /> : null;
 }
 
 /** Another plan is opening while a design runs: stop it (keeping what's done), or stay. */
@@ -119,26 +147,6 @@ function LeaveDialog({ answer }: { answer: (go: boolean) => void }) {
   );
 }
 
-function BriefDialogs() {
-  const open = useDesigner((s) => s.briefOpen);
-  const [needKey, setNeedKey] = useState(false);
-  useEffect(() => {
-    if (open && !aiSettings()) setNeedKey(true);
-  }, [open]);
-  if (!open) return null;
-  if (needKey) {
-    return (
-      <AiSettingsDialog
-        onClose={() => {
-          setNeedKey(false);
-          if (!aiSettings()) useDesigner.setState({ briefOpen: false });
-        }}
-      />
-    );
-  }
-  return <BriefDialog onClose={() => useDesigner.setState({ briefOpen: false })} />;
-}
-
 /**
  * Over the stage: while a version is previewed, which one and how to leave it (Before | V2,
  * Accept…, Back to my plan); while a run goes on with the panel closed, how far it is.
@@ -148,11 +156,6 @@ export function DesignerBar() {
   const walking = useEditor((s) => !!s.walking);
   const run = useDesigner((s) => s.run);
   const panel = useDesigner((s) => s.panel);
-  const selected = useDesigner((s) => s.selected);
-  // A version in the renovation is shown as the plan has it (with any changes made by hand).
-  const shownDesign = useDesigner((s) => s.designs.find((x) => x.id === s.selected));
-  const after = useStore((s) => s.editor.doc.renovation?.levels[0]);
-  const inPlan = !!shownDesign && acceptedNow(shownDesign, after);
   // The bar coming or going changes the plan's height: fit the plan to what's left, with a
   // margin, so nothing of it is cut under the bar or the designer's sheet.
   const barShown = !!preview || (!!run && !panel);
@@ -202,18 +205,10 @@ export function DesignerBar() {
             { value: 'version', label: preview.label, title: `Design ${preview.label}` },
           ]}
         />
-        <span className="designer-bar-text">
-          {inPlan
-            ? `${preview.label} is in your renovation, shown as your plan has it`
-            : `Previewing ${preview.label}, not in your plan yet`}
-        </span>
+        <span className="designer-bar-text">Previewing {preview.label}, not in your plan yet</span>
         <span className="button-row">
-          {!run && selected && (
-            <button
-              type="button"
-              className="btn btn-small btn-primary"
-              onClick={() => useDesigner.setState({ accepting: selected })}
-            >
+          {!run && !panel && (
+            <button type="button" className="btn btn-small btn-primary" onClick={openTalk}>
               Accept…
             </button>
           )}
@@ -225,13 +220,13 @@ export function DesignerBar() {
     );
   }
   if (run && !panel) {
-    const done = run.state.steps.filter((s) => s.status === 'done').length;
-    const n = run.state.steps.length;
     return (
       <div className="reno-bar designer-bar">
-        <button type="button" className="link-btn" onClick={openPanel}>
-          Designing {Math.min(done + 1, Math.max(n, 1))} of {Math.max(n, 1)} ·{' '}
-          {usd(usageTotals(run.state.usage).usd ?? 0)}
+        <button type="button" className="link-btn" onClick={openTalk}>
+          Designer is replying… · {usd(usageTotals(run.state.usage).usd ?? 0)}
+        </button>
+        <button type="button" className="btn btn-small" onClick={stopTalkRun}>
+          Stop
         </button>
       </div>
     );

@@ -35,8 +35,9 @@ export const CONCEPT = { ...concept, walls: [...concept.walls, SHELTER_OP] };
 
 /** Room answers by a word of the space's name in the prompt ("furnish \"Kitchen\""). */
 export const ROOMS: { match: RegExp; answer: unknown }[] = [
-  { match: /furnish "Master bedroom"/, answer: mainBedroom },
-  { match: /furnish "Mdm Lim/, answer: bedroom },
+  // The layout renames the bedrooms; a room asked for alone keeps the plan's names.
+  { match: /furnish "(Master|Main) bedroom"/, answer: mainBedroom },
+  { match: /furnish "(Mdm Lim|Bedroom")/, answer: bedroom },
   { match: /furnish "Living/, answer: living },
   { match: /furnish "Kitchen"/, answer: kitchen },
 ];

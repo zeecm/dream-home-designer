@@ -60,13 +60,17 @@ export interface CostCheckProps {
   backLabel?: string;
   onStart: () => void;
   onEditPrices: () => void;
+  /** Inside a cost card that already asks: no heading of its own unless it may cost US$0.50. */
+  quiet?: boolean;
 }
 
 export function CostCheck(p: CostCheckProps) {
   const { spend, cap, prices } = useSpend();
   const heading = useRef<HTMLHeadingElement>(null);
   // Focus goes to the heading (never to the button that spends).
-  useEffect(() => heading.current?.focus(), []);
+  useEffect(() => {
+    if (!p.quiet) heading.current?.focus();
+  }, [p.quiet]);
   const price = priceOf(p.ai.model, prices);
   const typical = p.est.usd?.typical ?? null;
   // At most: every request at its limit, and the run's few fix-ups (each at its limit too).
@@ -84,9 +88,11 @@ export function CostCheck(p: CostCheckProps) {
   return (
     <>
       <div className="dialog-body cost-check">
-        <h3 ref={heading} tabIndex={-1} className="cost-head">
-          This uses a lot of AI tokens
-        </h3>
+        {(!p.quiet || (p.est.usd?.high ?? 0) >= 0.5) && (
+          <h3 ref={heading} tabIndex={-1} className="cost-head">
+            This uses a lot of AI tokens
+          </h3>
+        )}
         {typical !== null && high !== null ? (
           <>
             <p className="cost-figure num">About {usd(typical)}</p>
