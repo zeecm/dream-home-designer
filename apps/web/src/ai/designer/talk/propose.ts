@@ -124,12 +124,15 @@ function priceInput(req: PressRequest, designId: string): Omit<PriceInput, 'desi
   if (!conv || !ai || designerCannotUse(ai) || levelGone()) return null;
   const project = doc();
   let finish: PriceInput['finish'];
+  // What it is placed with: a new design's kept pieces now; finishing an option, its own.
+  let made: MadeWith = 'new';
   if (req.finish) {
     const f = req.finish;
     const p = useTalk.getState().proposals.find((x) => x.id === f.proposalId);
     const o = p?.options.find((x) => x.letter === f.letter);
     if (!p || !o) return null;
     finish = { option: o, rooms: f.rooms, words: p.words, scope: p.scope };
+    made = madeOf(p, f.letter);
   }
   // Another idea asks for something different from the options so far, with the person's words.
   const alt = req.alternative;
@@ -157,7 +160,7 @@ function priceInput(req: PressRequest, designId: string): Omit<PriceInput, 'desi
     ...(finish ? { finish } : {}),
     designId,
     // Priced before the version exists: every kept piece goes in.
-    opts: designOpts(project, designLevelId(), 'new'),
+    opts: designOpts(project, designLevelId(), made),
     ai: { provider: ai.provider, model: ai.model },
     prices: priceTable(),
   };

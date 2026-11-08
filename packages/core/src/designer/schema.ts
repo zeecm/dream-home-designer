@@ -486,6 +486,12 @@ export const Kept = z.object({
   until: z.string().optional(),
 });
 export type Kept = z.infer<typeof Kept>;
+/** Kept pieces read tolerantly: one this build can't read is dropped, not the version. */
+const readableKept = (items: unknown[]): Kept[] =>
+  items.flatMap((x) => {
+    const r = Kept.safeParse(x);
+    return r.success ? [r.data] : [];
+  });
 
 export const Design = z.object({
   id: z.string(),
@@ -524,7 +530,10 @@ export const Design = z.object({
    * The kept pieces it was made with (slice 3a), read as they were whatever is kept or let go
    * since, or the conversation started over. Absent before: worked out from the times.
    */
-  kept: z.array(Kept).max(30).optional(),
+  kept: z
+    .array(z.unknown())
+    .transform((items) => readableKept(items).slice(-30))
+    .optional(),
   /** The conversation's proposal it was accepted from (absent: made by v1's form). */
   from: z
     .object({ conversationId: z.string(), proposalId: z.string(), letter: z.string().max(1) })

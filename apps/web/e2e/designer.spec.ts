@@ -2460,6 +2460,19 @@ test.describe('pointing at the plan (slice 3a, PR B)', () => {
     await expect(chips.getByRole('listitem')).toHaveCount(2);
     await expect(chips.locator('.talk-pchip-text').last()).not.toHaveText(/ · V\d+$/);
     await expect(page.getByText('Previewing V1, not in your plan yet')).toBeHidden();
+    // Accepted, it is in your plan (the renovation's copy of the level): never "(gone)" (N2-H1).
+    await expect(chips.getByRole('listitem').last()).not.toContainText('(gone)');
+    await expect(chips.getByRole('button', { name: /, gone\. Show where it was$/ })).toHaveCount(0);
+    // An electrical point the version added, the same way.
+    await panel(page).getByRole('button', { name: 'Close the designer' }).click();
+    await page.locator('[data-hit^="point:"]').first().click({ force: true });
+    await page.getByRole('button', { name: 'Ask the designer' }).click();
+    await expect(chips.getByRole('listitem')).toHaveCount(3);
+    await expect(chips.getByRole('listitem').last()).not.toContainText('(gone)');
+    await chips
+      .getByRole('button', { name: /^Remove / })
+      .last()
+      .click();
     await chips
       .getByRole('button', { name: /^Remove / })
       .last()

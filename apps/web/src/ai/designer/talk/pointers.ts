@@ -6,6 +6,8 @@ import {
   type Pointer,
   type Project,
   type Vec2,
+  beforeId,
+  designLevels,
   entranceDoor,
   furnitureKind,
   keptHolds,
@@ -301,8 +303,11 @@ export function pointerGone(p: Pointer, project: Project = doc()): boolean {
     return !pr?.options.some((o) => o.letter === v.letter);
   }
   if (p.kind === 'spot' || !p.targetId) return false;
-  const level = project.levels.find((l) => l.id === p.levelId);
-  const after = project.renovation?.levels.find((l) => l.id === p.levelId);
+  // The level as the designer designs it (talkLevel's lookup): the plan's, and its
+  // renovation's copy (`<id>~after`), where an accepted version's pieces are.
+  const both = designLevels(project, beforeId(p.levelId));
+  const level = both?.before;
+  const after = both?.after;
   const has = (l: Level | undefined) => {
     if (!l || !p.targetId) return false;
     switch (p.kind) {

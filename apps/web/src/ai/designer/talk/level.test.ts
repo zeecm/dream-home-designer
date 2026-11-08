@@ -65,6 +65,33 @@ describe('pointers carry their level (3a.12) and say when their target is gone (
     expect(v && pointerGone(v)).toBe(true);
   });
 
+  it('a piece on your plan after an Accept is there (in the renovation’s copy), never "gone"', () => {
+    useTalk.setState({ conv: { levelId: upper.id, draftPointers: [] } as unknown as Conversation });
+    const room = Object.values(upper.rooms)[0];
+    if (!room) throw new Error('no room');
+    const p = makePointer({ kind: 'room', id: room.id, at: { x: 0, y: 0 } });
+    if (!p) throw new Error('no pointer');
+    // The accepted piece is only in `<level>~after`; the pointer names the plan's level.
+    const accepted = {
+      ...project,
+      renovation: {
+        levels: project.levels.map((l) => ({
+          ...l,
+          id: `${l.id}~after`,
+          items: { ...l.items, it_new: { id: 'it_new' } as never },
+          points: { ...l.points, pt_new: { id: 'pt_new' } as never },
+        })),
+      },
+    } as typeof project;
+    const piece = { ...p, kind: 'item' as const, targetId: 'it_new' };
+    const point = { ...p, kind: 'point' as const, targetId: 'pt_new' };
+    expect(pointerGone(piece, accepted)).toBe(false);
+    expect(pointerGone(point, accepted)).toBe(false);
+    expect(pointerGone({ ...piece, targetId: 'it_none' }, accepted)).toBe(true);
+    // Before the Accept (no renovation): it isn't there.
+    expect(pointerGone(piece, project)).toBe(true);
+  });
+
   it('a point on a wall (a socket) is pointed at where it is on the wall, by its name', () => {
     useTalk.setState({ conv: { levelId: upper.id, draftPointers: [] } as unknown as Conversation });
     const wall = Object.values(upper.walls)[0];

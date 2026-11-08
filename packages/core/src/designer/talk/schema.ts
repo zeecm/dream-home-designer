@@ -21,8 +21,12 @@ import { clean } from '../util';
  * so it never drops kept pieces (while the brief still holds them in place) or the chips.
  */
 export const TALK_RECORD_VERSION = 4;
-/** Proposals are unchanged by house rules: still written as 2. */
-export const PROPOSAL_RECORD_VERSION = 2;
+/**
+ * 3: an option's `madeAt` and the kept pieces it was made with (slice 3a). 1 and 2 are read as
+ * 3 with neither (worked out from the proposal's time). A build that knows only 2 reads a 3 as
+ * nothing, so it never writes one back without them (a stale tab carrying a run on, say).
+ */
+export const PROPOSAL_RECORD_VERSION = 3;
 /** Rules kept per conversation, the recently deleted (for Undo) included. */
 export const MAX_RULE_RECORDS = 40;
 /** Pointers in one message (UX §1.2). */
@@ -628,7 +632,7 @@ export const ProposalOption = z.object({
   /**
    * When this option was asked for (Another idea comes after the card): what was kept by then
    * is what it is placed with. Absent on older records: the proposal's own time. (Added with
-   * talk records 4: a build that knows 3 is read-only on these, so never drops it.)
+   * proposal records 3: a build that knows only 2 never reads these, so never drops it.)
    */
   madeAt: z.string().optional(),
   /**

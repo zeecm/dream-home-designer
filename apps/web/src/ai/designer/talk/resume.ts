@@ -45,7 +45,8 @@ const modelName = (id: string) => MODEL_NAMES[id] ?? id;
 /** Looks for runs to carry on, or to show as running elsewhere. */
 export function checkResume() {
   const st = useTalk.getState();
-  if (!st.projectId || st.newer || !useDesigner.getState().panel) return;
+  // No conversation read (yet, or one a newer build wrote): nothing here is this tab's to carry on.
+  if (!st.projectId || st.newer || !st.conv || !useDesigner.getState().panel) return;
   for (const p of st.proposals) {
     for (const o of p.options) {
       if (o.status !== 'running' || !o.run) continue;
