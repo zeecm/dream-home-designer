@@ -193,18 +193,20 @@ interface Props {
 }
 
 /** What a folded card last said of itself (its checks need the plan worked out again). */
-const verdicts = new Map<string, { text: string; total: number }>();
+const verdicts = new Map<string, { text: string; total: number; rules: string }>();
 
 /**
  * A folded card's line: its checks as last worked out, and what is in the renovation as the
  * record says now (an Undo or a Put it back since takes rows out; QA R2).
  */
-function foldedLine(card: CardModel): string {
+function foldedLine(card: CardModel, rules: string): string {
   const said = verdicts.get(card.key);
   const inNow = card.accepted.filter((a) => !a.out).length;
   if (!said) return inNow ? ` · Accepted ${inNow}` : '';
   if (inNow && inNow >= said.total) return ' · In your renovation';
-  return ` · ${said.text}${inNow ? ` · Accepted ${inNow} of ${said.total}` : ''}`;
+  // Worked out before your rules last changed: it says so rather than an old verdict (QA B5).
+  const text = said.rules === rules ? said.text : 'Not checked against your rules yet';
+  return ` · ${text}${inNow ? ` · Accepted ${inNow} of ${said.total}` : ''}`;
 }
 
 export const ProposalCard = memo(function ProposalCard({
@@ -259,7 +261,12 @@ export const ProposalCard = memo(function ProposalCard({
   );
   const ids = useMemo(() => new Set(changes.map((c) => c.id)), [changes]);
   const [ticks, setTicks] = useState<string[] | null>(card.ticks);
-  useEffect(() => setTicks(card.ticks), [card.ticks]);
+  // Ticks saved and not yet all back: each save's record comes back when it is written, and an
+  // older one would take back a tick made since (a quick second tick, on a slow disk, lost).
+  const saving = useRef(0);
+  useEffect(() => {
+    if (saving.current === 0) setTicks(card.ticks);
+  }, [card.ticks]);
   const ticked = useMemo(
     () => (ticks ?? defaultTicks(changes)).filter((id) => ids.has(id)),
     [ticks, changes, ids],
@@ -318,6 +325,7 @@ export const ProposalCard = memo(function ProposalCard({
     setTicks(next);
     if (card.proposal && card.option) {
       const letter = card.option.letter;
+      saving.current++;
       void actProposal(card.proposal.id, (p) =>
         p
           ? {
@@ -325,7 +333,9 @@ export const ProposalCard = memo(function ProposalCard({
               options: p.options.map((o) => (o.letter === letter ? { ...o, ticks: next } : o)),
             }
           : p,
-      );
+      ).finally(() => {
+        saving.current--;
+      });
     }
   };
   const toggle = (c: Change, on: boolean) => {
@@ -418,7 +428,7 @@ export const ProposalCard = memo(function ProposalCard({
         >
           <span>
             {card.title} · {headLabel(project, card)}
-            {foldedLine(card)}
+            {foldedLine(card, rulesKey)}
           </span>
           <span className="talk-fold-show" aria-hidden="true">
             Show ›
@@ -522,7 +532,11 @@ export const ProposalCard = memo(function ProposalCard({
   );
 
   // What the folded line will say (with what is in the renovation then, as the record has it).
-  verdicts.set(card.key, { text: verdict, total: accepted.length + changes.length });
+  verdicts.set(card.key, {
+    text: verdict,
+    total: accepted.length + changes.length,
+    rules: rulesKey,
+  });
   if (!expanded) {
     return (
       <article className="talk-card talk-card-folded" aria-labelledby={`card-${card.key}`}>
@@ -535,7 +549,7 @@ export const ProposalCard = memo(function ProposalCard({
         >
           <span>
             {card.title} · {headLabel(project, card)}
-            {foldedLine(card)}
+            {foldedLine(card, rulesKey)}
           </span>
           <span className="talk-fold-show" aria-hidden="true">
             Show ›

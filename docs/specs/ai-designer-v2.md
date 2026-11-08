@@ -646,7 +646,7 @@ Criteria 3a.1–3a.12 (from the PM's list and the UX design's §12):
   width left passes; "keep 0.90 m clear" fails only a piece that leaves less.
 - **Decisions vs rules.** A rule is checked on every proposal; a Decision is told to the designer,
   not checked. Just this once keeps an offered rule as a Decision; Make this a rule turns a Decision
-  into an offer (priced, about US$0.02; free when the Decision came from Just this once).
+  into an offer (priced as a Send, about US$0.03; free when the Decision came from Just this once).
 - **Conflicts** are refused with why (see 3a.6); two clear widths on the same way merge to the wider.
 - **Already in your plan** works for rules as for the app's checks (3a.7); waivers are per rule and
   per piece, and the rule stays.

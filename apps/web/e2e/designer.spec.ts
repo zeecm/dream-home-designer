@@ -318,6 +318,19 @@ test.describe('desktop', () => {
   }) => {
     test.setTimeout(120_000);
     await setup(page);
+    // A slow disk: each saved record comes back 300 ms late. A tick made before an earlier
+    // tick's record came back was taken back by it (a flake under load, a lost tick for real).
+    await page.addInitScript(() => {
+      const d = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, 'oncomplete');
+      Object.defineProperty(IDBTransaction.prototype, 'oncomplete', {
+        set(fn) {
+          d?.set?.call(this, fn ? (e: Event) => setTimeout(() => fn.call(this, e), 300) : fn);
+        },
+        get() {
+          return d?.get?.call(this);
+        },
+      });
+    });
     let release: () => void = () => {};
     const held = new Promise<void>((r) => {
       release = r;
@@ -799,7 +812,19 @@ test.describe('desktop', () => {
     expect(dump).not.toContain('not-a-real-key');
   });
 
-  test('dragging a piece with the designer open and a card: under 5 ms a frame of designer work', async ({
+  /** No designer work on the main thread for a whole second (`__dhdDesignerPerf` counts it). */
+  const designerQuiet = async (page: Page) => {
+    const calls = () =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __dhdDesignerPerf: { calls: number } }).__dhdDesignerPerf.calls,
+      );
+    const from = await calls();
+    await page.waitForTimeout(1000);
+    return (await calls()) === from;
+  };
+
+  test('dragging a piece with the designer open and a card: no designer work a frame, under 5 ms a frame (PERF)', async ({
     page,
   }) => {
     test.setTimeout(120_000);
@@ -836,7 +861,12 @@ test.describe('desktop', () => {
     const sofa = page.locator('[data-hit^="item:"]').first();
     const box = await sofa.boundingBox();
     if (!box) throw new Error('no piece to drag');
-    await page.waitForTimeout(600);
+    // The accept's own work done first (its card worked out again once the plan settled, the
+    // worker's answers landing): only what the drag does is counted.
+    await page.evaluate(() => {
+      (window as unknown as { __dhdDesignerPerf: unknown }).__dhdDesignerPerf = { ms: 0, calls: 0 };
+    });
+    await expect.poll(() => designerQuiet(page), { timeout: 30_000, intervals: [0] }).toBe(true);
     await page.evaluate(() => {
       (window as unknown as { __dhdDesignerPerf: unknown }).__dhdDesignerPerf = { ms: 0, calls: 0 };
     });
@@ -852,7 +882,12 @@ test.describe('desktop', () => {
           .__dhdDesignerPerf,
     );
     await page.mouse.up();
-    expect(perf.ms / frames).toBeLessThan(5);
+    // The work counted, not timed: the drag works no card out move by move (each open card
+    // works itself out in several steps, so that would be well over one a move). A run so
+    // busy that the plan settled mid-drag (250 ms between two moves) works it out once.
+    expect(perf.calls, JSON.stringify(perf)).toBeLessThan(frames / 3);
+    // The time it took, which a busy machine stretches: strict only on a quiet one (PERF=1).
+    expect(perf.ms / frames).toBeLessThan(process.env.PERF ? 5 : 20);
     // The drag's re-checks went to the worker too.
     await expect.poll(async () => (await answered()).worker).toBeGreaterThan(placed.worker);
     expect((await answered()).here).toBe(0);
@@ -1716,10 +1751,21 @@ test.describe('iterating (slice 2, PR 3)', () => {
     await openSample(page);
     await talk(page);
     await justDesign(page);
-    // Kitchen, accepted, then Undo, twenty times: each a new card in the log.
+    // Kitchen, accepted, then Undo, twenty times: each a new card in the log. Each round's
+    // designer work on the main thread is counted (`__dhdDesignerPerf`), and timed.
+    await page.evaluate(() => {
+      (window as unknown as { __dhdDesignerPerf: unknown }).__dhdDesignerPerf = { ms: 0, calls: 0 };
+    });
+    const work = () =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __dhdDesignerPerf: { calls: number } }).__dhdDesignerPerf.calls,
+      );
     const times: number[] = [];
+    const calls: number[] = [];
     for (let i = 1; i <= 20; i++) {
       const t0 = Date.now();
+      const c0 = await work();
       await panel(page)
         .getByRole('button', { name: /^Kitchen · about US\$/ })
         .last()
@@ -1737,13 +1783,22 @@ test.describe('iterating (slice 2, PR 3)', () => {
       await panel(page).getByRole('button', { name: 'Undo' }).last().click();
       await expect(log(page).getByText(new RegExp(`^Undone: .* from V${i} `))).toBeVisible();
       times.push(Date.now() - t0);
+      calls.push((await work()) - c0);
     }
     const mean = (xs: number[]) => xs.reduce((t, x) => t + x, 0) / xs.length;
     const early = mean(times.slice(1, 4));
     const late = mean(times.slice(-3));
-    console.log(`card 2–4: ${Math.round(early)} ms; card 18–20: ${Math.round(late)} ms`);
-    // Older cards are folded: card 20 costs about what card 2 did.
-    expect(late).toBeLessThan(early * 1.6 + 400);
+    const earlyWork = mean(calls.slice(1, 4));
+    const lateWork = mean(calls.slice(-3));
+    console.log(
+      `card 2–4: ${Math.round(early)} ms, ${earlyWork} steps; ` +
+        `card 18–20: ${Math.round(late)} ms, ${lateWork} steps`,
+    );
+    // Older cards are folded and work nothing out: card 20 does what card 2 did (counted,
+    // with room for a plan that settled once more or less), and takes about as long (timed,
+    // which a busy machine stretches unevenly: strict only on a quiet one, PERF=1).
+    expect(lateWork).toBeLessThan(earlyWork * 1.5 + 10);
+    expect(late).toBeLessThan(process.env.PERF ? early * 1.6 + 400 : early * 3 + 2000);
     // Folded cards work nothing out: only the newest card is open.
     await expect(panel(page).locator('article.talk-card:not(.talk-card-folded)')).toHaveCount(1);
   });
@@ -1873,7 +1928,7 @@ const consoleInCorridor = (c: Call) =>
       }
     : null;
 const CORRIDOR =
-  'Your rule “Never anything in the corridor”: the chinese console table is in the way from the main door to Main bedroom and Bedroom.';
+  'Your rule “Never anything in the corridor”: the Chinese console table is in the way from the main door to Main bedroom and Bedroom.';
 
 async function yourRules(page: Page) {
   await panel(page).getByRole('button', { name: 'Designer menu' }).click();
@@ -1931,7 +1986,7 @@ test.describe('house rules (slice 3a, PR A)', () => {
     const view = await yourRules(page);
     await expect(
       view.getByRole('article', { name: 'Never anything in the corridor' }),
-    ).toContainText('✕ V1 doesn’t meet it: the chinese console table is in the way');
+    ).toContainText('✕ V1 doesn’t meet it: the Chinese console table is in the way');
     await expect(view).toContainText(
       'Your rules stay on this device, with this conversation. They’re not in the plan, its exports or share links.',
     );
@@ -1987,6 +2042,7 @@ test.describe('house rules (slice 3a, PR A)', () => {
         faces('notFaces', 'The sofa away from the window'),
         faces('faces', 'The sofa facing the window'),
         faces('faces', 'The sofa facing the window'),
+        REPLY_RULE,
       ],
     });
     await openSample(page);
@@ -2031,6 +2087,23 @@ test.describe('house rules (slice 3a, PR A)', () => {
     const view = await yourRules(page);
     await expect(view.getByRole('article')).toHaveCount(1);
     await expect(view.getByRole('article', { name: 'The sofa facing the window' })).toBeVisible();
+    // Make this a rule from a Decision (priced as a Send): kept, it moves to Your rules.
+    await view.getByRole('button', { name: /^Decisions \(\d+\) are told/ }).click();
+    const decisions = panel(page).getByRole('region', { name: 'Decisions' });
+    await decisions
+      .getByRole('textbox', { name: 'Something to keep, avoid or have' })
+      .fill('Nothing in the corridor');
+    await decisions.getByRole('button', { name: 'Add' }).click();
+    const row = decisions.getByRole('listitem').filter({ hasText: 'Nothing in the corridor' });
+    await row.getByRole('button', { name: /^Make this a rule · about US\$\d\.\d\d$/ }).click();
+    await expect(
+      log(page).getByText('Asked to make a rule of: Nothing in the corridor.'),
+    ).toBeVisible();
+    await panel(page)
+      .getByRole('region', { name: 'Rule offer: Never anything in the corridor' })
+      .getByRole('button', { name: 'Keep as a rule' })
+      .click();
+    await expect(log(page).getByText('Moved to Your rules.')).toBeVisible();
   });
 
   test('3a.7 and 3a.8: a rule the plan breaks is said and never stops a proposal; Bring this back is checked on your rules', async ({
@@ -2055,7 +2128,7 @@ test.describe('house rules (slice 3a, PR A)', () => {
       name: 'Rule offer: Never anything in the corridor',
     });
     await expect(offer).toContainText(
-      'Your plan doesn’t meet it now: the chinese console table is in the way from the main door to Main bedroom and Bedroom. That won’t stop a proposal.',
+      'Your plan doesn’t meet it now: the Chinese console table is in the way from the main door to Main bedroom and Bedroom. That won’t stop a proposal.',
     );
     await offer.getByRole('button', { name: 'Keep as a rule' }).click();
     await expect(
@@ -2168,6 +2241,20 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     await fingerSized(page);
     await noSideways(page);
     await shot(page, 'rule-offer-phone');
+    // Show on plan drops the sheet so the rule is in sight (QA B1).
+    await offer.getByRole('button', { name: 'Show on plan' }).tap();
+    await expect(panel(page)).not.toHaveClass(/talk-full/);
+    const band = page.getByTestId('rule-layer').locator('.rl-band').first();
+    await expect(band).toBeVisible();
+    const onTop = await band.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return !!top?.closest('svg.plan-svg');
+    });
+    expect(onTop).toBe(true);
+    await shot(page, 'rule-shown-phone');
+    await panel(page).getByRole('button', { name: 'Make the designer full height' }).tap();
+    await offer.scrollIntoViewIfNeeded();
     await offer.getByRole('button', { name: 'Keep as a rule' }).tap();
     await log(page).getByRole('button', { name: 'Your rules' }).last().tap();
     const view = panel(page).getByRole('region', { name: 'Your rules' });
@@ -2177,6 +2264,60 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     await fingerSized(page);
     await noSideways(page);
     await shot(page, 'your-rules-phone');
+  });
+
+  test('asked to design it from the 3D view: the proposal is on the plan, in sight, before Accept (owner, 8 Nov)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    // The sample flat, last seen in 3D.
+    await setup(page, 'anthropic', { 'dhd:view': '3d' });
+    await mock(page, { talk: [REPLY_PLAN] });
+    await page.goto('/');
+    await waitSaved(page);
+    await expect(page.locator('main.stage')).toHaveClass(/stage-3d/);
+    await page
+      .getByRole('button', { name: /Plan details|Show plan details/ })
+      .first()
+      .tap()
+      .catch(() => {});
+    await page.getByRole('button', { name: 'Talk to the designer' }).tap();
+    await panel(page).getByRole('button', { name: 'Just design it' }).tap();
+    const box = panel(page).getByRole('textbox', { name: 'Message the designer' });
+    await box.tap();
+    await box.fill('Please design the living room and the main bedroom.');
+    await panel(page)
+      .getByRole('button', { name: /^Send · about US\$/ })
+      .tap();
+    // The designer's plan asks first (the cost card takes the sheet to full height).
+    await panel(page)
+      .getByRole('button', { name: /^Go ahead · about US\$/ })
+      .tap();
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // Before Accept: the plan, not the 3D view, with the sheet folded to peek below it.
+    await expect(page.locator('main.stage')).toHaveClass(/stage-plan/);
+    await expect(panel(page)).toHaveClass(/talk-peek/);
+    await expect(v1.getByRole('button', { name: 'Show V1 on the plan' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(panel(page).getByText(/^On the table: V1/)).toBeInViewport();
+    // The new pieces are drawn on the plan, and no sheet covers them.
+    const marks = page.getByTestId('proposal-layer').locator('polygon.pv-new');
+    await expect(marks.first()).toBeVisible();
+    const inSight = await marks.evaluateAll(
+      (els) =>
+        els.filter((el) => {
+          const r = el.getBoundingClientRect();
+          const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+          return !!top?.closest('svg.plan-svg');
+        }).length,
+    );
+    expect(inSight).toBeGreaterThan(0);
+    await shot(page, 'phone-asked-proposal');
   });
 
   test('first meeting, a proposal, accept part, Undo, the sheet’s three heights', async ({
@@ -2216,8 +2357,11 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     // The tools at the foot give way to the sheet; the plan above shows the proposal.
     await expect(page.locator('.palette')).toBeHidden();
     await shot(page, 'phone-proposal');
-    // Full height (the cost card took it there, its answers in sight), then smaller and
-    // folded to peek, each by its handle; and full again by the handle.
+    // The cost card took the sheet to full height; the proposal folded it to peek, so the plan
+    // shows it. Then full, smaller and full again, each by its handle.
+    await expect(panel(page)).toHaveClass(/talk-peek/);
+    await expect(page.getByTestId('proposal-layer')).toBeVisible();
+    await panel(page).getByRole('button', { name: 'Make the designer full height' }).tap();
     await expect(panel(page)).toHaveClass(/talk-full/);
     await panel(page).getByRole('button', { name: 'Make the designer smaller' }).tap();
     await expect(panel(page)).toHaveClass(/talk-half/);
@@ -2268,13 +2412,19 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
       timeout: 30_000,
     });
-    // The cost card took the sheet to full height; it stays there.
-    await expect(panel(page)).toHaveClass(/talk-full/);
+    // The proposal folded the sheet to peek, the plan showing it; full again by the handle.
+    await expect(panel(page)).toHaveClass(/talk-peek/);
+    const tall = panel(page).getByRole('button', { name: 'Make the designer full height' });
+    await tall.tap();
     await v1.getByRole('button', { name: /^Another idea · about US\$/ }).tap();
     const b = titled(page, 'V1B');
     await expect(b.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
       timeout: 30_000,
     });
+    // B going on the plan folds the sheet to peek again.
+    await expect(panel(page)).toHaveClass(/talk-peek/);
+    await tall.tap();
+    await expect(panel(page)).toHaveClass(/talk-full/);
     const calls = m.calls.length;
     const tabs = panel(page).getByRole('tablist', { name: 'V1: ideas' });
     // Letters only, each 44 px tall; the names are in the tabs' names and the card's title.

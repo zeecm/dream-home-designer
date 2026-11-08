@@ -11,6 +11,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useEditor } from '../../../editor';
 import { shownLevelId, useProject, useStore } from '../../../store';
 import { icons } from '../../../ui/icons';
+import { shownViewNow, useOneView } from '../../../ui/oneView';
 import { AiSettingsDialog } from '../../AiSettingsDialog';
 import { aiSettings } from '../../credentials';
 import { BriefDialog } from '../BriefDialog';
@@ -26,6 +27,7 @@ import { lineState, undoLine } from './accept';
 import { cardChanges, cardResult, cardVerdict, optionCard, versionKey } from './cards';
 import { copyConversation, downloadConversation, showStart } from './iterate';
 import { stopTalkRun } from './propose';
+import { useRuleShown } from './rules';
 import { focusInLog, keepFocus, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { recoverPending, stopReply } from './turn';
@@ -71,6 +73,11 @@ function useMedia(test: () => boolean): boolean {
 }
 
 type Size = 'peek' | 'half' | 'full';
+/** A short window, where even the sheet at half covers the plan (styles.css gives it the height). */
+const SHORT_Q = '(max-height: 500px)';
+/** Sheet heights that leave no plan in sight. */
+const coversPlan = (s: Size) =>
+  s === 'full' || (s === 'half' && !!window.matchMedia?.(SHORT_Q).matches);
 
 /** "On the table: V4 · Passes all checks [Accept…]" (UX §5.2). */
 function OnTheTable() {
@@ -509,6 +516,43 @@ export function TalkPanel() {
     });
     return () => cancelAnimationFrame(f);
   }, [costCard, sheet]);
+  // A card going on the plan for the first time is seen there before Accept. On a phone the
+  // cost card has taken the sheet to full height, over the whole stage, so the sheet folds to
+  // peek (the On the table bar and Accept… stay in reach). A new proposal on a phone showing
+  // only 3D shows the plan, where new, moved and left-out pieces are marked (not an older card
+  // shown by Show in 3D, which asked for 3D).
+  const oneView = useOneView();
+  // Show on plan for a rule (slice 3a QA B1): the sheet drops to half (peek where half still
+  // covers the plan), and a phone showing only 3D shows the plan, where the rule is drawn.
+  const ruleShown = useRuleShown((st) => st.rule?.id ?? null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on a rule being shown
+  useEffect(() => {
+    if (!ruleShown) return;
+    if (sheet)
+      setSize((s) =>
+        s === 'full' ? (coversPlan('half') ? 'peek' : 'half') : coversPlan(s) ? 'peek' : s,
+      );
+    const ed = useEditor.getState();
+    if (oneView && !ed.walking && !ed.elevation && shownViewNow() === '3d') ed.setViewMode('plan');
+  }, [ruleShown]);
+  const seen = useRef(new Set<string>());
+  const mountedAt = useRef(Date.now());
+  useEffect(() => {
+    if (!shown || seen.current.has(shown)) return;
+    seen.current.add(shown);
+    if (sheet) {
+      setSize((s) => (coversPlan(s) ? 'peek' : s));
+      // Typing at peek: the keyboard closing goes back to a height that still shows it.
+      if (before.current && coversPlan(before.current)) before.current = 'peek';
+    }
+    const p = useTalk.getState().proposals.find((x) => shown.startsWith(`${x.id}:`));
+    const o = p?.options.find((x) => shown === `${p?.id}:${x.letter}`);
+    const fresh = !!p && (o?.status === 'running' || Date.parse(p.at) >= mountedAt.current);
+    const ed = useEditor.getState();
+    if (fresh && oneView && !ed.walking && !ed.elevation && shownViewNow() === '3d') {
+      ed.setViewMode('plan');
+    }
+  }, [shown, sheet, oneView]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: on a change of the sheet's size
   useEffect(() => {
     const f = requestAnimationFrame(() => useEditor.getState().requestFit(64));

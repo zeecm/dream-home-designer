@@ -20,6 +20,15 @@ import {
  * wish is noted in Decisions, not checked (criterion 40).
  */
 
+/** A name at most 80 characters, cut at a word with an ellipsis (never mid-word). */
+export function cutName(raw: string): string {
+  const s = raw.replace(/\s+/g, ' ').trim();
+  if (s.length <= 80) return s;
+  const head = s.slice(0, 79);
+  const at = head.lastIndexOf(' ');
+  return `${(at > 40 ? head.slice(0, at) : head).replace(/[\s,;:.]+$/, '')}…`;
+}
+
 /** A rule as a reply gives it: no id, time or level yet (the reducer adds those). */
 export type RuleDraft = Pick<Rule, 'name' | 'subject' | 'relation' | 'target' | 'n'>;
 
@@ -180,7 +189,7 @@ export function ruleFromReply(
 ): { draft: RuleDraft } | { unfit: true; name: string } | null {
   const o = asObj(raw);
   if (!o) return null;
-  const name = typeof o.name === 'string' ? o.name.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+  const name = typeof o.name === 'string' ? cutName(o.name) : '';
   const relation = (RULE_RELATIONS as readonly string[]).find(
     (r) => r.toLowerCase() === lower(o.relation),
   ) as RuleRelation | undefined;
