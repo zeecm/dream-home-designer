@@ -8591,3 +8591,56 @@ html[data-proposal] .elec-warn circle {
 html[data-proposal] .plan-svg g.clearance {
   opacity: 0.4;
 }
+
+/* Slice 2, PR 2: talk. Send keeps to one line; the hint gives way. */
+.talk-send {
+  flex: none;
+  white-space: nowrap;
+}
+.talk-send-row .field-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* What a reply noted: lines under its words, their Edit beside them (on touch too). */
+.talk-noted {
+  display: grid;
+  gap: 2px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.talk-noted .talk-app-text .link-btn {
+  display: inline-flex;
+  margin-left: 4px;
+}
+.talk-meta {
+  margin: 4px 0 0;
+}
+.talk-concern {
+  margin-top: 6px;
+}
+.talk-concern .talk-app-icon {
+  color: var(--pill-warning-ink);
+}
+.talk-alt {
+  margin-top: 8px;
+}
+.talk-status,
+.talk-cut {
+  margin: 4px 0 0;
+}
+.talk-sent-state {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  margin-top: 4px;
+}
+.talk-sent-state p {
+  margin: 0;
+}
+.talk-error {
+  color: var(--negative);
+}
+.talk-why {
+  color: var(--text);
+}

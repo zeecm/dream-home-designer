@@ -7,7 +7,7 @@ import { Mark } from './Mark';
 import { TurnCost } from './ProposalCard';
 import { planRequest, pressPlan, pressPrice } from './propose';
 import { timed, useSettledProject } from './settle';
-import { answerChip, editTurn, retryPrice, retryTurn } from './turn';
+import { answerChip, chipLabel, editTurn, retryPrice, retryTurn } from './turn';
 import { useTalk } from './useTalk';
 
 /**
@@ -170,7 +170,7 @@ function Asked({ t }: { t: TurnOf<'designer'> }) {
                     className="chip"
                     onClick={() => void answerChip(t, i, c)}
                   >
-                    {c}
+                    {chipLabel(q, c)}
                   </button>
                 ))}
               </div>

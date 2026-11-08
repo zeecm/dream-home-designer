@@ -1164,8 +1164,9 @@ test.describe('talking to the designer (slice 2, PR 2)', () => {
     await justDesign(page);
     await send(page, 'Redo the kitchen');
     const q = log(page).getByRole('region', { name: 'How do you cook?' });
-    await q.getByRole('button', { name: 'heavy' }).click();
-    await expect(log(page).locator('.talk-bubble').last()).toHaveText('heavy');
+    // A fact's chips read as What I know says them.
+    await q.getByRole('button', { name: 'A lot: big meals, wok' }).click();
+    await expect(log(page).locator('.talk-bubble').last()).toHaveText('A lot: big meals, wok');
     expect(m.calls).toHaveLength(1);
     await panel(page).getByRole('button', { name: 'Designer menu' }).click();
     await page.getByRole('menuitem', { name: 'What I know about you' }).click();

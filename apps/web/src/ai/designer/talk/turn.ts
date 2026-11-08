@@ -442,11 +442,7 @@ async function replyNow(turnId: string, prompt: TalkPrompt) {
 const lowerEq = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /** A chip of a designer's question as a What I know fact (free), or null (it fills the composer). */
-export function chipFact(
-  q: TalkQuestion,
-  choice: string,
-  brief: DesignBrief,
-): { brief: DesignBrief; key: QuestionKey } | null {
+function factOfChip(q: TalkQuestion, choice: string): TalkFact | null {
   if (!q.fact) return null;
   const k: FactKey = q.fact;
   const pick = <T extends { id: unknown; label: string }>(xs: T[]) =>
@@ -468,8 +464,26 @@ export function chipFact(
     const id = Object.entries(STYLE_NAMES).find(
       ([sid, name]) => lowerEq(sid, choice) || lowerEq(name, choice),
     )?.[0];
-    if (id) fact = { key: k, text: choice, number: null, choice: id };
+    if (id)
+      fact = {
+        key: k,
+        text: STYLE_NAMES[id as keyof typeof STYLE_NAMES],
+        number: null,
+        choice: id,
+      };
   } else fact = { key: k, text: choice, number: null, choice: null };
+  return fact;
+}
+
+/** A chip's words: a What I know fact's own label ("A lot: big meals, wok"), else the model's. */
+export const chipLabel = (q: TalkQuestion, choice: string) => factOfChip(q, choice)?.text ?? choice;
+
+export function chipFact(
+  q: TalkQuestion,
+  choice: string,
+  brief: DesignBrief,
+): { brief: DesignBrief; key: QuestionKey } | null {
+  const fact = factOfChip(q, choice);
   if (!fact) return null;
   const f = applyFacts(brief, [fact]);
   const key = f.keys[0];
@@ -487,7 +501,7 @@ export async function answerChip(t: TurnOf<'designer'>, index: number, choice: s
       type: 'talkAnswer',
       turnId: t.id,
       index,
-      words: choice,
+      words: chipLabel(q, choice),
       id: newId('turn'),
       at: nowIso(),
       brief: fact.brief,
