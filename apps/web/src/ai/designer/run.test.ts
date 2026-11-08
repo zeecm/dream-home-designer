@@ -872,6 +872,47 @@ describe('a locked phone: a step cut off while away goes again on return (locked
     expect(of(room3)).toHaveLength(1);
   });
 
+  it('two rooms let go together where only one fits: one goes, and nothing committed passes the figure', async () => {
+    const HIGH = 0.25;
+    let spent = 0;
+    let cap = Number.POSITIVE_INFINITY;
+    const inflight = new Map<string, number>();
+    const committed = () => spent + [...inflight.values()].reduce((t, x) => t + x, 0);
+    let most = 0;
+    let rooms = 0;
+    const prov = provider('anthropic');
+    const r = start('anthropic', {
+      fetch: prov.fetch,
+      onUsage: (u) => {
+        spent += u.usd ?? 0;
+      },
+      onStep: (key, kind, phase) => {
+        if (phase === 'end') {
+          inflight.delete(key);
+          return;
+        }
+        inflight.set(key, HIGH);
+        // The first room's start: room for it and one more, not two.
+        if (kind === 'room' && ++rooms === 1) cap = committed() + HIGH + 0.01;
+        most = Math.max(most, committed() - cap);
+      },
+      overLimit: (next) => (next ? committed() + HIGH > cap : committed() >= cap),
+    });
+    await until(() => prov.calls.length === 1, 'layout');
+    prov.calls[0]?.release();
+    // Room 1 goes alone until its answer starts; then rooms 2 and 3 are let go together.
+    await until(() => prov.calls.length >= 2, 'room 1');
+    await vi.advanceTimersByTimeAsync(1000);
+    // Only room 2 fits beside room 1: room 3 waits (the run asks, and with no answer, stops).
+    expect(prov.calls).toHaveLength(3);
+    expect(most).toBeLessThanOrEqual(1e-9);
+    for (const c of prov.calls) c.release();
+    const { state } = await r.run;
+    expect(state.phase).toBe('stopped');
+    expect(prov.calls).toHaveLength(3);
+    expect(most).toBeLessThanOrEqual(1e-9);
+  });
+
   it('nothing is sent again when what is left of the figure is less than the steps in flight may cost', async () => {
     // The steps on their way at their most (as the run's checkpoint counts them).
     const HIGH = 0.25;

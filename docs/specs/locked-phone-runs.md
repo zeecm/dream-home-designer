@@ -120,7 +120,11 @@ one minute between updates unless a fix round starts ("fixing 1 problem · about
 | Event on auto-carry on after reload | Picked up where it stopped: 3 of 5 rooms done, not paid for again. |
 | Interrupted card (asks) | This design stopped when the page closed. 3 of 5 rooms are done and kept. [Carry on · at most US$0.40] [Keep as it is] |
 | Same, plan changed | …Your plan has changed since. [Carry on with the plan as it is now · at most US$0.40] [Keep as it is] |
-| Cut-off note in the message's cost detail | Bedroom 2 was cut off when the screen locked and sent again: about ~US$0.03 extra may be billed. |
+| Cut-off note in the message's cost detail | Bedroom 2 was cut off when the screen locked and sent again: about ~US$0.03 extra may be billed. (As built: "Bedroom 2 was cut off and sent again: up to US$0.03 extra may be billed.", and the cost says "up to": a cut-off attempt is counted at its most.) |
+| Interrupted card, cut off again and again (a step's third cut-off) | This design stopped: a step was cut off again and again while the screen was off. 3 of 5 rooms are done and kept. [Carry on · at most US$0.40] [Keep as it is] |
+| Interrupted card, at its figure (a step, or a request sent again, wouldn't fit) | This design stopped before going past what it was priced at. … |
+| Interrupted card, at the tab's limit | This design stopped at this tab's limit. … |
+| Paused at the figure (the next step wouldn't fit) | The next step may take this design past what it was priced at (US$0.60). It has used US$0.42 so far; finishing it may take up to US$0.30 more. [Stop here, keep what's done] [Finish the design] |
 
 The figure on Carry on is the remaining steps at their high plus fix rounds left (the existing
 `remainingHigh`), bound to the press like Go ahead.

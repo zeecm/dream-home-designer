@@ -288,12 +288,21 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     if (o.signal.aborted) resolve(false);
     o.signal.addEventListener('abort', () => resolve(false), { once: true });
   });
+  /**
+   * Whether the next step may go (`next`: counted at its most). It is reserved (`onStep`
+   * 'start') in the same step as the check passes: two rooms let go together each count the
+   * other, never both checked against the room only one of them fits.
+   */
   const mayStart = async (next?: {
     key: string;
     kind: 'layout' | 'room' | 'fix';
   }): Promise<boolean> => {
+    const reserve = () => {
+      if (next) o.onStep?.(next.key, next.kind, 'start');
+      return true;
+    };
     if (stopping || o.signal.aborted) return false;
-    if (allowOver || !o.overLimit?.(next)) return true;
+    if (allowOver || !o.overLimit?.(next)) return reserve();
     if (!asking) {
       state.phase = 'paused';
       say(`Paused: this tab has reached its limit. ${usdText(spentSoFar())} spent on this design.`);
@@ -310,7 +319,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     }
     // Stop while paused ends the wait too.
     const go = await Promise.race([asking, aborted]);
-    return go && !o.signal.aborted;
+    return go && !o.signal.aborted && reserve();
   };
 
   let cap = 2;
@@ -430,7 +439,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
         previous: plan.layout.previous ?? null,
       });
       const t0 = Date.now();
-      o.onStep?.(st.key, 'layout', 'start');
+      // (Reserved as `mayStart` let it go.)
       const concept = await step(prompt, st, (raw) => parseConcept(raw, bounds));
       o.onStep?.(st.key, 'layout', 'end');
       // (A step sent again after the page was away took the time away too: not timed.)
@@ -510,7 +519,6 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       try {
         const parse = (raw: unknown) => parseSpaceDesign(raw, bounds);
         const t0 = Date.now();
-        o.onStep?.(st.key, 'room', 'start');
         const answer = await step(prompt, st, parse, onStart);
         o.onStep?.(st.key, 'room', 'end');
         if (!st.resent) o.onTimed?.('room', Date.now() - t0);
@@ -539,7 +547,6 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
             update();
             const fix: FixRequest = { round: fixes, failures: left, placed: now.placed };
             const tf = Date.now();
-            o.onStep?.(st.key, 'fix', 'start');
             const again = await step(
               roomStep(ctx, s, r.level, design.aliases, {
                 concept: design.concept,

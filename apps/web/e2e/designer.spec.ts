@@ -2661,13 +2661,13 @@ test.describe('a locked phone: resume and the wake lock (locked-phone runs, part
         .getByText(/^Back\. Carrying on from Kitchen: \d of \d rooms done, not paid for again\.$/)
         .first(),
     ).toBeVisible();
-    // The cut-off attempts are metered as estimated: "~" on the cost, and said in its detail.
-    const cost = v1.getByRole('button', { name: /^Cost of this reply: ~US\$/ });
+    // The cut-off attempts are counted at their most: "up to" on the cost, and in its detail.
+    const cost = v1.getByRole('button', { name: /^Cost of this reply: up to US\$/ });
     await expect(cost).toBeVisible();
     await cost.click();
     await expect(
       v1
-        .getByText(/Kitchen was cut off and sent again: about ~US\$\d\.\d\d extra may be billed\./)
+        .getByText(/Kitchen was cut off and sent again: up to US\$\d\.\d\d extra may be billed\./)
         .first(),
     ).toBeVisible();
     // 7: the screen kept on at the start and after each return; let go at the end.

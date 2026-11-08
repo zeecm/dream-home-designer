@@ -121,11 +121,14 @@ export function TurnCost({
   usage,
   fixes = 0,
   names = {},
+  atMost = false,
 }: {
   usage: CardModel['usage'];
   fixes?: number;
   /** Step names by key, for the steps cut off and sent again. */
   names?: Record<string, string>;
+  /** A design run's: an attempt cut off is counted at its most, so the figure is "up to". */
+  atMost?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ai = useAi();
@@ -134,7 +137,9 @@ export function TurnCost({
   const s = spentOf(usage);
   const t = usageTotals(usage);
   const text =
-    s.usd === null ? `${tokens(s.tokens)} tokens` : `${s.estimated ? '~' : ''}${usd(s.usd)}`;
+    s.usd === null
+      ? `${tokens(s.tokens)} tokens`
+      : `${s.estimated ? (atMost ? 'up to ' : '~') : ''}${usd(s.usd)}`;
   const model = usage[0]?.model ?? ai?.model ?? '';
   return (
     <span className="talk-cost">
@@ -157,7 +162,7 @@ export function TurnCost({
             <span key={i} className="talk-cost-cut">
               {' '}
               {c.name} was cut off and sent again
-              {c.usd !== null ? `: about ~${usd(c.usd)} extra may be billed.` : '.'}
+              {c.usd !== null ? `: up to ${usd(c.usd)} extra may be billed.` : '.'}
             </span>
           ))}
         </span>
@@ -1284,6 +1289,7 @@ export const ProposalCard = memo(function ProposalCard({
           <TurnCost
             usage={card.usage}
             fixes={Object.values(card.input.spaces).reduce((t, x) => t + (x.fixes ?? 0), 0)}
+            atMost
             names={{
               layout: 'The layout',
               ...Object.fromEntries(Object.entries(card.input.spaces).map(([k, x]) => [k, x.name])),
