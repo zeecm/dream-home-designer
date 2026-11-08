@@ -74,9 +74,10 @@ async function decide(
     hold = await takeRunLock(runId, true, ctrl.signal);
     waiting.delete(key);
     if (!hold) return;
-    // The other tab let go: its run ended, or the tab closed. As the record says now.
-    await loadTalk(projectId, true);
   }
+  // As the record says now that the lock is ours (the other tab's run may have ended, or a
+  // Stop been written, since the record shown here was read).
+  await loadTalk(projectId, true);
   const found = findOption(proposalId, letter);
   if (
     useTalk.getState().projectId !== projectId ||
@@ -140,6 +141,7 @@ async function offer(key: string, p: Proposal, letter: string) {
     ...d,
     model: ai && !sameModel ? { now: modelName(ai.model), was: modelName(run.model) } : null,
     noKey: !usable,
+    why: run.paused ?? 'closed',
   });
 }
 

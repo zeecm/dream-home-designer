@@ -489,7 +489,11 @@ describe('the runner (criteria 25–28)', () => {
     const kitchen = state.steps.find((s) => s.label === 'Kitchen');
     const cut = state.usage.filter((u) => u.step === kitchen?.key);
     expect(cut).toHaveLength(2);
-    expect(cut[0]).toMatchObject({ estimated: true, input: 1000 });
+    // Cut off, it may be billed in full: its whole prompt (none of it from the cache) and output
+    // to its limit, more than the answer that came after it.
+    expect(cut[0]).toMatchObject({ estimated: true, cachedInput: 0, cacheWrite: 0 });
+    expect(cut[0]?.input).toBeGreaterThan(1000);
+    expect(cut[0]?.output).toBeGreaterThan(cut[1]?.output ?? 0);
     expect(kitchen?.retries).toBe(1);
   });
 
@@ -838,6 +842,7 @@ describe('a locked phone: a step cut off while away goes again on return (locked
     for (const c of prov.calls) c.release();
     const { state, design } = await r.run;
     expect(state.phase).toBe('interrupted');
+    expect(state.interrupt).toBe('resent');
     // The first request and two sent again: the third cut-off sends nothing more.
     expect(of(room3)).toHaveLength(3);
     const key = rowOf(state, room3)?.key as string;
@@ -862,8 +867,42 @@ describe('a locked phone: a step cut off while away goes again on return (locked
     for (const c of prov.calls) c.release();
     const { state } = await r.run;
     expect(state.phase).toBe('interrupted');
+    expect(state.interrupt).toBe('limit');
     expect(prov.calls).toHaveLength(before);
     expect(of(room3)).toHaveLength(1);
+  });
+
+  it('nothing is sent again when what is left of the figure is less than the steps in flight may cost', async () => {
+    // The steps on their way at their most (as the run's checkpoint counts them).
+    const HIGH = 0.25;
+    let spent = 0;
+    let cap = Number.POSITIVE_INFINITY;
+    const inflight = new Map<string, number>();
+    const committed = () => spent + [...inflight.values()].reduce((t, x) => t + x, 0);
+    const { prov, r, room3, of } = await midRun({
+      onUsage: (u) => {
+        spent += u.usd ?? 0;
+      },
+      onStep: (key, _kind, phase) => {
+        if (phase === 'start') inflight.set(key, HIGH);
+        else inflight.delete(key);
+      },
+      overLimit: (next) => (next ? committed() + HIGH > cap : committed() >= cap),
+    });
+    // Rooms 3 and 4 on their way: a cent of headroom past them, less than either's most.
+    expect(inflight.size).toBe(2);
+    cap = committed() + 0.01;
+    const before = prov.calls.length;
+    await away(r, () => of(room3)[0]?.cut(), 10_000);
+    turn('visible');
+    await vi.advanceTimersByTimeAsync(1000);
+    for (const c of prov.calls) c.release();
+    const { state } = await r.run;
+    // The cut-off attempt is counted at its most, so room 3 doesn't fit again: not resent.
+    expect(of(room3)).toHaveLength(1);
+    expect(prov.calls).toHaveLength(before);
+    expect(state.phase).toBe('interrupted');
+    expect(state.interrupt).toBe('limit');
   });
 
   it('away more than 10 minutes: nothing is sent again, the run ends interrupted, its finished rooms kept', async () => {

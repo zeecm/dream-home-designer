@@ -175,10 +175,16 @@ The figure on Carry on is the remaining steps at their high plus fix rounds left
   (`resume` in `talk/pricing.ts`).
 - The runner's requests carry `resumeOnReturn`: a step cut off while the page was hidden (or one
   that went quiet meanwhile) waits for the page to be back and online, then goes again at once,
-  not counted as a network retry. Each send pays for its prompt again, so one step is sent again
-  at most twice, and never past the run's figure or the tab's limit (the room gate's own check,
-  as `mayRetry`); past either, or away more than 10 min, the run ends `interrupted` and its card
-  asks. Talk calls keep their own recovery as it was.
+  not counted as a network retry. Each send pays for its prompt again, so one step (its row,
+  fix rounds included) is sent again at most twice, and never past the run's figure or the tab's
+  limit (the room gate's own check, as `mayRetry`, which network retries share); past either, or
+  away more than 10 min, the run ends `interrupted` and its card asks, saying why (the page
+  closed, cut off again and again, or its figure or the tab's limit). Talk calls keep their own
+  recovery as it was.
+- The run's figure holds what it spent, every step on its way at its most and, before a step
+  goes, that step at its most: a step that doesn't fit pauses and asks. An attempt cut off by a
+  lock or a dropped connection is counted at its most (its whole prompt and output to its
+  limit), not at what streamed.
 - What a run spent is written to its checkpoint as each request is metered, with each step in
   flight and the most it may cost (`inflight`). Carrying on counts the steps that were in flight
   at their most as spent (a page that died mid-step never metered them), so by itself it never

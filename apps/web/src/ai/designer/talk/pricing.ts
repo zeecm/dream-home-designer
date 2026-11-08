@@ -129,7 +129,11 @@ export function resumeFigure(est: RunEstimate, fixesLeft: number): number | null
   return est.usd.high + est.usd.fix * share;
 }
 
-/** What an interrupted run spent: what was metered, and the most each step in flight may cost. */
+/**
+ * What an interrupted run spent: what was metered, and the most each step in flight may cost.
+ * A step cut off while the page was alive is both metered (at its most) and still in flight:
+ * counted twice, on purpose (it may be billed and sent again).
+ */
 export const spentWithInflight = (run: RunCheckpoint): number =>
   run.spent + run.inflight.reduce((t, x) => t + x.high, 0);
 

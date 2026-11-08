@@ -492,7 +492,10 @@ export const RunCheckpoint = z.object({
   /** Its Web Lock is `dhd-run:{id}`: a checkpoint whose lock nobody holds was interrupted. */
   id: z.string().max(80),
   startedAt: z.string(),
-  /** Its last progress (a step finished, or it started). */
+  /**
+   * Its last progress: a step finished (saved), or it started. A request metered or a step
+   * sent writes `spent` and `inflight` without moving it.
+   */
   at: z.string(),
   provider: z.enum(['anthropic', 'openai', 'gemini']),
   model: z.string().max(120),
@@ -535,7 +538,7 @@ export const RunCheckpoint = z.object({
   /** Stopped by the person (Stop, or another plan opened): never carried on. */
   stopped: z.boolean().default(false),
   /** Waiting at a limit when it was last saved. */
-  paused: z.enum(['tab', 'approved']).nullable().default(null),
+  paused: z.enum(['tab', 'approved', 'resent']).nullable().default(null),
   /** How long its finished steps took (for the time left). */
   times: z
     .array(z.object({ kind: z.enum(['layout', 'room', 'fix']), ms: z.number().min(0) }))

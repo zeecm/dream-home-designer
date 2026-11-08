@@ -254,6 +254,14 @@ function TimeLeftLine({ live }: { live: LiveRun }) {
   );
 }
 
+/** Why an interrupted design stopped, as its card says it. */
+const STOPPED_BECAUSE: Record<'closed' | 'resent' | 'approved' | 'tab', string> = {
+  closed: 'This design stopped when the page closed.',
+  resent: 'This design stopped: a step was cut off again and again while the screen was off.',
+  approved: 'This design stopped before going past what it was priced at.',
+  tab: 'This design stopped at this tab’s limit.',
+};
+
 /** A run the page lost: running in another tab, carrying on, or asking once. */
 function ResumeNote({
   cardKey,
@@ -283,7 +291,7 @@ function ResumeNote({
   return (
     <div className="talk-stopped" data-resume="">
       <p>
-        This design stopped when the page closed. {kept}
+        {STOPPED_BECAUSE[view.why]} {kept}
         {view.changed ? ' Your plan has changed since.' : ''}
       </p>
       {view.model && (
@@ -357,8 +365,16 @@ export const ProposalCard = memo(function ProposalCard({
   const comparable = useDesigner((s) => !!versionId && s.designs.some((d) => d.id === versionId));
   // Running in the record, with no run here, no checkpoint to carry on from and nothing to say
   // about it (an older build dropped the checkpoint): shown as stopped, as it is.
+  // (Not while a run is being started here: its option is written running a moment before
+  // its run shows.)
+  const starting = useDesigner((s) => s.starting);
   const stale =
-    card.status === 'running' && card.kind === 'proposal' && !live && !card.option?.run && !resume;
+    card.status === 'running' &&
+    card.kind === 'proposal' &&
+    !live &&
+    !card.option?.run &&
+    !resume &&
+    !starting;
   const running = card.status === 'running' && !stale;
   const [expanded, setExpanded] = useState(newest);
   // The newest card opens; once a newer one comes it folds to its line (opened again by a
@@ -741,7 +757,7 @@ export const ProposalCard = memo(function ProposalCard({
           <p>
             {live.pausedBy === 'tab'
               ? 'You’ve reached your limit for this tab.'
-              : `This design has used what it was priced at (${usd(live.approved ?? 0)}).`}{' '}
+              : `The next step may take this design past what it was priced at (${usd(live.approved ?? 0)}).`}{' '}
             It has used {usd(live.state.usage.reduce((t, u) => t + (u.usd ?? 0), 0))} so far
             {live.remaining !== null
               ? `; finishing it may take up to ${usd(live.remaining)} more.`

@@ -29,7 +29,7 @@ import {
 import { useStore } from '../../../store';
 import { aiSettings } from '../../credentials';
 import { freshPrice, readPrice, trialResult } from '../results';
-import { type StepState, blankStep, runDesign } from '../run';
+import { type StepState, blankStep, interruptText, runDesign } from '../run';
 import { addUsage, capUsd, countRun, overLimit, priceTable, spent, usd } from '../spend';
 import { type Running, designOpts, useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
@@ -425,6 +425,9 @@ async function run(
 ) {
   const conv = useTalk.getState().conv;
   if (!conv) return;
+  // The plan it was priced on: another opened meanwhile, it runs nowhere (each await below).
+  const planId = doc().id;
+  const here = () => doc().id === planId;
   // The runner works on its own copies, never on what the store holds.
   const sp: ScopePlan = {
     ...made.sp,
@@ -444,12 +447,13 @@ async function run(
           }
         : x,
     );
-    if (p) void runOption(p, letter, sp, made.est, approved);
+    if (p && here()) void runOption(p, letter, sp, made.est, approved);
     return;
   }
   const project = doc();
   const s = await talkStore();
   const fp = await s.putLevel(project.id, sp.ctx.base);
+  if (!here()) return;
   if (req.alternative) {
     const { proposalId, letter } = req.alternative;
     const option = newOption(letter, req.scope, sp, fp);
@@ -468,6 +472,7 @@ async function run(
       return;
     }
     if (ids.person) await clearTyped();
+    if (!here()) return;
     useTalk.setState({ shown: `${proposalId}:${letter}`, open: null, why: null });
     useDesigner.setState({ previewing: true });
     say(`Designing V${p.n}${letter}, another idea for ${p.scope.label}.`);
@@ -495,6 +500,7 @@ async function run(
   // Its number is the one the record gave it (another tab may have taken this one meanwhile).
   const p = await numbered(proposal, after);
   if (ids.person) await clearTyped();
+  if (!here()) return;
   // Every new proposal goes on the plan (after an accept the stage had gone back to After).
   useTalk.setState({ shown: `${proposalId}:A`, open: null, why: null });
   useDesigner.setState({ previewing: true });
@@ -636,8 +642,10 @@ export async function carryOn(
     const o = p.options.find((x) => x.letter === letter);
     const run = o?.run;
     if (!o || !run) return 'no';
+    // Still this plan, and still its run's to carry on (another plan opened meanwhile: never).
+    const still = () => doc().id === p.projectId && hold.held;
     const made = await resumePriced(p, letter);
-    if (!made) return 'no';
+    if (!made || !still()) return 'no';
     const figure = resumeFigure(made.est, run.fixesLeft);
     const shown = press?.shown ?? null;
     if (press && !figureHolds(shown, figure)) return 'dearer';
@@ -661,6 +669,7 @@ export async function carryOn(
           text: `Picked up where it stopped: ${doneText(d)}, not paid for again.`,
         },
       });
+      if (!still()) return 'no';
     }
     useTalk.setState({ shown: `${p.id}:${letter}`, open: null, why: null });
     useDesigner.setState({ previewing: true });
@@ -712,12 +721,13 @@ async function runOption(
   from?: CarryFrom,
 ) {
   const ai = aiSettings();
-  if (!ai) {
+  const project = doc();
+  // Its own plan's: never run against a plan opened meanwhile (its results would go nowhere).
+  const projectId = p.projectId;
+  if (!ai || project.id !== projectId) {
     from?.hold.release();
     return;
   }
-  const project = doc();
-  const projectId = project.id;
   const ctrl = new AbortController();
   let endRun: () => void = () => {};
   const ended = new Promise<void>((resolve) => {
@@ -804,6 +814,24 @@ async function runOption(
     ended,
     again: () => {},
   };
+  // Written to this plan's record by its id, whichever plan is open now (another plan opened
+  // mid-run still ends this one's run in its own record).
+  const writeOption = (patch: (o: ProposalOption) => ProposalOption) =>
+    actProposal(
+      p.id,
+      (x) =>
+        x ? { ...x, options: x.options.map((o) => (o.letter === letter ? patch(o) : o)) } : x,
+      projectId,
+    );
+  const writeRun = () => writeOption((o) => ({ ...o, run: structuredClone(ck) }));
+  // Stop (or another plan opened): marked stopped before the requests are aborted, so a page
+  // that goes before the run's end is written never carries it on. There from the first moment
+  // the run shows.
+  const stop = () => {
+    ck.stopped = true;
+    void writeRun();
+    ctrl.abort();
+  };
   const firstLeft = timeLeft(steps, ck.times, null);
   useDesigner.setState({ run: running });
   useTalk.setState({
@@ -818,6 +846,7 @@ async function runOption(
       approved,
       left: firstLeft,
       wake: null,
+      stop,
     },
   });
   if (!prior) countRun();
@@ -857,27 +886,24 @@ async function runOption(
     ck.at = nowIso();
     return structuredClone(ck);
   };
-  /** The highest a step sent now may cost: its own estimate, else the dearest room's, a fix's. */
+  /**
+   * The most a step sent now may cost: its own estimate; a room the layout made, a room's on
+   * average (so the rooms together are what was priced); a fix round, its share of the fixes.
+   */
   const highOf = (key: string, kind: 'layout' | 'room' | 'fix') => {
     if (!est.usd) return 0;
     if (kind === 'fix') return est.fixes > 0 ? est.usd.fix / est.fixes : 0;
     const own = est.steps.find((x) => x.step === key)?.usd?.high;
-    return own ?? Math.max(0, ...est.steps.map((x) => x.usd?.high ?? 0));
+    if (own !== undefined) return own;
+    const rooms = est.steps.filter((x) => x.kind === 'room').map((x) => x.usd?.high ?? 0);
+    return rooms.length ? rooms.reduce((t, x) => t + x, 0) / rooms.length : 0;
   };
+  /** The steps on their way, at their most. */
+  const inflightHigh = () => ck.inflight.reduce((t, x) => t + x.high, 0);
   // The run's own figure: past what it was priced at, it asks as the tab's limit does. After
   // Finish, a new figure (what finishing may still cost) holds until the run ends.
   let cap = approved;
   let pastTab = false;
-  // Written to this plan's record by its id, whichever plan is open now (another plan opened
-  // mid-run still ends this one's run in its own record).
-  const writeOption = (patch: (o: ProposalOption) => ProposalOption) =>
-    actProposal(
-      p.id,
-      (x) =>
-        x ? { ...x, options: x.options.map((o) => (o.letter === letter ? patch(o) : o)) } : x,
-      projectId,
-    );
-  const writeRun = () => writeOption((o) => ({ ...o, run: structuredClone(ck) }));
   const save = async (d: DraftDesign, info: { fixesLeft: number }) => {
     const copy = structuredClone(d);
     const run = checkpoint(copy, info.fixesLeft);
@@ -891,16 +917,11 @@ async function runOption(
     }));
   };
   // Its lock, taken once the run shows here (never a moment shown as a run with no owner).
-  const hold = from?.hold ?? (await takeRunLock(runId)) ?? { release: () => {} };
-  // Stop (or another plan opened): marked stopped before the requests are aborted, so a page
-  // that goes before the run's end is written never carries it on.
-  setLive({
-    stop: () => {
-      ck.stopped = true;
-      void writeRun();
-      ctrl.abort();
-    },
-  });
+  const hold = from?.hold ??
+    (await takeRunLock(runId)) ?? {
+      release: () => {},
+      held: true,
+    };
   // Saved at once: a page that goes before the first step ends can carry on from the start.
   await writeRun();
   const { state, design } = await runDesign({
@@ -924,6 +945,8 @@ async function runOption(
       if (r && r.ctrl === ctrl) useDesigner.setState({ run: { ...r, state: shown } });
     },
     onSave: save,
+    // (These two write what was spent and what is on its way; `ck.at`, its last progress, moves
+    // only when a step is saved.)
     onUsage: (u) => {
       addUsage(u);
       spentHere += u.usd ?? 0;
@@ -955,7 +978,16 @@ async function runOption(
         },
       });
     },
-    overLimit: () => (!pastTab && overLimit()) || (cap !== null && spentRun() >= cap),
+    // Its figure holds what it spent, the steps on their way at their most, and the step about
+    // to go at its most: one that doesn't fit pauses and asks; nothing is sent again past it.
+    overLimit: (next) => {
+      if (!pastTab && overLimit()) return true;
+      if (cap === null) return false;
+      const committed = spentRun() + inflightHigh();
+      // A step about to go must fit at its most; with none (a request sent again), nothing more
+      // goes once all of it is committed.
+      return next ? committed + highOf(next.key, next.kind) > cap + 1e-9 : committed >= cap;
+    },
     askAgain: true,
     confirmOver: () =>
       new Promise<boolean>((resolve) => {
@@ -980,20 +1012,24 @@ async function runOption(
         say(
           by === 'tab'
             ? 'Paused: this tab has reached its limit.'
-            : `Paused: this design has used ${usd(spentRun())}, what it was priced at.`,
+            : `Paused: the next step may take this design past what it was priced at. ${usd(spentRun())} spent so far.`,
         );
       }),
   });
   screen.end();
   if (state.phase === 'interrupted' && !ck.stopped) {
-    // Away too long to go on by itself: the checkpoint stays, the card asks (resume.ts).
+    // The checkpoint stays, and the card asks (resume.ts): away too long, or (cut off again
+    // and again, or no room left in its figure) asked whatever the time.
+    const why = state.interrupt ?? 'away';
+    ck.paused =
+      why === 'resent' ? 'resent' : why === 'limit' ? (overLimit() ? 'tab' : 'approved') : null;
     const run = checkpoint(design, ck.fixesLeft);
     await writeOption((o) => ({ ...o, run }));
     if (useTalk.getState().live?.ctrl === ctrl) useTalk.setState({ live: null });
     const r = useDesigner.getState().run;
     if (r?.ctrl === ctrl) useDesigner.setState({ run: null });
     hold.release();
-    say('Paused while you were away. Finished rooms are kept.');
+    if (doc().id === projectId) say(interruptText(why));
     endRun();
     runHooks.interrupted();
     return;
@@ -1046,13 +1082,15 @@ async function runOption(
   if (useTalk.getState().live?.ctrl === ctrl) useTalk.setState({ live: null });
   const r = useDesigner.getState().run;
   if (r?.ctrl === ctrl) useDesigner.setState({ run: null });
-  say(
-    status === 'checked'
-      ? `V${p.n}${p.options.length > 1 || letter !== 'A' ? letter : ''} is ready. ${state.usage.length ? `Cost ${usd(state.usage.reduce((t, u) => t + (u.usd ?? 0), 0))}.` : ''}`
-      : status === 'stopped'
-        ? 'Stopped. Finished rooms are kept.'
-        : (state.halt?.message ?? 'The design didn’t work.'),
-  );
+  // Said only where its plan is open (never in another plan's live region).
+  if (doc().id === projectId)
+    say(
+      status === 'checked'
+        ? `V${p.n}${p.options.length > 1 || letter !== 'A' ? letter : ''} is ready. ${state.usage.length ? `Cost ${usd(state.usage.reduce((t, u) => t + (u.usd ?? 0), 0))}.` : ''}`
+        : status === 'stopped'
+          ? 'Stopped. Finished rooms are kept.'
+          : (state.halt?.message ?? 'The design didn’t work.'),
+    );
   endRun();
 }
 

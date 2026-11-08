@@ -36,8 +36,17 @@ const LOWER: Record<Effort, Effort | null> = { high: 'medium', medium: 'low', lo
 const ABORT_TEXT = 'Stopped.';
 
 export class Stopped extends Error {}
-/** Away too long to carry on by itself: the run ends here, ready to carry on when asked. */
-export class Interrupted extends Error {}
+/**
+ * Why a run stopped where it may carry on from: away too long, a step cut off more often
+ * than RESENDS, or no room left in its figure (or the tab's limit) to send a step again.
+ */
+export type InterruptReason = 'away' | 'resent' | 'limit';
+/** A run that ends here, ready to carry on when asked (its card says why). */
+export class Interrupted extends Error {
+  constructor(readonly reason: InterruptReason) {
+    super(reason);
+  }
+}
 
 /**
  * When the page last went out of view (ms since the epoch), and how long it was away the last
@@ -165,8 +174,10 @@ export interface RequestState {
   } | null;
   retries: number;
   cutOffHigh: number | null;
-  /** Sent again after the page came back (a locked phone): not a network retry. */
+  /** This request's sends again after the page came back (a locked phone): not a retry. */
   resent?: number;
+  /** The row's sends again, across its requests (its fix rounds too): never reset. */
+  resentAll?: number;
 }
 
 export interface RequestOptions<T> {
@@ -213,7 +224,8 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
   const { ai, st } = o;
   const name = PROVIDERS[ai.provider].short;
   watchPage();
-  // This request's own count (a row's fix round is a request of its own).
+  // This request's own count (a row's fix round is a request of its own: timed apart); the
+  // row's total, which the cap counts, goes on.
   st.resent = 0;
   const throttle = o.throttle ?? { last: 0 };
   const fail = (text: string): null => {
@@ -236,7 +248,7 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
     const no = attempt++ > 0 ? (o.mayRetry?.() ?? null) : null;
     // A design run's step isn't failed for it (it would never be asked for again): the run is
     // interrupted with the step left to do, and its card asks.
-    if (no && o.resumeOnReturn) throw new Interrupted();
+    if (no && o.resumeOnReturn) throw new Interrupted('limit');
     if (no) return fail(`${st.label}: ${no}`);
     const ctrl = new AbortController();
     const signal = anySignal([o.signal, ctrl.signal]);
@@ -309,9 +321,11 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
         o.update();
         await backOnline(o.signal, Number.POSITIVE_INFINITY);
         if (o.signal.aborted) throw new Stopped(ABORT_TEXT);
-        if (awayFor > AWAY_MS || (st.resent ?? 0) >= RESENDS || o.mayRetry?.())
-          throw new Interrupted();
+        if (awayFor > AWAY_MS) throw new Interrupted('away');
+        if ((st.resentAll ?? 0) >= RESENDS) throw new Interrupted('resent');
+        if (o.mayRetry?.()) throw new Interrupted('limit');
         st.resent = (st.resent ?? 0) + 1;
+        st.resentAll = (st.resentAll ?? 0) + 1;
         st.wait = null;
         o.onResent?.();
         continue;

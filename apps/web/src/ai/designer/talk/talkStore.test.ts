@@ -272,6 +272,13 @@ describe('a run’s checkpoint in its option (locked-phone runs, part 1)', () =>
     expect(back?.options[0]?.run).toEqual(run);
   });
 
+  it('a run interrupted for being cut off again and again says so (its card asks)', async () => {
+    const s = await openTalk(new IDBFactory());
+    await s.applyProposal('prj_a', 'prop1', () => withRun({ ...run, paused: 'resent' }));
+    const [back] = await s.proposals('prj_a');
+    expect(back?.options[0]?.run?.paused).toBe('resent');
+  });
+
   it('one that can’t be read is dropped, never the proposal with it', async () => {
     const s = await openTalk(new IDBFactory());
     await s.applyProposal('prj_a', 'prop1', () => withRun({ ...run, fixesLeft: -1 }));

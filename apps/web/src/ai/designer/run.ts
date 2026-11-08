@@ -31,7 +31,14 @@ import {
 } from '@dhd/core';
 import { type AiSettings, PROVIDERS } from '../credentials';
 import { AiError } from '../providers';
-import { type Halt, Halted, Interrupted, Stopped, requestStep } from './request';
+import {
+  type Halt,
+  Halted,
+  type InterruptReason,
+  Interrupted,
+  Stopped,
+  requestStep,
+} from './request';
 import { type StepSink, streamStep } from './stream';
 
 /**
@@ -92,6 +99,8 @@ export interface RunState {
    */
   phase: 'running' | 'paused' | 'done' | 'stopped' | 'halted' | 'failed' | 'interrupted';
   halt: Halt | null;
+  /** Interrupted: why (away too long, cut off too often, no room left in its figure). */
+  interrupt?: InterruptReason | null;
   /** This run's requests. */
   usage: Usage[];
   startedAt: number;
@@ -141,8 +150,11 @@ export interface RunOptions {
     design: DesignInput,
     opts?: DesignOptions,
   ) => Promise<DesignResult>;
-  /** Whether the tab's limit has been reached. */
-  overLimit?: () => boolean;
+  /**
+   * Whether the tab's limit (or the run's figure) has been reached, counting `next` (the step
+   * about to be sent) at its most: before each step, and before any request is sent again.
+   */
+  overLimit?: (next?: { key: string; kind: 'layout' | 'room' | 'fix' }) => boolean;
   /** The limit was reached: true to finish the design, false to stop here. */
   confirmOver?: () => Promise<boolean>;
   /**
@@ -179,6 +191,14 @@ export function mergeAnswer(
     summary: next.summary,
   };
 }
+
+/** What a run interrupted says, by why. */
+export const interruptText = (why: InterruptReason) =>
+  why === 'away'
+    ? 'Paused while you were away. Finished steps are kept.'
+    : why === 'resent'
+      ? 'Paused: a step was cut off again and again. Finished steps are kept.'
+      : 'Paused: this design has used what it was priced at. Finished steps are kept.';
 
 /** Which step a run is on, the same everywhere it is shown: "Step 2 of 5". */
 export function progressOf(state: Pick<RunState, 'steps'>): { step: number; of: number } {
@@ -231,6 +251,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     steps: [],
     phase: 'running',
     halt: null,
+    interrupt: null,
     usage: [],
     startedAt: Date.now(),
     endedAt: null,
@@ -267,9 +288,12 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     if (o.signal.aborted) resolve(false);
     o.signal.addEventListener('abort', () => resolve(false), { once: true });
   });
-  const mayStart = async (): Promise<boolean> => {
+  const mayStart = async (next?: {
+    key: string;
+    kind: 'layout' | 'room' | 'fix';
+  }): Promise<boolean> => {
     if (stopping || o.signal.aborted) return false;
-    if (allowOver || !o.overLimit?.()) return true;
+    if (allowOver || !o.overLimit?.(next)) return true;
     if (!asking) {
       state.phase = 'paused';
       say(`Paused: this tab has reached its limit. ${usdText(spentSoFar())} spent on this design.`);
@@ -303,8 +327,20 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       promptChars,
       outputChars,
     });
-    if (!finished) {
-      // Cut off before its usage arrived: what streamed, counted from its characters.
+    if (!finished && !o.signal.aborted) {
+      // Cut off before its usage arrived (a locked phone, a dropped connection): it may be
+      // billed in full, its whole prompt and output to its limit, and is counted so (the
+      // figure it is held to never assumes less). Stop's cut-off is said apart, at that most.
+      const price = priceOf(u.model, o.prices);
+      const most = {
+        input: tokensOf(promptChars),
+        cachedInput: 0,
+        cacheWrite: 0,
+        output: Math.max(p.maxTokens, u.output, tokensOf(outputChars)),
+      };
+      u = { ...u, ...most, estimated: true, usd: price ? usdOf(most, price) : null };
+    } else if (!finished) {
+      // Cut off by Stop: what streamed, counted from its characters.
       const output = Math.max(u.output, tokensOf(outputChars));
       const price = priceOf(u.model, o.prices);
       u = { ...u, output, estimated: true, usd: price ? usdOf({ ...u, output }, price) : null };
@@ -385,7 +421,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     // 1. The layout and style.
     if (plan.layout) {
       const st = state.steps[0] as StepState;
-      if (!(await mayStart())) return ended('stopped');
+      if (!(await mayStart({ key: 'layout', kind: 'layout' }))) return ended('stopped');
       const bounds = levelBounds(ctx.base);
       const prompt = layoutStep(ctx, {
         ...(plan.feedback ? { feedback: plan.feedback } : {}),
@@ -460,7 +496,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     let runError: unknown = null;
     const room = async (s: (typeof spaces)[number], onStart?: () => void) => {
       const st = state.steps.find((x) => x.key === s.key) as StepState;
-      if (!(await mayStart())) {
+      if (!(await mayStart({ key: s.key, kind: 'room' }))) {
         onStart?.();
         return;
       }
@@ -487,7 +523,12 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
           let fixes = 0;
           let now = first;
           const rounds = fixRoundsFor(ctx.brief.quality);
-          while (now.fixable.length && fixes < rounds && fixesLeft > 0 && (await mayStart())) {
+          while (
+            now.fixable.length &&
+            fixes < rounds &&
+            fixesLeft > 0 &&
+            (await mayStart({ key: s.key, kind: 'fix' }))
+          ) {
             // Taken from the run's few before the request goes (rooms run side by side).
             fixesLeft--;
             fixes++;
@@ -600,7 +641,8 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       return ended('halted');
     }
     if (e instanceof Interrupted) {
-      say('Paused while you were away. Finished steps are kept.');
+      state.interrupt = e.reason;
+      say(interruptText(e.reason));
       return ended('interrupted');
     }
     state.halt = {

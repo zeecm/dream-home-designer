@@ -10,6 +10,8 @@ export const runLockName = (id: string) => `dhd-run:${id}`;
 /** A run's lock, held until released. */
 export interface RunHold {
   release: () => void;
+  /** Still held (not released). */
+  readonly held: boolean;
 }
 
 type Locks = {
@@ -32,7 +34,17 @@ export function takeRunLock(
   signal?: AbortSignal,
 ): Promise<RunHold | null> {
   const l = locks();
-  if (!l) return Promise.resolve({ release: () => {} });
+  if (!l) {
+    let held = true;
+    return Promise.resolve({
+      release: () => {
+        held = false;
+      },
+      get held() {
+        return held;
+      },
+    });
+  }
   return new Promise((resolve) => {
     let release: () => void = () => {};
     const held = new Promise<void>((r) => {
@@ -50,6 +62,9 @@ export function takeRunLock(
           if (done) return;
           done = true;
           release();
+        },
+        get held() {
+          return !done;
         },
       });
       await held;

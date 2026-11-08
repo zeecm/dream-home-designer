@@ -2615,21 +2615,21 @@ test.describe('a locked phone: resume and the wake lock (locked-phone runs, part
     await page.getByRole('button', { name: /^Designer · V1 on the table$/ }).click();
   };
 
-  test('hidden mid-step, its request cut off, shown again: only that step goes again, four times running (1, 2, 7, 8, 13)', async ({
+  test('hidden mid-step, its request cut off, shown again: only that step goes again, twice at most, then it asks (1, 2, 7, 8, 13)', async ({
     page,
   }) => {
     test.setTimeout(180_000);
     await setup(page);
     await stubWake(page);
     const sent = apiLog(page);
-    const { m, waits } = await wholeFlat(page, 4);
+    const { m, waits } = await wholeFlat(page, 3);
     const v1 = card(page, 1);
     // 8: on a computer, how long, and no "Keep this screen open".
     await expect(
       v1.getByText(/^Designing · (about \d+ min left|less than a minute left|almost done)$/),
     ).toBeVisible();
     await expect(v1.getByText('Keep this screen open')).toHaveCount(0);
-    for (let cycle = 1; cycle <= 4; cycle++) {
+    for (let cycle = 1; cycle <= 3; cycle++) {
       await expect.poll(() => waits.length, { timeout: 30_000 }).toBe(cycle);
       await setHidden(page, true);
       waits[cycle - 1]?.('abort');
@@ -2638,14 +2638,24 @@ test.describe('a locked phone: resume and the wake lock (locked-phone runs, part
       await page.waitForTimeout(500);
       expect(asked(m.calls, KITCHEN)).toHaveLength(cycle);
       await setHidden(page, false);
-      await expect.poll(() => asked(m.calls, KITCHEN).length).toBe(cycle + 1);
+      // Sent again twice; the third cut-off is one too many: it asks, sending nothing.
+      if (cycle < 3) await expect.poll(() => asked(m.calls, KITCHEN).length).toBe(cycle + 1);
     }
+    await expect(
+      v1.getByText(
+        /^This design stopped: a step was cut off again and again while the screen was off\./,
+      ),
+    ).toBeVisible();
+    await page.waitForTimeout(500);
+    expect(asked(m.calls, KITCHEN)).toHaveLength(3);
+    await v1.getByRole('button', { name: /^Carry on · at most US\$\d+\.\d\d$/ }).click();
     await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
       timeout: 30_000,
     });
-    // 1: the layout and the finished rooms asked for once each; the kitchen five times.
+    // 1: the layout and the finished rooms asked for once each; the kitchen three times, and
+    // once more on Carry on.
     const steps = [...new Set(m.calls.map((c) => c.step))];
-    for (const s of steps) expect(asked(m.calls, s)).toHaveLength(s === KITCHEN ? 5 : 1);
+    for (const s of steps) expect(asked(m.calls, s)).toHaveLength(s === KITCHEN ? 4 : 1);
     await expect(
       log(page)
         .getByText(/^Back\. Carrying on from Kitchen: \d of \d rooms done, not paid for again\.$/)
@@ -2662,7 +2672,7 @@ test.describe('a locked phone: resume and the wake lock (locked-phone runs, part
     ).toBeVisible();
     // 7: the screen kept on at the start and after each return; let go at the end.
     const w = await wake(page);
-    expect(w.filter((x) => x === 'request screen').length).toBeGreaterThanOrEqual(5);
+    expect(w.filter((x) => x === 'request screen').length).toBeGreaterThanOrEqual(4);
     expect(w.at(-1)).toBe('release');
     // 13: nothing of the run (nor the key) in any request to our server.
     expect(sent.some((x) => /fixesLeft|dhd-run|"run":/.test(x) || x.includes(KEY))).toBe(false);

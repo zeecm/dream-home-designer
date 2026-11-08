@@ -67,6 +67,11 @@ export type ResumeView =
       model: { now: string; was: string } | null;
       /** No key now: Carry on opens AI settings. */
       noKey: boolean;
+      /**
+       * Why it stopped: the page closed (or was away too long), a step was cut off again and
+       * again, or it reached what it was priced at or the tab's limit.
+       */
+      why: 'closed' | 'resent' | 'approved' | 'tab';
     };
 
 /** A talk call on its way (ephemeral: never written per token). */
