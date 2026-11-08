@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
 import { newBlankPlan, waitSaved } from './helpers';
+import { expect, test } from './test';
 
 test('a new plan guides you: walls make a room, a walk finishes it, and it stays closed', async ({
   page,

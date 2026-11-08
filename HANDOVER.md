@@ -1288,6 +1288,8 @@ algorithm notes and the checklists for Phases 3 to 5.
 
 ## 7. Conventions
 
+**Check main after every merge (owner, 8 Nov).** A green PR is not enough: after a squash merge, watch the `ci` run on `main` to the end and fix a red one at once. Main went red after #48, #51 and #52 (e2e: `exact.spec.ts:99`, `elevation.spec.ts:238`, `guide.spec.ts:33`) without anyone noticing until the owner did.
+
 **Never go idle (owner, 7 Nov).** This session only wakes on a message, a finished agent or
 command, a PR event or a scheduled check-in, so a turn that ends with nothing running stops all
 work until the owner prompts. After a merge, start the next roadmap item (spec, design or
@@ -1312,6 +1314,15 @@ affordance as major:
    then try it.
 The e2e suite follows the same rules for the phone (`mobile.spec.ts` checks the first wall's
 preview mid-drag and drags its end).
+
+**E2e specs import `test` and `expect` from `e2e/test.ts`, not `@playwright/test` (8 Nov; Biome
+refuses the latter in `e2e/`).** Its `test` closes every browser context a test opens itself
+(a second person on a share link). Playwright closes only the one behind `page`, and each one
+left open stays in the worker's browser for the rest of the run; in Split or 3D view its 3D
+view draws every frame in SwiftShader. That was why `main` went red after #41: with two such
+pages in its browser the exact render's first sample never came (36 s without them); a view
+link's first paint missed its 10 s and the guide's close click hung for 60 s (2.4 s without).
+`contexts.spec.ts` checks that a context a test leaves open is gone by the next test.
 
 - Every document mutation goes through a `Command` in `packages/core/src/commands.ts`.
   UI code never mutates the project directly.

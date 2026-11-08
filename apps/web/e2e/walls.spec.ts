@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { expect, test } from './test';
 
 test('a wall becomes a glass partition, or a half wall with glass above; each one undo step', async ({
   page,

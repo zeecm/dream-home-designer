@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { expect, test } from './test';
 
 test('walk through the flat in first person, then leave with Esc', async ({ page }) => {
   const errors: string[] = [];

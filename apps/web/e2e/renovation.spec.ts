@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { expect, test } from './test';
 
 const WALL = '[data-hit="wall:w_bedroom_living-and-dining"]';
 

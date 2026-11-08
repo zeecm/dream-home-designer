@@ -50,6 +50,24 @@
           }
         }
       }
+    },
+    {
+      "include": ["apps/web/e2e/**"],
+      "ignore": ["apps/web/e2e/test.ts"],
+      "linter": {
+        "rules": {
+          "nursery": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@playwright/test": "Import from './test': its `test` closes the browser contexts a test opens, so none is left drawing for the rest of the run."
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

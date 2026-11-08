@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { expect, test } from './test';
 
 test('clearances: a wardrobe with room, then a chair in front of it; the count and switch', async ({
   page,

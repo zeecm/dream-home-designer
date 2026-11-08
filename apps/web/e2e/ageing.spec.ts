@@ -1,5 +1,5 @@
-import { type Locator, type Page, devices, expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { type Locator, type Page, devices, expect, test } from './test';
 
 // The older person (ageing parents) check, slice 1, on the sample flat: two bedrooms (Bath/WC 1
 // opens off the main bedroom), the main door at the living room's foot near its right-hand

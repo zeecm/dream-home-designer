@@ -1,5 +1,5 @@
-import { type Page, devices, expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { type Page, devices, expect, test } from './test';
 
 /** The sample's room on the plan (screen box). */
 async function roomBox(page: Page, id: string) {

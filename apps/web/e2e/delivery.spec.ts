@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { expect, test } from './test';
 
 test('my own sofa by its size: too big for the bedroom door, fine in the living room, kept', async ({
   page,

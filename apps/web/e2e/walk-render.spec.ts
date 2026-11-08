@@ -1,5 +1,5 @@
-import { type CDPSession, type Locator, type Page, devices, expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { type CDPSession, type Locator, type Page, devices, expect, test } from './test';
 
 // A phone (the iPhone's screen, touch and pixel ratio, in the Chromium the suite runs). No AI
 // key: the test stops at the dialog and calls nothing outside.

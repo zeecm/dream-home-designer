@@ -1,5 +1,5 @@
-import { type Page, expect, test } from '@playwright/test';
 import { newBlankPlan, waitSaved } from './helpers';
+import { type Page, expect, test } from './test';
 
 const WALL = '[data-hit="wall:w_bedroom_living-and-dining"]';
 

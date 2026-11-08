@@ -18,8 +18,8 @@ import {
   updateRoom,
   updateWall,
 } from '@dhd/core';
-import { type Page, type Request, devices, expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { type Page, type Request, devices, expect, test } from './test';
 
 /**
  * The exact render: the app path traces the 3D model on the device, so what it draws is the

@@ -1,5 +1,5 @@
-import { type Browser, type Page, devices, expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { type Browser, type Page, devices, expect, test } from './test';
 
 // The top bar fits every screen: on a phone each control is a whole 40 px target, none cut
 // off by the screen's edge; on a tablet or a laptop the page never scrolls sideways.

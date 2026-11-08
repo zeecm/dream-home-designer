@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { expect, test } from '@playwright/test';
 import { waitSaved } from './helpers';
+import { expect, test } from './test';
 
 // The Older person check is on hold (owner, 7 Nov 2026): without its flag nothing of it shows or
 // runs, even with a choice left in the browser, and clearance works as it did before it.
