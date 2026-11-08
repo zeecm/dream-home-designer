@@ -228,8 +228,15 @@ export const MOBILITY_CHOICES: { id: DesignBrief['household']['elders'][number];
     { id: 'wheelchair', label: 'Uses a wheelchair' },
   ];
 
-const budgetWords = (b: DesignBrief['budget']) =>
-  b ? `S$${Math.round(b.low / 1000)}–${Math.round(b.high / 1000)}k` : 'not set';
+/** "S$42.5k" (thousands, to one place where it isn't whole). */
+const thousands = (v: number) => `${Math.round(v / 100) / 10}`;
+/** A range ("S$30–50k"), or the one figure given ("S$40k"). */
+export const budgetWords = (b: DesignBrief['budget']) =>
+  !b
+    ? 'not set'
+    : b.low === b.high
+      ? `S$${thousands(b.high)}k`
+      : `S$${thousands(b.low)}–${thousands(b.high)}k`;
 
 /**
  * What to call a person when the household gave no name: "You", "Partner", "Parent", "Child"

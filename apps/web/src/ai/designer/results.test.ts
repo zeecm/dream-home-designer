@@ -103,13 +103,16 @@ const priceIn = (): Omit<PriceInput, 'designs'> => ({
  * The client with a fake worker: one that answers (its own module graph, by clones), fails
  * with an `error` or a `messageerror` when asked for a result, or never answers at all.
  */
-async function withWorker(how: 'answers' | 'error' | 'messageerror' | 'silent') {
+async function withWorker(
+  how: 'answers' | 'error' | 'messageerror' | 'silent' | 'price-fails-once',
+) {
   vi.resetModules();
   const side = await import('./resultsHandler');
   const posted: Ask[] = [];
   const heldAtPrice: Design[][] = [];
   let held: Design[] = [];
   let ended = false;
+  let priceFailed = false;
   class FakeWorker {
     onmessage: ((e: { data: Answer }) => void) | null = null;
     onerror: (() => void) | null = null;
@@ -120,7 +123,13 @@ async function withWorker(how: 'answers' | 'error' | 'messageerror' | 'silent') 
       if (sent.kind === 'designs') held = sent.designs;
       if (sent.kind === 'price') heldAtPrice.push(held);
       if (how === 'silent') return;
-      if (sent.kind === 'result' && how !== 'answers') {
+      if (how === 'price-fails-once' && sent.kind === 'price' && !priceFailed) {
+        priceFailed = true;
+        const no: Answer = { id: sent.id, ok: false, error: 'not this time' };
+        setTimeout(() => this.onmessage?.({ data: no }), 0);
+        return;
+      }
+      if (sent.kind === 'result' && how !== 'answers' && how !== 'price-fails-once') {
         setTimeout(() => (how === 'error' ? this.onerror : this.onmessageerror)?.(), 0);
         return;
       }
@@ -257,6 +266,26 @@ describe('designer results in a worker', () => {
       await vi.advanceTimersByTimeAsync(0);
       await expect(next).resolves.toBeTruthy();
       expect(counted().here).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a price that fails shows as still pricing, and is asked again (QA: no bare button)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { client, posted } = await withWorker('price-fails-once');
+      const input = priceIn();
+      expect(client.readPrice('k', () => input)).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(0);
+      // Failed: still a skeleton (pending), never a button with no price.
+      expect(client.readPrice('k', () => input)).toBeUndefined();
+      expect(posted.filter((m) => m.kind === 'price')).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(2100);
+      expect(client.readPrice('k', () => input)).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(posted.filter((m) => m.kind === 'price')).toHaveLength(2);
+      expect(client.readPrice('k', () => input)?.est).toBeTruthy();
     } finally {
       vi.useRealTimers();
     }

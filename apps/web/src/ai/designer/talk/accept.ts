@@ -1,6 +1,7 @@
 import {
   type Change,
   type Design,
+  type DesignResult,
   type HistoryEntry,
   type Level,
   type ResultCheck,
@@ -19,9 +20,17 @@ import { useEditor } from '../../../editor';
 import { useStore } from '../../../store';
 import { loadDesigns, useDesigner } from '../state';
 import { designStore } from '../storage';
-import { type CardModel, cardChanges, cardResult, cardResultNow, nowOf } from './cards';
+import {
+  type CardModel,
+  cardChanges,
+  cardResultNow,
+  nowOf,
+  precheckOn,
+  putBackMoves,
+} from './cards';
 import { focusInLog } from './scroll';
 import { talkStore } from './talkStore';
+import { lineTitle } from './titles';
 import { act, actProposal, newId, nowIso, say, useTalk } from './useTalk';
 
 /**
@@ -56,19 +65,39 @@ export function precheckAccept(
   card: CardModel,
   ticked: string[],
   waived: readonly string[],
-): { failing: ResultCheck[]; hdb: boolean } {
-  const project = useStore.getState().editor.doc;
-  const b = nowOf(project);
-  const r = cardResult(project, card);
-  if (!b || !r) return { failing: [], hdb: false };
-  const changes = cardChanges(project, card, r);
-  const merged = mergeChanges(b.now, r.level, changes, ticked);
-  const rep = subsetReport(b.now, b.before, r, merged, card.input.brief, {
-    rates: useRates.getState().rates,
-    waived: [...card.waivers.map((w) => w.key), ...waived],
-    renovation: !!project.renovation,
-  });
-  return { failing: rep.failing, hdb: rep.failing.some((c) => !c.waivable) };
+  r: DesignResult | null,
+): { failing: ResultCheck[]; hdb: boolean; missing: boolean } {
+  return precheckOn(
+    useStore.getState().editor.doc,
+    card,
+    ticked,
+    waived,
+    r,
+    useRates.getState().rates,
+  );
+}
+
+/** Why nothing was accepted when the card couldn't be checked on the plan as it is. */
+export const NOT_CHECKED =
+  'Couldn’t check these changes on your plan as it is, so nothing was accepted. Try again.';
+
+/**
+ * Accept selected's question first (the button): the ticked changes checked on the plan as it
+ * is, waited for, never read from a check still pending; refused, with a line, when there is
+ * no result to check them with.
+ */
+export async function precheckNow(
+  card: CardModel,
+  ticked: string[],
+  waived: readonly string[],
+): Promise<{ failing: ResultCheck[]; hdb: boolean } | null> {
+  const r = await cardResultNow(useStore.getState().editor.doc, card).catch(() => null);
+  const pre = precheckAccept(card, ticked, waived, r);
+  if (pre.missing) {
+    await nothing(NOT_CHECKED);
+    return null;
+  }
+  return pre;
 }
 
 /**
@@ -128,7 +157,8 @@ async function acceptOnce(
   if (!ok.length) return nothing('Already accepted in another tab.');
   const ids = ok.map((c) => c.id);
   // The waivers the accepted changes need: their own checks, or what they fail together.
-  const pre = precheckAccept(card, ids, []);
+  const pre = precheckAccept(card, ids, [], r);
+  if (pre.missing) return nothing(NOT_CHECKED);
   const needed = new Set([...ok.flatMap((c) => c.checks), ...pre.failing.map((c) => c.key)]);
   const waiving = waive.filter(
     (w, i, all) => needed.has(w.key) && all.findIndex((x) => x.key === w.key) === i,
@@ -197,6 +227,12 @@ async function acceptOnce(
         : p,
     );
   }
+  // V4, or V4B for an alternative: what the lines and decisions call it.
+  const title = lineTitle({
+    n,
+    letter: card.option?.letter ?? 'A',
+    proposalId: card.proposal?.id ?? '',
+  });
   // What was left out is a rejection the designer remembers (spec: Remembers), one line a time.
   if (left.length) {
     const names = left.map((c) => c.name);
@@ -207,8 +243,8 @@ async function acceptOnce(
       id: newId('dec'),
       at,
       kind: 'rejected',
-      text: cut(`Left out of V${n}: ${shown}${more}`, 160),
-      from: `V${n}`,
+      text: cut(`Left out of ${title}: ${shown}${more}`, 160),
+      from: title,
     });
   }
   for (const w of waiving) {
@@ -218,7 +254,7 @@ async function acceptOnce(
       at,
       kind: 'waiver',
       text: cut(`Waived: ${w.text}`, 160),
-      from: `V${n}`,
+      from: title,
     });
   }
   await act({
@@ -232,7 +268,7 @@ async function acceptOnce(
     total,
     left: left.map((c) => cut(c.name, TALK_LIMITS.left)).slice(0, 20),
   });
-  say(`Accepted ${plural(ids.length, 'change')} from V${n}. Undo is available.`);
+  say(`Accepted ${plural(ids.length, 'change')} from ${title}. Undo is available.`);
   return eventId;
 }
 
@@ -377,6 +413,107 @@ function focusWhenThere(selector: string, tries = 20) {
   else if (tries > 0) requestAnimationFrame(() => focusWhenThere(selector, tries - 1));
 }
 
+/**
+ * Put it back (criterion 28): its history step, the accept lines it took out (each then reads
+ * "Undone", its rows out of the renovation, so the cards offer them again) and the versions it
+ * took out (no longer "Accepted"), kept as they were for its Undo. In this tab only, as the
+ * history is.
+ */
+interface PutBack {
+  patches: HistoryEntry['patches'];
+  lines: string[];
+  versions: Map<string, Design['accepted']>;
+  /** Whether what it took out is out now (the step is in the plan). */
+  out: boolean;
+}
+const putBacks: PutBack[] = [];
+
+/** Takes the accepts out of the cards, lines and versions after a Put it back just done. */
+export async function rememberPutBack() {
+  const step = useStore.getState().editor.history.past.at(-1);
+  const conv = useTalk.getState().conv;
+  if (!step || !conv) return;
+  const lines = conv.turns.flatMap((t) =>
+    t.kind === 'event' && t.event.type === 'accepted' && !t.event.undone ? [t.id] : [],
+  );
+  const versions = new Map(
+    useDesigner
+      .getState()
+      .designs.filter((d) => d.accepted)
+      .map((d) => [d.id, d.accepted] as const),
+  );
+  // Applied by the sync, one change at a time with the accept lines' own.
+  putBacks.push({ patches: step.patches, lines, versions, out: false });
+  await syncLines();
+}
+
+async function applyPutBack(pb: PutBack, out: boolean) {
+  pb.out = out;
+  for (const id of pb.lines) {
+    const t = useTalk.getState().conv?.turns.find((x) => x.id === id);
+    if (t?.kind !== 'event' || t.event.type !== 'accepted') continue;
+    await act({ type: out ? 'undone' : 'redone', eventId: id });
+    await markRows(t, out);
+  }
+  const projectId = useStore.getState().editor.doc.id;
+  const s = await designStore();
+  const mine = await s.list(projectId);
+  for (const [id, accepted] of pb.versions) {
+    const d = mine.find((x) => x.id === id);
+    if (d) await s.put({ ...d, accepted: out ? null : accepted });
+  }
+  await loadDesigns(projectId);
+  say(
+    out
+      ? 'Your plan is back as it was before the designer.'
+      : 'The designer’s changes are back in your renovation.',
+  );
+}
+
+/** What an undone version had accepted, for its Redo (this tab only, as the history is). */
+const undoneVersions = new Map<string, Design['accepted']>();
+
+/**
+ * A version follows its accept lines (QA R3): once every line of it is undone it is no longer
+ * "Accepted" (in Versions, for the next request's hand edits), and a Redo makes it so again.
+ */
+async function followVersion(
+  e: { proposalId: string; letter: string },
+  out: boolean,
+): Promise<void> {
+  const p = useTalk.getState().proposals.find((x) => x.id === e.proposalId);
+  const o = p?.options.find((x) => x.letter === e.letter);
+  const id = o ? (o.version ?? o.designId) : e.proposalId;
+  const stillIn = (useTalk.getState().conv?.turns ?? []).some(
+    (t) =>
+      t.kind === 'event' &&
+      t.event.type === 'accepted' &&
+      t.event.proposalId === e.proposalId &&
+      t.event.letter === e.letter &&
+      !t.event.undone,
+  );
+  const projectId = useStore.getState().editor.doc.id;
+  const s = await designStore();
+  const d = (await s.list(projectId)).find((x) => x.id === id);
+  if (!d) return;
+  if (out && !stillIn && d.accepted) {
+    undoneVersions.set(id, d.accepted);
+    await s.put({ ...d, accepted: null });
+  } else if (!out && !d.accepted && undoneVersions.has(id)) {
+    await s.put({ ...d, accepted: undoneVersions.get(id) ?? null });
+    undoneVersions.delete(id);
+  } else return;
+  await loadDesigns(projectId);
+}
+
+/** A Put it back undone (or redone) by the toolbar or Ctrl+Z: what it took out follows. */
+async function syncPutBacks() {
+  const moves = putBackMoves(putBacks, useStore.getState().editor.history);
+  // A step trimmed from the history moved nowhere: what it took out stays as it is.
+  for (const pb of moves.gone) putBacks.splice(putBacks.indexOf(pb), 1);
+  for (const { item, out } of moves.apply) await applyPutBack(item, out);
+}
+
 // The toolbar's Undo and Redo (and Ctrl+Z) move a line's accept too: the line follows. A
 // change that arrives while the lines are being brought up to date runs the sync again.
 let syncing = false;
@@ -390,17 +527,20 @@ async function syncLines() {
   try {
     do {
       dirty = false;
+      await syncPutBacks();
       for (const t of useTalk.getState().conv?.turns ?? []) {
         if (t.kind !== 'event' || t.event.type !== 'accepted') continue;
         const st = lineState(t.id);
         if (st === 'redo' && !t.event.undone) {
           await act({ type: 'undone', eventId: t.id });
           await markRows(t, true);
-          say(`Undone: the changes from V${t.event.n} are out of your renovation.`);
+          await followVersion(t.event, true);
+          say(`Undone: the changes from ${lineTitle(t.event)} are out of your renovation.`);
         } else if (st === 'undo' && t.event.undone) {
           await act({ type: 'redone', eventId: t.id });
           await markRows(t, false);
-          say(`Redone: the changes from V${t.event.n} are back in your renovation.`);
+          await followVersion(t.event, false);
+          say(`Redone: the changes from ${lineTitle(t.event)} are back in your renovation.`);
         }
       }
     } while (dirty);

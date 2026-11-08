@@ -2,6 +2,7 @@ import {
   type Conversation,
   FIX_PER_RUN,
   type Level,
+  type Proposal,
   type QuestionKey,
   type ScopeRef,
   TALK_LIMITS,
@@ -9,6 +10,7 @@ import {
   type TurnOf,
   cut,
   meetingOver,
+  optionTitle,
   questionText,
   roomArea,
   sleepingConflict,
@@ -32,10 +34,11 @@ import { useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
 import { FactEditor } from './Facts';
 import { Mark, type MarkKind } from './Mark';
+import { ProposalTurn } from './Options';
 import { ProposalCard } from './ProposalCard';
 import { ReplyParts, ReplyText, SentState, Streaming } from './Talk';
 import { lineState, redoLine, undoLine } from './accept';
-import { type CardModel, designCard, optionCard } from './cards';
+import { type CardModel, designCard, earlierDesign, optionCard } from './cards';
 import { dayMark } from './days';
 import {
   answerCost,
@@ -47,6 +50,7 @@ import {
 } from './propose';
 import { toNewest } from './scroll';
 import { timed, useSettledProject } from './settle';
+import { lineTitle, versionTitle } from './titles';
 import { act, newId, nowIso, talkLevel, useBusy, useTalk } from './useTalk';
 
 /**
@@ -231,15 +235,17 @@ function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
         : [],
     [level],
   );
-  // Prices without the person's words (they add little), once per plan, brief and prices.
+  // Prices without the person's words (they add little), once per plan, brief, versions (an
+  // accept or its Undo changes what a press would do) and prices.
   const tick = useResultsTickN();
+  const designs = useDesigner((s) => s.designs);
   // biome-ignore lint/correctness/useExhaustiveDependencies: on what the prices read
   const priced = useMemo(
     () =>
       latest && ai
         ? timed(() => scopes.map((s) => ({ s, ...pressPriceState(scopeRequest(s)) })))
         : [],
-    [latest, ai, scopes, conv.brief, prices, project, tick],
+    [latest, ai, scopes, conv.brief, prices, project, tick, designs],
   );
   const conflict = level ? sleepingConflict(conv.brief, level) : null;
   const cant = ai && designerCannotUse(ai);
@@ -433,6 +439,13 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
 
 function Event({ t }: { t: TurnOf<'event'> }) {
   const e = t.event;
+  // Read again as the proposal gains options (V4 becomes V4A).
+  useTalk((s) =>
+    e.type === 'accepted'
+      ? (s.proposals.find((p) => p.id === e.proposalId)?.options.length ?? 1)
+      : 1,
+  );
+  const v = e.type === 'accepted' ? lineTitle(e) : '';
   // The history moves under the line: its Undo or Redo shows only while it applies.
   const history = useStore((s) => s.editor.history);
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again as the history moves
@@ -443,12 +456,12 @@ function Event({ t }: { t: TurnOf<'event'> }) {
     const n = e.changes.length;
     if (e.undone) {
       icon = 'undo';
-      text = `Undone: the ${plural(n, 'change')} from V${e.n} ${n === 1 ? 'is' : 'are'} out of your renovation.`;
+      text = `Undone: the ${plural(n, 'change')} from ${v} ${n === 1 ? 'is' : 'are'} out of your renovation.`;
     } else {
       text =
         n >= e.total
-          ? `You accepted ${plural(n, 'change')} from V${e.n}.`
-          : `You accepted ${n} of ${e.total} changes from V${e.n}.${e.left.length ? ` Left out: ${e.left.slice(0, 3).join(', ')}${e.left.length > 3 ? ` and ${e.left.length - 3} more` : ''}.` : ''}`;
+          ? `You accepted ${plural(n, 'change')} from ${v}.`
+          : `You accepted ${n} of ${e.total} changes from ${v}.${e.left.length ? ` Left out: ${e.left.slice(0, 3).join(', ')}${e.left.length > 3 ? ` and ${e.left.length - 3} more` : ''}.` : ''}`;
     }
   } else if (e.type === 'stopped') {
     icon = 'stop';
@@ -497,9 +510,24 @@ function Event({ t }: { t: TurnOf<'event'> }) {
   );
 }
 
+const cardModels = new WeakMap<Proposal, CardModel[]>();
+/** A proposal's cards, made once per version of its record. */
+function cardsOf(p: Proposal): CardModel[] {
+  let cs = cardModels.get(p);
+  if (!cs) {
+    cs = p.options.map((o) => optionCard(p, o));
+    cardModels.set(p, cs);
+  }
+  return cs;
+}
+
 /** v1's versions, folded at the top of the log ("Earlier designs (3)"). */
 function Earlier({ cards }: { cards: CardModel[] }) {
   const [open, setOpen] = useState(false);
+  const shownHere = useTalk((s) => cards.some((c) => c.key === s.shown));
+  useEffect(() => {
+    if (shownHere) setOpen(true);
+  }, [shownHere]);
   if (!cards.length) return null;
   return (
     <li className="talk-earlier">
@@ -516,7 +544,7 @@ function Earlier({ cards }: { cards: CardModel[] }) {
           {cards.map((c) => (
             <li key={c.key}>
               <p className="talk-earlier-from muted">
-                From the form,{' '}
+                {c.design?.from ? 'From an earlier conversation' : 'From the form'},{' '}
                 {new Date(c.at).toLocaleDateString('en-SG', { day: 'numeric', month: 'short' })}
               </p>
               <ProposalCard card={c} newest={false} live={null} />
@@ -536,17 +564,17 @@ export function Log() {
   const list = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const [behind, setBehind] = useState(false);
-  const earlier = useMemo(() => designs.filter((d) => !d.from).map(designCard), [designs]);
-  const byId = useMemo(() => new Map(proposals.map((p) => [p.id, p])), [proposals]);
-  // One card model per proposal while it is unchanged (cards are memoised on it).
-  const cards = useMemo(
+  const convId = conv?.id ?? null;
+  const earlier = useMemo(
     () =>
-      new Map(
-        proposals.flatMap((p) => {
-          const o = p.options[0];
-          return o ? [[p.id, optionCard(p, o)] as const] : [];
-        }),
-      ),
+      designs.filter((d) => earlierDesign(d, convId)).map((d) => designCard(d, versionTitle(d))),
+    [designs, convId],
+  );
+  const byId = useMemo(() => new Map(proposals.map((p) => [p.id, p])), [proposals]);
+  // One card model per option while its proposal is unchanged: a write to one proposal
+  // re-renders its card only (cards are memoised on their models; QA P4-6).
+  const cards = useMemo(
+    () => new Map(proposals.map((p) => [p.id, cardsOf(p)] as const)),
     [proposals],
   );
   const newestProposal = useMemo(() => {
@@ -644,11 +672,12 @@ export function Log() {
             else if (t.kind === 'event') body = <Event t={t} />;
             else if (t.kind === 'proposal') {
               const p = byId.get(t.proposalId);
-              const c = cards.get(t.proposalId);
+              const cs = cards.get(t.proposalId);
               body =
-                p && c ? (
-                  <ProposalCard
-                    card={c}
+                p && cs?.length ? (
+                  <ProposalTurn
+                    proposal={p}
+                    cards={cs}
                     newest={t.id === newestProposal}
                     live={live && live.proposalId === p.id ? live : null}
                   />

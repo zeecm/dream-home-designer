@@ -53,7 +53,14 @@ export {
   dependsOnWalls,
   mergeDesign,
 } from './accept';
-export { bathroomsHeld, handEdits, heldAspects, lockCovers, wallsHeld } from './handEdits';
+export {
+  bathroomsHeld,
+  handEditCount,
+  handEdits,
+  heldAspects,
+  lockCovers,
+  wallsHeld,
+} from './handEdits';
 export {
   type Hit,
   type PlaceOutcome,

@@ -48,7 +48,7 @@ export interface LiveReply {
   ctrl: AbortController;
 }
 
-export type TalkView = 'log' | 'know' | 'decisions';
+export type TalkView = 'log' | 'know' | 'decisions' | 'versions';
 
 interface TalkState {
   projectId: string | null;

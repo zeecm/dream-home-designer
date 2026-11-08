@@ -21,6 +21,7 @@ import {
   eventsSince,
   handEdits,
   lastAccepted,
+  optionTitle,
   pendingReply,
   priceOf,
   probeLines,
@@ -113,7 +114,9 @@ async function onTable(conv: Conversation): Promise<string[]> {
     const t = conv.turns[i];
     if (t?.kind !== 'proposal') continue;
     const p = proposals.find((x) => x.id === t.proposalId);
-    const o = p?.options[0];
+    // The option on the plan, if it is this proposal's; else its newest.
+    const shown = useTalk.getState().shown;
+    const o = p?.options.find((x) => shown === `${p.id}:${x.letter}`) ?? p?.options.at(-1);
     if (!p || !o || o.status === 'running' || o.status === 'failed') return [];
     try {
       const card = optionCard(p, o);
@@ -127,7 +130,12 @@ async function onTable(conv: Conversation): Promise<string[]> {
         o.waivers.map((w) => w.key),
       );
       const failing = r.checks.filter((c) => v.failing.includes(c.key)).map((c) => c.text);
-      return tableLines(`V${p.n} · ${p.scope.label}: ${v.text}`, changes, ticks, failing);
+      return tableLines(
+        `${optionTitle(p.n, o.letter, p.options.length)} · ${p.scope.label}: ${v.text}`,
+        changes,
+        ticks,
+        failing,
+      );
     } catch {
       return [];
     }
@@ -139,11 +147,12 @@ async function onTable(conv: Conversation): Promise<string[]> {
 function digests(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const p of useTalk.getState().proposals) {
-    const o = p.options[0];
-    if (!o) continue;
-    const accepted = o.accepted.filter((a) => !a.out).length;
-    out[p.id] =
-      `V${p.n} (${p.scope.label}): ${o.status === 'failed' ? 'didn’t finish' : o.status === 'stopped' ? 'stopped part-way' : 'designed'}${accepted ? `, ${accepted} changes accepted` : ''}.`;
+    // One line, each option said in it (V4A … ; V4B …).
+    const each = p.options.map((o) => {
+      const accepted = o.accepted.filter((a) => !a.out).length;
+      return `${optionTitle(p.n, o.letter, p.options.length)} (${p.scope.label}): ${o.status === 'failed' ? 'didn’t finish' : o.status === 'stopped' ? 'stopped part-way' : 'designed'}${accepted ? `, ${accepted} changes accepted` : ''}`;
+    });
+    if (each.length) out[p.id] = `${each.join('; ')}.`;
   }
   return out;
 }

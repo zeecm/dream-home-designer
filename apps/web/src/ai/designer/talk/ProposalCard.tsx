@@ -10,7 +10,7 @@ import {
   subsetReport,
   usageTotals,
 } from '@dhd/core';
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useRates } from '../../../cost/estimate';
 import { useEditor } from '../../../editor';
 import { warningsOf } from '../../../electrical/electrical';
@@ -24,7 +24,7 @@ import { openCompare, useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
 import { keepTogether } from '../words';
 import { Mark } from './Mark';
-import { acceptCard, precheckAccept } from './accept';
+import { acceptCard, precheckNow } from './accept';
 import {
   type CardModel,
   cardChanges,
@@ -34,7 +34,15 @@ import {
   nowOf,
   planMoved,
 } from './cards';
-import { finishPrice, finishRooms, pressScope, scopePrice } from './propose';
+import { bringBackCard } from './iterate';
+import {
+  anotherPrice,
+  finishPrice,
+  finishRooms,
+  pressAnother,
+  pressScope,
+  scopePrice,
+} from './propose';
 import { focusInLog, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { type LiveRun, actProposal, useBusy, useTalk } from './useTalk';
@@ -160,12 +168,34 @@ interface Props {
   /** The newest card: open; older ones fold to one line. */
   newest: boolean;
   live: LiveRun | null;
+  /** Alternatives A / B / C: the segmented control over the card's body. */
+  tabs?: ReactNode;
+  /** A sideways swipe on the change list (phone): the next or previous option. */
+  onSwipe?: (dir: 1 | -1) => void;
 }
 
 /** What a folded card last said of itself (its checks need the plan worked out again). */
-const verdicts = new Map<string, string>();
+const verdicts = new Map<string, { text: string; total: number }>();
 
-export const ProposalCard = memo(function ProposalCard({ card, newest, live }: Props) {
+/**
+ * A folded card's line: its checks as last worked out, and what is in the renovation as the
+ * record says now (an Undo or a Put it back since takes rows out; QA R2).
+ */
+function foldedLine(card: CardModel): string {
+  const said = verdicts.get(card.key);
+  const inNow = card.accepted.filter((a) => !a.out).length;
+  if (!said) return inNow ? ` · Accepted ${inNow}` : '';
+  if (inNow && inNow >= said.total) return ' · In your renovation';
+  return ` · ${said.text}${inNow ? ` · Accepted ${inNow} of ${said.total}` : ''}`;
+}
+
+export const ProposalCard = memo(function ProposalCard({
+  card,
+  newest,
+  live,
+  tabs,
+  onSwipe,
+}: Props) {
   // The plan once edits pause: a drag never works a card out again frame by frame.
   const project = useSettledProject();
   const { prices } = useSpend();
@@ -183,8 +213,13 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
   const comparable = useDesigner((s) => !!versionId && s.designs.some((d) => d.id === versionId));
   const running = card.status === 'running';
   const [expanded, setExpanded] = useState(newest);
+  // The newest card opens; once a newer one comes it folds to its line (opened again by a
+  // tap), so a long conversation works out one or two cards, not every one (QA P4-6).
+  const wasNewest = useRef(newest);
   useEffect(() => {
     if (newest) setExpanded(true);
+    else if (wasNewest.current) setExpanded(false);
+    wasNewest.current = newest;
   }, [newest]);
   // Worked out only while it is open or on the plan; folded, it shows what it said last.
   const active = expanded || shown;
@@ -236,14 +271,23 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
   const accepted = card.accepted.filter((a) => !a.out);
   const allIn = !running && changes.length === 0 && accepted.length > 0;
   const acceptBtn = useRef<HTMLButtonElement>(null);
-  // Another idea's price: once per plan (settled), scope and prices; never per keystroke.
-  const scope = card.proposal?.scope;
+  // Another idea's price: once per plan (settled), scope, versions and prices; never per
+  // keystroke.
+  const proposal = card.proposal;
+  const designs = useDesigner((s) => s.designs);
   // biome-ignore lint/correctness/useExhaustiveDependencies: on what the price reads
   const another = useMemo(
     () =>
-      !running && scope && ai && !designerCannotUse(ai) ? timed(() => scopePrice(scope)) : null,
-    [running, scope, ai, project, prices, tick],
+      // Priced only while the card is open: a folded card shows no button to price.
+      expanded && !running && proposal && ai && !designerCannotUse(ai)
+        ? timed(() =>
+            card.status === 'failed' ? scopePrice(proposal.scope) : anotherPrice(proposal),
+          )
+        : null,
+    [expanded, running, proposal, ai, project, prices, tick, card.status, designs],
   );
+  // A sideways swipe of at least 60 px on the change list; a mostly vertical one scrolls.
+  const swipe = useRef<{ x: number; y: number } | null>(null);
   const rowsRef = useRef<HTMLDivElement>(null);
 
   const setTicked = (next: string[]) => {
@@ -284,7 +328,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
     const b = nowOf(project);
     useProposalView.setState({
       card: card.key,
-      label: `V${card.n}`,
+      label: card.title,
       now: b?.now ?? null,
       target: r.level,
       merged: running ? (b?.now ?? null) : merged,
@@ -296,7 +340,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
         .filter((s) => s.storedKey && ['done', 'copied'].includes(s.status))
         .flatMap((s) => s.rooms),
     });
-  }, [shown, r, merged, changes, ticked, failingItems, running, card.key, card.n, project]);
+  }, [shown, r, merged, changes, ticked, failingItems, running, card.key, card.title, project]);
   useEffect(
     () => () => {
       if (useProposalView.getState().card === card.key) useProposalView.setState(EMPTY_VIEW);
@@ -321,12 +365,11 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
           ),
         );
       } else {
-        useStore.setState({ toast: { text: `Not changed in V${card.n}`, at: Date.now() } });
+        useStore.setState({ toast: { text: `Not changed in ${card.title}`, at: Date.now() } });
       }
     });
-  }, [shown, changes, card.key, card.n]);
+  }, [shown, changes, card.key, card.title]);
 
-  const accepted0 = card.accepted.filter((a) => !a.out).length;
   if (!expanded && !r) {
     // Folded and not on the plan: what it said last (nothing is worked out for it).
     return (
@@ -339,9 +382,8 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
           onClick={() => setExpanded(true)}
         >
           <span>
-            V{card.n} · {headLabel(project, card)}
-            {verdicts.get(card.key) ? ` · ${verdicts.get(card.key)}` : ''}
-            {accepted0 && !verdicts.has(card.key) ? ` · Accepted ${accepted0}` : ''}
+            {card.title} · {headLabel(project, card)}
+            {foldedLine(card)}
           </span>
           <span className="talk-fold-show" aria-hidden="true">
             Show ›
@@ -355,7 +397,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
     return (
       <article className="talk-card" data-card={card.key} aria-labelledby={`card-${card.key}`}>
         <h3 className="talk-card-title" id={`card-${card.key}`}>
-          V{card.n} · {headLabel(project, card)}
+          {card.title} · {headLabel(project, card)}
         </h3>
         <p className="talk-card-note muted" aria-busy="true">
           Checking it on your plan…
@@ -413,14 +455,14 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
   const head = (
     <div className="talk-card-head">
       <h3 className="talk-card-title" id={`card-${card.key}`}>
-        V{card.n} · {headLabel(project, card)}
+        {card.title} · {headLabel(project, card)}
       </h3>
       {card.status !== 'failed' && (
         <button
           type="button"
           className={onPlan ? 'btn btn-small talk-onplan on' : 'btn btn-small talk-onplan'}
           aria-pressed={onPlan}
-          aria-label={`Show V${card.n} on the plan`}
+          aria-label={`Show ${card.title} on the plan`}
           onClick={() => {
             // Pressed only while the plan really shows it (Esc or a walk may have ended it).
             if (onPlan) {
@@ -438,11 +480,8 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
     </div>
   );
 
-  // What the folded line will say.
-  const acc = accepted.length
-    ? ` · Accepted ${accepted.length} of ${accepted.length + changes.length}`
-    : '';
-  verdicts.set(card.key, `${allIn ? 'In your renovation' : verdict}${acc}`);
+  // What the folded line will say (with what is in the renovation then, as the record has it).
+  verdicts.set(card.key, { text: verdict, total: accepted.length + changes.length });
   if (!expanded) {
     return (
       <article className="talk-card talk-card-folded" aria-labelledby={`card-${card.key}`}>
@@ -454,8 +493,8 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
           onClick={() => setExpanded(true)}
         >
           <span>
-            V{card.n} · {headLabel(project, card)} · {allIn ? 'In your renovation' : verdict}
-            {acc}
+            {card.title} · {headLabel(project, card)}
+            {foldedLine(card)}
           </span>
           <span className="talk-fold-show" aria-hidden="true">
             Show ›
@@ -468,8 +507,14 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
   const tickedN = ticked.length;
   const progress = live?.state.steps ?? [];
   return (
-    <article className="talk-card" aria-labelledby={`card-${card.key}`} data-card={card.key}>
+    <article
+      className="talk-card"
+      aria-labelledby={`card-${card.key}`}
+      data-card={card.key}
+      id={`panel-${card.key}`}
+    >
       {head}
+      {tabs}
       {title && <p className="talk-card-summary">{keepTogether(title)}</p>}
       {card.words.trim() && <p className="talk-card-words">Your words: “{card.words.trim()}”</p>}
       {planMoved(project, card) && !card.accepted.length && (
@@ -585,7 +630,25 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
         </div>
       )}
       {(changes.length > 0 || accepted.length > 0) && (
-        <div className="talk-changes" ref={rowsRef}>
+        <div
+          className="talk-changes"
+          ref={rowsRef}
+          onPointerDown={(e) => {
+            if (onSwipe && e.pointerType !== 'mouse')
+              swipe.current = { x: e.clientX, y: e.clientY };
+          }}
+          onPointerUp={(e) => {
+            const s0 = swipe.current;
+            swipe.current = null;
+            if (!s0 || !onSwipe) return;
+            const dx = e.clientX - s0.x;
+            const dy = e.clientY - s0.y;
+            if (Math.abs(dx) >= 60 && Math.abs(dx) > Math.abs(dy) * 1.5) onSwipe(dx < 0 ? 1 : -1);
+          }}
+          onPointerCancel={() => {
+            swipe.current = null;
+          }}
+        >
           <div className="talk-changes-head">
             <h4>Changes</h4>
             <span className="muted num">
@@ -705,7 +768,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
                             </p>
                           )}
                           {blocked && (
-                            <p className="talk-row-sub">Needs the walls from V{card.n}</p>
+                            <p className="talk-row-sub">Needs the walls from {card.title}</p>
                           )}
                           {fail.length > 0 && !c.waivable && (
                             <p className="talk-row-sub negative">
@@ -859,16 +922,18 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
             onClick={() => {
               // Worked out now, never from a check still pending: what the ticked changes fail
               // together is asked about first, and an HDB rule refused.
-              const pre = precheckAccept(
+              void precheckNow(
                 card,
                 ticked,
                 waive.map((w) => w.key),
-              );
-              if (pre.failing.length) {
-                setAsking({ checks: pre.failing, hdb: pre.hdb });
-                return;
-              }
-              void accept(waive);
+              ).then((pre) => {
+                if (!pre) return;
+                if (pre.failing.length) {
+                  setAsking({ checks: pre.failing, hdb: pre.hdb });
+                  return;
+                }
+                void accept(waive);
+              });
             }}
           >
             Accept selected ({tickedN})
@@ -973,7 +1038,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
                     onClick={() => {
                       setMore(false);
                       const text = [
-                        `V${card.n} · ${card.label}`,
+                        `${card.title} · ${card.label}`,
                         ...changes.map((c) => `- ${c.text}`),
                       ].join('\n');
                       void navigator.clipboard?.writeText(text).then(
@@ -991,13 +1056,24 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
               )}
             </span>
           </span>
+          {!newest && card.status !== 'failed' && (
+            <button
+              type="button"
+              className="link-btn"
+              data-bring-back=""
+              disabled={busy}
+              onClick={() => void bringBackCard(card)}
+            >
+              Bring this back
+            </button>
+          )}
           {card.proposal && another && card.status !== 'failed' && (
             <button
               type="button"
               className="link-btn"
               disabled={busy}
               data-spends=""
-              onClick={() => card.proposal && void pressScope(card.proposal.scope)}
+              onClick={() => card.proposal && void pressAnother(card.proposal)}
             >
               Another idea{another.usd ? ` · about ${usd(another.usd.typical)}` : ''}
             </button>
@@ -1013,6 +1089,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
           d={card.design}
           r={r}
           model={card.usage[0]?.model ?? null}
+          title={card.title}
           onClose={() => setWrong(false)}
         />
       )}
@@ -1039,6 +1116,7 @@ export const ProposalCard = memo(function ProposalCard({ card, newest, live }: P
           }}
           r={r}
           model={card.usage[0]?.model ?? null}
+          title={card.title}
           onClose={() => setWrong(false)}
         />
       )}

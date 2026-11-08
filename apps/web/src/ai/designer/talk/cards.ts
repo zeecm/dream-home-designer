@@ -7,9 +7,14 @@ import {
   type Project,
   type Proposal,
   type ProposalOption,
+  type Rates,
+  type ResultCheck,
   type Usage,
   changeSet,
   levelFingerprint,
+  mergeChanges,
+  optionTitle,
+  subsetReport,
 } from '@dhd/core';
 import { readResult, requestResult } from '../results';
 import { designOpts } from '../state';
@@ -23,6 +28,8 @@ export interface CardModel {
   key: string;
   kind: 'proposal' | 'design';
   n: number;
+  /** "V4", or "V4B" for an alternative. */
+  title: string;
   /** "Living and dining", "Whole flat". */
   label: string;
   input: DesignInput;
@@ -43,12 +50,28 @@ export interface CardModel {
 
 export const cardKey = (p: Proposal, letter: string) => `${p.id}:${letter}`;
 
+/**
+ * The card a version shows as: its proposal's option in this conversation, else its own
+ * (v1's form, or a conversation since started over: under Earlier designs).
+ */
+export const versionKey = (d: Design, conversationId: string | null) =>
+  d.from && d.from.conversationId === conversationId
+    ? `${d.from.proposalId}:${d.from.letter}`
+    : `d:${d.id}`;
+
+/** Versions shown under Earlier designs: v1's, and those of a conversation started over. */
+export const earlierDesign = (d: Design, conversationId: string | null) =>
+  !d.from || d.from.conversationId !== conversationId;
+
 export function optionCard(p: Proposal, o: ProposalOption): CardModel {
   return {
     key: cardKey(p, o.letter),
     kind: 'proposal',
     n: p.n,
-    label: p.scope.all ? 'Whole flat' : p.scope.label,
+    title: optionTitle(p.n, o.letter, p.options.length),
+    // With alternatives, each is named by its own idea (the title says it on a phone, where
+    // the segments show only letters).
+    label: p.options.length > 1 ? o.name : p.scope.all ? 'Whole flat' : p.scope.label,
     input: {
       id: o.designId,
       brief: o.brief,
@@ -72,7 +95,7 @@ export function optionCard(p: Proposal, o: ProposalOption): CardModel {
 }
 
 /** A version v1's form made, as a card (its accepts happened in v1's Accept dialog). */
-export function designCard(d: Design): CardModel {
+export function designCard(d: Design, title = `V${d.n}`): CardModel {
   const stopped = Object.values(d.spaces).some(
     (s) => s.status === 'cancelled' || s.status === 'skipped',
   );
@@ -80,6 +103,7 @@ export function designCard(d: Design): CardModel {
     key: `d:${d.id}`,
     kind: 'design',
     n: d.n,
+    title,
     label: d.concept?.name ?? d.name,
     input: d,
     usage: d.usage,
@@ -185,6 +209,52 @@ export function cardVerdict(
     };
   if (w.size) return { failing, waived: w.size, text: `${w.size} accepted anyway`, tone: 'waived' };
   return { failing, waived: 0, text: 'Passes all checks', tone: 'pass' };
+}
+
+/**
+ * What accepting the ticked changes would leave failing, on `project` as it is, worked out from
+ * `r` (the card's result, waited for): the hard checks those changes cause together, less the
+ * ones accepted anyway, and whether any is an HDB rule. With no result it fails closed:
+ * `missing`, and the accept is refused (never "nothing fails" from a check still pending).
+ */
+export function precheckOn(
+  project: Project,
+  card: CardModel,
+  ticked: string[],
+  waived: readonly string[],
+  r: DesignResult | null,
+  rates: Rates,
+): { failing: ResultCheck[]; hdb: boolean; missing: boolean } {
+  const b = nowOf(project);
+  if (!b || !r) return { failing: [], hdb: false, missing: true };
+  const changes = cardChanges(project, card, r);
+  const merged = mergeChanges(b.now, r.level, changes, ticked);
+  const rep = subsetReport(b.now, b.before, r, merged, card.input.brief, {
+    rates,
+    waived: [...card.waivers.map((w) => w.key), ...waived],
+    renovation: !!project.renovation,
+  });
+  return { failing: rep.failing, hdb: rep.failing.some((c) => !c.waivable), missing: false };
+}
+
+/**
+ * Put it back's step against the plan's history: out while it is in `past`, back in while it is
+ * in `future`, and gone once trimmed from both (the history keeps 200 steps): then what it took
+ * out stays as it is, and it is no longer followed.
+ */
+export function putBackMoves<T extends { patches: unknown; out: boolean }>(
+  items: readonly T[],
+  history: { past: readonly { patches: unknown }[]; future: readonly { patches: unknown }[] },
+): { apply: { item: T; out: boolean }[]; gone: T[] } {
+  const apply: { item: T; out: boolean }[] = [];
+  const gone: T[] = [];
+  for (const item of items) {
+    const inPast = history.past.some((e) => e.patches === item.patches);
+    const inFuture = !inPast && history.future.some((e) => e.patches === item.patches);
+    if (!inPast && !inFuture) gone.push(item);
+    else if (inPast !== item.out) apply.push({ item, out: inPast });
+  }
+  return { apply, gone };
 }
 
 /** Whether the plan the card would go on has changed since it was made. */
