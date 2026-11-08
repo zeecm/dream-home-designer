@@ -189,6 +189,12 @@ function place(box: Box, size: Size, h: number): React.CSSProperties {
   return { left: best.left, top: best.top, width: w, maxHeight: size.height - 2 * M };
 }
 
+/** Whether a pointer event on a dialog is outside its box (on its backdrop). */
+function outsideOf(e: React.MouseEvent<HTMLElement>): boolean {
+  const r = e.currentTarget.getBoundingClientRect();
+  return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+}
+
 /** The target's extent on the screen: a piece's footprint, else a small box round its spot. */
 function boxOf(level: Level, t: Target, view: View, size: Size): Box {
   const it = t.kind === 'item' && t.id ? level.items[t.id] : undefined;
@@ -277,6 +283,7 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
   // Opened from the keyboard or a context click: the first row has the focus, and it goes back
   // where it was on close.
   const back = useRef<Element | null>(null);
+  const onBackdrop = useRef(false);
   // biome-ignore lint/correctness/useExhaustiveDependencies: on a new target
   useEffect(() => {
     if (!box || !target || !(focusFirst || sheets)) return;
@@ -451,7 +458,9 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
     target.kind === 'wall'
       ? 'Another idea for this wall'
       : target.kind === 'opening'
-        ? 'Another door here'
+        ? level.openings[target.id ?? '']?.kind === 'window'
+          ? 'Another window here'
+          : 'Another door here'
         : target.kind === 'room'
           ? `Redesign ${room}`
           : 'Something else here';
@@ -508,13 +517,22 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
   // Off the stage (panned away): not drawn, back when it is in sight again.
   const offStage = tbox.x1 < 0 || tbox.y1 < 0 || tbox.x0 > size.width || tbox.y0 > size.height;
   if (!sheets && offStage) return null;
-  // A phone on its side: the sheet takes the half away from what was tapped.
-  const side =
-    sheets && size.width > size.height && (tbox.x0 + tbox.x1) / 2 < size.width / 2
-      ? 'talk-pop-sheet talk-pop-right'
-      : 'talk-pop-sheet';
+  // A phone on its side: the sheet (min(420 px, 60vw), at the left or the right of the screen)
+  // takes the side that covers less of what was tapped, its whole footprint and a margin.
+  let side = 'talk-pop-sheet';
+  if (sheets && size.width > size.height && typeof window !== 'undefined') {
+    const vw = window.innerWidth;
+    const sheetW = Math.min(420, vw * 0.6);
+    const ox = box?.parentElement?.getBoundingClientRect().left ?? 0;
+    const a = ox + tbox.x0 - 16;
+    const b = ox + tbox.x1 + 16;
+    const onLeft = Math.max(0, Math.min(b, sheetW) - Math.max(a, 0));
+    const onRight = Math.max(0, Math.min(b, vw) - Math.max(a, vw - sheetW));
+    if (onRight < onLeft) side = 'talk-pop-sheet talk-pop-right';
+  }
   const style = sheets ? undefined : place(tbox, size, h);
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: the backdrop tap; Esc closes it (onCancel)
     <dialog
       // A new element when it changes between floating and the sheet (modal is set on open).
       key={sheets ? 'sheet' : 'float'}
@@ -528,6 +546,17 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
         // Esc on the sheet: closed the app's way (the target let go), not only the element.
         e.preventDefault();
         closePopover();
+      }}
+      onPointerDown={(e) => {
+        // A press that starts on the backdrop (outside the sheet): its tap closes it. The tap
+        // that opened the sheet began on the plan, so its click never does.
+        onBackdrop.current = sheets && e.target === e.currentTarget && outsideOf(e);
+      }}
+      onClick={(e) => {
+        // A tap on the sheet's backdrop closes it (UX §2.1); Esc is onCancel.
+        const close = onBackdrop.current && e.target === e.currentTarget && outsideOf(e);
+        onBackdrop.current = false;
+        if (close) closePopover();
       }}
     >
       <div className="talk-pop-head">
@@ -549,7 +578,26 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
         {rowsOf(paid)}
         {locked && <p className="talk-pop-note">{locked}</p>}
       </fieldset>
-      {cantPay && <p className="talk-pop-foot field-hint">{cantPay}</p>}
+      {cantPay && (
+        <p className="talk-pop-foot field-hint">
+          {cantPay}
+          {!ai && (
+            <>
+              {' '}
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => {
+                  closePopover();
+                  useTalk.setState({ settings: 'key' });
+                }}
+              >
+                AI settings
+              </button>
+            </>
+          )}
+        </p>
+      )}
     </dialog>
   );
 }

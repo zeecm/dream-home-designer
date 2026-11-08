@@ -55,7 +55,7 @@ function Chip({
   useTalk((s) => s.proposals);
   const gone = pointerGone(p);
   const ring = usePointerUi((s) => s.ring === p.id);
-  const full = `${text}${gone ? ' (gone)' : ''}`;
+  const full = `${p.full ?? text}${gone ? ' (gone)' : ''}`;
   return (
     <li
       className={`talk-pchip${gone ? ' gone' : ''}${ring ? ' ring' : ''}`}

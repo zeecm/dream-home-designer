@@ -1,7 +1,7 @@
-import { z } from 'zod';
 import { furnitureKind, newItem } from '../../furniture';
 import type { Item, Level } from '../../schema';
 import { nameOf } from '../place';
+import type { Kept } from '../schema';
 
 /**
  * Kept pieces (slice 3a, Keep this): a piece the household wants left where it is. A plan
@@ -16,28 +16,8 @@ export const MAX_KEPT = 30;
 export const KEPT_GAP = 0.05;
 export const KEPT_ANGLE = (3 * Math.PI) / 180;
 
-export const Kept = z.object({
-  id: z.string(),
-  /** A plan piece's id; null for a piece only in a proposal (kept by kind and pose). */
-  itemId: z.string().nullable(),
-  assetId: z.string(),
-  /** Where it is: plan x, y (metres) and its turn (radians). */
-  pose: z.object({ x: z.number(), y: z.number(), rot: z.number() }),
-  /** Its size as kept (scale), so it is placed again the same. */
-  scale: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional(),
-  /** "plan", or the version it was kept from ("V4"). */
-  from: z.string().max(12),
-  levelId: z.string(),
-  at: z.string(),
-  /**
-   * What the brief said of a plan piece before it was kept ('bring', or 'in-place' the person
-   * chose themselves): put back when it is let go, never simply deleted. Set by the reducer.
-   */
-  prior: z.enum(['bring', 'in-place']).nullable().optional(),
-  /** When it was let go (Let the designer move it): in `keptGone` only. */
-  until: z.string().optional(),
-});
-export type Kept = z.infer<typeof Kept>;
+// The record (in the designer's schema, which versions use too, without an import cycle).
+export { Kept } from '../schema';
 
 const turnDiff = (a: number, b: number) => {
   const d = Math.abs(a - b) % (2 * Math.PI);

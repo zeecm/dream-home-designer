@@ -1893,6 +1893,12 @@ test.describe('iterating (slice 2, PR 3)', () => {
       if (i === 1) await go.click();
       const v = card(page, i);
       const accept = v.getByRole('button', { name: /^Accept selected/ });
+      // After the first, a press goes ahead at the figure its button showed: a cost card
+      // instead is a failure, said as such (not a timeout on the card).
+      if (i > 1) {
+        await expect(v.or(go).first()).toBeVisible({ timeout: 30_000 });
+        if (await go.isVisible()) throw new Error(`press became a cost card in round ${i}`);
+      }
       await expect(accept).toBeEnabled({ timeout: 30_000 });
       await accept.click();
       const line = log(page)
@@ -2446,6 +2452,22 @@ test.describe('pointing at the plan (slice 3a, PR B)', () => {
     await expect(page.getByText('Previewing V1, not in your plan yet')).toBeHidden();
     const piece = page.locator('[data-hit^="item:"]').first();
     const hit = await piece.getAttribute('data-hit');
+    // Ask the designer on an accepted piece, the designer closed: about your plan (N-M1), no
+    // version put back on the plan.
+    await panel(page).getByRole('button', { name: 'Close the designer' }).click();
+    await piece.click({ force: true });
+    await page.getByRole('button', { name: 'Ask the designer' }).click();
+    await expect(chips.getByRole('listitem')).toHaveCount(2);
+    await expect(chips.locator('.talk-pchip-text').last()).not.toHaveText(/ · V\d+$/);
+    await expect(page.getByText('Previewing V1, not in your plan yet')).toBeHidden();
+    await chips
+      .getByRole('button', { name: /^Remove / })
+      .last()
+      .click();
+    await expect(chips.getByRole('listitem')).toHaveCount(1);
+    // The selection let go from the plan (Esc there), so the next click opens the popover.
+    await page.getByRole('application', { name: 'Floor plan' }).focus();
+    await page.keyboard.press('Escape');
     await piece.click({ force: true });
     const pop = page.getByTestId('plan-popover');
     await expect(pop).toBeVisible();
@@ -2486,13 +2508,13 @@ test.describe('pointing at the plan (slice 3a, PR B)', () => {
     const pop = page.getByTestId('plan-popover');
     await expect(pop).toBeVisible();
     await expect(pop.getByRole('button', { name: 'Comment' })).toBeEnabled();
-    await expect(pop.getByRole('button', { name: /^Another door here/ })).toBeDisabled();
+    await expect(pop.getByRole('button', { name: /^Another (door|window) here/ })).toBeDisabled();
     await expect(pop).toContainText('Add your AI key to ask for other ideas.');
     await pop.getByRole('button', { name: 'Comment' }).click();
     await expect(composerChips(page).getByRole('listitem')).toHaveCount(2);
   });
 
-  test('S4, M6: the keyboard: Tab keeps cycling, Enter opens it on its first row, ↑↓ move, Esc goes back', async ({
+  test('S4, M6: the keyboard: Tab keeps cycling, the menu key opens it on its first row, ↑↓ move, Esc goes back', async ({
     page,
   }) => {
     test.setTimeout(150_000);
@@ -2516,8 +2538,9 @@ test.describe('pointing at the plan (slice 3a, PR B)', () => {
     await page.keyboard.press('Tab');
     await expect(plan).toBeFocused();
     await expect(pop.getByRole('heading')).not.toHaveText(first ?? '');
-    // Enter: its first row has the focus; the arrows move between rows.
-    await page.keyboard.press('Enter');
+    // The menu key: its first row has the focus (Enter on a room renames it, as before); the
+    // arrows move between rows.
+    await page.keyboard.press('ContextMenu');
     await expect(pop.getByRole('button', { name: 'Comment' })).toBeFocused();
     await page.keyboard.press('ArrowDown');
     await expect(pop.getByRole('button', { name: 'Comment' })).not.toBeFocused();
@@ -2598,7 +2621,8 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     await tap.lift();
     const roomSheet = page.getByTestId('plan-popover');
     await expect(roomSheet).toBeVisible();
-    await roomSheet.getByRole('button', { name: 'Close' }).tap();
+    // A tap outside it, on the backdrop, closes it (UX §2.1).
+    await page.touchscreen.tap(195, 200);
     await expect(roomSheet).toBeHidden();
     // A press that moves 8 px or more: a pan, no chip.
     const pan = await finger(page, floor);

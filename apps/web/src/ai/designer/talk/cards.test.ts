@@ -23,6 +23,7 @@ import {
   cardScope,
   cardVerdict,
   earlierDesign,
+  madeWith,
   midLine,
   optionCard,
   precheckOn,
@@ -232,6 +233,24 @@ describe('the accept precheck fails closed (tech lead)', () => {
       madeAt: '2026-11-08T11:00:00.000Z',
     };
     expect(optionCard(proposal, b, level.id).at).toBe('2026-11-08T11:00:00.000Z');
+  });
+  it('a version is read with the kept set on its record, whatever is kept or started over since', () => {
+    const sofa = {
+      id: 'kept_v1',
+      itemId: null,
+      assetId: 'sofa-3',
+      pose: { x: 1, y: 2, rot: 0 },
+      from: 'V1',
+      levelId: level.id,
+      at: '2026-11-08T09:00:00.000Z',
+    };
+    const o = { ...(proposal.options[0] as Proposal['options'][number]), kept: [sofa] };
+    const withSet = optionCard(proposal, o, level.id);
+    // Its own set: not worked out from the conversation's (gone after Start over, another
+    // level designed, or more than 30 let go since).
+    expect(madeWith(withSet)).toEqual({ kept: [sofa] });
+    // A record from before: worked out from its time.
+    expect(madeWith(card)).toBe(proposal.at);
   });
   it('with no result to check with: missing, never "nothing fails"', () => {
     expect(precheckOn(project, card, ['x'], [], null, TYPICAL_RATES)).toEqual({

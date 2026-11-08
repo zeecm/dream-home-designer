@@ -996,6 +996,9 @@ function work(
     resultSpaces.filter((s) => s.storedKey && s.status !== 'missing').flatMap((s) => s.rooms),
   );
   const baseKeys = baseChecks(start, brief, uses, opts.rules, opts.kept);
+  const proposalKept = new Set(
+    (opts.kept ?? []).filter((k) => k.itemId === null).map((k) => `K|${k.id}`),
+  );
   // A piece the version copied (an earlier version's room, placed again) has a new id but the
   // plan's pose: it is the plan's piece, its checks keyed as the plan's.
   const poseKey = (it: {
@@ -1034,10 +1037,11 @@ function work(
     // In the plan before and not the version's doing: a piece it didn't touch, a room it
     // didn't furnish, or what furnishing can't change (a window, the bedroom count).
     // Someone with nowhere to sleep is always the version's to answer for.
-    // A proposal's kept piece (no plan id) is never in the plan before: always the version's.
+    // A proposal's kept piece (kept with no plan id) is never in the plan before: always the
+    // version's. A plan piece kept by id and since deleted by hand is the plan's, as before.
     const already =
       !c.key.startsWith('P1|unplaced') &&
-      !(c.key.startsWith('K|') && !c.itemId) &&
+      !proposalKept.has(c.key) &&
       baseKeys.has(c.itemId ? swapSegment(c.key, c.itemId, twinOf(c.itemId)) : c.key) &&
       (c.itemId
         ? unchanged(c.itemId)

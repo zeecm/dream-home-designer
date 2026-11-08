@@ -927,7 +927,9 @@ export function PlanCanvas() {
         popoverOn()
       ) {
         const sel = useEditor.getState().selection;
-        const t = sel ? targetOfSelection(sel) : null;
+        // Enter on a room still renames it (Shift+F10 or the menu key opens its popover).
+        const renames = !menuKey && sel?.kind === 'room';
+        const t = sel && !renames ? targetOfSelection(sel) : null;
         if (t) {
           e.preventDefault();
           openPopover(t, true);

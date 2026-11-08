@@ -35,6 +35,7 @@ import {
   cardResult,
   cardVerdict,
   headLabel,
+  madeWith,
   midLine,
   nowOf,
   planMoved,
@@ -266,7 +267,7 @@ function useSubset(
               waived: [...card.waivers.map((w) => w.key), ...waive],
               renovation: !!project.renovation,
               rules: houseRulesFor(card.levelId),
-              kept: houseKeptFor(card.levelId, card.at),
+              kept: houseKeptFor(card.levelId, madeWith(card)),
             }),
           ),
         ),
@@ -408,7 +409,14 @@ function foldedLine(card: CardModel, rules: string): string {
   if (!said) return inNow ? ` · Accepted ${inNow}` : '';
   if (inNow && inNow >= said.total) return ' · In your renovation';
   // Worked out before your rules last changed: it says so rather than an old verdict (QA B5).
-  const text = said.rules === rules ? said.text : 'Not checked against your rules yet';
+  // Only rules count here: a piece kept since doesn't apply to a version made before it.
+  const rulesOf = (key: string) =>
+    key
+      .split('|')
+      .filter((x) => x && !x.startsWith('k:'))
+      .join('|');
+  const text =
+    rulesOf(said.rules) === rulesOf(rules) ? said.text : 'Not checked against your rules yet';
   return ` · ${text}${inNow ? ` · Accepted ${inNow} of ${said.total}` : ''}`;
 }
 

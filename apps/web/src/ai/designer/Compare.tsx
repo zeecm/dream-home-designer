@@ -74,7 +74,12 @@ function CompareView({ picks, designs }: { picks: string[]; designs: Design[] })
       const b = v ? baseOf(project, v.base.variant, v.levelId) : null;
       const r =
         v && b
-          ? readResult(b.base, b.before, v, designOpts(project, v.levelId, v.createdAt))
+          ? readResult(
+              b.base,
+              b.before,
+              v,
+              designOpts(project, v.levelId, v.kept ? { kept: v.kept } : v.createdAt),
+            )
           : null;
       if (!d || !r) continue;
       // Against the flat as it is, as the drawing and the cost are (whatever it was made on).

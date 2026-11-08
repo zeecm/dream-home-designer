@@ -20,7 +20,8 @@ export function AskDesigner({ level, selection }: { level: Level; selection: Sel
       type="button"
       className="btn talk-ask-btn"
       onClick={async () => {
-        openPanel();
+        // About your plan: no version is put back on it (the chip says "your plan").
+        openPanel({ preview: false });
         await ensureConversation();
         const at = objectPoint(level, selection);
         const t = at ? targetOf(selection, at) : null;

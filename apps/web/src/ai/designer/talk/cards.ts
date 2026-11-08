@@ -3,6 +3,7 @@ import {
   type Design,
   type DesignInput,
   type DesignResult,
+  type Kept,
   type LensReport,
   type Level,
   type Project,
@@ -19,7 +20,7 @@ import {
   subsetReport,
 } from '@dhd/core';
 import { readLens, readResult, requestResult } from '../results';
-import { designOpts, houseKeptFor, houseRulesFor } from '../state';
+import { type MadeWith, designOpts, houseKeptFor, houseRulesFor } from '../state';
 
 /**
  * A card in the conversation: a proposal's option, or a version made by v1's form ("Earlier
@@ -47,6 +48,8 @@ export interface CardModel {
   at: string;
   /** The fingerprint of the level it was made on. */
   madeOn: string;
+  /** The kept pieces it was made with (on its record); absent on older ones. */
+  kept?: readonly Kept[];
   proposal?: Proposal;
   option?: ProposalOption;
   design?: Design;
@@ -94,6 +97,7 @@ export function optionCard(p: Proposal, o: ProposalOption, levelId: string): Car
     words: p.words,
     // An alternative is placed with what was kept when it was asked for.
     at: o.madeAt ?? p.at,
+    ...(o.kept ? { kept: o.kept } : {}),
     madeOn: o.base.fingerprint,
     proposal: p,
     option: o,
@@ -121,6 +125,7 @@ export function designCard(d: Design, title = `V${d.n}`): CardModel {
     note: null,
     words: d.request.feedback,
     at: d.createdAt,
+    ...(d.kept ? { kept: d.kept } : {}),
     madeOn: d.base.fingerprint,
     design: d,
   };
@@ -135,6 +140,10 @@ export function nowOf(project: Project, levelId: string): { now: Level; before: 
   return l ? { now: l.after ?? l.before, before: l.before } : null;
 }
 
+/** What a card's version was made with, for its kept pieces (its record's set, else its time). */
+export const madeWith = (card: Pick<CardModel, 'kept' | 'at'>): MadeWith =>
+  card.kept ? { kept: card.kept } : card.at;
+
 /**
  * A card placed on the plan as it is now, if it is ready: null while the designer's worker
  * works it out (a calm "Checking…" shows; `useResultsTick` re-renders when it lands).
@@ -142,7 +151,7 @@ export function nowOf(project: Project, levelId: string): { now: Level; before: 
 export function cardResult(project: Project, card: CardModel): DesignResult | null {
   const b = nowOf(project, card.levelId);
   if (!b) return null;
-  return readResult(b.now, b.before, card.input, designOpts(project, card.levelId, card.at));
+  return readResult(b.now, b.before, card.input, designOpts(project, card.levelId, madeWith(card)));
 }
 
 /**
@@ -152,7 +161,7 @@ export function cardResult(project: Project, card: CardModel): DesignResult | nu
 export function cardLens(project: Project, card: CardModel): LensReport[] | null {
   const b = nowOf(project, card.levelId);
   if (!b) return null;
-  return readLens(b.now, b.before, card.input, designOpts(project, card.levelId, card.at));
+  return readLens(b.now, b.before, card.input, designOpts(project, card.levelId, madeWith(card)));
 }
 
 /** A card placed on the plan as it is now, waited for (an accept, a request's context). */
@@ -162,7 +171,12 @@ export async function cardResultNow(
 ): Promise<DesignResult | null> {
   const b = nowOf(project, card.levelId);
   if (!b) return null;
-  return requestResult(b.now, b.before, card.input, designOpts(project, card.levelId, card.at));
+  return requestResult(
+    b.now,
+    b.before,
+    card.input,
+    designOpts(project, card.levelId, madeWith(card)),
+  );
 }
 
 const changesMemo = new Map<string, Change[]>();
@@ -266,7 +280,7 @@ export function precheckOn(
     waived: [...card.waivers.map((w) => w.key), ...waived],
     renovation: !!project.renovation,
     rules: houseRulesFor(card.levelId),
-    kept: houseKeptFor(card.levelId, card.at),
+    kept: houseKeptFor(card.levelId, madeWith(card)),
   });
   return { failing: rep.failing, hdb: rep.failing.some((c) => !c.waivable), missing: false };
 }

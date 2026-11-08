@@ -26,7 +26,12 @@ import {
   optionTitle,
 } from './iterate';
 import { talk } from './reducer';
-import type { Conversation, Proposal, ProposalOption } from './schema';
+import {
+  type Conversation,
+  type Proposal,
+  type ProposalOption,
+  proposalFromRecord,
+} from './schema';
 
 const level = () => sampleFlatProject().levels[0] as Level;
 const AT = '2026-11-08T10:00:00.000Z';
@@ -103,6 +108,28 @@ const proposal = (options: ProposalOption[], scope = living): Proposal => ({
   scope,
   words: 'More storage, please',
   options,
+});
+
+describe('the kept set a version was made with (slice 3a)', () => {
+  it('is on its record, read back as written; an older record reads with none', () => {
+    const sofa = {
+      id: 'kept_v1',
+      itemId: null,
+      assetId: 'sofa-3',
+      pose: { x: 1, y: 2, rot: 0 },
+      from: 'V1',
+      levelId: 'lvl1',
+      at: AT,
+    };
+    const made = proposal([{ ...option('A'), kept: [sofa] }, option('B')]);
+    const read = proposalFromRecord(JSON.parse(JSON.stringify(made)));
+    expect(read?.options[0]?.kept).toEqual([sofa]);
+    expect(read?.options[1]?.kept).toBeUndefined();
+    // A piece the build can't read is dropped, not the version.
+    const bad = JSON.parse(JSON.stringify(made));
+    bad.options[0].kept.push({ id: 'x', assetId: 3 });
+    expect(proposalFromRecord(bad)?.options[0]?.kept).toEqual([sofa]);
+  });
 });
 
 describe('alternatives A/B/C (criterion 25, D3)', () => {

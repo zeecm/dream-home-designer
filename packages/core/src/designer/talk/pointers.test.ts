@@ -406,6 +406,14 @@ describe('Keep this (3a.3, no request)', () => {
     expect(r.checks.find((c) => c.key === 'K|kept_moved')).toBeUndefined();
   });
 
+  it('a plan piece kept by id and then deleted by hand is the plan’s, never the version’s', () => {
+    const base = structuredClone(level);
+    const id = sofa?.id ?? '';
+    delete base.items[id];
+    const r = living(base, [kept({ id: 'kept_gone' })]);
+    expect(r.checks.find((c) => c.key === 'K|kept_gone')).toMatchObject({ already: true });
+  });
+
   it('a proposal’s kept piece not placed fails its K check as the version’s own', () => {
     const k = kept({ id: 'kept_far', itemId: null, assetId: 'not-a-piece', from: 'V4' });
     const r = living(sampleLevel(), [k]);

@@ -53,6 +53,8 @@ export const Pointer = z.object({
     }),
   ]),
   label: z.string().max(80),
+  /** The whole label, when `label` had to be cut (the chip's tooltip; never sent). */
+  full: z.string().max(300).optional(),
   room: z.string().max(80).nullable(),
   /** Where it is, as the change rows say it ("by the window"). */
   where: z.string().max(120),
@@ -629,6 +631,15 @@ export const ProposalOption = z.object({
    * talk records 4: a build that knows 3 is read-only on these, so never drops it.)
    */
   madeAt: z.string().optional(),
+  /**
+   * The kept pieces it was made with, as `brief` is: read as they were, whatever is kept or let
+   * go since, the conversation started over or another level designed. Absent on older
+   * records: worked out from `madeAt` (keptBefore).
+   */
+  kept: z
+    .array(z.unknown())
+    .transform((items) => readable(Kept, items).slice(-MAX_KEPT))
+    .optional(),
   name: z.string().max(TALK_LIMITS.name),
   /** The id its pieces are seeded with, and its version's id once accepted. */
   designId: z.string(),

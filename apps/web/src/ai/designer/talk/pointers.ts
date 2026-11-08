@@ -213,8 +213,9 @@ export function makePointer(t: Target): Pointer | null {
     // Cut to the record's limits, so a long room or level name never makes it unreadable.
     levelName: levelName?.slice(0, 60) ?? null,
     version,
-    // Cut with "…" when longer than the record holds.
+    // Cut with "…" when longer than the record holds; the whole of it for the tooltip.
     label: label.length > 80 ? `${label.slice(0, 79)}…` : label,
+    ...(label.length > 80 ? { full: label.slice(0, 300) } : {}),
     room: words.room?.slice(0, 80) ?? null,
     where: words.where.slice(0, 120),
     state: stateOf(t, title).slice(0, 80),
