@@ -1087,7 +1087,7 @@ test.describe('talking to the designer (slice 2, PR 2)', () => {
     await justDesign(page);
     await send(page, 'Not the sofa under the window, please.');
     await expect(log(page).getByText('Noted in Decisions: No sofa under the window')).toBeVisible();
-    await expect(log(page).getByText('Noted in What I know: budget up to S$40k')).toBeVisible();
+    await expect(log(page).getByText('Noted in What I know: budget S$40k')).toBeVisible();
     await expect(log(page).getByText(/^Noted for your ID: Move the WC/)).toBeVisible();
     await send(page, 'And the kitchen?');
     await expect(log(page).getByText('And the kitchen?')).toBeVisible();

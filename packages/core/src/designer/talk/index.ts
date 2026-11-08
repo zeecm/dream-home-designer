@@ -12,3 +12,4 @@ export * from './reply';
 export * from './partial';
 export * from './prompt';
 export * from './probe';
+export * from './iterate';

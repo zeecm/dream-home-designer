@@ -459,9 +459,13 @@ export function applyFacts(
     switch (f.key) {
       case 'budget': {
         const c = BUDGET_CHOICES.find((x) => x.id === f.choice);
-        const v = c ? c.v : f.number ? { low: Math.round(f.number * 0.8), high: f.number } : null;
+        // A figure the person gave stays that figure ("about S$40k" is S$40k, not a range).
+        const v = c ? c.v : f.number ? { low: f.number, high: f.number } : null;
         b = { ...b, budget: v };
-        add('budget', `budget ${v ? `up to ${sgd(v.high)}` : 'not sure'}`);
+        add(
+          'budget',
+          `budget ${!v ? 'not sure' : v.low === v.high ? sgd(v.high) : `up to ${sgd(v.high)}`}`,
+        );
         break;
       }
       case 'walls':

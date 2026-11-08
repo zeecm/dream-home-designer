@@ -21,6 +21,7 @@ import {
   TALK_LIMITS as L,
   MAX_DECISIONS,
   MAX_TURNS,
+  QUESTION_KEYS,
   type QuestionKey,
   SENT_CHARS,
   type ScopeRef,
@@ -56,6 +57,36 @@ export type TalkAction =
       /** A form filled in for this plan before (v1's brief): its facts are kept, not asked. */
       form: { at: string } | null;
       ids: [string, string];
+      /** Start over keeping What I know: those facts are known (not asked), assumptions too. */
+      kept?: { known: QuestionKey[]; assumed: QuestionKey[] };
+    }
+  /**
+   * Start over (UX §8.6): a new conversation in this one's place (`fromId`, so two tabs start
+   * over once). The numbering goes on; What I know is kept when ticked, else `brief` (fresh).
+   */
+  | {
+      type: 'restart';
+      fromId: string;
+      id: string;
+      at: string;
+      keep: boolean;
+      brief: DesignBrief;
+      beforeFp: string;
+      afterFp: string | null;
+      level: Level;
+      ids: [string, string];
+    }
+  /**
+   * Bring this back (criterion 27): an older proposal or version made again as V(n+1), with no
+   * request: its app line, then its card (the proposal record is written beside this).
+   */
+  | {
+      type: 'bringBack';
+      at: string;
+      ids: { event: string; turn: string };
+      proposalId: string;
+      /** What it was ("V2", "V4B"). */
+      from: string;
     }
   | {
       type: 'answer';
@@ -203,7 +234,7 @@ export type TalkAction =
 
 /** A new conversation: the greeting and the first questions (or, after a form, the offer). */
 export function newConversation(a: Extract<TalkAction, { type: 'start' }>): Conversation {
-  const known = a.form ? formKnows(a.brief) : [];
+  const known = a.kept ? a.kept.known : a.form ? formKnows(a.brief) : [];
   const conv: Conversation = {
     projectId: a.projectId,
     id: a.id,
@@ -213,7 +244,7 @@ export function newConversation(a: Extract<TalkAction, { type: 'start' }>): Conv
     levelId: a.levelId,
     start: { at: a.at, beforeFp: a.beforeFp, afterFp: a.afterFp },
     brief: a.brief,
-    assumed: [],
+    assumed: a.kept ? a.kept.assumed.filter((k) => known.includes(k)) : [],
     known,
     met: false,
     settled: [],
@@ -237,9 +268,11 @@ export function newConversation(a: Extract<TalkAction, { type: 'start' }>): Conv
     text: cut(greetingText(a.level), L.designer),
     lines: [],
     after: cut(
-      a.form
-        ? `I’ve kept what you told me in the form on ${date}: ${formSummary(a.brief)}. Change any of it in What I know about you.`
-        : GREETING_NEXT,
+      a.kept
+        ? `I’ve kept what I know about you: ${formSummary(a.brief)}. Change any of it in What I know about you.`
+        : a.form
+          ? `I’ve kept what you told me in the form on ${date}: ${formSummary(a.brief)}. Change any of it in What I know about you.`
+          : GREETING_NEXT,
       L.after,
     ),
   };
@@ -345,6 +378,44 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
     case 'start':
       // A conversation there already is stays (two tabs opening the panel at once).
       return conv?.id ? conv : newConversation(a);
+    case 'restart': {
+      if (!conv || conv.id !== a.fromId) return conv;
+      // Kept after a first meeting that ended: nothing is asked again (what was skipped stays
+      // as it was); kept part-way, what wasn't answered yet is still asked.
+      const known = meetingOver(conv)
+        ? [...QUESTION_KEYS]
+        : [...new Set([...conv.known, ...doneKeys(conv)])];
+      return newConversation({
+        type: 'start',
+        id: a.id,
+        at: a.at,
+        projectId: conv.projectId,
+        levelId: conv.levelId,
+        brief: a.keep ? conv.brief : a.brief,
+        beforeFp: a.beforeFp,
+        afterFp: a.afterFp,
+        nextN: conv.nextN,
+        level: a.level,
+        form: null,
+        ids: a.ids,
+        ...(a.keep ? { kept: { known, assumed: conv.assumed } } : {}),
+      });
+    }
+    case 'bringBack': {
+      if (conv.turns.some((t) => t.kind === 'proposal' && t.proposalId === a.proposalId))
+        return conv;
+      const text = `Brought back ${a.from} as V${conv.nextN}, checked on your plan as it is now.`;
+      return push(
+        { ...conv, nextN: conv.nextN + 1 },
+        {
+          kind: 'event',
+          id: a.ids.event,
+          at: a.at,
+          event: { type: 'note', text: cut(text, L.note) },
+        },
+        { kind: 'proposal', id: a.ids.turn, at: a.at, proposalId: a.proposalId },
+      );
+    }
     case 'answer':
       return settle(
         conv,
