@@ -702,7 +702,10 @@ still), `'never'` while an exact render draws. React's own changes to the scene 
 themselves (the sun, the hour, the theme's colours); the rest ask with `invalidate()`:
 `LevelMesh` after each `meshes.update` (an edit, a version switched, a model arriving), the
 camera rig, swinging doors until they land, the lamps (chosen again half a second after the
-camera stops) and drei's orbit controls (each `change`, damping included). `Redraw` covers a
+camera stops) and drei's orbit controls (each `change`, damping included). The controls stop
+asking a pixel or two before their damping ends (their own 1 mm threshold): `SettleOrbit` asks
+on while more than a pixel of glide is left, then plays the rest out in that frame (QA F1: the
+next unrelated redraw used to snap the view by 0.6-3.6% of its pixels). `Redraw` covers a
 resize, the frame loop back from rest, a restored GL context and any change in the project,
 hour, theme, walk, comparing or its divider. Wallpapers are canvas textures (no async load);
 model textures come with their model. Nothing is drawn in 3D for a plan selection. Tests set
@@ -1400,6 +1403,12 @@ schema-10 preview ("schemaVersion 10 not supported (want 1-7)"; owner, 6 Nov).
 
 ## 9. Known gaps and debts
 
+- **Needs a real-device check: the walk after the render dialog (QA F2, 8 Nov).** Under
+  SwiftShader, closing the photo-real render dialog during a walk stalls the page's
+  `requestAnimationFrame` for over 20 s (the app's frames and a separate rAF counter both read
+  0; the page is visible, focused and answers `evaluate` in 1-3 ms). A key press or a long
+  screenshot gets frames going again; leaving the walk brings them back at once. It happens
+  before the demand frame loop too (1be60a0's parent). Check on a real phone and computer.
 - **Links are the capability.** A project is readable by anyone with its link; editing needs
   the owner or an edit key. Listing is off in production, and writes are rate-limited (and
   capped per day). Google sign-in is built and off until the

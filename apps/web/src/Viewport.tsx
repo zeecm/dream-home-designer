@@ -602,6 +602,8 @@ declare global {
   interface Window {
     /** Set to a number by a test before the app loads: the 3D view counts the frames it draws. */
     __DHD_FRAMES__?: number;
+    /** With `__DHD_FRAMES__` set: draws one frame with nothing changed. */
+    __DHD_REDRAW__?: () => void;
     /** With `__DHD_FRAMES__` set: the 3D view's inside doors, and how far open each is now. */
     __DHD_DOORS__?: () => { id: string; centre: { x: number; y: number }; open: number }[];
   }
@@ -632,9 +634,65 @@ function Redraw({ on }: { on: unknown[] }) {
     el.addEventListener('webglcontextrestored', restored);
     return () => el.removeEventListener('webglcontextrestored', restored);
   }, [gl, invalidate]);
-  // A test's frame count.
+  // A test's frame count, and a way to draw a frame with nothing changed.
   useFrame(() => {
     if (typeof window.__DHD_FRAMES__ === 'number') window.__DHD_FRAMES__ += 1;
+  });
+  useEffect(() => {
+    if (typeof window.__DHD_FRAMES__ !== 'number') return;
+    window.__DHD_REDRAW__ = () => invalidate();
+    return () => {
+      window.__DHD_REDRAW__ = undefined;
+    };
+  }, [invalidate]);
+  return null;
+}
+
+/** How much of the orbit's glide (px on screen) is drawn a frame at a time; less, at once. */
+const GLIDE_PX = 1;
+
+/**
+ * Draws the orbit's damping to its end. The controls ask for a frame only while the camera
+ * moves more than their own threshold (about a millimetre a frame), but the damping goes on
+ * below it: stopped there, the next unrelated redraw snapped the view by a pixel or two (QA
+ * F1). This keeps asking while more than GLIDE_PX of the glide is left (about each frame's
+ * move over the damping factor), then plays the rest out in this frame, before it is drawn:
+ * the last few dozen damping steps move it less than a pixel, and would take as many frames.
+ * Runs after the controls' own update.
+ */
+function SettleOrbit() {
+  const last = useRef<{ p: THREE.Vector3; q: THREE.Quaternion } | null>(null);
+  useFrame(({ camera, controls, size, invalidate }) => {
+    const was = last.current;
+    if (!was) {
+      last.current = { p: camera.position.clone(), q: camera.quaternion.clone() };
+      return;
+    }
+    const orbit = controls as {
+      target?: THREE.Vector3;
+      dampingFactor?: number;
+      update?: () => unknown;
+    } | null;
+    const reach = Math.max(1e-3, orbit?.target ? camera.position.distanceTo(orbit.target) : 10);
+    // This frame's move, as an angle from the eye: the turn, and the slide over the distance.
+    const moved = was.q.angleTo(camera.quaternion) + was.p.distanceTo(camera.position) / reach;
+    if (moved > 0) {
+      const damping = orbit?.dampingFactor ?? 0.05;
+      const fov = THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).fov ?? FOV);
+      const left = ((moved * (1 - damping)) / damping) * (size.height / fov);
+      if (left > GLIDE_PX) invalidate();
+      else {
+        // The last pixel of the glide, played out now (each update a damping step).
+        const at = new THREE.Vector3();
+        for (let i = 0; i < 400; i++) {
+          at.copy(camera.position);
+          orbit?.update?.();
+          if (at.distanceToSquared(camera.position) < 1e-14) break;
+        }
+      }
+    }
+    was.p.copy(camera.position);
+    was.q.copy(camera.quaternion);
   });
   return null;
 }
@@ -826,6 +884,7 @@ export function Viewport() {
         ) : (
           <>
             <CameraRig frame={frame} />
+            <SettleOrbit />
             <OrbitControls
               target={[frame.x, 0, frame.z]}
               makeDefault

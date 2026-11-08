@@ -20,9 +20,12 @@ async function drawnIn(page: Page, ms: number) {
   return (await frames(page)) - from;
 }
 
-/** Waits for the view to come to rest: no frame for a whole second. */
-async function rests(page: Page) {
-  await expect.poll(() => drawnIn(page, 1000), { timeout: 30_000, intervals: [0] }).toBe(0);
+/**
+ * Waits for the view to come to rest: no frame for `quiet` ms (a second; longer where a frame
+ * may take that long on a busy machine).
+ */
+async function rests(page: Page, timeout = 30_000, quiet = 1000) {
+  await expect.poll(() => drawnIn(page, quiet), { timeout, intervals: [0] }).toBe(0);
 }
 
 /** Waits for the view to draw again (from `from` frames), with nobody touching anything. */
@@ -31,6 +34,30 @@ async function draws(page: Page, from: number) {
 }
 
 const view = (page: Page) => page.getByTestId('viewport').locator('canvas');
+
+/** The share of pixels that differ between two screenshots of the same size. */
+const differing = (page: Page, a: Buffer, b: Buffer) =>
+  page.evaluate(
+    async ([x, y]) => {
+      const pixels = async (b64: string) => {
+        const img = await createImageBitmap(
+          await (await fetch(`data:image/png;base64,${b64}`)).blob(),
+        );
+        const c = new OffscreenCanvas(img.width, img.height);
+        const g = c.getContext('2d') as OffscreenCanvasRenderingContext2D;
+        g.drawImage(img, 0, 0);
+        return g.getImageData(0, 0, img.width, img.height).data;
+      };
+      const [p, q] = await Promise.all([pixels(x), pixels(y)]);
+      if (p.length !== q.length) return 1;
+      let n = 0;
+      for (let i = 0; i < p.length; i += 4) {
+        if (p[i] !== q[i] || p[i + 1] !== q[i + 1] || p[i + 2] !== q[i + 2]) n++;
+      }
+      return n / (p.length / 4);
+    },
+    [a.toString('base64'), b.toString('base64')] as const,
+  );
 
 async function open3d(page: Page, key: '2' | '3') {
   await page.goto('/');
@@ -55,6 +82,7 @@ for (const [mode, key] of [
 test('orbiting draws while the damping settles after the mouse lets go, then stops', async ({
   page,
 }) => {
+  test.setTimeout(150_000);
   await open3d(page, '3');
   await rests(page);
   const box = await view(page).boundingBox();
@@ -63,14 +91,24 @@ test('orbiting draws while the damping settles after the mouse lets go, then sto
   const y = box.y + box.height / 2;
   await page.mouse.move(x, y);
   await page.mouse.down();
-  await page.mouse.move(x + 240, y + 40, { steps: 4 });
+  // A short drag: its glide is about 75 frames, which SwiftShader on a busy machine draws at
+  // 2 to 4 a second.
+  await page.mouse.move(x + 120, y + 20, { steps: 4 });
   await page.mouse.up();
   const released = await frames(page);
   const shot = await view(page).screenshot();
   // The camera glides on after the mouse is up, a frame at a time, and comes to rest.
   await expect.poll(() => frames(page)).toBeGreaterThan(released + 5);
+  await rests(page, 90_000, 3000);
+  const settled = await view(page).screenshot();
+  expect(settled.equals(shot)).toBe(false);
+  // It drew the glide to its end: a frame drawn now, with nothing changed, is the same
+  // picture (stopped a pixel or two short, the next redraw snapped the view; QA F1).
+  const from = await frames(page);
+  await page.evaluate(() => window.__DHD_REDRAW__?.());
+  await draws(page, from);
   await rests(page);
-  expect((await view(page).screenshot()).equals(shot)).toBe(false);
+  expect(await differing(page, settled, await view(page).screenshot())).toBeLessThan(0.0005);
 });
 
 test('a new time of day redraws the view, with nothing else touched', async ({ page }) => {
