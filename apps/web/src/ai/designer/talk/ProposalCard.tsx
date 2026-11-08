@@ -241,7 +241,12 @@ export const ProposalCard = memo(function ProposalCard({
   );
   const ids = useMemo(() => new Set(changes.map((c) => c.id)), [changes]);
   const [ticks, setTicks] = useState<string[] | null>(card.ticks);
-  useEffect(() => setTicks(card.ticks), [card.ticks]);
+  // Ticks saved and not yet all back: each save's record comes back when it is written, and an
+  // older one would take back a tick made since (a quick second tick, on a slow disk, lost).
+  const saving = useRef(0);
+  useEffect(() => {
+    if (saving.current === 0) setTicks(card.ticks);
+  }, [card.ticks]);
   const ticked = useMemo(
     () => (ticks ?? defaultTicks(changes)).filter((id) => ids.has(id)),
     [ticks, changes, ids],
@@ -300,6 +305,7 @@ export const ProposalCard = memo(function ProposalCard({
     setTicks(next);
     if (card.proposal && card.option) {
       const letter = card.option.letter;
+      saving.current++;
       void actProposal(card.proposal.id, (p) =>
         p
           ? {
@@ -307,7 +313,9 @@ export const ProposalCard = memo(function ProposalCard({
               options: p.options.map((o) => (o.letter === letter ? { ...o, ticks: next } : o)),
             }
           : p,
-      );
+      ).finally(() => {
+        saving.current--;
+      });
     }
   };
   const toggle = (c: Change, on: boolean) => {

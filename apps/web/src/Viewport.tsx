@@ -62,6 +62,7 @@ function LevelMesh({
   const shown = useLevel();
   const level = of ?? shown;
   const meshes = useMemo(() => new LevelMeshes(materials, { ceilings, models }), [ceilings]);
+  const invalidate = useThree((s) => s.invalidate);
   useDoorSwings(meshes, walker);
   useEffect(() => () => meshes.dispose(), [meshes]);
   useEffect(() => {
@@ -76,8 +77,11 @@ function LevelMesh({
   useEffect(() => models.onLoad(() => setArrived((n) => n + 1)), []);
   // biome-ignore lint/correctness/useExhaustiveDependencies: `arrived` re-runs it for new models
   useLayoutEffect(() => {
-    if (level) meshes.update(level);
-  }, [level, meshes, arrived]);
+    if (!level) return;
+    meshes.update(level);
+    // Built outside React: the view draws the edit, or the model that arrived, itself.
+    invalidate();
+  }, [level, meshes, arrived, invalidate]);
   return <primitive object={meshes.group} />;
 }
 
@@ -105,8 +109,18 @@ function useDoorSwings(meshes: LevelMeshes, walker?: MutableRefObject<WalkPose |
     open.current.clear();
     want.current.clear();
   }, [!!walker]);
-  useFrame((_, dt) => {
+  // A test's view of the doors: where each is and how far open (see `__DHD_FRAMES__`).
+  useEffect(() => {
+    if (typeof window.__DHD_FRAMES__ !== 'number') return;
+    window.__DHD_DOORS__ = () =>
+      meshes.doors().map((d) => ({ ...d, open: open.current.get(d.id) ?? 1 }));
+    return () => {
+      window.__DHD_DOORS__ = undefined;
+    };
+  }, [meshes]);
+  useFrame(({ invalidate }, dt) => {
     const at = walker?.current?.at;
+    let swinging = false;
     for (const d of meshes.doors()) {
       let target = 1;
       if (at) {
@@ -117,11 +131,15 @@ function useDoorSwings(meshes: LevelMeshes, walker?: MutableRefObject<WalkPose |
       want.current.set(d.id, target);
       const cur = open.current.get(d.id) ?? (at ? 0 : 1);
       const step = instant ? 1 : Math.min(dt, 0.1) * DOOR_SPEED;
-      const next = cur + Math.max(-step, Math.min(step, target - cur));
+      // Lands on its target exactly, so a door that got there asks for no more frames.
+      const next = Math.abs(target - cur) <= step ? target : cur + Math.sign(target - cur) * step;
       open.current.set(d.id, next);
+      if (next !== target) swinging = true;
       // Every frame: a door rebuilt by an edit starts standing open.
       meshes.setDoorOpen(d.id, next);
     }
+    // A door on its way draws its next frame (the view draws only when something changes).
+    if (swinging) invalidate();
   });
 }
 
@@ -143,7 +161,7 @@ function frameOf(level: Level | undefined): Frame {
 
 /** Frames the whole plan from above and to the front, for whatever shape the pane has. */
 function CameraRig({ frame }: { frame: Frame }) {
-  const { camera, size } = useThree();
+  const { camera, size, invalidate } = useThree();
   useEffect(() => {
     const aspect = size.width / Math.max(1, size.height);
     const vertical = ((FOV / 2) * Math.PI) / 180;
@@ -158,7 +176,8 @@ function CameraRig({ frame }: { frame: Frame }) {
     );
     camera.lookAt(frame.x, 0, frame.z);
     camera.updateProjectionMatrix();
-  }, [camera, size.width, size.height, frame]);
+    invalidate();
+  }, [camera, size.width, size.height, frame, invalidate]);
   return null;
 }
 
@@ -189,7 +208,12 @@ function Lamps({ level, max = MAX_LAMPS }: { level: Level; max?: number }) {
   const lamps = useMemo(() => itemLights(level), [level]);
   const count = Math.min(max, lamps.length);
   const refs = useRef<(THREE.PointLight | null)[]>([]);
-  const last = useRef(-1);
+  const invalidate = useThree((s) => s.invalidate);
+  // When the lamps were last chosen (ms), and where from.
+  const last = useRef(Number.NEGATIVE_INFINITY);
+  const from = useRef(new THREE.Vector3());
+  // A frame asked for once the half-second is up, when the camera stopped before it was.
+  const again = useRef<number | undefined>(undefined);
   const place = (camera: THREE.Camera) => {
     const nearest = [...lamps]
       .map((l) => ({
@@ -210,16 +234,33 @@ function Lamps({ level, max = MAX_LAMPS }: { level: Level; max?: number }) {
       light.userData.lit = light.intensity;
     });
   };
-  useFrame(({ camera, clock }) => {
-    const t = clock.elapsedTime;
-    if (t - last.current < 0.5) return;
-    last.current = t;
+  useFrame(({ camera }) => {
+    const now = performance.now();
+    const wait = last.current + 500 - now;
+    if (wait > 0) {
+      // Only drawn when something changes: a camera that came to rest within the half-second
+      // has its lamps chosen once more when it is up. (With all of them lit, none to choose.)
+      if (
+        lamps.length > max &&
+        again.current === undefined &&
+        !camera.position.equals(from.current)
+      )
+        again.current = window.setTimeout(() => {
+          again.current = undefined;
+          invalidate();
+        }, wait);
+      return;
+    }
+    last.current = now;
+    from.current.copy(camera.position);
     place(camera);
   });
+  useEffect(() => () => window.clearTimeout(again.current), []);
   // A lamp just added or moved shows at once, not on the next half-second.
   // biome-ignore lint/correctness/useExhaustiveDependencies: on new lamps
   useEffect(() => {
-    last.current = -1;
+    last.current = Number.NEGATIVE_INFINITY;
+    invalidate();
   }, [lamps]);
   return (
     <>
@@ -557,6 +598,105 @@ function Capture({
   return null;
 }
 
+declare global {
+  interface Window {
+    /** Set to a number by a test before the app loads: the 3D view counts the frames it draws. */
+    __DHD_FRAMES__?: number;
+    /** With `__DHD_FRAMES__` set: draws one frame with nothing changed. */
+    __DHD_REDRAW__?: () => void;
+    /** With `__DHD_FRAMES__` set: the 3D view's inside doors, and how far open each is now. */
+    __DHD_DOORS__?: () => { id: string; centre: { x: number; y: number }; open: number }[];
+  }
+}
+
+/**
+ * The view draws only when something changes (`frameloop="demand"`): React's changes to the
+ * scene ask for a frame themselves, and so do the meshes built outside React (`LevelMesh`),
+ * the orbit controls (while moving and while their damping settles), the camera rig, the
+ * lamps and swinging doors. This asks for one on the rest: a resize, the frame loop coming
+ * back from rest (an exact render), a lost graphics context restored, and any change in
+ * `on` (the project, the time of day, the theme, comparing and its divider).
+ */
+function Redraw({ on }: { on: unknown[] }) {
+  const invalidate = useThree((s) => s.invalidate);
+  const gl = useThree((s) => s.gl);
+  const width = useThree((s) => s.size.width);
+  const height = useThree((s) => s.size.height);
+  const dpr = useThree((s) => s.viewport.dpr);
+  const frameloop = useThree((s) => s.frameloop);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: each is a reason to draw again
+  useEffect(() => {
+    invalidate();
+  }, [invalidate, width, height, dpr, frameloop, ...on]);
+  useEffect(() => {
+    const el = gl.domElement;
+    const restored = () => invalidate();
+    el.addEventListener('webglcontextrestored', restored);
+    return () => el.removeEventListener('webglcontextrestored', restored);
+  }, [gl, invalidate]);
+  // A test's frame count, and a way to draw a frame with nothing changed.
+  useFrame(() => {
+    if (typeof window.__DHD_FRAMES__ === 'number') window.__DHD_FRAMES__ += 1;
+  });
+  useEffect(() => {
+    if (typeof window.__DHD_FRAMES__ !== 'number') return;
+    window.__DHD_REDRAW__ = () => invalidate();
+    return () => {
+      window.__DHD_REDRAW__ = undefined;
+    };
+  }, [invalidate]);
+  return null;
+}
+
+/** How much of the orbit's glide (px on screen) is drawn a frame at a time; less, at once. */
+const GLIDE_PX = 1;
+
+/**
+ * Draws the orbit's damping to its end. The controls ask for a frame only while the camera
+ * moves more than their own threshold (about a millimetre a frame), but the damping goes on
+ * below it: stopped there, the next unrelated redraw snapped the view by a pixel or two (QA
+ * F1). This keeps asking while more than GLIDE_PX of the glide is left (about each frame's
+ * move over the damping factor), then plays the rest out in this frame, before it is drawn:
+ * the last few dozen damping steps move it less than a pixel, and would take as many frames.
+ * Runs after the controls' own update.
+ */
+function SettleOrbit() {
+  const last = useRef<{ p: THREE.Vector3; q: THREE.Quaternion } | null>(null);
+  useFrame(({ camera, controls, size, invalidate }) => {
+    const was = last.current;
+    if (!was) {
+      last.current = { p: camera.position.clone(), q: camera.quaternion.clone() };
+      return;
+    }
+    const orbit = controls as {
+      target?: THREE.Vector3;
+      dampingFactor?: number;
+      update?: () => unknown;
+    } | null;
+    const reach = Math.max(1e-3, orbit?.target ? camera.position.distanceTo(orbit.target) : 10);
+    // This frame's move, as an angle from the eye: the turn, and the slide over the distance.
+    const moved = was.q.angleTo(camera.quaternion) + was.p.distanceTo(camera.position) / reach;
+    if (moved > 0) {
+      const damping = orbit?.dampingFactor ?? 0.05;
+      const fov = THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).fov ?? FOV);
+      const left = ((moved * (1 - damping)) / damping) * (size.height / fov);
+      if (left > GLIDE_PX) invalidate();
+      else {
+        // The last pixel of the glide, played out now (each update a damping step).
+        const at = new THREE.Vector3();
+        for (let i = 0; i < 400; i++) {
+          at.copy(camera.position);
+          orbit?.update?.();
+          if (at.distanceToSquared(camera.position) < 1e-14) break;
+        }
+      }
+    }
+    was.p.copy(camera.position);
+    was.q.copy(camera.quaternion);
+  });
+  return null;
+}
+
 const coarsePointer = () => window.matchMedia('(pointer: coarse)').matches;
 
 /**
@@ -667,9 +807,13 @@ export function Viewport() {
       <Canvas
         shadows
         camera={{ fov: FOV, near: 0.05, far: 500 }}
-        frameloop={resting ? 'never' : 'always'}
+        // Drawn only when something changes (see Redraw), except while walking, which moves
+        // every frame (not while a render's dialog stands the walker still); at rest while an
+        // exact render draws, so the GPU serves one job.
+        frameloop={resting ? 'never' : walking && !rendering ? 'always' : 'demand'}
         data-testid="viewport"
       >
+        <Redraw on={[project, level, hour, dark, walking, rendering, compare, split, variant]} />
         <color attach="background" args={[background]} />
         <hemisphereLight
           args={[
@@ -740,6 +884,7 @@ export function Viewport() {
         ) : (
           <>
             <CameraRig frame={frame} />
+            <SettleOrbit />
             <OrbitControls
               target={[frame.x, 0, frame.z]}
               makeDefault
