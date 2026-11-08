@@ -337,8 +337,18 @@ export function changeSet(
       pool.splice(pool.indexOf(like), 1);
       const name = pieceName(like);
       const ids = { now: [old.id], target: [like.id] };
+      // The same piece where it already is, facing the same way (0 and 2π alike): no change.
+      // A room proposed again after a full accept puts every piece back where it is.
+      if (
+        same &&
+        dist(centre(old), centre(like)) <= MOVE_EPS &&
+        angleDiff(old.rotationY, like.rotationY) <= TURN_EPS
+      )
+        continue;
       if (same) {
-        const turn = dist(centre(old), centre(like)) <= SAME_SPOT;
+        const turn =
+          dist(centre(old), centre(like)) <= SAME_SPOT &&
+          angleDiff(old.rotationY, like.rotationY) > TURN_EPS;
         const where = whereOf(target, like);
         const face = facesOf(like.id);
         mine.push(
@@ -689,7 +699,7 @@ export function subsetReport(
       !!b &&
       a.assetId === b.assetId &&
       dist(centre(a), centre(b)) < 1e-3 &&
-      Math.abs(a.rotationY - b.rotationY) < 1e-3
+      angleDiff(a.rotationY, b.rotationY) < TURN_EPS
     );
   };
   const waived = new Set(opts.waived ?? []);

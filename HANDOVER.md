@@ -680,6 +680,14 @@ Heavy-room run: blocking time about 85 to 33 ms; drag with the panel open: about
 Still on the main thread: `subsetReport` (about 190 ms heavy), `sendPrice`/`talkPrompt`,
 `probeLines`.
 
+**AI designer v2, slice 2 part 3 (iterate, 8 Nov):** core `designer/talk/iterate.ts`
+(alternatives, Bring this back, restart, text and export). Alternatives A/B/C share one card and
+one V number (V4A, V4B) for one- or two-room scopes; only accepted options become versions.
+Bring this back re-checks an old option on today's plan and keeps hand edits made since. Put it
+back is one Command and one undo step; `rememberPutBack`/`putBackMoves` keep cards, lines and
+versions in step with real history moves only. Start over keeps numbering and sweeps unused
+levels. Folded cards compute nothing; a 20-card e2e keeps each round near 1-2 s.
+
 **Drag on big plans (task #69):** room labels are fitted once per room (`fitRoomLabel`,
 memo keyed on everything the fit reads) with `placeLabel` filtering far circles and searching
 nearest-first (exact, ties kept); `wallStatuses`, `planGeometry`, `roomShapes` and

@@ -48,7 +48,7 @@ const MOVE_KEYS = new Set([...FORWARD, ...BACK, ...LEFT, ...RIGHT, 'ShiftLeft', 
  * Keys a focused control takes for itself: all of them in a text field, the arrows on a
  * slider (the View or Time slider just used keeps focus; WASD and Esc still walk and leave).
  */
-const ownsKey = (t: EventTarget | null, key: string) =>
+export const ownsKey = (t: EventTarget | null, key: string) =>
   // A dialog open over the walk (a render) has its keys to itself, Esc to close it included.
   (t instanceof Element && !!t.closest('dialog')) ||
   (t instanceof HTMLInputElement && t.type === 'range'
@@ -139,11 +139,7 @@ export function WalkControls({
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (ownsKey(e.target, e.key) || e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key === 'Escape') {
-        // The first Esc only releases pointer lock (the browser does that itself).
-        if (!document.pointerLockElement) useEditor.getState().stopWalk();
-        return;
-      }
+      // Esc is the viewport's (it works before these controls are up, in a 3D view loading).
       if (!MOVE_KEYS.has(e.code)) return;
       keys.current.add(e.code);
       e.preventDefault();

@@ -7839,6 +7839,9 @@ textarea {
 .talk-changes {
   display: grid;
   gap: 6px;
+  /* A sideways swipe switches A / B / C (QA P4-1): the browser keeps vertical scrolling and
+     leaves the sideways drag to the page, so it isn't cancelled. */
+  touch-action: pan-y;
 }
 .talk-changes-head {
   display: flex;
@@ -8363,6 +8366,12 @@ textarea {
   html[data-talk-sheet] .designer-bar .designer-bar-text {
     display: none;
   }
+  /* My plan before the designer: what the bar is and what Put it back does stay said. */
+  html[data-talk-sheet] .designer-bar-start .designer-bar-text {
+    display: block;
+    order: -1;
+    font-size: var(--fs-hint);
+  }
   html[data-talk-sheet="full"] .reno-bar.designer-bar {
     display: none;
   }
@@ -8555,6 +8564,15 @@ html[data-proposal] .elec-warn circle {
   .designer-bar .designer-bar-text {
     display: none;
   }
+  /* My plan before the designer keeps saying what is shown (QA P4-5), on its own row. */
+  .reno-bar.designer-bar-start {
+    flex-wrap: wrap;
+  }
+  .designer-bar-start .designer-bar-text {
+    display: block;
+    flex-basis: 100%;
+    font-size: var(--fs-hint);
+  }
 }
 .talk-folded > :not(.talk-side-tab) {
   display: none;
@@ -8714,5 +8732,103 @@ html[data-proposal] .plan-svg g.clearance {
 @media (prefers-reduced-motion: reduce) {
   .talk-price-skeleton {
     animation: none;
+  }
+}
+
+/* Alternatives A / B / C (UX §6.4): a segmented tablist over the card's body. */
+.talk-options {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: calc(var(--radius-control) + 2px);
+  background: var(--active);
+  min-width: 0;
+}
+.talk-option {
+  display: inline-flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.talk-option.on {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+}
+.talk-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.talk-option-letter {
+  flex: none;
+  font-weight: 600;
+}
+.talk-option-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.talk-option-mark {
+  flex: none;
+  display: inline-flex;
+}
+
+/* Versions: one row each, its verdict on the plan as it is now. */
+.talk-versions {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.talk-version {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.talk-version-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.talk-version-title {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.talk-version-verdict {
+  font-size: var(--fs-hint);
+  color: var(--muted);
+}
+.designer-bar-start .designer-bar-text {
+  min-width: 0;
+}
+.talk-restart .check-row {
+  margin-top: 8px;
+}
+
+/* On a phone the names go and the letters stay, 44 px tall (the title names the option). */
+@media (max-width: 900px), (pointer: coarse) {
+  .talk-option {
+    height: 44px;
+  }
+  .talk-option-name {
+    display: none;
+  }
+  .talk-version {
+    flex-wrap: wrap;
   }
 }

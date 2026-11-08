@@ -324,6 +324,11 @@ export const Turn = z.discriminatedUnion('kind', [
       .default(null),
     /** "Just {room}": the plan's first room alone. */
     just: ScopeRef.nullable().default(null),
+    /** Another idea as an alternative (B, C) of a proposal, rather than a new one. */
+    alt: z
+      .object({ proposalId: z.string(), letter: z.enum(['B', 'C']) })
+      .nullable()
+      .default(null),
   }),
   z.object({ ...base, kind: z.literal('proposal'), proposalId: z.string() }),
   z.object({ ...base, kind: z.literal('event'), event: TalkEvent }),

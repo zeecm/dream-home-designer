@@ -62,10 +62,11 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
   const { prices } = useSpend();
   const busy = useBusy();
   const tick = useResultsTickN();
+  const designs = useDesigner((s) => s.designs);
   // biome-ignore lint/correctness/useExhaustiveDependencies: on what the price reads
   const price = useMemo(
     () => (newest ? timed(() => scopePrice(newest.scope)) : null),
-    [newest, project, prices, tick],
+    [newest, project, prices, tick, designs],
   );
   const area = useRef<HTMLTextAreaElement>(null);
   const saved = conv?.draft ?? '';

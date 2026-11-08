@@ -8,6 +8,7 @@ import { ordered, problemsInOrder, togglePick } from './compare';
 import { baseOf, changedText, onPlanNow } from './plan';
 import { readResult, useResultsTickN } from './results';
 import { closeCompare, designOpts, previewFrom, useDesigner } from './state';
+import { versionTitle } from './talk/titles';
 import { humanize, problemRoom } from './words';
 
 /**
@@ -71,7 +72,7 @@ function CompareView({ picks, designs }: { picks: string[]; designs: Design[] })
       ).length;
       out.push({
         key: d.id,
-        title: `V${d.n}`,
+        title: versionTitle(d),
         name: d.concept?.name ?? d.name,
         level: r.level,
         design: d,
@@ -140,7 +141,7 @@ function CompareView({ picks, designs }: { picks: string[]; designs: Design[] })
                     disabled={last(d.id)}
                     onChange={() => useDesigner.setState({ comparing: togglePick(picks, d.id) })}
                   />
-                  <span>V{d.n}</span>
+                  <span>{versionTitle(d)}</span>
                 </label>
               ))}
           </fieldset>

@@ -4,6 +4,7 @@ import type { Level } from '../../schema';
 import { aliasesFor } from '../aliases';
 import { type DesignBrief, defaultBrief } from '../schema';
 import { spacesOf } from '../spaces';
+import { factText } from './firstMeeting';
 import {
   RECORDED,
   RECORDED_ESCAPES,
@@ -243,7 +244,12 @@ describe('the reducer: a message and its reply', () => {
       'note',
     ]);
     expect(c.decisions.map((x) => x.text)).toEqual(['No sofa under the window']);
-    expect(c.brief.budget).toEqual({ low: 32000, high: 40000 });
+    // "About S$40k" stays S$40k: never widened into a range the person didn't give.
+    expect(c.brief.budget).toEqual({ low: 40000, high: 40000 });
+    expect(factText('budget', c.brief, level)).toBe('S$40k');
+    expect(d?.kind === 'designer' && d.talk?.noted.find((x) => x.kind === 'fact')?.text).toMatch(
+      /budget S\$40k/,
+    );
     expect(c.assumed).not.toContain('budget');
     expect(c.notes).toHaveLength(1);
   });

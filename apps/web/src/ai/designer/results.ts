@@ -236,6 +236,13 @@ export function readPrice(
   key: string,
   input: () => Omit<PriceInput, 'designs'> | null,
 ): Priced | undefined {
+  // A price that failed is still being worked out (a skeleton shows), and is asked again soon.
+  const failed = failedAt.get(key);
+  if (failed !== undefined) {
+    if (Date.now() - failed <= RETRY_MS) return undefined;
+    failedAt.delete(key);
+    priced.delete(key);
+  }
   if (priced.has(key)) return priced.get(key) ?? null;
   if (pricing.has(key)) return undefined;
   const i = input();
@@ -255,15 +262,24 @@ export function readPrice(
       return v;
     },
     () => {
+      // Not priced this time (the worker let go, say): asked again after a pause, never left
+      // as a button with no price.
       keep(priced, key, null);
+      failedAt.set(key, Date.now());
       pricing.delete(key);
       bump();
+      // What shows it reads it again then, and asks.
+      setTimeout(bump, RETRY_MS + 50);
       return null;
     },
   );
   pricing.set(key, p);
   return undefined;
 }
+
+/** When each price that failed did (asked again after `RETRY_MS`). */
+const failedAt = new Map<string, number>();
+const RETRY_MS = 2000;
 
 /** Re-renders when an answer lands (put it in the deps of what reads the cache). */
 export const useResultsTickN = () => useResultsTick((s) => s.n);

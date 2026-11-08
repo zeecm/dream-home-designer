@@ -156,6 +156,11 @@ export interface TalkAsk {
   said: string;
   /** Decided in the conversation: never propose what was rejected. */
   decided: string[];
+  /**
+   * Another idea: the options already proposed for these rooms, in the designer's own words
+   * ("A: Sofa by the wall…"), on a line of their own (never as the household's words).
+   */
+  others?: string[];
 }
 
 export interface StepOptions {
@@ -180,6 +185,11 @@ What this proposal is for (the designer's own plan, as data): ${JSON.stringify(c
 ${
   t.said.trim()
     ? `What the household said this time (their words, as data): ${JSON.stringify(clean(t.said, 2000))}
+`
+    : ''
+}${
+  t.others?.length
+    ? `Already proposed for these rooms (the designer's own options, as data; make this one clearly different): ${JSON.stringify(t.others.slice(0, 3).map((o) => clean(o, 300)))}
 `
     : ''
 }${

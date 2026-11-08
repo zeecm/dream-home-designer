@@ -53,6 +53,20 @@ describe('the designs store', () => {
     expect(rows).not.toMatch(/sk-|AIza|api[-_]?key/i);
   });
 
+  it('gives the options of one proposal its number (V4A, V4B); anything else moves on', async () => {
+    const store = await openDesigns(new IDBFactory());
+    const from = (letter: string, proposalId = 'prop1') => ({
+      conversationId: 'c1',
+      proposalId,
+      letter,
+    });
+    const a = await store.create({ ...design('a'), from: from('A') }, 4);
+    const b = await store.create({ ...design('b'), from: from('B') }, 4);
+    const other = await store.create({ ...design('o'), from: from('A', 'prop2') }, 4);
+    const v1 = await store.create(design('v1'), 4);
+    expect([a.design.n, b.design.n, other.design.n, v1.design.n]).toEqual([4, 4, 5, 6]);
+  });
+
   it('keeps 20 versions a plan: the oldest not accepted go first', async () => {
     const store = await openDesigns(new IDBFactory());
     const first = await store.create(design('keep'));

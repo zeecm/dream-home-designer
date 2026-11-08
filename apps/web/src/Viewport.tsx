@@ -31,7 +31,7 @@ import { useLevel, useProject, useStore } from './store';
 import { icons } from './ui/icons';
 import { Joystick } from './walk/Joystick';
 import { MiniMap } from './walk/MiniMap';
-import { WalkControls, type WalkPose } from './walk/WalkControls';
+import { WalkControls, type WalkPose, ownsKey } from './walk/WalkControls';
 import { setSound, unlockAudio, useSound } from './walk/footsteps';
 import { FOV_MAX, FOV_MIN, setWalkFov, useWalkFov } from './walk/fov';
 import { loadWalkPose, saveWalkPose } from './walk/pose';
@@ -575,6 +575,19 @@ export function Viewport() {
   const dark = usePrefersDark();
   const walking = useEditor((s) => !!s.walking);
   const { startWalk, stopWalk } = useEditor.getState();
+  // Esc leaves the walk from the moment it starts: the walk's own controls live in the 3D
+  // view, which may still be loading (a slow phone), and an Esc then was lost. The first Esc
+  // under pointer lock only releases it (the browser takes that one itself).
+  useEffect(() => {
+    if (!walking) return;
+    const down = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== 'Escape' || ownsKey(e.target, e.key) || e.ctrlKey || e.metaKey || e.altKey)
+        return;
+      if (!document.pointerLockElement) useEditor.getState().stopWalk();
+    };
+    window.addEventListener('keydown', down);
+    return () => window.removeEventListener('keydown', down);
+  }, [walking]);
   // Comparing a renovation's before and after, side by side across a divider.
   const [comparing, setComparing] = useState(false);
   const [rendering, setRendering] = useState(false);

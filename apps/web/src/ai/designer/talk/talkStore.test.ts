@@ -124,6 +124,32 @@ describe('the conversation store (dhd-talk)', () => {
     expect(await s.proposals('prj_b')).toHaveLength(1);
   });
 
+  it('Start over removes the old conversation’s proposals only (both stores)', async () => {
+    for (const s of [await openTalk(new IDBFactory()), await openTalk(undefined)]) {
+      await s.applyProposal('prj_a', 'p_old', () => proposal('p_old'));
+      await s.applyProposal('prj_a', 'p_new', () => ({
+        ...proposal('p_new'),
+        conversationId: 'conv2',
+      }));
+      await s.applyProposal('prj_b', 'p_b', () => proposal('p_b', 'prj_b'));
+      await s.removeProposals('prj_a', 'conv2');
+      expect((await s.proposals('prj_a')).map((p) => p.id)).toEqual(['p_new']);
+      expect((await s.proposals('prj_b')).map((p) => p.id)).toEqual(['p_b']);
+      // The levels no record names any more go; another plan's stay.
+      const kept = await s.putLevel('prj_a', level);
+      const moved = structuredClone(level);
+      const v = Object.values(moved.vertices)[0];
+      if (v) v.x += 1;
+      const other = await s.putLevel('prj_a', moved);
+      const theirs = await s.putLevel('prj_b', moved);
+      expect(other).not.toBe(kept);
+      await s.sweepLevels('prj_a', [kept]);
+      expect(await s.getLevel('prj_a', kept)).not.toBeNull();
+      expect(await s.getLevel('prj_a', other)).toBeNull();
+      expect(await s.getLevel('prj_b', theirs)).not.toBeNull();
+    }
+  });
+
   it('a record that wouldn’t read back is never written; nothing is lost', async () => {
     const s = await openTalk(new IDBFactory());
     await s.apply('prj_a', () => started());

@@ -18,7 +18,7 @@ import {
   tanBrief,
   wallOp,
 } from './fixtures/sample';
-import { bathroomsHeld, handEdits, heldAspects, wallsHeld } from './handEdits';
+import { bathroomsHeld, handEditCount, handEdits, heldAspects, wallsHeld } from './handEdits';
 import { roomStep } from './prompts';
 import { designResult } from './result';
 import { BATHROOMS, type Concept, type Part } from './schema';
@@ -187,6 +187,30 @@ describe('handEdits (criterion 20)', () => {
       },
     ]);
     expect(handEdits(accepted, accepted)).toEqual([]);
+  });
+
+  it('counts each change by hand: three sofas added are three (one lock), a move one more', () => {
+    const s0 = fresh();
+    const lvl = flat(s0);
+    const r = designResult(lvl, lvl, sampleDesign({ level: lvl }));
+    const s1 = dispatch(s0, acceptDesign(lvl.id, r.level, allParts(r.level), { base: lvl }));
+    const accepted = reno(s1);
+    const sofa = Object.values(accepted.items).find((i) => i.assetId === 'sofa-3');
+    if (!sofa) throw new Error('no sofa');
+    const now = structuredClone(accepted);
+    for (const k of [1, 2, 3]) {
+      now.items[`it_hand${k}`] = {
+        ...structuredClone(sofa),
+        id: `it_hand${k}`,
+        position: { ...sofa.position, x: sofa.position.x - 0.3 * k },
+      };
+    }
+    expect(handEditCount(accepted, now)).toBe(3);
+    expect(handEdits(accepted, now)).toHaveLength(1);
+    const moved = now.items[sofa.id];
+    if (moved) moved.position = { ...moved.position, x: moved.position.x + 0.5 };
+    expect(handEditCount(accepted, now)).toBe(4);
+    expect(handEditCount(accepted, accepted)).toBe(0);
   });
 
   it('pieces added and removed, floors and walls changed by hand', () => {

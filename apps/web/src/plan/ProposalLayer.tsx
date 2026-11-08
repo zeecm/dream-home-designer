@@ -24,7 +24,8 @@ interface Mark {
 
 export const ProposalLayer = memo(function ProposalLayer() {
   const v = useProposalView();
-  const side = useEditor((s) => s.preview?.side);
+  // My plan before the designer is not a proposal: no marks on it (QA P4-5).
+  const side = useEditor((s) => (s.preview?.start ? 'start' : s.preview?.side));
   const hover = useTalk((s) => (s.hover?.card === v.card ? s.hover.change : null));
   const open = useTalk((s) => (s.open?.card === v.card ? s.open.change : null));
   const marks = useMemo(() => {
@@ -135,7 +136,7 @@ export const ProposalLayer = memo(function ProposalLayer() {
 export function ProposalLegend() {
   const card = useProposalView((s) => s.card);
   const ghost = useProposalView((s) => s.ghost);
-  const side = useEditor((s) => s.preview?.side);
+  const side = useEditor((s) => (s.preview?.start ? 'start' : s.preview?.side));
   // On a touch screen or a short stage, a small Key in the corner, opened on a tap.
   const [compact] = useState(
     () => !!window.matchMedia?.('(pointer: coarse), (max-height: 600px)').matches,
