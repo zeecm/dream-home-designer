@@ -180,10 +180,22 @@ export const blankStep = (key: string, label: string, kind: StepState['kind']): 
 const usdText = (v: number) => (v < 10 ? `US$${v.toFixed(2)}` : `US$${Math.round(v)}`);
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
+/** `p`, or Stopped as soon as `signal` aborts (whichever comes first). */
+function untilStopped<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Stopped());
+  return new Promise<T>((resolve, reject) => {
+    const stop = () => reject(new Stopped());
+    signal.addEventListener('abort', stop, { once: true });
+    p.then(resolve, reject).finally(() => signal.removeEventListener('abort', stop));
+  });
+}
+
 export async function runDesign(o: RunOptions): Promise<{ state: RunState; design: DraftDesign }> {
   const { ai, ctx, plan } = o;
-  // Placed and checked in the designer's worker when there is one; here otherwise.
-  const place = o.results ?? ((b, f, d, opts) => Promise.resolve(designResult(b, f, d, opts)));
+  // Placed and checked in the designer's worker when there is one; here otherwise. Stop always
+  // ends the run, even while a check is out (a worker that hangs or dies says nothing).
+  const placeAny = o.results ?? ((b, f, d, opts) => Promise.resolve(designResult(b, f, d, opts)));
+  const place: typeof placeAny = (b, f, d, opts) => untilStopped(placeAny(b, f, d, opts), o.signal);
   const doFetch = o.fetch ?? fetch.bind(globalThis);
   const design: DraftDesign = structuredClone(o.design);
   const name = PROVIDERS[ai.provider].short;

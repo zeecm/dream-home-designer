@@ -21,7 +21,7 @@ import {
 } from '@dhd/core';
 import { useStore } from '../../../store';
 import { aiSettings } from '../../credentials';
-import { freshPrice, readPrice, requestResult } from '../results';
+import { freshPrice, readPrice, trialResult } from '../results';
 import { blankStep, runDesign } from '../run';
 import { addUsage, capUsd, countRun, overLimit, priceTable, spent, usd } from '../spend';
 import { type Running, designOpts, useDesigner } from '../state';
@@ -274,7 +274,9 @@ async function askOrRun(req: PressRequest) {
   const was = shown ? atMostOf(shown) : null;
   const now = atMostOf(made.est);
   const dearer = !shown || (was !== null && now !== null && now > was + 0.005);
-  const ask = dearer ? 'ask-threshold' : rule(made.est, true);
+  // The rule's own card first (the tab's first run, the limit); dearer only stops a go.
+  const ruled = rule(made.est, true);
+  const ask = ruled === 'go' && dearer ? 'ask-threshold' : ruled;
   if (ask === 'go') {
     await run(req, made, atMostOf(made.est), { person: newId('turn'), turn: newId('turn') });
     return;
@@ -537,7 +539,7 @@ async function runOption(
     signal: ctrl.signal,
     prices: priceTable(),
     result: designOpts(project),
-    results: requestResult,
+    results: trialResult,
     ...(sp.expected ? { expected: sp.expected } : {}),
     onUpdate: (st) => {
       setLive({ state: st });

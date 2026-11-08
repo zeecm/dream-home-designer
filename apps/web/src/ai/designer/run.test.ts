@@ -3,6 +3,7 @@ import {
   type Level,
   aliasesFor,
   defaultBrief,
+  designResult,
   sampleFlatProject,
   usageTotals,
 } from '@dhd/core';
@@ -354,6 +355,20 @@ describe('the runner (criteria 25–28)', () => {
         .map((s) => s.status)
         .sort(),
     ).toEqual(['cancelled', 'cancelled', 'cancelled', 'skipped']);
+  });
+
+  it('Stop ends the run while a check never comes back (a worker hung or killed)', async () => {
+    const prov = provider('anthropic', { auto: true });
+    let asked = 0;
+    // The plan's two placings answer; every room's check after them never does.
+    const results: RunOptions['results'] = (b, f, d, opts) =>
+      ++asked <= 2 ? Promise.resolve(designResult(b, f, d, opts)) : new Promise(() => {});
+    const r = start('anthropic', { fetch: prov.fetch, results });
+    await until(() => asked >= 3, 'a room sent for its check');
+    r.ctrl.abort();
+    const { state } = await r.run;
+    expect(state.phase).toBe('stopped');
+    expect(state.endedAt).not.toBeNull();
   });
 
   const limited = (prov: ReturnType<typeof provider>) => {

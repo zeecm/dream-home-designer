@@ -28,10 +28,25 @@ const bump = () => useResultsTick.setState((s) => ({ n: s.n + 1 }));
 /** A message before it has its id. */
 type Unsent = { [K in Ask['kind']]: Omit<Extract<Ask, { kind: K }>, 'id'> }[Ask['kind']];
 
-type Waiting = { ask: Ask; resolve: (v: unknown) => void; reject: (e: Error) => void };
+type Waiting = {
+  ask: Ask;
+  resolve: (v: unknown) => void;
+  reject: (e: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
 const waiting = new Map<number, Waiting>();
 let seq = 0;
 let worker: Worker | null | undefined;
+
+/** How long one ask may take in the worker before it is given up on (and the worker with it). */
+export const WORKER_TIMEOUT_MS = 12_000;
+
+/**
+ * Counted only when a test asks (it sets `window.__dhdDesignerWorker`): asks the worker
+ * answered, and asks answered here on the main thread.
+ */
+type Counts = { worker: number; here: number };
+const counts = () => (globalThis as { __dhdDesignerWorker?: Counts }).__dhdDesignerWorker;
 
 /**
  * An ask answered here, on the main thread (no worker, or it failed): a price is worked out
@@ -40,6 +55,8 @@ let worker: Worker | null | undefined;
 function here(ask: Ask): Answer {
   if (ask.kind === 'price')
     handle({ id: 0, kind: 'designs', designs: useDesigner.getState().designs });
+  const c = counts();
+  if (c) c.here++;
   return handle(ask);
 }
 
@@ -47,8 +64,21 @@ function answered(a: Answer) {
   const w = waiting.get(a.id);
   waiting.delete(a.id);
   if (!w) return;
+  clearTimeout(w.timer);
   if (a.ok) w.resolve(a.value);
   else w.reject(new Error(a.error));
+}
+
+/**
+ * The worker failed, can't read what it was sent, or hung or died without a word (an
+ * out-of-memory kill fires nothing): it is let go, what it was asked is answered here, and so
+ * is all that follows.
+ */
+function giveUp(w: Worker) {
+  if (worker !== w) return;
+  worker = null;
+  w.terminate();
+  for (const x of [...waiting.values()]) answered(here(x.ask));
 }
 
 /** The worker, started once with the project's models and versions; null where it can't be. */
@@ -60,12 +90,13 @@ function getWorker(): Worker | null {
   }
   try {
     const w = new Worker(new URL('./results.worker.ts', import.meta.url), { type: 'module' });
-    w.onmessage = (e: MessageEvent<Answer>) => answered(e.data);
-    // A worker that fails: what it was asked is answered here, and so is all that follows.
-    w.onerror = () => {
-      worker = null;
-      for (const x of [...waiting.values()]) answered(here(x.ask));
+    w.onmessage = (e: MessageEvent<Answer>) => {
+      const c = counts();
+      if (c) c.worker++;
+      answered(e.data);
     };
+    w.onerror = () => giveUp(w);
+    w.onmessageerror = () => giveUp(w);
     worker = w;
     tell({ kind: 'models', models: useStore.getState().editor.doc.models });
     tell({ kind: 'designs', designs: useDesigner.getState().designs });
@@ -96,16 +127,43 @@ function send<T>(ask: Unsent): Promise<T> {
     return a.ok ? Promise.resolve(a.value as T) : Promise.reject(new Error(a.error));
   }
   return new Promise<T>((resolve, reject) => {
-    waiting.set(full.id, { ask: full, resolve: resolve as (v: unknown) => void, reject });
-    w.postMessage(full);
+    const timer = setTimeout(() => giveUp(w), WORKER_TIMEOUT_MS);
+    waiting.set(full.id, { ask: full, resolve: resolve as (v: unknown) => void, reject, timer });
+    try {
+      w.postMessage(full);
+    } catch (e) {
+      // Not cloneable: nothing went, so nothing is waited for.
+      waiting.delete(full.id);
+      clearTimeout(timer);
+      reject(e instanceof Error ? e : new Error(String(e)));
+    }
   });
 }
 
-const LIMIT = 24;
+/** Few: a result holds a whole level (the cards on the table, Compare's pair, the preview). */
+const LIMIT = 12;
 function keep<T>(m: Map<string, T>, key: string, v: T) {
   m.delete(key);
   m.set(key, v);
   if (m.size > LIMIT) m.delete(m.keys().next().value as string);
+}
+
+/** Frozen again, as designResult leaves it (a clone isn't): memos on frozen levels hold here. */
+const frozen = (r: DesignResult): DesignResult => freeze(r, true);
+
+/**
+ * A version placed and checked once, not kept (a run's per-room trials: each is asked once,
+ * and keeping them would push the cards' results out).
+ */
+export function trialResult(
+  base: Level,
+  before: Level,
+  design: DesignInput,
+  opts: DesignOptions = {},
+): Promise<DesignResult> {
+  const hit = results.get(designResultKey(base, before, design, opts));
+  if (hit) return Promise.resolve(hit);
+  return send<DesignResult>({ kind: 'result', base, before, design, opts }).then(frozen);
 }
 
 const results = new Map<string, DesignResult>();
@@ -125,9 +183,7 @@ export function requestResult(
   if (going) return going;
   const p = send<DesignResult>({ kind: 'result', base, before, design, opts }).then(
     (sent) => {
-      // Frozen again, as designResult leaves it (a clone isn't): what reads it on this side
-      // (room shapes, the changes, the checks) keeps its own memos on frozen levels.
-      const r = freeze(sent, true);
+      const r = frozen(sent);
       keep(results, key, r);
       placing.delete(key);
       bump();
