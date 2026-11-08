@@ -659,12 +659,18 @@ describe('suggestPoints: the sample flat', () => {
     for (let i = 0; i < 8; i++)
       for (let j = 0; j < 5; j++)
         names.push([`Bedroom ${i}${j}`, { x: i * 3 + 1.5, y: j * 3 + 1.5 }]);
-    const l = Object.freeze(structuredClone(flat(plan(segs, names))));
-    const t0 = performance.now();
-    const out = suggestPoints(l);
-    const ms = performance.now() - t0;
-    expect(out.rooms).toHaveLength(40);
-    expect(ms).toBeLessThan(process.env.PERF ? 150 : 450);
+    const base = flat(plan(segs, names));
+    // The median of five cold runs: one slow run on a busy machine is not a slow function.
+    const times: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const l = Object.freeze(structuredClone(base));
+      const t0 = performance.now();
+      const out = suggestPoints(l);
+      times.push(performance.now() - t0);
+      expect(out.rooms).toHaveLength(40);
+    }
+    times.sort((a, b) => a - b);
+    expect(times[2]).toBeLessThan(process.env.PERF ? 150 : 450);
   });
 });
 

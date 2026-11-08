@@ -688,6 +688,14 @@ back is one Command and one undo step; `rememberPutBack`/`putBackMoves` keep car
 versions in step with real history moves only. Start over keeps numbering and sweeps unused
 levels. Folded cards compute nothing; a 20-card e2e keeps each round near 1-2 s.
 
+**Phone: a new proposal in sight before Accept (owner bug, 8 Nov).** A cost card takes the phone
+sheet to full height, which covers the whole stage, and nothing brought it down again, so the
+proposal (drawn all along) was hidden behind the sheet in Plan and 3D alike. Now a card going on
+the plan for the first time folds a sheet that covers the plan (full, or half on a short
+window) to peek, and a phone showing only 3D switches to the plan, where the changes are marked
+(`TalkPanel` in `talk/Conversation.tsx`). E2e: the phone test "asked to design it from the 3D
+view".
+
 **AI designer v2, slice 3b PR 1 (lenses and the storage lens, 8 Nov):** core
 `designer/lenses/` holds the `Lens` interface (`report`, optional `steer`; lenses never gate)
 and `storageLens`. The household it measures for (`storageSettingFor`): the storage meter's own
@@ -708,8 +716,7 @@ again with the steer (`Steer`, weights only: protected roles left out last, `dro
 preferred piece narrowed costs more and is looked at again at full width, gains a little against
 a wall; swaps go on to one that keeps it whole), kept only if no worse (`piecesNoWorse`, no new
 hard key from `spaceHardKeys`, the one helper for a space's hard checks). The benchmark's
-layouts are unchanged and cost about the same. The conversation record still needs 3a's v3
-(`owns` is a new question key): this branch rebases onto it.
+layouts are unchanged and cost about the same. `owns` is in 3a's conversation record v3.
 
 **AI designer v2, slice 3b PR 2 (the second look, criterion 41, 8 Nov):** core `designer/look/`.
 A Thorough run with a model that can see (`looksAt`, `VISION` and the families `claude-*`,
@@ -738,6 +745,27 @@ nearest-first (exact, ties kept); `wallStatuses`, `planGeometry`, `roomShapes` a
 incrementally from the last one (`rasterBare`, exact; widths recomputed within WIDE/2+1).
 72-room corner drag: about 970 ms CPU a step before, about 150 ms after; walkway run 126 to
 58 ms. Left: the main-door widest-way search (about 25 ms, global), possibly a Web Worker.
+
+**The 3D view draws only when something changes (8 Nov):** `frameloop="demand"` in
+`Viewport.tsx`; `'always'` only while walking (not while a render's dialog holds the walker
+still), `'never'` while an exact render draws. React's own changes to the scene ask for a frame
+themselves (the sun, the hour, the theme's colours); the rest ask with `invalidate()`:
+`LevelMesh` after each `meshes.update` (an edit, a version switched, a model arriving), the
+camera rig, swinging doors until they land, the lamps (chosen again half a second after the
+camera stops) and drei's orbit controls (each `change`, damping included). The controls stop
+asking a pixel or two before their damping ends (their own 1 mm threshold): `SettleOrbit` asks
+on while more than a pixel of glide is left, then plays the rest out in that frame (QA F1: the
+next unrelated redraw used to snap the view by 0.6-3.6% of its pixels). `Redraw` covers a
+resize, the frame loop back from rest, a restored GL context and any change in the project,
+hour, theme, walk, comparing or its divider. Wallpapers are canvas textures (no async load);
+model textures come with their model. Nothing is drawn in 3D for a plan selection. Tests set
+`window.__DHD_FRAMES__ = 0` to count frames (and get `__DHD_DOORS__`); `e2e/frames.spec.ts`
+checks idle, orbit damping, the hour, an edit, a model load, a resize, the walk and doors.
+Idle frames in 5 s (SwiftShader, 1440 × 900): 3D view 34 → 0, Split 87 → 0. Full e2e suite
+(`CI=1`, 2 workers, `--trace off`, build included, this container): 16.7 min (234 tests) before,
+16.2 min (242, the 8 new ones about 40 s of it) after. Small, because tests rarely leave a view
+idle for long and the contexts tests leave open were already closed (§7); a page left open
+in 3D or Split no longer costs anything, only one left walking.
 
 ## 5. Owner to-dos
 
@@ -1376,7 +1404,8 @@ left open stays in the worker's browser for the rest of the run; in Split or 3D 
 view draws every frame in SwiftShader. That was why `main` went red after #41: with two such
 pages in its browser the exact render's first sample never came (36 s without them); a view
 link's first paint missed its 10 s and the guide's close click hung for 60 s (2.4 s without).
-`contexts.spec.ts` checks that a context a test leaves open is gone by the next test.
+`contexts.spec.ts` checks that a context a test leaves open is gone by the next test. Since the 3D view draws
+only on demand (8 Nov), an idle one left open costs nothing; one left walking still does.
 
 - Every document mutation goes through a `Command` in `packages/core/src/commands.ts`.
   UI code never mutates the project directly.
@@ -1427,6 +1456,12 @@ schema-10 preview ("schemaVersion 10 not supported (want 1-7)"; owner, 6 Nov).
 
 ## 9. Known gaps and debts
 
+- **Needs a real-device check: the walk after the render dialog (QA F2, 8 Nov).** Under
+  SwiftShader, closing the photo-real render dialog during a walk stalls the page's
+  `requestAnimationFrame` for over 20 s (the app's frames and a separate rAF counter both read
+  0; the page is visible, focused and answers `evaluate` in 1-3 ms). A key press or a long
+  screenshot gets frames going again; leaving the walk brings them back at once. It happens
+  before the demand frame loop too (1be60a0's parent). Check on a real phone and computer.
 - **Links are the capability.** A project is readable by anyone with its link; editing needs
   the owner or an edit key. Listing is off in production, and writes are rate-limited (and
   capped per day). Google sign-in is built and off until the

@@ -12,6 +12,7 @@ import { WET } from '../locks';
 import { nameOf } from '../place';
 import { RELATIONS, type Role, roleOf } from '../principles';
 import type { DesignResult, ResultCheck } from '../result';
+import type { Rule } from '../rules/schema';
 import type { DesignBrief, DesignInput, DesignItem } from '../schema';
 import { BATHROOMS } from '../schema';
 import { roomIdAt, roomsBeside } from '../spaces';
@@ -683,11 +684,18 @@ export function subsetReport(
   r: DesignResult,
   merged: Level,
   brief: DesignBrief,
-  opts: { rates?: Rates; waived?: readonly string[]; renovation?: boolean } = {},
+  opts: {
+    rates?: Rates;
+    waived?: readonly string[];
+    renovation?: boolean;
+    /** The house rules the card was checked against (slice 3a). */
+    rules?: readonly Rule[];
+  } = {},
 ): SubsetReport {
+  const rules = opts.rules?.length ? { rules: opts.rules } : {};
   const rates = opts.rates ?? TYPICAL_RATES;
   const baseKeys = new Set(
-    designChecks(settled(now), { brief, uses: r.uses })
+    designChecks(settled(now), { brief, uses: r.uses, ...rules })
       .filter((c) => c.hard)
       .map((c) => c.key),
   );
@@ -703,7 +711,7 @@ export function subsetReport(
     );
   };
   const waived = new Set(opts.waived ?? []);
-  const caused = designChecks(settled(merged), { brief, uses: r.uses })
+  const caused = designChecks(settled(merged), { brief, uses: r.uses, ...rules })
     .filter((c) => c.hard)
     .filter((c) => !(baseKeys.has(c.key) && (c.itemId ? unchanged(c.itemId) : true)))
     .map((c): ResultCheck => ({ ...c, already: false, part: null }));

@@ -220,7 +220,9 @@ export function conversationText(
   for (const k of QUESTION_KEYS) {
     if (k === 'mobility' && !b.household.elders.length) continue;
     if (k === 'sleeping' && !peopleOf(b).some((p) => p.kind !== 'helper')) continue;
-    const assumed = conv.assumed.includes(k) ? ' (assumed)' : '';
+    // How much they own is never asked in the first meeting: Typical until it is said.
+    const assumed =
+      conv.assumed.includes(k) || (k === 'owns' && b.owns === undefined) ? ' (assumed)' : '';
     out.push(`- ${FACT_LABELS[k]}: ${factText(k, b, level)}${assumed}`);
   }
   // Accepted rows still in the renovation, room by room, in the order they were accepted.

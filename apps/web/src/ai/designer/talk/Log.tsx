@@ -99,6 +99,25 @@ export function handText(lines: readonly string[], more: number): string {
   return `You changed these yourself: ${list.join(', ')}${more ? ` and ${more} more` : ''}. They stay as you left them.`;
 }
 function Person({ t }: { t: TurnOf<'person'> }) {
+  // Make this a rule (UX §3.8): the app's line, not a bubble of theirs.
+  if (t.ruleAsk) {
+    return (
+      <article className="talk-turn talk-app" aria-labelledby={`h-${t.id}`}>
+        <h3 id={`h-${t.id}`} className="visually-hidden">
+          App
+        </h3>
+        <p className="talk-app-line">
+          <span className="talk-app-icon">
+            <Mark kind="dot" />
+          </span>
+          <span className="talk-app-text">
+            <span>Asked to make a rule of: {t.text.replace(/^Make this a rule: /, '')}.</span>
+          </span>
+        </p>
+        <SentState t={t} />
+      </article>
+    );
+  }
   return (
     <article className="talk-turn talk-you" aria-labelledby={`h-${t.id}`}>
       <h3 id={`h-${t.id}`} className="visually-hidden">
@@ -482,6 +501,8 @@ function Event({ t }: { t: TurnOf<'event'> }) {
   } else if (e.type === 'hand-edits') {
     icon = 'edit';
     text = handText(e.lines, e.more);
+  } else if (e.type === 'rule') {
+    text = e.text;
   } else {
     icon = e.type === 'fact' ? 'edit' : /^Couldn’t/.test(e.text) ? 'warn' : 'dot';
     text = e.text;
@@ -497,6 +518,16 @@ function Event({ t }: { t: TurnOf<'event'> }) {
         </span>
         <span className="talk-app-text">
           <span>{text}</span>
+          {e.type === 'rule' && (
+            <button
+              type="button"
+              className="link-btn"
+              data-rules-link=""
+              onClick={() => useTalk.setState({ view: 'rules' })}
+            >
+              Your rules
+            </button>
+          )}
           {st === 'undo' && (
             <button
               type="button"
@@ -667,7 +698,7 @@ export function Log() {
             const mark = day !== lastDay;
             lastDay = day;
             const speaker =
-              t.kind === 'person'
+              t.kind === 'person' && !t.ruleAsk
                 ? 'you'
                 : t.kind === 'event' || t.kind === 'cost-ask'
                   ? 'app'

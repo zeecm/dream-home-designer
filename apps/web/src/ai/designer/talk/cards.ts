@@ -19,7 +19,7 @@ import {
   subsetReport,
 } from '@dhd/core';
 import { readLens, readResult, requestResult } from '../results';
-import { designOpts } from '../state';
+import { designOpts, houseRulesFor } from '../state';
 
 /**
  * A card in the conversation: a proposal's option, or a version made by v1's form ("Earlier
@@ -141,7 +141,7 @@ export function nowOf(project: Project, levelId: string): { now: Level; before: 
 export function cardResult(project: Project, card: CardModel): DesignResult | null {
   const b = nowOf(project, card.levelId);
   if (!b) return null;
-  return readResult(b.now, b.before, card.input, designOpts(project));
+  return readResult(b.now, b.before, card.input, designOpts(project, card.levelId));
 }
 
 /**
@@ -151,7 +151,7 @@ export function cardResult(project: Project, card: CardModel): DesignResult | nu
 export function cardLens(project: Project, card: CardModel): LensReport[] | null {
   const b = nowOf(project, card.levelId);
   if (!b) return null;
-  return readLens(b.now, b.before, card.input, designOpts(project));
+  return readLens(b.now, b.before, card.input, designOpts(project, card.levelId));
 }
 
 /** A card placed on the plan as it is now, waited for (an accept, a request's context). */
@@ -161,7 +161,7 @@ export async function cardResultNow(
 ): Promise<DesignResult | null> {
   const b = nowOf(project, card.levelId);
   if (!b) return null;
-  return requestResult(b.now, b.before, card.input, designOpts(project));
+  return requestResult(b.now, b.before, card.input, designOpts(project, card.levelId));
 }
 
 const changesMemo = new Map<string, Change[]>();
@@ -214,6 +214,8 @@ export function cardVerdict(
   open: readonly { key: string }[],
   subset: readonly { key: string }[],
   waived: readonly string[],
+  /** The household's live rules on the card's level (UX §3.7: "…and your 2 rules"). */
+  rules = 0,
 ): { failing: string[]; waived: number; text: string; tone: 'pass' | 'waived' | 'fail' } {
   const w = new Set(waived);
   const failing = [...new Set([...open, ...subset].map((c) => c.key))].filter((k) => !w.has(k));
@@ -226,8 +228,19 @@ export function cardVerdict(
       tone: 'fail',
     };
   if (w.size) return { failing, waived: w.size, text: `${w.size} accepted anyway`, tone: 'waived' };
-  return { failing, waived: 0, text: 'Passes all checks', tone: 'pass' };
+  return {
+    failing,
+    waived: 0,
+    text: rules
+      ? `Passes all checks and your ${rules === 1 ? 'rule' : `${rules} rules`}`
+      : 'Passes all checks',
+    tone: 'pass',
+  };
 }
+
+/** A check's line after "Doesn't pass: " ("your rule “…”: …", not "Your rule"). */
+export const midLine = (text: string) =>
+  text.startsWith('Your rule ') ? `y${text.slice(1)}` : text;
 
 /**
  * What accepting the ticked changes would leave failing, on `project` as it is, worked out from
@@ -251,6 +264,7 @@ export function precheckOn(
     rates,
     waived: [...card.waivers.map((w) => w.key), ...waived],
     renovation: !!project.renovation,
+    rules: houseRulesFor(card.levelId),
   });
   return { failing: rep.failing, hdb: rep.failing.some((c) => !c.waivable), missing: false };
 }

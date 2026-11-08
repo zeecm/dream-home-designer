@@ -161,7 +161,13 @@ describe('parseTalkReply: malformed replies are salvaged, never shown broken', (
       questions: null,
     });
     expect(r.reply.say.length).toBe(900);
-    expect(r.reply.memory).toEqual({ decisions: [], facts: [], notes: [] });
+    expect(r.reply.memory).toEqual({
+      decisions: [],
+      facts: [],
+      notes: [],
+      rule: null,
+      unfit: null,
+    });
   });
 
   it('a question without questions, and a plan naming no room here, become replies', () => {

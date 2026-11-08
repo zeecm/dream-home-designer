@@ -32,6 +32,8 @@ import {
   sleepsOf,
   windowZones,
 } from './principles';
+import { ruleChecks } from './rules/check';
+import type { Rule } from './rules/schema';
 import type { DesignBrief, RoomUse } from './schema';
 import { roomsBeside, spacesOf } from './spaces';
 
@@ -40,7 +42,7 @@ import { roomsBeside, spacesOf } from './spaces';
  * line in the app's words with the piece or room it is about. Hard checks gate a proposal;
  * soft ones are advice. HDB rules can't be waived. Spec: docs/specs/ai-designer-v2.md.
  */
-export type Principle = 'P1' | 'P2' | 'P3' | 'P4' | 'HDB';
+export type Principle = 'P1' | 'P2' | 'P3' | 'P4' | 'HDB' | 'R';
 
 export interface DesignCheck {
   /** The same failure has the same key on another level (to tell caused from already there). */
@@ -71,6 +73,8 @@ export interface CheckOptions {
   /** Already worked out for this level. */
   clearance?: ClearanceIssue[];
   walk?: WalkwayReport;
+  /** The household's house rules for this level (slice 3a): each a hard, waivable R check. */
+  rules?: readonly Rule[];
 }
 
 /** The way to a bed side, hard (the walkway check's 0.60 m is the better width). */
@@ -774,6 +778,16 @@ export function designChecks(level: Level, opts: CheckOptions): DesignCheck[] {
     });
   }
   // One line per key (a piece narrowing a way at two places is one failure).
+  if (opts.rules?.length) {
+    out.push(
+      ...ruleChecks(opts.rules, {
+        level,
+        usesOf: (id) => usesOf(level, id, opts),
+        // The walkway check above made its pass on this level just now (unless it was given).
+        samePass: !opts.walk,
+      }),
+    );
+  }
   const seen = new Set<string>();
   return out.filter((c) => {
     if (seen.has(c.key)) return false;

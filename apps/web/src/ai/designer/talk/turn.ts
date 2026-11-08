@@ -17,14 +17,17 @@ import {
   aliasesFor,
   applyFacts,
   echoOf,
+  entranceDoor,
   estimateTalk,
   eventsSince,
   handEdits,
   lastAccepted,
+  liveRules,
   optionTitle,
   pendingReply,
   priceOf,
   probeLines,
+  ruleOffer,
   spacesOf,
   tableLines,
   talkAsks,
@@ -41,6 +44,7 @@ import { designOpts, useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
 import { cardChanges, cardResultNow, cardVerdict, optionCard } from './cards';
 import { followPlan } from './propose';
+import { tableCard } from './rules';
 import { talkCall } from './talkCall';
 import {
   type LiveReply,
@@ -253,8 +257,15 @@ async function pastLimit(prompt: TalkPrompt, conv: Conversation, anyway = false)
   return true;
 }
 
-/** Sends the composer's words to the designer. */
-export async function sendMessage(text: string, anyway = false): Promise<boolean> {
+/**
+ * Sends the composer's words to the designer. `ruleAsk`: Make this a rule from a Decision (its
+ * words are the app's, the composer is left as it is).
+ */
+export async function sendMessage(
+  text: string,
+  anyway = false,
+  ruleAsk?: { decisionId: string },
+): Promise<boolean> {
   const words = text.trim();
   const ai = aiSettings();
   const conv0 = useTalk.getState().conv;
@@ -278,10 +289,11 @@ export async function sendMessage(text: string, anyway = false): Promise<boolean
       text: words,
       sent: prompt.sent,
       aliases: input.aliases,
+      ...(ruleAsk ? { ruleAsk } : {}),
     });
     if (!next || pendingReply(next)?.id !== id) return;
     sent = true;
-    await clearTyped();
+    if (!ruleAsk) await clearTyped();
     say('Designer is replying.');
     await replyNow(id, prompt);
   });
@@ -478,6 +490,7 @@ async function replyNow(turnId: string, prompt: TalkPrompt) {
         aliases: aliasesFor(level, conv.aliases),
         spaces: spacesOf(level).map((s) => ({ key: s.key, name: s.name, rooms: s.rooms })),
         walls: conv.brief.walls,
+        mainDoor: entranceDoor(level),
       },
       signal: ctrl.signal,
       prices: priceTable(),
@@ -535,6 +548,21 @@ async function replyNow(turnId: string, prompt: TalkPrompt) {
           })
         : null;
     const id = newId('turn');
+    // A rule offered: vetted on the plan as it is now, before the reply is kept (tech §4).
+    const draft = res.reply.memory.rule;
+    const now = useTalk.getState().conv ?? conv;
+    const offer = draft
+      ? ruleOffer(draft, {
+          id: newId('rule'),
+          at: nowIso(),
+          turnId: id,
+          version: tableCard(now)?.title ?? null,
+          levelId: now.levelId,
+          rules: liveRules(now),
+          level,
+          brief: now.brief,
+        })
+      : null;
     const after = await act({
       type: 'replyDone',
       turnId,
@@ -547,6 +575,7 @@ async function replyNow(turnId: string, prompt: TalkPrompt) {
       probe,
       ids: Array.from({ length: 12 }, () => newId('dec')),
       fold: prompt.foldUpTo ? { upTo: prompt.foldUpTo, hard: prompt.foldHard } : null,
+      offer,
     });
     // The live region: the finished message in short (UX §9.1).
     say(

@@ -199,6 +199,32 @@ describe('the conversation store (dhd-talk)', () => {
     expect(await s.setAside('prj_a')).toBe('none');
     expect((await s.apply('prj_a', () => started()))?.id).toBe('conv1');
   });
+
+  it('a record set aside that this build reads goes back in place, only where nothing is', async () => {
+    const idb = new IDBFactory();
+    const s = await openTalk(idb);
+    await s.apply('prj_a', () => started());
+    await putRaw(idb, { ...started(), turns: 'not a list' });
+    expect(await s.setAside('prj_a')).toBe('aside');
+    // Nothing a later build can read: it stays aside.
+    expect(await s.restore('prj_a')).toBe(false);
+    // As if a later build read it after all: the record kept aside is a good one.
+    await new Promise<void>((resolve, reject) => {
+      const req = idb.open('dhd-talk', 1);
+      req.onsuccess = () => {
+        const tx = req.result.transaction('bad', 'readwrite');
+        tx.objectStore('bad').put({ projectId: 'prj_a', raw: started(), at: AT });
+        tx.oncomplete = () => {
+          req.result.close();
+          resolve();
+        };
+        tx.onerror = () => reject(tx.error);
+      };
+    });
+    expect(await s.restore('prj_a')).toBe(true);
+    expect((await s.get('prj_a'))?.id).toBe('conv1');
+    expect(await s.restore('prj_a')).toBe(false);
+  });
 });
 
 describe('versions and days', () => {

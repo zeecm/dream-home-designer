@@ -36,6 +36,7 @@ import { uploadPlanImage, usePlanImage, useUploadPicker } from '../ui/PlanImage'
 import { RenovationMarks } from '../ui/Renovation';
 import { icons } from '../ui/icons';
 import { ProposalLayer, ProposalLegend } from './ProposalLayer';
+import { RuleCaption, RuleLayer } from './RuleLayer';
 import { useCommentTool } from './commentTool';
 import { useCalibrateTool, useOpeningTool, useRoomTool, useWallTool } from './drawTools';
 import { useElectricalTool } from './electricalTool';
@@ -967,6 +968,7 @@ export function PlanCanvas() {
             />
             <SuggestLayer zoom={v.zoom} size={size} />
             <ProposalLayer />
+            {level && <RuleLayer level={level} zoom={v.zoom} />}
             <DesignFocusLayer size={size} />
             <TraceDraftLayer />
             <PlanHighlights
@@ -1114,6 +1116,7 @@ export function PlanCanvas() {
         </button>
       </div>
       <ProposalLegend />
+      <RuleCaption />
       <ScaleBar zoom={v.zoom} />
     </div>
   );

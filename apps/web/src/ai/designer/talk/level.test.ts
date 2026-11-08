@@ -19,6 +19,8 @@ vi.mock('../../../store', () => ({
 }));
 vi.mock('../state', () => ({
   designOpts: () => ({}),
+  setHouseRules: () => {},
+  houseRulesFor: () => [],
   useDesigner: create(() => ({ designs: [] })),
   getBrief: async () => null,
   loadDesigns: async () => {},
@@ -26,10 +28,26 @@ vi.mock('../state', () => ({
 }));
 vi.mock('../results', () => ({}));
 
-const { designLevelId, levelGone, levelGoneText, talkLevel, talkLevels, useTalk } = await import(
-  './useTalk'
-);
+const { designLevelId, levelGone, levelGoneText, rulesOn, talkLevel, talkLevels, useTalk } =
+  await import('./useTalk');
 const { headLabel, nowOf, optionCard } = await import('./cards');
+
+describe('house rules go with the conversation’s level (slice 3a)', () => {
+  it('a card is checked against the live rules of its own level only', () => {
+    const rule = (id: string, levelId: string, deleted = false) =>
+      ({ id, levelId, deleted }) as Conversation['rules'][number];
+    useTalk.setState({
+      conv: {
+        levelId: upper.id,
+        rules: [rule('a', upper.id), rule('b', upper.id, true), rule('c', ground.id)],
+      } as Conversation,
+    });
+    expect(rulesOn(upper.id).map((r) => r.id)).toEqual(['a']);
+    expect(rulesOn(ground.id)).toEqual([]);
+    useTalk.setState({ conv: null });
+    expect(rulesOn(upper.id)).toEqual([]);
+  });
+});
 
 describe('the level a conversation designs', () => {
   it('before a conversation: the level shown', () => {
