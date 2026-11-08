@@ -266,13 +266,14 @@ const rule = (est: RunEstimate, pressedPriced: boolean) =>
   });
 
 async function askOrRun(req: PressRequest) {
-  // The button's price, then the price now: a press never goes on a stale or missing one.
-  const shown = pressPrice(req);
+  // The button's price (priced without the person's words), then the price now, in full: a
+  // press never goes ahead on a stale or missing one; it asks with the cost card instead.
+  const shown = pressPrice({ ...req, words: '' });
   const made = await planOf(req, newId('dsn'));
-  if (!made || !shown) return;
-  const was = atMostOf(shown);
+  if (!made) return;
+  const was = shown ? atMostOf(shown) : null;
   const now = atMostOf(made.est);
-  const dearer = was !== null && now !== null && now > was + 0.005;
+  const dearer = !shown || (was !== null && now !== null && now > was + 0.005);
   const ask = dearer ? 'ask-threshold' : rule(made.est, true);
   if (ask === 'go') {
     await run(req, made, atMostOf(made.est), { person: newId('turn'), turn: newId('turn') });
