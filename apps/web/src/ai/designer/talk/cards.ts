@@ -91,7 +91,7 @@ export function optionCard(p: Proposal, o: ProposalOption): CardModel {
 }
 
 /** A version v1's form made, as a card (its accepts happened in v1's Accept dialog). */
-export function designCard(d: Design): CardModel {
+export function designCard(d: Design, title = `V${d.n}`): CardModel {
   const stopped = Object.values(d.spaces).some(
     (s) => s.status === 'cancelled' || s.status === 'skipped',
   );
@@ -99,7 +99,7 @@ export function designCard(d: Design): CardModel {
     key: `d:${d.id}`,
     kind: 'design',
     n: d.n,
-    title: `V${d.n}`,
+    title,
     label: d.concept?.name ?? d.name,
     input: d,
     usage: d.usage,

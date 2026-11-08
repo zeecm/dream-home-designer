@@ -22,8 +22,11 @@ export function CaseDialog({
   d,
   r,
   model,
+  title = `V${d.n}`,
   onClose,
 }: {
+  /** "V4", or "V4B" for an alternative. */
+  title?: string;
   d: Design;
   r: DesignResult;
   model: string | null;
@@ -96,7 +99,7 @@ export function CaseDialog({
       onClose={(e) => e.target === e.currentTarget && onClose()}
     >
       <header className="dialog-head">
-        <h2 id="case-h">What’s wrong with V{d.n}?</h2>
+        <h2 id="case-h">What’s wrong with {title}?</h2>
         <button type="button" className="icon-btn" aria-label="Close" onClick={close}>
           {icons.close}
         </button>
@@ -150,7 +153,7 @@ export function CaseDialog({
         </label>
         <p className="field-hint">
           {file
-            ? `A case file of ${Math.ceil(new TextEncoder().encode(text).length / 1024)} KB: the plan before and as V${d.n} has it, your brief (with names) and the checks. No key, prices or plan image. `
+            ? `A case file of ${Math.ceil(new TextEncoder().encode(text).length / 1024)} KB: the plan before and as ${title} has it, your brief (with names) and the checks. No key, prices or plan image. `
             : 'Pick what’s wrong to make a case file. '}
           Nothing is sent: you copy or download it, then{' '}
           <a

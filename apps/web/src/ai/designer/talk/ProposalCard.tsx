@@ -1072,6 +1072,7 @@ export const ProposalCard = memo(function ProposalCard({
           d={card.design}
           r={r}
           model={card.usage[0]?.model ?? null}
+          title={card.title}
           onClose={() => setWrong(false)}
         />
       )}
@@ -1098,6 +1099,7 @@ export const ProposalCard = memo(function ProposalCard({
           }}
           r={r}
           model={card.usage[0]?.model ?? null}
+          title={card.title}
           onClose={() => setWrong(false)}
         />
       )}

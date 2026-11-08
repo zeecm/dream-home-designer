@@ -7,7 +7,7 @@ import { Segmented } from '../../ui/fields';
 import { LayoutsDialog } from '../LayoutsDialog';
 import { usd } from './spend';
 import { closePanel, endPreview, openPanel, useDesigner } from './state';
-import { flatMoved, putItBack } from './talk/iterate';
+import { flatMoved, putBackWords, putItBack } from './talk/iterate';
 import { stopTalkRun } from './talk/propose';
 import { loadTalk, useTalk } from './talk/useTalk';
 
@@ -218,8 +218,7 @@ export function DesignerBar() {
         {confirming ? (
           <>
             <span className="designer-bar-text" role="alert">
-              Put your plan back as it was on {day}? Everything accepted from the designer since is
-              taken out. One Undo brings it back.
+              {putBackWords(preview.level, day)}
               {flatMoved()
                 ? ' Your plan’s walls have changed since; only the renovation goes back.'
                 : ''}

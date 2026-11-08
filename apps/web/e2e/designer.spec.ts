@@ -1570,16 +1570,44 @@ test.describe('iterating (slice 2, PR 3)', () => {
     // Put it back asks inline, then puts the plan back as one step.
     await menu(page, 'My plan before the designer');
     await bar.getByRole('button', { name: 'Put it back' }).click();
-    await expect(bar).toContainText('Everything accepted from the designer since is taken out.');
+    // The sample had no renovation: all of it goes, and Undo brings it back.
+    await expect(bar).toContainText(
+      /Put your plan back as it was on \d+ \w+\? The whole renovation goes\. One Undo brings it back\./,
+    );
     await bar.getByRole('button', { name: 'Put it back' }).click();
     await expect(log(page).getByText(/^You put your plan back as it was on /)).toBeVisible();
     const back = await saved(page);
     expect(back.levels).toEqual(start.levels);
     expect(back.renovation).toBeUndefined();
-    // One Undo brings the designer's changes back.
+    // What was accepted is out everywhere: the line, the card (its rows offered again), On the
+    // table and Versions.
+    const line = log(page)
+      .getByText(/changes from V1/)
+      .first();
+    await expect(line).toHaveText(/^Undone: the \d+ changes from V1 are out of your renovation\.$/);
+    await expect(v1.getByRole('button', { name: /^Accept selected \(\d+\)$/ })).toBeEnabled();
+    await expect(v1.getByText(/in your renovation/)).toHaveCount(0);
+    await expect(panel(page).getByRole('region', { name: 'On the table' })).toContainText(
+      'On the table: V1 · Passes all checks',
+    );
+    await menu(page, 'Versions');
+    const version = panel(page).locator('[data-version="V1"]');
+    await expect(version).toBeVisible();
+    await expect(version).not.toContainText('Accepted');
+    await panel(page).getByRole('button', { name: '‹ Conversation' }).click();
+    // One Undo brings the designer's changes back, and the line, the card and Versions follow.
     await page.locator('body').click({ position: { x: 5, y: 300 } });
     await page.keyboard.press('Control+z');
     await expect.poll(async () => (await saved(page)).renovation).toEqual(accepted.renovation);
+    await expect(line).toHaveText(/^You accepted \d+ changes from V1\./);
+    // All of it in again: the card says so and offers nothing to accept.
+    await expect(v1.getByText(/in your renovation/i).first()).toBeVisible();
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toHaveCount(0);
+    await expect(panel(page).getByRole('region', { name: 'On the table' })).toContainText(
+      'V1 is in your renovation',
+    );
+    await menu(page, 'Versions');
+    await expect(version).toContainText('Accepted');
   });
 
   test('Copy as text and Download conversation: the decisions, facts, accepted changes; no key', async ({
@@ -1651,6 +1679,10 @@ test.describe('iterating (slice 2, PR 3)', () => {
     await expect(
       dialog.getByRole('checkbox', { name: 'Keep what I know about you' }),
     ).toBeChecked();
+    // It says what goes, and offers a copy of it first.
+    await expect(dialog).toContainText('the ideas you didn’t accept go with them');
+    await expect(dialog.getByRole('button', { name: 'Copy as text' })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Download conversation' })).toBeVisible();
     await shot(page, 'start-over');
     await dialog.getByRole('button', { name: 'Start over' }).click();
     await expect(dialog).toBeHidden();

@@ -8,6 +8,8 @@ import {
   copiedLine,
   costEstimate,
   defaultBrief,
+  handEdits,
+  lastAccepted,
   levelFingerprint,
   optionTitle,
   putPlanBack,
@@ -16,8 +18,11 @@ import { useRates } from '../../../cost/estimate';
 import { useEditor } from '../../../editor';
 import { useStore } from '../../../store';
 import { useDesigner } from '../state';
+import { rememberPutBack } from './accept';
 import { type CardModel, nowOf } from './cards';
+import { numbered } from './propose';
 import { talkStore } from './talkStore';
+import { versionTitle } from './titles';
 import { act, actProposal, loadTalk, newId, nowIso, say, talkLevel, useTalk } from './useTalk';
 
 /**
@@ -33,7 +38,7 @@ const toast = (text: string) => useStore.setState({ toast: { text, at: Date.now(
 const titleOf = (src: BringSource) =>
   src.kind === 'option'
     ? optionTitle(src.proposal.n, src.option.letter, src.proposal.options.length)
-    : `V${src.design.n}`;
+    : versionTitle(src.design);
 
 /**
  * Bring this back (criterion 27): the old option or version made again as V(n+1), with no
@@ -59,16 +64,17 @@ export async function bringBack(src: BringSource): Promise<string | null> {
   });
   await actProposal(proposalId, () => p);
   const from = titleOf(src);
-  await act({
+  const after = await act({
     type: 'bringBack',
     at: nowIso(),
     ids: { event: newId('turn'), turn: turnId },
     proposalId,
     from,
   });
+  const made = await numbered(p, after);
   useTalk.setState({ view: 'log', shown: `${proposalId}:A`, open: null, why: null });
   useDesigner.setState({ previewing: true });
-  say(`Brought back ${from} as V${p.n}, checked on your plan as it is now.`);
+  say(`Brought back ${from} as V${made.n}, checked on your plan as it is now.`);
   return proposalId;
 }
 
@@ -130,6 +136,23 @@ export function flatMoved(): boolean {
 }
 
 /**
+ * What Put it back's question says (UX §11), never hiding what goes: with no renovation at the
+ * start, the whole renovation; else what was accepted since; and the changes made by hand since
+ * the last accept (or since the start), which go with it.
+ */
+export function putBackWords(start: Level, day: string): string {
+  const conv = useTalk.getState().conv;
+  const after = doc().renovation?.levels[0];
+  const last = lastAccepted(useDesigner.getState().designs, after);
+  const hand = after ? handEdits(last?.accepted?.level ?? start, after).length : 0;
+  const byHand = hand ? `${hand} ${hand === 1 ? 'change' : 'changes'} you made by hand` : '';
+  const what = !conv?.start.afterFp
+    ? `The whole renovation goes${byHand ? `, with the ${byHand}` : ''}`
+    : `Everything accepted from the designer since is taken out${byHand ? `, and the ${byHand}` : ''}`;
+  return `Put your plan back as it was on ${day}? ${what}. One Undo brings it back.`;
+}
+
+/**
  * Put it back: the renovation as it was when the conversation started (none, if there was
  * none), as one undo step; the app line offers Undo through the toolbar's history.
  */
@@ -149,6 +172,8 @@ export async function putItBack(): Promise<boolean> {
     return false;
   }
   if (after) useEditor.getState().setVariant('after');
+  // The accepts it took out leave the cards, the lines, Copy as text and the next request.
+  await rememberPutBack();
   await act({
     type: 'event',
     id: newId('turn'),
@@ -189,7 +214,11 @@ export async function copyConversation() {
   }
 }
 
-/** Download conversation: the records as a `.json` file the person keeps (no key, no prices). */
+/**
+ * Download conversation: the records as a `.json` file the person keeps: the messages, the
+ * proposals, the levels they name, and what each request cost (its tokens and US$); never the
+ * key or the price table.
+ */
 export async function downloadConversation() {
   const { conv, proposals } = useTalk.getState();
   if (!conv) return;
@@ -216,6 +245,7 @@ export async function downloadConversation() {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast('Downloaded: the messages, proposals and what each request cost (no key).');
 }
 
 // ---------------------------------------------------------------------------- Start over
@@ -249,6 +279,13 @@ export async function startOver(keep: boolean): Promise<boolean> {
   });
   if (!fresh || fresh.id === conv.id) return false;
   await s.removeProposals(project.id, fresh.id).catch(() => {});
+  // The levels only the old conversation named go too (its start, its proposals' plans).
+  const named = [
+    fresh.start.beforeFp,
+    ...(fresh.start.afterFp ? [fresh.start.afterFp] : []),
+    ...(await s.proposals(project.id)).flatMap((p) => p.options.map((o) => o.base.fingerprint)),
+  ];
+  await s.sweepLevels(project.id, named).catch(() => {});
   useEditor.getState().setPreview(null);
   useDesigner.setState({ previewing: false });
   useTalk.setState({ view: 'log', shown: null, open: null, hover: null, why: null });

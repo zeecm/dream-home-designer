@@ -135,6 +135,18 @@ describe('the conversation store (dhd-talk)', () => {
       await s.removeProposals('prj_a', 'conv2');
       expect((await s.proposals('prj_a')).map((p) => p.id)).toEqual(['p_new']);
       expect((await s.proposals('prj_b')).map((p) => p.id)).toEqual(['p_b']);
+      // The levels no record names any more go; another plan's stay.
+      const kept = await s.putLevel('prj_a', level);
+      const moved = structuredClone(level);
+      const v = Object.values(moved.vertices)[0];
+      if (v) v.x += 1;
+      const other = await s.putLevel('prj_a', moved);
+      const theirs = await s.putLevel('prj_b', moved);
+      expect(other).not.toBe(kept);
+      await s.sweepLevels('prj_a', [kept]);
+      expect(await s.getLevel('prj_a', kept)).not.toBeNull();
+      expect(await s.getLevel('prj_a', other)).toBeNull();
+      expect(await s.getLevel('prj_b', theirs)).not.toBeNull();
     }
   });
 

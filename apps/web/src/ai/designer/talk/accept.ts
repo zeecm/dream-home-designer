@@ -22,6 +22,7 @@ import { designStore } from '../storage';
 import { type CardModel, cardChanges, cardResult, cardResultNow, nowOf } from './cards';
 import { focusInLog } from './scroll';
 import { talkStore } from './talkStore';
+import { lineTitle } from './titles';
 import { act, actProposal, newId, nowIso, say, useTalk } from './useTalk';
 
 /**
@@ -197,6 +198,12 @@ async function acceptOnce(
         : p,
     );
   }
+  // V4, or V4B for an alternative: what the lines and decisions call it.
+  const title = lineTitle({
+    n,
+    letter: card.option?.letter ?? 'A',
+    proposalId: card.proposal?.id ?? '',
+  });
   // What was left out is a rejection the designer remembers (spec: Remembers), one line a time.
   if (left.length) {
     const names = left.map((c) => c.name);
@@ -207,8 +214,8 @@ async function acceptOnce(
       id: newId('dec'),
       at,
       kind: 'rejected',
-      text: cut(`Left out of V${n}: ${shown}${more}`, 160),
-      from: `V${n}`,
+      text: cut(`Left out of ${title}: ${shown}${more}`, 160),
+      from: title,
     });
   }
   for (const w of waiving) {
@@ -218,7 +225,7 @@ async function acceptOnce(
       at,
       kind: 'waiver',
       text: cut(`Waived: ${w.text}`, 160),
-      from: `V${n}`,
+      from: title,
     });
   }
   await act({
@@ -232,7 +239,7 @@ async function acceptOnce(
     total,
     left: left.map((c) => cut(c.name, TALK_LIMITS.left)).slice(0, 20),
   });
-  say(`Accepted ${plural(ids.length, 'change')} from V${n}. Undo is available.`);
+  say(`Accepted ${plural(ids.length, 'change')} from ${title}. Undo is available.`);
   return eventId;
 }
 
@@ -377,6 +384,72 @@ function focusWhenThere(selector: string, tries = 20) {
   else if (tries > 0) requestAnimationFrame(() => focusWhenThere(selector, tries - 1));
 }
 
+/**
+ * Put it back (criterion 28): its history step, the accept lines it took out (each then reads
+ * "Undone", its rows out of the renovation, so the cards offer them again) and the versions it
+ * took out (no longer "Accepted"), kept as they were for its Undo. In this tab only, as the
+ * history is.
+ */
+interface PutBack {
+  patches: HistoryEntry['patches'];
+  lines: string[];
+  versions: Map<string, Design['accepted']>;
+  /** Whether what it took out is out now (the step is in the plan). */
+  out: boolean;
+}
+const putBacks: PutBack[] = [];
+
+/** Takes the accepts out of the cards, lines and versions after a Put it back just done. */
+export async function rememberPutBack() {
+  const step = useStore.getState().editor.history.past.at(-1);
+  const conv = useTalk.getState().conv;
+  if (!step || !conv) return;
+  const lines = conv.turns.flatMap((t) =>
+    t.kind === 'event' && t.event.type === 'accepted' && !t.event.undone ? [t.id] : [],
+  );
+  const versions = new Map(
+    useDesigner
+      .getState()
+      .designs.filter((d) => d.accepted)
+      .map((d) => [d.id, d.accepted] as const),
+  );
+  // Applied by the sync, one change at a time with the accept lines' own.
+  putBacks.push({ patches: step.patches, lines, versions, out: false });
+  await syncLines();
+}
+
+async function applyPutBack(pb: PutBack, out: boolean) {
+  pb.out = out;
+  for (const id of pb.lines) {
+    const t = useTalk.getState().conv?.turns.find((x) => x.id === id);
+    if (t?.kind !== 'event' || t.event.type !== 'accepted') continue;
+    await act({ type: out ? 'undone' : 'redone', eventId: id });
+    await markRows(t, out);
+  }
+  const projectId = useStore.getState().editor.doc.id;
+  const s = await designStore();
+  const mine = await s.list(projectId);
+  for (const [id, accepted] of pb.versions) {
+    const d = mine.find((x) => x.id === id);
+    if (d) await s.put({ ...d, accepted: out ? null : accepted });
+  }
+  await loadDesigns(projectId);
+  say(
+    out
+      ? 'Your plan is back as it was before the designer.'
+      : 'The designer’s changes are back in your renovation.',
+  );
+}
+
+/** A Put it back undone (or redone) by the toolbar or Ctrl+Z: what it took out follows. */
+async function syncPutBacks() {
+  const past = useStore.getState().editor.history.past;
+  for (const pb of putBacks) {
+    const applied = past.some((e) => e.patches === pb.patches);
+    if (applied !== pb.out) await applyPutBack(pb, applied);
+  }
+}
+
 // The toolbar's Undo and Redo (and Ctrl+Z) move a line's accept too: the line follows. A
 // change that arrives while the lines are being brought up to date runs the sync again.
 let syncing = false;
@@ -390,17 +463,18 @@ async function syncLines() {
   try {
     do {
       dirty = false;
+      await syncPutBacks();
       for (const t of useTalk.getState().conv?.turns ?? []) {
         if (t.kind !== 'event' || t.event.type !== 'accepted') continue;
         const st = lineState(t.id);
         if (st === 'redo' && !t.event.undone) {
           await act({ type: 'undone', eventId: t.id });
           await markRows(t, true);
-          say(`Undone: the changes from V${t.event.n} are out of your renovation.`);
+          say(`Undone: the changes from ${lineTitle(t.event)} are out of your renovation.`);
         } else if (st === 'undo' && t.event.undone) {
           await act({ type: 'redone', eventId: t.id });
           await markRows(t, false);
-          say(`Redone: the changes from V${t.event.n} are back in your renovation.`);
+          say(`Redone: the changes from ${lineTitle(t.event)} are back in your renovation.`);
         }
       }
     } while (dirty);

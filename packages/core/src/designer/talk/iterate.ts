@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Level } from '../../schema';
 import { peopleOf } from '../principles';
+import type { TalkAsk } from '../prompts';
 import type { Design } from '../schema';
 import { FACT_LABELS, factText } from './firstMeeting';
 import {
@@ -13,7 +14,6 @@ import {
   TALK_LIMITS,
   TALK_RECORD_VERSION,
   cut,
-  cutLines,
 } from './schema';
 
 /**
@@ -79,19 +79,22 @@ const LITTLE = new Set(
   'a an the on by of to in at for with and or from near facing under over'.split(' '),
 );
 
+/** What Another idea is for, in a run's talk block. */
+export const ANOTHER_INTENT =
+  'Another idea for the same rooms, clearly different from the options already proposed.';
+
 /**
- * What Another idea asks the designer for, in the person's words with the run: the same rooms,
- * a different idea from each option so far.
+ * What Another idea asks the designer for (a run's talk block): a different idea for the same
+ * rooms; the person's words as theirs, and the options so far, in the designer's own words, on
+ * a line of their own.
  */
-export function anotherWords(p: Proposal): string {
-  const was = p.options
-    .map((o) => `${o.letter}: ${cut(optionSummary(o) || optionName(o), 200)}`)
-    .join(' ');
-  const said = p.words.trim();
-  return cutLines(
-    `${said ? `${said}\n\n` : ''}Another idea for the same rooms, clearly different from what you proposed: ${was}`,
-    DRAFT_CHARS,
-  );
+export function anotherAsk(p: Proposal, said: string, decided: string[]): TalkAsk {
+  return {
+    intent: ANOTHER_INTENT,
+    said: cut(said, DRAFT_CHARS),
+    decided,
+    others: p.options.map((o) => `${o.letter}: ${cut(optionSummary(o) || optionName(o), 300)}`),
+  };
 }
 
 /** "V4", or "V4B" when the proposal has alternatives. */

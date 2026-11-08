@@ -14,8 +14,9 @@ import { designOpts, useDesigner } from '../state';
 import { FactEditor } from './Facts';
 import { Mark } from './Mark';
 import { cardVerdict, nowOf, versionKey } from './cards';
-import { bringBackDesign, copyConversation, startOver } from './iterate';
+import { bringBackDesign, copyConversation, downloadConversation, startOver } from './iterate';
 import { timed, useSettledProject } from './settle';
+import { versionTitle } from './titles';
 import { act, newId, nowIso, talkLevel, useBusy, useTalk } from './useTalk';
 
 /**
@@ -287,10 +288,7 @@ export function Versions() {
       ) : (
         <ul className="talk-versions">
           {list.map((d) => {
-            const options = d.from
-              ? (proposals.find((p) => p.id === d.from?.proposalId)?.options.length ?? 1)
-              : 1;
-            const title = optionTitle(d.n, d.from?.letter ?? 'A', options);
+            const title = versionTitle(d);
             return (
               <li key={d.id} className="talk-version" data-version={title}>
                 <span className="talk-version-text">
@@ -388,7 +386,7 @@ export function StartOverDialog({ onClose }: { onClose: () => void }) {
       <div className="confirm-body">
         <p id="restart-d">
           Your versions stay, under Earlier designs. The designer forgets this conversation’s
-          messages and decisions.
+          messages and decisions, and the ideas you didn’t accept go with them.
         </p>
         <label className="check-row">
           <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} />
@@ -397,9 +395,16 @@ export function StartOverDialog({ onClose }: { onClose: () => void }) {
         {busy && <p className="field-hint">Stop the designer first: it is still working.</p>}
       </div>
       <footer className="dialog-foot">
-        <button type="button" className="link-btn" onClick={() => void copyConversation()}>
-          Copy this conversation first
-        </button>
+        <span className="talk-restart-keep">
+          Keep a copy first:{' '}
+          <button type="button" className="link-btn" onClick={() => void copyConversation()}>
+            Copy as text
+          </button>{' '}
+          ·{' '}
+          <button type="button" className="link-btn" onClick={() => void downloadConversation()}>
+            Download conversation
+          </button>
+        </span>
         <span className="button-row">
           <button type="button" className="btn" onClick={close}>
             Cancel

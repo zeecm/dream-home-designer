@@ -1,4 +1,5 @@
 import {
+  type Conversation,
   DRAFT_CHARS,
   type DraftDesign,
   type Proposal,
@@ -12,7 +13,7 @@ import {
   type TalkAsk,
   type TalkPlan,
   type TurnOf,
-  anotherWords,
+  anotherAsk,
   askRule,
   atMostOf,
   cut,
@@ -99,12 +100,16 @@ function priceInput(req: PressRequest, designId: string): Omit<PriceInput, 'desi
   const alt = req.alternative;
   const of = alt && useTalk.getState().proposals.find((x) => x.id === alt.proposalId);
   if (alt && !of) return null;
+  // The person's words (this time's, else the card's) go as theirs; the options so far as the
+  // designer's own, on a line of their own.
+  const words = of ? req.words || of.words : req.words;
+  const talk = of && !req.talk ? anotherAsk(of, words, decided()) : req.talk;
   return {
     project,
     brief: conv.brief,
     scope: req.scope,
-    words: of ? anotherWords({ ...of, words: req.words || of.words }) : req.words,
-    ...(req.talk ? { talk: req.talk } : {}),
+    words,
+    ...(talk ? { talk } : {}),
     ...(finish ? { finish } : {}),
     designId,
     opts: designOpts(project),
@@ -407,7 +412,16 @@ async function run(
     const p = await actProposal(proposalId, (x) =>
       x && nextLetter(x) === letter ? { ...x, options: [...x.options, option] } : null,
     );
-    if (!p?.options.some((o) => o.letter === letter && o.designId === option.designId)) return;
+    if (!p?.options.some((o) => o.letter === letter && o.designId === option.designId)) {
+      // Another tab added this letter first: nothing runs here, and the log says why.
+      await act({
+        type: 'event',
+        id: newId('turn'),
+        at: nowIso(),
+        event: { type: 'note', text: `Another tab is already making option ${letter}.` },
+      });
+      return;
+    }
     if (ids.person) await clearTyped();
     useTalk.setState({ shown: `${proposalId}:${letter}`, open: null, why: null });
     useDesigner.setState({ previewing: true });
@@ -432,13 +446,25 @@ async function run(
     options: [structuredClone(option)],
   };
   await actProposal(proposalId, () => proposal);
-  await act({ type: 'propose', at: nowIso(), ids, proposalId, scope, words });
+  const after = await act({ type: 'propose', at: nowIso(), ids, proposalId, scope, words });
+  // Its number is the one the record gave it (another tab may have taken this one meanwhile).
+  const p = await numbered(proposal, after);
   if (ids.person) await clearTyped();
   // Every new proposal goes on the plan (after an accept the stage had gone back to After).
   useTalk.setState({ shown: `${proposalId}:A`, open: null, why: null });
   useDesigner.setState({ previewing: true });
-  say(`Designing V${proposal.n}, ${option.name}.`);
-  void runOption(proposal, 'A', sp, made.est, approved);
+  say(`Designing V${p.n}, ${option.name}.`);
+  void runOption(p, 'A', sp, made.est, approved);
+}
+
+/**
+ * A new proposal with the number its turn took in the record (the action that added it took
+ * the next one, read in its own transaction), patched when this tab's mirror was behind.
+ */
+export async function numbered(p: Proposal, conv: Conversation | null): Promise<Proposal> {
+  const n = conv ? conv.nextN - 1 : p.n;
+  if (n === p.n || n < 1) return p;
+  return (await actProposal(p.id, (x) => (x ? { ...x, n } : x))) ?? { ...p, n };
 }
 
 /** An option as its run starts (its rooms saved into it as they come). */
@@ -698,7 +724,7 @@ async function runOption(
   if (r?.ctrl === ctrl) useDesigner.setState({ run: null });
   say(
     status === 'checked'
-      ? `V${p.n} is ready. ${state.usage.length ? `Cost ${usd(state.usage.reduce((t, u) => t + (u.usd ?? 0), 0))}.` : ''}`
+      ? `V${p.n}${p.options.length > 1 || letter !== 'A' ? letter : ''} is ready. ${state.usage.length ? `Cost ${usd(state.usage.reduce((t, u) => t + (u.usd ?? 0), 0))}.` : ''}`
       : status === 'stopped'
         ? 'Stopped. Finished rooms are kept.'
         : (state.halt?.message ?? 'The design didn’t work.'),

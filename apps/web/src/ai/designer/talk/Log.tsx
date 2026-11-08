@@ -49,6 +49,7 @@ import {
 } from './propose';
 import { toNewest } from './scroll';
 import { timed, useSettledProject } from './settle';
+import { lineTitle, versionTitle } from './titles';
 import { act, newId, nowIso, talkLevel, useBusy, useTalk } from './useTalk';
 
 /**
@@ -435,12 +436,13 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
 
 function Event({ t }: { t: TurnOf<'event'> }) {
   const e = t.event;
-  const options = useTalk((s) =>
+  // Read again as the proposal gains options (V4 becomes V4A).
+  useTalk((s) =>
     e.type === 'accepted'
       ? (s.proposals.find((p) => p.id === e.proposalId)?.options.length ?? 1)
       : 1,
   );
-  const v = e.type === 'accepted' ? optionTitle(e.n, e.letter, options) : '';
+  const v = e.type === 'accepted' ? lineTitle(e) : '';
   // The history moves under the line: its Undo or Redo shows only while it applies.
   const history = useStore((s) => s.editor.history);
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again as the history moves
@@ -550,7 +552,8 @@ export function Log() {
   const [behind, setBehind] = useState(false);
   const convId = conv?.id ?? null;
   const earlier = useMemo(
-    () => designs.filter((d) => earlierDesign(d, convId)).map(designCard),
+    () =>
+      designs.filter((d) => earlierDesign(d, convId)).map((d) => designCard(d, versionTitle(d))),
     [designs, convId],
   );
   const byId = useMemo(() => new Map(proposals.map((p) => [p.id, p])), [proposals]);
