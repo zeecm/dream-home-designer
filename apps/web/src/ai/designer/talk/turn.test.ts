@@ -20,6 +20,8 @@ vi.mock('../../../store', () => ({
 }));
 vi.mock('../state', () => ({
   designOpts: () => ({}),
+  setHouseRules: () => {},
+  houseRulesFor: () => [],
   useDesigner: create(() => ({
     designs: [],
     panel: true,

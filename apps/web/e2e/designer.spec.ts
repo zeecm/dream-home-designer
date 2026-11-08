@@ -18,6 +18,11 @@ import {
   REPLY_REJECT,
   REPLY_TEXT,
 } from '../../../packages/core/src/designer/talk/fixtures/replies';
+import {
+  REPLY_RULE,
+  REPLY_WISH,
+  ruleReply,
+} from '../../../packages/core/src/designer/talk/fixtures/rule-wordings';
 import { answerFor, promptOf } from '../src/ai/designer/fixtures/sample';
 import {
   type FixtureUsage,
@@ -426,6 +431,19 @@ test.describe('desktop', () => {
   }) => {
     test.setTimeout(120_000);
     await setup(page);
+    // A slow disk: each saved record comes back 300 ms late. A tick made before an earlier
+    // tick's record came back was taken back by it (a flake under load, a lost tick for real).
+    await page.addInitScript(() => {
+      const d = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, 'oncomplete');
+      Object.defineProperty(IDBTransaction.prototype, 'oncomplete', {
+        set(fn) {
+          d?.set?.call(this, fn ? (e: Event) => setTimeout(() => fn.call(this, e), 300) : fn);
+        },
+        get() {
+          return d?.get?.call(this);
+        },
+      });
+    });
     let release: () => void = () => {};
     const held = new Promise<void>((r) => {
       release = r;
@@ -907,7 +925,19 @@ test.describe('desktop', () => {
     expect(dump).not.toContain('not-a-real-key');
   });
 
-  test('dragging a piece with the designer open and a card: under 5 ms a frame of designer work', async ({
+  /** No designer work on the main thread for a whole second (`__dhdDesignerPerf` counts it). */
+  const designerQuiet = async (page: Page) => {
+    const calls = () =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __dhdDesignerPerf: { calls: number } }).__dhdDesignerPerf.calls,
+      );
+    const from = await calls();
+    await page.waitForTimeout(1000);
+    return (await calls()) === from;
+  };
+
+  test('dragging a piece with the designer open and a card: no designer work a frame, under 5 ms a frame (PERF)', async ({
     page,
   }) => {
     test.setTimeout(120_000);
@@ -944,7 +974,12 @@ test.describe('desktop', () => {
     const sofa = page.locator('[data-hit^="item:"]').first();
     const box = await sofa.boundingBox();
     if (!box) throw new Error('no piece to drag');
-    await page.waitForTimeout(600);
+    // The accept's own work done first (its card worked out again once the plan settled, the
+    // worker's answers landing): only what the drag does is counted.
+    await page.evaluate(() => {
+      (window as unknown as { __dhdDesignerPerf: unknown }).__dhdDesignerPerf = { ms: 0, calls: 0 };
+    });
+    await expect.poll(() => designerQuiet(page), { timeout: 30_000, intervals: [0] }).toBe(true);
     await page.evaluate(() => {
       (window as unknown as { __dhdDesignerPerf: unknown }).__dhdDesignerPerf = { ms: 0, calls: 0 };
     });
@@ -960,7 +995,12 @@ test.describe('desktop', () => {
           .__dhdDesignerPerf,
     );
     await page.mouse.up();
-    expect(perf.ms / frames).toBeLessThan(5);
+    // The work counted, not timed: the drag works no card out move by move (each open card
+    // works itself out in several steps, so that would be well over one a move). A run so
+    // busy that the plan settled mid-drag (250 ms between two moves) works it out once.
+    expect(perf.calls, JSON.stringify(perf)).toBeLessThan(frames / 3);
+    // The time it took, which a busy machine stretches: strict only on a quiet one (PERF=1).
+    expect(perf.ms / frames).toBeLessThan(process.env.PERF ? 5 : 20);
     // The drag's re-checks went to the worker too.
     await expect.poll(async () => (await answered()).worker).toBeGreaterThan(placed.worker);
     expect((await answered()).here).toBe(0);
@@ -1824,10 +1864,21 @@ test.describe('iterating (slice 2, PR 3)', () => {
     await openSample(page);
     await talk(page);
     await justDesign(page);
-    // Kitchen, accepted, then Undo, twenty times: each a new card in the log.
+    // Kitchen, accepted, then Undo, twenty times: each a new card in the log. Each round's
+    // designer work on the main thread is counted (`__dhdDesignerPerf`), and timed.
+    await page.evaluate(() => {
+      (window as unknown as { __dhdDesignerPerf: unknown }).__dhdDesignerPerf = { ms: 0, calls: 0 };
+    });
+    const work = () =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __dhdDesignerPerf: { calls: number } }).__dhdDesignerPerf.calls,
+      );
     const times: number[] = [];
+    const calls: number[] = [];
     for (let i = 1; i <= 20; i++) {
       const t0 = Date.now();
+      const c0 = await work();
       await panel(page)
         .getByRole('button', { name: /^Kitchen · about US\$/ })
         .last()
@@ -1845,13 +1896,22 @@ test.describe('iterating (slice 2, PR 3)', () => {
       await panel(page).getByRole('button', { name: 'Undo' }).last().click();
       await expect(log(page).getByText(new RegExp(`^Undone: .* from V${i} `))).toBeVisible();
       times.push(Date.now() - t0);
+      calls.push((await work()) - c0);
     }
     const mean = (xs: number[]) => xs.reduce((t, x) => t + x, 0) / xs.length;
     const early = mean(times.slice(1, 4));
     const late = mean(times.slice(-3));
-    console.log(`card 2–4: ${Math.round(early)} ms; card 18–20: ${Math.round(late)} ms`);
-    // Older cards are folded: card 20 costs about what card 2 did.
-    expect(late).toBeLessThan(early * 1.6 + 400);
+    const earlyWork = mean(calls.slice(1, 4));
+    const lateWork = mean(calls.slice(-3));
+    console.log(
+      `card 2–4: ${Math.round(early)} ms, ${earlyWork} steps; ` +
+        `card 18–20: ${Math.round(late)} ms, ${lateWork} steps`,
+    );
+    // Older cards are folded and work nothing out: card 20 does what card 2 did (counted,
+    // with room for a plan that settled once more or less), and takes about as long (timed,
+    // which a busy machine stretches unevenly: strict only on a quiet one, PERF=1).
+    expect(lateWork).toBeLessThan(earlyWork * 1.5 + 10);
+    expect(late).toBeLessThan(process.env.PERF ? early * 1.6 + 400 : early * 3 + 2000);
     // Folded cards work nothing out: only the newest card is open.
     await expect(panel(page).locator('article.talk-card:not(.talk-card-folded)')).toHaveCount(1);
   });
@@ -1951,6 +2011,265 @@ test.describe('iterating (slice 2, PR 3)', () => {
   });
 });
 
+/** The sample's living room as mocked, with a shallow console in the passage to the bedrooms. */
+const LIVING_CONSOLE = {
+  ...living,
+  items: [
+    ...living.items,
+    {
+      ref: 'con1',
+      assetId: 'chinese-console',
+      keep: null,
+      wall: 'W10',
+      along: 1.2,
+      at: null,
+      rotation: null,
+      width: 0.3,
+      depth: 0.2,
+      height: null,
+      why: 'Somewhere for keys on the way in.',
+    },
+  ],
+};
+/** Answers the living room with the console in the corridor. */
+const consoleInCorridor = (c: Call) =>
+  c.step === 'furnish "Living'
+    ? {
+        status: 200,
+        body: STREAM[c.provider](LIVING_CONSOLE, USAGE),
+        headers: { 'content-type': 'text/event-stream' },
+      }
+    : null;
+const CORRIDOR =
+  'Your rule “Never anything in the corridor”: the Chinese console table is in the way from the main door to Main bedroom and Bedroom.';
+
+async function yourRules(page: Page) {
+  await panel(page).getByRole('button', { name: 'Designer menu' }).click();
+  await page.getByRole('menuitem', { name: /^Your rules/ }).click();
+  return panel(page).getByRole('region', { name: 'Your rules' });
+}
+
+test.describe('house rules (slice 3a, PR A)', () => {
+  test('39: the corridor rule is offered and kept; a console in the corridor fails with its wording; a number edit re-checks with no request; deleting it passes (3a.5, 3a.9)', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const m = await mock(page, { talk: [REPLY_RULE], reply: consoleInCorridor });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await send(page, 'Never put anything in the corridor, please.');
+    const offer = panel(page).getByRole('region', {
+      name: 'Rule offer: Never anything in the corridor',
+    });
+    await expect(offer).toBeVisible();
+    await expect(offer).toContainText('I’ll keep this as a rule for your home');
+    await expect(offer).toContainText(
+      'Checks: Nothing in the way from the main door to Main bedroom and Bedroom, with 0.90 m clear.',
+    );
+    // Show on plan: the way drawn on the plan, with the rule's name.
+    await offer.getByRole('button', { name: 'Show on plan' }).click();
+    await expect(page.getByTestId('rule-layer').locator('.rl-band').first()).toBeVisible();
+    await expect(page.getByTestId('rule-caption')).toHaveText(
+      'Your rule: Never anything in the corridor',
+    );
+    await shot(page, 'rule-offer');
+    await offer.getByRole('button', { name: 'Keep as a rule' }).click();
+    await expect(
+      log(page).getByText('Kept as a rule · Never anything in the corridor'),
+    ).toBeVisible();
+    await expect(
+      log(page).getByText('Kept as a rule: Never anything in the corridor.'),
+    ).toBeVisible();
+    expect(m.calls.map((c) => c.step)).toEqual(['talk']);
+    // A later proposal with a console in the corridor fails with the rule's wording.
+    await design(page, /^Living and dining · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // The run told the designer the rule, in the app's words (the talk block).
+    expect(m.calls.find((c) => c.step === 'furnish "Living')?.body).toContain(
+      'Rules this proposal must meet',
+    );
+    await expect(v1).toContainText(`Doesn’t pass: y${CORRIDOR.slice(1)}`);
+    await shot(page, 'rule-fails');
+    // Your rules: what V1 does with it, said on the device.
+    const view = await yourRules(page);
+    await expect(
+      view.getByRole('article', { name: 'Never anything in the corridor' }),
+    ).toContainText('✕ V1 doesn’t meet it: the Chinese console table is in the way');
+    await expect(view).toContainText(
+      'Your rules stay on this device, with this conversation. They’re not in the plan, its exports or share links.',
+    );
+    await shot(page, 'your-rules');
+    // A number edit re-checks at once, with no request.
+    const calls = m.calls.length;
+    const width = view.getByRole('textbox', {
+      name: 'Clear width, Never anything in the corridor',
+    });
+    await width.fill('1.0');
+    await width.press('Enter');
+    await expect(view).toContainText(
+      'Checks: Nothing in the way from the main door to Main bedroom and Bedroom, with 1.00 m clear.',
+    );
+    // The household's rules are on this device only: never in the saved plan.
+    const doc = JSON.stringify(await saved(page));
+    expect(doc).not.toContain('Never anything in the corridor');
+    expect(await dumpIdb(page)).toContain('Never anything in the corridor');
+    // Delete: the card is checked again and passes the rule; Undo is offered.
+    await view.getByRole('button', { name: 'Delete' }).click();
+    await expect(view.getByRole('button', { name: 'Undo' })).toBeVisible();
+    await view.getByRole('button', { name: '‹ Conversation' }).click();
+    await expect(
+      log(page).getByText(
+        /^You changed a rule: Never anything in the corridor, 0\.90 m → 1\.00 m\. V1 checked again: (passes|doesn’t pass)\.$/,
+      ),
+    ).toBeVisible();
+    await expect(
+      log(page).getByText(
+        /^You deleted a rule: Never anything in the corridor\. V1 checked again: (passes|doesn’t pass)\.$/,
+      ),
+    ).toBeVisible();
+    await expect(v1).not.toContainText('your rule');
+    expect(m.calls.length).toBe(calls);
+  });
+
+  test('40 and 3a.6: a wish is noted, not checked; a contradicting rule is refused, Keep yours keeps it', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await setup(page);
+    const faces = (relation: string, name: string) =>
+      ruleReply('Noted.', {
+        name,
+        subject: { kind: 'kind', id: 'sofa' },
+        relation,
+        target: { kind: 'window', id: null, rooms: [], at: null, r: null },
+        n: null,
+      });
+    await mock(page, {
+      talk: [
+        REPLY_WISH,
+        faces('notFaces', 'The sofa away from the window'),
+        faces('faces', 'The sofa facing the window'),
+        faces('faces', 'The sofa facing the window'),
+        REPLY_RULE,
+      ],
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await send(page, 'I want it to feel more airy.');
+    await expect(
+      log(page).getByText('Noted in Decisions, not checked: Feel more airy'),
+    ).toBeVisible();
+    await expect(panel(page).getByRole('region', { name: /^Rule offer/ })).toHaveCount(0);
+    await send(page, 'Never put the sofa facing the window, the glare is bad.');
+    await panel(page)
+      .getByRole('region', { name: 'Rule offer: The sofa away from the window' })
+      .getByRole('button', { name: 'Keep as a rule' })
+      .click();
+    await expect(
+      log(page).getByText('Kept as a rule: The sofa away from the window.'),
+    ).toBeVisible();
+    await send(page, 'Actually the sofa should face the window.');
+    const refused = panel(page)
+      .getByRole('region', { name: 'Rule offer: The sofa facing the window' })
+      .first();
+    await expect(refused).toContainText('This can’t be a rule as it stands');
+    await expect(refused).toContainText('It contradicts a rule you have:');
+    await expect(refused).toContainText('New: The sofa faces the window');
+    await expect(refused).toContainText('Yours: The sofa doesn’t face the window (kept ');
+    await expect(refused.getByRole('button', { name: 'Keep as a rule' })).toHaveCount(0);
+    await shot(page, 'rule-refused');
+    await refused.getByRole('button', { name: 'Keep yours' }).click();
+    await expect(log(page).getByText('Kept your rule.')).toBeVisible();
+    // Asked again, Replace yours swaps them in one step.
+    await send(page, 'No really, face the window.');
+    const again = panel(page)
+      .getByRole('region', { name: 'Rule offer: The sofa facing the window' })
+      .last();
+    await again.getByRole('button', { name: 'Replace yours with the new one' }).click();
+    await expect(
+      log(page).getByText(
+        'Replaced your rule The sofa away from the window with The sofa facing the window.',
+      ),
+    ).toBeVisible();
+    const view = await yourRules(page);
+    await expect(view.getByRole('article')).toHaveCount(1);
+    await expect(view.getByRole('article', { name: 'The sofa facing the window' })).toBeVisible();
+    // Make this a rule from a Decision (priced as a Send): kept, it moves to Your rules.
+    await view.getByRole('button', { name: /^Decisions \(\d+\) are told/ }).click();
+    const decisions = panel(page).getByRole('region', { name: 'Decisions' });
+    await decisions
+      .getByRole('textbox', { name: 'Something to keep, avoid or have' })
+      .fill('Nothing in the corridor');
+    await decisions.getByRole('button', { name: 'Add' }).click();
+    const row = decisions.getByRole('listitem').filter({ hasText: 'Nothing in the corridor' });
+    await row.getByRole('button', { name: /^Make this a rule · about US\$\d\.\d\d$/ }).click();
+    await expect(
+      log(page).getByText('Asked to make a rule of: Nothing in the corridor.'),
+    ).toBeVisible();
+    await panel(page)
+      .getByRole('region', { name: 'Rule offer: Never anything in the corridor' })
+      .getByRole('button', { name: 'Keep as a rule' })
+      .click();
+    await expect(log(page).getByText('Moved to Your rules.')).toBeVisible();
+  });
+
+  test('3a.7 and 3a.8: a rule the plan breaks is said and never stops a proposal; Bring this back is checked on your rules', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const m = await mock(page, { talk: [REPLY_RULE], reply: consoleInCorridor });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^Living and dining · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    await v1.getByRole('button', { name: /^Accept selected/ }).click();
+    await expect(log(page).getByText(/^You accepted \d+ changes from V1\./)).toBeVisible();
+    // The console is in the plan now: the offer says so, and it won't stop a proposal.
+    await send(page, 'Never put anything in the corridor, please.');
+    const offer = panel(page).getByRole('region', {
+      name: 'Rule offer: Never anything in the corridor',
+    });
+    await expect(offer).toContainText(
+      'Your plan doesn’t meet it now: the Chinese console table is in the way from the main door to Main bedroom and Bedroom. That won’t stop a proposal.',
+    );
+    await offer.getByRole('button', { name: 'Keep as a rule' }).click();
+    await expect(
+      log(page).getByText('Kept as a rule: Never anything in the corridor.'),
+    ).toBeVisible();
+    await design(page, /^Kitchen · about US\$/);
+    const v2 = card(page, 2);
+    await expect(v2.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    await v2.getByText(/^Already in your plan: \d+$/).click();
+    await expect(v2).toContainText(CORRIDOR);
+    await expect(v2).not.toContainText(`Doesn’t pass: y${CORRIDOR.slice(1)}`);
+    await shot(page, 'rule-already');
+    // Bring this back: checked on the plan as it is now and on the rule.
+    const calls = m.calls.length;
+    const folded = panel(page).getByRole('button', { name: /^V1 · Living and dining/ });
+    if (await folded.isVisible()) await folded.click();
+    await card(page, 1).getByRole('button', { name: 'Bring this back' }).click();
+    await expect(
+      log(page).getByText(
+        'Brought back V1 as V3, checked on your plan as it is now and on your rule.',
+      ),
+    ).toBeVisible();
+    expect(m.calls.length).toBe(calls);
+  });
+});
+
 test.describe('phone, 390 px, fingers only (35)', () => {
   const { defaultBrowserType: _webkit, ...iPhone } = devices['iPhone 13'];
   test.use({ ...iPhone, viewport: { width: 390, height: 844 } });
@@ -2005,6 +2324,115 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     await expect(box).toHaveValue('');
   });
 
+  test('a rule offer and Your rules by finger: 44 px targets, no sideways scroll (3a.11)', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await setup(page);
+    await mock(page, { talk: [REPLY_RULE] });
+    await page.goto('/');
+    await waitSaved(page);
+    await page
+      .getByRole('button', { name: /Plan details|Show plan details/ })
+      .first()
+      .tap()
+      .catch(() => {});
+    await page.getByRole('button', { name: 'Talk to the designer' }).tap();
+    await panel(page).getByRole('button', { name: 'Just design it' }).tap();
+    const box = panel(page).getByRole('textbox', { name: 'Message the designer' });
+    await box.tap();
+    await box.fill('Never put anything in the corridor.');
+    await panel(page)
+      .getByRole('button', { name: /^Send · about US\$/ })
+      .tap();
+    const offer = panel(page).getByRole('region', {
+      name: 'Rule offer: Never anything in the corridor',
+    });
+    await expect(offer).toBeVisible();
+    await box.blur();
+    await offer.getByRole('button', { name: 'Change the numbers' }).tap();
+    await fingerSized(page);
+    await noSideways(page);
+    await shot(page, 'rule-offer-phone');
+    // Show on plan drops the sheet so the rule is in sight (QA B1).
+    await offer.getByRole('button', { name: 'Show on plan' }).tap();
+    await expect(panel(page)).not.toHaveClass(/talk-full/);
+    const band = page.getByTestId('rule-layer').locator('.rl-band').first();
+    await expect(band).toBeVisible();
+    const onTop = await band.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return !!top?.closest('svg.plan-svg');
+    });
+    expect(onTop).toBe(true);
+    await shot(page, 'rule-shown-phone');
+    await panel(page).getByRole('button', { name: 'Make the designer full height' }).tap();
+    await offer.scrollIntoViewIfNeeded();
+    await offer.getByRole('button', { name: 'Keep as a rule' }).tap();
+    await log(page).getByRole('button', { name: 'Your rules' }).last().tap();
+    const view = panel(page).getByRole('region', { name: 'Your rules' });
+    await expect(
+      view.getByRole('article', { name: 'Never anything in the corridor' }),
+    ).toBeVisible();
+    await fingerSized(page);
+    await noSideways(page);
+    await shot(page, 'your-rules-phone');
+  });
+
+  test('asked to design it from the 3D view: the proposal is on the plan, in sight, before Accept (owner, 8 Nov)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    // The sample flat, last seen in 3D.
+    await setup(page, 'anthropic', { 'dhd:view': '3d' });
+    await mock(page, { talk: [REPLY_PLAN] });
+    await page.goto('/');
+    await waitSaved(page);
+    await expect(page.locator('main.stage')).toHaveClass(/stage-3d/);
+    await page
+      .getByRole('button', { name: /Plan details|Show plan details/ })
+      .first()
+      .tap()
+      .catch(() => {});
+    await page.getByRole('button', { name: 'Talk to the designer' }).tap();
+    await panel(page).getByRole('button', { name: 'Just design it' }).tap();
+    const box = panel(page).getByRole('textbox', { name: 'Message the designer' });
+    await box.tap();
+    await box.fill('Please design the living room and the main bedroom.');
+    await panel(page)
+      .getByRole('button', { name: /^Send · about US\$/ })
+      .tap();
+    // The designer's plan asks first (the cost card takes the sheet to full height).
+    await panel(page)
+      .getByRole('button', { name: /^Go ahead · about US\$/ })
+      .tap();
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // Before Accept: the plan, not the 3D view, with the sheet folded to peek below it.
+    await expect(page.locator('main.stage')).toHaveClass(/stage-plan/);
+    await expect(panel(page)).toHaveClass(/talk-peek/);
+    await expect(v1.getByRole('button', { name: 'Show V1 on the plan' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(panel(page).getByText(/^On the table: V1/)).toBeInViewport();
+    // The new pieces are drawn on the plan, and no sheet covers them.
+    const marks = page.getByTestId('proposal-layer').locator('polygon.pv-new');
+    await expect(marks.first()).toBeVisible();
+    const inSight = await marks.evaluateAll(
+      (els) =>
+        els.filter((el) => {
+          const r = el.getBoundingClientRect();
+          const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+          return !!top?.closest('svg.plan-svg');
+        }).length,
+    );
+    expect(inSight).toBeGreaterThan(0);
+    await shot(page, 'phone-asked-proposal');
+  });
+
   test('first meeting, a proposal, accept part, Undo, the sheet’s three heights', async ({
     page,
   }) => {
@@ -2042,8 +2470,11 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     // The tools at the foot give way to the sheet; the plan above shows the proposal.
     await expect(page.locator('.palette')).toBeHidden();
     await shot(page, 'phone-proposal');
-    // Full height (the cost card took it there, its answers in sight), then smaller and
-    // folded to peek, each by its handle; and full again by the handle.
+    // The cost card took the sheet to full height; the proposal folded it to peek, so the plan
+    // shows it. Then full, smaller and full again, each by its handle.
+    await expect(panel(page)).toHaveClass(/talk-peek/);
+    await expect(page.getByTestId('proposal-layer')).toBeVisible();
+    await panel(page).getByRole('button', { name: 'Make the designer full height' }).tap();
     await expect(panel(page)).toHaveClass(/talk-full/);
     await panel(page).getByRole('button', { name: 'Make the designer smaller' }).tap();
     await expect(panel(page)).toHaveClass(/talk-half/);
@@ -2094,13 +2525,19 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
       timeout: 30_000,
     });
-    // The cost card took the sheet to full height; it stays there.
-    await expect(panel(page)).toHaveClass(/talk-full/);
+    // The proposal folded the sheet to peek, the plan showing it; full again by the handle.
+    await expect(panel(page)).toHaveClass(/talk-peek/);
+    const tall = panel(page).getByRole('button', { name: 'Make the designer full height' });
+    await tall.tap();
     await v1.getByRole('button', { name: /^Another idea · about US\$/ }).tap();
     const b = titled(page, 'V1B');
     await expect(b.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
       timeout: 30_000,
     });
+    // B going on the plan folds the sheet to peek again.
+    await expect(panel(page)).toHaveClass(/talk-peek/);
+    await tall.tap();
+    await expect(panel(page)).toHaveClass(/talk-full/);
     const calls = m.calls.length;
     const tabs = panel(page).getByRole('tablist', { name: 'V1: ideas' });
     // Letters only, each 44 px tall; the names are in the tabs' names and the card's title.

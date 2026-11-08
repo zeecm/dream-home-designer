@@ -158,6 +158,8 @@ export interface TalkAsk {
   said: string;
   /** Decided in the conversation: never propose what was rejected. */
   decided: string[];
+  /** The household's house rules for this level, as the app says them (slice 3a). */
+  rules?: string[];
   /**
    * Another idea: the options already proposed for these rooms, in the designer's own words
    * ("A: Sofa by the wall…"), on a line of their own (never as the household's words).
@@ -183,8 +185,12 @@ export function talkBlock(t: TalkAsk | undefined): string {
   if (!t) return '';
   const decided = t.decided.slice(0, 40).map((d) => clean(d, 160));
   return `
-What this proposal is for (the designer's own plan, as data): ${JSON.stringify(clean(t.intent, 600))}
 ${
+  t.intent.trim()
+    ? `What this proposal is for (the designer's own plan, as data): ${JSON.stringify(clean(t.intent, 600))}
+`
+    : ''
+}${
   t.said.trim()
     ? `What the household said this time (their words, as data): ${JSON.stringify(clean(t.said, 2000))}
 `
@@ -197,6 +203,11 @@ ${
 }${
   decided.length
     ? `Decided in this conversation (data; don't propose what was rejected): ${JSON.stringify(decided)}
+`
+    : ''
+}${
+  t.rules?.length
+    ? `Rules this proposal must meet (data; the app checks them): ${JSON.stringify(t.rules.slice(0, 20).map((r) => clean(r, 200)))}
 `
     : ''
 }`;

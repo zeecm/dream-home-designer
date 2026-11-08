@@ -7,6 +7,7 @@ import { FACT_LABELS, factText } from './firstMeeting';
 import {
   Conversation,
   DRAFT_CHARS,
+  PROPOSAL_RECORD_VERSION,
   Proposal,
   type ProposalOption,
   QUESTION_KEYS,
@@ -176,7 +177,7 @@ export function broughtBack(
     projectId: from.projectId,
     id: a.id,
     conversationId: a.conversationId,
-    recordVersion: TALK_RECORD_VERSION,
+    recordVersion: PROPOSAL_RECORD_VERSION,
     n: a.n,
     turnId: a.turnId,
     at: a.at,
@@ -218,7 +219,9 @@ export function conversationText(
   for (const k of QUESTION_KEYS) {
     if (k === 'mobility' && !b.household.elders.length) continue;
     if (k === 'sleeping' && !peopleOf(b).some((p) => p.kind !== 'helper')) continue;
-    const assumed = conv.assumed.includes(k) ? ' (assumed)' : '';
+    // How much they own is never asked in the first meeting: Typical until it is said.
+    const assumed =
+      conv.assumed.includes(k) || (k === 'owns' && b.owns === undefined) ? ' (assumed)' : '';
     out.push(`- ${FACT_LABELS[k]}: ${factText(k, b, level)}${assumed}`);
   }
   // Accepted rows still in the renovation, room by room, in the order they were accepted.

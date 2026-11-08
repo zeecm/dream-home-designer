@@ -851,9 +851,13 @@ export interface FurnishedPass {
 
 let pass: FurnishedPass | null = null;
 
-/** The furnished pass for a level (recomputed whenever the level isn't the last one). */
-export function furnishedPass(level: Level): FurnishedPass {
-  if (pass && pass.level === level && Object.isFrozen(level)) return pass;
+/**
+ * The furnished pass for a level (recomputed whenever the level isn't the last one). `trust`:
+ * the caller knows the level hasn't changed since the last pass on it (one synchronous check),
+ * so an unfrozen level's pass is reused too.
+ */
+export function furnishedPass(level: Level, trust = false): FurnishedPass {
+  if (pass && pass.level === level && (trust || Object.isFrozen(level))) return pass;
   const bare = bareOf(level);
   const { g, room, rooms, throats, throatOf } = bare;
   const pieces = Object.values(level.items).filter(blocks);
@@ -1261,6 +1265,147 @@ export function walkwayReport(level: Level): WalkwayReport {
 }
 
 /** For the plan details' walkway line. */
+/** A house rule's route (slice 3a), measured at the rule's own width. */
+export interface RouteMeasure {
+  roomId: string;
+  /** The narrowest clear width on the widest way now (0: closed). */
+  have: number;
+  /** What is needed there: the rule's width, or the flat's own where it is narrower. */
+  need: number;
+  capped: boolean;
+  /** The flat's own width on the bare way, wall to wall (the most any rule can keep). */
+  bareCap: number;
+  ok: boolean;
+  pinch: [Vec2, Vec2] | null;
+  /** The bare way (what Show on plan draws), and the pieces narrowing it or standing in it. */
+  path: Vec2[];
+  blamed: string[];
+  /**
+   * The corridor stretches of the bare way: where the floor within `need` of it is nowhere
+   * twice the need wide, so anything standing there is in the way (in an open room a piece
+   * is walked round).
+   */
+  narrow: Vec2[][];
+}
+
+/**
+ * The way from the main door to each of `roomIds`, measured exactly at `need` (a 1.00 m rule is
+ * measured at 1.00 m, never the raster's width): the same widest-way search and pinch
+ * measurement as the walkway check, on its cached bare and furnished passes. A room the bare
+ * plan doesn't join to the main door is left out (no piece can fix it).
+ */
+/** The corridor stretches of bare ways, per bare plan (they depend on the walls alone). */
+const narrowCache = new WeakMap<object, Map<string, Vec2[][]>>();
+
+export function measureRoute(
+  level: Level,
+  roomIds: readonly string[],
+  need: number,
+  /** The last furnished pass on this very level still holds (see `furnishedPass`). */
+  trust = false,
+): { status: 'ok' | 'no-main-door'; perRoom: RouteMeasure[] } {
+  const bare = bareOf(level);
+  if (!bare.start) return { status: 'no-main-door', perRoom: [] };
+  const pass = furnishedPass(level, trust);
+  const { g, throatOf, throats } = bare;
+  const perRoom: RouteMeasure[] = [];
+  /** Whether the floor within `r` of a cell is nowhere `2r` wide (a corridor, not a room). */
+  const corridorAt = (k: number, r: number): boolean => {
+    const cx = k % g.nx;
+    const cy = Math.floor(k / g.nx);
+    const reach = Math.ceil(r / g.c);
+    for (let y = Math.max(0, cy - reach); y <= Math.min(g.ny - 1, cy + reach); y++) {
+      for (let x = Math.max(0, cx - reach); x <= Math.min(g.nx - 1, cx + reach); x++) {
+        if ((x - cx) ** 2 + (y - cy) ** 2 > reach * reach) continue;
+        const j = y * g.nx + x;
+        // Widths are capped at WIDE, and a doorway reads as WIDE: neither is open floor.
+        if (throatOf[j] === -1 && (bare.width[j] as number) >= Math.min(2 * r, WIDE) - 1e-6)
+          return false;
+      }
+    }
+    return true;
+  };
+  const narrowMemo = narrowCache.get(bare) ?? new Map<string, Vec2[][]>();
+  narrowCache.set(bare, narrowMemo);
+  const narrowOf = (cells: number[], want: number): Vec2[][] => {
+    const key = `${cells[0]}|${cells[cells.length - 1]}|${cells.length}|${want}`;
+    const hit = narrowMemo.get(key);
+    if (hit) return hit;
+    if (narrowMemo.size > 64) narrowMemo.clear();
+    const out: Vec2[][] = [];
+    let run: number[] = [];
+    for (const k of cells) {
+      if (corridorAt(k, want)) run.push(k);
+      else if (run.length) {
+        if (run.length > 1) out.push(polyline(g, run));
+        run = [];
+      }
+    }
+    if (run.length > 1) out.push(polyline(g, run));
+    narrowMemo.set(key, out);
+    return out;
+  };
+  for (const roomId of roomIds) {
+    const idx = bare.rooms.findIndex((r) => r.id === roomId);
+    const bareCell = idx >= 0 ? (bare.first[idx] as number) : -1;
+    if (bareCell < 0) continue;
+    const bareWay = bare.search.path(bareCell);
+    const capM = measure(
+      bareWay,
+      pass.bareRaster,
+      bare.width,
+      throatOf,
+      throats,
+      need,
+      pass.bareObs,
+    );
+    const bareCap = capM.exact ? capM.have : Number.POSITIVE_INFINITY;
+    const want = Math.min(need, bareCap - CAP_MARGIN);
+    const cell = pass.first[idx] as number;
+    if (cell < 0) {
+      const standing = standingPieces(pass, bareWay);
+      perRoom.push({
+        roomId,
+        have: 0,
+        need: want,
+        capped: want < need - 1e-9,
+        bareCap,
+        ok: false,
+        pinch: closedBarOf(pass, bareWay),
+        path: polyline(g, bareWay),
+        blamed: standing.length ? standing : narrowingPieces(pass, bareWay, want),
+        narrow: narrowOf(bareWay, want),
+      });
+      continue;
+    }
+    const m = measure(
+      pass.search.path(cell),
+      pass.raster,
+      pass.width,
+      throatOf,
+      throats,
+      want,
+      pass.obs,
+    );
+    const ok = m.have >= m.need - 0.005;
+    let blamed = ok ? [] : (m.by.map((i) => passPiece(pass, i)).filter((id) => !!id) as string[]);
+    if (!ok && !blamed.length) blamed = narrowingPieces(pass, bareWay, want);
+    perRoom.push({
+      roomId,
+      have: Math.max(0, m.have),
+      need: Math.min(want, m.need),
+      capped: want < need - 1e-9 || m.need < want - 1e-9,
+      bareCap,
+      ok,
+      pinch: ok ? null : m.pinch,
+      path: polyline(g, bareWay),
+      blamed,
+      narrow: narrowOf(bareWay, want),
+    });
+  }
+  return { status: 'ok', perRoom };
+}
+
 export function walkwayStatus(level: Level): WalkwayReport['status'] {
   return walkwayReport(level).status;
 }

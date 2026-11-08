@@ -34,6 +34,7 @@ import {
   loadTalk,
   newId,
   nowIso,
+  rulesOn,
   say,
   talkLevel,
   talkLevels,
@@ -117,6 +118,7 @@ async function bringBackOnce(src: BringSource): Promise<string | null> {
     ids: { event: newId('turn'), turn: turnId },
     proposalId,
     from,
+    rules: rulesOn(designLevelId()).length,
   });
   const made = await numbered(p, written);
   useTalk.setState({ view: 'log', shown: `${proposalId}:A`, open: null, why: null });
