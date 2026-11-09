@@ -13,9 +13,10 @@ import {
   usageOf,
   usdOf,
 } from '@dhd/core';
-import type { AiSettings } from '../../credentials';
-import { type Halt, Halted, type RequestState, Stopped, requestStep } from '../request';
-import { streamRequest, talkRequestFor } from '../stream';
+import type { Page } from './page';
+import type { AiSettings } from './providers';
+import { type Halt, Halted, type RequestState, Stopped, requestStep } from './request';
+import { streamRequest, talkRequestFor } from './stream';
 
 /**
  * One talk call (tech §2.8): sent with the runner's retry rules, its text read as it streams
@@ -29,6 +30,8 @@ export interface TalkCallOptions {
   prompt: TalkPrompt;
   parseCtx: TalkParseContext;
   signal: AbortSignal;
+  /** The browser page it runs in (a dropped connection is tried again once it is back). */
+  page?: Page;
   prices?: Record<string, Price>;
   fetch?: typeof fetch;
   /** The reply's words so far (and its kind once known), at most every `paintMs`. */
@@ -79,9 +82,17 @@ export async function talkCall(o: TalkCallOptions): Promise<TalkCallResult> {
     const value = await requestStep({
       ai,
       signal: o.signal,
+      ...(o.page ? { page: o.page } : {}),
       ...(o.prices ? { prices: o.prices } : {}),
       send: (effort, sink, signal, hooks) =>
-        streamRequest(ai, talkRequestFor(ai, prompt, effort), sink, signal, hooks, o.fetch),
+        streamRequest(
+          ai,
+          talkRequestFor(ai, prompt, effort, { browser: !!o.page }),
+          sink,
+          signal,
+          hooks,
+          o.fetch,
+        ),
       effort: prompt.effort,
       promptChars: chars.all,
       maxTokens: prompt.maxTokens,

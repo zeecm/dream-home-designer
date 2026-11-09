@@ -1,3 +1,4 @@
+import { AiError, type AiSettings, anySignal, errorBody, failure } from '@dhd/ai';
 import {
   type Level,
   SKETCH_KEY,
@@ -7,8 +8,7 @@ import {
   planSketch,
   sceneSheet,
 } from '@dhd/core';
-import type { AiSettings } from './credentials';
-import { AiError, anySignal, errorBody, failure, timeoutSignal } from './providers';
+import { timeoutSignal } from './providers';
 
 /** Looks of a render to choose from. */
 export const RENDER_STYLES = {

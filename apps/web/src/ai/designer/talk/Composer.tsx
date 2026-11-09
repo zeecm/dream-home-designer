@@ -1,3 +1,4 @@
+import { designerCannotUse } from '@dhd/ai';
 import {
   DRAFT_CHARS,
   type Pointer,
@@ -12,7 +13,6 @@ import { useAi } from '../../credentials';
 import { useResultsTickN } from '../results';
 import { capUsd, spent, tokens, usd, useSpend } from '../spend';
 import { useDesigner } from '../state';
-import { designerCannotUse } from '../stream';
 import { PointerChips } from './Chips';
 import { usePointerUi } from './pointers';
 import { pressScope, scopePrice, stopTalkRun } from './propose';

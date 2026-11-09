@@ -1,5 +1,14 @@
-import { type AiSettings, CURATED, MODEL_NAMES, PROVIDERS, type Provider } from './credentials';
-import { AiError, anySignal, errorBody, failure, timeoutSignal } from './providers';
+import {
+  AiError,
+  type AiSettings,
+  PROVIDERS,
+  type Provider,
+  anySignal,
+  errorBody,
+  failure,
+} from '@dhd/ai';
+import { CURATED, MODEL_NAMES } from './credentials';
+import { timeoutSignal } from './providers';
 
 /** A model to choose: its id exactly as the provider lists it, and a name to show. */
 export interface ModelOption {

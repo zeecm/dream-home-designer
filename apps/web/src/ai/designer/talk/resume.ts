@@ -1,8 +1,8 @@
+import { designerCannotUse } from '@dhd/ai';
 import { type Proposal, RESUME_MS, levelFingerprint } from '@dhd/core';
 import { MODEL_NAMES, aiSettings } from '../../credentials';
 import { wouldPass } from '../spend';
 import { useDesigner } from '../state';
-import { designerCannotUse } from '../stream';
 import { cardKey } from './cards';
 import { approvedLeft, resumeFigure } from './pricing';
 import { carryOn, endStopped, keepAsItIs, resumePriced, roomsDone, runHooks } from './propose';

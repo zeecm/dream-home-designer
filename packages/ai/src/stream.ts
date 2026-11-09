@@ -1,13 +1,14 @@
 import type { StepPrompt, TalkPrompt } from '@dhd/core';
-import type { AiSettings, Provider } from '../credentials';
-import { errorBody } from '../providers';
+import { errorBody } from './errors';
+import type { AiSettings, Provider } from './providers';
 import { readSse } from './sse';
 
 /**
- * One designer request, streamed, straight from this browser to the person's provider with
- * their own key: the request each provider takes (its documented REST shape) and the reading
- * of its events. Every step sends the system prompt and the run's stable prefix first, byte
- * for byte, so the provider can cache them; Claude is told where (`cache_control`).
+ * One designer request, streamed, straight to the person's provider with their own key (from
+ * their browser, or from our server for a run they ask it to carry on): the request each
+ * provider takes (its documented REST shape) and the reading of its events. Every step sends
+ * the system prompt and the run's stable prefix first, byte for byte, so the provider can
+ * cache them; Claude is told where (`cache_control`).
  */
 
 export type Effort = StepPrompt['effort'];
@@ -105,12 +106,22 @@ export interface ProviderRequest {
   body: Record<string, unknown>;
 }
 
-const anthropicHeaders = (ai: AiSettings, fallback: boolean): Record<string, string> => ({
+/** Where a request is sent from: the person's browser, or a server (the default). */
+export interface RequestFrom {
+  /** From a browser: Claude is told so (a header a server must not send). */
+  browser?: boolean;
+}
+
+const anthropicHeaders = (
+  ai: AiSettings,
+  fallback: boolean,
+  from: RequestFrom,
+): Record<string, string> => ({
   'x-api-key': ai.key,
   'anthropic-version': ANTHROPIC_VERSION,
   ...(fallback ? { 'anthropic-beta': FALLBACK_BETA } : {}),
   // The person's own key in their own browser: what this header is for.
-  'anthropic-dangerous-direct-browser-access': 'true',
+  ...(from.browser ? { 'anthropic-dangerous-direct-browser-access': 'true' } : {}),
 });
 
 /**
@@ -121,6 +132,7 @@ export function talkRequestFor(
   ai: AiSettings,
   p: TalkPrompt,
   effort: Effort = p.effort,
+  from: RequestFrom = {},
 ): ProviderRequest {
   const text = (m: TalkPrompt['messages'][number]) => m.blocks.map((b) => b.text).join('');
   if (ai.provider === 'anthropic') {
@@ -143,7 +155,7 @@ export function talkRequestFor(
     }));
     return {
       url: 'https://api.anthropic.com/v1/messages',
-      headers: anthropicHeaders(ai, fallback),
+      headers: anthropicHeaders(ai, fallback, from),
       body: {
         model: ai.model,
         max_tokens: p.maxTokens,
@@ -210,6 +222,7 @@ export function requestFor(
   ai: AiSettings,
   p: StepPrompt,
   effort: Effort = p.effort,
+  from: RequestFrom = {},
 ): ProviderRequest {
   const stable = `${p.prefix}${p.shared}`;
   if (ai.provider === 'anthropic') {
@@ -227,7 +240,7 @@ export function requestFor(
     ];
     return {
       url: 'https://api.anthropic.com/v1/messages',
-      headers: anthropicHeaders(ai, fallback),
+      headers: anthropicHeaders(ai, fallback, from),
       body: {
         model: ai.model,
         max_tokens: p.maxTokens,
@@ -326,8 +339,9 @@ export function streamStep(
   signal: AbortSignal,
   hooks: StreamHooks = {},
   doFetch: typeof fetch = fetch,
+  from: RequestFrom = {},
 ): Promise<void> {
-  return streamRequest(ai, requestFor(ai, p, effort), sink, signal, hooks, doFetch);
+  return streamRequest(ai, requestFor(ai, p, effort, from), sink, signal, hooks, doFetch);
 }
 
 /** Sends a request and reads its stream into `sink` (as `streamStep`). */

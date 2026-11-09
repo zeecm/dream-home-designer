@@ -1,9 +1,7 @@
+import { AiError, type AiSettings, PROVIDERS, type Provider } from '@dhd/ai';
 import { useEffect, useRef, useState } from 'react';
 import { icons } from '../ui/icons';
 import {
-  type AiSettings,
-  PROVIDERS,
-  type Provider,
   forgetAi,
   keyFor,
   makesPictures,
@@ -21,7 +19,7 @@ import {
   modelName,
   recommended,
 } from './models';
-import { AiError, askForJson, inSettings } from './providers';
+import { askForJson, inSettings } from './providers';
 
 /**
  * A 64 × 64 light grey PNG for the test: an image so the test also checks the model takes one.

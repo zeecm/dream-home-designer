@@ -1,3 +1,4 @@
+import type { RunState } from '@dhd/ai';
 import {
   type Design,
   type DesignBrief,
@@ -14,7 +15,6 @@ import { meterSetting } from '../../storage/store';
 import { setLeaveGuard, useStore } from '../../store';
 import { defaultPicks } from './compare';
 import { sharedQuestion } from './once';
-import type { RunState } from './run';
 import { type DesignStore, designStore } from './storage';
 
 /**

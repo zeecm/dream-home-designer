@@ -1,3 +1,4 @@
+import { type StepState, blankStep, designerCannotUse, interruptText, runDesign } from '@dhd/ai';
 import {
   type Conversation,
   DRAFT_CHARS,
@@ -29,11 +30,10 @@ import {
 import { meterSetting } from '../../../storage/store';
 import { useStore } from '../../../store';
 import { aiSettings } from '../../credentials';
+import { browserPage } from '../page';
 import { freshPrice, readPrice, trialResult } from '../results';
-import { type StepState, blankStep, interruptText, runDesign } from '../run';
 import { addUsage, capUsd, countRun, overLimit, priceTable, spent, usd } from '../spend';
 import { type MadeWith, type Running, designOpts, houseKeptFor, useDesigner } from '../state';
-import { designerCannotUse } from '../stream';
 import {
   type PriceInput,
   type Priced,
@@ -966,6 +966,7 @@ async function runOption(
     design: sp.draft,
     plan: sp.plan,
     signal: ctrl.signal,
+    page: browserPage(),
     prices: priceTable(),
     // Placed as its card will be: with the kept pieces it was made with.
     result: designOpts(project, designLevelId(), madeOf(p, letter)),

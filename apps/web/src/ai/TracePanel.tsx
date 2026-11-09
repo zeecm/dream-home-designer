@@ -1,3 +1,4 @@
+import { AiError, PROVIDERS } from '@dhd/ai';
 import { type Level, importTrace, newId, readingToPlan, roomArea, tracedLevel } from '@dhd/core';
 import { useState } from 'react';
 import { useEditor } from '../editor';
@@ -5,9 +6,8 @@ import { currentLevel, useProject, useStore } from '../store';
 import { usePlanImage } from '../ui/PlanImage';
 import { formatArea } from '../units';
 import { AiSettingsDialog } from './AiSettingsDialog';
-import { PROVIDERS, aiSettings, useAi } from './credentials';
+import { aiSettings, useAi } from './credentials';
 import { traceWhere, useTrace } from './draft';
-import { AiError } from './providers';
 import { readPlan } from './trace';
 
 /** Reads the plan image with the person's model, into a draft to look over. */

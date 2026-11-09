@@ -1,6 +1,6 @@
+import { AiError, type AiSettings } from '@dhd/ai';
 import { LayoutSuggestions, type Level, clean, planForModel } from '@dhd/core';
-import type { AiSettings } from './credentials';
-import { AiError, askForJson, lowerEnums } from './providers';
+import { askForJson, lowerEnums } from './providers';
 
 /** What the household wants, from the brief. */
 export interface Brief {

@@ -1,3 +1,4 @@
+import { QUIET_MS, designerCannotUse, talkCall } from '@dhd/ai';
 import {
   BUDGET_CHOICES,
   COOKING_CHOICES,
@@ -39,14 +40,12 @@ import {
 } from '@dhd/core';
 import { useStore } from '../../../store';
 import { aiSettings } from '../../credentials';
-import { QUIET_MS } from '../request';
+import { browserPage } from '../page';
 import { addUsage, capUsd, overLimit, priceTable, spent, usd } from '../spend';
 import { designOpts, useDesigner } from '../state';
-import { designerCannotUse } from '../stream';
 import { cardChanges, cardResultNow, cardVerdict, optionCard } from './cards';
 import { followPlan } from './propose';
 import { tableCard } from './rules';
-import { talkCall } from './talkCall';
 import {
   type LiveReply,
   act,
@@ -505,6 +504,7 @@ async function replyNow(turnId: string, prompt: TalkPrompt) {
         mainDoor: entranceDoor(level),
       },
       signal: ctrl.signal,
+      page: browserPage(),
       prices: priceTable(),
       onText: (t) => set({ say: t.say, kind: t.kind }),
       // Never past the tab's limit, nor past what the reply was priced at most: its "up to"

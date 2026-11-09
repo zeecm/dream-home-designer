@@ -1,3 +1,4 @@
+import { designerCannotUse } from '@dhd/ai';
 import {
   type Change,
   type DesignResult,
@@ -24,7 +25,6 @@ import { failingChecks } from '../parts';
 import { useResultsTickN } from '../results';
 import { tokens, usd, useSpend } from '../spend';
 import { houseKeptFor, houseRulesFor, openCompare, useDesigner } from '../state';
-import { designerCannotUse } from '../stream';
 import { keepTogether } from '../words';
 import { Mark } from './Mark';
 import { acceptCard, precheckNow } from './accept';

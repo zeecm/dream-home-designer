@@ -1,11 +1,10 @@
+import { type AiSettings, PROVIDERS, designerCannotUse } from '@dhd/ai';
 import { type DesignBrief, PRICES_AS_OF, type RunEstimate, priceOf } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { Segmented } from '../../ui/fields';
-import { type AiSettings, PROVIDERS } from '../credentials';
 import { LARGE_INPUT, MAX_STEP_INPUT } from './plan';
 import { tokens, usd, useSpend } from './spend';
 import { useDesigner } from './state';
-import { designerCannotUse } from './stream';
 import { useTalk } from './talk/useTalk';
 
 /**

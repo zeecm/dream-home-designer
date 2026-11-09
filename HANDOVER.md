@@ -763,6 +763,23 @@ review): a step is sent again at most twice and never past the figure or the tab
 and the steps in flight (at their most) are written as they happen and counted on carrying on;
 Stop or another plan opened marks the checkpoint stopped and writes the end by plan id.
 
+**AI runs that survive a locked phone, part 2 step 1 (8 Nov): `@dhd/ai` (`packages/ai`).** The
+designer's provider requests moved out of the web app, unchanged, so the edge can run them too
+(cloud runs, tech §2): `run.ts` (`runDesign`), `request.ts` (`requestStep`, the retry, resend and
+interrupt rules), `stream.ts` and `sse.ts`, `talkCall.ts`, `errors.ts` (`AiError`, `failure`,
+`redact`, `providerMessage`, `errorBody`, `anySignal`, `TO_SETTINGS`, from the web's
+`providers.ts`, which keeps `inSettings`) and `providers.ts` (`Provider`, `AiSettings`, `PROVIDERS`, from
+`credentials.ts`; key storage stays in the web). It is runtime-neutral TS: no DOM, checked by
+its tsconfig (no `dom` lib) and by Biome (`noRestrictedGlobals`: `document`, `window`,
+`navigator`, storage, IndexedDB, `process`, `Buffer`; `noNodejsModules`). What the request rules need of the browser comes in as a
+`Page` (`hidden`, `offline`, `onVisibility`, `onOnline`; long-lived, one per document): the web passes `browserPage()`
+(`ai/designer/page.ts`) to `runDesign` and `talkCall`; a server passes none, so nothing is ever
+away and no `anthropic-dangerous-direct-browser-access` header goes (`requestFor(…, { browser })`).
+Its tests run in Node and in workerd (`vitest.workers.config.ts`, `@cloudflare/vitest-pool-workers`),
+and `runtimes.test.ts` checks a whole-flat run with each provider sends and keeps the same in
+both. The run-test harness (`fixtures/runner.ts`, `flat.ts`) is shared with the web's
+`talk/carryOn.test.ts` (a run carried on from its checkpoint, priced as the card prices it).
+
 ## 5. Owner to-dos
 
 - **Before the repo goes public:** `apps/web/public/samples/hdb-3room-type4.pdf` (and its PNG
@@ -984,7 +1001,7 @@ while a changed key's is looked up, falling back per job. If listing fails, `CUR
 plans model with JSON and the picture model without making a picture (Gemini `countTokens`,
 OpenAI `GET /v1/models/{id}`), a line each; changing the provider, key or a model stops it.
 Every failed provider call (trace, layouts, render, Test, listing) now shows what the
-provider said (`failure`/`providerMessage` in `providers.ts`: `error.message`, cut to 200
+provider said (`failure`/`providerMessage`, now in `@dhd/ai`'s `errors.ts`: `error.message`, cut to 200
 characters, shown as text, with keys and tokens redacted: sk-…, sk_live_…, AIza…, AQ.…,
 ya29.…, Bearer …, and long mixed-case or hex runs; lower-case model names stay): "Gemini
 turned the request down (400): …". Gemini's 400 "API key not valid" counts as a refused key.

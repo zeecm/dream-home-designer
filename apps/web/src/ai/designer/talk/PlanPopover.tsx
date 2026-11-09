@@ -1,3 +1,4 @@
+import { designerCannotUse } from '@dhd/ai';
 import {
   type Level,
   type Project,
@@ -18,7 +19,6 @@ import { FLOAT_DIALOG } from '../../../ui/dialogs';
 import { useAi } from '../../credentials';
 import { usd } from '../spend';
 import { useDesigner } from '../state';
-import { designerCannotUse } from '../stream';
 import {
   type Target,
   addPointer,
