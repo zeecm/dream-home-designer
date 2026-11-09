@@ -1072,6 +1072,9 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
       <Header title={kind?.name ?? 'Furniture'} onClose={clear} />
       {/* First, so a phone's sheet shows it without scrolling. */}
       <ItemClearances level={level} id={id} />
+      {/* Your own furniture's way in comes before the actions: its verdict is in a phone sheet's
+          first view (lift spec 15); other pieces show nothing here. */}
+      <GettingItIn level={level} id={id} />
       <div className="inspector-asks">
         <ThingViewEntry level={level} selection={{ kind: 'item', id }} />
         <AskDesigner level={level} selection={{ kind: 'item', id }} />
@@ -1079,7 +1082,6 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
       {ageingEnabled() && <ItemAgeing level={level} id={id} kind="item" />}
       <ItemStorage level={level} id={id} />
       <CarpentryLine item={it} />
-      <GettingItIn level={level} id={id} />
       <LengthField
         label="Width"
         value={size.w}
