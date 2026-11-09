@@ -12,6 +12,7 @@ import { WET } from '../locks';
 import { nameOf } from '../place';
 import { RELATIONS, type Role, roleOf } from '../principles';
 import type { DesignResult, ResultCheck } from '../result';
+import type { Kept } from '../rules/kept';
 import type { Rule } from '../rules/schema';
 import type { DesignBrief, DesignInput, DesignItem } from '../schema';
 import { BATHROOMS } from '../schema';
@@ -690,9 +691,14 @@ export function subsetReport(
     renovation?: boolean;
     /** The house rules the card was checked against (slice 3a). */
     rules?: readonly Rule[];
+    /** The pieces kept where they are (slice 3a). */
+    kept?: readonly Kept[];
   } = {},
 ): SubsetReport {
-  const rules = opts.rules?.length ? { rules: opts.rules } : {};
+  const rules = {
+    ...(opts.rules?.length ? { rules: opts.rules } : {}),
+    ...(opts.kept?.length ? { kept: opts.kept } : {}),
+  };
   const rates = opts.rates ?? TYPICAL_RATES;
   const baseKeys = new Set(
     designChecks(settled(now), { brief, uses: r.uses, ...rules })

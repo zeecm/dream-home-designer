@@ -460,6 +460,39 @@ export const SpaceStatus = z.enum(['done', 'failed', 'cancelled', 'skipped', 'lo
 export type SpaceStatus = z.infer<typeof SpaceStatus>;
 
 /** A version, kept in this browser (never in the project). */
+/**
+ * A piece kept where it is (slice 3a, Keep this; rules/kept.ts has what is done with it). Here
+ * so a version can carry the kept pieces it was made with.
+ */
+export const Kept = z.object({
+  id: z.string(),
+  /** A plan piece's id; null for a piece only in a proposal (kept by kind and pose). */
+  itemId: z.string().nullable(),
+  assetId: z.string(),
+  /** Where it is: plan x, y (metres) and its turn (radians). */
+  pose: z.object({ x: z.number(), y: z.number(), rot: z.number() }),
+  /** Its size as kept (scale), so it is placed again the same. */
+  scale: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional(),
+  /** "plan", or the version it was kept from ("V4"). */
+  from: z.string().max(12),
+  levelId: z.string(),
+  at: z.string(),
+  /**
+   * What the brief said of a plan piece before it was kept ('bring', or 'in-place' the person
+   * chose themselves): put back when it is let go, never simply deleted. Set by the reducer.
+   */
+  prior: z.enum(['bring', 'in-place']).nullable().optional(),
+  /** When it was let go (Let the designer move it): in `keptGone` only. */
+  until: z.string().optional(),
+});
+export type Kept = z.infer<typeof Kept>;
+/** Kept pieces read tolerantly: one this build can't read is dropped, not the version. */
+const readableKept = (items: unknown[]): Kept[] =>
+  items.flatMap((x) => {
+    const r = Kept.safeParse(x);
+    return r.success ? [r.data] : [];
+  });
+
 export const Design = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -493,6 +526,14 @@ export const Design = z.object({
    * Never an HDB rule. Absent in versions kept before.
    */
   waivers: z.array(z.object({ key: z.string(), text: z.string(), at: z.string() })).default([]),
+  /**
+   * The kept pieces it was made with (slice 3a), read as they were whatever is kept or let go
+   * since, or the conversation started over. Absent before: worked out from the times.
+   */
+  kept: z
+    .array(z.unknown())
+    .transform((items) => readableKept(items).slice(-30))
+    .optional(),
   /** The conversation's proposal it was accepted from (absent: made by v1's form). */
   from: z
     .object({ conversationId: z.string(), proposalId: z.string(), letter: z.string().max(1) })

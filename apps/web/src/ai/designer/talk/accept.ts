@@ -350,6 +350,8 @@ async function keepVersion(
           base: { variant: o.base.variant, fingerprint: levelFingerprint(base) },
           baseLevel: base,
           brief: o.brief,
+          // The kept pieces it was made with go with the version (read as they were).
+          ...(o.kept ? { kept: [...o.kept] } : {}),
           request: {
             scope: card.proposal.scope.all
               ? { kind: 'all' }

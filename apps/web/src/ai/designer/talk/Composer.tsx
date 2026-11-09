@@ -1,5 +1,6 @@
 import {
   DRAFT_CHARS,
+  type Pointer,
   type ScopeRef,
   type TalkEstimate,
   meetingOver,
@@ -12,6 +13,8 @@ import { useResultsTickN } from '../results';
 import { capUsd, spent, tokens, usd, useSpend } from '../spend';
 import { useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
+import { PointerChips } from './Chips';
+import { usePointerUi } from './pointers';
 import { pressScope, scopePrice, stopTalkRun } from './propose';
 import { scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
@@ -45,6 +48,8 @@ function useNewest(): { key: string; scope: ScopeRef } | null {
   return useMemo(() => (p ? { key: `${p.id}:A`, scope: p.scope } : null), [p]);
 }
 
+const NO_POINTERS: Pointer[] = [];
+
 export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: () => void }) {
   const conv = useTalk((s) => s.conv);
   const running = useTalk((s) => !!s.live);
@@ -54,7 +59,9 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
   const [online, setOnline] = useState(() =>
     typeof navigator === 'undefined' ? true : navigator.onLine !== false,
   );
-  const [flash, setFlash] = useState(false);
+  const [flash, setFlash] = useState<string | false>(false);
+  const pointers = useTalk((s) => s.conv?.draftPointers ?? NO_POINTERS);
+  const pointerHint = usePointerUi((s) => s.hint);
   const [est, setEst] = useState<TalkEstimate | null>(null);
   const [text, setText] = useState(conv?.draft ?? '');
   const newest = useNewest();
@@ -229,7 +236,13 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
   const send = () => {
     if (why || replying || running) return;
     if (!text.trim()) {
-      setFlash(true);
+      // Chips and no words: say what to write about (UX §1.2).
+      const first = pointers[0]?.label.split(' · ')[0];
+      setFlash(
+        first
+          ? `Say what you’d like about ${first === 'Here' ? 'that spot' : `the ${first.toLowerCase()}`}`
+          : 'Write a message first',
+      );
       setTimeout(() => setFlash(false), 1600);
       return;
     }
@@ -239,15 +252,17 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
     text.length >= 1800
       ? `${text.length.toLocaleString('en-US')} of ${DRAFT_CHARS.toLocaleString('en-US')}`
       : flash
-        ? 'Write a message first'
-        : replying || running
-          ? 'Wait for the reply, or Stop'
-          : (why ??
-            (anyway && cap !== null
-              ? `At most it would pass your ${usd(cap)} limit; it usually costs ${usd(est?.usd?.typical ?? 0)}.`
-              : typeof level === 'number'
-                ? `Asks before anything over ${usd(level)}`
-                : ''));
+        ? flash
+        : pointerHint
+          ? pointerHint
+          : replying || running
+            ? 'Wait for the reply, or Stop'
+            : (why ??
+              (anyway && cap !== null
+                ? `At most it would pass your ${usd(cap)} limit; it usually costs ${usd(est?.usd?.typical ?? 0)}.`
+                : typeof level === 'number'
+                  ? `Asks before anything over ${usd(level)}`
+                  : ''));
   const sendLabel =
     anyway && est?.usd
       ? `Send anyway · up to ${usd(est.usd.high)}`
@@ -265,7 +280,8 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
         send();
       }}
     >
-      {chips.length > 0 && (
+      <PointerChips pointers={pointers} removable />
+      {chips.length > 0 && !(pointers.length && coarse()) && (
         <div className="chip-row chip-scroll talk-quick">
           {chips.map((c) => (
             <button
@@ -295,6 +311,17 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
+          // Backspace at the start moves to the last chip's × (it never deletes by itself).
+          if (
+            e.key === 'Backspace' &&
+            pointers.length &&
+            e.currentTarget.selectionStart === 0 &&
+            e.currentTarget.selectionEnd === 0
+          ) {
+            e.preventDefault();
+            document.querySelector<HTMLButtonElement>('[data-last-chip]')?.focus();
+            return;
+          }
           if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
           // Ctrl or Cmd+Enter sends everywhere; Enter alone on a computer (Shift: a new line).
           if (e.metaKey || e.ctrlKey || (!e.shiftKey && !coarse())) {

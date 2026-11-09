@@ -19,7 +19,7 @@ import {
 import { useRates } from '../../../cost/estimate';
 import { useEditor } from '../../../editor';
 import { shownLevelId, useStore } from '../../../store';
-import { useDesigner } from '../state';
+import { houseKeptFor, useDesigner } from '../state';
 import { rememberPutBack } from './accept';
 import { type CardModel, nowOf } from './cards';
 import { numbered } from './propose';
@@ -109,6 +109,8 @@ async function bringBackOnce(src: BringSource): Promise<string | null> {
     brief: conv.brief,
     base: { variant: after ? 'after' : 'before', fingerprint: fp },
     held,
+    // Made now: with the pieces kept now, on its record (as a new option is).
+    kept: [...houseKeptFor(designLevelId(), 'new')],
   });
   await actProposal(proposalId, () => p);
   const from = titleOf(src);

@@ -107,21 +107,34 @@ for any plan.
   [spec](docs/specs/ai-designer-v2.md)
 - Smooth dragging on big plans: room labels, wall statuses and the walkway check work out only
   what a drag changed (a 70-room plan went from about 1 s to under 0.15 s a step).
+- The 3D view draws only when something changes (it redrew 60 times a second while idle), and on a
+  phone a new designer proposal is in sight on the plan before you accept it.
+- AI interior designer v2, slice 3a part A: house rules ("no bed facing the door", "keep the
+  corridor clear") kept from the conversation, checked on every proposal and accept, shown on the
+  plan, renamed, edited and deleted with Undo. [spec](docs/specs/ai-designer-v2.md)
+- AI interior designer v2, slice 3b part 1: the storage lens. Each proposal is scored on the storage
+  meter for who sleeps where and how much they own; a short room keeps its storage pieces where a
+  layout can, and never at the cost of a check. [spec](docs/specs/ai-designer-v2.md)
+- AI runs that survive a locked phone, part 1: a designer run saves its progress after each step
+  and carries on where it stopped when you come back, never past the figure you approved; a step
+  cut off is sent again at most twice before it asks. [spec](docs/specs/locked-phone-runs.md)
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
-- The 3D view draws only when something changes (it redrew 60 times a second while idle).
-- AI interior designer v2, slice 3a: point at the plan ("not here", "keep this") and house rules
-  ("nothing in the corridor") that become checks on every proposal. [spec](docs/specs/ai-designer-v2.md)
-- AI interior designer v2, slice 3b: the storage lens is built (each proposal scored on the
-  storage meter for who sleeps where, how much they own on the card, storage kept when a room is
-  short); the second look at each proposal is next.
+- AI interior designer v2, slice 3a part B: point at the plan (a piece or a spot, "keep this",
+  "why here?", "something else here") with the pointers sent with your message.
+- AI interior designer v2, slice 3b part 2: a second look at each proposal (a picture of the plan
+  the model checks for flow, focal point, too empty or too full), acted on only where the app's
+  checks agree, and house rules it suggests offered to keep.
+- AI runs that survive a locked phone, part 2: opt-in cloud runs that keep going while the phone is
+  locked, with a push when done; off in production until the owner has tried it with a real key.
+  Keys stored on the server are built next but stay off until Google sign-in is set up.
 
 ### Planned
 1. Levels you can switch between in the editor: today it shows only the first level of a
    multi-level home (a maisonette), so the upper floor can't be drawn or designed.
-2. AI interior designer v2, slice 3b: a second look at each proposal (flow, focal point, a room
-   too empty or too full), regression cases from it, and asking the designer on a comment.
+2. AI interior designer v2, slice 3b part 3: regression cases from the second look, and asking the
+   designer on a comment; slice 3a part C: the solver aims for house rules, not only checks them.
 3. Elevations on the contractor sheet (elevation slice 2), with piece labels, the saved
    picture's font and the iPhone canvas size. [spec](docs/specs/elevation.md)
 4. Storage meter 1b: storage beds, a pantry and a bay seat. [spec](docs/specs/storage-meter.md)

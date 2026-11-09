@@ -6,6 +6,7 @@ import {
   type SubsetReport,
   WARNING_TEXT,
   defaultTicks,
+  keptHolds,
   mergeChanges,
   spentOf,
   subsetReport,
@@ -22,7 +23,7 @@ import { CaseDialog } from '../CaseDialog';
 import { failingChecks } from '../parts';
 import { useResultsTickN } from '../results';
 import { tokens, usd, useSpend } from '../spend';
-import { houseRulesFor, openCompare, useDesigner } from '../state';
+import { houseKeptFor, houseRulesFor, openCompare, useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
 import { keepTogether } from '../words';
 import { Mark } from './Mark';
@@ -34,6 +35,7 @@ import {
   cardResult,
   cardVerdict,
   headLabel,
+  madeWith,
   midLine,
   nowOf,
   planMoved,
@@ -53,6 +55,7 @@ import { timed, useSettledProject } from './settle';
 import {
   type LiveRun,
   type ResumeView,
+  act,
   actProposal,
   useBusy,
   useRulesKey,
@@ -219,6 +222,22 @@ export function TurnCost({
   );
 }
 
+const NO_IDS: string[] = [];
+/**
+ * The ids of pieces kept where they are on the card's result (for the Kept tag): only the card
+ * on the plan reads it, so a folded card never re-renders as the view changes.
+ */
+function useKeptIds(levelId: string, shown: boolean): string[] {
+  const kept = useTalk((s) => (shown && s.conv?.levelId === levelId ? s.conv.kept : null));
+  const target = useProposalView((s) => (shown ? s.target : null));
+  return useMemo(() => {
+    if (!kept?.length || !target) return NO_IDS;
+    return Object.values(target.items)
+      .filter((it) => kept.some((k) => (k.itemId ? k.itemId === it.id : keptHolds(k, it))))
+      .map((it) => it.id);
+  }, [kept, target]);
+}
+
 /** The plan as the ticked changes would make it, and what that fails and costs (150 ms). */
 function useSubset(
   card: CardModel,
@@ -248,6 +267,7 @@ function useSubset(
               waived: [...card.waivers.map((w) => w.key), ...waive],
               renovation: !!project.renovation,
               rules: houseRulesFor(card.levelId),
+              kept: houseKeptFor(card.levelId, madeWith(card)),
             }),
           ),
         ),
@@ -389,7 +409,14 @@ function foldedLine(card: CardModel, rules: string): string {
   if (!said) return inNow ? ` · Accepted ${inNow}` : '';
   if (inNow && inNow >= said.total) return ' · In your renovation';
   // Worked out before your rules last changed: it says so rather than an old verdict (QA B5).
-  const text = said.rules === rules ? said.text : 'Not checked against your rules yet';
+  // Only rules count here: a piece kept since doesn't apply to a version made before it.
+  const rulesOf = (key: string) =>
+    key
+      .split('|')
+      .filter((x) => x && !x.startsWith('k:'))
+      .join('|');
+  const text =
+    rulesOf(said.rules) === rulesOf(rules) ? said.text : 'Not checked against your rules yet';
   return ` · ${text}${inNow ? ` · Accepted ${inNow} of ${said.total}` : ''}`;
 }
 
@@ -440,10 +467,13 @@ export const ProposalCard = memo(function ProposalCard({
   }, [newest]);
   // Worked out only while it is open or on the plan; folded, it shows what it said last.
   const active = expanded || shown;
+  // The pointing tip, once per conversation; kept pieces tag their rows.
+  const tipSeen = useTalk((s) => !!s.conv?.tips.includes('point'));
+  const keptIds = useKeptIds(card.levelId, shown);
   const tick = useResultsTickN();
   // A rule kept, changed or deleted re-checks the card, with no request (3a.5).
   const rulesKey = useRulesKey(card.levelId);
-  const ruleCount = rulesKey ? rulesKey.split('|').length : 0;
+  const ruleCount = rulesKey ? rulesKey.split('|').filter((x) => !x.startsWith('k:')).length : 0;
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
   const r = useMemo(
     () => (active ? timed(() => cardResult(project, card)) : null),
@@ -598,7 +628,7 @@ export const ProposalCard = memo(function ProposalCard({
     },
     [card.key],
   );
-  // A piece tapped on the plan opens its row (slice 2's Why); one that didn't change says so.
+  // A piece tapped on the plan opens its row (slice 2's Why); the popover says the rest.
   useEffect(() => {
     if (!shown) return;
     return useEditor.subscribe((s, prev) => {
@@ -615,11 +645,10 @@ export const ProposalCard = memo(function ProposalCard({
             'nearest',
           ),
         );
-      } else {
-        useStore.setState({ toast: { text: `Not changed in ${card.title}`, at: Date.now() } });
       }
+      // Not changed in it: the popover says so (slice 3a), no toast.
     });
-  }, [shown, changes, card.key, card.title]);
+  }, [shown, changes, card.key]);
 
   if (!expanded && !r) {
     // Folded and not on the plan: what it said last (nothing is worked out for it).
@@ -1015,7 +1044,12 @@ export const ProposalCard = memo(function ProposalCard({
                               })
                             }
                           >
-                            <span>{keepTogether(c.text)}</span>
+                            <span>
+                              {keepTogether(c.text)}
+                              {keptIds.some((k) => c.items.target.includes(k)) && (
+                                <span className="talk-kept-tag"> Kept</span>
+                              )}
+                            </span>
                             <span className="talk-row-why" aria-hidden="true">
                               ›
                             </span>
@@ -1200,6 +1234,27 @@ export const ProposalCard = memo(function ProposalCard({
             </div>
           )}
         </dl>
+      )}
+      {onPlan && !tipSeen && (
+        <p className="talk-app-line talk-tip">
+          <span className="talk-app-icon">
+            <Mark kind="dot" />
+          </span>
+          <span className="talk-app-text">
+            <span>
+              {window.matchMedia?.('(pointer: coarse)').matches
+                ? 'Tap a piece on the plan to comment on it or ask why it’s there. Press and hold empty floor to point at a spot.'
+                : 'Click a piece on the plan to comment on it or ask why it’s there. Right-click empty floor to point at a spot.'}
+            </span>
+            <button
+              type="button"
+              className="link-btn"
+              onClick={() => void act({ type: 'tipSeen', tip: 'point' })}
+            >
+              Got it
+            </button>
+          </span>
+        </p>
       )}
       {!allIn && card.status !== 'failed' && (changes.length > 0 || running) && (
         <div className="talk-actions">

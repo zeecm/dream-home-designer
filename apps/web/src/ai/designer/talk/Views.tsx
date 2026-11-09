@@ -357,7 +357,14 @@ function VersionVerdict({ d }: { d: Design }) {
   const v = useMemo(() => {
     const b = nowOf(project, d.levelId);
     if (!b) return null;
-    const r = timed(() => readResult(b.now, b.before, d, designOpts(project, d.levelId)));
+    const r = timed(() =>
+      readResult(
+        b.now,
+        b.before,
+        d,
+        designOpts(project, d.levelId, d.kept ? { kept: d.kept } : d.createdAt),
+      ),
+    );
     if (!r) return { text: 'Checking…', tone: 'pending' };
     const f = failingChecks(r, d);
     return cardVerdict(
