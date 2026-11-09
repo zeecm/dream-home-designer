@@ -21,7 +21,7 @@ import { PROPOSAL_RECORD_VERSION, proposalFromRecord } from '../talk/schema';
 import type { Conversation, TurnOf } from '../talk/schema';
 import { actOnLook, applyLookEdit, lookNoWorse, lookNote, lookRuleOffer } from './act';
 import { type LookAnswer, type LookFinding, MAX_FINDINGS, parseLook } from './findings';
-import { lookFacts, lookStep } from './prompt';
+import { lookBase, lookFacts, lookStep } from './prompt';
 import { LOOK_PX, MIN_PX_PER_M, critiqueSketch, lookPictureSizes } from './sketch';
 import { IMAGE_TOKENS, canSee, imageTokens, looksAt } from './vision';
 
@@ -56,6 +56,7 @@ const finding = (f: Partial<LookFinding> & Pick<LookFinding, 'target'>): LookFin
   ...f,
 });
 const look = (findings: LookFinding[]): LookAnswer => ({ findings, summary: null });
+const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 describe('the picture (critiqueSketch)', () => {
   it('the whole flat is one picture, readable, the same bytes every time', () => {
@@ -114,6 +115,50 @@ describe('the picture (critiqueSketch)', () => {
       expect(svg).toContain(`>${pinch.issue.have.toFixed(2)} m<`);
       expect(svg).toContain('stroke="#d0021b"');
     }
+  });
+});
+
+describe('the picture, as QA read it', () => {
+  it('a ceiling light is left out; the room short in front of a piece is clipped to its room', () => {
+    const lit = withPieces(level, [['ceiling-light', { x: 7.5, y: 5.45 }, 0]]);
+    const r = place({ [SAMPLE_KEYS.main]: v2(sampleMain) }, lit);
+    const svg = critiqueSketch(r, lit, { aliases: aliasesFor(r.level), scope: null })[0]?.svg ?? '';
+    // One outline for each piece on the floor: none for the light.
+    const onFloor = Object.values(r.level.items).filter((x) => {
+      const k = furnitureKind(x.assetId);
+      return k?.category !== 'People' && !k?.ceiling;
+    });
+    expect(Object.values(r.level.items).some((x) => x.assetId === 'ceiling-light')).toBe(true);
+    const outlines = svg.match(/fill="#(e6f4ea|f7f7f7)"/g) ?? [];
+    expect(outlines).toHaveLength(onFloor.length);
+    // Each zone outline is drawn inside a clip of its room.
+    const zones = (svg.match(/stroke-dasharray="5 3"/g) ?? []).length;
+    expect((svg.match(/clip-path="url\(#lookclip\d+\)"/g) ?? []).length).toBe(zones);
+  });
+
+  it('split in two, no label sits on the split: each is in the half it is well inside', () => {
+    const big: Level = {
+      ...level,
+      vertices: Object.fromEntries(
+        Object.entries(level.vertices).map(([id, v]) => [id, { ...v, x: v.x * 6, y: v.y * 6 }]),
+      ),
+    };
+    const r = place({}, big);
+    const pics = critiqueSketch(r, big, { aliases: aliasesFor(r.level), scope: null });
+    expect(pics).toHaveLength(2);
+    for (const p of pics) {
+      // Pixels a metre, and the quarter metre kept clear of each edge.
+      const inset = (LOOK_PX / Math.max(p.width, p.height)) * 0.25;
+      const xs = [...p.svg.matchAll(/<text x="([\d.]+)"/g)].map((m) => Number(m[1]));
+      expect(xs.length).toBeGreaterThan(0);
+      for (const x of xs) {
+        expect(x).toBeGreaterThanOrEqual(inset - 0.1);
+        expect(x).toBeLessThanOrEqual(p.width - inset + 0.1);
+      }
+    }
+    // Every room is named in one picture or the other.
+    const both = pics.map((p) => p.svg).join('');
+    for (const room of Object.values(big.rooms)) expect(both).toContain(esc(room.name));
   });
 });
 
@@ -207,6 +252,8 @@ describe('what the app does with them (actOnLook): the checks always win', () =>
     );
     expect(plan.rounds[0]?.failures[0]?.text).toBe(c.text);
     expect(JSON.stringify(plan)).not.toContain('The model’s own words.” ');
+    // A round that changes nothing is noted in the app's words too, never the model's.
+    expect(plan.acted).toEqual([c.text]);
   });
 
   it('a fix the checks don’t agree with is dropped, and kept in the record (criterion 41)', () => {
@@ -573,6 +620,29 @@ describe('the request and its price', () => {
     });
     expect(facts.pieces.every((p) => /^P\d+$/.test(p.id))).toBe(true);
     expect(facts.pieces.some((p) => p.changed === 'added')).toBe(true);
+    expect(facts.rules).toEqual([]);
+    // A kept piece is said as kept, never as this version's addition.
+    const it = Object.values(r0.level.items).find((x) => !level.items[x.id]);
+    const kept = {
+      id: 'kept_1',
+      itemId: null,
+      assetId: it!.assetId,
+      pose: { x: it!.position.x, y: it!.position.z, rot: it!.rotationY },
+      from: 'V1',
+      levelId: 'lvl',
+      at: AT,
+    };
+    const withKept = lookFacts(r0, level, {
+      aliases,
+      scope: null,
+      brief: ONGS,
+      lenses: [],
+      kept: [kept],
+      roomOf: () => 'rm_main-bedroom',
+    });
+    const mine = withKept.pieces.find((p) => p.id === of.get(it!.id));
+    expect(mine).toMatchObject({ changed: null, kept: true });
+    expect(withKept.pieces.filter((p) => p.kept)).toHaveLength(1);
     const step = lookStep(ctxIn, facts, [{ mediaType: 'image/png', data: 'AAAA' }]);
     expect(step.kind).toBe('look');
     expect(step.images).toHaveLength(1);
@@ -613,6 +683,32 @@ describe('the request and its price', () => {
     });
     expect(IMAGE_TOKENS.anthropic).toBeGreaterThan(IMAGE_TOKENS.openai);
     expect(openai.steps.at(-1)?.input).toBeLessThan(withLook.steps.at(-1)?.input ?? 0);
+  });
+
+  it('a run carried on with every room done still prices its look, and its round, on the prefix', () => {
+    const base = {
+      provider: 'anthropic' as const,
+      model: 'claude-opus-5-5',
+      quality: 'thorough' as const,
+    };
+    // Without the prefix nothing is priced (there is no step to build it from).
+    expect(estimateRun([], { ...base, look: true }).steps).toEqual([]);
+    const est = estimateRun([], {
+      ...base,
+      look: { pictures: [{ width: 1568, height: 1200 }], base: lookBase(ctxIn) },
+    });
+    expect(est.steps.map((s) => s.kind)).toEqual(['look']);
+    expect(est.usd!.high).toBeGreaterThan(0);
+    // Its one round, priced as a room step on the same prefix.
+    expect(est.fixes).toBe(1);
+    expect(est.usd!.fix).toBeGreaterThan(0);
+    const room = roomStep(ctxIn, spacesOf(level)[0]!, level, ctxIn.aliases);
+    // The same request as a run with a room step prices: the prefix is the run's.
+    const withRoom = estimateRun([room], {
+      ...base,
+      look: { pictures: [{ width: 1568, height: 1200 }] },
+    });
+    expect(withRoom.steps.at(-1)!.input).toBe(est.steps[0]!.input);
   });
 
   it('the pictures are priced as drawn: a flat too large for one is two, each at its size', () => {

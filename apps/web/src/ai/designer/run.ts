@@ -126,6 +126,13 @@ export interface RunState {
 /** A version as the runner builds it, and what a run asks for (core's). */
 export type { DraftDesign, RunPlan };
 
+/** The card's line when the provider refuses the second look's picture. */
+export const PICTURE_REFUSED = 'The model couldn’t take the picture, so there’s no second look.';
+
+/** Whether a failed request's line is the provider refusing a picture (a 400 about the image). */
+export const pictureRefused = (line: string) =>
+  /\(400\)/.test(line) && /image|picture|modality/i.test(line);
+
 /** A request a run sends: the layout, a room's answer, a fix round, the second look. */
 export type StepKind = 'layout' | 'room' | 'fix' | 'look';
 
@@ -182,9 +189,14 @@ export interface RunOptions {
   /**
    * The second look (tech 3b §2): given, the run ends with one (Thorough, a model that can see;
    * the caller decides). The device turns the core's plan drawings into PNGs: null when it
-   * can't (the look is skipped, nothing else fails).
+   * can't (the look is skipped, nothing else fails). `scope`: the rooms the run was asked for
+   * (a run carried on: its checkpoint's, as `plan` holds only the rooms left); the look is at
+   * every finished space among them, whichever session designed it. Default: `plan.rooms`.
    */
-  look?: { rasterise: (images: LookImage[]) => Promise<PromptImage[] | null> };
+  look?: {
+    rasterise: (images: LookImage[]) => Promise<PromptImage[] | null>;
+    scope?: RunPlan['rooms'];
+  };
 }
 
 export { NET_WAITS, QUIET_MS, classify } from './request';
@@ -466,20 +478,25 @@ export async function runDesign(
     at: new Date().toISOString(),
   });
 
-  /** The second look at what this run designed (`designed`: the spaces it answered). */
+  /**
+   * The second look (its request reserved at the gate): `designed`, the finished spaces it may
+   * change; `scope`, the rooms it is drawn and told about (null: the whole flat).
+   */
   async function secondLook(
     st: StepState,
     designed: { key: string; rooms: string[]; name: string }[],
+    scope: string[] | null,
   ): Promise<OptionLook> {
     const out = blankLook();
     const before = await place(ctx.base, ctx.before, design, o.result);
     design.aliases = aliasesFor(before.level, design.aliases);
-    const scope = plan.rooms === 'all' ? null : designed.flatMap((s) => s.rooms);
     const facts = lookFacts(before, ctx.base, {
       aliases: design.aliases,
       scope,
       brief: ctx.brief,
       lenses: lensReports(before, ctx.base, ctx.brief, o.result ?? {}),
+      ...(o.result?.rules?.length ? { rules: o.result.rules } : {}),
+      ...(o.result?.kept?.length ? { kept: o.result.kept } : {}),
       roomOf: (it) => roomIdAt(before.level, { x: it.position.x, y: it.position.z }),
     });
     const pictures = critiqueSketch(before, ctx.base, {
@@ -492,17 +509,23 @@ export async function runDesign(
       o.signal,
     );
     if (!images?.length) {
+      // Nothing sent: its reservation ends.
+      o.onStep?.(st.key, 'look', 'end');
       st.status = 'skipped';
       return { ...out, state: 'skipped', line: 'The plan couldn’t be drawn for the second look.' };
     }
-    st.label = 'Second look · Looking…';
-    update();
     const answer = await step(lookStep(ctx, facts, images), st, parseLook);
     o.onStep?.(st.key, 'look', 'end');
-    st.label = 'Second look';
     if (!answer) {
-      // A refused picture or an unreadable answer: the look ends there; the design stands.
-      return { ...out, state: 'failed', line: st.error };
+      // The look ends there; the design stands. A picture the provider refused (a 400 about
+      // the image) is no failure of the design's: skipped, in plain words, never sent again.
+      const why = (st.error ?? '').replace(`${st.label}: `, '');
+      if (pictureRefused(why)) {
+        st.status = 'skipped';
+        st.error = null;
+        return { ...out, state: 'skipped', line: PICTURE_REFUSED };
+      }
+      return { ...out, state: 'failed', line: `The second look didn’t work: ${why}`.slice(0, 300) };
     }
     out.summary = answer.summary;
     out.findings = answer.findings;
@@ -535,11 +558,11 @@ export async function runDesign(
     });
     const bounds = levelBounds(before.level);
     for (const r of acted.rounds) {
-      if (fixesLeft <= 0 || !(await mayStart({ key: st.key, kind: 'fix' }))) break;
       const s = designed.find((x) => x.key === r.space);
       const entry = next.spaces[r.space];
       const space = before.spaces.find((x) => x.key === r.space);
       if (!s || !entry?.design || !space) continue;
+      if (fixesLeft <= 0 || !(await mayStart({ key: st.key, kind: 'fix' }))) break;
       fixesLeft--;
       st.fixing = { round: 1, problems: r.failures.length };
       st.status = 'running';
@@ -555,6 +578,7 @@ export async function runDesign(
           concept: design.concept,
           ...(o.result?.kept?.length ? { kept: o.result.kept } : {}),
           ...(storage !== undefined ? { storage } : {}),
+          ...(plan.feedback ? { feedback: plan.feedback } : {}),
           ...(plan.talk ? { talk: plan.talk } : {}),
           locks: plan.locks ?? [],
           previous: entry.design,
@@ -798,13 +822,25 @@ export async function runDesign(
 
     // 3. The second look: the proposal drawn as a plan, looked at once, what the app's checks
     // agree with acted on in one round (counted in the run's fix requests), kept if no worse.
+    // It looks at every finished space the run was asked for (a run carried on: those of the
+    // sessions before too), drawn as asked: the whole flat, or those rooms.
     const lookSt = state.steps.find((x) => x.kind === 'look');
-    const designedHere = spaces.filter((s) => design.spaces[s.key]?.status === 'done');
+    const asked = o.look?.scope ?? plan.rooms;
+    const inLook = r.spaces.filter((s) => asked === 'all' || asked.includes(s.key));
+    const designedHere = inLook.filter((s) => design.spaces[s.key]?.status === 'done');
+    /** Everything but the look was done when it came: a Stop or a no now ends the run done. */
+    let lookOnly = false;
     if (o.look && lookSt && !stopping && !o.signal.aborted) {
+      lookOnly = true;
       if (!designedHere.length) lookSt.status = 'skipped';
-      else if (await mayStart({ key: lookSt.key, kind: 'look' })) {
+      else if (!(await mayStart({ key: lookSt.key, kind: 'look' }))) {
+        // Not sent: the limit was reached and the person said no (or stopped while it asked).
+        lookSt.status = 'skipped';
+        look = { ...blankLook(), state: 'skipped', line: 'Not looked at: the run was stopped.' };
+      } else {
         try {
-          look = await secondLook(lookSt, designedHere);
+          const scope = asked === 'all' ? null : inLook.flatMap((s) => s.rooms);
+          look = await secondLook(lookSt, designedHere, scope);
         } catch (e) {
           // A refused key or a spent quota during the look: the look failed, with its line; the
           // rooms are done and checked, so the design stands.
@@ -823,16 +859,18 @@ export async function runDesign(
       }
     }
     if (lookSt?.status === 'waiting') lookSt.status = 'skipped';
-    const done = state.steps.filter((s) => s.status === 'done').length;
-    if (stopping || o.signal.aborted) {
+    if ((stopping || o.signal.aborted) && !lookOnly) {
       say('Stopped. Finished steps are kept.');
       return ended('stopped');
     }
+    // (The look is no step designed: one stopped or skipped leaves the design done.)
+    const rows = state.steps.filter((s) => s.kind !== 'look');
+    const done = rows.filter((s) => s.status === 'done').length;
     const total = spentSoFar();
     say(
-      done === state.steps.length
+      done === rows.length
         ? `Design done. ${usdText(total)} in all.`
-        : `Design done, with ${state.steps.length - done} ${state.steps.length - done === 1 ? 'step' : 'steps'} not designed. ${usdText(total)} in all.`,
+        : `Design done, with ${rows.length - done} ${rows.length - done === 1 ? 'step' : 'steps'} not designed. ${usdText(total)} in all.`,
     );
     return ended('done');
   } catch (e) {

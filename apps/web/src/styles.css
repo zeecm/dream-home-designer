@@ -7986,6 +7986,11 @@ textarea {
   cursor: pointer;
   color: var(--muted);
 }
+/* The look's words are the model's: a long unbroken one (a URL) wraps inside the card. */
+[data-look] dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .talk-look-notes {
   margin: 4px 0 0;
   padding-left: 16px;

@@ -121,6 +121,11 @@ export const fixRoundsFor = (quality: DesignBrief['quality']) =>
 const FIX_EXTRA = 600;
 /** Tokens of the second look's facts sheet and task, about. */
 const LOOK_FACTS = 1500;
+/**
+ * Tokens a room step adds to the prefix (the space, its needs, the answer it had), at most
+ * about: the second look's round priced with no room step to price it from.
+ */
+const ROOM_PART = 3000;
 
 export interface StepEstimate {
   step: string;
@@ -170,12 +175,14 @@ export function estimateRun(
      * prompt the run's prefix (cached), the facts and the pictures, and at most one round of a
      * room step's price in `fix` (it counts against the run's FIX_PER_RUN). With the sizes of
      * the pictures it will send (`lookPictureSizes`), they are priced as drawn; else as one.
+     * `base` (`lookBase`): the prefix it reads when the run sends no other step (a run carried
+     * on with every room done), its round then priced as a room step on that prefix.
      */
-    look?: boolean | { pictures: { width: number; height: number }[] };
+    look?: boolean | { pictures: { width: number; height: number }[]; base?: StepPrompt };
   },
 ): RunEstimate {
   const price = priceOf(opts.model, opts.prices);
-  const first = prompts[0];
+  const first = prompts[0] ?? (typeof opts.look === 'object' ? opts.look.base : undefined);
   const all = [...prompts];
   if (opts.look && first) {
     // The facts sheet and the task as characters; the pictures as the tokens they cost.
@@ -239,12 +246,29 @@ export function estimateRun(
       usd,
     };
   });
-  // The second look's round is a room step sent again: the dearest room's fix request.
-  if (opts.look && price && fixOnes.length) fixOnes.push(Math.max(...fixOnes));
+  // The second look's round is a room step sent again: the dearest room's fix request, or with
+  // no room step in the run, one on the look's prefix with a room's part on top.
+  const looks = !!opts.look && !!first;
+  if (looks && price) {
+    const out = OUTPUT[opts.quality].room;
+    const bare = tokensOf(first.system.length + first.prefix.length) + ROOM_PART;
+    fixOnes.push(
+      fixOnes.length
+        ? Math.max(...fixOnes)
+        : usdOf(
+            {
+              input: bare + out.typical + FIX_EXTRA,
+              cachedInput: 0,
+              cacheWrite: 0,
+              output: out.max,
+            },
+            price,
+          ),
+    );
+  }
   const sum = (f: (s: StepEstimate) => number) => steps.reduce((t, s) => t + f(s), 0);
   const roomFixes =
-    steps.filter((s) => s.kind === 'room').length * fixRoundsFor(opts.quality) +
-    (opts.look && room ? 1 : 0);
+    steps.filter((s) => s.kind === 'room').length * fixRoundsFor(opts.quality) + (looks ? 1 : 0);
   const fixes = Math.min(FIX_PER_RUN, roomFixes);
   return {
     requests: steps.length,

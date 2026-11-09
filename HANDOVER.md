@@ -743,7 +743,15 @@ kept only if `lookNoWorse`. Priced in `estimateRun` (`look: true`: the step and 
 `fix`). Stored as `ProposalOption.look`; proposals are records of 4 (`PROPOSAL_RECORD_VERSION`;
 3 is house rules part B's `madeAt` and `kept`). The option's kept pieces are never edited: a
 taste fix about one is dropped ('kept'), and a round's request carries the kept set. The look's
-request and its round are reserved in the run's checkpoint like any step (`StepKind` 'look').
+request and its round are reserved in the run's checkpoint like any step (`StepKind` 'look'),
+and the checkpoint says whether the look is still to come (`RunCheckpoint.look`): a run carried
+on looks at every finished room it was asked for, whichever session designed it, and prices the
+look on the prefix alone (`lookBase`) when no room is left. A Stop or a "no" at the limit with
+only the look left ends the run done (the look `stopped` or `skipped`), never stopped part-way.
+The look is told the house rules (in the app's sentences) and which pieces are kept. Known and
+accepted: a tab of an older build (house rules part B) that rewrites the conversation drops
+`talk.look`, so the next talk prompt's `eventsSince` may stop at the offer and leave out the
+events before it.
 The card shows "Second look": its line, three notes then "and N more", its cost. WebKit draws
 the picture's sans-serif labels fine (checked on a screenshot). Not yet: a refused picture ends
 as `failed` (the design stands), case files and "Save a case" (PR 3), cloud runs.

@@ -2,12 +2,14 @@ import {
   type Conversation,
   FIX_PER_RUN,
   type Level,
+  NO_LOOK,
   type Proposal,
   type QuestionKey,
   type ScopeRef,
   TALK_LIMITS,
   type Turn,
   type TurnOf,
+  canSee,
   cut,
   meetingOver,
   optionTitle,
@@ -445,6 +447,8 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
             onStart={() => void answerCost(t, 'go')}
             onEditPrices={() => useTalk.setState({ settings: 'prices' })}
           />
+          {(useTalk.getState().conv?.brief.quality ?? 'thorough') === 'thorough' &&
+            !canSee(ai.provider, ai.model) && <p className="muted talk-no-look">{NO_LOOK}</p>}
         </div>
       ) : (
         <div className="button-row talk-cost-buttons">

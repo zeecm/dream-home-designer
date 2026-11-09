@@ -7,6 +7,9 @@ import { OUTPUT } from '../prices';
 import { peopleOf, sleepingPlan } from '../principles';
 import { type PromptImage, SYSTEM_PROMPT, type StepPrompt } from '../prompts';
 import type { DesignResult } from '../result';
+import { type Kept, keptHolds } from '../rules/kept';
+import type { Rule } from '../rules/schema';
+import { ruleSentence } from '../rules/words';
 import { clean } from '../util';
 import { LOOK_SCHEMA, MAX_FINDINGS } from './findings';
 import { LOOK_KEY } from './sketch';
@@ -22,10 +25,18 @@ export interface LookFacts {
   scope: string[] | 'all';
   rooms: { id: string; name: string; area: number; uses: string[] }[];
   household: { sleeping: { room: string; people: string[] }[]; elders: string[] };
-  rules: unknown[];
+  /** The household's house rules, in the app's sentences (so it suggests none they have). */
+  rules: string[];
   checks: { passes: boolean; hard: string[]; soft: string[] };
   lenses: Record<string, unknown>;
-  pieces: { id: string; kind: string; room: string | null; changed: 'added' | 'moved' | null }[];
+  pieces: {
+    id: string;
+    kind: string;
+    room: string | null;
+    changed: 'added' | 'moved' | null;
+    /** Kept where it is by the household: never to be moved, swapped or removed. */
+    kept?: true;
+  }[];
 }
 
 const moved = (a: Item, b: Item) =>
@@ -43,7 +54,10 @@ export function lookFacts(
     scope: string[] | null;
     brief: ContextInput['brief'];
     lenses: LensReport[];
-    rules?: unknown[];
+    /** The house rules the version is checked on. */
+    rules?: readonly Rule[];
+    /** The pieces kept where they are that the version was made with. */
+    kept?: readonly Kept[];
     roomOf: (it: Item) => string | null;
   },
 ): LookFacts {
@@ -72,12 +86,25 @@ export function lookFacts(
     .filter((p) => p.kind === 'elder' && p.detail && p.detail !== 'walks')
     .map((p) => clean(p.detail ?? '', 20));
   const fresh = result.checks.filter((c) => !c.already);
+  const kept = o.kept ?? [];
+  const isKept = (it: Item) =>
+    o.brief.keep.items[it.id] === 'in-place' ||
+    kept.some((k) => k.itemId === it.id || keptHolds(k, it));
   const pieces = Object.values(level.items)
     .map((it) => ({ it, room: o.roomOf(it) }))
     .filter((x) => inScope(x.room))
     .sort((p, q) => (a(p.it.id) < a(q.it.id) ? -1 : 1))
     .map(({ it, room }) => {
       const was = start.items[it.id];
+      // A kept piece is the household's, where they kept it: never this version's change.
+      if (isKept(it))
+        return {
+          id: a(it.id),
+          kind: it.assetId,
+          room: room ? a(room) : null,
+          changed: null,
+          kept: true as const,
+        };
       return {
         id: a(it.id),
         kind: it.assetId,
@@ -89,7 +116,7 @@ export function lookFacts(
     scope: o.scope ? o.scope.map(a) : 'all',
     rooms,
     household: { sleeping, elders },
-    rules: o.rules ?? [],
+    rules: (o.rules ?? []).map((r) => clean(ruleSentence(r, level), 200)),
     checks: {
       passes: result.passes,
       hard: fresh
@@ -105,6 +132,24 @@ export function lookFacts(
     pieces,
   };
 }
+
+/**
+ * The part of the second look's request a price is worked out from when the run sends nothing
+ * else (a run carried on with every room done): the run's system prompt and prefix, no facts.
+ */
+export function lookBase(ctx: ContextInput): StepPrompt {
+  return { ...lookStep(ctx, NO_FACTS, []), tail: '' };
+}
+
+const NO_FACTS: LookFacts = {
+  scope: 'all',
+  rooms: [],
+  household: { sleeping: [], elders: [] },
+  rules: [],
+  checks: { passes: true, hard: [], soft: [] },
+  lenses: {},
+  pieces: [],
+};
 
 /** The second look's request: one per option, its pictures set by the device (`images`). */
 export function lookStep(ctx: ContextInput, facts: LookFacts, images: PromptImage[]): StepPrompt {

@@ -163,15 +163,15 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
     // Where it acts: the space of the piece it suggests about, else of its target.
     const about = f.suggest?.piece ? resolveAlias(aliases, f.suggest.piece) : null;
     const addTo = f.suggest?.kind === 'add' ? resolveAlias(aliases, f.suggest.room) : null;
-    const space = spaceOf(result, addTo ?? (about && level.items[about] ? about : id));
-    if (!space || !ctx.answers[space]) {
-      plan.dropped.push({ finding: f, why: 'not-designed' });
-      continue;
-    }
     // A kept piece stays as it is: a suggestion about it (its taste fix) is not acted on.
     const onKept = f.suggest?.kind !== 'add' && (isKept(about) || (!about && isKept(id)));
     if (onKept && f.principle === 'taste') {
       plan.dropped.push({ finding: f, why: 'kept' });
+      continue;
+    }
+    const space = spaceOf(result, addTo ?? (about && level.items[about] ? about : id));
+    if (!space || !ctx.answers[space]) {
+      plan.dropped.push({ finding: f, why: 'not-designed' });
       continue;
     }
     let s = f.suggest;
@@ -189,7 +189,8 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
     }
     if (f.principle === 'taste') taste = true;
     if (target) plan.targets.push(target);
-    plan.acted.push(line);
+    // What it was, in the note if the round changes nothing: a P1–P4 fix in the app's words.
+    plan.acted.push(target ? failure : line);
     const ref = about && level.items[about] ? (result.refs[about] ?? null) : null;
     if (s && EXECUTES.has(s.kind) && (s.kind === 'add' || (ref && !onKept))) {
       const refs: Record<string, string> = {};

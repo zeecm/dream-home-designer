@@ -6,6 +6,7 @@ import type { Item, Level, Vec2 } from '../../schema';
 import { isBoundary, isGlass, isHalfWall } from '../../schema';
 import { type AliasMap, aliasOf } from '../aliases';
 import type { DesignResult } from '../result';
+import { roomIdAt } from '../spaces';
 import { clean } from '../util';
 
 /**
@@ -24,6 +25,11 @@ export const LOOK_PX = 1568;
 export const MIN_PX_PER_M = 30;
 /** Room round the scope, metres. */
 const AROUND = 1;
+/**
+ * Labels this near a picture's edge are left to the other half of a split (the halves overlap
+ * by twice this): none is cut in two, or piled up at the split.
+ */
+const LABEL_INSET = 0.25;
 
 export const LOOK_COLOURS = {
   background: '#ffffff',
@@ -157,6 +163,12 @@ function draw(
   const scope = new Set(o.scope ?? Object.keys(level.rooms));
   const out: string[] = [];
   const label = (at: Vec2, lines: string[], size: number, colour: string = C.text) => {
+    const inside =
+      at.x >= b.x0 + LABEL_INSET &&
+      at.x <= b.x1 - LABEL_INSET &&
+      at.y >= b.y0 + LABEL_INSET &&
+      at.y <= b.y1 - LABEL_INSET;
+    if (!inside) return;
     const x = X(at.x);
     const y0 = (at.y - b.y0) * k - ((lines.length - 1) * size * 1.15) / 2;
     lines.forEach((l, i) => {
@@ -177,15 +189,20 @@ function draw(
   }
   // What the version took out: dashed, under what it put in.
   const items = Object.values(level.items).sort((p, q) => (p.id < q.id ? -1 : 1));
+  // (A ceiling light is no piece on the floor: left out, as it is from the labels.)
+  const onFloor = (it: Item) => {
+    const kind = furnitureKind(it.assetId);
+    return kind?.category !== 'People' && !kind?.ceiling;
+  };
   for (const it of Object.values(start.items).sort((p, q) => (p.id < q.id ? -1 : 1))) {
-    if (level.items[it.id]) continue;
+    if (level.items[it.id] || !onFloor(it)) continue;
     out.push(
       `<polygon points="${poly(itemFootprint(it))}" fill="none" stroke="${C.removed}" stroke-width="2" stroke-dasharray="6 4"/>`,
     );
   }
   for (const it of items) {
     const kind = furnitureKind(it.assetId);
-    if (kind?.category === 'People') continue;
+    if (!onFloor(it)) continue;
     const was = start.items[it.id];
     const changed = !was || moved(it, was);
     out.push(
@@ -226,6 +243,7 @@ function draw(
   }
   // The key gaps: where a way narrows (the pinch, with its width), and a piece short of the
   // room in front of it (the room there is).
+  let clips = 0;
   for (const p of result.problems) {
     const i = p.issue;
     if (i?.kind === 'walkway') {
@@ -235,8 +253,18 @@ function draw(
       );
       label({ x: (a.x + c.x) / 2, y: (a.y + c.y) / 2 }, [`${i.have.toFixed(2)} m`], 14, C.pinch);
     } else if (i?.kind === 'zone') {
+      // Clipped to the piece's room: the room it lacks is never drawn through a wall.
+      const piece = p.itemId ? level.items[p.itemId] : undefined;
+      const room = p.roomId ?? (piece ? roomIdAt(level, centre(piece)) : null);
+      const shape = room ? shapes.get(room) : undefined;
+      let clip = '';
+      if (shape) {
+        const id = `lookclip${++clips}`;
+        out.push(`<clipPath id="${id}"><polygon points="${poly(shape.outer)}"/></clipPath>`);
+        clip = ` clip-path="url(#${id})"`;
+      }
       out.push(
-        `<polygon points="${poly(i.zone)}" fill="none" stroke="${C.zone}" stroke-width="2" stroke-dasharray="5 3"/>`,
+        `<polygon points="${poly(i.zone)}" fill="none" stroke="${C.zone}" stroke-width="2" stroke-dasharray="5 3"${clip}/>`,
       );
       const z = i.zone;
       const m = z.reduce((t, q) => ({ x: t.x + q.x / z.length, y: t.y + q.y / z.length }), {

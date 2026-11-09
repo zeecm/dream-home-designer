@@ -118,8 +118,9 @@ async function mock(
         return route.abort('failed');
       }
       const call = { provider: p, step: a.step, body: raw };
-      (a.step === 'look' ? looks : calls).push(call);
-      const custom = opts.reply?.(call, calls.filter((c) => c.step === call.step).length);
+      const sent = a.step === 'look' ? looks : calls;
+      sent.push(call);
+      const custom = opts.reply?.(call, sent.filter((c) => c.step === call.step).length);
       if (custom instanceof Promise) {
         // Held, then cut off (a locked phone's dropped request), or answered.
         if ((await custom) === 'abort') return route.abort('failed').catch(() => {});

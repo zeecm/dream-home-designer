@@ -631,6 +631,11 @@ export const RunCheckpoint = z.object({
   /** The room rows before the layout is known. */
   expected: z.array(z.object({ key: z.string(), label: z.string() })).optional(),
   layout: z.enum(['none', 'left', 'done']),
+  /**
+   * The second look (Thorough, a model that can see): still to come, or done (looked at, or
+   * skipped or failed: never asked again). Absent: none asked for, or an older build's.
+   */
+  look: z.enum(['left', 'done']).optional(),
   /** The rooms it designs, once known (after the layout, or from the start without one). */
   rooms: z.array(z.string()).nullable(),
   /** Fix requests it may still send. */

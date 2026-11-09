@@ -3,6 +3,7 @@ import {
   DRAFT_CHARS,
   type DraftDesign,
   FIX_PER_RUN,
+  NO_LOOK,
   type OptionLook,
   PROPOSAL_RECORD_VERSION,
   type Proposal,
@@ -20,6 +21,7 @@ import {
   anotherAsk,
   askRule,
   atMostOf,
+  canSee,
   cut,
   entranceDoor,
   levelFingerprint,
@@ -36,7 +38,7 @@ import {
 } from '@dhd/core';
 import { meterSetting } from '../../../storage/store';
 import { useStore } from '../../../store';
-import { aiSettings } from '../../credentials';
+import { type AiSettings, aiSettings } from '../../credentials';
 import { rasterise } from '../look';
 import { freshPrice, readPrice, trialResult } from '../results';
 import { type StepKind, type StepState, blankStep, interruptText, runDesign } from '../run';
@@ -671,7 +673,23 @@ function lookOffersOf(
   return { look: { ...look, notes: [...new Set(notes)].slice(0, 12) }, offers };
 }
 
-/** Runs one option with slice 1's runner, saving each room into the proposal. */
+/** Thorough on a model that can't see: the card says why there is no second look (else none). */
+function noLook(brief: { quality: string }, ai: Pick<AiSettings, 'provider' | 'model'>) {
+  if (brief.quality !== 'thorough' || canSee(ai.provider, ai.model)) return null;
+  const look: OptionLook = {
+    state: 'skipped',
+    summary: null,
+    notes: [],
+    findings: [],
+    dropped: [],
+    offers: [],
+    round: 'none',
+    line: NO_LOOK,
+    at: nowIso(),
+  };
+  return look;
+}
+
 /** A run carried on from its checkpoint: its lock already held here. */
 interface CarryFrom {
   run: RunCheckpoint;
@@ -831,8 +849,9 @@ async function runOption(
   const ended = new Promise<void>((resolve) => {
     endRun = resolve;
   });
-  // Thorough with a model that can see ends with the second look (priced in its figure).
-  const looks = looksAt(sp.brief, ai);
+  // Thorough with a model that can see ends with the second look (priced in its figure); a run
+  // carried on whose look is done sends none.
+  const looks = looksAt(sp.brief, ai) && from?.run.look !== 'done';
   const runId = from?.run.id ?? newId('run');
   const now = nowIso();
   const prior = from?.run;
@@ -850,6 +869,7 @@ async function runOption(
         approved: approved === null ? null : priorSpent + approved,
         paused: null,
         stopped: false,
+        ...(looks ? { look: 'left' as const } : {}),
       }
     : {
         id: runId,
@@ -861,6 +881,7 @@ async function runOption(
         ...(sp.expected ? { expected: structuredClone(sp.expected) } : {}),
         layout: sp.plan.layout ? 'left' : 'none',
         rooms: null,
+        ...(looks ? { look: 'left' as const } : {}),
         fixesLeft: FIX_PER_RUN,
         approved,
         spent: 0,
@@ -982,6 +1003,10 @@ async function runOption(
       const rooms = runnerSteps.filter((s) => s.kind === 'room').map((s) => s.key);
       if (rooms.length && rooms.every((k) => d.spaces[k])) ck.rooms = rooms;
     }
+    // The look, once it has ended (looked at, skipped or failed), is never asked for again.
+    const lk = runnerSteps.find((s) => s.kind === 'look');
+    if (ck.look === 'left' && lk && ['done', 'failed', 'skipped'].includes(lk.status))
+      ck.look = 'done';
     ck.fixesLeft = fixesLeft;
     ck.spent = spentBefore + spentRun();
     ck.at = nowIso();
@@ -1030,7 +1055,8 @@ async function runOption(
     design,
     look: looked,
   } = await runDesign({
-    ...(looks ? { look: { rasterise } } : {}),
+    // At every finished room it was asked for (carried on: the checkpoint's, not only those left).
+    ...(looks ? { look: { rasterise, scope: ck.plan.rooms } } : {}),
     ai,
     ctx: sp.ctx,
     design: sp.draft,
@@ -1081,7 +1107,7 @@ async function runOption(
         at: nowIso(),
         event: {
           type: 'note',
-          text: `Back. Carrying on from ${st.label}: ${done} of ${rows.length} rooms done, not paid for again.`,
+          text: `Back. Carrying on from ${st.kind === 'look' ? 'the second look' : st.label}: ${done} of ${rows.length} rooms done, not paid for again.`,
         },
       });
     },
@@ -1157,7 +1183,9 @@ async function runOption(
   const cutOff = state.steps.reduce((t, s) => t + (s.cutOffHigh ?? 0), 0);
   // A house rule the second look suggests, vetted on the plan as it is (only while open).
   const { look, offers } =
-    doc().id === projectId ? lookOffersOf(looked, p, letter, design) : { look: looked, offers: [] };
+    doc().id === projectId
+      ? lookOffersOf(looked ?? noLook(sp.brief, ai), p, letter, design)
+      : { look: looked ?? noLook(sp.brief, ai), offers: [] };
   await writeOption((o) => {
     // Ended: nothing to carry on from.
     const { run: _ended, ...rest } = o;

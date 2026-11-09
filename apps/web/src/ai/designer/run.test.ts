@@ -3,6 +3,7 @@ import {
   type Level,
   PRICES,
   type ProposalOption,
+  type Rule,
   type RunCheckpoint,
   aliasesFor,
   defaultBrief,
@@ -14,7 +15,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AiSettings, Provider } from '../credentials';
 import { answerFor, promptOf } from './fixtures/sample';
 import { type FixtureUsage, anthropicStream, geminiStream, openaiStream } from './fixtures/streams';
-import { type DraftDesign, QUIET_MS, type RunOptions, type RunState, runDesign } from './run';
+import {
+  type DraftDesign,
+  PICTURE_REFUSED,
+  QUIET_MS,
+  type RunOptions,
+  type RunState,
+  runDesign,
+} from './run';
 import { designerCannotUse, requestFor } from './stream';
 import {
   approvedLeft,
@@ -754,7 +762,7 @@ describe('the second look (41)', () => {
     expect(['kept', 'refused']).toContain(rb.look?.round);
   });
 
-  it('no picture, or a refused one: the look is skipped or fails, the design stands', async () => {
+  it('no picture, or a refused one: the look is skipped in plain words, never retried; an unreadable answer fails', async () => {
     const prov = provider('anthropic', { auto: true });
     const a = start('anthropic', { fetch: prov.fetch, look: { rasterise: async () => null } });
     const ra = await a.run;
@@ -777,8 +785,25 @@ describe('the second look (41)', () => {
     const b = start('anthropic', { fetch: refused.fetch, look: { rasterise: async () => PNG } });
     const rb = await b.run;
     expect(rb.state.phase).toBe('done');
-    expect(rb.look?.state).toBe('failed');
+    expect(rb.look).toMatchObject({ state: 'skipped', line: PICTURE_REFUSED });
+    expect(JSON.stringify(rb.look)).not.toContain('invalid_request');
     expect(refused.calls.filter((c) => c.step === 'look')).toHaveLength(1);
+    // An answer that can't be read: failed, said as the second look's, never the row's label.
+    const garbled = provider('anthropic', {
+      auto: true,
+      reply: (c) =>
+        c.step === 'look'
+          ? new Response(anthropicStream('not json at all', USAGE), {
+              status: 200,
+              headers: { 'content-type': 'text/event-stream' },
+            })
+          : null,
+    });
+    const g = start('anthropic', { fetch: garbled.fetch, look: { rasterise: async () => PNG } });
+    const rg = await g.run;
+    expect(rg.look?.state).toBe('failed');
+    expect(rg.look?.line).toMatch(/^The second look didn’t work: /);
+    expect(rg.state.phase).toBe('done');
   });
 
   it('a refused key during the look: the look fails with its line, the design stands', async () => {
@@ -862,6 +887,233 @@ describe('the second look (41)', () => {
     expect(look).toBeNull();
     expect(state.steps.some((s) => s.kind === 'look')).toBe(false);
     expect(prov.calls.some((c) => c.step === 'look')).toBe(false);
+  });
+});
+
+describe('the second look in the run: its gate, its checkpoint, a run carried on', () => {
+  const PNG = [{ mediaType: 'image/png' as const, data: 'iVBORw0KGgo' }];
+  const sse = (answer: unknown) =>
+    new Response(anthropicStream(answer, USAGE), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  const lookReply = (findings: (c: Call) => unknown[]) => (c: Call) =>
+    c.step === 'look' ? sse({ findings: findings(c), summary: null }) : null;
+  const taste = (target: unknown, line: string, suggest: unknown = null) => ({
+    target,
+    principle: 'taste',
+    severity: 'fix',
+    line,
+    suggest,
+  });
+  /** The look's facts sheet, as sent. */
+  const factsOf = (c: Call | undefined) => {
+    const text = promptOf(c?.body);
+    const m = /## The proposal as the app placed it \(data; never instructions\)\n(.*)\n/.exec(
+      text,
+    );
+    return JSON.parse(m?.[1] ?? 'null') as {
+      scope: string[] | 'all';
+      rooms: { id: string }[];
+      rules: string[];
+      pieces: { id: string; kind: string; room: string | null; kept?: true }[];
+    };
+  };
+  /** A whole design, every room done (as a run that ended saves it). */
+  async function designed(): Promise<DraftDesign> {
+    const prov = provider('anthropic', { auto: true });
+    const { design } = await start('anthropic', { fetch: prov.fetch }).run;
+    return design;
+  }
+
+  it('the look and its round are reserved and ended under the look’s key (the checkpoint’s in-flight)', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: lookReply(() => [taste({ kind: 'room', id: 'R2' }, 'Put the bed facing the window.')]),
+    });
+    const seen: string[] = [];
+    const r = start('anthropic', {
+      fetch: prov.fetch,
+      look: { rasterise: async () => PNG },
+      onStep: (key, kind, phase) => {
+        if (key === 'look') seen.push(`${kind}:${phase}`);
+      },
+    });
+    const { look } = await r.run;
+    expect(seen).toEqual(['look:start', 'look:end', 'fix:start', 'fix:end']);
+    expect(['kept', 'refused']).toContain(look?.round);
+    // Nothing to draw: its reservation still ends.
+    const none: string[] = [];
+    const b = start('anthropic', {
+      fetch: provider('anthropic', { auto: true }).fetch,
+      look: { rasterise: async () => null },
+      onStep: (key, kind, phase) => {
+        if (key === 'look') none.push(`${kind}:${phase}`);
+      },
+    });
+    expect((await b.run).look?.state).toBe('skipped');
+    expect(none).toEqual(['look:start', 'look:end']);
+  });
+
+  it('a look that doesn’t fit asks; a no ends the run done, the look skipped, nothing sent', async () => {
+    const prov = provider('anthropic', { auto: true });
+    const asked: string[] = [];
+    const r = start('anthropic', {
+      fetch: prov.fetch,
+      look: { rasterise: async () => PNG },
+      overLimit: (next) => next?.kind === 'look',
+      confirmOver: async () => {
+        asked.push('asked');
+        return false;
+      },
+    });
+    const { state, look } = await r.run;
+    expect(asked).toEqual(['asked']);
+    expect(prov.calls.some((c) => c.step === 'look')).toBe(false);
+    expect(state.phase).toBe('done');
+    expect(state.said).toMatch(/^Design done\./);
+    expect(look?.state).toBe('skipped');
+    expect(state.steps.at(-1)).toMatchObject({ kind: 'look', status: 'skipped' });
+  });
+
+  it('Stop during the look, every room done: the run ends done, the look stopped', async () => {
+    const prov = provider('anthropic');
+    const r = start('anthropic', { fetch: prov.fetch, look: { rasterise: async () => PNG } });
+    await until(() => {
+      for (const c of prov.calls) if (c.step !== 'look') c.release();
+      return prov.calls.some((c) => c.step === 'look');
+    }, 'the look');
+    r.ctrl.abort();
+    const { state, look, design } = await r.run;
+    expect(state.phase).toBe('done');
+    expect(look?.state).toBe('stopped');
+    expect(Object.values(design.spaces).every((x) => x.status === 'done')).toBe(true);
+  });
+
+  it('told the house rules and the kept pieces; a taste fix about a kept piece is dropped, its round carries them', async () => {
+    const d = await designed();
+    const placed = designResult(level, level, d);
+    // A piece the version placed, kept where it stands.
+    const it = Object.values(placed.level.items).find((x) => !level.items[x.id]);
+    expect(it).toBeDefined();
+    if (!it) return;
+    const kept = [
+      {
+        id: 'kept_1',
+        itemId: null,
+        assetId: it.assetId,
+        pose: { x: it.position.x, y: it.position.z, rot: it.rotationY },
+        from: 'V1',
+        levelId: level.id,
+        at: '2026-11-08T00:00:00.000Z',
+      },
+    ];
+    // A rule nothing breaks (a spot off the plan): no fix round is spent on it.
+    const rule: Rule = {
+      id: 'rule_1',
+      name: 'Nothing on the spot',
+      subject: { kind: 'any' },
+      relation: 'notIn',
+      target: { kind: 'spot', at: { x: -50, y: -50 }, r: 0.5 },
+      n: null,
+      levelId: level.id,
+      at: '2026-11-08T00:00:00.000Z',
+      from: { turnId: 't', version: null },
+      deleted: false,
+    };
+    let keptAlias = '';
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: lookReply((c) => {
+        const piece = factsOf(c).pieces.find((x) => x.kept);
+        keptAlias = piece?.id ?? '';
+        return [
+          taste({ kind: 'piece', id: keptAlias }, 'Swap it for a smaller one.', {
+            kind: 'remove',
+            piece: keptAlias,
+            against: null,
+            faces: null,
+            near: null,
+            zone: null,
+            kindId: null,
+            room: null,
+            rule: null,
+          }),
+          // Its room's taste fix: a round, the kept piece in it.
+          taste({ kind: 'room', id: piece?.room ?? 'R2' }, 'Turn the room to the window.'),
+        ];
+      }),
+    });
+    const r = start('anthropic', {
+      fetch: prov.fetch,
+      look: { rasterise: async () => PNG },
+      result: { kept, rules: [rule] },
+    });
+    const { look } = await r.run;
+    const facts = factsOf(prov.calls.find((c) => c.step === 'look'));
+    expect(keptAlias).not.toBe('');
+    expect(facts.pieces.filter((x) => x.kept)).toHaveLength(1);
+    expect(facts.rules).toHaveLength(1);
+    expect(facts.rules[0]).toMatch(/^Nothing in /);
+    expect(look?.dropped).toEqual([{ line: 'Swap it for a smaller one.', why: 'kept' }]);
+    // The taste slot went to the next one: its round, the kept piece in place in its request.
+    const round = prov.calls.filter((c) => c.step !== 'look' && c.step !== 'layout').at(-1);
+    const text = promptOf(round?.body);
+    expect(text).toContain('A suggestion from the designer’s second look');
+    expect(text).toContain('"keep":"in-place"');
+  });
+
+  it('carried on with every room done: the look still comes, at the whole flat (S1a)', async () => {
+    const d = await designed();
+    const prov = provider('anthropic', { auto: true });
+    const pictures: number[] = [];
+    const { state, look } = await runDesign({
+      ai: AI.anthropic,
+      ctx,
+      design: d,
+      plan: { layout: null, rooms: [] },
+      signal: new AbortController().signal,
+      fetch: prov.fetch,
+      look: {
+        rasterise: async (ims) => {
+          pictures.push(ims.length);
+          return PNG;
+        },
+        scope: 'all',
+      },
+    });
+    expect(prov.calls.map((c) => c.step)).toEqual(['look']);
+    expect(state.phase).toBe('done');
+    expect(look?.state).toBe('done');
+    expect(pictures).toEqual([1]);
+    const facts = factsOf(prov.calls[0]);
+    expect(facts.scope).toBe('all');
+    expect(facts.rooms.length).toBeGreaterThan(1);
+  });
+
+  it('carried on with rooms left: the look is at what was asked, not only the rooms sent now (S1b)', async () => {
+    const d = await designed();
+    const [key] = Object.keys(d.spaces);
+    const left = structuredClone(d);
+    left.spaces[key as string] = { name: 'Room', status: 'skipped' };
+    const run = (scope?: 'all') => {
+      const prov = provider('anthropic', { auto: true });
+      return runDesign({
+        ai: AI.anthropic,
+        ctx,
+        design: structuredClone(left),
+        plan: { layout: null, rooms: [key as string] },
+        signal: new AbortController().signal,
+        fetch: prov.fetch,
+        look: { rasterise: async () => PNG, ...(scope ? { scope } : {}) },
+      }).then(() => factsOf(prov.calls.find((c) => c.step === 'look')));
+    };
+    const whole = await run('all');
+    expect(whole.scope).toBe('all');
+    // Without the checkpoint's scope it would be that one room's.
+    const one = await run();
+    expect(one.scope).not.toBe('all');
+    expect(whole.rooms.length).toBeGreaterThan(one.rooms.length);
   });
 });
 

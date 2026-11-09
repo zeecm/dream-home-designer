@@ -132,6 +132,7 @@ const LOOK_SHOWN = 3;
  * above say whether the proposal passes.
  */
 function SecondLook({ look, usage }: { look: OptionLook; usage: CardModel['usage'] }) {
+  // Its request and its round's (metered under the look's step), said as one figure.
   const cost = usage.filter((u) => u.step === 'look').reduce((t, u) => t + (u.usd ?? 0), 0);
   const notes = look.notes;
   const head = look.state === 'done' ? look.summary : look.line;
@@ -164,7 +165,11 @@ function SecondLook({ look, usage }: { look: OptionLook; usage: CardModel['usage
             </ul>
           </details>
         )}
-        {cost > 0 && <span className="muted talk-look-cost">second look {usd(cost)}</span>}
+        {cost > 0 && (
+          <span className="muted talk-look-cost">
+            {look.round === 'none' ? 'second look' : 'second look, its round included,'} {usd(cost)}
+          </span>
+        )}
       </dd>
     </div>
   );
@@ -758,7 +763,13 @@ export const ProposalCard = memo(function ProposalCard({
     }
   };
   const fixed = Object.values(card.input.spaces).reduce((t, s) => t + (s.fixed ?? 0), 0);
-  const missing = r.spaces.filter((s) => !['done', 'copied', 'locked'].includes(s.status));
+  // The rooms it was asked for and didn't place: for some rooms, only those (never the rest of
+  // the flat, which it was never asked to design).
+  const scope = card.proposal?.scope;
+  const asked = (key: string) => !scope || scope.all || key in card.input.spaces;
+  const missing = r.spaces.filter(
+    (s) => !['done', 'copied', 'locked'].includes(s.status) && asked(s.key),
+  );
   const groups = [...new Set([...changes.map((c) => c.group), ...accepted.map((a) => a.group)])];
   const nameOf = (g: string) =>
     changes.find((c) => c.group === g)?.groupName ??
