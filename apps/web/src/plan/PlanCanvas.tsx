@@ -6,6 +6,7 @@ import {
   isHalfWall,
   levelBounds,
   planGeometry,
+  roomIdAt,
   siteOf,
   underlayToWorld,
   wallStatuses,
@@ -15,6 +16,14 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { AgeingAnnouncement, AgeingLayer } from '../ageing/ageing';
 import { TraceDraftLayer } from '../ai/DraftLayer';
 import { DesignFocusLayer } from '../ai/designer/focus';
+import {
+  PlanPopover,
+  openPopover,
+  popoverOn,
+  targetOf,
+  targetOfSelection,
+} from '../ai/designer/talk/PlanPopover';
+import { addSpot, makePointer } from '../ai/designer/talk/pointers';
 import { type PixelBox, inkBounds } from '../assets';
 import { ClearanceAnnouncement, ClearanceLayer } from '../clearance/clearance';
 import { CommentsOnPlan } from '../comments/PlanPins';
@@ -34,7 +43,9 @@ import { currentLevel, useLevel, useProject, useStore } from '../store';
 import { Compass, describeNorth } from '../ui/Compass';
 import { uploadPlanImage, usePlanImage, useUploadPicker } from '../ui/PlanImage';
 import { RenovationMarks } from '../ui/Renovation';
+import { dialogHasKeys } from '../ui/dialogs';
 import { icons } from '../ui/icons';
+import { HoldRing, PointerLayer, useHold } from './PointerLayer';
 import { ProposalLayer, ProposalLegend } from './ProposalLayer';
 import { RuleCaption, RuleLayer } from './RuleLayer';
 import { useCommentTool } from './commentTool';
@@ -100,7 +111,7 @@ function useElementSize<T extends Element>() {
 
 const isTyping = (t: EventTarget | null) =>
   // While a dialog is open, keys are the dialog's, not the plan's shortcuts.
-  !!document.querySelector('dialog[open]') ||
+  dialogHasKeys() ||
   (t instanceof HTMLElement &&
     (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)));
 
@@ -526,6 +537,48 @@ export function PlanCanvas() {
   } | null>(null);
   /** Whether the press now going down stopped a coast. */
   const stoppedCoast = useRef(false);
+  /** A version on the plan (not My plan before): Here and the popover work then (slice 3a). */
+  const previewing = useEditor(
+    (s) => !!s.preview && s.preview.side === 'version' && !s.preview.start,
+  );
+  /** The long-press on empty floor: the cue at 150 ms, Here at 500 ms. */
+  const hold = useRef<{ cue?: number; fire?: number; held?: boolean }>({});
+  const endHold = () => {
+    window.clearTimeout(hold.current.cue);
+    window.clearTimeout(hold.current.fire);
+    hold.current = {};
+    if (useHold.getState().at) useHold.setState({ at: null, fired: false });
+  };
+  // The long-press's timers end with the plan, and when the version leaves it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: endHold reads only refs
+  useEffect(() => {
+    if (!previewing) endHold();
+    return endHold;
+  }, [previewing]);
+  /** Empty floor in a room under a press: Here may go there. */
+  const emptyFloor = (p: PlanPointer) =>
+    (!p.hit || p.hit.kind === 'room') && !!level && !!roomIdAt(level, p.world);
+  /** Adds a Here chip at a spot (the version shown). */
+  const here = (world: Vec2) => {
+    const ptr = makePointer({ kind: 'spot', id: null, at: world });
+    if (ptr) void addSpot(ptr);
+  };
+  /** A right-button press while previewing: a still one is a context click (UX §2.2). */
+  const rightDown = useRef<{ start: PlanPointer; moved: number } | null>(null);
+  /** A context click (or a long-press on an object): its popover, or Here on empty floor. */
+  const contextAt = (p: PlanPointer) => {
+    if (p.hit && p.hit.kind !== 'vertex' && p.hit.kind !== 'room') {
+      useEditor.getState().select(p.hit);
+      openPopover(targetOf(p.hit, p.world), true);
+      return;
+    }
+    if (emptyFloor(p)) {
+      here(p.world);
+      requestAnimationFrame(() =>
+        document.querySelector<HTMLTextAreaElement>('#talk-text')?.focus(),
+      );
+    }
+  };
   /** The suggested point a finger went down on, if any. */
   const ghostDown = useRef<string | null>(null);
   const gesture = useRef<{ dist: number; mid: Vec2 } | null>(null);
@@ -569,6 +622,7 @@ export function PlanCanvas() {
     touches.current.set(e.pointerId, screenOf(e));
     if (touches.current.size >= 2) {
       hideLoupe();
+      endHold();
       // A second finger: whatever the first one was starting is called off (a drag it had
       // begun is taken back).
       if (touch.current?.claimed && ctx) {
@@ -584,6 +638,22 @@ export function PlanCanvas() {
     const start = pointer(e);
     touch.current = { start, moved: false, claimed: false, stopped: stoppedCoast.current };
     ghostDown.current = ghostKeyOf(e.target);
+    endHold();
+    if (previewing && !stoppedCoast.current && emptyFloor(start)) {
+      hold.current.cue = window.setTimeout(() => {
+        if (touch.current?.start === start && !gesture.current)
+          useHold.setState({ at: start.screen, fired: false });
+      }, 150);
+      hold.current.fire = window.setTimeout(() => {
+        const t = touch.current;
+        // Cancelled by a move (onTouchMove), a second finger or a stopped coast.
+        if (t?.start !== start || gesture.current || t.stopped) return endHold();
+        hold.current.held = true;
+        (navigator as Navigator & { vibrate?: (ms: number) => boolean }).vibrate?.(10);
+        useHold.setState({ at: null, fired: true });
+        here(start.world);
+      }, 500);
+    }
     // Running trunking, the next leg shows from the moment the finger is down.
     if (ctx && tool === 'electrical' && useEditor.getState().trunking) active.move(start, false);
     // Held still on the spot it will place (or on a corner in Select): magnify it.
@@ -618,7 +688,11 @@ export function PlanCanvas() {
     const t = touch.current;
     if (!t || !ctx) return;
     const p = pointer(e);
-    if (!t.moved && Math.hypot(p.screen.x - t.start.screen.x, p.screen.y - t.start.screen.y) < 8) {
+    const far = Math.hypot(p.screen.x - t.start.screen.x, p.screen.y - t.start.screen.y) >= 8;
+    // A long-press is called off by a move of 8 px or more (it becomes a pan, as today).
+    if (far && !hold.current.held && (hold.current.cue || hold.current.fire)) endHold();
+    if (hold.current.held) return;
+    if (!t.moved && !far) {
       return;
     }
     if (!t.moved) {
@@ -680,6 +754,9 @@ export function PlanCanvas() {
     }
     const t = touch.current;
     touch.current = null;
+    const held = hold.current.held;
+    endHold();
+    if (held) return;
     if (pan.current) {
       pan.current = null;
       startFling(e.timeStamp);
@@ -715,6 +792,7 @@ export function PlanCanvas() {
   /** The system took the touch (a back swipe, a long press): end it without acting. */
   const onTouchCancel = (e: React.PointerEvent) => {
     hideLoupe();
+    endHold();
     touches.current.delete(e.pointerId);
     if (touches.current.size === 0) gesture.current = null;
     const t = touch.current;
@@ -755,6 +833,9 @@ export function PlanCanvas() {
       toggleGhost(ghost);
       return;
     }
+    const context = previewing && (e.button === 2 || (e.button === 0 && e.ctrlKey));
+    rightDown.current = context ? { start: p, moved: 0 } : null;
+    if (context && e.button === 0) return;
     if (e.button === 1 || e.button === 2 || space.current || !ctx || !active.down(p)) {
       pan.current = p.screen;
       setPanning(true);
@@ -768,6 +849,13 @@ export function PlanCanvas() {
       return;
     }
     const p = pointer(e);
+    if (rightDown.current) {
+      const s0 = rightDown.current.start.screen;
+      rightDown.current.moved = Math.max(
+        rightDown.current.moved,
+        Math.hypot(p.screen.x - s0.x, p.screen.y - s0.y),
+      );
+    }
     if (pan.current) {
       setView(panBy(liveView(), p.screen.x - pan.current.x, p.screen.y - pan.current.y), true);
       pan.current = p.screen;
@@ -778,6 +866,17 @@ export function PlanCanvas() {
   const onPointerUp = (e: React.PointerEvent) => {
     if (e.pointerType === 'touch') {
       onTouchUp(e);
+      return;
+    }
+    // A right-button press released within 4 px is a click: the popover, or Here.
+    const right = rightDown.current;
+    rightDown.current = null;
+    if (right && right.moved < 4) {
+      if (pan.current) {
+        pan.current = null;
+        setPanning(false);
+      }
+      contextAt(right.start);
       return;
     }
     if (pan.current) {
@@ -818,6 +917,36 @@ export function PlanCanvas() {
         if (e.target === svgRef.current) setRing(true);
       }
       if (isTyping(e.target)) return;
+      // Enter, Shift+F10 or the context-menu key on the plan, while the designer is pointing:
+      // the selected object's popover with its first row focused, or Here mid-view.
+      const menuKey = e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey);
+      if (
+        (menuKey || (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.altKey)) &&
+        e.target === svgRef.current &&
+        tool === 'select' &&
+        popoverOn()
+      ) {
+        const sel = useEditor.getState().selection;
+        // Enter on a room still renames it (Shift+F10 or the menu key opens its popover).
+        const renames = !menuKey && sel?.kind === 'room';
+        const t = sel && !renames ? targetOfSelection(sel) : null;
+        if (t) {
+          e.preventDefault();
+          openPopover(t, true);
+          return;
+        }
+        if (!sel && previewing) {
+          const mid = { x: v.cx, y: v.cy };
+          if (level && roomIdAt(level, mid)) {
+            e.preventDefault();
+            here(mid);
+            requestAnimationFrame(() =>
+              document.querySelector<HTMLTextAreaElement>('#talk-text')?.focus(),
+            );
+            return;
+          }
+        }
+      }
       if (e.code === 'Space') {
         space.current = true;
         e.preventDefault();
@@ -895,7 +1024,12 @@ export function PlanCanvas() {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerCancel={(e) => (e.pointerType === 'touch' ? onTouchCancel(e) : onPointerUp(e))}
+        onPointerCancel={(e) => {
+          if (e.pointerType === 'touch') return onTouchCancel(e);
+          // A cancelled mouse or pen press is never a context click.
+          rightDown.current = null;
+          onPointerUp(e);
+        }}
         onContextMenu={(e) => e.preventDefault()}
         // A tap's mouse events, after it opened the comment composer, would take its focus
         // (and close a phone's keyboard).
@@ -968,6 +1102,7 @@ export function PlanCanvas() {
             />
             <SuggestLayer zoom={v.zoom} size={size} />
             <ProposalLayer />
+            {level && <PointerLayer level={level} zoom={v.zoom} />}
             {level && <RuleLayer level={level} zoom={v.zoom} />}
             <DesignFocusLayer size={size} />
             <TraceDraftLayer />
@@ -1010,6 +1145,8 @@ export function PlanCanvas() {
         {loupe && <Loupe at={loupe} size={size} scene={sceneId} />}
       </svg>
       <CommentsOnPlan view={v} size={size} tool={tool} />
+      <PlanPopover view={v} size={size} />
+      <HoldRing />
 
       <p id="plan-keys" className="visually-hidden">
         In Select, Tab moves through rooms, walls, openings and corners; Escape then Shift+Tab

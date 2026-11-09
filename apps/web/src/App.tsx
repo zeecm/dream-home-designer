@@ -24,12 +24,13 @@ import { Inspector } from './ui/Inspector';
 import { Palette, TOOLS } from './ui/Palette';
 import { RenovationBar } from './ui/Renovation';
 import { TopBar } from './ui/TopBar';
+import { dialogHasKeys } from './ui/dialogs';
 import { icons } from './ui/icons';
 import { useOneView, useShownView } from './ui/oneView';
 
 const isTyping = (t: EventTarget | null) =>
   // While a dialog is open, keys are the dialog's, not the plan's shortcuts.
-  !!document.querySelector('dialog[open]') ||
+  dialogHasKeys() ||
   (t instanceof HTMLElement &&
     (t.isContentEditable ||
       ['TEXTAREA', 'SELECT'].includes(t.tagName) ||
@@ -43,7 +44,7 @@ function useShortcuts() {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return; // the active tool already handled it
       // A dialog open over the app has the keys (no undo behind it, say).
-      if (document.querySelector('dialog[open]')) return;
+      if (dialogHasKeys()) return;
       const { undo, redo, save } = useStore.getState();
       const ed = useEditor.getState();
       const mod = e.metaKey || e.ctrlKey;

@@ -33,7 +33,7 @@ import { aiSettings } from '../../credentials';
 import { browserPage } from '../page';
 import { freshPrice, readPrice, trialResult } from '../results';
 import { addUsage, capUsd, countRun, overLimit, priceTable, spent, usd } from '../spend';
-import { type Running, designOpts, useDesigner } from '../state';
+import { type MadeWith, type Running, designOpts, houseKeptFor, useDesigner } from '../state';
 import {
   type PriceInput,
   type Priced,
@@ -124,12 +124,15 @@ function priceInput(req: PressRequest, designId: string): Omit<PriceInput, 'desi
   if (!conv || !ai || designerCannotUse(ai) || levelGone()) return null;
   const project = doc();
   let finish: PriceInput['finish'];
+  // What it is placed with: a new design's kept pieces now; finishing an option, its own.
+  let made: MadeWith = 'new';
   if (req.finish) {
     const f = req.finish;
     const p = useTalk.getState().proposals.find((x) => x.id === f.proposalId);
     const o = p?.options.find((x) => x.letter === f.letter);
     if (!p || !o) return null;
     finish = { option: o, rooms: f.rooms, words: p.words, scope: p.scope };
+    made = madeOf(p, f.letter);
   }
   // Another idea asks for something different from the options so far, with the person's words.
   const alt = req.alternative;
@@ -156,7 +159,8 @@ function priceInput(req: PressRequest, designId: string): Omit<PriceInput, 'desi
     ...(talk ? { talk } : {}),
     ...(finish ? { finish } : {}),
     designId,
-    opts: designOpts(project, designLevelId()),
+    // Priced before the version exists: every kept piece goes in.
+    opts: designOpts(project, designLevelId(), made),
     ai: { provider: ai.provider, model: ai.model },
     prices: priceTable(),
   };
@@ -199,11 +203,26 @@ async function planOf(req: PressRequest, designId: string): Promise<Priced> {
 /** A request's price for its button or card: null while it is worked out, or when it can't be. */
 export const pressPrice = (req: PressRequest): RunEstimate | null => pressPriceState(req).est;
 
+/**
+ * The figure a request's button last showed (its most), by request: a press compares the
+ * price now with it when the button's own cached price has gone meanwhile (replaced or
+ * evicted by what the press itself changed), rather than asking as if it had risen.
+ */
+const lastShown = new Map<string, number>();
+const requestKey = (req: PressRequest) => JSON.stringify({ ...req, words: '' });
+
 /** The price and whether it is still being worked out (a skeleton shows meanwhile). */
 export function pressPriceState(req: PressRequest): { est: RunEstimate | null; pending: boolean } {
   const key = priceKey(req);
   if (!key) return { est: null, pending: false };
   const v = readPrice(key, () => priceInput(req, 'dsn_est'));
+  const most = v?.est ? atMostOf(v.est) : null;
+  if (most !== null) {
+    const k = requestKey(req);
+    lastShown.delete(k);
+    lastShown.set(k, most);
+    if (lastShown.size > 50) lastShown.delete(lastShown.keys().next().value as string);
+  }
   return { est: v?.est ?? null, pending: v === undefined };
 }
 
@@ -330,12 +349,16 @@ const rule = (est: RunEstimate, pressedPriced: boolean) =>
 async function askOrRun(req: PressRequest) {
   // The button's price (priced without the person's words), then the price now, in full: a
   // press never goes ahead on a stale or missing one; it asks with the cost card instead.
+  // The figure the button showed: its cached price, or (gone meanwhile) the last it showed.
   const shown = pressPrice({ ...req, words: '' });
+  const remembered = shown ? undefined : lastShown.get(requestKey(req));
+  const was = shown ? atMostOf(shown) : (remembered ?? null);
   const made = await planOf(req, newId('dsn'));
   if (!made) return;
-  const was = shown ? atMostOf(shown) : null;
   const now = atMostOf(made.est);
-  const dearer = !shown || (was !== null && now !== null && now > was + 0.005);
+  // The money rule, unchanged: no figure shown, or one that has risen, asks.
+  const dearer =
+    (!shown && remembered === undefined) || (was !== null && now !== null && now > was + 0.005);
   // The rule's own card first (the tab's first run, the limit); dearer only stops a go.
   const ruled = rule(made.est, true);
   const ask = ruled === 'go' && dearer ? 'ask-threshold' : ruled;
@@ -530,6 +553,9 @@ function newOption(
 ): ProposalOption {
   return {
     letter,
+    madeAt: nowIso(),
+    // The kept pieces it is made with, on its record (read so whatever changes after).
+    kept: [...houseKeptFor(designLevelId(), 'new')],
     name: cut(
       letter === 'A' ? (scope.all ? 'Whole flat' : scope.label) : `Idea ${letter}`,
       TALK_LIMITS.name,
@@ -623,7 +649,8 @@ export async function resumePriced(p: Proposal, letter: string): Promise<Priced>
     words: '',
     resume: { option: o, run: o.run, scope: p.scope },
     designId: o.designId,
-    opts: designOpts(project),
+    // Priced as it runs: on the conversation's level, with what it was made with.
+    opts: designOpts(project, designLevelId(), o.kept ? { kept: o.kept } : (o.madeAt ?? p.at)),
     ai: { provider: ai.provider, model: ai.model },
     prices: priceTable(),
   }).catch(() => null);
@@ -709,6 +736,12 @@ export async function keepAsItIs(p: Proposal, letter: string) {
 /** The checkpoint's copy of what a run asks for. */
 const planRecord = (plan: RunPlan): RunCheckpoint['plan'] =>
   structuredClone(plan) as RunCheckpoint['plan'];
+
+/** What an option was made with, for its kept pieces (its record's set, else its time). */
+function madeOf(p: Proposal, letter: string): MadeWith {
+  const o = p.options.find((x) => x.letter === letter);
+  return o?.kept ? { kept: o.kept } : (o?.madeAt ?? p.at);
+}
 
 /**
  * Runs one option with slice 1's runner, saving each room into the proposal, with a
@@ -935,7 +968,8 @@ async function runOption(
     signal: ctrl.signal,
     page: browserPage(),
     prices: priceTable(),
-    result: designOpts(project, designLevelId()),
+    // Placed as its card will be: with the kept pieces it was made with.
+    result: designOpts(project, designLevelId(), madeOf(p, letter)),
     results: trialResult,
     fixesLeft: ck.fixesLeft,
     ...(sp.expected ? { expected: sp.expected } : {}),

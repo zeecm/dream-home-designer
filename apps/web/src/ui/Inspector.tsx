@@ -54,6 +54,7 @@ import { wallpaperCanvas } from '@dhd/render';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AgeingBack, AgeingPanel, ItemAgeing, OlderPersonSection } from '../ageing/ageing';
 import { useAgeing } from '../ageing/store';
+import { AskDesigner } from '../ai/designer/talk/AskDesigner';
 import {
   doorIssueLines,
   doorsWithIssues,
@@ -773,7 +774,10 @@ function WallInspector({ level, id }: { level: Level; id: string }) {
   return (
     <>
       <Header title={boundary ? 'Room boundary' : 'Wall'} onClose={clear} />
-      <WallViewEntry level={level} wallId={id} />
+      <div className="inspector-asks">
+        <WallViewEntry level={level} wallId={id} />
+        <AskDesigner level={level} selection={{ kind: 'wall', id }} />
+      </div>
       <Segmented
         label="Kind"
         value={boundary ? 'boundary' : 'wall'}
@@ -1068,11 +1072,16 @@ function ItemInspector({ level, id }: { level: Level; id: string }) {
       <Header title={kind?.name ?? 'Furniture'} onClose={clear} />
       {/* First, so a phone's sheet shows it without scrolling. */}
       <ItemClearances level={level} id={id} />
-      <ThingViewEntry level={level} selection={{ kind: 'item', id }} />
+      {/* Your own furniture's way in comes before the actions: its verdict is in a phone sheet's
+          first view (lift spec 15); other pieces show nothing here. */}
+      <GettingItIn level={level} id={id} />
+      <div className="inspector-asks">
+        <ThingViewEntry level={level} selection={{ kind: 'item', id }} />
+        <AskDesigner level={level} selection={{ kind: 'item', id }} />
+      </div>
       {ageingEnabled() && <ItemAgeing level={level} id={id} kind="item" />}
       <ItemStorage level={level} id={id} />
       <CarpentryLine item={it} />
-      <GettingItIn level={level} id={id} />
       <LengthField
         label="Width"
         value={size.w}
@@ -1240,7 +1249,10 @@ function OpeningInspector({ level, id }: { level: Level; id: string }) {
       <Header title={title} onClose={clear} />
       {/* First, so a phone's sheet shows it without scrolling. */}
       <DoorClearances level={level} id={id} />
-      <ThingViewEntry level={level} selection={{ kind: 'opening', id }} />
+      <div className="inspector-asks">
+        <ThingViewEntry level={level} selection={{ kind: 'opening', id }} />
+        <AskDesigner level={level} selection={{ kind: 'opening', id }} />
+      </div>
       {ageingEnabled() && <ItemAgeing level={level} id={id} kind="opening" />}
       <Segmented
         label="Kind"
@@ -1477,7 +1489,10 @@ function RoomInspector({ level, id }: { level: Level; id: string }) {
         <span>Floor area</span>
         <span className="num total-figure">{formatArea(roomArea(level, room))}</span>
       </p>
-      <RoomViewEntry level={level} roomId={id} />
+      <div className="inspector-asks">
+        <RoomViewEntry level={level} roomId={id} />
+        <AskDesigner level={level} selection={{ kind: 'room', id }} />
+      </div>
       <SelectField
         label="Floor"
         value={room.floorMaterial}

@@ -5,6 +5,7 @@ import {
   type Conversation,
   type DesignBrief,
   type FactKey,
+  type Pointer,
   type QuestionKey,
   STYLE_NAMES,
   type TalkEstimate,
@@ -167,6 +168,7 @@ function inputFor(
   message: string,
   table: string[],
   sent?: string,
+  pointers: readonly Pointer[] = conv.draftPointers,
 ): TalkInput | null {
   const project = doc();
   const level = talkLevel();
@@ -183,6 +185,7 @@ function inputFor(
     events: eventsSince(conv, digests()),
     onTable: table,
     ...(sent !== undefined ? { sent } : {}),
+    ...(pointers.length ? { pointers } : {}),
   };
 }
 
@@ -192,7 +195,7 @@ const warm = (conv: Conversation) =>
 
 const priceMemo = new Map<string, TalkEstimate | null>();
 /** What a Send would cost now (Send · about US$0.03), memoised on the conversation and words. */
-export function sendPrice(text: string): TalkEstimate | null {
+export function sendPrice(text: string, pointers?: readonly Pointer[]): TalkEstimate | null {
   const ai = aiSettings();
   const conv = useTalk.getState().conv;
   if (!ai || !conv || designerCannotUse(ai)) return null;
@@ -200,12 +203,14 @@ export function sendPrice(text: string): TalkEstimate | null {
     conv.id,
     conv.rev,
     text.length,
+    // A popover's own chip (its words; its id is new each time), else the composer's.
+    pointers ? pointers.map((p) => [p.kind, p.label, p.where, p.state]) : null,
     ai.model,
     priceTable()[ai.model] ?? null,
   ]);
   if (priceMemo.has(key)) return priceMemo.get(key) ?? null;
   // Send's figure leaves out the table's few lines (a send prices itself afresh, in full).
-  const input = inputFor(conv, text, []);
+  const input = inputFor(conv, text, [], undefined, pointers ?? conv.draftPointers);
   const est = input
     ? estimateTalk(talkChars(talkPrompt(input)), {
         provider: ai.provider,
@@ -264,6 +269,8 @@ export async function sendMessage(
   text: string,
   anyway = false,
   ruleAsk?: { decisionId: string },
+  /** The chips it goes with: the composer's, unless given (a popover's one). */
+  pointersGiven?: Pointer[],
 ): Promise<boolean> {
   const words = text.trim();
   const ai = aiSettings();
@@ -276,7 +283,10 @@ export async function sendMessage(
     await noteHandEdits();
     const conv = useTalk.getState().conv ?? conv0;
     if (pendingReply(conv)) return;
-    const input = inputFor(conv, words, await onTable(conv));
+    const pointers = pointersGiven ?? (ruleAsk ? [] : conv.draftPointers);
+    // Not from the composer: what is typed there, and its chips, stay.
+    const keepDraft = !!ruleAsk || !!pointersGiven;
+    const input = inputFor(conv, words, await onTable(conv), undefined, pointers);
     if (!input) return;
     const prompt = talkPrompt(input);
     if (await pastLimit(prompt, conv, anyway)) return;
@@ -289,10 +299,12 @@ export async function sendMessage(
       sent: prompt.sent,
       aliases: input.aliases,
       ...(ruleAsk ? { ruleAsk } : {}),
+      ...(pointers.length ? { pointers } : {}),
+      ...(keepDraft ? { keepDraft } : {}),
     });
     if (!next || pendingReply(next)?.id !== id) return;
     sent = true;
-    if (!ruleAsk) await clearTyped();
+    if (!keepDraft) await clearTyped();
     say('Designer is replying.');
     await replyNow(id, prompt);
   });

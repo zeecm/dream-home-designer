@@ -129,6 +129,8 @@ export function broughtBack(
      * take the place of the old option's own, which were about the plan as it was then.
      */
     held?: Lock[];
+    /** The kept pieces it is made with, now (slice 3a): on its record, as a new option's. */
+    kept?: ProposalOption['kept'];
   },
 ): Proposal {
   const from =
@@ -157,6 +159,9 @@ export function broughtBack(
         };
   const option: ProposalOption = structuredClone({
     letter: 'A',
+    // Made now, with what is kept now (not the old version's set).
+    madeAt: a.at,
+    ...(a.kept ? { kept: a.kept } : {}),
     name: cut(from.name, TALK_LIMITS.name),
     designId: a.designId,
     brief: a.brief,

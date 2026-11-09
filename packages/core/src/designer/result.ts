@@ -35,6 +35,7 @@ import {
 import { ACCESS, type ProgrammeUse, peopleOf, roleOf } from './principles';
 import { acceptResolve, piecesNoWorse } from './resolve';
 import { ruleKeepOuts } from './rules/check';
+import { type Kept, placeKept } from './rules/kept';
 import type { Rule } from './rules/schema';
 import type { Concept, DesignInput, DesignItem, RoomUse, SpaceDesign, SpaceStatus } from './schema';
 import type { Zone } from './schema';
@@ -143,6 +144,11 @@ export interface DesignOptions {
    * and kept out of by the walkway re-solve. In the key, so a rule edit re-checks at no cost.
    */
   rules?: readonly Rule[];
+  /**
+   * Pieces kept where they are (slice 3a): a proposal's are placed again, before anything
+   * else, and every one is checked (K). In the key, as the rules are.
+   */
+  kept?: readonly Kept[];
 }
 
 const BEDROOM_USES = new Set<RoomUse>(['master', 'bedroom', 'kids', 'parents', 'guest']);
@@ -243,7 +249,10 @@ function work(
   opts: DesignOptions,
 ): DesignResult {
   const { brief, aliases, concept } = design;
-  const rulesOpt = opts.rules?.length ? { rules: opts.rules } : {};
+  const rulesOpt = {
+    ...(opts.rules?.length ? { rules: opts.rules } : {}),
+    ...(opts.kept?.length ? { kept: opts.kept } : {}),
+  };
   // What the house rules change in a space's outcome (only the fields the checks read, so a
   // rename keeps the cache): the steered solve is kept only if no rule check gets worse, and a
   // settled outcome comes from the rules' keep-outs. The plain first solve doesn't read them.
@@ -271,6 +280,8 @@ function work(
     design.id,
   );
   const lvl: Level = structuredClone(walls.level);
+  // Kept pieces stand where they were kept, before anything is placed, and are never cleared.
+  const keptIds = placeKept(lvl, opts.kept ?? []);
   const geomLevel = walls.level;
   const geom = planGeometry(geomLevel);
   const sides = new Map(Object.keys(lvl.walls).map((id) => [id, roomsBeside(geomLevel, id)]));
@@ -425,7 +436,7 @@ function work(
     const takenOut: Item[] = [];
     for (const it of Object.values(lvl.items)) {
       if (!inRooms(s.rooms, centreOf(it))) continue;
-      if (brief.keep.items[it.id] === 'in-place') continue;
+      if (brief.keep.items[it.id] === 'in-place' || keptIds.has(it.id)) continue;
       if (keepAs.includes(aspectOf(it))) continue;
       if (WET_PIECES.has(it.assetId)) {
         if (!replaces.has(it.assetId)) continue;
@@ -984,7 +995,10 @@ function work(
   const designedRooms = new Set(
     resultSpaces.filter((s) => s.storedKey && s.status !== 'missing').flatMap((s) => s.rooms),
   );
-  const baseKeys = baseChecks(start, brief, uses, opts.rules);
+  const baseKeys = baseChecks(start, brief, uses, opts.rules, opts.kept);
+  const proposalKept = new Set(
+    (opts.kept ?? []).filter((k) => k.itemId === null).map((k) => `K|${k.id}`),
+  );
   // A piece the version copied (an earlier version's room, placed again) has a new id but the
   // plan's pose: it is the plan's piece, its checks keyed as the plan's.
   const poseKey = (it: {
@@ -1023,8 +1037,11 @@ function work(
     // In the plan before and not the version's doing: a piece it didn't touch, a room it
     // didn't furnish, or what furnishing can't change (a window, the bedroom count).
     // Someone with nowhere to sleep is always the version's to answer for.
+    // A proposal's kept piece (kept with no plan id) is never in the plan before: always the
+    // version's. A plan piece kept by id and since deleted by hand is the plan's, as before.
     const already =
       !c.key.startsWith('P1|unplaced') &&
+      !proposalKept.has(c.key) &&
       baseKeys.has(c.itemId ? swapSegment(c.key, c.itemId, twinOf(c.itemId)) : c.key) &&
       (c.itemId
         ? unchanged(c.itemId)
@@ -1166,15 +1183,21 @@ function baseChecks(
   brief: DesignInput['brief'],
   uses: Record<string, RoomUse>,
   rules?: readonly Rule[],
+  kept?: readonly Kept[],
 ): Set<string> {
-  const k = stableJson([brief, uses, rules ?? []]);
+  const k = stableJson([brief, uses, rules ?? [], kept ?? []]);
   const per = baseMemo.get(start) ?? new Map<string, Set<string>>();
   baseMemo.set(start, per);
   const hit = per.get(k);
   if (hit) return hit;
   // The version's room uses, so the same failure has the same key on both.
   const keys = new Set(
-    designChecks(start, { brief, uses, ...(rules?.length ? { rules } : {}) }).map((c) => c.key),
+    designChecks(start, {
+      brief,
+      uses,
+      ...(rules?.length ? { rules } : {}),
+      ...(kept?.length ? { kept } : {}),
+    }).map((c) => c.key),
   );
   per.set(k, keys);
   if (per.size > 4) per.delete(per.keys().next().value as string);

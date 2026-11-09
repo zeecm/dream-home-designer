@@ -32,6 +32,7 @@ import { CostCheck } from '../CostCheck';
 import { useResultsTickN } from '../results';
 import { capUsd, usd, useSpend } from '../spend';
 import { useDesigner } from '../state';
+import { PointerChips } from './Chips';
 import { FactEditor } from './Facts';
 import { Mark, type MarkKind } from './Mark';
 import { ProposalTurn } from './Options';
@@ -40,6 +41,7 @@ import { ReplyParts, ReplyText, SentState, Streaming } from './Talk';
 import { lineState, redoLine, undoLine } from './accept';
 import { type CardModel, designCard, earlierDesign, nowOf, optionCard } from './cards';
 import { dayMark } from './days';
+import { unkeep } from './pointers';
 import {
   answerCost,
   cardRequest,
@@ -98,6 +100,12 @@ export function handText(lines: readonly string[], more: number): string {
   const list = items.map((x) => `${x.what.charAt(0).toLowerCase()}${x.what.slice(1)} (${x.how})`);
   return `You changed these yourself: ${list.join(', ')}${more ? ` and ${more} more` : ''}. They stay as you left them.`;
 }
+/** Undo a kept piece from its line. */
+function undoKept(keptId: string) {
+  const k = useTalk.getState().conv?.kept.find((x) => x.id === keptId);
+  if (k) return unkeep(k);
+}
+
 function Person({ t }: { t: TurnOf<'person'> }) {
   // Make this a rule (UX §3.8): the app's line, not a bubble of theirs.
   if (t.ruleAsk) {
@@ -123,9 +131,10 @@ function Person({ t }: { t: TurnOf<'person'> }) {
       <h3 id={`h-${t.id}`} className="visually-hidden">
         You said
       </h3>
-      <p className="talk-bubble" title={new Date(t.at).toLocaleString()}>
-        {t.text}
-      </p>
+      <div className="talk-bubble" title={new Date(t.at).toLocaleString()}>
+        {t.pointers?.length ? <PointerChips pointers={t.pointers} removable={false} /> : null}
+        <p className="talk-bubble-text">{t.text}</p>
+      </div>
       <SentState t={t} />
     </article>
   );
@@ -478,6 +487,15 @@ function Event({ t }: { t: TurnOf<'event'> }) {
       : 1,
   );
   const v = e.type === 'accepted' ? lineTitle(e) : '';
+  // Undo on a kept line while it is the newest kept action (UX §2.4).
+  const newestKept = useTalk((s) => {
+    const turns = s.conv?.turns ?? [];
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const x = turns[i];
+      if (x?.kind === 'event' && x.event.type === 'kept') return x.id;
+    }
+    return null;
+  });
   // The history moves under the line: its Undo or Redo shows only while it applies.
   const history = useStore((s) => s.editor.history);
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again as the history moves
@@ -503,6 +521,9 @@ function Event({ t }: { t: TurnOf<'event'> }) {
     text = handText(e.lines, e.more);
   } else if (e.type === 'rule') {
     text = e.text;
+  } else if (e.type === 'kept') {
+    icon = e.undone ? 'undo' : 'check';
+    text = e.undone ? `${e.text} Undone.` : e.text;
   } else {
     icon = e.type === 'fact' ? 'edit' : /^Couldn’t/.test(e.text) ? 'warn' : 'dot';
     text = e.text;
@@ -518,6 +539,11 @@ function Event({ t }: { t: TurnOf<'event'> }) {
         </span>
         <span className="talk-app-text">
           <span>{text}</span>
+          {e.type === 'kept' && !e.undone && newestKept === t.id && (
+            <button type="button" className="link-btn" onClick={() => void undoKept(e.keptId)}>
+              Undo
+            </button>
+          )}
           {e.type === 'rule' && (
             <button
               type="button"
