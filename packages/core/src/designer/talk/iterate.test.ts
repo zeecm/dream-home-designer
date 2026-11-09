@@ -9,7 +9,7 @@ import { handEdits } from '../handEdits';
 import { talkBlock } from '../prompts';
 import { designResult } from '../result';
 import { BATHROOMS, type Part } from '../schema';
-import type { Design } from '../schema';
+import { type Design, Design as DesignSchema } from '../schema';
 import { spacesOf } from '../spaces';
 import { changeSet } from './changes';
 import {
@@ -26,7 +26,13 @@ import {
   optionTitle,
 } from './iterate';
 import { talk } from './reducer';
-import type { Conversation, Proposal, ProposalOption } from './schema';
+import {
+  type Conversation,
+  PROPOSAL_RECORD_VERSION,
+  type Proposal,
+  type ProposalOption,
+  proposalFromRecord,
+} from './schema';
 
 const level = () => sampleFlatProject().levels[0] as Level;
 const AT = '2026-11-08T10:00:00.000Z';
@@ -106,6 +112,50 @@ const proposal = (options: ProposalOption[], scope = living): Proposal => ({
   options,
 });
 
+describe('the kept set a version was made with (slice 3a)', () => {
+  it('a 2 proposal record reads as the current one without them, a newer one is not read', () => {
+    const v2 = { ...proposal([option('A')]), recordVersion: 2 };
+    const read = proposalFromRecord(JSON.parse(JSON.stringify(v2)));
+    expect(PROPOSAL_RECORD_VERSION).toBe(4);
+    expect(read?.recordVersion).toBe(4);
+    expect(read?.options[0]?.kept).toBeUndefined();
+    expect(proposalFromRecord({ ...v2, recordVersion: 5 })).toBeNull();
+  });
+
+  it('is on its record, read back as written; an older record reads with none', () => {
+    const sofa = {
+      id: 'kept_v1',
+      itemId: null,
+      assetId: 'sofa-3',
+      pose: { x: 1, y: 2, rot: 0 },
+      from: 'V1',
+      levelId: 'lvl1',
+      at: AT,
+    };
+    const made = proposal([{ ...option('A'), kept: [sofa] }, option('B')]);
+    const read = proposalFromRecord(JSON.parse(JSON.stringify(made)));
+    expect(read?.options[0]?.kept).toEqual([sofa]);
+    expect(read?.options[1]?.kept).toBeUndefined();
+    // A piece the build can't read is dropped, not the version.
+    const bad = JSON.parse(JSON.stringify(made));
+    bad.options[0].kept.push({ id: 'x', assetId: 3 });
+    expect(proposalFromRecord(bad)?.options[0]?.kept).toEqual([sofa]);
+  });
+
+  it('a version’s kept set is read tolerantly too (one it can’t read dropped)', () => {
+    const sofa = {
+      id: 'kept_v1',
+      itemId: null,
+      assetId: 'sofa-3',
+      pose: { x: 1, y: 2, rot: 0 },
+      from: 'V1',
+      levelId: 'lvl1',
+      at: AT,
+    };
+    expect(DesignSchema.shape.kept.parse([sofa, { id: 'x', assetId: 3 }])).toEqual([sofa]);
+  });
+});
+
 describe('alternatives A/B/C (criterion 25, D3)', () => {
   it('only for one or two rooms: the whole flat or three rooms make a new card', () => {
     expect(alternates(living)).toBe(true);
@@ -157,6 +207,34 @@ describe('alternatives A/B/C (criterion 25, D3)', () => {
 });
 
 describe('Bring this back (criterion 27)', () => {
+  it('is made now, with the pieces kept now on its record (not the old version’s)', () => {
+    const sofa = {
+      id: 'kept_now',
+      itemId: null,
+      assetId: 'sofa-3',
+      pose: { x: 1, y: 2, rot: 0 },
+      from: 'V2',
+      levelId: 'lvl1',
+      at: AT,
+    };
+    const old = proposal([{ ...option('A'), kept: [], madeAt: '2026-01-01T00:00:00.000Z' }]);
+    const p = broughtBack(
+      { kind: 'option', proposal: old, option: old.options[0] as ProposalOption },
+      {
+        id: 'prop9',
+        designId: 'dsn_new',
+        n: 7,
+        at: '2026-11-08T12:00:00.000Z',
+        turnId: 'tq',
+        conversationId: 'conv1',
+        brief: tanBrief(),
+        base: { variant: 'after', fingerprint: 'fpNow' },
+        kept: [sofa],
+      },
+    );
+    expect(p.options[0]).toMatchObject({ madeAt: '2026-11-08T12:00:00.000Z', kept: [sofa] });
+  });
+
   it('makes V(n+1) from an option: no usage, nothing ticked, waivers kept, today’s brief', () => {
     const old = proposal([option('A', 'Sofa by the wall.'), option('B')]);
     const today = { ...tanBrief(), budget: { low: 40_000, high: 40_000 } };

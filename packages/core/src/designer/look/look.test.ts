@@ -322,6 +322,53 @@ describe('what the app does with them (actOnLook): the checks always win', () =>
     expect(turned.items.find((i) => i.ref === 'sofa1')?.against).toBe('window-wall');
   });
 
+  it('a piece kept where it is (the option’s kept set) is never moved, swapped or removed', () => {
+    const sofaId = Object.entries(r0.refs).find(([, x]) => x === 'sofa1')?.[0] as string;
+    const it = r0.level.items[sofaId];
+    expect(it).toBeDefined();
+    if (!it) return;
+    const kept = [
+      {
+        id: 'kept_1',
+        itemId: null,
+        assetId: it.assetId,
+        pose: { x: it.position.x, y: it.position.z, rot: it.rotationY },
+        from: 'V1',
+        levelId: 'lvl',
+        at: AT,
+      },
+    ];
+    const swap = finding({
+      target: { kind: 'piece', id: sofa },
+      severity: 'fix',
+      line: 'A smaller sofa.',
+      suggest: {
+        kind: 'swap',
+        piece: sofa,
+        kindId: 'sofa-2',
+        against: null,
+        faces: null,
+        near: null,
+        zone: null,
+        room: null,
+        rule: null,
+      },
+    });
+    // Made without it kept: the swap is an edit. With it kept: the taste fix is dropped.
+    expect(actOnLook(look([swap]), ctx).edits).toHaveLength(1);
+    const plan = actOnLook(look([swap]), { ...ctx, kept });
+    expect(plan.edits).toEqual([]);
+    expect(plan.rounds).toEqual([]);
+    expect(plan.dropped.map((d) => d.why)).toEqual(['kept']);
+    // The taste slot isn't spent on it: the next taste fix is acted on.
+    const next = actOnLook(
+      look([swap, finding({ target: { kind: 'piece', id: bed }, severity: 'fix', line: 'B.' })]),
+      { ...ctx, kept },
+    );
+    expect(next.rounds).toHaveLength(1);
+    expect(next.dropped).toEqual([expect.objectContaining({ why: 'kept' })]);
+  });
+
   it('a swap or an addition must be a catalogue piece that suits the room, else it is dropped', () => {
     const base = {
       piece: null,
@@ -597,12 +644,12 @@ describe('the request and its price', () => {
     expect(imageTokens('gemini', 1568, 1000)).toBe(258 * 3 * 2);
   });
 
-  it('proposals are records of 3: a 2 reads with no look; a newer one is left alone', () => {
+  it('proposals are records of 4: a 3 reads with no look; a 5 is left alone', () => {
     const p = {
       projectId: 'p',
       id: 'prp_1',
       conversationId: 'c',
-      recordVersion: 2,
+      recordVersion: 3,
       n: 1,
       turnId: 't',
       at: '2026-11-08T00:00:00Z',
@@ -622,12 +669,17 @@ describe('the request and its price', () => {
           base: { variant: 'before', fingerprint: 'fp' },
           status: 'checked',
           ticks: null,
+          madeAt: '2026-11-08T00:00:00Z',
+          kept: [],
         },
       ],
     };
     const back = proposalFromRecord(p);
-    expect(back?.recordVersion).toBe(PROPOSAL_RECORD_VERSION);
+    expect(PROPOSAL_RECORD_VERSION).toBe(4);
+    expect(back?.recordVersion).toBe(4);
     expect(back?.options[0]?.look).toBeNull();
-    expect(proposalFromRecord({ ...p, recordVersion: PROPOSAL_RECORD_VERSION + 1 })).toBeNull();
+    expect(back?.options[0]?.madeAt).toBe('2026-11-08T00:00:00Z');
+    expect(back?.options[0]?.kept).toEqual([]);
+    expect(proposalFromRecord({ ...p, recordVersion: 5 })).toBeNull();
   });
 });

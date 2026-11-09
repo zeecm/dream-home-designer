@@ -1,4 +1,5 @@
 import type { Level } from '../../schema';
+import { type Kept, MAX_KEPT } from '../rules/kept';
 import { MAX_RULES, type Rule, roundN } from '../rules/schema';
 import type { DesignBrief, Usage } from '../schema';
 import {
@@ -21,8 +22,10 @@ import {
   type Decision,
   TALK_LIMITS as L,
   MAX_DECISIONS,
+  MAX_POINTERS,
   MAX_RULE_RECORDS,
   MAX_TURNS,
+  type Pointer,
   QUESTION_KEYS,
   type QuestionKey,
   type RuleOffer,
@@ -63,8 +66,9 @@ export type TalkAction =
       ids: [string, string];
       /** Start over keeping What I know: those facts are known (not asked), assumptions too. */
       kept?: { known: QuestionKey[]; assumed: QuestionKey[] };
-      /** Start over keeping What I know: the house rules go on too (Q2). */
+      /** Start over keeping What I know: the house rules go on too (Q2), and kept pieces. */
       rules?: Rule[];
+      keptPieces?: Kept[];
     }
   /**
    * Start over (UX §8.6): a new conversation in this one's place (`fromId`, so two tabs start
@@ -182,6 +186,13 @@ export type TalkAction =
       aliases?: Record<string, string>;
       /** Make this a rule from a Decision (priced): its reply offers the rule. */
       ruleAsk?: { decisionId: string };
+      /** What it points at (the composer's chips, or a popover's one). */
+      pointers?: Pointer[];
+      /**
+       * Sent from outside the composer (a popover's paid row, Make this a rule): what is
+       * typed there and its chips stay for the person's own message.
+       */
+      keepDraft?: boolean;
     }
   /** The text streamed so far, kept as the tab hides (a phone may kill it). */
   | { type: 'checkpoint'; turnId: string; text: string; chars: number }
@@ -278,7 +289,14 @@ export type TalkAction =
   | { type: 'ruleReopen'; decisionId: string; vet: RuleVet }
   | { type: 'ruleEdit'; ruleId: string; n?: number | null; name?: string }
   | { type: 'ruleDelete'; ruleId: string }
-  | { type: 'ruleRestore'; ruleId: string };
+  | { type: 'ruleRestore'; ruleId: string }
+  /** Pointers (slice 3a): a chip added to the composer or taken off (at most five). */
+  | { type: 'pointerAdd'; pointer: Pointer }
+  | { type: 'pointerRemove'; id: string }
+  /** Keep this: a piece kept where it is, with its app line; Let the designer move it. */
+  | { type: 'keepItem'; kept: Kept; id: string; at: string; text: string }
+  | { type: 'unkeepItem'; keptId: string; id: string; at: string; text: string }
+  | { type: 'tipSeen'; tip: 'point' };
 
 /** A new conversation: the greeting and the first questions (or, after a form, the offer). */
 export function newConversation(a: Extract<TalkAction, { type: 'start' }>): Conversation {
@@ -308,6 +326,10 @@ export function newConversation(a: Extract<TalkAction, { type: 'start' }>): Conv
     handSeen: [],
     aside: { usd: 0, tokens: 0, estimated: false },
     rules: (a.rules ?? []).slice(0, MAX_RULES),
+    kept: (a.keptPieces ?? []).slice(0, MAX_KEPT),
+    keptGone: [],
+    draftPointers: [],
+    tips: [],
   };
   const date = a.form ? dayOf(a.form.at) : '';
   const greet: Turn = {
@@ -447,7 +469,13 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
         level: a.level,
         form: null,
         ids: a.ids,
-        ...(a.keep ? { kept: { known, assumed: conv.assumed }, rules: liveRules(conv) } : {}),
+        ...(a.keep
+          ? {
+              kept: { known, assumed: conv.assumed },
+              rules: liveRules(conv),
+              keptPieces: conv.kept,
+            }
+          : {}),
       });
     }
     case 'bringBack': {
@@ -702,8 +730,14 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
     case 'send': {
       // One reply at a time: a second Send waits for the first.
       if (pendingReply(conv)) return conv;
+      const pointers = (a.pointers ?? []).slice(0, MAX_POINTERS);
       return push(
-        { ...conv, draft: '', lastSentAt: a.at, ...(a.aliases ? { aliases: a.aliases } : {}) },
+        {
+          ...conv,
+          ...(a.keepDraft ? {} : { draft: '', draftPointers: [] }),
+          lastSentAt: a.at,
+          ...(a.aliases ? { aliases: a.aliases } : {}),
+        },
         {
           kind: 'person',
           id: a.id,
@@ -711,6 +745,7 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
           text: cutLines(a.text, L.person) || '…',
           sent: a.sent.slice(0, SENT_CHARS),
           ...(a.ruleAsk ? { ruleAsk: a.ruleAsk } : {}),
+          ...(pointers.length ? { pointers } : {}),
           reply: {
             state: 'pending',
             error: null,
@@ -917,8 +952,86 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
       };
       return push(conv, said);
     }
+    case 'pointerAdd': {
+      const p = a.pointer;
+      const same = conv.draftPointers.some(
+        (x) =>
+          x.id === p.id ||
+          (x.kind === p.kind &&
+            x.targetId === p.targetId &&
+            (p.kind !== 'spot' || (x.at.x === p.at.x && x.at.y === p.at.y)) &&
+            JSON.stringify(x.version) === JSON.stringify(p.version)),
+      );
+      if (same || conv.draftPointers.length >= MAX_POINTERS) return conv;
+      return { ...conv, draftPointers: [...conv.draftPointers, p] };
+    }
+    case 'pointerRemove':
+      if (!conv.draftPointers.some((x) => x.id === a.id)) return conv;
+      return { ...conv, draftPointers: conv.draftPointers.filter((x) => x.id !== a.id) };
+    case 'keepItem': {
+      const k = a.kept;
+      const already = conv.kept.some(
+        (x) => x.id === k.id || (k.itemId ? x.itemId === k.itemId : keptSame(x, k)),
+      );
+      if (already || conv.kept.length >= MAX_KEPT) return conv;
+      const prior = k.itemId ? (conv.brief.keep.items[k.itemId] ?? null) : null;
+      const brief = k.itemId
+        ? {
+            ...conv.brief,
+            keep: {
+              ...conv.brief.keep,
+              items: { ...conv.brief.keep.items, [k.itemId]: 'in-place' as const },
+            },
+          }
+        : conv.brief;
+      return push(
+        { ...conv, brief, kept: [...conv.kept, k.itemId ? { ...k, prior } : k] },
+        {
+          kind: 'event',
+          id: a.id,
+          at: a.at,
+          event: { type: 'kept', keptId: k.id, text: cut(a.text, L.note), undone: false },
+        },
+      );
+    }
+    case 'unkeepItem': {
+      const k = conv.kept.find((x) => x.id === a.keptId);
+      if (!k) return conv;
+      const items = { ...conv.brief.keep.items };
+      // What the brief said before (the person's own 'bring' or 'in-place') comes back.
+      if (k.itemId && items[k.itemId] === 'in-place') {
+        if (k.prior) items[k.itemId] = k.prior;
+        else delete items[k.itemId];
+      }
+      const next: Conversation = {
+        ...conv,
+        brief: { ...conv.brief, keep: { ...conv.brief.keep, items } },
+        kept: conv.kept.filter((x) => x.id !== k.id),
+        keptGone: [...conv.keptGone, { ...k, until: a.at }].slice(-MAX_KEPT),
+        turns: conv.turns.map((t) =>
+          t.kind === 'event' && t.event.type === 'kept' && t.event.keptId === k.id
+            ? { ...t, event: { ...t.event, undone: true } }
+            : t,
+        ),
+      };
+      return push(next, {
+        kind: 'event',
+        id: a.id,
+        at: a.at,
+        event: { type: 'note', text: cut(a.text, L.note) },
+      });
+    }
+    case 'tipSeen':
+      return conv.tips.includes(a.tip) ? conv : { ...conv, tips: [...conv.tips, a.tip] };
   }
 }
+
+/** Two kept proposal pieces at the same place. */
+const keptSame = (a: Kept, b: Kept) =>
+  !a.itemId &&
+  !b.itemId &&
+  a.assetId === b.assetId &&
+  Math.hypot(a.pose.x - b.pose.x, a.pose.y - b.pose.y) < 0.05;
 
 /** The house rules that stand (not deleted). */
 export const liveRules = (conv: Conversation): Rule[] => conv.rules.filter((r) => !r.deleted);

@@ -1,4 +1,12 @@
-import type { Design, DesignBrief, DesignOptions, Project, Rule } from '@dhd/core';
+import {
+  type Design,
+  type DesignBrief,
+  type DesignOptions,
+  type Kept,
+  type Project,
+  type Rule,
+  keptBefore,
+} from '@dhd/core';
 import { create } from 'zustand';
 import { useRates } from '../../cost/estimate';
 import { useEditor } from '../../editor';
@@ -73,19 +81,40 @@ export const setHouseRules = (f: (levelId: string) => readonly Rule[]) => {
   houseRules = f;
 };
 export const houseRulesFor = (levelId: string): readonly Rule[] => houseRules(levelId);
+/** The pieces kept where they are on a level (Keep this), from the conversation. */
+let houseKept: (levelId: string) => readonly Kept[] = () => [];
+export const setHouseKept = (f: (levelId: string) => readonly Kept[]) => {
+  houseKept = f;
+};
+/**
+ * What a version was made with, for its kept pieces: the set on its record (read as it was,
+ * whatever is kept, let go or started over since), else its time (an older record: worked out
+ * with keptBefore), or 'new' for a design not made yet (those kept now).
+ */
+export type MadeWith = string | 'new' | { kept: readonly Kept[] };
+/** The kept pieces a version is placed and checked with. */
+export const houseKeptFor = (levelId: string, made: MadeWith): readonly Kept[] =>
+  typeof made === 'object' ? made.kept : keptBefore(houseKept(levelId), made);
 
 /**
  * What a version is placed and checked with: the rates, the site, the plan's own models and,
  * on `levelId`, the household's house rules (slice 3a: in the result's key, so a rule kept,
- * changed or deleted re-checks every card with no request).
+ * changed or deleted re-checks every card with no request), and the pieces kept before
+ * `made`: what the version was made with (`madeWith`), or 'new' for a design not made yet.
  */
-export const designOpts = (doc: Project, levelId?: string): DesignOptions => {
+export const designOpts = (
+  doc: Project,
+  levelId: string | undefined,
+  made: MadeWith,
+): DesignOptions => {
   const rules = levelId ? houseRules(levelId) : [];
+  const kept = levelId ? houseKeptFor(levelId, made) : [];
   return {
     rates: useRates.getState().rates,
     ...(doc.site ? { site: doc.site } : {}),
     ...(doc.models ? { models: doc.models } : {}),
     ...(rules.length ? { rules: [...rules] } : {}),
+    ...(kept.length ? { kept: [...kept] } : {}),
     // The storage meter's own setting: its household wins when the person set it there (the
     // storage lens, tech 3b §4.1). Part of the result key, so editing it re-scores the cards.
     storage: meterSetting(doc.id),
@@ -111,8 +140,9 @@ export const getBrief = async (projectId: string) => (await store()).getBrief(pr
 export const putBrief = async (projectId: string, b: DesignBrief) =>
   (await store()).putBrief(projectId, b);
 
-export function openPanel() {
-  useDesigner.setState({ panel: true, previewing: true });
+/** Opens the designer; `preview: false` leaves the plan as it is (Ask the designer on your plan). */
+export function openPanel({ preview = true }: { preview?: boolean } = {}) {
+  useDesigner.setState({ panel: true, previewing: preview });
 }
 export function closePanel() {
   useDesigner.setState({ panel: false, comparing: null });

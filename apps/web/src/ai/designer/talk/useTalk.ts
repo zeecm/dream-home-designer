@@ -14,8 +14,17 @@ import { create } from 'zustand';
 import { meterSetting, setMeterAmount, useStorage } from '../../../storage/store';
 import { shownLevelId, useStore } from '../../../store';
 import type { RunState } from '../run';
-import { getBrief, loadDesigns, putBrief, setHouseRules, useDesigner } from '../state';
+import {
+  getBrief,
+  loadDesigns,
+  putBrief,
+  setHouseKept,
+  setHouseRules,
+  useDesigner,
+} from '../state';
 import { onOtherTab, talkStore, talkStoreReady } from './talkStore';
+import type { TimeLeft } from './timeLeft';
+import type { WakeState } from './wakeLock';
 
 /**
  * The open plan's conversation as the panel sees it: the record (mirrored from `dhd-talk`
@@ -36,7 +45,42 @@ export interface LiveRun {
   remaining: number | null;
   /** The most it was priced at (US$), bound by the button pressed. */
   approved: number | null;
+  /** About how long it has left (worked out again as each step ends). */
+  left?: TimeLeft | null;
+  /** Whether the screen is kept on while it runs. */
+  wake?: WakeState | null;
+  /** Stops it for good (marked stopped, then aborted): Stop, or another plan opened. */
+  stop?: () => void;
 }
+
+/**
+ * A run that stopped when the page closed (or was away too long), as its card shows it until
+ * it carries on or is kept as it is (docs/specs/locked-phone-runs.md, part 1).
+ */
+export type ResumeView =
+  | { kind: 'other-tab' }
+  | { kind: 'carrying-on' }
+  | { kind: 'offline'; done: number; total: number | null }
+  | {
+      kind: 'ask';
+      /** The plan has changed since it stopped. */
+      changed: boolean;
+      /** What carrying on may cost at most (US$), as its button shows it; null: not priced. */
+      figure: number | null;
+      /** Still being priced. */
+      pending: boolean;
+      done: number;
+      total: number | null;
+      /** A different model is set now than it was started with. */
+      model: { now: string; was: string } | null;
+      /** No key now: Carry on opens AI settings. */
+      noKey: boolean;
+      /**
+       * Why it stopped: the page closed (or was away too long), a step was cut off again and
+       * again, or it reached what it was priced at or the tab's limit.
+       */
+      why: 'closed' | 'resent' | 'approved' | 'tab';
+    };
 
 /** A talk call on its way (ephemeral: never written per token). */
 export interface LiveReply {
@@ -71,6 +115,8 @@ interface TalkState {
   open: { card: string; change: string } | null;
   hover: { card: string; change: string } | null;
   live: LiveRun | null;
+  /** Runs interrupted, by card key, as their cards show them. */
+  resume: Record<string, ResumeView>;
   /** The designer replying to a message. */
   reply: LiveReply | null;
   /** The polite live region's words. */
@@ -104,6 +150,7 @@ export const useTalk = create<TalkState>(() => ({
   open: null,
   hover: null,
   live: null,
+  resume: {},
   reply: null,
   said: '',
   formOpen: false,
@@ -189,6 +236,13 @@ export const rulesOn = (levelId: string) => {
   return c && c.levelId === levelId ? liveRules(c).filter((r) => r.levelId === levelId) : [];
 };
 setHouseRules(rulesOn);
+setHouseKept((levelId) => {
+  const c = useTalk.getState().conv;
+  // Those let go too: a version made while one was kept is still placed with it (keptBefore).
+  return c && c.levelId === levelId
+    ? [...c.keptGone, ...c.kept].filter((k) => k.levelId === levelId)
+    : [];
+});
 
 /** A key that changes when the live rules do (a card re-reads its result then). */
 export const useRulesKey = (levelId: string) =>
@@ -197,6 +251,7 @@ export const useRulesKey = (levelId: string) =>
       ? s.conv.rules
           .filter((r) => !r.deleted && r.levelId === levelId)
           .map((r) => `${r.id}:${r.n}:${r.name}`)
+          .concat(s.conv.kept.map((k) => `k:${k.id}`))
           .join('|')
       : '',
   );
@@ -318,15 +373,17 @@ export async function act(action: TalkAction): Promise<Conversation | null> {
 export async function actProposal(
   id: string,
   fn: (p: Proposal | null) => Proposal | null,
+  /** The plan it belongs to: the open one unless said (a run's end, after another opened). */
+  projectId = doc().id,
 ): Promise<Proposal | null> {
-  const projectId = doc().id;
   const s = await talkStore();
   let p: Proposal | null;
   try {
     p = await s.applyProposal(projectId, id, fn);
   } catch {
-    p = fn(useTalk.getState().proposals.find((x) => x.id === id) ?? null);
-    useTalk.setState({ note: UNSAVED });
+    const mine = doc().id === projectId;
+    p = fn(mine ? (useTalk.getState().proposals.find((x) => x.id === id) ?? null) : null);
+    if (mine) useTalk.setState({ note: UNSAVED });
   }
   if (p && doc().id === projectId) {
     useTalk.setState((st) => {
@@ -405,13 +462,17 @@ export async function ensureConversation(): Promise<Conversation | null> {
 // Another plan: its own conversation.
 useStore.subscribe((s, prev) => {
   if (s.editor.doc.id === prev.editor.doc.id) return;
-  useTalk.getState().live?.ctrl.abort();
+  // Leaving the plan stops its run for good: it is never carried on later.
+  const live = useTalk.getState().live;
+  if (live?.stop) live.stop();
+  else live?.ctrl.abort();
   useTalk.getState().reply?.ctrl.abort();
   useTalk.setState({
     projectId: null,
     conv: null,
     proposals: [],
     live: null,
+    resume: {},
     shown: null,
     open: null,
     hover: null,

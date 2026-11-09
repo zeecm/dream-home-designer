@@ -30,6 +30,7 @@ import {
 } from '@dhd/core';
 import { memo, useEffect, useId, useMemo } from 'react';
 import { create } from 'zustand';
+import { AskDesigner } from '../ai/designer/talk/AskDesigner';
 import { type Selection, useEditor } from '../editor';
 import { ThingViewEntry } from '../elevation/Entry';
 import { useProject, useStore } from '../store';
@@ -492,6 +493,7 @@ export function PointInspector({ level, id }: { level: Level; id: string }) {
           )}
         </div>
       )}
+      <AskDesigner level={level} selection={{ kind: 'point', id }} />
       <button
         type="button"
         className="btn btn-danger"

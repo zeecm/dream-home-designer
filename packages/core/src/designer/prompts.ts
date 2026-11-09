@@ -13,6 +13,7 @@ import { compass } from './describe';
 import { heldAspects, lockCovers } from './handEdits';
 import { storageBlock } from './lenses/storage';
 import { OUTPUT } from './prices';
+import { type Kept, withKept } from './rules/kept';
 import {
   AGAINST,
   type Concept,
@@ -178,6 +179,8 @@ export interface TalkAsk {
 export interface StepOptions {
   /** The person's words, for an iteration. */
   feedback?: string;
+  /** Pieces kept where they are (Keep this): listed as in-place, so none is asked for twice. */
+  kept?: readonly Kept[];
   /** Parts that stay as they are. */
   locks?: Lock[];
   /** From the conversation: what this proposal is for. */
@@ -342,7 +345,7 @@ export function conceptBlock(concept: Concept | null): string {
 export function roomStep(
   ctx: ContextInput,
   space: Space,
-  level: Level,
+  designed: Level,
   aliases: AliasMap,
   opts: StepOptions & {
     concept?: Concept | null;
@@ -355,6 +358,9 @@ export function roomStep(
     storage?: StorageSetting | false;
   } = {},
 ): StepPrompt {
+  // The kept pieces on it (a run's level has them already): in-place, never asked for again.
+  const kept = withKept(designed, opts.kept ?? []);
+  const level = kept.level;
   const quality = ctx.brief.quality;
   const of = aliasOf(aliases);
   const a = (id: string) => of.get(id) ?? id;
@@ -404,7 +410,10 @@ export function roomStep(
         id: a(it.id),
         kind: it.assetId,
         size: [r2(sz.w), r2(sz.d), r2(sz.h)],
-        keep: held.includes(aspectOf(it)) ? 'in-place' : (ctx.brief.keep.items[it.id] ?? 'leave'),
+        keep:
+          held.includes(aspectOf(it)) || kept.ids.has(it.id)
+            ? 'in-place'
+            : (ctx.brief.keep.items[it.id] ?? 'leave'),
       };
     })
     .sort((p, q) => (p.id < q.id ? -1 : 1));

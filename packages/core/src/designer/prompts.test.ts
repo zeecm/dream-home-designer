@@ -114,6 +114,25 @@ describe('prompts (criterion 23)', () => {
     expect(p.prefix).toBe(layoutStep(ctx).prefix);
   });
 
+  it('a kept piece is in its room step as in-place, so the room doesn’t ask for another', () => {
+    const living = spaces.find((x) => x.key === SAMPLE_KEYS.living)!;
+    const kept = {
+      id: 'k1',
+      itemId: null,
+      assetId: 'plant',
+      pose: { x: 9.6, y: 2.0, rot: 0 },
+      from: 'V4',
+      levelId: level.id,
+      at: '2026-11-08T10:00:00.000Z',
+    };
+    const plain = roomStep(ctx, living, r.level, aliases, { concept });
+    expect(plain.tail).not.toContain('"kind":"plant"');
+    const p = roomStep(ctx, living, r.level, aliases, { concept, kept: [kept] });
+    expect(p.tail).toMatch(/"kind":"plant","size":\[[^\]]*\],"keep":"in-place"/);
+    // No kept pieces: the same bytes as before.
+    expect(roomStep(ctx, living, r.level, aliases, { concept, kept: [] }).tail).toBe(plain.tail);
+  });
+
   it('finds the layout’s intent for a space by alias, however the alias is written', () => {
     const loose = {
       ...concept,

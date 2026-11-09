@@ -7,6 +7,7 @@ import {
   type SubsetReport,
   WARNING_TEXT,
   defaultTicks,
+  keptHolds,
   mergeChanges,
   spentOf,
   subsetReport,
@@ -23,7 +24,7 @@ import { CaseDialog } from '../CaseDialog';
 import { failingChecks } from '../parts';
 import { useResultsTickN } from '../results';
 import { tokens, usd, useSpend } from '../spend';
-import { houseRulesFor, openCompare, useDesigner } from '../state';
+import { houseKeptFor, houseRulesFor, openCompare, useDesigner } from '../state';
 import { designerCannotUse } from '../stream';
 import { keepTogether } from '../words';
 import { Mark } from './Mark';
@@ -35,6 +36,7 @@ import {
   cardResult,
   cardVerdict,
   headLabel,
+  madeWith,
   midLine,
   nowOf,
   planMoved,
@@ -48,9 +50,18 @@ import {
   pressScope,
   scopePrice,
 } from './propose';
+import { pressCarryOn, pressKeep } from './resume';
 import { focusInLog, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
-import { type LiveRun, actProposal, useBusy, useRulesKey, useTalk } from './useTalk';
+import {
+  type LiveRun,
+  type ResumeView,
+  act,
+  actProposal,
+  useBusy,
+  useRulesKey,
+  useTalk,
+} from './useTalk';
 import { EMPTY_VIEW, useProposalView } from './view';
 
 /**
@@ -191,15 +202,43 @@ function GroupTick({
   );
 }
 
+/**
+ * Steps cut off part-way and sent again (a locked phone, a dropped connection), with what the
+ * cut-off attempts may still be billed: the attempt before each later one for the same step.
+ */
+function cutOffs(usage: CardModel['usage'], names: Record<string, string>) {
+  const out: { name: string; usd: number | null }[] = [];
+  usage.forEach((u, i) => {
+    if (!u.estimated || !usage.slice(i + 1).some((v) => v.step === u.step)) return;
+    out.push({ name: names[u.step] ?? 'A step', usd: u.usd });
+  });
+  return out;
+}
+
 /** The cost of a card's run, as a button opening its details (UX §9.3). */
-export function TurnCost({ usage, fixes = 0 }: { usage: CardModel['usage']; fixes?: number }) {
+export function TurnCost({
+  usage,
+  fixes = 0,
+  names = {},
+  atMost = false,
+}: {
+  usage: CardModel['usage'];
+  fixes?: number;
+  /** Step names by key, for the steps cut off and sent again. */
+  names?: Record<string, string>;
+  /** A design run's: an attempt cut off is counted at its most, so the figure is "up to". */
+  atMost?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const ai = useAi();
   if (!usage.length) return null;
+  const cut = cutOffs(usage, names);
   const s = spentOf(usage);
   const t = usageTotals(usage);
   const text =
-    s.usd === null ? `${tokens(s.tokens)} tokens` : `${s.estimated ? '~' : ''}${usd(s.usd)}`;
+    s.usd === null
+      ? `${tokens(s.tokens)} tokens`
+      : `${s.estimated ? (atMost ? 'up to ' : '~') : ''}${usd(s.usd)}`;
   const model = usage[0]?.model ?? ai?.model ?? '';
   return (
     <span className="talk-cost">
@@ -217,10 +256,34 @@ export function TurnCost({ usage, fixes = 0 }: { usage: CardModel['usage']; fixe
           {plural(usage.length, 'request')} · {tokens(t.tokens - t.cached)} tokens in,{' '}
           {tokens(t.cached)} from cache · {tokens(usage.reduce((a, u) => a + u.output, 0))} out
           {fixes ? ` · ${plural(fixes, 'fix round')}` : ''} · {model}
+          {cut.map((c, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: one line per cut-off attempt, in order
+            <span key={i} className="talk-cost-cut">
+              {' '}
+              {c.name} was cut off and sent again
+              {c.usd !== null ? `: up to ${usd(c.usd)} extra may be billed.` : '.'}
+            </span>
+          ))}
         </span>
       )}
     </span>
   );
+}
+
+const NO_IDS: string[] = [];
+/**
+ * The ids of pieces kept where they are on the card's result (for the Kept tag): only the card
+ * on the plan reads it, so a folded card never re-renders as the view changes.
+ */
+function useKeptIds(levelId: string, shown: boolean): string[] {
+  const kept = useTalk((s) => (shown && s.conv?.levelId === levelId ? s.conv.kept : null));
+  const target = useProposalView((s) => (shown ? s.target : null));
+  return useMemo(() => {
+    if (!kept?.length || !target) return NO_IDS;
+    return Object.values(target.items)
+      .filter((it) => kept.some((k) => (k.itemId ? k.itemId === it.id : keptHolds(k, it))))
+      .map((it) => it.id);
+  }, [kept, target]);
 }
 
 /** The plan as the ticked changes would make it, and what that fails and costs (150 ms). */
@@ -252,6 +315,7 @@ function useSubset(
               waived: [...card.waivers.map((w) => w.key), ...waive],
               renovation: !!project.renovation,
               rules: houseRulesFor(card.levelId),
+              kept: houseKeptFor(card.levelId, madeWith(card)),
             }),
           ),
         ),
@@ -273,6 +337,113 @@ interface Props {
   onSwipe?: (dir: 1 | -1) => void;
 }
 
+const coarsePointer = () =>
+  typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
+
+/**
+ * The running card's time left: on a phone, keep the screen open (locking it pauses the
+ * design); on a computer, just how long. Worked out again only as each step ends.
+ */
+function TimeLeftLine({ live }: { live: LiveRun }) {
+  const coarse = useMemo(coarsePointer, []);
+  const left = live.left?.text;
+  if (!left || live.paused) return null;
+  const problems = live.state.steps.reduce((t, s) => t + (s.fixing?.problems ?? 0), 0);
+  const lead = problems ? `fixing ${plural(problems, 'problem')} · ` : '';
+  if (!coarse) {
+    return (
+      <p className="talk-card-note" data-time-left="">
+        Designing · {lead}
+        {left}
+      </p>
+    );
+  }
+  const refused = live.wake === 'refused' || live.wake === 'unsupported';
+  return (
+    <div data-time-left="">
+      <p className="talk-card-note">
+        <strong>Keep this screen open</strong> · {lead}
+        {left}
+        {refused ? '. Your screen may turn off on its own: tap it now and then.' : ''}
+      </p>
+      {!refused && (
+        <p className="field-hint">
+          Locking your phone pauses the design. It carries on when you come back.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Why an interrupted design stopped, as its card says it. */
+const STOPPED_BECAUSE: Record<'closed' | 'resent' | 'approved' | 'tab', string> = {
+  closed: 'This design stopped when the page closed.',
+  resent: 'This design stopped: a step was cut off again and again while the screen was off.',
+  approved: 'This design stopped before going past what it was priced at.',
+  tab: 'This design stopped at this tab’s limit.',
+};
+
+/** A run the page lost: running in another tab, carrying on, or asking once. */
+function ResumeNote({
+  cardKey,
+  view,
+  busy,
+}: {
+  cardKey: string;
+  view: ResumeView;
+  busy: boolean;
+}) {
+  if (view.kind === 'other-tab') return <p className="talk-card-note">Designing in another tab.</p>;
+  if (view.kind === 'carrying-on')
+    return <p className="talk-card-note">Picking up where it stopped…</p>;
+  if (view.kind === 'offline') {
+    return (
+      <p className="talk-card-note">
+        Waiting for the connection…{' '}
+        {view.total === null ? '' : `${view.done} of ${view.total} done.`}
+      </p>
+    );
+  }
+  const kept =
+    view.total === null
+      ? 'Nothing had finished yet.'
+      : `${view.done} of ${view.total} rooms are done and kept.`;
+  const at = view.figure !== null ? ` · at most ${usd(view.figure)}` : '';
+  return (
+    <div className="talk-stopped" data-resume="">
+      <p>
+        {STOPPED_BECAUSE[view.why]} {kept}
+        {view.changed ? ' Your plan has changed since.' : ''}
+      </p>
+      {view.model && (
+        <p>
+          Carry on with {view.model.now}? It was started with {view.model.was}.
+        </p>
+      )}
+      <div className="button-row">
+        <button
+          type="button"
+          className="btn btn-small btn-primary"
+          data-spends=""
+          disabled={busy || view.pending}
+          onClick={() => void pressCarryOn(cardKey)}
+        >
+          {view.changed ? 'Carry on with the plan as it is now' : 'Carry on'}
+          {at}
+        </button>
+        <button
+          type="button"
+          className="btn btn-small"
+          disabled={busy || view.pending}
+          onClick={() => void pressKeep(cardKey)}
+        >
+          Keep as it is
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** What a folded card last said of itself (its checks need the plan worked out again). */
 const verdicts = new Map<string, { text: string; total: number; rules: string }>();
 
@@ -286,7 +457,14 @@ function foldedLine(card: CardModel, rules: string): string {
   if (!said) return inNow ? ` · Accepted ${inNow}` : '';
   if (inNow && inNow >= said.total) return ' · In your renovation';
   // Worked out before your rules last changed: it says so rather than an old verdict (QA B5).
-  const text = said.rules === rules ? said.text : 'Not checked against your rules yet';
+  // Only rules count here: a piece kept since doesn't apply to a version made before it.
+  const rulesOf = (key: string) =>
+    key
+      .split('|')
+      .filter((x) => x && !x.startsWith('k:'))
+      .join('|');
+  const text =
+    rulesOf(said.rules) === rulesOf(rules) ? said.text : 'Not checked against your rules yet';
   return ` · ${text}${inNow ? ` · Accepted ${inNow} of ${said.total}` : ''}`;
 }
 
@@ -306,13 +484,26 @@ export const ProposalCard = memo(function ProposalCard({
   const whyAll = useTalk((s) => s.why === card.key);
   const onPlan = useEditor((s) => shown && !!s.preview && s.preview.side === 'version');
   const hover = useTalk((s) => (s.hover?.card === card.key ? s.hover.change : null));
+  const resume = useTalk((s) => s.resume[card.key]);
   const planHover = useEditor((s) => (shown && s.hover?.kind === 'item' ? s.hover.id : null));
   const busy = useBusy();
   const [accepting, setAccepting] = useState(false);
   // A version to compare: this card's, once accepted (or an earlier design's).
   const versionId = card.design?.id ?? card.option?.version ?? null;
   const comparable = useDesigner((s) => !!versionId && s.designs.some((d) => d.id === versionId));
-  const running = card.status === 'running';
+  // Running in the record, with no run here, no checkpoint to carry on from and nothing to say
+  // about it (an older build dropped the checkpoint): shown as stopped, as it is.
+  // (Not while a run is being started here: its option is written running a moment before
+  // its run shows.)
+  const starting = useDesigner((s) => s.starting);
+  const stale =
+    card.status === 'running' &&
+    card.kind === 'proposal' &&
+    !live &&
+    !card.option?.run &&
+    !resume &&
+    !starting;
+  const running = card.status === 'running' && !stale;
   const [expanded, setExpanded] = useState(newest);
   // The newest card opens; once a newer one comes it folds to its line (opened again by a
   // tap), so a long conversation works out one or two cards, not every one (QA P4-6).
@@ -324,10 +515,13 @@ export const ProposalCard = memo(function ProposalCard({
   }, [newest]);
   // Worked out only while it is open or on the plan; folded, it shows what it said last.
   const active = expanded || shown;
+  // The pointing tip, once per conversation; kept pieces tag their rows.
+  const tipSeen = useTalk((s) => !!s.conv?.tips.includes('point'));
+  const keptIds = useKeptIds(card.levelId, shown);
   const tick = useResultsTickN();
   // A rule kept, changed or deleted re-checks the card, with no request (3a.5).
   const rulesKey = useRulesKey(card.levelId);
-  const ruleCount = rulesKey ? rulesKey.split('|').length : 0;
+  const ruleCount = rulesKey ? rulesKey.split('|').filter((x) => !x.startsWith('k:')).length : 0;
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
   const r = useMemo(
     () => (active ? timed(() => cardResult(project, card)) : null),
@@ -482,7 +676,7 @@ export const ProposalCard = memo(function ProposalCard({
     },
     [card.key],
   );
-  // A piece tapped on the plan opens its row (slice 2's Why); one that didn't change says so.
+  // A piece tapped on the plan opens its row (slice 2's Why); the popover says the rest.
   useEffect(() => {
     if (!shown) return;
     return useEditor.subscribe((s, prev) => {
@@ -499,11 +693,10 @@ export const ProposalCard = memo(function ProposalCard({
             'nearest',
           ),
         );
-      } else {
-        useStore.setState({ toast: { text: `Not changed in ${card.title}`, at: Date.now() } });
       }
+      // Not changed in it: the popover says so (slice 3a), no toast.
     });
-  }, [shown, changes, card.key, card.title]);
+  }, [shown, changes, card.key]);
 
   if (!expanded && !r) {
     // Folded and not on the plan: what it said last (nothing is worked out for it).
@@ -665,6 +858,8 @@ export const ProposalCard = memo(function ProposalCard({
       {planMoved(project, card) && !card.accepted.length && (
         <p className="field-hint">Made on your plan as it was; checked again on it as it is now.</p>
       )}
+      {running && live && <TimeLeftLine live={live} />}
+      {running && !live && resume && <ResumeNote cardKey={card.key} view={resume} busy={busy} />}
       {running && (
         <ol className="talk-progress" aria-label="Progress">
           {progress.map((st) => (
@@ -682,11 +877,15 @@ export const ProposalCard = memo(function ProposalCard({
               {st.status === 'done'
                 ? 'Placed and checked'
                 : st.status === 'running'
-                  ? st.wait
-                    ? `${st.wait.net ? 'Connection dropped; trying again' : st.wait.server ? 'The provider had a problem; trying again' : 'Busy; trying again'} in ${st.wait.seconds} s (${st.wait.attempt} of ${st.wait.server ? 1 : 2})`
-                    : st.fixing
-                      ? `Checking… fixing ${plural(st.fixing.problems, 'problem')}`
-                      : 'Placing…'
+                  ? st.wait?.away
+                    ? typeof navigator !== 'undefined' && navigator.onLine === false
+                      ? 'Waiting for the connection…'
+                      : 'Paused while you’re away; it carries on when you’re back'
+                    : st.wait
+                      ? `${st.wait.net ? 'Connection dropped; trying again' : st.wait.server ? 'The provider had a problem; trying again' : 'Busy; trying again'} in ${st.wait.seconds} s (${st.wait.attempt} of ${st.wait.server ? 1 : 2})`
+                      : st.fixing
+                        ? `Checking… fixing ${plural(st.fixing.problems, 'problem')}`
+                        : 'Placing…'
                   : st.status === 'failed'
                     ? (st.error ?? 'Didn’t work')
                     : 'Waiting'}
@@ -699,7 +898,7 @@ export const ProposalCard = memo(function ProposalCard({
           <p>
             {live.pausedBy === 'tab'
               ? 'You’ve reached your limit for this tab.'
-              : `This design has used what it was priced at (${usd(live.approved ?? 0)}).`}{' '}
+              : `The next step may take this design past what it was priced at (${usd(live.approved ?? 0)}).`}{' '}
             It has used {usd(live.state.usage.reduce((t, u) => t + (u.usd ?? 0), 0))} so far
             {live.remaining !== null
               ? `; finishing it may take up to ${usd(live.remaining)} more.`
@@ -746,7 +945,7 @@ export const ProposalCard = memo(function ProposalCard({
       {!running && card.status !== 'failed' && changes.length === 0 && !accepted.length && (
         <p className="talk-card-note">No changes from your plan as it is.</p>
       )}
-      {card.status === 'stopped' && missing.length > 0 && (
+      {(card.status === 'stopped' || stale) && missing.length > 0 && (
         <div className="talk-stopped">
           <p>
             {card.note ? `${card.note} ` : ''}Stopped before {missing.map((s) => s.name).join(', ')}{' '}
@@ -893,7 +1092,12 @@ export const ProposalCard = memo(function ProposalCard({
                               })
                             }
                           >
-                            <span>{keepTogether(c.text)}</span>
+                            <span>
+                              {keepTogether(c.text)}
+                              {keptIds.some((k) => c.items.target.includes(k)) && (
+                                <span className="talk-kept-tag"> Kept</span>
+                              )}
+                            </span>
                             <span className="talk-row-why" aria-hidden="true">
                               ›
                             </span>
@@ -1082,6 +1286,27 @@ export const ProposalCard = memo(function ProposalCard({
           )}
         </dl>
       )}
+      {onPlan && !tipSeen && (
+        <p className="talk-app-line talk-tip">
+          <span className="talk-app-icon">
+            <Mark kind="dot" />
+          </span>
+          <span className="talk-app-text">
+            <span>
+              {window.matchMedia?.('(pointer: coarse)').matches
+                ? 'Tap a piece on the plan to comment on it or ask why it’s there. Press and hold empty floor to point at a spot.'
+                : 'Click a piece on the plan to comment on it or ask why it’s there. Right-click empty floor to point at a spot.'}
+            </span>
+            <button
+              type="button"
+              className="link-btn"
+              onClick={() => void act({ type: 'tipSeen', tip: 'point' })}
+            >
+              Got it
+            </button>
+          </span>
+        </p>
+      )}
       {!allIn && card.status !== 'failed' && (changes.length > 0 || running) && (
         <div className="talk-actions">
           <button
@@ -1253,6 +1478,11 @@ export const ProposalCard = memo(function ProposalCard({
           <TurnCost
             usage={card.usage}
             fixes={Object.values(card.input.spaces).reduce((t, x) => t + (x.fixes ?? 0), 0)}
+            atMost
+            names={{
+              layout: 'The layout',
+              ...Object.fromEntries(Object.entries(card.input.spaces).map(([k, x]) => [k, x.name])),
+            }}
           />
         </div>
       )}

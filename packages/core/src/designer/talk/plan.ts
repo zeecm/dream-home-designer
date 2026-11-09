@@ -116,6 +116,7 @@ export function roomPrompts(
     .map((s) =>
       roomStep(ctx, s, r.level, aliases, {
         concept: design.concept,
+        ...(opts.kept?.length ? { kept: opts.kept } : {}),
         // As the run sends it: the storage lens's block, unless the lens is off.
         ...(!lensOn(opts, 'storage')
           ? { storage: false as const }

@@ -716,7 +716,11 @@ again with the steer (`Steer`, weights only: protected roles left out last, `dro
 preferred piece narrowed costs more and is looked at again at full width, gains a little against
 a wall; swaps go on to one that keeps it whole), kept only if no worse (`piecesNoWorse`, no new
 hard key from `spaceHardKeys`, the one helper for a space's hard checks). The benchmark's
-layouts are unchanged and cost about the same. `owns` is in 3a's conversation record v3.
+layouts are unchanged and cost about the same. The `owns` question key is in 3a's conversation
+record v3; the brief's `owns` field is new within v3 (no bump) and read tolerantly, so a 3a build
+writing a conversation drops it and the next load takes it back from the meter (`ownsFromMeter`).
+The solver's memo keys carry the house rules where a choice depends on them (the steered solve, a
+settled outcome); the plain first solve stays shared.
 
 **AI designer v2, slice 3b PR 2 (the second look, criterion 41, 8 Nov):** core `designer/look/`.
 A Thorough run with a model that can see (`looksAt`, `VISION` and the families `claude-*`,
@@ -736,7 +740,10 @@ history, and the events since the last reply see past it); one the app can't hol
 note; intent, swap, remove and add are edits to the answer
 with no request, anything else a room request. The round counts against `FIX_PER_RUN` and is
 kept only if `lookNoWorse`. Priced in `estimateRun` (`look: true`: the step and one round in
-`fix`). Stored as `ProposalOption.look`; proposals are records of 3 (`PROPOSAL_RECORD_VERSION`).
+`fix`). Stored as `ProposalOption.look`; proposals are records of 4 (`PROPOSAL_RECORD_VERSION`;
+3 is house rules part B's `madeAt` and `kept`). The option's kept pieces are never edited: a
+taste fix about one is dropped ('kept'), and a round's request carries the kept set. The look's
+request and its round are reserved in the run's checkpoint like any step (`StepKind` 'look').
 The card shows "Second look": its line, three notes then "and N more", its cost. WebKit draws
 the picture's sans-serif labels fine (checked on a screenshot). Not yet: a refused picture ends
 as `failed` (the design stands), case files and "Save a case" (PR 3), cloud runs.
@@ -769,6 +776,18 @@ Idle frames in 5 s (SwiftShader, 1440 × 900): 3D view 34 → 0, Split 87 → 0.
 16.2 min (242, the 8 new ones about 40 s of it) after. Small, because tests rarely leave a view
 idle for long and the contexts tests leave open were already closed (§7); a page left open
 in 3D or Split no longer costs anything, only one left walking.
+
+**AI runs that survive a locked phone, part 1 (8 Nov):** spec `docs/specs/locked-phone-runs.md`.
+A design run checkpoints after every finished step (`ProposalOption.run` in `dhd-talk`) and holds
+the Web Lock `dhd-run:{id}`. A step cut off while the page was hidden goes again on return, not as
+a network retry; away over 10 min, or after a reload, the card carries on by itself (within 10 min,
+plan unchanged, within the approved figure and the tab's limit, same model) or asks once: Carry on
+· at most US$x, or Keep as it is. Another tab holding the run shows "Designing in another tab" and
+queues for the lock. A screen wake lock is held while it runs (`talk/wakeLock.ts`); the card says
+the time left (`talk/timeLeft.ts`), on phones with "Keep this screen open". Money guards (tech-lead
+review): a step is sent again at most twice and never past the figure or the tab's limit; spending
+and the steps in flight (at their most) are written as they happen and counted on carrying on;
+Stop or another plan opened marks the checkpoint stopped and writes the end by plan id.
 
 ## 5. Owner to-dos
 

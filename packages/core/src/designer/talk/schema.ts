@@ -1,6 +1,7 @@
 import { z } from 'zod';
+import { Kept, MAX_KEPT } from '../rules/kept';
 import { Rule } from '../rules/schema';
-import { Concept, DesignBrief, Lock, SpaceDesign, SpaceStatus, Usage } from '../schema';
+import { Aspect, Concept, DesignBrief, Lock, SpaceDesign, SpaceStatus, Usage } from '../schema';
 import { clean } from '../util';
 
 /**
@@ -12,19 +13,65 @@ import { clean } from '../util';
  */
 
 /**
+ * 4: pointing at the plan (slice 3a: the composer's chips, a sent message's pointers, kept
+ * pieces and their 'kept' log line, the tips seen).
  * 3: house rules (slice 3a: the conversation's rules, a reply's rule offer, a Decision's rule).
- * 2: the talk call (a person's Send, the designer's replies, hand edits). 1 and 2 are read as 3.
- * A build that knows only 2 sees a 3 as newer and goes read-only, so it never drops the rules.
+ * 2: the talk call (a person's Send, the designer's replies, hand edits). 1 to 3 are read as 4,
+ * with the newer parts empty. A build that knows only 3 sees a 4 as newer and goes read-only,
+ * so it never drops kept pieces (while the brief still holds them in place) or the chips.
  */
-export const TALK_RECORD_VERSION = 3;
+export const TALK_RECORD_VERSION = 4;
 /**
- * Proposals: 3, an option's second look (slice 3b; house rules left them at 2). 1 and 2 are read
- * as 3 (defaults only). A build that knows only 2 sees a 3 as newer and leaves it alone, so it
- * never drops the look.
+ * 4: an option's second look (slice 3b). 3: an option's `madeAt` and the kept pieces it was made
+ * with (slice 3a). 1 to 3 are read as 4 with defaults (no look; `madeAt` worked out from the
+ * proposal's time). A build that knows only 3 reads a 4 as nothing, so it never writes one back
+ * without the look (or, for 2, without `madeAt` and the kept pieces).
  */
-export const PROPOSAL_RECORD_VERSION = 3;
+export const PROPOSAL_RECORD_VERSION = 4;
 /** Rules kept per conversation, the recently deleted (for Undo) included. */
 export const MAX_RULE_RECORDS = 40;
+/** Pointers in one message (UX §1.2). */
+export const MAX_POINTERS = 5;
+
+/**
+ * What the person pointed at on the plan (slice 3a §1): a piece, a door or window, an electrical
+ * point, a wall, a room or a spot, on their plan or on a version, with the words the chip and the
+ * model are given. The target is looked up again when shown ("(gone)" is never stored).
+ */
+export const Pointer = z.object({
+  id: z.string(),
+  kind: z.enum(['item', 'opening', 'point', 'wall', 'room', 'spot']),
+  targetId: z.string().nullable(),
+  /** The spot, a wall's spot along it, or the target's centre (where it was, if gone). */
+  at: z.object({ x: z.number(), y: z.number() }),
+  levelId: z.string(),
+  /** Its level's name, when the home has several (said on the chip). */
+  levelName: z.string().max(60).nullable().default(null),
+  version: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('plan') }),
+    z.object({
+      kind: z.literal('option'),
+      proposalId: z.string(),
+      letter: z.string().max(1),
+      /** "V4", "V4B". */
+      title: z.string().max(8),
+    }),
+  ]),
+  label: z.string().max(80),
+  /** The whole label, when `label` had to be cut (the chip's tooltip; never sent). */
+  full: z.string().max(300).optional(),
+  room: z.string().max(80).nullable(),
+  /** Where it is, as the change rows say it ("by the window"). */
+  where: z.string().max(120),
+  /** Its state in that version ("added in V4", "not changed"). */
+  state: z.string().max(80),
+});
+export type Pointer = z.infer<typeof Pointer>;
+
+/** The pointers of a list this build can read, at most five. */
+const Pointers = z
+  .array(z.unknown())
+  .transform((items) => readable(Pointer, items).slice(0, MAX_POINTERS));
 /** Turns kept in one conversation; the oldest go first. */
 export const MAX_TURNS = 500;
 /** Decisions kept, and how long each may be. */
@@ -249,6 +296,13 @@ export const TalkEvent = z.discriminatedUnion('type', [
     lines: z.array(z.string().max(TALK_LIMITS.line)).max(3),
     more: z.number().int().min(0),
   }),
+  /** A piece kept where it is (Keep this): the app's line, with Undo while it is the newest. */
+  z.object({
+    type: z.literal('kept'),
+    keptId: z.string(),
+    text: z.string().max(TALK_LIMITS.note),
+    undone: z.boolean().default(false),
+  }),
   /** A house rule kept, changed, deleted or replaced: the app's line, with Your rules. */
   z.object({
     type: z.literal('rule'),
@@ -282,6 +336,8 @@ export const Turn = z.discriminatedUnion('kind', [
     sent: z.string().max(SENT_CHARS).optional(),
     /** Make this a rule (UX §3.8): shown as the app's line, not a bubble. */
     ruleAsk: z.object({ decisionId: z.string() }).optional(),
+    /** What it pointed at (chips above the words; frozen into `sent` as quoted data). */
+    pointers: Pointers.optional(),
     /** Its reply: running, answered, failed (Try again), or cut off (Stop, a closed tab). */
     reply: z
       .object({
@@ -452,6 +508,26 @@ export const Conversation = z.object({
   turns: z.array(Turn).max(MAX_TURNS),
   /** The composer, kept across closes and reloads. */
   draft: z.string().max(DRAFT_CHARS).default(''),
+  /** The composer's chips (slice 3a), kept with the draft. */
+  draftPointers: Pointers.default([]),
+  /** Pieces kept where they are (Keep this), at most 30. */
+  kept: z
+    .array(z.unknown())
+    .transform((items) => readable(Kept, items).slice(-MAX_KEPT))
+    .default([]),
+  /**
+   * Kept pieces let go (with `until`): versions made while they were kept are still placed
+   * with them, so letting go never rewrites a version already made. The newest 30.
+   */
+  keptGone: z
+    .array(z.unknown())
+    .transform((items) => readable(Kept, items).slice(-MAX_KEPT))
+    .default([]),
+  /** One-time tips seen (the pointing tip). */
+  tips: z
+    .array(z.string())
+    .transform((t) => t.filter((x): x is 'point' => x === 'point'))
+    .default([]),
   /** Short names (R1, W3, P12) the talk calls use, never renamed once given. */
   aliases: z.record(z.string()).default({}),
   /**
@@ -515,10 +591,91 @@ export const OptionLook = z.object({
   at: z.string(),
 });
 export type OptionLook = z.infer<typeof OptionLook>;
+/** How far ahead an interrupted run carries on by itself, from its last progress (ms). */
+export const RESUME_MS = 10 * 60_000;
+
+/**
+ * A design run's checkpoint (docs/specs/locked-phone-runs.md, part 1): what it needs to carry
+ * on from its last finished step when the page comes back, or after a reload. Written with the
+ * option's saved rooms (one write), removed when the run ends. Never a key or a price table.
+ */
+export const RunCheckpoint = z.object({
+  /** Its Web Lock is `dhd-run:{id}`: a checkpoint whose lock nobody holds was interrupted. */
+  id: z.string().max(80),
+  startedAt: z.string(),
+  /**
+   * Its last progress: a step finished (saved), or it started. A request metered or a step
+   * sent writes `spent` and `inflight` without moving it.
+   */
+  at: z.string(),
+  provider: z.enum(['anthropic', 'openai', 'gemini']),
+  model: z.string().max(120),
+  /** What it asks for, as planned (what is done so far is below). */
+  plan: z.object({
+    layout: z.object({ previous: Concept.nullable().optional() }).nullable(),
+    rooms: z.union([z.literal('all'), z.array(z.string())]),
+    skip: z.array(z.string()).optional(),
+    feedback: z.string().max(DRAFT_CHARS).optional(),
+    locks: z.array(Lock).optional(),
+    previous: z.record(SpaceDesign).optional(),
+    keep: z.record(z.array(Aspect)).optional(),
+    talk: z
+      .object({
+        intent: z.string(),
+        said: z.string(),
+        decided: z.array(z.string()),
+        others: z.array(z.string()).optional(),
+      })
+      .optional(),
+  }),
+  /** The room rows before the layout is known. */
+  expected: z.array(z.object({ key: z.string(), label: z.string() })).optional(),
+  layout: z.enum(['none', 'left', 'done']),
+  /** The rooms it designs, once known (after the layout, or from the start without one). */
+  rooms: z.array(z.string()).nullable(),
+  /** Fix requests it may still send. */
+  fixesLeft: z.number().int().min(0),
+  /** The most it was approved for (US$), and what it has spent of it (as each request is metered). */
+  approved: z.number().min(0).nullable(),
+  spent: z.number().min(0),
+  /**
+   * Steps sent and not yet back, with the most each may cost: a page that dies mid-step never
+   * meters it, so carrying on counts this as spent.
+   */
+  inflight: z
+    .array(z.object({ step: z.string(), high: z.number().min(0) }))
+    .max(20)
+    .default([]),
+  /** Stopped by the person (Stop, or another plan opened): never carried on. */
+  stopped: z.boolean().default(false),
+  /** Waiting at a limit when it was last saved. */
+  paused: z.enum(['tab', 'approved', 'resent']).nullable().default(null),
+  /** How long its finished steps took (for the time left). */
+  times: z
+    .array(z.object({ kind: z.enum(['layout', 'room', 'fix']), ms: z.number().min(0) }))
+    .max(60)
+    .default([]),
+});
+export type RunCheckpoint = z.infer<typeof RunCheckpoint>;
 
 /** One option (A, B, C) of a proposal: a version as the runner builds it, not yet a version. */
 export const ProposalOption = z.object({
   letter: z.enum(['A', 'B', 'C']),
+  /**
+   * When this option was asked for (Another idea comes after the card): what was kept by then
+   * is what it is placed with. Absent on older records: the proposal's own time. (Added with
+   * proposal records 3: a build that knows only 2 never reads these, so never drops it.)
+   */
+  madeAt: z.string().optional(),
+  /**
+   * The kept pieces it was made with, as `brief` is: read as they were, whatever is kept or let
+   * go since, the conversation started over or another level designed. Absent on older
+   * records: worked out from `madeAt` (keptBefore).
+   */
+  kept: z
+    .array(z.unknown())
+    .transform((items) => readable(Kept, items).slice(-MAX_KEPT))
+    .optional(),
   name: z.string().max(TALK_LIMITS.name),
   /** The id its pieces are seeded with, and its version's id once accepted. */
   designId: z.string(),
@@ -566,6 +723,11 @@ export const ProposalOption = z.object({
   version: z.string().nullable().default(null),
   /** Its second look (Thorough, a model that can see); null: none (yet). */
   look: OptionLook.nullable().default(null),
+  /**
+   * While it runs: where to carry on from (an older build leaves it out). One that can't be
+   * read is dropped, never the proposal with it: the card is then today's stopped one.
+   */
+  run: RunCheckpoint.optional().catch(undefined),
 });
 export type ProposalOption = z.infer<typeof ProposalOption>;
 

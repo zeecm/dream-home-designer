@@ -2,6 +2,7 @@ import type { Project } from '../../schema';
 import { type AliasMap, resolveAlias } from '../aliases';
 import { categoriesFor, resolveAsset } from '../catalogue';
 import type { DesignResult } from '../result';
+import { type Kept, keptHolds } from '../rules/kept';
 import { type OfferCtx, ruleOffer } from '../rules/offer';
 import { ruleFromReply } from '../rules/parse';
 import type { Rule } from '../rules/schema';
@@ -24,7 +25,13 @@ import type { LookAnswer, LookFinding, LookSuggest } from './findings';
  * Whatever is acted on is kept only if the plan comes out no worse (`lookNoWorse`).
  */
 
-export type DropWhy = 'target' | 'checks-disagree' | 'taste-once' | 'not-designed' | 'suggest';
+export type DropWhy =
+  | 'target'
+  | 'checks-disagree'
+  | 'taste-once'
+  | 'not-designed'
+  | 'suggest'
+  | 'kept';
 
 export interface LookEdit {
   space: string;
@@ -64,6 +71,12 @@ export interface LookCtx {
   answers: Record<string, SpaceDesign>;
   /** The project's own furniture models (a swap or an addition may name one). */
   models?: Project['models'];
+  /**
+   * The pieces kept where they are that the option was made with (slice 3a): never moved,
+   * swapped or removed by the look. A taste fix about one is dropped ('kept'); a P1–P4 fix
+   * about one goes back as a round, whose request says it is kept.
+   */
+  kept?: readonly Kept[];
 }
 
 const NOTE = (line: string) => `Designer’s second look: ${line}`;
@@ -98,6 +111,12 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
   const refOf = (alias: string | null): string | null => {
     const id = resolveAlias(aliases, alias);
     return id && level.items[id] ? (result.refs[id] ?? null) : null;
+  };
+  const kept = ctx.kept ?? [];
+  /** Whether a piece on the plan stands for a kept one. */
+  const isKept = (id: string | null) => {
+    const it = id ? level.items[id] : undefined;
+    return !!it && kept.some((k) => k.itemId === it.id || keptHolds(k, it));
   };
   for (const f of answer.findings) {
     const id = resolveAlias(aliases, f.target.id);
@@ -149,6 +168,12 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
       plan.dropped.push({ finding: f, why: 'not-designed' });
       continue;
     }
+    // A kept piece stays as it is: a suggestion about it (its taste fix) is not acted on.
+    const onKept = f.suggest?.kind !== 'add' && (isKept(about) || (!about && isKept(id)));
+    if (onKept && f.principle === 'taste') {
+      plan.dropped.push({ finding: f, why: 'kept' });
+      continue;
+    }
     let s = f.suggest;
     // A swap or an addition names a catalogue piece that suits the room (no bed in the living
     // room), as a room step's answer would; one that doesn't is dropped.
@@ -166,7 +191,7 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
     if (target) plan.targets.push(target);
     plan.acted.push(line);
     const ref = about && level.items[about] ? (result.refs[about] ?? null) : null;
-    if (s && EXECUTES.has(s.kind) && (s.kind === 'add' || ref)) {
+    if (s && EXECUTES.has(s.kind) && (s.kind === 'add' || (ref && !onKept))) {
       const refs: Record<string, string> = {};
       for (const a of [s.faces, s.near]) {
         const r = refOf(a);

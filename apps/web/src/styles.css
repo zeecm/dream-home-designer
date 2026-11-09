@@ -8992,3 +8992,322 @@ html[data-proposal] .plan-svg g.clearance {
     flex-wrap: wrap;
   }
 }
+
+/* Pointing at the plan (slice 3a): chips, the popover, the Here pin and the hold ring. */
+.talk-pchips {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 0;
+  overflow-x: auto;
+  list-style: none;
+  overscroll-behavior-x: contain;
+}
+.talk-bubble .talk-pchips {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+.talk-pchip {
+  display: flex;
+  flex: none;
+  align-items: center;
+  max-width: 240px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--text);
+}
+.talk-bubble .talk-pchip {
+  background: var(--surface);
+}
+.talk-pchip.ring {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.talk-pchip-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px 0 10px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: var(--fs-hint);
+  cursor: pointer;
+}
+.talk-bubble .talk-pchip-label {
+  padding-right: 10px;
+}
+.talk-pchip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.talk-pchip.gone .talk-pchip-label {
+  color: var(--muted);
+}
+.talk-pchip-x {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  margin-right: 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.talk-pchip-x:hover {
+  background: var(--active);
+  color: var(--text);
+}
+.talk-bubble-text {
+  margin: 0;
+}
+@media (pointer: coarse) {
+  .talk-pchip {
+    height: 44px;
+  }
+  .talk-pchip-label {
+    min-height: 44px;
+  }
+  .talk-pchip-x {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    margin-right: 0;
+  }
+}
+
+.talk-pop {
+  position: absolute;
+  right: auto;
+  bottom: auto;
+  margin: 0;
+  max-width: none;
+  color: var(--text);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 10px 0 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+.talk-pop-sheet::backdrop {
+  background: rgba(0, 0, 0, 0.12);
+}
+.talk-pop-sheet {
+  position: fixed;
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  z-index: 60;
+  max-height: 70vh;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.14);
+}
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  .talk-pop-sheet {
+    right: auto;
+    width: min(420px, 60vw);
+    max-height: calc(100vh - 16px);
+  }
+  /* What was tapped is on the left: the sheet takes the right. */
+  .talk-pop-sheet.talk-pop-right {
+    left: auto;
+    right: 0;
+  }
+}
+.talk-pop-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px 0 14px;
+}
+.talk-pop-title {
+  margin: 4px 0 0;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.talk-pop-state {
+  margin: 2px 14px 6px;
+  font-size: var(--fs-hint);
+  color: var(--muted);
+}
+.talk-pop-state.negative {
+  color: var(--negative);
+}
+.talk-pop-rows {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.talk-pop-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: var(--fs-body);
+  text-align: left;
+  cursor: pointer;
+}
+.talk-pop-row:hover:not(:disabled),
+.talk-pop-row:focus-visible {
+  background: var(--raised);
+}
+.talk-pop-row:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.talk-pop-row[aria-pressed="true"] {
+  font-weight: 600;
+}
+.talk-pop-price {
+  color: var(--muted);
+  font-size: var(--fs-hint);
+}
+.talk-pop-rule {
+  width: 100%;
+  margin: 6px 0;
+  border: 0;
+  border-top: 1px solid var(--rule);
+}
+.talk-pop-why,
+.talk-pop-note,
+.talk-pop-foot {
+  margin: 2px 14px 6px;
+  font-size: var(--fs-hint);
+  color: var(--muted);
+}
+.talk-pop-sheet .talk-pop-row {
+  min-height: 48px;
+}
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  .talk-pop-sheet .talk-pop-row {
+    min-height: 44px;
+  }
+}
+@media (pointer: coarse) {
+  .talk-pop-x {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* On the plan: what a chip lights (the selection's halo), the Here pin, Was here. */
+.ptr-lit {
+  fill: color-mix(in srgb, var(--accent) 12%, transparent);
+  stroke: var(--accent);
+  stroke-width: 3px;
+  vector-effect: non-scaling-stroke;
+}
+.ptr-lit-wall {
+  stroke-width: 8px;
+  stroke-linecap: round;
+  stroke-opacity: 0.6;
+}
+.ptr-was circle {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2px;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
+}
+.ptr-was text,
+.ptr-pin text {
+  fill: var(--text);
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+  font-weight: 600;
+}
+.ptr-pin circle {
+  fill: var(--accent);
+  stroke: #fff;
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+.ptr-pin .ptr-pin-spot {
+  stroke-width: 1px;
+}
+.ptr-pin-stem {
+  stroke: var(--accent);
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+.plan-svg {
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+.hold-ring {
+  position: absolute;
+  z-index: 7;
+  pointer-events: none;
+}
+.hold-ring-track,
+.hold-ring-fill {
+  fill: none;
+  stroke-width: 4px;
+}
+.hold-ring-track {
+  stroke: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.hold-ring-fill {
+  stroke: var(--accent);
+  stroke-dasharray: 201;
+  stroke-dashoffset: 201;
+  transform: rotate(-90deg);
+  transform-origin: 36px 36px;
+  animation: hold-fill 350ms linear forwards;
+}
+@keyframes hold-fill {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hold-ring-fill {
+    animation: none;
+  }
+}
+
+.inspector-asks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+}
+@media (pointer: coarse) {
+  .talk-ask-btn {
+    height: 44px;
+  }
+}
+.talk-kept-tag {
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+.talk-tip {
+  margin: 4px 0 8px;
+}
