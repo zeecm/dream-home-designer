@@ -1,4 +1,10 @@
-import { type DesignBrief, designResult, usageTotals } from '@dhd/core';
+import {
+  type DesignBrief,
+  designResult,
+  freeEssentials,
+  parseSpaceDesign,
+  usageTotals,
+} from '@dhd/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import sampleMain from '../../core/src/designer/benchmark/answers/sample-main-bedroom.json' with {
   type: 'json',
@@ -690,6 +696,84 @@ describe('free fixes and room vetting (designer listens, B1)', () => {
     // The room step asks for the bedroom by its kept name.
     expect(prov.calls.some((c) => c.step === 'furnish "Main bedroom"')).toBe(true);
     expect(prov.calls.some((c) => /furnish "Study"/.test(c.step))).toBe(false);
+  });
+
+  it('a fix round whose answer drops the bed: the app puts it back, and its row says so (N1)', async () => {
+    // The first answer has its bed and a dining table that doesn't belong; the fix takes the
+    // table out, and the bed with it.
+    const withTable = {
+      ...sampleMain,
+      items: [
+        ...sampleMain.items,
+        { ...sampleMain.items[0], ref: 'dt1', assetId: 'dining-4', why: '', against: 'free' },
+      ],
+    };
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => (main(c) ? sse(n === 1 ? withTable : noBed()) : null),
+    });
+    const { design } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+    }).run;
+    expect(prov.calls.filter(main)).toHaveLength(2);
+    const space = design.spaces['rm_main-bedroom'];
+    expect(space?.rounds?.[0]?.outcome).toBe('fixed');
+    const bed = space?.design?.items.find((i) => i.ref.startsWith('app:'));
+    expect(bed?.assetId).toBe('bed-queen');
+    expect(bed?.why).toBe('Put back by the app: the fix round’s answer left out the queen bed.');
+  });
+
+  it('a free pass that fails leaves the paid answer as it is, and the run goes on (S2)', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (main(c) ? sse(noBed()) : null),
+    });
+    const { state, design } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+      free: () => Promise.reject(new Error('the worker died')),
+    }).run;
+    expect(state.phase).toBe('done');
+    const space = design.spaces['rm_main-bedroom'];
+    expect(space?.status).toBe('done');
+    // The answer as the model gave it, metered and kept: no app piece, nothing lost.
+    expect(space?.design?.items.map((i) => i.ref).sort()).toEqual(
+      noBed()
+        .items.map((i) => i.ref)
+        .sort(),
+    );
+    expect(state.usage.some((u) => u.step === 'rm_main-bedroom')).toBe(true);
+  });
+
+  it('a space whose furniture the person kept (Change something) gets no free pass (S3)', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (main(c) ? sse(noBed()) : null),
+    });
+    const asked: string[][] = [];
+    const previous = parseSpaceDesign(noBed(), null);
+    if (!previous.ok) throw new Error(previous.error);
+    const { design } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+      plan: {
+        layout: null,
+        rooms: ['rm_main-bedroom'],
+        previous: { 'rm_main-bedroom': previous.value },
+        keep: { 'rm_main-bedroom': ['furniture'] },
+      },
+      free: (b, f, d, opts, fo) => {
+        asked.push([...(fo.spaces ?? [])]);
+        return Promise.resolve(freeEssentials(b, f, d, opts, fo));
+      },
+    }).run;
+    expect(asked).toEqual([]);
+    const items = design.spaces['rm_main-bedroom']?.design?.items ?? [];
+    expect(items.some((i) => i.ref.startsWith('app:'))).toBe(false);
   });
 });
 

@@ -296,13 +296,21 @@ export function readFree(
   const key = freeKey(base, before, design, opts, o);
   const hit = frees.get(key);
   if (hit) return hit;
-  if (!getWorker()) {
-    const v = freeEssentials(base, before, design, opts, o);
-    keep(frees, key, v);
-    return v;
-  }
   if (freeing.has(key)) return null;
   freeing.add(key);
+  if (!getWorker()) {
+    // No worker: worked out after this paint (it may place a space twice), never in the
+    // render that asked; `useResultsTick` says when it lands.
+    setTimeout(() => {
+      try {
+        keep(frees, key, freeze(freeEssentials(base, before, design, opts, o), true));
+      } finally {
+        freeing.delete(key);
+        bump();
+      }
+    }, 0);
+    return null;
+  }
   trialFree(base, before, design, opts, o).then(
     (v) => {
       keep(frees, key, freeze(v, true));

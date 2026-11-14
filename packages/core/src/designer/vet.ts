@@ -79,14 +79,18 @@ export function vetConcept(
   if (!sleeping.length) return { concept, lines, refused: [] };
   const who = (ids: string[]) =>
     andList([...new Set(ids.flatMap((id) => sleepers(id).map((p) => personLabel(p, brief))))]);
-  const sleep = (n: number) => (n === 1 ? 'sleeps' : 'sleep');
+  // "You sleep", "Partner sleeps", "You and Partner sleep".
+  const sleep = (n: number, names: string) => (n === 1 && names !== 'You' ? 'sleeps' : 'sleep');
+  /** A room of the flat as it is for living, dining or cooking (by the brief's use, else name). */
+  const livingKind = (id: string) => {
+    const r = base.rooms[id];
+    if (!r) return false;
+    const use = brief.rooms[id]?.use;
+    if (use && use !== 'keep' && use !== 'designer') return LIVING_USES.has(use);
+    return LIVING_NAME.test(r.name);
+  };
   const living = Object.values(base.rooms)
-    .filter((r) => {
-      if (!at.has(r.id) || sleeping.includes(r.id)) return false;
-      const use = brief.rooms[r.id]?.use;
-      if (use && use !== 'keep' && use !== 'designer') return LIVING_USES.has(use);
-      return LIVING_NAME.test(r.name);
-    })
+    .filter((r) => at.has(r.id) && !sleeping.includes(r.id) && livingKind(r.id))
     .map((r) => r.id);
   const wordFor = (id: string) => {
     const name = base.rooms[id]?.name ?? '';
@@ -126,53 +130,47 @@ export function vetConcept(
     return out;
   };
 
-  // 1. Walls: refuse removals that join a sleeping room to a living one, newest first; those
-  // with a living room on one side before any other (so two bedrooms joined still stand).
-  const skip = new Set<number>();
-  let level = wallsOf(skip);
-  let joined = joins(level);
+  // 1. Walls: refuse removals that make a new join of a sleeping room to a living one (one the
+  // flat as it is already has, a kitchen with a sleeper open to the living room, is no reason to
+  // refuse anything). Newest first, those with a living room on one side before any other (so
+  // two bedrooms joined still stand); then each refusal is put back if the joins stay gone
+  // without it, so only what is needed is refused.
   const removals = concept.walls
     .map((op, i) => ({ op, i, wallId: resolveAlias(aliases, op.wall) }))
     .filter((x) => x.op.op === 'remove_wall' && x.wallId && base.walls[x.wallId])
     .reverse();
+  const already = new Set(
+    joins(wallsOf(new Set(removals.map((x) => x.i)))).map((j) => `${j.bed}|${j.to}`),
+  );
+  const fresh = (level: Level) => joins(level).filter((j) => !already.has(`${j.bed}|${j.to}`));
+  const skip = new Set<number>();
+  let level = wallsOf(skip);
+  let joined = fresh(level);
+  const firstJoined = joined;
   const besideLiving = (wallId: string) =>
     roomsBeside(base, wallId).some((r) => !!r && living.includes(r));
   const order = [
     ...removals.filter((x) => besideLiving(x.wallId as string)),
     ...removals.filter((x) => !besideLiving(x.wallId as string)),
   ];
-  const refusedFor: { wallId: string; joined: { bed: string; to: string }[] }[] = [];
+  const tried: typeof order = [];
   for (const x of order) {
     if (!joined.length) break;
     skip.add(x.i);
-    refusedFor.push({ wallId: x.wallId as string, joined });
-    level = wallsOf(skip);
-    joined = joins(level);
+    tried.push(x);
+    joined = fresh(wallsOf(skip));
   }
-  if (refusedFor.length) {
-    // One phrase a pair of rooms ("the walls between Bedroom and Living and dining").
-    const pairs = new Map<string, number>();
-    for (const x of refusedFor) {
-      const names = roomsBeside(base, x.wallId)
-        .map((id) => (id ? (base.rooms[id]?.name ?? 'a room') : 'outside'))
-        .sort((a, b) => (sleepingNamed(a) ? -1 : sleepingNamed(b) ? 1 : a.localeCompare(b)));
-      const k = names.join(' and ');
-      pairs.set(k, (pairs.get(k) ?? 0) + 1);
+  // Each refusal put back, the last first, when nothing new is joined without it.
+  if (!joined.length) {
+    for (const x of [...tried].reverse()) {
+      skip.delete(x.i);
+      if (fresh(wallsOf(skip)).length) skip.add(x.i);
     }
-    const phrases = [...pairs].map(([k, n]) => `the ${n > 1 ? 'walls' : 'wall'} between ${k}`);
-    const many = refusedFor.length > 1;
-    const first = refusedFor[0] as (typeof refusedFor)[number];
-    const beds = [...new Set(first.joined.map((j) => j.bed))];
-    const rank = (id: string) => {
-      const w = wordFor(id);
-      return w === 'the living room' ? 0 : w === 'the dining room' ? 1 : 2;
-    };
-    const to = [...first.joined].sort((a, b) => rank(a.to) - rank(b.to))[0]?.to ?? '';
-    const n = new Set(beds.flatMap((id) => sleepers(id).map((p) => p.key))).size;
-    lines.push(
-      `Kept ${andList(phrases)}: taking ${many ? 'them' : 'it'} out would join the room ${who(beds)} ${sleep(n)} in to ${wordFor(to)}.`,
-    );
   }
+  level = wallsOf(skip);
+  const refusedFor = tried
+    .filter((x) => skip.has(x.i))
+    .map((x) => ({ wallId: x.wallId as string, joined: firstJoined }));
   const walls = concept.walls.filter((_, i) => !skip.has(i));
 
   // 2. Names and uses, on the level as the walls now leave it.
@@ -219,6 +217,9 @@ export function vetConcept(
     const beds = bedsIn(id);
     if (!beds.length) continue;
     const own = beds.find((b) => b === id) ?? (beds[0] as string);
+    // A living room, dining room or kitchen someone sleeps in keeps its own use: vetting keeps
+    // bedrooms bedrooms, it never makes one of the living room.
+    if (livingKind(own)) continue;
     const was = base.rooms[own]?.name ?? 'This room';
     const prior = brief.rooms[own]?.use;
     const fallback: RoomUse =
@@ -239,7 +240,46 @@ export function vetConcept(
     said.add(id);
     const n = new Set(beds.flatMap((b) => sleepers(b).map((p) => p.key))).size;
     lines.push(
-      `${r.name} stays a bedroom: ${who(beds)} ${sleep(n)} there. To make it a study, change who sleeps where.`,
+      `${r.name} stays a bedroom: ${who(beds)} ${sleep(n, who(beds))} there. To make it a study, change who sleeps where.`,
+    );
+  }
+  if (refusedFor.length) {
+    // In the card's words: each side by the name it has now ("Bedroom (now part of Master
+    // bedroom)"), a living, dining or kitchen side as what it is ("the living room"). One phrase
+    // a pair of rooms ("the walls between …").
+    const nameNow = (id: string) => {
+      const entry = rooms.find((r) => roomOf(r) === id);
+      return entry?.name ?? level.rooms[id]?.name ?? base.rooms[id]?.name ?? 'a room';
+    };
+    const sideName = (id: string | null) => {
+      if (!id) return 'outside';
+      if (!sleeping.includes(id) && livingKind(id)) return wordFor(id);
+      const p = at.get(id);
+      const after = p ? roomIdAt(level, p) : null;
+      const was = base.rooms[id]?.name ?? 'a room';
+      if (after && after !== id) return `${was} (now part of ${nameNow(after)})`;
+      return after ? nameNow(after) : was;
+    };
+    const pairs = new Map<string, number>();
+    for (const x of refusedFor) {
+      const sides = roomsBeside(base, x.wallId);
+      const living = (id: string | null) => !!id && !sleeping.includes(id) && livingKind(id);
+      const names = [...sides].sort((a, b) => Number(living(a)) - Number(living(b))).map(sideName);
+      const k = names.join(' and ');
+      pairs.set(k, (pairs.get(k) ?? 0) + 1);
+    }
+    const phrases = [...pairs].map(([k, n]) => `the ${n > 1 ? 'walls' : 'wall'} between ${k}`);
+    const many = refusedFor.length > 1;
+    const first = refusedFor[0] as (typeof refusedFor)[number];
+    const beds = [...new Set(first.joined.map((j) => j.bed))];
+    const rank = (id: string) => {
+      const w = wordFor(id);
+      return w === 'the living room' ? 0 : w === 'the dining room' ? 1 : 2;
+    };
+    const to = [...first.joined].sort((a, b) => rank(a.to) - rank(b.to))[0]?.to ?? '';
+    const n = new Set(beds.flatMap((id) => sleepers(id).map((p) => p.key))).size;
+    lines.unshift(
+      `Kept ${andList(phrases)}: taking ${many ? 'them' : 'it'} out would join the room ${who(beds)} ${sleep(n, who(beds))} in to ${wordFor(to)}.`,
     );
   }
   const changed =

@@ -510,7 +510,8 @@ export function MakeRule({ d }: { d: Decision }) {
   const text = `Make this a rule: ${d.text}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: priced on the conversation as it is
   const est = useMemo(() => (d.rule ? null : sendPrice(text)), [d.rule, text, conv?.rev]);
-  if (d.kind === 'waiver') return null;
+  // A waiver, or a piece the app placed itself and they left out: nothing to make a rule of.
+  if (d.kind === 'waiver' || d.free) return null;
   if (d.rule)
     return (
       <button type="button" className="link-btn" onClick={() => void reopenRule(d.id)}>

@@ -353,8 +353,26 @@ describe('subsetReport', () => {
       design.brief,
     );
     expect(none.delta).toBe(0);
-    expect(none.failing).toEqual([]);
+    // With nothing ticked, only what the version's own beds, seats and table would have met.
+    expect(
+      none.failing.every((c) => /^P1\|(bed|seats|dining|desks)\|/.test(c.key) && !c.itemId),
+    ).toBe(true);
+    expect(all.failing).toEqual([]);
     expect(all.delta).toBeGreaterThan(0);
     expect(all.cost.high).toBeGreaterThanOrEqual(all.cost.low);
+  });
+
+  it('unticking the row with the bed fails the ticked changes, though the plan had none either (UX 2)', () => {
+    const lvl = sampleFlatProject().levels[0] as Level;
+    const design = sampleDesign({ level: lvl, concept: null });
+    const r = designResult(lvl, lvl, design);
+    const cs = changeSet(lvl, r, design);
+    const bedRow = cs.find((c) =>
+      c.items.target.some((id) => r.level.items[id]?.assetId.startsWith('bed-')),
+    );
+    expect(bedRow).toBeDefined();
+    const ticked = cs.filter((c) => c !== bedRow).map((c) => c.id);
+    const rep = subsetReport(lvl, lvl, r, mergeChanges(lvl, r.level, cs, ticked), design.brief);
+    expect(rep.failing.some((c) => c.key.startsWith('P1|bed|'))).toBe(true);
   });
 });

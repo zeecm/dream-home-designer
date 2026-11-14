@@ -16,7 +16,7 @@ import type { Kept } from '../rules/kept';
 import type { Rule } from '../rules/schema';
 import type { DesignBrief, DesignInput, DesignItem } from '../schema';
 import { BATHROOMS } from '../schema';
-import { roomIdAt, roomsBeside } from '../spaces';
+import { roomIdAt, roomsBeside, spacesOf } from '../spaces';
 import { levelFingerprint, settled, stableJson } from '../util';
 
 /**
@@ -409,7 +409,7 @@ export function changeSet(
         ),
       );
     }
-    out.push(...stableOrder(foldBelongs(mine, now, target), now, target));
+    out.push(...stableOrder(foldBelongs(mine, now, target, r.refs), now, target));
 
     // Paint and floors.
     const rooms = new Set(s.rooms);
@@ -518,10 +518,20 @@ function stableOrder(changes: Change[], now: Level, target: Level): Change[] {
 }
 
 /** Chairs into their table, bedside tables into their bed: one row each. */
-function foldBelongs(changes: Change[], now: Level, target: Level): Change[] {
+function foldBelongs(
+  changes: Change[],
+  now: Level,
+  target: Level,
+  refs: Record<string, string> = {},
+): Change[] {
   const itemOf = (c: Change) => {
     const id = c.items.target[0] ?? c.items.now[0];
     return id ? (target.items[id] ?? now.items[id]) : undefined;
+  };
+  /** A row whose piece the app placed itself (its ref starts `app:`). */
+  const appOwned = (c: Change) => {
+    const id = c.items.target[0];
+    return !!id && !!refs[id]?.startsWith('app:');
   };
   // Taken out together, or put in (added, moved, swapped) together.
   const family = (v: ChangeVerb) => (v === 'remove' ? 'out' : 'in');
@@ -533,7 +543,13 @@ function foldBelongs(changes: Change[], now: Level, target: Level): Change[] {
     if (!it || !of || c.items.target.length + c.items.now.length > 2) continue;
     const p = changes
       .filter(
-        (x) => x !== c && family(x.verb) === family(c.verb) && of.includes(roleOfIt(itemOf(x))),
+        (x) =>
+          x !== c &&
+          family(x.verb) === family(c.verb) &&
+          of.includes(roleOfIt(itemOf(x))) &&
+          // The app's own pieces and the designer's are never one row: unticking the app's
+          // bed must not take the designer's bedside table with it.
+          appOwned(x) === appOwned(c),
       )
       .map((x) => ({ x, d: dist(centre(it), centre(itemOf(x) as Item)) }))
       .filter((o) => o.d < 2.5)
@@ -717,9 +733,38 @@ export function subsetReport(
     );
   };
   const waived = new Set(opts.waived ?? []);
+  // A must-have the version meets (a bed for the couple, the seats) that the ticked changes
+  // leave unmet fails them, even when the plan as it is failed it too: unticking the bed leaves
+  // them with no bed, and that is said and asked about at Accept.
+  // Only when a piece the version places for it (a bed, a sofa, the table, a desk, in that room)
+  // is left out of the ticked changes.
+  const versionFails = new Set(r.checks.filter((c) => c.hard).map((c) => c.key));
+  const NEED: Record<string, Role[]> = {
+    bed: ['bed'],
+    seats: ['sofa', 'armchair'],
+    dining: ['dining-table', 'dining-chair', 'stool'],
+    desks: ['desk'],
+  };
+  const spaceRooms = (roomId: string) =>
+    spacesOf(r.level).find((s) => s.rooms.includes(roomId))?.rooms ?? [roomId];
+  const essentialLeft = (c: { key: string; itemId?: string; roomId?: string }) => {
+    const [principle, code] = c.key.split('|');
+    const roles = principle === 'P1' && code ? NEED[code] : undefined;
+    if (c.itemId || !roles || !c.roomId || versionFails.has(c.key)) return false;
+    const rooms = spaceRooms(c.roomId);
+    return Object.values(r.level.items).some((it) => {
+      if (merged.items[it.id] || !roles.includes(roleOf(furnitureKind(it.assetId)))) return false;
+      const room = roomIdAt(r.level, centre(it));
+      return (
+        !!room && (code === 'bed' || code === 'desks' ? room === c.roomId : rooms.includes(room))
+      );
+    });
+  };
   const caused = designChecks(settled(merged), { brief, uses: r.uses, ...rules })
     .filter((c) => c.hard)
-    .filter((c) => !(baseKeys.has(c.key) && (c.itemId ? unchanged(c.itemId) : true)))
+    .filter(
+      (c) => essentialLeft(c) || !(baseKeys.has(c.key) && (c.itemId ? unchanged(c.itemId) : true)),
+    )
     .map((c): ResultCheck => ({ ...c, already: false, part: null }));
   const cost = costEstimate(before, merged, rates);
   const was =

@@ -18,6 +18,7 @@ export {
   type FreeOutcome,
   freeEssentials,
   freeName,
+  gaveWayWords,
   isAppRef,
 } from './free';
 export { type VetResult, readsAsBedroom, vetConcept } from './vet';

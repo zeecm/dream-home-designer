@@ -44,7 +44,15 @@ import {
   planMoved,
   tickedExtra,
 } from './cards';
-import { freeLabel, freeLines, freeOffer, isAppChange, placeFree, useFreeBusy } from './free';
+import {
+  freeLabel,
+  freeLines,
+  freeOffer,
+  isAppChange,
+  placeFree,
+  publishTickedOut,
+  useFreeBusy,
+} from './free';
 import { bringBackCard } from './iterate';
 import {
   anotherPrice,
@@ -401,6 +409,11 @@ function ResumeNote({
   );
 }
 
+/** A must-have check (a bed, the seats, the table, a desk) with no piece of its own. */
+const ESSENTIAL_KEY = /^P1\|(bed|seats|dining|desks)\|/;
+/** "You and Partner have no bed in …" → "You and Partner will have no bed in …". */
+const willHave = (says: string) => says.replace(/\b(?:has|have) (no|\d+)\b/, 'will have $1');
+
 /**
  * Accept's question, counted as the card counts (one line a failure as the person reads it):
  * "Accept anyway? 1 problem: 4 dining chairs aren't at a table".
@@ -414,7 +427,10 @@ function askLine(checks: readonly ResultCheck[], brief: CardModel['input']['brie
       roomId: c.roomId ?? null,
     })),
   );
-  return `Accept anyway? ${plural(lines.length, 'problem')}: ${lines.map((l) => l.says.replace(/\.$/, '')).join('; ')}`;
+  // A must-have the ticks leave unmet is said as what will happen: "will have no bed".
+  const said = (l: (typeof lines)[number]) =>
+    (ESSENTIAL_KEY.test(l.first.key) ? willHave(l.says) : l.says).replace(/\.$/, '');
+  return `Accept anyway? ${plural(lines.length, 'problem')}: ${lines.map(said).join('; ')}`;
 }
 
 /** What a folded card last said of itself (its checks need the plan worked out again). */
@@ -549,6 +565,8 @@ export const ProposalCard = memo(function ProposalCard({
     [card, r, changes, waiveKey],
   );
   // The free fix's dry run (in the worker, free): offered only when it would place something.
+  // From the plan once edits have paused a full second: never re-run as a drag goes on.
+  const slowProject = useSettledProject(1000);
   const freeBusy = useFreeBusy((s) => s.card);
   const declinedKey = useTalk((s) =>
     (s.conv?.decisions ?? [])
@@ -558,8 +576,8 @@ export const ProposalCard = memo(function ProposalCard({
   );
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
   const offer = useMemo(
-    () => (active && r && !running ? timed(() => freeOffer(project, card)) : null),
-    [active, r, running, project, card, tick, declinedKey],
+    () => (active && r && !running ? timed(() => freeOffer(slowProject, card)) : null),
+    [active, r, running, slowProject, card, tick, declinedKey],
   );
   // The electrical layer's notes on the points this proposal adds (surface trunking on a
   // structural wall, an aircon with no compressor): notes, not failures, so amber.
@@ -753,22 +771,40 @@ export const ProposalCard = memo(function ProposalCard({
     changes.find((c) => c.group === g)?.groupName ??
     accepted.find((a) => a.group === g)?.groupName ??
     g;
-  // One verdict for the card, from the one list.
+  // A bed, the seats, the table or a desk the ticks leave out (the version has them): said in
+  // the lead as what will happen, counted in the verdict and the bar, and asked about at Accept.
+  const essentialsOut = mergeLines(
+    extras
+      .filter((c) => ESSENTIAL_KEY.test(c.key) && !c.itemId)
+      .map((c) => ({
+        key: c.key,
+        text: c.text,
+        says: peopleWords(c.text, card.input.brief),
+        roomId: c.roomId ?? null,
+      })),
+  ).map((l) => `${willHave(l.says).replace(/\.$/, '')}: its row isn’t ticked.`);
+  publishTickedOut(card.key, essentialsOut.length);
+  // The rest of what the ticks fail together: the Checks row's own line.
+  const otherExtras = extras.filter((c) => !(ESSENTIAL_KEY.test(c.key) && !c.itemId));
+  // One verdict for the card, from the one list (and the must-haves its ticks leave out).
   const one = cardVerdict(
-    rep.failures.map((f) => ({ key: f.key })),
+    [
+      ...rep.failures.map((f) => ({ key: f.key })),
+      ...essentialsOut.map((_, i) => ({ key: `ticked-out|${i}` })),
+    ],
     [],
     waivedKeys,
     ruleCount,
   );
   const failingLine = report || !running ? { text: one.text, tone: one.tone } : null;
   // What the app did itself (free): the pieces it placed, and its vetting lines.
-  const did = [...freeLines(changes, r), ...(card.option?.appLines ?? [])];
-  const missedLines = (offer?.missed ?? []).map((m) => m.text);
+  const did = [...freeLines(changes, r, ticked), ...(card.option?.appLines ?? [])];
+  const missedLines = [...essentialsOut, ...(offer?.missed ?? []).map((m) => m.text)];
   const freeButton =
     offer && offer.added.length > 0 ? (
       <button
         type="button"
-        className="btn btn-small talk-free-btn"
+        className="btn talk-free-btn"
         data-free-fix=""
         disabled={!!freeBusy || accepting}
         onClick={() => {
@@ -1072,6 +1108,9 @@ export const ProposalCard = memo(function ProposalCard({
                       .map((key) => checkText.get(key))
                       .filter((x): x is ResultCheck => !!x);
                     const opened = openRow === c.id || whyAll;
+                    // A piece the app placed itself: tagged, and said to a screen reader too.
+                    const byApp = isAppChange(c, r);
+                    const appSaid = byApp ? ', placed by the app, free' : '';
                     const lit =
                       hover === c.id ||
                       (!!planHover && [...c.items.target, ...c.items.now].includes(planHover));
@@ -1096,7 +1135,7 @@ export const ProposalCard = memo(function ProposalCard({
                               className="talk-tick"
                               checked={isOn}
                               disabled={running || blocked}
-                              aria-label={`Accept: ${c.text}`}
+                              aria-label={`Accept: ${c.text}${appSaid}`}
                               onChange={(e) => toggle(c, e.target.checked)}
                             />
                           </label>
@@ -1108,7 +1147,7 @@ export const ProposalCard = memo(function ProposalCard({
                             type="button"
                             className="talk-row-text"
                             aria-expanded={opened}
-                            aria-label={`Why: ${c.text}`}
+                            aria-label={`Why: ${c.text}${appSaid}`}
                             onClick={() =>
                               useTalk.setState({
                                 open: opened ? null : { card: card.key, change: c.id },
@@ -1116,15 +1155,16 @@ export const ProposalCard = memo(function ProposalCard({
                             }
                           >
                             <span>
+                              {byApp && (
+                                <>
+                                  <span className="talk-kept-tag talk-app-tag" data-by-app="">
+                                    By the app
+                                  </span>{' '}
+                                </>
+                              )}
                               {keepTogether(c.text)}
                               {keptIds.some((k) => c.items.target.includes(k)) && (
                                 <span className="talk-kept-tag"> Kept</span>
-                              )}
-                              {isAppChange(c, r) && (
-                                <span className="talk-kept-tag" data-by-app="">
-                                  {' '}
-                                  By the app
-                                </span>
                               )}
                             </span>
                             <span className="talk-row-why" aria-hidden="true">
@@ -1221,13 +1261,15 @@ export const ProposalCard = memo(function ProposalCard({
                     : ''
               }
             >
-              {failingLine?.tone === 'pass' && !extras.length && <Mark kind="check" />}
+              {failingLine?.tone === 'pass' && !otherExtras.length && <Mark kind="check" />}
               {/* The version passes, what is ticked doesn't: said plainly, never ✓ over red. */}
-              {failingLine?.tone === 'pass' && extras.length
+              {failingLine?.tone === 'pass' && otherExtras.length
                 ? 'The design passes as a whole'
                 : verdict}
-              {lead && rep.failures.length > 0 && <span className="muted"> · listed above</span>}
-              {extras.length > 0 && (
+              {lead && rep.failures.length + essentialsOut.length > 0 && (
+                <span className="muted"> · listed above</span>
+              )}
+              {otherExtras.length > 0 && (
                 <div className="talk-ticked-extra" data-ticked-extra="">
                   <p className="negative">
                     {rep.failures.length
@@ -1235,7 +1277,7 @@ export const ProposalCard = memo(function ProposalCard({
                       : 'What you ticked fails, together:'}
                   </p>
                   <ul className="talk-room-fails">
-                    {extras.map((c) => (
+                    {otherExtras.map((c) => (
                       <li key={c.key} className="negative">
                         {keepTogether(peopleWords(c.text, card.input.brief))}
                       </li>

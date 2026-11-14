@@ -40,7 +40,7 @@ import { ReplyParts, ReplyText, SentState, Streaming } from './Talk';
 import { lineState, redoLine, undoLine } from './accept';
 import { type CardModel, designCard, earlierDesign, nowOf, optionCard } from './cards';
 import { dayMark } from './days';
-import { freeUndoable, undoFree } from './free';
+import { focusFreeButton, freeUndoable, undoFree } from './free';
 import { unkeep } from './pointers';
 import {
   answerCost,
@@ -575,7 +575,7 @@ function Event({ t }: { t: TurnOf<'event'> }) {
               type="button"
               className="link-btn"
               data-undo-free={t.id}
-              onClick={() => void undoFree(t.id)}
+              onClick={() => void undoFree(t.id).then(focusFreeButton)}
             >
               Undo
             </button>

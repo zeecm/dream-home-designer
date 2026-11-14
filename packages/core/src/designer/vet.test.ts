@@ -38,7 +38,7 @@ describe('criterion 20: the owner’s V4 layout', () => {
       'w_bedroom_living-and-dining-3',
     ]);
     expect(v.lines).toEqual([
-      'Kept the walls between Bedroom and Living and dining: taking them out would join the room You and Partner sleep in to the living room.',
+      'Kept the walls between Bedroom (now part of Master Bedroom) and the living room: taking them out would join the room You and Partner sleep in to the living room.',
     ]);
     const r = place(v.concept);
     const main = r.spaces.find((s) => s.rooms.includes('rm_main-bedroom'));
@@ -79,6 +79,53 @@ describe('criterion 20: the owner’s V4 layout', () => {
     const c = concept();
     const v = vet(c, { ...brief, sleeping: {} });
     expect(v.concept).toBe(c);
+  });
+});
+
+describe('only new joins are refused (tech lead S1)', () => {
+  const W = (alias: string) => ({ ...owner.concept.walls[0], op: 'remove_wall', wall: alias });
+
+  it('a sleeper in the kitchen (open to the living room already): the bigger master still goes through', () => {
+    const b = { ...brief, sleeping: { 'rm_main-bedroom': ['adult-1'], rm_kitchen: ['adult-2'] } };
+    const v = vet(concept(), b);
+    // The kitchen's join to the living room is the flat's own: only the walls that would join
+    // Main bedroom to it are kept.
+    expect(v.refused.sort()).toEqual([
+      'w_bedroom_living-and-dining',
+      'w_bedroom_living-and-dining-3',
+    ]);
+    expect(v.concept.walls.some((w) => w.wall === 'W5')).toBe(true);
+    expect(v.lines[0]).toMatch(
+      /^Kept the walls between Bedroom \(now part of Master Bedroom\) and the living room: .* You sleep in/,
+    );
+  });
+
+  it('a sleeper in Living and dining: W5 stands, and Living and dining keeps its own use', () => {
+    const b = {
+      ...brief,
+      sleeping: { 'rm_main-bedroom': ['adult-1'], 'rm_living-and-dining': ['adult-2'] },
+    };
+    const v = vet(concept(), b);
+    expect(v.refused).not.toContain('w_bedroom_main-bedroom');
+    const living = v.concept.rooms.find((r) => r.name === 'Living & Study');
+    expect(living?.use).toBe('living');
+    expect(v.lines.some((l) => /Living and dining stays a bedroom/.test(l))).toBe(false);
+  });
+
+  it('nothing new joined: nothing refused, even with a sleeper already open to the living room', () => {
+    const b = { ...brief, sleeping: { rm_kitchen: ['adult-1', 'adult-2'] } };
+    const c = concept({ ...owner.concept, walls: [W('W5')] });
+    const v = vet(c, b);
+    expect(v.refused).toEqual([]);
+    expect(v.lines).toEqual([]);
+  });
+
+  it('a newer living-side removal that joins nothing is put back; only the one that does is refused', () => {
+    // W9 opens Main bedroom to the living room; W6 opens Bedroom (where nobody sleeps) to it.
+    const c = concept({ ...owner.concept, walls: [W('W9'), W('W6')], rooms: [] });
+    const v = vet(c);
+    expect(v.refused).toEqual(['w_living-and-dining_main-bedroom-2']);
+    expect(v.concept.walls.map((w) => w.wall)).toEqual(['W6']);
   });
 });
 

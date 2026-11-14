@@ -87,7 +87,11 @@ describe('rows the app placed (By the app)', () => {
     const { r, changes } = placed();
     const app = changes.filter((c) => isAppChange(c, r));
     expect(app.map((c) => c.text)).toEqual([expect.stringMatching(/^Add a queen bed/)]);
-    expect(app[0]?.why).toBe('A bed for You and Partner: nobody had one.');
+    expect(app[0]?.why).toBe(
+      'A bed for You and Partner: nobody had one. One bedside table no longer fits and is left out.',
+    );
+    // The designer's bedside table is its own row, never folded into the app's bed.
+    expect(app[0]?.text).not.toMatch(/bedside/);
     expect(changes.filter((c) => !isAppChange(c, r)).length).toBeGreaterThan(0);
   });
 
@@ -96,8 +100,42 @@ describe('rows the app placed (By the app)', () => {
     const lines = freeLines(changes, r);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toBe(
-      'Placed by the app, free: a queen bed in Main bedroom, against the wall by Bedroom.',
+      'Placed by the app, free: a queen bed in Main bedroom, against the wall by Bedroom; one bedside table no longer fits and is left out.',
     );
+  });
+
+  it('unticked, the app’s row is said as left out of what is ticked (UX 2)', () => {
+    const { r, changes } = placed();
+    const app = changes.filter((c) => isAppChange(c, r));
+    const ticked = changes.filter((c) => !app.includes(c)).map((c) => c.id);
+    expect(freeLines(changes, r, ticked)).toEqual([
+      'Left out of what you’ve ticked: a queen bed in Main bedroom, against the wall by Bedroom, placed by the app, free.',
+    ]);
+    // The ticked subset fails the bed check then (core subsetReport), and the lead says it.
+    const html = renderToStaticMarkup(
+      <CheckLead
+        cardKey="prp:U"
+        report={{ failures: [], leftOut: [], rooms: [] }}
+        did={freeLines(changes, r, ticked)}
+        missed={['You and Partner will have no bed in Main bedroom: its row isn’t ticked.']}
+      />,
+    );
+    expect(html).toContain('You and Partner will have no bed in Main bedroom');
+    expect(html).toContain('data-app-line="missed"');
+  });
+
+  it('a bed a fix round dropped and the app put back says so (N1)', () => {
+    const c = {
+      verb: 'add',
+      text: 'Add a queen bed against the wall by Bedroom',
+      groupName: 'Main bedroom',
+      why: 'Put back by the app: the fix round’s answer left out the queen bed.',
+      items: { now: [], target: ['it_bed'] },
+    } as unknown as Change;
+    const r = { refs: { it_bed: 'app:bed' } } as never;
+    expect(freeLines([c], r)).toEqual([
+      'Put back by the app, free: a queen bed in Main bedroom, against the wall by Bedroom.',
+    ]);
   });
 
   it('placedWords: the room after the piece, then where it stands', () => {

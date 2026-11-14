@@ -7,6 +7,7 @@ import {
   type ProposalOption,
   freeName,
   furnitureKind,
+  gaveWayWords,
   isAppRef,
   roleOf,
   roomIdAt,
@@ -64,11 +65,46 @@ export function placedWords(c: Change): string {
 }
 
 /** The lead's lines for the pieces the app placed: "Placed by the app, free: a queen bed in …". */
-export function freeLines(changes: readonly Change[], r: DesignResult): string[] {
+export function freeLines(
+  changes: readonly Change[],
+  r: DesignResult,
+  /** The rows ticked: an app row unticked is said as left out. */
+  ticked?: readonly string[],
+): string[] {
   return changes
     .filter((c) => c.verb !== 'remove' && isAppChange(c, r))
-    .map((c) => `Placed by the app, free: ${placedWords(c)}.`);
+    .map((c) => {
+      if (ticked && !ticked.includes(c.id)) {
+        return `Left out of what you’ve ticked: ${placedWords(c)}, placed by the app, free.`;
+      }
+      // A piece a fix round's answer dropped and the app put back (the runner says so), and an
+      // extra of the answer that gave way for it (the free pass says so on its row).
+      const head = /^Put back by the app/.test(c.why ?? '') ? 'Put back' : 'Placed';
+      const gave = gaveWayOf(c.why);
+      return `${head} by the app, free: ${placedWords(c)}${gave ? `; ${gave}` : ''}.`;
+    });
 }
+
+/** "a queen bed and a 3-seat sofa": what the app placed itself, for the run-end announcement. */
+export function freePlacedWords(changes: readonly Change[], r: DesignResult): string | null {
+  const names = changes
+    .filter((c) => c.verb !== 'remove' && isAppChange(c, r))
+    .map((c) => {
+      const id = c.items.target[0];
+      const name = freeName(id ? (r.level.items[id]?.assetId ?? '') : '');
+      return `${/^[aeiou8]/i.test(name) ? 'an' : 'a'} ${name}`;
+    });
+  if (!names.length) return null;
+  return names.length === 1
+    ? (names[0] as string)
+    : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+}
+
+/** "one bedside table no longer fits and is left out", from an app piece's reason. */
+export const gaveWayOf = (why: string | null | undefined): string | null => {
+  const m = /(One .+? no longer fits? and (?:is|are) left out)\.?$/.exec(why ?? '');
+  return m?.[1] ? lower(m[1]) : null;
+};
 
 /** The room and role of a row the app placed (its first piece), for a Decision. */
 export function appRowOf(c: Change, r: DesignResult): { room: string; role: string } | null {
@@ -129,6 +165,17 @@ export function freeOffer(project: Project, card: CardModel): FreeOutcome | null
 
 /** Bumped when a free fix lands on a card: the phone's sheet folds to peek to show it. */
 export const useFreePlaced = create(() => ({ n: 0, card: null as string | null }));
+
+/**
+ * Must-haves each card's ticks leave out (a bed unticked), by card key: the On the table bar
+ * counts them with the card's own failures.
+ */
+export const useTickedOut = create<Record<string, number>>(() => ({}));
+/** Said by a card as it renders: written after it, and only when it changed. */
+export function publishTickedOut(key: string, n: number) {
+  if ((useTickedOut.getState()[key] ?? 0) === n) return;
+  queueMicrotask(() => useTickedOut.setState({ [key]: n }));
+}
 
 /** Placing on a card now (the button reads "Placing…"). */
 export const useFreeBusy = create(() => ({ card: null as string | null }));
@@ -238,7 +285,9 @@ export async function placeFree(card: CardModel): Promise<string | null> {
         : x,
     );
     const words = added.map(placedWords);
-    const text = `Placed by the app, free: ${words.join('; ') || 'the missing pieces'}.`;
+    // What of the answer gave way for it, said with it (never silently).
+    const gave = out.gaveWay?.length ? gaveWayWords(out.gaveWay) : null;
+    const text = `Placed by the app, free: ${words.join('; ') || 'the missing pieces'}${gave ? `; ${gave}` : ''}.`;
     const id = newId('turn');
     await act({
       type: 'event',
@@ -259,7 +308,7 @@ export async function placeFree(card: CardModel): Promise<string | null> {
     const n = rep.failures.length;
     const what = words.map((w) => w.replace(/,.*$/, '')).join(' and ');
     say(
-      `Placed ${what}. ${n ? `${n} still ${n === 1 ? 'doesn’t' : 'don’t'} pass.` : 'Passes all checks.'} Undo is available.`,
+      `Placed ${what}${gave ? `; ${gave}` : ''}. ${n ? `${n} still ${n === 1 ? 'doesn’t' : 'don’t'} pass.` : 'Passes all checks.'} Undo is available.`,
     );
     useFreePlaced.setState((s) => ({ n: s.n + 1, card: card.key }));
     useTalk.setState({ shown: card.key });
@@ -296,6 +345,26 @@ export function freeUndoable(eventId: string): boolean {
         x.event.proposalId === free.proposalId &&
         !x.event.undone,
     );
+}
+
+/**
+ * After the line's Undo, focus goes to the card's Place … · free again once its dry run has
+ * offered it (on a phone at peek, the bar's); never left on a button that has gone.
+ */
+export function focusFreeButton() {
+  const until = Date.now() + 3000;
+  const look = () => {
+    const peek = document.documentElement.dataset.talkSheet === 'peek';
+    const btn = document.querySelector<HTMLButtonElement>(
+      peek ? '[data-free-fix="bar"]' : '[data-free-fix=""]',
+    );
+    if (btn) {
+      btn.focus();
+      return;
+    }
+    if (Date.now() < until) setTimeout(look, 50);
+  };
+  look();
 }
 
 /** The line's Undo: the pieces it added come out of the option's answers again. */

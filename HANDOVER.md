@@ -870,9 +870,42 @@ No money change, no record bump (every new field optional and read tolerantly).
 - **Prompts:** `TALK_SYSTEM` now says the app places a missing bed, seats, dining table or desk
   itself, free, and keeps a sleeping room a bedroom (lead blocker 5); the fix block says app:
   pieces are the app's, to keep, move or replace with refs of their own (within FIX_EXTRA).
+- Review fixes (tech lead, 14 Nov): vetting refuses only **new** joins (a kitchen with a sleeper
+  already open to the living room refuses nothing), puts back each refusal not needed once the
+  joins are gone, and never rewrites the use of a living, dining or kitchen room someone sleeps
+  in. The free pass fails open (a worker that fails leaves the paid answer as it is; only Stop
+  ends the room), never runs in a space whose furniture the person kept (`plan.keep`, a
+  furniture lock), and counts what the answer carried over from the one it changes as theirs
+  (`FreeOptions.theirs`: never an extra that may give way). A bed a fix round's answer dropped
+  and the app put back reads "Put back by the app, free: …". The bench runs the free pass on
+  every answer (`runFlat`) and has two new flats, the owner's V8 main bedroom (no bed: its keep
+  refs aren't in the flat as it is) and a living room with no sofa; the four old flats' layouts
+  are byte-identical. The card's dry run reads the plan once edits pause a full second, and with
+  no worker it runs after paint.
+- UX review fixes (14 Nov): the bar's buttons keep focus where it is on a press (the composer's
+  blur resized the phone sheet under the finger, so the first tap was lost; e2e on an iPhone 13
+  with touch), and after a free fix at peek focus goes to the bar, after Undo to the button
+  offered again. Unticking a row whose piece meets a must-have (the app's bed or the
+  designer's) fails the ticked changes (`subsetReport`: a P1 bed/seats/dining/desks check the
+  version meets and the ticks leave unmet, though the plan as it is failed it too): the lead
+  says "You and Partner will have no bed in Main bedroom: its row isn't ticked.", the app's line
+  "Left out of what you've ticked: …", the Checks row and the bar count it, and Accept asks
+  "Accept anyway? 1 problem: You and Partner will have no bed …". The app's rows and the
+  designer's are never folded into one (`foldBelongs`), the tag comes first and doesn't wrap,
+  and screen readers hear ", placed by the app, free". An extra that gave way for the app's
+  piece is said on its row, the lead, the log line and the announcement ("…; one bedside table
+  no longer fits and is left out"; `FreeOutcome.gaveWay`). The wall-kept line uses the card's
+  names ("Kept the walls between Bedroom (now part of Master bedroom) and the living room: …").
+  The run-end announcement adds "; the app placed a queen bed, free.". The Accept line says
+  "Left out: the app's queen bed"; Decisions offer no Make this a rule for a free piece.
+- **Caveat, `Decision.free`:** an older tab (PR A, #71) that rewrites the conversation drops it,
+  and the app may then place a piece the person declined again (they untick it once more). C's
+  talk record v5 must carry `declined` under its bump.
 - Left for B2/C: the fix-up pool by progress, Keep fixing, repeats, strict mode; orphans and the
   nudge stay out (lead decisions). A structured `declined` list in talk v5 (C) replaces the
-  tolerant `Decision.free`.
+  tolerant `Decision.free`. When the second look merges: `withFree` at run scope (the look's
+  round answer gets the free pass), `actOnLook`/`applyLookEdit` leave `app:` pieces alone (or
+  rename them on a swap), `lookFacts` marks them, and its round signatures use `checkSig`.
 
 **AI costs always have a figure (#67, 14 Nov).** The owner's Gemini 3 runs had no price, so no
 cost card had a figure and neither the approved figure nor the tab's limit held.

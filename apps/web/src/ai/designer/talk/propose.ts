@@ -46,7 +46,7 @@ import {
 } from '../spend';
 import { type MadeWith, type Running, designOpts, houseKeptFor, useDesigner } from '../state';
 import { cardReportNow, optionCard } from './cards';
-import { declinedPieces } from './free';
+import { declinedPieces, freePlacedWords } from './free';
 import {
   type PriceInput,
   type Priced,
@@ -1192,7 +1192,12 @@ async function readyText(
   if (!p || !o) return plain;
   try {
     const got = await cardReportNow(doc(), optionCard(p, o, designLevelId()));
-    return got ? readyLine(title, got.report, cost) : plain;
+    if (!got) return plain;
+    // What the app placed itself, free, said once with the rest: "…; the app placed a queen bed,
+    // free. Cost US$0.04."
+    const free = freePlacedWords(got.changes, got.r);
+    const line = readyLine(title, got.report, null);
+    return `${free ? `${line.replace(/\.$/, '')}; the app placed ${free}, free.` : line}${cost ? ` Cost ${cost}.` : ''}`;
   } catch {
     return plain;
   }

@@ -95,9 +95,11 @@ describe('free fixes: beds (criterion 11)', () => {
     expect(bed && after.level.items[bed[0]]?.assetId).toBe('bed-queen');
     // The answer carries it as data: the version rebuilds from what is stored.
     const items = out.spaces[MAIN]?.design?.items ?? [];
+    // One of the answer's bedside tables gave way for it: said on the bed's own row.
     expect(items.filter((i) => isAppRef(i.ref)).map((i) => i.why)).toEqual([
-      'A bed for Rachel and Daniel: nobody had one.',
+      'A bed for Rachel and Daniel: nobody had one. One bedside table no longer fits and is left out.',
     ]);
+    expect(out.gaveWay).toEqual([{ space: MAIN, ref: 'side2', assetId: 'bedside' }]);
     // The run report names the piece by its app ref; no failure is left for it.
     const rep = runReport(after, { ...d, spaces: out.spaces });
     expect(rep.failures.filter((f) => f.key.startsWith('P1|bed|'))).toEqual([]);
@@ -191,6 +193,32 @@ describe('free fixes: kept only when strictly better (criterion 14)', () => {
       [MAIN, 'bed'],
       [LIVING, 'sofa'],
     ]);
+  });
+
+  it('a bedside table that would give way to the bed: an extra of this answer, but never one carried over', () => {
+    const { lvl, d } = version('dsn_free_theirs', { [MAIN]: without(sampleMain, ['bed1']) });
+    // New in this answer: the bedside table that loses its place makes room for the bed.
+    const fresh = freeEssentials(lvl, lvl, d);
+    expect(fresh.added.map((a) => a.role)).toEqual(['bed']);
+    const r = designResult(lvl, lvl, { ...d, spaces: fresh.spaces });
+    expect(r.dropped.map((n) => n.ref)).toEqual(['side2']);
+    // Carried over from the answer it changes (Change something kept it): it is theirs, and
+    // nothing of theirs is lost for a free fix.
+    const refs = d.spaces[MAIN]?.design?.items.map((i) => i.ref) ?? [];
+    const kept = freeEssentials(lvl, lvl, d, {}, { theirs: { [MAIN]: refs } });
+    expect(kept.added).toEqual([]);
+    expect(kept.spaces).toBe(d.spaces);
+  });
+
+  it('a space whose furniture the person kept (a lock): no free fix, no try', () => {
+    const { lvl, d } = version('dsn_free_locked', { [MAIN]: without(sampleMain, ['bed1']) });
+    const locked: DesignInput = {
+      ...d,
+      request: { locks: [{ space: MAIN, aspect: 'furniture', by: 'person', label: 'Furniture' }] },
+    };
+    const out = freeEssentials(lvl, lvl, locked);
+    expect(out.tries).toBe(0);
+    expect(out.added).toEqual([]);
   });
 });
 

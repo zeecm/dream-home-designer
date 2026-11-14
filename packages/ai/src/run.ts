@@ -21,6 +21,9 @@ import {
   designResult,
   fixRoundsFor,
   freeEssentials,
+  freeName,
+  furnitureKind,
+  isAppRef,
   layoutStep,
   leftOutLines,
   lensOn,
@@ -30,6 +33,7 @@ import {
   parseSpaceDesign,
   placedWords,
   resolveAsset,
+  roleOf,
   roomStep,
   runReport,
   tokensOf,
@@ -286,7 +290,8 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
   const placeAny = o.results ?? ((b, f, d, opts) => Promise.resolve(designResult(b, f, d, opts)));
   const place: typeof placeAny = (b, f, d, opts) => untilStopped(placeAny(b, f, d, opts), o.signal);
   const freeAny =
-    o.free ?? ((b, f, d, opts, fo) => Promise.resolve(freeEssentials(b, f, d, opts, fo)));
+    o.free ??
+    ((b, f, d, opts, fo) => Promise.resolve().then(() => freeEssentials(b, f, d, opts, fo)));
   const doFetch = o.fetch ?? fetch.bind(globalThis);
   const design: DraftDesign = structuredClone(o.design);
   const name = PROVIDERS[ai.provider].short;
@@ -581,21 +586,61 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     /**
      * An answer with the app's free fixes (the missing essentials of its must-have checks),
      * worked out on the space alone as `failing` checks it, and kept only when strictly better.
+     * Never in a space whose furniture the person kept (Change something, a lock); the pieces the
+     * answer carries over from the one it changes count as theirs, so "no worse" leaves out only
+     * what this answer added. It fails open: a free pass that can't be worked out leaves the paid
+     * answer as it is (only Stop ends the room).
      */
-    const withFree = async (s: (typeof spaces)[number], answer: SpaceDesign) => {
+    const withFree = async (
+      s: (typeof spaces)[number],
+      answer: SpaceDesign,
+      /** The answer a fix round changed: a piece of it the new one dropped and the app puts back. */
+      prior?: SpaceDesign,
+    ) => {
+      if (furnitureHeld(s)) return answer;
       const trial: DraftDesign = {
         ...design,
         spaces: { [s.key]: { name: s.name, status: 'done', design: answer } },
       };
+      const previous = plan.previous?.[s.key];
       const out = await untilStopped(
         freeAny(ctx.base, ctx.before, trial, o.result, {
           spaces: [s.key],
           ...(o.declined?.length ? { declined: o.declined } : {}),
+          ...(previous ? { theirs: { [s.key]: previous.items.map((i) => i.ref) } } : {}),
         }),
         o.signal,
-      );
-      return out.added.length ? (out.spaces[s.key]?.design ?? answer) : answer;
+      ).catch((e: unknown) => {
+        if (e instanceof Stopped) throw e;
+        return null;
+      });
+      const placed = out?.added.length ? out.spaces[s.key]?.design : undefined;
+      if (!placed) return answer;
+      // A piece the fix round's answer dropped, put back by the app: its row says so.
+      const had = new Set((prior?.items ?? []).map((i) => roleOf(furnitureKind(i.assetId))));
+      const back = (out?.added ?? []).filter((a) => a.space === s.key && had.has(a.role));
+      if (!back.length) return placed;
+      const refs = new Set(back.map((a) => a.ref));
+      return {
+        ...placed,
+        items: placed.items.map((i) =>
+          refs.has(i.ref) && isAppRef(i.ref)
+            ? {
+                ...i,
+                why: `Put back by the app: the fix round’s answer left out the ${freeName(i.assetId)}.`,
+              }
+            : i,
+        ),
+      };
     };
+    /** The person kept this space's furniture: by the plan (Change something) or a lock. */
+    const furnitureHeld = (s: (typeof spaces)[number]) =>
+      !!plan.keep?.[s.key]?.includes('furniture') ||
+      (plan.locks ?? []).some(
+        (l) =>
+          l.aspect === 'furniture' &&
+          (l.space === '*' || l.space.split('+').some((id) => s.rooms.includes(id))),
+      );
     // A run-stopping error (a refused key, a quota): set before the first room's gate opens,
     // so no other room is sent after it.
     let runError: unknown = null;
@@ -695,7 +740,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
               st.error = null;
               break;
             }
-            const fixedAnswer = await withFree(s, merge(again));
+            const fixedAnswer = await withFree(s, merge(again), current);
             const next = await failing(s, fixedAnswer);
             // Kept only if it fails less; no better twice running is a room that can't pass,
             // and the second round isn't spent on it.

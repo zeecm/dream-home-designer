@@ -313,7 +313,12 @@ async function acceptOnce(
     letter: card.option?.letter ?? 'A',
     changes: ids,
     total,
-    left: left.map((c) => cut(c.name, TALK_LIMITS.left)).slice(0, 20),
+    // The app's own pieces said as the app's ("Left out: the app's queen bed").
+    left: left
+      .map((c) =>
+        cut(isAppChange(c, r) ? c.name.replace(/^the /, 'the app’s ') : c.name, TALK_LIMITS.left),
+      )
+      .slice(0, 20),
   });
   say(`Accepted ${plural(ids.length, 'change')} from ${title}. Undo is available.`);
   return eventId;

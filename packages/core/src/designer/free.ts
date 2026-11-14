@@ -1,13 +1,15 @@
 import { furnitureKind } from '../furniture';
 import type { Level } from '../schema';
+import { lockCovers } from './handEdits';
 import { type Person, type Role, peopleOf, roleOf, seatsOf } from './principles';
 import { checkSig } from './report';
 import { piecesNoWorse } from './resolve';
 import { type DesignOptions, type DesignResult, type ResultCheck, designResult } from './result';
-import type { DesignInput, DesignItem, SpaceDesign } from './schema';
+import { type DesignInput, type DesignItem, LIMITS, type SpaceDesign } from './schema';
 import { roomIdAt } from './spaces';
 import { personLabel } from './talk/firstMeeting';
 import { pieceWords } from './talk/probe';
+import { clean } from './util';
 
 /**
  * Free fixes (spec docs/specs/designer-listens.md §3, lead decisions "Free fixes: a post-pass on
@@ -61,15 +63,32 @@ export interface FreeOutcome {
   spaces: DesignInput['spaces'];
   added: FreeAdd[];
   missed: FreeMiss[];
+  /** Extras of the answer that no longer fit once the app's pieces went in (said with them). */
+  gaveWay: { space: string; ref: string; assetId: string }[];
   /** Placings tried (each a `designResult`). */
   tries: number;
 }
+
+/** "one bedside table no longer fits and is left out" (without a full stop). */
+export function gaveWayWords(lost: readonly { assetId: string }[]): string {
+  const names = lost.map((l) => `one ${freeName(l.assetId)}`);
+  const list =
+    names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+  return `${list} no longer ${names.length > 1 ? 'fit and are' : 'fits and is'} left out`;
+}
+
+const cap = (s: string) => (s ? `${s[0]?.toUpperCase()}${s.slice(1)}` : s);
 
 export interface FreeOptions {
   /** Only these spaces (by result or stored key); every designed space when absent. */
   spaces?: readonly string[];
   /** Pieces the person left out before (by room and role): never offered again. */
   declined?: readonly { room: string; role: string }[];
+  /**
+   * The refs of pieces the answer carries over from the one it changes, by space: theirs, so
+   * never an extra that may give way ("no worse" leaves out only what this answer added).
+   */
+  theirs?: Readonly<Record<string, readonly string[]>>;
 }
 
 /** What a free fix is judged by: the version's failing hard checks and its pieces. */
@@ -88,18 +107,20 @@ interface Side {
  */
 const EXTRAS = new Set<Role>(['bedside', 'side-table', 'light', 'decor', 'rug', 'coffee-table']);
 
-function sideOf(r: DesignResult, design: DesignInput): Side {
+function sideOf(r: DesignResult, design: DesignInput, theirs: FreeOptions['theirs'] = {}): Side {
   const hard = r.checks.filter((c) => c.hard && !c.already);
   const answerItem = (n: { ref?: string; space?: string }) => {
     const s = r.spaces.find((x) => x.key === n.space);
     const items = (s?.storedKey && design.spaces[s.storedKey]?.design?.items) || [];
-    return items.find((i) => i.ref === n.ref);
+    return { stored: s?.storedKey ?? null, item: items.find((i) => i.ref === n.ref) };
   };
   const counts = (n: { ref?: string; space?: string }) => {
     if (!n.ref) return true;
-    const a = answerItem(n);
-    // A piece kept by its alias always counts, and so does the app's own.
+    const { stored, item: a } = answerItem(n);
+    // A piece kept by its alias, carried over from the answer it changes, or the app's own
+    // always counts.
     if (!a || a.keep || isAppRef(n.ref)) return true;
+    if ([n.space, stored].some((k) => !!k && theirs[k]?.includes(a.ref))) return true;
     return !EXTRAS.has(roleOf(furnitureKind(a.assetId)));
   };
   return {
@@ -356,6 +377,7 @@ export function freeEssentials(
   const added: FreeAdd[] = [];
   const missed: FreeMiss[] = [];
   let tries = 0;
+  const gaveWay: FreeOutcome['gaveWay'] = [];
   const declined = new Set((o.declined ?? []).map((d) => `${d.room}|${d.role}`));
   for (const s of r.spaces) {
     const key = s.storedKey;
@@ -364,6 +386,11 @@ export function freeEssentials(
     const answer = current.spaces[key]?.design;
     // Only answers by intent: the solver places the pieces (a first answer by position can't).
     if (!answer || answer.v !== 2) continue;
+    // Never where the person kept the furniture (a lock, or changed by hand since accepting).
+    const held = (design.request?.locks ?? []).some(
+      (l) => l.aspect === 'furniture' && (l.space === '*' || lockCovers(l, s.rooms)),
+    );
+    if (held) continue;
     const failing = r.checks.filter((c) => {
       const code = c.key.split('|')[1] ?? '';
       return (
@@ -402,7 +429,7 @@ export function freeEssentials(
     const first = ORDER.find((c) => wants.some((w) => codeOf(w) === c));
     const alone = wants.filter((w) => codeOf(w) === first);
     const sets = alone.length < wants.length ? [wants, alone] : [wants];
-    const was = sideOf(r, current);
+    const was = sideOf(r, current, o.theirs);
     let kept: { wants: Want[]; r: DesignResult; design: DesignInput } | null = null;
     let lastTry: DesignResult | null = null;
     for (const set of sets) {
@@ -419,14 +446,47 @@ export function freeEssentials(
       tries++;
       const rn = designResult(base, before, next, opts);
       lastTry ??= rn;
-      if (freeBetter(was, sideOf(rn, next))) {
+      if (freeBetter(was, sideOf(rn, next, o.theirs))) {
         kept = { wants: set, r: rn, design: next };
         break;
       }
     }
     const room = (id: string) => r.level.rooms[id]?.name ?? s.name;
     if (kept) {
+      // The extras of the answer that gave way (a bedside table with no room by the new bed's
+      // head): said with the piece, on its row and wherever the app says what it placed.
+      const was = new Set(r.dropped.map((n) => `${n.space}|${n.ref}`));
+      const items = kept.design.spaces[key]?.design?.items ?? [];
+      const lost = kept.r.dropped.flatMap((n) => {
+        const a = n.ref && !isAppRef(n.ref) ? items.find((i) => i.ref === n.ref) : undefined;
+        return a && n.space === s.key && !was.has(`${n.space}|${n.ref}`)
+          ? [{ space: key, ref: a.ref, assetId: a.assetId }]
+          : [];
+      });
       current = kept.design;
+      if (lost.length) {
+        const head = kept.wants[0]?.item.ref;
+        const said = gaveWayWords(lost);
+        const d = current.spaces[key]?.design;
+        if (d) {
+          current = {
+            ...current,
+            spaces: {
+              ...current.spaces,
+              [key]: {
+                ...(current.spaces[key] as DesignInput['spaces'][string]),
+                design: {
+                  ...d,
+                  items: d.items.map((i) =>
+                    i.ref === head ? { ...i, why: clean(`${i.why} ${cap(said)}.`, LIMITS.why) } : i,
+                  ),
+                },
+              },
+            },
+          };
+        }
+        gaveWay.push(...lost);
+      }
       r = kept.r;
       for (const w of kept.wants) {
         added.push({
@@ -454,5 +514,5 @@ export function freeEssentials(
       });
     }
   }
-  return { spaces: current.spaces, added, missed, tries };
+  return { spaces: current.spaces, added, missed, gaveWay, tries };
 }

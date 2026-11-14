@@ -8207,7 +8207,14 @@ textarea {
 .talk-decision-actions {
   display: flex;
   gap: 10px;
-  flex: none;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+/* The decision's words keep a readable width; its actions wrap under each other first. */
+.talk-decisions li > span:first-child {
+  flex: 1 1 14em;
+  min-width: 0;
 }
 
 /* House rules (slice 3a): the offer under a reply, its refusals, and Your rules. */
@@ -9408,6 +9415,10 @@ html[data-proposal] .plan-svg g.clearance {
 .talk-check-link {
   margin-left: 4px;
   color: var(--text);
+}
+/* The tag before a row's text, never split across lines. */
+.talk-app-tag {
+  white-space: nowrap;
 }
 .talk-check-lead .talk-free-btn {
   justify-self: start;
