@@ -240,8 +240,11 @@ export const FIX_PER_RUN = 3;
 /** How many times one room's answer may be sent back: once on Quick, twice on Thorough. */
 export const fixRoundsFor = (quality: DesignBrief['quality']) =>
   quality === 'quick' ? 1 : FIX_ROUNDS;
-/** Tokens a fix round's prompt adds for the failures and where the pieces were placed. */
-const FIX_EXTRA = 600;
+/**
+ * Tokens a fix round's prompt adds: the failures, where the pieces were placed, and the pieces
+ * left out with their hints (at most 8 + 8 lines of at most 300 characters).
+ */
+const FIX_EXTRA = 2100;
 
 export interface StepEstimate {
   step: string;

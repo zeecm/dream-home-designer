@@ -503,6 +503,111 @@ describe('fix rounds: the app checks each answer before it is shown (designer v2
     expect(space?.fixes).toBe(1);
   });
 
+  it('each round is stored with how it ended (fixed, no better), for the card', async () => {
+    const better = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => (living(c) && n === 1 ? sse(facingWall()) : null),
+    });
+    const one = await start('anthropic', { fetch: better.fetch }).run;
+    const fixedRoom = Object.values(one.design.spaces).find((s) => s.name.startsWith('Living'));
+    expect(fixedRoom?.rounds).toEqual([{ outcome: 'fixed', before: 5, after: 0 }]);
+    // Rooms that passed first time have no rounds.
+    expect(Object.values(one.design.spaces).filter((s) => s.rounds).length).toBe(1);
+    const same = provider('anthropic', {
+      auto: true,
+      reply: (c) => (living(c) ? sse(facingWall()) : null),
+    });
+    const two = await start('anthropic', { fetch: same.fetch }).run;
+    const stuck = Object.values(two.design.spaces).find((s) => s.name.startsWith('Living'));
+    expect(stuck?.rounds).toEqual([{ outcome: 'no-better', before: 5, after: 5 }]);
+  });
+
+  it('a fix round cut off at the length limit twice is stored as cut off, not silent', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) =>
+        living(c) && n === 1
+          ? sse(facingWall())
+          : living(c)
+            ? new Response(anthropicStream(facingWall(), USAGE, { stop: 'max_tokens' }), {
+                status: 200,
+                headers: { 'content-type': 'text/event-stream' },
+              })
+            : null,
+    });
+    const { design } = await start('anthropic', { fetch: prov.fetch }).run;
+    const space = Object.values(design.spaces).find((s) => s.name.startsWith('Living'));
+    expect(space?.status).toBe('done');
+    expect(space?.rounds).toEqual([{ outcome: 'cut-off', before: 5, after: 5 }]);
+  });
+
+  it('a fix round the model declines is stored as declined, never as “no readable answer”', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) =>
+        living(c) && n === 1
+          ? sse(facingWall())
+          : living(c)
+            ? new Response(anthropicStream(facingWall(), USAGE, { stop: 'refusal' }), {
+                status: 200,
+                headers: { 'content-type': 'text/event-stream' },
+              })
+            : null,
+    });
+    const { design } = await start('anthropic', { fetch: prov.fetch }).run;
+    const space = Object.values(design.spaces).find((s) => s.name.startsWith('Living'));
+    expect(space?.rounds).toEqual([{ outcome: 'refused', before: 5, after: 5 }]);
+  });
+
+  it('a room still failing when the run’s fix-ups are used up says so', async () => {
+    const twoKids: DesignBrief = {
+      ...brief,
+      household: { ...brief.household, children: ['primary', 'primary'] },
+      sleeping: {
+        'rm_main-bedroom': ['adult-1', 'adult-2', 'child-1'],
+        rm_bedroom: ['elder-1', 'child-2'],
+      },
+    };
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (living(c) ? sse(facingWall()) : null),
+    });
+    const { design } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: twoKids },
+      design: { ...fresh(), brief: twoKids },
+      fixesLeft: 1,
+    }).run;
+    const outcomes = Object.values(design.spaces).flatMap((s) => s.rounds ?? []);
+    expect(outcomes.filter((x) => x.outcome !== 'no-fixups')).toHaveLength(1);
+    expect(outcomes.some((x) => x.outcome === 'no-fixups')).toBe(true);
+  });
+
+  it('a bed left out for a keep ref the plan doesn’t have: the fix round names it, with the hint', async () => {
+    const keptGone = () => {
+      const a = structuredClone(answerFor('furnish "Master bedroom"')?.answer) as {
+        items: Record<string, unknown>[];
+      };
+      const bed = a.items.find((i) => i.ref === 'bed1') as Record<string, unknown>;
+      bed.keep = 'P99';
+      return a;
+    };
+    const main = (c: { step: string }) => /furnish "(Master|Main) bedroom"/.test(c.step);
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => (main(c) && n === 1 ? sse(keptGone()) : null),
+    });
+    await start('anthropic', { fetch: prov.fetch }).run;
+    const calls = prov.calls.filter(main);
+    expect(calls).toHaveLength(2);
+    const body = promptOf(calls[1]?.body);
+    expect(body).toMatch(/has no bed in /);
+    expect(body).toContain('Pieces of your answer the app left out, with why and how to fix it');
+    expect(body).toContain('L1 left out');
+    expect(body).toContain('“bed1”: there’s no piece “P99” in the flat.');
+    expect(body).toContain('Place a new `bed-queen` with keep: null');
+  });
+
   it('the fix round says where the app placed each piece', async () => {
     const prov = provider('anthropic', {
       auto: true,

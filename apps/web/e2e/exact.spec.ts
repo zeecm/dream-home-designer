@@ -583,10 +583,15 @@ test('the picture is the plan: walls where they are, the opening where it is, no
   expect(hueGap(floor.h, hueOf('#c49a6c')), JSON.stringify(floor)).toBeLessThan(25);
   expect(floor.s).toBeGreaterThan(0.2);
   // The sofa there, in its own neutral colours (its seat's cushion), not something else: less
-  // saturated than any paint (over 0.25 above), though lit by the yellow wall beside it, the
-  // oak floor and the sunlit ground through the window it reads a little warm (0.15–0.16).
+  // saturated than any paint. Lit by the yellow wall beside it, the oak floor and the sunlit
+  // ground through the window it reads a little warm: 0.14–0.23 at 32 samples (the path
+  // tracer's noise on a 7×7 patch; two runs of one scene gave 0.142 and 0.224), while the paints
+  // read 0.58–0.79. So the bound sits between them, and well below every paint measured here.
   const sofa = at('sofa', [2.35, 0.5, 2.0]);
-  expect(sofa.s, JSON.stringify(sofa)).toBeLessThan(0.2);
+  expect(sofa.s, JSON.stringify(sofa)).toBeLessThan(0.3);
+  expect(sofa.s, JSON.stringify({ sofa, green, yellow })).toBeLessThan(
+    Math.min(green.s, yellow.s) - 0.2,
+  );
 });
 
 // ---------------------------------------------------------------- on a phone, in the walk

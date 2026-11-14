@@ -140,13 +140,33 @@ function Person({ t }: { t: TurnOf<'person'> }) {
 }
 
 function Designer({ t, named }: { t: TurnOf<'designer'>; named: boolean }) {
+  // Every sentence of the reply was an "I can't check" (the claims filter took them out): the
+  // app's line in its place, in the app's voice, with the reply's cost on it.
+  if (t.talk?.appLine && !t.text) {
+    return (
+      <article className="talk-turn talk-app" aria-labelledby={`h-${t.id}`} data-app-line="">
+        <h3 id={`h-${t.id}`} className="visually-hidden">
+          App
+        </h3>
+        <p className="talk-app-line">
+          <span className="talk-app-icon">
+            <Mark kind="dot" />
+          </span>
+          <span className="talk-app-text">
+            <span>{t.talk.appLine}</span>
+          </span>
+        </p>
+        <ReplyParts t={t} />
+      </article>
+    );
+  }
   return (
     <article className="talk-turn talk-designer" aria-labelledby={`h-${t.id}`}>
       <h3 id={`h-${t.id}`} className={named ? 'talk-name' : 'visually-hidden'}>
         Designer
         <span className="visually-hidden"> said</span>
       </h3>
-      {t.talk ? <ReplyText text={t.text} /> : <p className="talk-text">{t.text}</p>}
+      {t.talk ? t.text && <ReplyText text={t.text} /> : <p className="talk-text">{t.text}</p>}
       {t.lines.length > 0 && (
         <ul className="talk-lines">
           {t.lines.map((l) => (
@@ -672,6 +692,7 @@ export function Log() {
     if (!el) return;
     follow(el);
     pinned.current = true;
+    el.dataset.pinned = '1';
     setBehind(false);
   }, [turns.length]);
   // A run's progress: followed only if the log was at its foot.
@@ -705,6 +726,8 @@ export function Log() {
     const on = () => {
       if (Date.now() - moved.current < 100) return; // our own scroll, not the person's
       pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+      // Read at a run's end: its card's head comes into view only if the log was following.
+      el.dataset.pinned = pinned.current ? '1' : '0';
       if (pinned.current) setBehind(false);
     };
     el.addEventListener('scroll', on, { passive: true });

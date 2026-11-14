@@ -8,6 +8,8 @@ import {
   defaultTicks,
   keptHolds,
   mergeChanges,
+  mergeLines,
+  peopleWords,
   spentOf,
   subsetReport,
   usageTotals,
@@ -25,6 +27,7 @@ import { useResultsTickN } from '../results';
 import { cannotDesign, tokens, usd, useSpend } from '../spend';
 import { houseKeptFor, houseRulesFor, openCompare, useDesigner } from '../state';
 import { keepTogether } from '../words';
+import { CheckLead, SetOutToFix, hasLead } from './CheckLead';
 import { Mark } from './Mark';
 import { acceptCard, precheckNow } from './accept';
 import {
@@ -32,12 +35,14 @@ import {
   cardChanges,
   cardLens,
   cardResult,
+  cardRunReport,
   cardVerdict,
   headLabel,
   madeWith,
   midLine,
   nowOf,
   planMoved,
+  tickedExtra,
 } from './cards';
 import { bringBackCard } from './iterate';
 import {
@@ -395,6 +400,22 @@ function ResumeNote({
   );
 }
 
+/**
+ * Accept's question, counted as the card counts (one line a failure as the person reads it):
+ * "Accept anyway? 1 problem: 4 dining chairs aren't at a table".
+ */
+function askLine(checks: readonly ResultCheck[], brief: CardModel['input']['brief']): string {
+  const lines = mergeLines(
+    checks.map((c) => ({
+      key: c.key,
+      text: c.text,
+      says: peopleWords(c.text, brief),
+      roomId: c.roomId ?? null,
+    })),
+  );
+  return `Accept anyway? ${plural(lines.length, 'problem')}: ${lines.map((l) => l.says.replace(/\.$/, '')).join('; ')}`;
+}
+
 /** What a folded card last said of itself (its checks need the plan worked out again). */
 const verdicts = new Map<string, { text: string; total: number; rules: string }>();
 
@@ -517,6 +538,14 @@ export const ProposalCard = memo(function ProposalCard({
     changes,
     ticked,
     waive.map((w) => w.key),
+  );
+  // The one list (UX "One list, one count"): what the version fails in its scope, less what is
+  // accepted anyway, one line a failure. The lead names every one, a missing bed (no piece, so
+  // no row) included; the count is its length, as the bar, the tabs and the talk call count.
+  const waiveKey = waive.map((w) => w.key).join('|');
+  const runRep = useMemo(
+    () => (r ? timed(() => cardRunReport(card, r, changes, { waive: waiveKey.split('|') })) : null),
+    [card, r, changes, waiveKey],
   );
   // The electrical layer's notes on the points this proposal adds (surface trunking on a
   // structural wall, an aircon with no compressor): notes, not failures, so amber.
@@ -689,14 +718,10 @@ export const ProposalCard = memo(function ProposalCard({
     );
   }
   const fails = failingChecks(r, { waivers: card.waivers });
-  // Failing checks no row answers for (a missing bed, a piece no change moves).
-  const unrowed = (report?.failing ?? []).filter(
-    (c) =>
-      !c.itemId ||
-      !changes.some(
-        (x) => x.items.target.includes(c.itemId ?? '') || x.items.now.includes(c.itemId ?? ''),
-      ),
-  );
+  const rep = runRep ?? cardRunReport(card, r, changes);
+  const waivedKeys = [...fails.waived.map((c) => c.key), ...waive.map((w) => w.key)];
+  // What the ticks fail together beyond the version's own count (said under Checks).
+  const extras = tickedExtra(rep, report?.failing ?? [], waivedKeys);
   const accept = async (w: { key: string; text: string }[]) => {
     setAccepting(true);
     const line = await acceptCard(card, ticked, w).finally(() => setAccepting(false));
@@ -708,27 +733,22 @@ export const ProposalCard = memo(function ProposalCard({
       );
     }
   };
-  const fixed = Object.values(card.input.spaces).reduce((t, s) => t + (s.fixed ?? 0), 0);
   const missing = r.spaces.filter((s) => !['done', 'copied', 'locked'].includes(s.status));
   const groups = [...new Set([...changes.map((c) => c.group), ...accepted.map((a) => a.group)])];
   const nameOf = (g: string) =>
     changes.find((c) => c.group === g)?.groupName ??
     accepted.find((a) => a.group === g)?.groupName ??
     g;
-  // One verdict for the card: what the proposal fails (ticked or not, in its scope) and what
-  // the ticked changes fail together, less what is accepted anyway.
-  const inCard = (c: { itemId?: string }) =>
-    !c.itemId ||
-    changes.some(
-      (x) => x.items.target.includes(c.itemId ?? '') || x.items.now.includes(c.itemId ?? ''),
-    );
+  // One verdict for the card, from the one list.
   const one = cardVerdict(
-    fails.open.filter(inCard),
-    report?.failing ?? [],
-    [...fails.waived.map((c) => c.key), ...waive.map((w) => w.key)],
+    rep.failures.map((f) => ({ key: f.key })),
+    [],
+    waivedKeys,
     ruleCount,
   );
   const failingLine = report || !running ? { text: one.text, tone: one.tone } : null;
+  // The lead: how this version was checked, above the summary ("did it work?" comes first).
+  const lead = !running && card.status !== 'failed' && !!failingLine && hasLead(rep);
   const verdict = running ? 'Checking…' : (failingLine?.text ?? 'Checking…');
   const title =
     card.input.concept?.summary ||
@@ -804,8 +824,12 @@ export const ProposalCard = memo(function ProposalCard({
     >
       {head}
       {tabs}
+      {lead && <CheckLead cardKey={card.key} report={rep} />}
       {title && <p className="talk-card-summary">{keepTogether(title)}</p>}
       {card.words.trim() && <p className="talk-card-words">Your words: “{card.words.trim()}”</p>}
+      {!running && card.status !== 'failed' && card.option?.addresses?.length ? (
+        <SetOutToFix addresses={card.option.addresses} report={rep} />
+      ) : null}
       {planMoved(project, card) && !card.accepted.length && (
         <p className="field-hint">Made on your plan as it was; checked again on it as it is now.</p>
       )}
@@ -1083,10 +1107,7 @@ export const ProposalCard = memo(function ProposalCard({
                           ))}
                           {confirm === c.id && (
                             <div className="talk-confirm notice-warning">
-                              <p>
-                                Accept anyway? {plural(fail.length, 'problem')}:{' '}
-                                {fail.map((f) => f.text).join('; ')}
-                              </p>
+                              <p>{askLine(fail, card.input.brief)}</p>
                               <div className="button-row">
                                 <button
                                   type="button"
@@ -1135,14 +1156,6 @@ export const ProposalCard = memo(function ProposalCard({
       )}
       {!running && card.status !== 'failed' && (changes.length > 0 || accepted.length > 0) && (
         <dl className="talk-lens">
-          {fixed > 0 && (
-            <div className="talk-lens-line">
-              <dd>
-                <Mark kind="check" /> Checked and fixed {plural(fixed, 'problem')} before showing
-                you this.
-              </dd>
-            </div>
-          )}
           <div>
             <dt>Checks</dt>
             <dd
@@ -1154,8 +1167,28 @@ export const ProposalCard = memo(function ProposalCard({
                     : ''
               }
             >
-              {failingLine?.tone === 'pass' && <Mark kind="check" />}
-              {verdict}
+              {failingLine?.tone === 'pass' && !extras.length && <Mark kind="check" />}
+              {/* The version passes, what is ticked doesn't: said plainly, never ✓ over red. */}
+              {failingLine?.tone === 'pass' && extras.length
+                ? 'The design passes as a whole'
+                : verdict}
+              {lead && rep.failures.length > 0 && <span className="muted"> · listed above</span>}
+              {extras.length > 0 && (
+                <div className="talk-ticked-extra" data-ticked-extra="">
+                  <p className="negative">
+                    {rep.failures.length
+                      ? 'What you ticked also fails, together:'
+                      : 'What you ticked fails, together:'}
+                  </p>
+                  <ul className="talk-room-fails">
+                    {extras.map((c) => (
+                      <li key={c.key} className="negative">
+                        {keepTogether(peopleWords(c.text, card.input.brief))}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {fails.already.length > 0 && (
                 <details className="talk-already">
                   <summary>Already in your plan: {fails.already.length}</summary>
@@ -1165,15 +1198,6 @@ export const ProposalCard = memo(function ProposalCard({
                     ))}
                   </ul>
                 </details>
-              )}
-              {unrowed.length > 0 && (
-                <ul className="talk-room-fails">
-                  {unrowed.map((c) => (
-                    <li key={c.key} className="negative">
-                      {keepTogether(c.text)}
-                    </li>
-                  ))}
-                </ul>
               )}
             </dd>
           </div>
@@ -1294,10 +1318,7 @@ export const ProposalCard = memo(function ProposalCard({
                     .join('; ')}
                 </p>
               ) : (
-                <p>
-                  Accept anyway? {plural(asking.checks.length, 'problem')}:{' '}
-                  {asking.checks.map((c) => c.text).join('; ')}
-                </p>
+                <p>{askLine(asking.checks, card.input.brief)}</p>
               )}
               <div className="button-row">
                 {!asking.hdb && (

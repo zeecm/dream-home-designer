@@ -212,6 +212,35 @@ describe('talkCall', () => {
     expect(r.usage[0]?.estimated).toBe(true);
   });
 
+  it('the claims filter: on the reply read, and on the text kept at Stop; never while streaming', async () => {
+    const claim = {
+      ...REPLY_TEXT_FIXTURE,
+      say: 'I don’t have the ability to run the checks before you see the results. I’ll add the queen bed against the long wall, and move the desk to the window.',
+    };
+    // Read to the end: only the claim goes, and no second (paid) request is made.
+    const done = provider(claim);
+    const a = start(done.fetch);
+    await until(() => a.texts.some((t) => t.length > 0), 'first words');
+    // Streaming shows what came, unfiltered (a prefix of the final text, as ever).
+    expect(a.texts.some((t) => t.startsWith('I don’t have'))).toBe(true);
+    done.calls[0]?.release();
+    await until(() => a.result() !== null, 'the end');
+    const r = a.result() as unknown as TalkCallResult;
+    expect(r.status).toBe('done');
+    if (r.status === 'done') expect(r.reply.say).toMatch(/^I’ll add the queen bed/);
+    expect(done.calls).toHaveLength(1);
+    // Stopped part-way, past the claim: the text kept is filtered too.
+    const head = anthropicStream(claim, { input: 1000, cached: 3000, output: 400 });
+    const p = provider(claim, { head: head.indexOf('message_delta') });
+    const s = start(p.fetch);
+    await until(() => s.texts.some((t) => t.includes('before you see')), 'the claim streamed');
+    s.ctrl.abort();
+    await until(() => s.result() !== null, 'stopped');
+    const cut = s.result() as unknown as TalkCallResult;
+    expect(cut.status).toBe('stopped');
+    expect(cut.say).not.toMatch(/ability to run/);
+  });
+
   it('a dropped connection is tried again and its text starts afresh', async () => {
     const p = provider(REPLY_TEXT_FIXTURE, {
       reply: (n) => (n === 1 ? new TypeError('Failed to fetch') : null),

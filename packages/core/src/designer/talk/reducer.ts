@@ -14,7 +14,14 @@ import {
 import { spentOf } from './price';
 import type { ProbeLines } from './probe';
 import { mechanicalSummary } from './prompt';
-import { type TalkReply, applyFacts, confirmText, factQuestion, widens } from './reply';
+import {
+  type TalkReply,
+  applyFacts,
+  confirmText,
+  factQuestion,
+  filterClaims,
+  widens,
+} from './reply';
 import {
   type Conversation,
   DECISION_CHARS,
@@ -214,6 +221,8 @@ export type TalkAction =
       fold: { upTo: string; hard: boolean } | null;
       /** The rule it offers, as the app built and vetted it (when the reply had one). */
       offer?: { rule: Rule; vet: RuleVet } | null;
+      /** Said by the app in the reply's place, when the claims filter emptied it. */
+      appLine?: string;
     }
   | {
       type: 'replyFailed';
@@ -755,7 +764,8 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
     case 'replyFailed': {
       const t = findTurn(conv, a.turnId, 'person');
       if (!t?.reply || t.reply.state !== 'pending') return conv;
-      const text = cutLines(a.text, L.designer);
+      // What came of it is kept, less any "I can't check" (a tab's checkpoint is raw text).
+      const text = cutLines(filterClaims(a.text).say, L.designer);
       const next = replaceTurn(conv, {
         ...t,
         reply: {
@@ -771,7 +781,8 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
     case 'replyCut': {
       const t = findTurn(conv, a.turnId, 'person');
       if (!t?.reply || t.reply.state !== 'pending') return conv;
-      const text = cutLines(a.text, L.designer);
+      // What came of it is kept, less any "I can't check" (a tab's checkpoint is raw text).
+      const text = cutLines(filterClaims(a.text).say, L.designer);
       const next = replaceTurn(conv, {
         ...t,
         // A closed tab's reply was never answered (Try again, Edit); a stopped one was cut.
@@ -1308,6 +1319,7 @@ function replyDone(
       })),
       concern,
       plan: r.plan,
+      ...(a.appLine ? { appLine: cut(a.appLine, 300) } : {}),
       offer: offer
         ? { rule: offer.rule, vet: offer.vet, state: offer.vet.ok ? 'open' : 'refused' }
         : null,

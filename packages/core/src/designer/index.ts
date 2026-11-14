@@ -105,6 +105,35 @@ export {
   talkBlock,
 } from './prompts';
 export {
+  LINE_MAX,
+  REPORT_MAX,
+  type FixSummary,
+  type ReportFailure,
+  type ReportLeftOut,
+  type ReportOptions,
+  type ReportRoom,
+  type RunReport,
+  checkRoomOf,
+  failureLines,
+  firstAndMore,
+  fixSummary,
+  addressedIn,
+  leadLine,
+  leadParts,
+  leftSig,
+  mergeLines,
+  type Mergeable,
+  leftOutLines,
+  manyOf,
+  peopleWords,
+  readyLine,
+  reportLine,
+  roundLines,
+  runReport,
+  tableEntries,
+  verdictWords,
+} from './report';
+export {
   type DesignOptions,
   type DesignProblem,
   type DesignResult,
@@ -133,6 +162,8 @@ export {
   Provider as AiProvider,
   RoomUse,
   Scope,
+  FixRound,
+  FixRounds,
   SpaceDesign,
   type SpaceKey,
   SpaceStatus,
@@ -159,6 +190,13 @@ export {
 } from './spaces';
 export { type UsageOpts, usageOf, usageTotals } from './usage';
 export { clean, levelFingerprint } from './util';
-export { KEEP_TEXT, LOCK_TEXT, type Note, applyDesignWalls, canonicalIds } from './walls';
+export {
+  type DropCode,
+  KEEP_TEXT,
+  LOCK_TEXT,
+  type Note,
+  applyDesignWalls,
+  canonicalIds,
+} from './walls';
 export * from './talk';
 export * from './rules';
