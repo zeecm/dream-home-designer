@@ -2357,8 +2357,17 @@ test.describe('designer listens, B2: fix rounds by progress, Keep fixing, what w
       await keep.scrollIntoViewIfNeeded();
       await keep.click();
       await expect(ask.getByRole('button', { name: 'Not now' })).toBeInViewport();
-      // Upright, the whole ask, its first line too (never under the bar above the log).
-      if (width === 390) await expect(ask.locator('p')).toBeInViewport({ ratio: 1 });
+      // Upright, the whole ask: its first line's top clear of the On the table bar's bottom.
+      if (width === 390) {
+        const bar = panel(page).getByRole('region', { name: 'On the table' });
+        await expect
+          .poll(async () => {
+            const p = await ask.locator('p').boundingBox();
+            const b = await bar.boundingBox();
+            return p && b ? Math.round(p.y - (b.y + b.height)) : -1;
+          })
+          .toBeGreaterThanOrEqual(0);
+      }
       await expect(ask.getByRole('button', { name: /^Keep fixing · at most/ })).toBeInViewport();
       await shot(page, `b2-keep-fixing-ask-${width}`);
     }
@@ -2521,6 +2530,84 @@ test.describe('designer listens, B1, on a phone (fingers only)', () => {
     }
     await shot(page, 'b1-phone-one-tap');
     expect(m.calls).toHaveLength(calls);
+  });
+
+  test('Keep fixing by finger: its ask clears the On the table bar; Go gives the card’s heading focus (B2, QA)', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const piece = (p: Record<string, unknown>) => ({
+      keep: null,
+      wall: null,
+      along: null,
+      at: null,
+      rotation: null,
+      width: null,
+      depth: null,
+      height: null,
+      why: '',
+      against: null,
+      faces: null,
+      near: null,
+      zone: null,
+      ...p,
+    });
+    const chairs = (k: number) => ({
+      ...sampleMainV2,
+      items: [
+        ...sampleMainV2.items,
+        ...Array.from({ length: k }, (_, i) =>
+          piece({ ref: `dc${i + 1}`, assetId: 'desk-chair', against: 'free', zone: 'work' }),
+        ),
+      ],
+    });
+    await mock(page, {
+      reply: (c, n) =>
+        mainStep(c)
+          ? {
+              status: 200,
+              body: anthropicStream(chairs(Math.max(0, 5 - n)), USAGE),
+              headers: { 'content-type': 'text/event-stream' },
+            }
+          : null,
+    });
+    await page.goto('/');
+    await waitSaved(page);
+    await openTalkByFinger(page);
+    await panel(page).getByRole('button', { name: 'Just design it' }).tap();
+    await panel(page)
+      .getByRole('button', { name: /^(Main|Master) bedroom · about US\$/ })
+      .tap();
+    const go = panel(page).getByRole('button', { name: /^Go ahead( anyway)? · about US\$/ });
+    const v1 = card(page, 1);
+    await expect(go.or(v1).first()).toBeVisible();
+    if (await go.isVisible()) await go.tap();
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 60_000,
+    });
+    const keep = v1.locator('[data-keep-fixing]');
+    await keep.scrollIntoViewIfNeeded();
+    await keep.tap();
+    const ask = v1.locator('[data-keep-fixing-card]');
+    const bar = panel(page).getByRole('region', { name: 'On the table' });
+    // Its first line below the bar's bottom, its buttons in sight (QA: it sat under the bar).
+    await expect
+      .poll(async () => {
+        const p = await ask.locator('p').boundingBox();
+        const b = await bar.boundingBox();
+        return p && b ? Math.round(p.y - (b.y + b.height)) : -1;
+      })
+      .toBeGreaterThanOrEqual(0);
+    await expect(ask.getByRole('button', { name: 'Not now' })).toBeInViewport();
+    await shot(page, 'b2-phone-keep-ask');
+    await ask.getByRole('button', { name: /^Keep fixing · at most US\$/ }).tap();
+    const heading = v1.getByRole('heading', { name: /^V1 · / });
+    await expect(heading).toBeFocused();
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 60_000,
+    });
+    await expect(heading).toBeFocused();
   });
 });
 

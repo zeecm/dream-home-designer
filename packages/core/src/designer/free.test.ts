@@ -296,7 +296,7 @@ describe('free fixes: kept only when strictly better (criterion 14)', () => {
     expect(out.spaces).toBe(d.spaces);
     expect(out.missed.map((m) => m.assetId)).toEqual(['bed-queen']);
     expect(out.missed[0]?.text).toMatch(
-      /^A queen bed fits in Main bedroom only with another check failing \(Your rule/,
+      /^The app didn’t place a queen bed in Main bedroom: it would only fit by breaking another check: “your rule/,
     );
   });
 
@@ -370,7 +370,7 @@ describe('free fixes: cannot place (criterion 13)', () => {
     expect(out.spaces).toBe(d.spaces);
     expect(out.missed.map((m) => m.assetId)).toEqual(['bed-queen']);
     expect(out.missed[0]?.text).toMatch(
-      /^A queen bed fits in Bedroom only with \d+ other checks failing \(.+\), so the app didn’t place one\.$/,
+      /^The app didn’t place a queen bed in Bedroom: it would only fit by breaking \d+ other checks, such as “[a-z][^”]+”\.$/,
     );
   });
 });

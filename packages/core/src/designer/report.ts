@@ -576,6 +576,8 @@ export interface FixSummary {
   stopped: boolean;
   /** A round was on its way when the page went (not sent again; it may be billed). */
   away: boolean;
+  /** The same, for a round Keep fixing sent (said with what Keep fixing did). */
+  keepAway: boolean;
   /** Rounds Keep fixing sent (asked and paid for after the version was shown), and what they fixed. */
   keepSent: number;
   kept: number;
@@ -596,6 +598,7 @@ export function fixSummary(rooms: readonly ReportRoom[]): FixSummary {
     looked: 0,
     stopped: false,
     away: false,
+    keepAway: false,
     keepSent: 0,
     kept: 0,
   };
@@ -618,7 +621,7 @@ export function fixSummary(rooms: readonly ReportRoom[]): FixSummary {
         // Asked for after the version was shown: said apart, never as fixed "before showing you".
         f.keepSent++;
         if (x.outcome === 'fixed') f.kept += Math.max(0, x.before - x.after);
-        if (x.outcome === 'away') f.away = true;
+        if (x.outcome === 'away') f.keepAway = true;
         continue;
       }
       if (x.by === 'look') f.looked++;
@@ -647,12 +650,18 @@ export function fixSummary(rooms: readonly ReportRoom[]): FixSummary {
 function fixSentence(f: FixSummary): string | null {
   const before = fixBefore(f);
   if (!f.keepSent) return before;
+  // A Keep fixing round cut off when the page went is said with what Keep fixing did (QA).
+  const lost = f.keepAway
+    ? f.keepSent > 1
+      ? ' (one of those rounds was cut off when the page went; it may still be billed)'
+      : ' (its round was cut off when the page went; it may still be billed)'
+    : '';
   if (before && f.fixed > 0 && f.kept > 0) {
-    return `${before.replace(/\.$/, '')}, and ${f.kept} more when you asked to keep fixing.`;
+    return `${before.replace(/\.$/, '')}, and ${f.kept} more when you asked to keep fixing${lost}.`;
   }
   const keep = f.kept
-    ? `Fixed ${plural(f.kept, 'problem')} when you asked to keep fixing.`
-    : 'Nothing more was fixed when you asked to keep fixing.';
+    ? `Fixed ${plural(f.kept, 'problem')} when you asked to keep fixing${lost}.`
+    : `Nothing more was fixed when you asked to keep fixing${lost}.`;
   return before ? `${before} ${keep}` : keep;
 }
 

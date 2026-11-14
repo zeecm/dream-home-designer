@@ -597,20 +597,34 @@ export function TalkPanel() {
       before.current = null;
       setSize('full');
     }
-    const f = requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        const ask = document.querySelector<HTMLElement>(
-          `[data-card="${CSS.escape(keepAsk)}"] [data-keep-fixing-card]`,
-        );
-        const row = ask?.querySelector('[data-keep-fixing-buttons]');
-        const log = ask?.closest<HTMLElement>('.talk-log') ?? null;
-        // The whole ask where it fits (its first lines never under the bar above the log, QA);
-        // where it doesn't (a phone on its side), its buttons.
-        const fits = !!ask && (!log || ask.offsetHeight + 16 <= log.clientHeight);
-        (fits ? ask : row)?.scrollIntoView({ block: 'nearest' });
-      }),
-    );
-    return () => cancelAnimationFrame(f);
+    /**
+     * The whole ask in the log's sight where it fits, its top clear of the On the table bar
+     * (measured, QA); where it doesn't (a phone on its side), its buttons. Again once the sheet
+     * has grown to full height (its height moves under the log as it goes).
+     */
+    const place = () => {
+      const ask = document.querySelector<HTMLElement>(
+        `[data-card="${CSS.escape(keepAsk)}"] [data-keep-fixing-card]`,
+      );
+      const log = ask?.closest<HTMLElement>('.talk-log');
+      if (!ask || !log) return;
+      const row = ask.querySelector<HTMLElement>('[data-keep-fixing-buttons]') ?? ask;
+      const lb = log.getBoundingClientRect();
+      const bar = document.querySelector('[aria-label="On the table"]')?.getBoundingClientRect();
+      const top =
+        Math.max(lb.top, bar && bar.bottom <= lb.top + lb.height / 2 ? bar.bottom : 0) + 8;
+      const bottom = lb.bottom - 8;
+      const fits = ask.offsetHeight <= bottom - top;
+      const box = (fits ? ask : row).getBoundingClientRect();
+      if (box.top < top) log.scrollTop -= top - box.top;
+      else if (box.bottom > bottom) log.scrollTop += Math.min(box.bottom - bottom, box.top - top);
+    };
+    const f = requestAnimationFrame(() => requestAnimationFrame(place));
+    const later = [setTimeout(place, 350), setTimeout(place, 800)];
+    return () => {
+      cancelAnimationFrame(f);
+      for (const t of later) clearTimeout(t);
+    };
   }, [keepAsk, sheet]);
   // A card going on the plan for the first time is seen there before Accept. On a phone the
   // cost card has taken the sheet to full height, over the whole stage, so the sheet folds to

@@ -1055,7 +1055,8 @@ fixing, orphans, what was left out.** Proposal records 5.
   "Keep fixing · at most US$x" opens its own cost card in the lead's frame (always asks; its
   first sentence takes focus, never the spend button; Not now or Escape give focus back to the
   button; on a phone the sheet goes full height and its buttons scroll into view, as a cost
-  card's do: `useKeepAsk`; the whole ask where it fits, its buttons where it doesn't): "Keep fixing
+  card's do: `useKeepAsk`; the whole ask where it fits, its top measured clear of the On the table
+  bar, again once the sheet has grown; its buttons where it doesn't): "Keep fixing
   Main bedroom takes about US$a (at most US$b, up to 3 more fix-ups, only while each one helps).
   Go ahead?" Go puts focus on the card's heading, which keeps it while the run goes (a heading
   drawn again takes focus back from the page's body: `useKeepAsk.focus`), and runs a
@@ -1085,7 +1086,9 @@ fixing, orphans, what was left out.** Proposal records 5.
   it is recorded as `FixRound` outcome `away`, counted as used ("This design used the 3 fix-ups
   it was priced for"), numbered with the rounds ("fix round 2: cut off when the page went; it may
   still be billed"; the next request is round 3), and said in the headline ("…; a fix round was
-  cut off when the page went (it may still be billed)."). Keep fixing stays offered while
+  cut off when the page went (it may still be billed)."; a Keep fixing round with Keep fixing's
+  part: "…, and 1 more when you asked to keep fixing (one of those rounds was cut off when the
+  page went; it may still be billed)."). Keep fixing stays offered while
   failures are left. A carried-on run's announcement gives "Cost US$0.04 since you came back,
   US$0.18 in all.". `FixRound.by` and `RoomFix.pending` are each `.catch(undefined)` on their
   own.
@@ -1105,7 +1108,8 @@ fixing, orphans, what was left out.** Proposal records 5.
 - **Answers by position (v1)** get the free pass and orphans too (QA: a v1 living room with no
   sofa and no table got neither, and a paid round instead): the app's piece goes to `placePiece`
   (against the longest free wall, as v1 places), kept only by the same rule, else said with why
-  (`missed`). The B1 guard (`v: 2` only) is gone; the bench is byte-identical (its recorded v1
+  (`missed`: "The app didn't place a 3-seat sofa in Living and dining: it would only fit by
+  breaking 7 other checks, such as “the dining chair isn't at a table”."). The B1 guard (`v: 2` only) is gone; the bench is byte-identical (its recorded v1
   answers miss no essential).
 - **Near misses** (criterion 15): a 0.89 m walkway of 0.90 m is mended and passes; 0.84 m is not a
   near miss. The boundary was 6 cm by float luck (0.9 − 0.84 rounds above 0.06, 0.9 + (2.97 −

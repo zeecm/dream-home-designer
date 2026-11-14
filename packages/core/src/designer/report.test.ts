@@ -785,3 +785,24 @@ describe('a fix round cut off when the page went (QA, B2)', () => {
     );
   });
 });
+
+describe('a Keep fixing round cut off when the page went (QA, B2)', () => {
+  it('is said with what Keep fixing did, not with the rounds before the version was shown', () => {
+    const room: ReportRoom = {
+      key: 'rm_main',
+      name: 'Main bedroom',
+      fixes: 5,
+      fixed: 4,
+      rounds: [
+        { outcome: 'fixed', before: 4, after: 3 },
+        { outcome: 'fixed', before: 3, after: 2 },
+        { outcome: 'fixed', before: 2, after: 1 },
+        { outcome: 'away', before: 1, after: 1, by: 'keep' },
+        { outcome: 'fixed', before: 1, after: 0, by: 'keep' },
+      ],
+    };
+    expect(leadParts([room], 0).fix).toBe(
+      'Checked and fixed 3 problems before showing you, and 1 more when you asked to keep fixing (one of those rounds was cut off when the page went; it may still be billed).',
+    );
+  });
+});

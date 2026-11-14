@@ -404,10 +404,16 @@ function missText(
   if (note) return `No ${name} fits in ${room}: it had no place clear of the other pieces.`;
   // Placed, but at a cost: how many other checks it would fail, and the first in the app's words.
   const worse = r.checks.filter((c) => c.hard && !c.already && !was.has(c.key));
+  // What blocks it, first, with one of the checks it would break as an example (QA).
   const first = worse[0]?.text.replace(/\.$/, '');
+  const example = first ? `${first[0]?.toLowerCase()}${first.slice(1)}` : '';
   return worse.length
-    ? `${an(name)[0]?.toUpperCase()}${an(name).slice(1)} fits in ${room} only with ${worse.length === 1 ? 'another check' : `${worse.length} other checks`} failing (${first ?? ''}), so the app didn’t place one.`
-    : `${an(name)[0]?.toUpperCase()}${an(name).slice(1)} in ${room} would leave other pieces out, so the app didn’t place one.`;
+    ? `The app didn’t place ${an(name)} in ${room}: it would only fit by breaking ${
+        worse.length === 1
+          ? `another check${example ? `: “${example}”` : ''}`
+          : `${worse.length} other checks${example ? `, such as “${example}”` : ''}`
+      }.`
+    : `The app didn’t place ${an(name)} in ${room}: it would leave other pieces out.`;
 }
 
 /**

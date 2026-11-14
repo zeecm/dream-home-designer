@@ -51,7 +51,7 @@ export function KeepFixing({
   const most = dearer ?? priced;
   useEffect(() => {
     // Its first sentence gets focus (never a spend button), as a cost card's heading does.
-    if (asking) head.current?.focus();
+    if (asking) head.current?.focus({ preventScroll: true });
     else if (back.current) {
       back.current = false;
       button.current?.focus();
