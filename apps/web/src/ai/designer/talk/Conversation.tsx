@@ -15,7 +15,6 @@ import { shownViewNow, useOneView } from '../../../ui/oneView';
 import { AiSettingsDialog } from '../../AiSettingsDialog';
 import { aiSettings } from '../../credentials';
 import { BriefDialog } from '../BriefDialog';
-import { failingChecks } from '../parts';
 import { useResultsTickN } from '../results';
 import { tokens, usd, useSpend } from '../spend';
 import { closePanel, openCompare, useDesigner } from '../state';
@@ -24,7 +23,7 @@ import { Log } from './Log';
 import { YourRules, rulesLabel } from './Rules';
 import { Back, Decisions, StartOverDialog, Versions, WhatIKnow } from './Views';
 import { lineState, undoLine } from './accept';
-import { cardChanges, cardResult, cardVerdict, optionCard, versionKey } from './cards';
+import { cardChanges, cardResult, cardRunReport, optionCard, versionKey } from './cards';
 import { copyConversation, downloadConversation, showStart } from './iterate';
 import { stopTalkRun } from './propose';
 import { useRuleShown } from './rules';
@@ -114,18 +113,9 @@ function OnTheTable() {
   );
   const open = useMemo(() => {
     if (!r || !last) return 0;
-    const f = failingChecks(r, { waivers: last.waivers });
+    // Counted from the card's one list (its run report), as the card counts it.
     const changes = timed(() => cardChanges(project, last, r));
-    const inCard = (c: { itemId?: string }) =>
-      !c.itemId ||
-      changes.some(
-        (x) => x.items.target.includes(c.itemId ?? '') || x.items.now.includes(c.itemId ?? ''),
-      );
-    return cardVerdict(
-      f.open.filter(inCard),
-      [],
-      f.waived.map((c) => c.key),
-    ).failing.length;
+    return cardRunReport(last, r, changes).failures.length;
   }, [r, last, project]);
   if (!last) return null;
   if (!r) {

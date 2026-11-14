@@ -9303,3 +9303,99 @@ html[data-proposal] .plan-svg g.clearance {
 .talk-tip {
   margin: 4px 0 8px;
 }
+
+/*
+ * Designer listens, PR A: the card's lead (how it was checked), above the summary. The app's
+ * voice, no fill and no frame: the headline in ink, each failure in ink with a warn mark, its
+ * measured cause in grey. Red stays on the Checks row's count.
+ */
+.talk-check-lead {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.talk-check-head {
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+.talk-check-pass {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  column-gap: 6px;
+  font-weight: 500;
+}
+.talk-check-mark {
+  display: flex;
+  height: 20px;
+  align-items: center;
+}
+.talk-check-fails {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.talk-check-fail {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 6px;
+  font-size: var(--fs-body);
+}
+.talk-check-fail .talk-app-icon {
+  height: 20px;
+}
+.talk-check-fail .talk-app-text {
+  display: grid;
+}
+.talk-check-cause {
+  font-size: var(--fs-hint);
+  color: var(--muted);
+}
+.talk-warn-mark {
+  color: var(--pill-warning-ink);
+}
+.talk-check-more > summary,
+.talk-check-how > summary {
+  font-size: var(--fs-hint);
+}
+.talk-check-more .talk-check-fails {
+  margin-top: 4px;
+}
+.talk-check-how ul {
+  font-size: var(--fs-hint);
+  color: var(--muted);
+}
+/* What this design set out to fix: 13 px, no frame, under the summary. */
+.talk-set-out {
+  display: grid;
+  gap: 2px;
+  font-size: var(--fs-hint);
+}
+.talk-set-out-head {
+  margin: 0;
+  font-size: var(--fs-hint);
+  font-weight: 600;
+}
+.talk-set-out ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.talk-set-out .talk-app-line {
+  color: var(--text);
+}
+.talk-plan-for {
+  margin-top: 6px;
+}
+@media (pointer: coarse) {
+  /* 44 px to the finger, keeping the disclosure's own marker (a list item). */
+  .talk-check-more > summary,
+  .talk-check-how > summary {
+    padding-block: 12px;
+  }
+}

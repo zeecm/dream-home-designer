@@ -1,7 +1,16 @@
 import { z } from 'zod';
 import { Kept, MAX_KEPT } from '../rules/kept';
 import { Rule } from '../rules/schema';
-import { Aspect, Concept, DesignBrief, Lock, SpaceDesign, SpaceStatus, Usage } from '../schema';
+import {
+  Aspect,
+  Concept,
+  DesignBrief,
+  FixRounds,
+  Lock,
+  SpaceDesign,
+  SpaceStatus,
+  Usage,
+} from '../schema';
 import { clean } from '../util';
 
 /**
@@ -189,6 +198,15 @@ export const TalkQuestion = z.object({
 });
 export type TalkQuestion = z.infer<typeof TalkQuestion>;
 
+/** One F or L line a plan says it deals with, and how ("For “…”: …"). */
+export const PlanAddress = z.object({
+  id: z.string().max(4),
+  sig: z.string().max(300),
+  says: z.string().max(200),
+  change: z.string().max(200),
+});
+export type PlanAddress = z.infer<typeof PlanAddress>;
+
 /** A plan of intent (or a concern's one alternative): what a design run would do, resolved. */
 export const TalkPlan = z.object({
   title: z.string().max(60),
@@ -198,6 +216,17 @@ export const TalkPlan = z.object({
   /** What the proposal is for, in the designer's words (the run's talk block). */
   intent: z.string().max(600),
   assumptions: z.array(z.string().max(200)).max(5),
+  /**
+   * The failures and left-out pieces on the table it deals with (F1, L2), each with its change
+   * and the run report's signature (what the next version is checked against). New within the
+   * record's version: optional, read tolerantly.
+   */
+  addresses: z.array(PlanAddress).max(8).optional().catch(undefined),
+  /** It came after a failing design (`title`, `failing` don't pass) and says nothing of it. */
+  unaddressed: z
+    .object({ title: z.string().max(12), failing: z.number().int().min(1) })
+    .optional()
+    .catch(undefined),
 });
 export type TalkPlan = z.infer<typeof TalkPlan>;
 
@@ -645,6 +674,11 @@ export const ProposalOption = z.object({
     .transform((items) => readable(Kept, items).slice(-MAX_KEPT))
     .optional(),
   name: z.string().max(TALK_LIMITS.name),
+  /**
+   * What the designer's plan said it would fix (its `addresses`): the card checks each against
+   * this option's own result. New within the record's version: optional, read tolerantly.
+   */
+  addresses: z.array(PlanAddress).max(8).optional().catch(undefined),
   /** The id its pieces are seeded with, and its version's id once accepted. */
   designId: z.string(),
   brief: DesignBrief,
@@ -658,6 +692,7 @@ export const ProposalOption = z.object({
       error: z.string().optional(),
       fixes: z.number().int().min(0).optional(),
       fixed: z.number().int().min(0).optional(),
+      rounds: FixRounds,
     }),
   ),
   /** Locks it was asked with (hand edits kept, parts kept by the person). */

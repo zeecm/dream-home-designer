@@ -1,25 +1,35 @@
 import {
   type Change,
   type Design,
+  type FixRound,
   type Level,
   type Proposal,
   TYPICAL_RATES,
+  changeSet,
   designResult,
+  leadLine,
   levelBounds,
   parseSpaceDesign,
+  proposalFromRecord,
+  readyLine,
   sampleFlatProject,
 } from '@dhd/core';
 import { describe, expect, it, vi } from 'vitest';
 import living from '../../../../../../packages/core/src/designer/fixtures/room-living.json' with {
   type: 'json',
 };
+import mainBedroom from '../../../../../../packages/core/src/designer/fixtures/room-main-bedroom.json' with {
+  type: 'json',
+};
 import {
   SAMPLE_KEYS,
   parsed,
   sampleDesign,
+  tanBrief,
 } from '../../../../../../packages/core/src/designer/fixtures/sample';
 import {
   type CardModel,
+  cardRunReport,
   cardScope,
   cardVerdict,
   earlierDesign,
@@ -269,5 +279,134 @@ describe('the accept precheck fails closed (tech lead)', () => {
     // Accepted anyway: those no longer stop it.
     const waived = pre.failing.map((c) => c.key);
     expect(precheckOn(project, card, all, waived, r, TYPICAL_RATES).failing).toEqual([]);
+  });
+});
+
+describe('the one list (designer listens: the card bug, criterion 8)', () => {
+  const project = sampleFlatProject('prj_one');
+  const level = project.levels[0] as Level;
+  // The owner's V6: the bed kept as a piece the plan doesn't have, so it is left out.
+  const room = parsed(
+    parseSpaceDesign(
+      {
+        ...mainBedroom,
+        items: mainBedroom.items.map((it) => (it.ref === 'bed1' ? { ...it, keep: 'P99' } : it)),
+      },
+      levelBounds(level),
+    ),
+  );
+  const design = sampleDesign({
+    level,
+    concept: null,
+    answers: { [SAMPLE_KEYS.main]: room },
+    brief: { ...tanBrief(), household: { ...tanBrief().household, children: [], elders: [] } },
+  });
+  const option = (patch: Partial<Proposal['options'][number]> = {}) =>
+    ({
+      letter: 'A',
+      name: 'Main bedroom',
+      designId: design.id,
+      brief: design.brief,
+      aliases: design.aliases,
+      concept: null,
+      spaces: design.spaces,
+      locks: [],
+      usage: [],
+      base: { variant: 'before', fingerprint: 'fp0' },
+      status: 'checked',
+      ticks: null,
+      accepted: [],
+      waivers: [],
+      version: null,
+      note: null,
+      ...patch,
+    }) as Proposal['options'][number];
+  const proposal = (o: Proposal['options'][number]): Proposal => ({
+    projectId: project.id,
+    id: 'prop1',
+    conversationId: 'c1',
+    recordVersion: 2,
+    n: 6,
+    turnId: 't',
+    at: '2026-11-08T10:00:00.000Z',
+    scope: { label: 'Main bedroom', spaces: [SAMPLE_KEYS.main], all: false },
+    words: '',
+    options: [o],
+  });
+  const reportOf = (o = option()) => {
+    const p = proposal(o);
+    const card = optionCard(p, p.options[0] as Proposal['options'][number], level.id);
+    const r = designResult(level, level, card.input);
+    const changes = cardScope(changeSet(level, r, card.input), card, []);
+    return { card, r, changes, rep: cardRunReport(card, r, changes) };
+  };
+
+  it('every failure counted is named, a missing bed (no piece, so no row) included', () => {
+    const { rep, changes } = reportOf();
+    const v = cardVerdict(
+      rep.failures.map((f) => ({ key: f.key })),
+      [],
+      [],
+    );
+    expect(v.text).toBe('2 don’t pass');
+    // No change row carries them (the bed was never placed) …
+    for (const f of rep.failures) {
+      expect(changes.some((c) => c.checks.includes(f.key))).toBe(false);
+    }
+    // … and the list names both, in the household's names, with why.
+    expect(rep.failures.map((f) => f.says)).toEqual([
+      'You have no bed in Main bedroom.',
+      'Partner has no bed in Main bedroom.',
+    ]);
+    expect(rep.failures[0]?.cause).toMatch(/kept a queen bed that isn’t in your plan/);
+    expect(leadLine(rep.rooms, rep.failures.length)).toBe('2 don’t pass:');
+    expect(readyLine('V6', rep, null)).toBe(
+      'V6 is ready. 2 don’t pass: You have no bed in Main bedroom, and 1 more.',
+    );
+  });
+
+  it('the fix line from stored rounds: fixed, still failing, cut off and no better each say so', () => {
+    const withRounds = (rounds: FixRound[], fixes = rounds.length, fixed = 0) => {
+      const spaces = structuredClone(design.spaces);
+      const e = spaces[SAMPLE_KEYS.main];
+      if (e) Object.assign(e, { rounds, fixes, fixed });
+      return reportOf(option({ spaces })).rep;
+    };
+    const lead = (rep: ReturnType<typeof withRounds>) => leadLine(rep.rooms, rep.failures.length);
+    expect(lead(withRounds([{ outcome: 'fixed', before: 4, after: 2 }], 1, 2))).toBe(
+      'Checked and fixed 2 problems before showing you. 2 still don’t pass:',
+    );
+    expect(lead(withRounds([{ outcome: 'cut-off', before: 2, after: 2 }]))).toBe(
+      'Sent back to be fixed, but the answer was cut off at the length limit and wasn’t used. 2 still don’t pass:',
+    );
+    expect(lead(withRounds([{ outcome: 'no-better', before: 2, after: 2 }]))).toBe(
+      'Sent back to be fixed once. The answer was no better, so the first one is shown. 2 still don’t pass:',
+    );
+    // fixed is 0 and no rounds were stored (an older build): still not silent.
+    expect(lead(withRounds([], 1, 0))).toMatch(/^Sent back to be fixed once/);
+  });
+
+  it('rounds and addresses are read tolerantly: a newer value drops them, never the record', () => {
+    const o = option({
+      addresses: [
+        {
+          id: 'F1',
+          sig: 'P1|bed|rm_main-bedroom|adult-1',
+          says: 'You have no bed',
+          change: 'a queen bed',
+        },
+      ],
+    });
+    const raw = structuredClone(proposal(o)) as unknown as {
+      options: { spaces: Record<string, { rounds?: unknown }>; addresses?: unknown }[];
+    };
+    const entry = raw.options[0]?.spaces[SAMPLE_KEYS.main];
+    if (entry) entry.rounds = [{ outcome: 'something-new', before: 1, after: 0 }];
+    const read = proposalFromRecord(raw);
+    expect(read).not.toBeNull();
+    expect(read?.options[0]?.spaces[SAMPLE_KEYS.main]?.rounds).toBeUndefined();
+    expect(read?.options[0]?.addresses?.[0]?.change).toBe('a queen bed');
+    if (raw.options[0]) raw.options[0].addresses = 'not a list';
+    expect(proposalFromRecord(raw)?.options[0]?.addresses).toBeUndefined();
   });
 });

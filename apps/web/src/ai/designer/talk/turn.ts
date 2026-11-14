@@ -7,10 +7,12 @@ import {
   type FactKey,
   type Pointer,
   type QuestionKey,
+  REPORT_MAX,
   STYLE_NAMES,
   type TalkEstimate,
   type TalkFact,
   type TalkInput,
+  type TalkParseContext,
   type TalkPrompt,
   type TalkQuestion,
   type TurnOf,
@@ -22,13 +24,17 @@ import {
   entranceDoor,
   estimateTalk,
   eventsSince,
+  failureLines,
   handEdits,
   lastAccepted,
+  leftOutLines,
+  leftSig,
   liveRules,
   optionTitle,
   pendingReply,
   priceOf,
   probeLines,
+  reportLine,
   ruleOffer,
   spacesOf,
   tableLines,
@@ -37,13 +43,14 @@ import {
   talkPrompt,
   tokensOf,
   usdOf,
+  verdictWords,
 } from '@dhd/core';
 import { useStore } from '../../../store';
 import { aiSettings } from '../../credentials';
 import { browserPage } from '../page';
 import { addUsage, capUsd, overLimit, priceTable, spent, usd } from '../spend';
 import { designOpts, useDesigner } from '../state';
-import { cardChanges, cardResultNow, cardVerdict, optionCard } from './cards';
+import { cardReportNow, cardVerdict, optionCard } from './cards';
 import { followPlan } from './propose';
 import { tableCard } from './rules';
 import {
@@ -111,10 +118,23 @@ export async function noteHandEdits() {
   }
 }
 
-/** The newest proposal still on the table, a line a change (what the designer sees of it). */
-async function onTable(conv: Conversation): Promise<string[]> {
+/** What the designer is told of the proposal on the table, and what its reply may address. */
+interface Table {
+  lines: string[];
+  /** Its F and L lines, as a plan's `addresses` may name them (null: nothing on the table). */
+  ctx: TalkParseContext['table'] | null;
+}
+const NO_TABLE: Table = { lines: [], ctx: null };
+
+/**
+ * The newest proposal still on the table, a line a change, then its run report's F lines
+ * (checks that don't pass) and L lines (pieces left out, with why and a hint): what the
+ * designer sees of it, in the conversation's own short ids.
+ */
+async function onTable(conv: Conversation): Promise<Table> {
   const project = doc();
   const proposals = useTalk.getState().proposals;
+  const level = talkLevel();
   for (let i = conv.turns.length - 1; i >= 0; i--) {
     const t = conv.turns[i];
     if (t?.kind !== 'proposal') continue;
@@ -122,44 +142,96 @@ async function onTable(conv: Conversation): Promise<string[]> {
     // The option on the plan, if it is this proposal's; else its newest.
     const shown = useTalk.getState().shown;
     const o = p?.options.find((x) => shown === `${p.id}:${x.letter}`) ?? p?.options.at(-1);
-    if (!p || !o || o.status === 'running' || o.status === 'failed') return [];
+    if (!p || !o || o.status === 'running' || o.status === 'failed') return NO_TABLE;
     try {
       const card = optionCard(p, o, designLevelId());
-      const r = await cardResultNow(project, card);
-      if (!r) return [];
-      const changes = cardChanges(project, card, r);
+      const aliases = level ? aliasesFor(level, conv.aliases) : conv.aliases;
+      const got = await cardReportNow(project, card, aliases);
+      if (!got) return NO_TABLE;
+      const { changes, report } = got;
       const ticks = o.ticks ?? changes.map((c) => c.id);
       const v = cardVerdict(
-        r.checks.filter((c) => c.hard && !c.already).map((c) => ({ key: c.key })),
+        report.failures.map((f) => ({ key: f.key })),
         [],
         o.waivers.map((w) => w.key),
       );
-      const failing = r.checks.filter((c) => v.failing.includes(c.key)).map((c) => c.text);
-      return tableLines(
-        `${optionTitle(p.n, o.letter, p.options.length)} · ${p.scope.label}: ${v.text}`,
-        changes,
-        ticks,
-        failing,
-      );
+      const title = optionTitle(p.n, o.letter, p.options.length);
+      return {
+        lines: tableLines(`${title} · ${p.scope.label}: ${v.text}`, changes, ticks, {
+          failures: failureLines(report, aliases),
+          leftOut: leftOutLines(report),
+        }),
+        ctx: {
+          title,
+          failing: report.failures.length,
+          entries: [
+            ...report.failures
+              .slice(0, REPORT_MAX)
+              .map((f) => ({ id: f.id, sig: f.sig, says: f.says })),
+            ...report.leftOut
+              .slice(0, REPORT_MAX)
+              .map((l) => ({ id: l.id, sig: leftSig(l), says: l.says })),
+          ],
+        },
+      };
     } catch {
-      return [];
+      return NO_TABLE;
     }
   }
-  return [];
+  return NO_TABLE;
 }
 
-/** Each proposal since the last reply, as one line ("V2 (Kitchen): accepted 4 of 6"). */
-function digests(): Record<string, string> {
+/** The newest proposals' run reports, by option (`p.id:letter`), as the digests say them. */
+type Verdicts = Record<string, string>;
+
+/**
+ * Each proposal since the last reply, as one line with its verdict from the run report ("V6
+ * (Main bedroom): designed; 2 don’t pass, 2 pieces left out."). Frozen into the message at
+ * Send. `verdicts` are worked out by `verdictsNow`; without them (a price) it says "designed".
+ */
+function digests(verdicts: Verdicts = {}): Record<string, string> {
   const out: Record<string, string> = {};
   for (const p of useTalk.getState().proposals) {
     // One line, each option said in it (V4A … ; V4B …).
     const each = p.options.map((o) => {
       const accepted = o.accepted.filter((a) => !a.out).length;
-      return `${optionTitle(p.n, o.letter, p.options.length)} (${p.scope.label}): ${o.status === 'failed' ? 'didn’t finish' : o.status === 'stopped' ? 'stopped part-way' : 'designed'}${accepted ? `, ${accepted} changes accepted` : ''}`;
+      const v = verdicts[`${p.id}:${o.letter}`];
+      return `${optionTitle(p.n, o.letter, p.options.length)} (${p.scope.label}): ${o.status === 'failed' ? 'didn’t finish' : o.status === 'stopped' ? 'stopped part-way' : 'designed'}${v ? `; ${v}` : ''}${accepted ? `, ${accepted} changes accepted` : ''}`;
     });
     if (each.length) out[p.id] = `${each.join('; ')}.`;
   }
   return out;
+}
+
+/** The verdicts of the proposals the next message tells of (those since the last reply). */
+async function verdictsNow(conv: Conversation): Promise<Verdicts> {
+  const project = doc();
+  const since = new Set(
+    eventsSinceTurns(conv).flatMap((t) => (t.kind === 'proposal' ? [t.proposalId] : [])),
+  );
+  const out: Verdicts = {};
+  for (const p of useTalk.getState().proposals) {
+    if (!since.has(p.id)) continue;
+    for (const o of p.options) {
+      if (o.status === 'running' || o.status === 'failed') continue;
+      try {
+        const got = await cardReportNow(project, optionCard(p, o, designLevelId()));
+        if (got) out[`${p.id}:${o.letter}`] = verdictWords(got.report);
+      } catch {
+        // Said as "designed" only.
+      }
+    }
+  }
+  return out;
+}
+
+/** The turns after the designer's last reply (what "Since your last reply" tells of). */
+function eventsSinceTurns(conv: Conversation) {
+  for (let i = conv.turns.length - 1; i >= 0; i--) {
+    const t = conv.turns[i];
+    if (t?.kind === 'designer' && t.talk) return conv.turns.slice(i + 1);
+  }
+  return conv.turns;
 }
 
 /** What a talk call is built from, on the plan as it is now. */
@@ -169,6 +241,8 @@ function inputFor(
   table: string[],
   sent?: string,
   pointers: readonly Pointer[] = conv.draftPointers,
+  /** The verdicts of the proposals since the last reply (a Send's; a price leaves them out). */
+  verdicts: Verdicts = {},
 ): TalkInput | null {
   const project = doc();
   const level = talkLevel();
@@ -182,7 +256,7 @@ function inputFor(
     ...(project.site ? { site: project.site } : {}),
     ...(project.models ? { models: project.models } : {}),
     message,
-    events: eventsSince(conv, digests()),
+    events: eventsSince(conv, digests(verdicts)),
     onTable: table,
     ...(sent !== undefined ? { sent } : {}),
     ...(pointers.length ? { pointers } : {}),
@@ -286,7 +360,8 @@ export async function sendMessage(
     const pointers = pointersGiven ?? (ruleAsk ? [] : conv.draftPointers);
     // Not from the composer: what is typed there, and its chips, stay.
     const keepDraft = !!ruleAsk || !!pointersGiven;
-    const input = inputFor(conv, words, await onTable(conv), undefined, pointers);
+    const table = await onTable(conv);
+    const input = inputFor(conv, words, table.lines, undefined, pointers, await verdictsNow(conv));
     if (!input) return;
     const prompt = talkPrompt(input);
     if (await pastLimit(prompt, conv, anyway)) return;
@@ -306,7 +381,7 @@ export async function sendMessage(
     sent = true;
     if (!keepDraft) await clearTyped();
     say('Designer is replying.');
-    await replyNow(id, prompt);
+    await replyNow(id, prompt, table.ctx);
   });
   if (got === 'busy') say('Another tab is waiting for a reply.');
   return sent;
@@ -322,14 +397,15 @@ export async function retryTurn(turnId: string) {
     const at = conv.turns.findIndex((x) => x.id === turnId);
     // History before it only: the turn itself and what came after it aren't repeated.
     const earlier = { ...conv, turns: conv.turns.slice(0, at) };
-    const input = inputFor(earlier, t.text, await onTable(earlier), t.sent);
+    const table = await onTable(earlier);
+    const input = inputFor(earlier, t.text, table.lines, t.sent);
     if (!input || at < 0) return;
     const prompt = talkPrompt(input);
     if (await pastLimit(prompt, conv)) return;
     const next = await act({ type: 'retry', turnId, at: nowIso() });
     if (!next || pendingReply(next)?.id !== turnId) return;
     say('Designer is replying.');
-    await replyNow(turnId, prompt);
+    await replyNow(turnId, prompt, table.ctx);
   });
   if (got === 'busy') say('Another tab is waiting for a reply.');
 }
@@ -477,7 +553,12 @@ export async function withReplyLock(
   return busy ? 'busy' : 'ran';
 }
 
-async function replyNow(turnId: string, prompt: TalkPrompt) {
+async function replyNow(
+  turnId: string,
+  prompt: TalkPrompt,
+  /** The run report on the table as the message went: what a plan's `addresses` may name. */
+  table: TalkParseContext['table'] | null = null,
+) {
   const ai = aiSettings();
   const conv = useTalk.getState().conv;
   const project = doc();
@@ -502,6 +583,7 @@ async function replyNow(turnId: string, prompt: TalkPrompt) {
         spaces: spacesOf(level).map((s) => ({ key: s.key, name: s.name, rooms: s.rooms })),
         walls: conv.brief.walls,
         mainDoor: entranceDoor(level),
+        ...(table ? { table } : {}),
       },
       signal: ctrl.signal,
       page: browserPage(),
@@ -575,13 +657,17 @@ async function replyNow(turnId: string, prompt: TalkPrompt) {
           brief: now.brief,
         })
       : null;
+    // Nothing left once the claims filter took its sentences out: the app's own run-report
+    // line says what the table holds instead (free, and never a paid retry).
+    const emptied = !res.reply.say && !!res.reply.removed;
+    const lines = emptied ? [await emptiedLine(now), ...res.lines] : res.lines;
     const after = await act({
       type: 'replyDone',
       turnId,
       id,
       at: nowIso(),
       reply: res.reply,
-      lines: res.lines,
+      lines,
       echo: echoOf(res.reply),
       usage: res.usage,
       probe,
@@ -591,7 +677,9 @@ async function replyNow(turnId: string, prompt: TalkPrompt) {
     });
     // The live region: the finished message in short (UX §9.1).
     say(
-      `Designer: ${(res.reply.say.split(/(?<=[.!?])\s/)[0] ?? '').slice(0, 200)} Cost ${usd(cost)}.`,
+      emptied
+        ? `${lines[0] ?? ''} Cost ${usd(cost)}.`
+        : `Designer: ${(res.reply.say.split(/(?<=[.!?])\s/)[0] ?? '').slice(0, 200)} Cost ${usd(cost)}.`,
     );
     // A plan goes on to its design run: priced here, run at once or asked first.
     const t = after?.turns.find((x) => x.id === id);
@@ -615,6 +703,21 @@ async function replyNow(turnId: string, prompt: TalkPrompt) {
   } finally {
     const r = useTalk.getState().reply;
     if (r?.ctrl === ctrl) useTalk.setState({ reply: null });
+  }
+}
+
+/**
+ * The app's line in place of a reply the claims filter emptied: the table's verdict from the
+ * run report ("V8: 3 don’t pass. You have no bed in Main bedroom, and 2 more.").
+ */
+async function emptiedLine(conv: Conversation): Promise<string> {
+  const t = tableCard(conv);
+  if (!t) return 'The designer’s reply had nothing more to say.';
+  try {
+    const got = await cardReportNow(doc(), t.card);
+    return got ? reportLine(t.title, got.report) : `${t.title} is on the table.`;
+  } catch {
+    return `${t.title} is on the table.`;
   }
 }
 

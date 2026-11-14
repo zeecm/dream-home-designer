@@ -551,11 +551,12 @@ export function placePiece(ix: SpaceIndex, want: Want): PlaceOutcome {
   const dropped: Note[] = [];
   let tries = 0;
   const note = (text: string) => ({ text, ref: want.ref, itemId: want.id });
-  const drop = (why: string): PlaceOutcome => {
+  const drop = (why: string, code: NonNullable<Note['code']>, wall?: number): PlaceOutcome => {
     const text = want.brought
       ? `Your ${want.w.toFixed(2)} m ${name} doesn’t fit here: ${why}.`
       : `Left out the ${name}: ${why}.`;
-    return { item: null, repaired, dropped: [note(text)], tries };
+    const numbers = wall === undefined ? {} : { need: want.w, longest: wall };
+    return { item: null, repaired, dropped: [{ ...note(text), code, ...numbers }], tries };
   };
   const builtIn = !!want.kind.carpentry;
 
@@ -636,15 +637,19 @@ export function placePiece(ix: SpaceIndex, want: Want): PlaceOutcome {
       addToIndex(ix, fallback.item, want.kind);
       return { item: fallback.item, repaired, dropped, tries };
     }
-    return drop(firstWhy ?? 'no wall in the room is long enough');
+    const longest = Math.max(
+      0,
+      ...faces.flatMap((f) => clearStretches(f, bottom, top).map(([a, b]) => b - a)),
+    );
+    return drop(firstWhy ?? 'no wall in the room is long enough', 'no-wall', longest);
   }
 
-  if (!want.at) return drop('it had no place');
+  if (!want.at) return drop('it had no place', 'no-place');
   const at = want.at;
-  if (!inRooms(ix, at)) return drop('it was placed outside this room');
+  if (!inRooms(ix, at)) return drop('it was placed outside this room', 'outside');
   const result = repairFree(ix, want, at);
   tries += result.tries;
-  if (!result.item) return drop(result.why);
+  if (!result.item) return drop(result.why, 'no-place');
   repaired.push(...result.notes.map(note));
   addToIndex(ix, result.item, want.kind);
   return { item: result.item, repaired, dropped, tries };

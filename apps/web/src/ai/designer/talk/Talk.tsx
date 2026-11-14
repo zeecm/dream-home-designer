@@ -1,9 +1,10 @@
-import { type TurnOf, cut } from '@dhd/core';
+import { type TalkPlan, type TurnOf, cut } from '@dhd/core';
 import { useMemo, useState } from 'react';
 import { useAi } from '../../credentials';
 import { useResultsTickN } from '../results';
 import { tokens, usd, useSpend } from '../spend';
 import { useDesigner } from '../state';
+import { bare } from './CheckLead';
 import { Mark } from './Mark';
 import { TurnCost } from './ProposalCard';
 import { RuleOfferBlock } from './Rules';
@@ -201,6 +202,7 @@ export function ReplyParts({ t }: { t: TurnOf<'designer'> }) {
         </div>
       )}
       {k.concern && <Concern t={t} />}
+      {k.plan && <PlanAddresses plan={k.plan} />}
       {k.offer && <RuleOfferBlock t={t} />}
       {k.noted.length > 0 && (
         <ul className="talk-noted">
@@ -237,6 +239,59 @@ export function ReplyParts({ t }: { t: TurnOf<'designer'> }) {
         </p>
       )}
     </>
+  );
+}
+
+/** Plan lines shown before "and n more". */
+const ADDRESSES_SHOWN = 3;
+
+/**
+ * Under a plan's reply, in the app's voice: what it says it fixes ("For “…”: …"), or, after a
+ * failing design, that it doesn't say (spec designer-listens §2, UX "Before, during, after").
+ */
+function PlanAddresses({ plan }: { plan: TalkPlan }) {
+  const a = plan.addresses ?? [];
+  if (!a.length) {
+    const u = plan.unaddressed;
+    if (!u) return null;
+    return (
+      <p className="talk-app-line talk-plan-for" data-unaddressed="">
+        <span className="talk-app-icon">
+          <Mark kind="dot" />
+        </span>
+        <span className="talk-app-text">
+          <span>
+            This plan doesn’t say how it fixes {u.title}’s{' '}
+            {u.failing === 1 ? 'problem' : `${u.failing} problems`}.
+          </span>
+        </span>
+      </p>
+    );
+  }
+  const more = a.length - ADDRESSES_SHOWN;
+  return (
+    <ul className="talk-noted talk-plan-for" aria-label="What this plan fixes">
+      {a.slice(0, ADDRESSES_SHOWN).map((x) => (
+        <li key={x.id} className="talk-app-line">
+          <span className="talk-app-icon">
+            <Mark kind="dot" />
+          </span>
+          <span className="talk-app-text">
+            <span>
+              For “{bare(x.says)}”: {bare(x.change)}.
+            </span>
+          </span>
+        </li>
+      ))}
+      {more > 0 && (
+        <li className="talk-app-line">
+          <span className="talk-app-icon" />
+          <span className="talk-app-text">
+            <span>and {more} more</span>
+          </span>
+        </li>
+      )}
+    </ul>
   );
 }
 

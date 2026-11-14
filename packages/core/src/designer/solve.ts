@@ -1624,13 +1624,21 @@ function solveOnce(input: SolveInput): SolveOutcome {
     const name = nameOf(t.want.kind);
     const note = (text: string) => ({ text, ref: t.want.ref, itemId: t.want.id });
     if (!c) {
-      dropped.push(
-        note(
+      const { bottom, top } = vertical(t.want);
+      const longest = Math.max(
+        0,
+        ...faces.flatMap((f) => clearStretches(f, bottom, top).map(([a, b]) => b - a)),
+      );
+      dropped.push({
+        ...note(
           t.want.brought
             ? `Your ${t.want.w.toFixed(2)} m ${name} doesn’t fit here: no wall or spot in the room has room for it.`
             : `Left out the ${name}: no wall or spot in the room has room for it.`,
         ),
-      );
+        code: 'no-wall',
+        need: t.want.w,
+        longest,
+      });
       return;
     }
     if (c.narrowed) {

@@ -1,4 +1,5 @@
 import {
+  type AliasMap,
   type Change,
   type Design,
   type DesignInput,
@@ -11,12 +12,14 @@ import {
   type ProposalOption,
   type Rates,
   type ResultCheck,
+  type RunReport,
   type Usage,
   changeSet,
   designLevels,
   levelFingerprint,
   mergeChanges,
   optionTitle,
+  runReport,
   subsetReport,
 } from '@dhd/core';
 import { readLens, readResult, requestResult } from '../results';
@@ -253,7 +256,56 @@ export function cardVerdict(
   };
 }
 
-/** A check's line after "Doesn't pass: " ("your rule “…”: …", not "Your rule"). */
+/** Whether a check is about this card: a room's own, or a piece one of its changes moves. */
+export const inCardOf =
+  (changes: readonly Change[]) =>
+  (c: { itemId?: string }): boolean =>
+    !c.itemId ||
+    changes.some(
+      (x) => x.items.target.includes(c.itemId ?? '') || x.items.now.includes(c.itemId ?? ''),
+    );
+
+/**
+ * The card's run report (spec docs/specs/designer-listens.md, UX "One list, one count"): what
+ * the version fails in its scope (less what is accepted anyway) and what the ticked changes fail
+ * together (`extra`), with the pieces it left out and its fix rounds. The one list for the
+ * card's lead and Checks row, the On the table bar, the folded line, the announcement and the
+ * talk call.
+ */
+export function cardRunReport(
+  card: CardModel,
+  r: DesignResult,
+  changes: readonly Change[],
+  o: { extra?: readonly ResultCheck[]; waive?: readonly string[]; aliases?: AliasMap } = {},
+): RunReport {
+  const scope = card.proposal?.scope;
+  const rooms = new Set(scope?.spaces.flatMap((k) => k.split('+')) ?? []);
+  const spaces =
+    !scope || scope.all
+      ? undefined
+      : r.spaces.filter((s) => s.rooms.some((id) => rooms.has(id))).map((s) => s.key);
+  return runReport(r, card.input, {
+    waived: [...card.waivers.map((w) => w.key), ...(o.waive ?? [])],
+    inScope: inCardOf(changes),
+    ...(o.extra ? { extra: o.extra } : {}),
+    ...(spaces ? { spaces } : {}),
+    aliases: o.aliases ?? card.input.aliases,
+  });
+}
+
+/** A card's run report on the plan as it is now, waited for (the talk call, the announcement). */
+export async function cardReportNow(
+  project: Project,
+  card: CardModel,
+  aliases?: AliasMap,
+): Promise<{ r: DesignResult; changes: Change[]; report: RunReport } | null> {
+  const r = await cardResultNow(project, card);
+  if (!r) return null;
+  const changes = cardChanges(project, card, r);
+  return { r, changes, report: cardRunReport(card, r, changes, aliases ? { aliases } : {}) };
+}
+
+/** A check's line after "Doesn't pass: "("your rule “…”: …", not "Your rule"). */
 export const midLine = (text: string) =>
   text.startsWith('Your rule ') ? `y${text.slice(1)}` : text;
 

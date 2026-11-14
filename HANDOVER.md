@@ -780,6 +780,34 @@ and `runtimes.test.ts` checks a whole-flat run with each provider sends and keep
 both. The run-test harness (`fixtures/runner.ts`, `flat.ts`) is shared with the web's
 `talk/carryOn.test.ts` (a run carried on from its checkpoint, priced as the card prices it).
 
+**The designer listens, PR A (issue #66 part 2, 14 Nov):** spec `docs/specs/designer-listens.md`
+(its Lead decisions and UX design win). One run report, core `designer/report.ts` (`runReport`,
+pure, from a `DesignResult` and the stored space entries): F lines (hard checks caused, not
+waived, with a signature principle|code|room|role) and L lines (pieces the answer asked for and
+the app left out, with the reason's `Note.code` and a to-fix hint: keep ref not in the plan,
+brief keeps it, no wall long enough with `need`/`longest`, no place, wet, not in the catalogue).
+It feeds the talk call (F and L lines replace "Doesn't pass" in On the table, at most 8 + 8; the
+history's bytes are unchanged; "Since your last reply" says `designed; 2 don’t pass, 1 piece left
+out`), fix rounds (`FixRequest.leftOut`; the fix prompt no longer invites dropping a bed, seat,
+table or desk; `FIX_EXTRA` 600 → 2,100 tokens) and the web card's one list (`cardRunReport`): the
+lead (`CheckLead.tsx`: the rounds' outcome and the count, every failure named in the household's
+names via `peopleWords`, with its measured cause; "How it was checked" per room), the Checks row
+("· listed above"), On the table, the folded line, Options' tab and the run-end announcement. The
+card bug ("2 don't pass" naming neither: a missing bed has no row) is gone. Each room's fix rounds
+are stored as `rounds` (`fixed`, `no-better`, `cut-off`, `failed`, `no-fixups`; optional, read
+tolerantly, no record bump). `TALK_SYSTEM` says how the app really works (checks before the person
+sees it, failures back up to the priced rounds) and drops "it, not you"; memory notes are for work
+the app doesn't cover, and stored notes about the app or the checks are no longer sent. The claims
+filter (`filterClaims`, `cantClaim` in `talk/reply.ts`) takes only first-person "I can't
+check/run/fix … the checks/results/before you see" sentences out, after the reply is read as
+usable (never a paid retry; an emptied reply shows the app's run-report line), on salvaged
+stopped or cut-off text too, never while streaming. `plan.addresses` (optional, read against the
+table's F/L ids with their signatures) shows "For “…”: …" under the plan's reply, or "This plan
+doesn't say how it fixes V8's 4 problems."; the option keeps them and its card shows "What this
+design set out to fix" with ✓/⚠. At a run's end the log brings the card's head into view when the
+card is taller than the log. Left for B1/B2/C: free fixes, the fix-up pool, vetting, repeats,
+strict mode; the hover-to-light of a failure line.
+
 ## 5. Owner to-dos
 
 - **Before the repo goes public:** `apps/web/public/samples/hdb-3room-type4.pdf` (and its PNG

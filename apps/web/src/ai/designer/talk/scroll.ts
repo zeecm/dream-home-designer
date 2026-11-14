@@ -153,3 +153,28 @@ export function toNewest(log: HTMLElement) {
   const top = last.getBoundingClientRect().top - log.getBoundingClientRect().top + log.scrollTop;
   log.scrollTop = Math.max(0, Math.min(foot, top - 8));
 }
+
+/**
+ * At a run's end (UX "Desktop and phone"): when its card is taller than the log, the card's head
+ * comes into view, not the log's foot (the "Where next?" offer), so its lead is read first.
+ * Waited for until the card has worked its checks out (it is short while "Checking…").
+ */
+export function cardHeadIntoView(cardKey: string, within = 5000) {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  const t0 = Date.now();
+  const tick = () => {
+    const el = document.querySelector<HTMLElement>(
+      `article.talk-card[data-card="${CSS.escape(cardKey)}"]`,
+    );
+    if (!el?.querySelector('[data-lead], .talk-lens, .talk-changes')) {
+      if (Date.now() - t0 < within) requestAnimationFrame(tick);
+      return;
+    }
+    // A frame more: the turn after it (the scope offer) is in, and the log has followed it.
+    requestAnimationFrame(() => {
+      const log = el.closest<HTMLElement>('.talk-log');
+      if (log && el.getBoundingClientRect().height > log.clientHeight) scrollInLog(el, 'start');
+    });
+  };
+  requestAnimationFrame(tick);
+}

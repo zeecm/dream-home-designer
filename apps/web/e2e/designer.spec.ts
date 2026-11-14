@@ -18,6 +18,9 @@ import {
 import living from '../../../packages/core/src/designer/fixtures/room-living.json' with {
   type: 'json',
 };
+import mainBedroom from '../../../packages/core/src/designer/fixtures/room-main-bedroom.json' with {
+  type: 'json',
+};
 import {
   REPLY_CONCERN,
   REPLY_PLAN,
@@ -1327,6 +1330,108 @@ test.describe('talking to the designer (slice 2, PR 2)', () => {
         .map((c) => c.step)
         .sort(),
     ).toEqual(['furnish "Living', 'furnish "Main bedroom"'].sort());
+  });
+
+  test('designer listens (A): a bed left out is named on the card and told to the designer; “I can’t check” is taken out; the plan says what it fixes (2, 6, 7, 8, 10)', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    // The owner's V6: the bed kept as a piece the plan doesn't have, so the app leaves it out.
+    // The fix round gives the same answer back; the third answer (after the plan) is right.
+    const noBed = {
+      ...mainBedroom,
+      items: mainBedroom.items.map((i) => (i.ref === 'bed1' ? { ...i, keep: 'P99' } : i)),
+    };
+    const main = (c: Call) => /furnish "(Main|Master) bedroom"/.test(c.step);
+    const claim = {
+      ...REPLY_TEXT,
+      say: "I don't have the ability to run the checks. I'll add the bed.",
+    };
+    const plan = {
+      ...REPLY_PLAN,
+      say: 'I’ll put the queen bed back against the long wall.',
+      plan: {
+        ...REPLY_PLAN.plan,
+        title: 'The queen bed back',
+        rooms: ['R2'],
+        options: [{ name: 'A', intent: 'A new queen bed against the long wall.' }],
+        assumptions: [],
+        addresses: [{ id: 'F1', change: 'a queen bed against the long wall' }],
+      },
+    };
+    const m = await mock(page, {
+      talk: [claim, plan],
+      reply: (c, n) =>
+        main(c) && n <= 2
+          ? {
+              status: 200,
+              body: anthropicStream(noBed, USAGE),
+              headers: { 'content-type': 'text/event-stream' },
+            }
+          : null,
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // 8 and the card bug: the count is named, in their names, the fix round said.
+    const lead = v1.locator('[data-lead]');
+    await expect(lead).toContainText(
+      'Sent back to be fixed once. The answer was no better, so the first one is shown. 2 still don’t pass:',
+    );
+    await expect(lead).toContainText(/You have no bed in (Main|Master) bedroom/);
+    await expect(lead).toContainText(/Partner has no bed in (Main|Master) bedroom/);
+    await expect(lead).toContainText('The designer kept a queen bed that isn’t in your plan');
+    await expect(lead).not.toContainText(/Adult \d|\bP99\b|\b[WR]\d+\b/);
+    await expect(v1.locator('.talk-lens')).toContainText('2 don’t pass · listed above');
+    await expect(panel(page).getByRole('region', { name: 'On the table' })).toContainText(
+      '2 don’t pass',
+    );
+    // 4: the fix round was told why the bed went, and how to fix it.
+    const fixBody = promptOf(JSON.parse(m.calls.filter(main)[1]?.body ?? '{}'));
+    expect(fixBody).toContain('L1 left out');
+    expect(fixBody).toContain('there’s no piece “P99” in the flat');
+    expect(fixBody).toContain('with keep: null');
+    await shot(page, 'listens-card');
+
+    // 2 and 10: the next talk request carries the F line and the drop reason.
+    await send(page, 'Where is the bed?');
+    await expect(log(page).getByText("I'll add the bed.", { exact: true })).toBeVisible();
+    await expect(log(page)).not.toContainText('ability to run');
+    const talkBody = promptOf(
+      JSON.parse(m.calls.filter((c) => c.step === 'talk')[0]?.body ?? '{}'),
+    );
+    const table = talkBody.slice(talkBody.indexOf('## On the table (data)'));
+    expect(table).toMatch(/F1 doesn’t pass · (Main|Master) bedroom \(R2\): Adult 1 has no bed/);
+    expect(table).toContain('L1 left out');
+    expect(table).toContain('there’s no piece “P99” in the flat');
+    expect(talkBody).toMatch(/designed; 2 don’t pass, 1 piece left out\./);
+    expect(talkBody).not.toContain('not you, says whether something passes');
+
+    // 7: a plan that says what it fixes: "For “…”: …" under it, and the next card checks it.
+    await send(page, 'Put the bed back, please.');
+    await expect(log(page)).toContainText(
+      /For “You have no bed in (Main|Master) bedroom”: a queen bed against the long wall\./,
+    );
+    // Priced first: run at once, or asked on a cost card.
+    const go = panel(page).getByRole('button', { name: /^Go ahead( anyway)? · about US\$/ });
+    const v2 = card(page, 2);
+    await expect(go.or(v2).first()).toBeVisible();
+    if (await go.isVisible()) await go.click();
+    await expect(v2.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    const fix = v2.getByRole('region', { name: 'What this design set out to fix' });
+    await expect(fix).toContainText(
+      /You have no bed in (Main|Master) bedroom: a queen bed against the long wall/,
+    );
+    await expect(fix).not.toContainText('Still doesn’t pass');
+    await shot(page, 'listens-set-out');
   });
 
   test('a question back answers free from a chip; a pushback shows the app’s own line', async ({

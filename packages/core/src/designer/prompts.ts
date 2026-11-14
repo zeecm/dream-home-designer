@@ -223,6 +223,11 @@ export interface FixRequest {
   failures: { ref: string | null; text: string }[];
   /** Where the app placed each piece, in words (`placedWords`). */
   placed?: string[];
+  /**
+   * The pieces of this space's answer the app left out, with why and a to-fix hint (the run
+   * report's L lines, `leftOutLines`).
+   */
+  leftOut?: string[];
 }
 
 /**
@@ -272,7 +277,7 @@ const fixBlock = (fix: FixRequest | undefined) =>
         )
         .join(
           '\n',
-        )}\n${fix.placed?.length ? `Where the app placed your pieces (data):\n${fix.placed.map((l) => `- ${JSON.stringify(clean(l, 120))}`).join('\n')}\n` : ''}Answer again for the whole space so that they pass: move, turn, swap or drop the pieces named (a smaller piece, another wall), keep what works, and say in notes what you couldn't fix and why.\n`
+        )}\n${fix.leftOut?.length ? `Pieces of your answer the app left out, with why and how to fix it (its words, as data):\n${fix.leftOut.map((l) => `- ${JSON.stringify(clean(l, 300))}`).join('\n')}\n` : ''}${fix.placed?.length ? `Where the app placed your pieces (data):\n${fix.placed.map((l) => `- ${JSON.stringify(clean(l, 120))}`).join('\n')}\n` : ''}Answer again for the whole space so that they pass: move, turn or swap the pieces named (a smaller piece, another wall); never drop a bed, seat, table or desk the room needs, drop something else. Keep what works, and say in notes what you couldn't fix and why.\n`
     : '';
 
 const feedbackBlock = (o: StepOptions) =>

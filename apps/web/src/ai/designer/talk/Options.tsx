@@ -1,11 +1,10 @@
 import type { Proposal } from '@dhd/core';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { failingChecks } from '../parts';
 import { useResultsTickN } from '../results';
 import { useDesigner } from '../state';
 import { Mark } from './Mark';
 import { ProposalCard } from './ProposalCard';
-import { type CardModel, cardResult } from './cards';
+import { type CardModel, cardChanges, cardResult, cardRunReport } from './cards';
 import { timed, useSettledProject } from './settle';
 import type { LiveRun } from './useTalk';
 import { useTalk } from './useTalk';
@@ -142,7 +141,9 @@ function Tab({
     if (card.status === 'failed') return 'failed' as const;
     const r = timed(() => cardResult(project, card));
     if (!r) return null;
-    return failingChecks(r, { waivers: card.waivers }).open.length ? ('fail' as const) : 'pass';
+    // The card's own one list (its scope), as its Checks row counts it.
+    const changes = cardChanges(project, card, r);
+    return cardRunReport(card, r, changes).failures.length ? ('fail' as const) : 'pass';
   }, [project, card, tick]);
   const name = card.option?.name ?? `Idea ${l}`;
   const said =

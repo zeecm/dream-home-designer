@@ -5,6 +5,7 @@ import {
   type TalkPrompt,
   type TalkReply,
   type Usage,
+  filterClaims,
   parseTalkReply,
   partialTalk,
   priceOf,
@@ -144,13 +145,15 @@ export async function talkCall(o: TalkCallOptions): Promise<TalkCallResult> {
     read = value;
   } catch (e) {
     settle();
-    const say = partialTalk(text).say ?? '';
+    // What streamed is kept as far as it went: filtered as the final reply is (never while
+    // streaming, where the text is always a prefix of the final one).
+    const say = filterClaims(partialTalk(text).say ?? '').say;
     if (e instanceof Stopped) return { status: 'stopped', usage, say };
     if (e instanceof Halted) return { status: 'halted', halt: e.halt, usage, say };
     return { status: 'failed', error: 'Something went wrong.', usage, say };
   }
   settle();
-  const say = partialTalk(text).say ?? '';
+  const say = filterClaims(partialTalk(text).say ?? '').say;
   if (!read) {
     return {
       status: 'failed',

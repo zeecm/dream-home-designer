@@ -147,7 +147,8 @@ function Designer({ t, named }: { t: TurnOf<'designer'>; named: boolean }) {
         Designer
         <span className="visually-hidden"> said</span>
       </h3>
-      {t.talk ? <ReplyText text={t.text} /> : <p className="talk-text">{t.text}</p>}
+      {/* Emptied by the claims filter: the app's line under it says the table's verdict. */}
+      {t.talk ? t.text && <ReplyText text={t.text} /> : <p className="talk-text">{t.text}</p>}
       {t.lines.length > 0 && (
         <ul className="talk-lines">
           {t.lines.map((l) => (

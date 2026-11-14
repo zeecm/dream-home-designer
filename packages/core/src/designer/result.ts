@@ -455,7 +455,7 @@ function work(
     const take = (want: Want, item: Item) => {
       if (WET_PIECES.has(want.kind.id) && !inset(itemFootprint(item, want.kind)).every(inKitchen)) {
         ix.placed = ix.placed.filter((p) => p.id !== item.id);
-        dropped.push({ text: wetText(want.kind.id), ref: want.ref, space: s.key });
+        dropped.push({ text: wetText(want.kind.id), ref: want.ref, space: s.key, code: 'wet' });
         return;
       }
       lvl.items[item.id] = item;
@@ -718,8 +718,8 @@ function work(
     a: DesignItem,
     ctx: { s: Space; key: string; faces: Face[]; byLength: Face[]; v2: boolean },
   ): (Want & { priority: number }) | null {
-    const leftOut = (text: string) => {
-      dropped.push({ text, ref: a.ref, space: ctx.s.key });
+    const leftOut = (text: string, code?: Note['code']) => {
+      dropped.push({ text, ref: a.ref, space: ctx.s.key, ...(code ? { code } : {}) });
       return null;
     };
     let brought: Item | null = null;
@@ -727,19 +727,22 @@ function work(
     if (a.keep) {
       const id = resolveAlias(aliases, a.keep);
       const it = id ? start.items[id] : undefined;
-      if (!id || !it) return leftOut(`“${a.ref}”: there’s no piece “${a.keep}” in the flat.`);
+      if (!id || !it)
+        return leftOut(`“${a.ref}”: there’s no piece “${a.keep}” in the flat.`, 'keep-missing');
       const how = brief.keep.items[id];
       kind = furnitureKind(it.assetId) ?? null;
       const what = kind ? nameOf(kind) : 'piece';
-      if (how === 'in-place') return leftOut(`Your ${what} stays where it is, as the brief says.`);
-      if (how !== 'bring') return leftOut(`Your ${what}: the brief leaves it out.`);
+      if (how === 'in-place') {
+        return leftOut(`Your ${what} stays where it is, as the brief says.`, 'keep-in-place');
+      }
+      if (how !== 'bring') return leftOut(`Your ${what}: the brief leaves it out.`, 'keep-brief');
       brought = it;
     } else {
       kind = resolveAsset(a.assetId, opts.models);
     }
-    if (!kind) return leftOut(`“${a.assetId}” (${a.ref}): not in the catalogue.`);
+    if (!kind) return leftOut(`“${a.assetId}” (${a.ref}): not in the catalogue.`, 'not-catalogue');
     if (kind.category === 'Bathroom') {
-      return leftOut(`The ${nameOf(kind)}: bathrooms keep their fittings.`);
+      return leftOut(`The ${nameOf(kind)}: bathrooms keep their fittings.`, 'bathroom');
     }
     const k = kind;
     const clamp = (v: number | null, base: number) =>
@@ -763,7 +766,7 @@ function work(
     let face = wallId ? (ctx.faces.find((f) => f.wallId === wallId) ?? null) : null;
     if (a.wall && !face && !ctx.v2) {
       if (!k.againstWall && !k.carpentry && a.at === null) {
-        return leftOut(`The ${nameOf(k)}: ${a.wall} isn’t a wall of ${ctx.s.name}.`);
+        return leftOut(`The ${nameOf(k)}: ${a.wall} isn’t a wall of ${ctx.s.name}.`, 'no-place');
       }
       repaired.push({
         text: `The ${nameOf(k)} was put on another wall: ${a.wall} isn’t a wall of ${ctx.s.name}.`,
@@ -774,7 +777,7 @@ function work(
     }
     const free = !face && a.at !== null;
     if (!face && !free && !k.againstWall && !k.carpentry && !ctx.v2) {
-      return leftOut(`The ${nameOf(k)}: the designer didn’t say where it goes.`);
+      return leftOut(`The ${nameOf(k)}: the designer didn’t say where it goes.`, 'no-place');
     }
     // The sink and the hob stay in the kitchen's wet area.
     if (k.id === 'kitchen-sink' || k.id === 'kitchen-hob') {
@@ -794,7 +797,7 @@ function work(
       // Placed on whichever wall fits: the space must be the kitchen itself.
       const inSpace = !probe && ctx.s.rooms.some((id) => inKitchen(roomLabel(named, id)));
       if (!(probe ? inKitchen(probe) : inSpace)) {
-        return leftOut(wetText(k.id));
+        return leftOut(wetText(k.id), 'wet');
       }
     }
     if (brought && placedBrought.has(brought.id)) {

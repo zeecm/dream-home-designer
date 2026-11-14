@@ -398,6 +398,21 @@ export function parseSpaceDesign(raw: unknown, bounds: Bounds | null): ParseResu
 
 // ------------------------------------------------------------------------------ versions
 
+/**
+ * How one fix round of a space ended, with its hard failures before and after (the space
+ * alone): `fixed` (fewer, its answer used), `no-better` (not used), `cut-off` (the answer was
+ * cut off at the length limit, not used), `failed` (no readable answer came), or `no-fixups`
+ * (not sent: the run's fix-ups were used up). New within the record's version: optional, and
+ * read tolerantly (an older build drops it; only the card's fix line loses its detail).
+ */
+export const FixRound = z.object({
+  outcome: z.enum(['fixed', 'no-better', 'cut-off', 'failed', 'no-fixups']),
+  before: z.number().int().min(0),
+  after: z.number().int().min(0),
+});
+export type FixRound = z.infer<typeof FixRound>;
+export const FixRounds = z.array(FixRound).max(12).optional().catch(undefined);
+
 export const Provider = z.enum(['anthropic', 'openai', 'gemini']);
 export type Provider = z.infer<typeof Provider>;
 
@@ -518,6 +533,7 @@ export const Design = z.object({
       /** Fix rounds its answer took (sent back with the checks it failed), and what they fixed. */
       fixes: z.number().int().min(0).optional(),
       fixed: z.number().int().min(0).optional(),
+      rounds: FixRounds,
     }),
   ),
   usage: z.array(Usage),

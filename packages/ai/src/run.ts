@@ -7,6 +7,7 @@ import {
   type DraftDesign,
   FIX_PER_RUN,
   type FixRequest,
+  type FixRound,
   type Level,
   type ParseResult,
   type Price,
@@ -18,6 +19,7 @@ import {
   designResult,
   fixRoundsFor,
   layoutStep,
+  leftOutLines,
   lensOn,
   levelBounds,
   parseConcept,
@@ -26,6 +28,7 @@ import {
   priceOf,
   resolveAsset,
   roomStep,
+  runReport,
   tokensOf,
   usageOf,
   usdOf,
@@ -42,6 +45,9 @@ import {
   requestStep,
 } from './request';
 import { type StepSink, streamStep } from './stream';
+
+/** A step's error when its answer was cut off at the output limit (request.ts says it so). */
+const CUT_OFF = /too long for one step/;
 
 /**
  * The designer's runner: the layout-and-style step for the whole flat, then one step per
@@ -504,6 +510,15 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
           .filter((c) => !c.unfixable)
           .map((c) => ({ ref: (c.itemId && res.refs[c.itemId]) || null, text: c.text })),
         placed: placedWords(res.level, s, res.refs, design.aliases, ctx.site?.north ?? 0),
+        // The pieces it left out, with why and a hint: so a bed dropped for a keep ref the
+        // plan doesn't have is said as that, not only as "has no bed".
+        leftOut: leftOutLines(
+          runReport(
+            res,
+            { spaces: trial.spaces, brief: ctx.brief },
+            { aliases: design.aliases, spaces: [s.key] },
+          ),
+        ),
       };
     };
     // A run-stopping error (a refused key, a quota): set before the first room's gate opens,
@@ -540,13 +555,16 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
           const first = await failing(s, current);
           let fixes = 0;
           let now = first;
-          const rounds = fixRoundsFor(ctx.brief.quality);
-          while (
-            now.fixable.length &&
-            fixes < rounds &&
-            fixesLeft > 0 &&
-            (await mayStart({ key: s.key, kind: 'fix' }))
-          ) {
+          const most = fixRoundsFor(ctx.brief.quality);
+          /** How each round went (and one not sent for want of fix-ups), for the card. */
+          const rounds: FixRound[] = [];
+          while (now.fixable.length && fixes < most) {
+            if (fixesLeft <= 0) {
+              const n = now.fixable.length;
+              rounds.push({ outcome: 'no-fixups', before: n, after: n });
+              break;
+            }
+            if (!(await mayStart({ key: s.key, kind: 'fix' }))) break;
             // Taken from the run's few before the request goes (rooms run side by side).
             fixesLeft--;
             fixes++;
@@ -555,7 +573,12 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
             st.status = 'running';
             say(`${s.name}: checking… fixing ${plural(left.length, 'problem')}.`);
             update();
-            const fix: FixRequest = { round: fixes, failures: left, placed: now.placed };
+            const fix: FixRequest = {
+              round: fixes,
+              failures: left,
+              placed: now.placed,
+              leftOut: now.leftOut,
+            };
             const tf = Date.now();
             const again = await step(
               roomStep(ctx, s, r.level, design.aliases, {
@@ -575,7 +598,13 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
             if (!st.resent) o.onTimed?.('fix', Date.now() - tf);
             st.fixing = null;
             if (!again) {
-              // The fix didn't come: the answer before it stands, checked as it is.
+              // The fix didn't come: the answer before it stands, checked as it is, and the
+              // card says why (cut off at the length limit, or no readable answer).
+              rounds.push({
+                outcome: CUT_OFF.test(st.error ?? '') ? 'cut-off' : 'failed',
+                before: left.length,
+                after: left.length,
+              });
               st.status = 'done';
               st.error = null;
               break;
@@ -583,10 +612,15 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
             const next = await failing(s, merge(again));
             // Kept only if it fails less; no better twice running is a room that can't pass,
             // and the second round isn't spent on it.
+            const out = { before: left.length, after: next.fixable.length };
             if (next.fixable.length < left.length) {
+              rounds.push({ outcome: 'fixed', ...out });
               current = merge(again);
               now = next;
-            } else break;
+            } else {
+              rounds.push({ outcome: 'no-better', ...out });
+              break;
+            }
           }
           design.spaces[s.key] = {
             name: s.name,
@@ -595,6 +629,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
             ...(fixes
               ? { fixes, fixed: Math.max(0, first.fixable.length - now.fixable.length) }
               : {}),
+            ...(rounds.length ? { rounds } : {}),
           };
           say(`${s.name} done. ${usdText(spentSoFar())} so far.`);
         } else {
