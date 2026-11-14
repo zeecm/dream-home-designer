@@ -121,6 +121,10 @@ for any plan.
 - AI costs always have a figure (#67): prices for every Gemini 3 model, checked against Google's
   page; a model with no price is refused rather than run unpriced; Gemini 3 thinks less when an
   answer runs too long, and fix rounds start at low thinking.
+- AI interior designer v2, slice 3b part 2: a second look at each Thorough proposal (a picture of
+  the plan the model checks for flow, focal point, too empty or too full), acted on only where the
+  app's checks agree and never with a new failure, priced up front, never paid twice on resume,
+  and house rules it suggests offered to keep.
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
@@ -135,9 +139,6 @@ for any plan.
   room vetting, no paying twice for the same failures. [spec](docs/specs/designer-listens.md)
 - AI interior designer v2, slice 3a part B: point at the plan (a piece or a spot, "keep this",
   "why here?", "something else here") with the pointers sent with your message.
-- AI interior designer v2, slice 3b part 2: a second look at each proposal (a picture of the plan
-  the model checks for flow, focal point, too empty or too full), acted on only where the app's
-  checks agree, and house rules it suggests offered to keep.
 - AI runs that survive a locked phone, part 2: opt-in cloud runs that keep going while the phone is
   locked, with a push when done; off in production until the owner has tried it with a real key.
   Keys stored on the server are built next but stay off until Google sign-in is set up.
