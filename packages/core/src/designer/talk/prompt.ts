@@ -274,7 +274,7 @@ Answer the household's message above as their designer, with one JSON object:
 - say: about 120 words at most, plain text, in their language.
 - concern: "rule"; "wall" (a wall id) when it is about a wall; "probe": their ask as one piece (room id, catalogue id, against, wall and along or at, else null) so the app can place it and measure.
 - plan: "title" (at most 60 characters), "rooms": room ids (R1…) in priority order, or ["all"]; "walls": true only to change walls (the brief must allow it); "options": one, whose "intent" says what the proposal does, for the designer who will place it; "assumptions" you made; "addresses": when On the table has F or L lines, the ones this plan deals with ("id": "F1" or "L2"; "change": the one-line change), else [].
-- memory: decisions they made in this message ("rejected", "keep", "wish": at most 3, short), facts for What I know (budget in S$, walls keep/allowed/structural, style, cooking light/daily/heavy, wfh 0-2, household-note, wish, keep), notes for their ID about work the app doesn't cover (beams, plumbing, curtains, products).
+- memory: decisions they made in this message ("rejected", "keep", "wish": at most 3, short), facts for What I know (budget in S$, walls keep/allowed/structural, style, cooking light/daily/heavy, wfh 0-2, household-note, wish, keep, fix-all on/off: they want every check fixed before they see a design, or to see it as it is), notes for their ID about work the app doesn't cover (beams, plumbing, curtains, products).
 - memory.rule: a lasting wish as a rule, else null. "name": their words (at most 80 characters). "subject": "any" (nothing, any piece), "category" (id: tall, storage, seating, beds, tables, lighting, plants), "kind" (id: a catalogue id or a role such as sofa, bed, desk, tv), or "item" (id: a piece's P id). "relation": notIn, in, faces, notFaces, within, atLeast, against or keepClear. "target": "room" (id: R id), "roomUse" (id: master, bedroom, kids, parents, guest, study, living, dining, kitchen, store), "wall" (id: W id), "opening" (id: D id, or "main door"), "ownDoor", "window", "kind" (id), "route" (rooms: the R ids the way from the main door leads to; a corridor or passage is a route), or "spot" (at, r in metres). "n": metres (the distance for within and atLeast, the clear width for keepClear or a route), else null. Don't put the same wish in decisions too.
 - fold: ${
     fold
@@ -302,7 +302,12 @@ function factsBlock(i: TalkInput): string {
     ),
     '',
     '## What I know about the household (data)',
-    json({ ...briefData(conv.brief, i.aliases), assumed: conv.assumed }),
+    json({
+      ...briefData(conv.brief, i.aliases),
+      // The strict setting is a live fact (never in the room steps' brief, which is cached).
+      ...(conv.brief.fixAll ? { beforeTheySeeADesign: 'fix every check first' } : {}),
+      assumed: conv.assumed,
+    }),
     '',
     '## Decisions (data; the household can edit or delete them)',
     decisions.length ? json(decisions) : 'None yet.',

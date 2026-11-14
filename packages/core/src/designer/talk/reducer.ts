@@ -123,6 +123,8 @@ export type TalkAction =
   | { type: 'formFilled'; brief: DesignBrief; at: string; ids: [string, string]; level: Level }
   | { type: 'editFact'; key: QuestionKey; brief: DesignBrief; at: string; id: string; level: Level }
   | { type: 'confirmFact'; key: QuestionKey }
+  /** The strict setting's "You changed" line taken back (its Undo): the setting as it was. */
+  | { type: 'factUndo'; eventId: string; fixAll: boolean }
   /** A setting of the brief that is no fact of What I know (Thorough or Quick, say). */
   | { type: 'setBrief'; brief: DesignBrief }
   | { type: 'draft'; text: string }
@@ -139,6 +141,8 @@ export type TalkAction =
       talk?: TurnOf<'cost-ask'>['talk'];
       just?: ScopeRef | null;
       alt?: TurnOf<'cost-ask'>['alt'];
+      /** It will likely fail the same way again (designer listens §5): always asks. */
+      repeat?: TurnOf<'cost-ask'>['repeat'];
     }
   /** The figure on an open cost card, worked out again (the plan or the prices moved). */
   | { type: 'costRefresh'; turnId: string; estimate: TurnOf<'cost-ask'>['estimate'] }
@@ -182,8 +186,8 @@ export type TalkAction =
       kind: Decision['kind'];
       text: string;
       from: string | null;
-      /** A piece the app placed itself, left out (by room and role). */
-      free?: Decision['free'];
+      /** A piece the app placed itself, left out (by room and role): a decline (records 5). */
+      free?: { room: string; role: string };
     }
   | { type: 'decisionEdit'; id: string; text: string }
   /** A message to the designer: the person's turn, its reply on its way. */
@@ -329,6 +333,7 @@ export function newConversation(a: Extract<TalkAction, { type: 'start' }>): Conv
     settled: [],
     nextN: a.nextN,
     decisions: [],
+    declined: [],
     turns: [],
     draft: '',
     aliases: {},
@@ -609,6 +614,16 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
     }
     case 'setBrief':
       return { ...conv, brief: a.brief };
+    case 'factUndo': {
+      // The strict setting's line, taken back while it is the newest such line: the setting as
+      // it was, said on the line ("… Undone."), never a second "You changed".
+      const t = findTurn(conv, a.eventId, 'event');
+      if (!t || t.event.type !== 'fact' || t.event.key !== 'fix-all' || t.event.undone) return conv;
+      return replaceTurn(
+        { ...conv, brief: { ...conv.brief, fixAll: a.fixAll } },
+        { ...t, event: { ...t.event, undone: true } },
+      );
+    }
     case 'confirmFact':
       return { ...conv, assumed: conv.assumed.filter((k) => k !== a.key) };
     case 'draft':
@@ -646,6 +661,7 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
             : null,
           just: a.just ? scopeCut(a.just) : null,
           alt: a.alt ?? null,
+          repeat: a.repeat ?? null,
         },
       );
     case 'costAnswer': {
@@ -724,18 +740,22 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
       const text = a.text.trim().slice(0, DECISION_CHARS);
       if (!text) return conv;
       const live = conv.decisions.filter((d) => !d.deleted);
-      if (live.some((d) => d.text === text && d.kind === a.kind)) return conv;
+      const same = live.find((d) => d.text === text && d.kind === a.kind);
+      // A decline goes with its Decision: the same one again keeps the one that stands.
+      const decline = (id: string) =>
+        a.free &&
+        !conv.declined.some(
+          (x) => x.decision === id && x.room === a.free?.room && x.role === a.free?.role,
+        )
+          ? [{ decision: id, room: a.free.room.slice(0, 80), role: a.free.role.slice(0, 40) }]
+          : [];
+      if (same) {
+        const more = decline(same.id);
+        return more.length ? { ...conv, declined: [...conv.declined, ...more] } : conv;
+      }
       const decisions = [
         ...conv.decisions,
-        {
-          id: a.id,
-          kind: a.kind,
-          text,
-          at: a.at,
-          from: a.from,
-          deleted: false,
-          ...(a.free ? { free: a.free } : {}),
-        },
+        { id: a.id, kind: a.kind, text, at: a.at, from: a.from, deleted: false },
       ];
       // The oldest go first past the cap (deleted ones before any that stand).
       const over = decisions.length - MAX_DECISIONS;
@@ -746,7 +766,11 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
               .map((d) => d.id)
           : [],
       );
-      return { ...conv, decisions: decisions.filter((d) => !drop.has(d.id)) };
+      const kept = decisions.filter((d) => !drop.has(d.id));
+      const ids = new Set(kept.map((d) => d.id));
+      // A decline whose Decision went past the cap is lifted with it.
+      const declined = [...conv.declined, ...decline(a.id)].filter((x) => ids.has(x.decision));
+      return { ...conv, decisions: kept, declined };
     }
     case 'decisionEdit': {
       const text = a.text.trim().slice(0, DECISION_CHARS);
@@ -1429,6 +1453,7 @@ const label = (k: QuestionKey) =>
     cooking: 'cooking',
     wfh: 'working from home',
     owns: 'how much you own',
+    'fix-all': 'before you see a design',
     budget: 'budget',
     walls: 'walls',
     style: 'style',

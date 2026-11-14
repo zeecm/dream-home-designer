@@ -202,7 +202,7 @@ export function ReplyParts({ t }: { t: TurnOf<'designer'> }) {
         </div>
       )}
       {k.concern && <Concern t={t} />}
-      {k.plan && <PlanAddresses plan={k.plan} />}
+      {k.plan && <PlanAddresses plan={k.plan} replyId={t.id} />}
       {k.offer && <RuleOfferBlock t={t} />}
       {k.noted.length > 0 && (
         <ul className="talk-noted">
@@ -249,7 +249,15 @@ const ADDRESSES_SHOWN = 3;
  * Under a plan's reply, in the app's voice: what it says it fixes ("For “…”: …"), or, after a
  * failing design, that it doesn't say (spec designer-listens §2, UX "Before, during, after").
  */
-function PlanAddresses({ plan }: { plan: TalkPlan }) {
+function PlanAddresses({ plan, replyId }: { plan: TalkPlan; replyId: string }) {
+  // The repeat cost card's sentence replaces "This plan doesn't say how it fixes…": never both
+  // (UX "Repeats explained, without nagging").
+  const repeated = useTalk(
+    (s) =>
+      !!s.conv?.turns.some(
+        (x) => x.kind === 'cost-ask' && x.talk?.replyTo === replyId && !!x.repeat,
+      ),
+  );
   // A piece left out and the failure it causes, named alike: one line, both changes on it.
   const a: { id: string; says: string; change: string }[] = [];
   for (const x of plan.addresses ?? []) {
@@ -259,7 +267,7 @@ function PlanAddresses({ plan }: { plan: TalkPlan }) {
   }
   if (!a.length) {
     const u = plan.unaddressed;
-    if (!u) return null;
+    if (!u || repeated) return null;
     return (
       <p className="talk-app-line talk-plan-for" data-unaddressed="">
         <span className="talk-app-icon">

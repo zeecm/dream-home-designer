@@ -1,6 +1,7 @@
 import {
   type Bounds,
   type DesignBrief,
+  declinedNow,
   designLevels,
   optionTitle,
   roomShapes,
@@ -126,10 +127,7 @@ function OnTheTable() {
   const side = useMedia(sideNow);
   const freeBusy = useFreeBusy((s) => s.card);
   const declinedKey = useTalk((s) =>
-    (s.conv?.decisions ?? [])
-      .filter((d) => !d.deleted && d.free)
-      .map((d) => d.id)
-      .join(','),
+    (s.conv ? declinedNow(s.conv) : []).map((d) => `${d.room}|${d.role}`).join(','),
   );
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
   const offer = useMemo(

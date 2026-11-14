@@ -1,0 +1,13 @@
+{
+  "about": "Owner, 9 Nov (issue #66): three of their messages and the designer’s plan replies to them, word for word from the export, for the replay e2e (criterion 31). Nothing else: no key, no prices, no plan, no names.",
+  "owner": {
+    "bed": "Where is the bed? Also you should fix the problems",
+    "fixAll": "Why are there always checks that don't pass? Can you fix them all before coming back to me? Ensure that there are no problems",
+    "again": "There are still 4 checks that dont pass!!! WHAT ARE YOU DOING? I TOLD YOU TO COMPLETE ALL ITEMS AND CHECKS AND MAKE SURE THEY PASS BEFORE COMING BACK TO ME"
+  },
+  "replies": {
+    "bed": "The app removed the bed because it doesn't allow sleeping furniture in a room named 'Living & Study'. Also, trying to fit the bedroom, study, and living area all into one space caused a jam—leaving only 0.20m for a desk chair that needs 0.80m to be usable.  To fix these problems, I'll reorganize the layout into proper zones. We'll put the queen bed back in the Main Bedroom, set up a dedicated Home Office in the spare bedroom for your desks, and arrange the living and dining properly in the living room. Since you wished for a bigger master bedroom, I'll also have the app look at adjusting the walls between the bedrooms to expand it!",
+    "fixAll": "I completely understand your frustration. As your designer, I suggest the layouts, but the app itself places the items and runs the checks—I don't have the ability to run them in the background and fix them before you see the results. In the last round, the app couldn't fit the bed, sofa, and dining table alongside the new furniture without blocking walkways, so it dropped them. Let's fix these four outstanding checks right now. I will set up a plan to remove the orphaned dining chair and strictly prioritize placing a queen bed in the Main bedroom, plus a sofa and a dining table in the Living room. Let's run this to get your essentials back.",
+    "again": "I sincerely apologize for the frustration! I propose the design ideas, but the app automatically places the items and runs the space checks. In the last round, the app dropped the bed, sofa, and dining table I asked for because it struggled to fit them alongside the new items without blocking walkways. Let's fix this immediately. I will set up a strict plan instructing the app to prioritize adding a queen bed back into the Main bedroom, plus a sofa and a dining table in the Living room. This will directly address the missing seating and sleeping checks. Let's run this update to ensure the essential furniture is in place!"
+  }
+}

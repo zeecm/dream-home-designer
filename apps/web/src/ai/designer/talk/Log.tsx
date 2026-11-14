@@ -14,9 +14,11 @@ import {
   meetingOver,
   optionTitle,
   questionText,
+  repeatWords,
   roomArea,
   sleepingConflict,
   spacesOf,
+  strictAdds,
 } from '@dhd/core';
 import {
   Fragment,
@@ -33,6 +35,7 @@ import { CostCheck } from '../CostCheck';
 import { useResultsTickN } from '../results';
 import { cannotDesign, capUsd, usd, useSpend } from '../spend';
 import { useDesigner } from '../state';
+import { ChangeAsked } from './CheckLead';
 import { PointerChips } from './Chips';
 import { FactEditor } from './Facts';
 import { Mark, type MarkKind } from './Mark';
@@ -42,7 +45,16 @@ import { ReplyParts, ReplyText, SentState, Streaming } from './Talk';
 import { lineState, redoLine, undoLine } from './accept';
 import { type CardModel, designCard, earlierDesign, nowOf, optionCard } from './cards';
 import { dayMark } from './days';
-import { focusFreeButton, freeUndoable, undoFree } from './free';
+import {
+  declinedPieces,
+  focusFreeButton,
+  freeLabel,
+  freeOffer,
+  freeUndoable,
+  placeFree,
+  undoFree,
+  useFreeBusy,
+} from './free';
 import { unkeep } from './pointers';
 import {
   answerCost,
@@ -52,7 +64,7 @@ import {
   pressScope,
   scopeRequest,
 } from './propose';
-import { HOLD, toNewest } from './scroll';
+import { HOLD, focusInLog, toNewest } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { lineTitle, versionTitle } from './titles';
 import {
@@ -424,8 +436,163 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
     : t.scope.all
       ? 'Designing the whole flat'
       : `Designing ${t.scope.label}`;
+  // Fix every check first (designer listens §6): said on every cost card while it is on, with
+  // what it adds at most; "Change" opens What I know at that row (a line, not a toggle beside
+  // the money buttons: it would change the figure under the finger about to press it).
+  const quality = useTalk((s) => s.conv?.brief.quality ?? 'thorough');
+  const strict = useTalk((s) => !!s.conv?.brief.fixAll);
+  const adds = strict && est ? strictAdds(est, quality) : null;
+  const strictLine = strict ? (
+    <p className="talk-strict-line" data-strict-line="">
+      Fix every check first is on: keeps fixing until every check passes, up to{' '}
+      {est?.fixes ?? FIX_PER_RUN} fix-ups
+      {adds !== null && adds > 0 ? ` (adds up to ${usd(adds)} at most)` : ''}.{' '}
+      <button
+        type="button"
+        className="link-btn"
+        onClick={() => useTalk.setState({ view: 'know', knowAt: 'fix-all' })}
+      >
+        Change
+      </button>
+    </p>
+  ) : null;
+  // The same failures again, nothing changed (§5): the version's free fix first, if a dry run
+  // would place something; Run it anyway outlined, never the near-black primary.
+  const repeat = t.repeat;
+  const proposals = useTalk((s) => s.proposals);
+  const repCard = useMemo(() => {
+    if (!repeat) return null;
+    const p = proposals.find((x) => x.id === repeat.card.proposalId);
+    const o = p?.options.find((x) => x.letter === repeat.card.letter);
+    return p && o ? optionCard(p, o, designLevelId()) : null;
+  }, [repeat, proposals]);
+  const slowProject = useSettledProject(1000);
+  const freeBusy = useFreeBusy((s) => s.card);
+  const declinedKey = useTalk(() => JSON.stringify(declinedPieces()));
+  // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
+  const offer = useMemo(
+    () => (open && repCard ? timed(() => freeOffer(slowProject, repCard)) : null),
+    [open, repCard, slowProject, tick, declinedKey],
+  );
+  const repeatText = useRef<HTMLParagraphElement>(null);
+  // Its first sentence takes focus (as CostCheck's heading does); never a spend button.
+  useEffect(() => {
+    if (open && repeat) repeatText.current?.focus({ preventScroll: true });
+  }, [open, repeat]);
   // Answered: your bubble says it ("Not now"), and the card that follows shows the run.
   if (t.state !== 'open') return null;
+  const priceSentence = t.estimate ? (
+    <p className="talk-text">
+      {what} takes about {usd(t.estimate.typical)} (at most {usd(t.estimate.high + t.estimate.fix)}
+      {t.estimate.fix > 0
+        ? `, up to ${est?.fixes ?? FIX_PER_RUN} fix-up${(est?.fixes ?? FIX_PER_RUN) === 1 ? '' : 's'} included`
+        : ''}
+      ).{repeat ? '' : ' Go ahead?'}
+    </p>
+  ) : null;
+  const freeFirst =
+    repCard && offer && offer.added.length > 0 ? (
+      <button
+        type="button"
+        className="btn talk-free-btn"
+        data-free-fix="repeat"
+        disabled={!!freeBusy}
+        onClick={() => {
+          void placeFree(repCard).then((line) => {
+            if (!line) return;
+            requestAnimationFrame(() =>
+              focusInLog(document.querySelector<HTMLButtonElement>(`[data-undo-free="${line}"]`)),
+            );
+          });
+        }}
+      >
+        {freeBusy === repCard.key ? 'Placing…' : freeLabel(offer)}
+      </button>
+    ) : (
+      <ChangeAsked />
+    );
+  if (repeat) {
+    return (
+      <article
+        className="talk-turn talk-app talk-card talk-cost-card"
+        aria-labelledby={`h-${t.id}`}
+        data-repeat=""
+      >
+        <h3 id={`h-${t.id}`} className="visually-hidden">
+          App: before spending
+        </h3>
+        {t.reason === 'ask-limit' && cap !== null && (
+          <p className="notice-warning">This would pass your {usd(cap)} limit for this tab.</p>
+        )}
+        <div className="talk-repeat">
+          {t.talk && <p className="talk-text">{what}</p>}
+          <p className="talk-text talk-repeat-text" tabIndex={-1} ref={repeatText}>
+            {repeatWords(repeat, repeat.again)}
+          </p>
+          {!repeat.again && repeat.failures.length > 0 && (
+            <p className="talk-repeat-fails">
+              {repeat.failures.map((f) => f.replace(/\.$/, '')).join(' · ')}
+            </p>
+          )}
+          {strictLine}
+          <div className="talk-repeat-ways">
+            {freeFirst}
+            {ai && est && t.reason !== 'ask-threshold' ? (
+              <div className="talk-costcheck">
+                {priceSentence}
+                <CostCheck
+                  ai={ai}
+                  est={est}
+                  quality={quality}
+                  onQuality={(q) => {
+                    const c = useTalk.getState().conv;
+                    if (c) void act({ type: 'setBrief', brief: { ...c.brief, quality: q } });
+                  }}
+                  what={`one for ${t.scope.all ? 'the layout and style, then one for each room' : t.scope.label}`}
+                  action="Run it anyway"
+                  anyway="Run it anyway"
+                  backLabel="Not now"
+                  quiet
+                  onBack={() => void answerCost(t, 'not-now')}
+                  onStart={() => void answerCost(t, 'go')}
+                  onEditPrices={() => useTalk.setState({ settings: 'prices' })}
+                />
+              </div>
+            ) : (
+              <div className="button-row talk-cost-buttons">
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy}
+                  data-spends=""
+                  data-run-anyway=""
+                  onClick={() => void answerCost(t, 'go')}
+                >
+                  Run it anyway{t.estimate ? ` · about ${usd(t.estimate.typical)}` : ''}
+                </button>
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={() => void answerCost(t, 'not-now')}
+                >
+                  Not now
+                </button>
+              </div>
+            )}
+          </div>
+          {t.estimate && !(ai && est && t.reason !== 'ask-threshold') && (
+            <p className="talk-repeat-fails">
+              (at most {usd(t.estimate.high + t.estimate.fix)}
+              {t.estimate.fix > 0
+                ? `, up to ${est?.fixes ?? FIX_PER_RUN} fix-up${(est?.fixes ?? FIX_PER_RUN) === 1 ? '' : 's'} included`
+                : ''}
+              )
+            </p>
+          )}
+        </div>
+      </article>
+    );
+  }
   return (
     <article className="talk-turn talk-app talk-card talk-cost-card" aria-labelledby={`h-${t.id}`}>
       <h3 id={`h-${t.id}`} className="visually-hidden">
@@ -434,16 +601,8 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
       {t.reason === 'ask-limit' && cap !== null && (
         <p className="notice-warning">This would pass your {usd(cap)} limit for this tab.</p>
       )}
-      {t.estimate && (
-        <p className="talk-text">
-          {what} takes about {usd(t.estimate.typical)} (at most{' '}
-          {usd(t.estimate.high + t.estimate.fix)}
-          {t.estimate.fix > 0
-            ? `, up to ${est?.fixes ?? FIX_PER_RUN} fix-up${(est?.fixes ?? FIX_PER_RUN) === 1 ? '' : 's'} included`
-            : ''}
-          ). Go ahead?
-        </p>
-      )}
+      {priceSentence}
+      {strictLine}
       {ai && est && t.reason !== 'ask-threshold' ? (
         <div className="talk-costcheck">
           <CostCheck
@@ -548,6 +707,9 @@ function Event({ t }: { t: TurnOf<'event'> }) {
   } else if (e.type === 'kept') {
     icon = e.undone ? 'undo' : 'check';
     text = e.undone ? `${e.text} Undone.` : e.text;
+  } else if (e.type === 'fact' && e.undone) {
+    icon = 'undo';
+    text = `${e.text} Undone.`;
   } else if (e.type === 'note' && e.free) {
     // A free fix asked for from a card: the app's own line, with Undo while it is the newest.
     icon = e.free.undone ? 'undo' : 'check';
@@ -558,6 +720,17 @@ function Event({ t }: { t: TurnOf<'event'> }) {
   }
   // Read again as the turns and the proposals move (a newer free line, an accept since).
   const freeUndo = useTalk((s) => e.type === 'note' && !!e.free && !!s.conv && freeUndoable(t.id));
+  // The strict setting's line: Undo while it is the newest such line (designer listens C).
+  const factUndo = useTalk((s) => {
+    if (e.type !== 'fact' || e.key !== 'fix-all' || e.undone) return false;
+    const turns = s.conv?.turns ?? [];
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const x = turns[i];
+      if (x?.kind === 'event' && x.event.type === 'fact' && x.event.key === 'fix-all')
+        return x.id === t.id;
+    }
+    return false;
+  });
   return (
     <article className="talk-turn talk-app" aria-labelledby={`h-${t.id}`}>
       <h3 id={`h-${t.id}`} className="visually-hidden">
@@ -571,6 +744,19 @@ function Event({ t }: { t: TurnOf<'event'> }) {
           <span>{text}</span>
           {e.type === 'kept' && !e.undone && newestKept === t.id && (
             <button type="button" className="link-btn" onClick={() => void undoKept(e.keptId)}>
+              Undo
+            </button>
+          )}
+          {factUndo && (
+            <button
+              type="button"
+              className="link-btn"
+              data-undo-fact={t.id}
+              onClick={() => {
+                const b = useTalk.getState().conv?.brief;
+                if (b) void act({ type: 'factUndo', eventId: t.id, fixAll: !b.fixAll });
+              }}
+            >
               Undo
             </button>
           )}

@@ -23,12 +23,14 @@ import {
   atMostOf,
   cut,
   entranceDoor,
+  firstAndMore,
   levelFingerprint,
   liveRules,
   lookNote,
   lookRuleOffer,
   looksAt,
   nextLetter,
+  notMetHead,
   optionName,
   optionTitle,
   planScope,
@@ -67,6 +69,7 @@ import {
   spentWithInflight,
   stepHigh,
 } from './pricing';
+import { dependsNow, repeatFor } from './repeat';
 import { type RunHold, takeRunLock } from './runLock';
 import { cardHeadIntoView, logFollowing } from './scroll';
 import { talkStore } from './talkStore';
@@ -465,7 +468,13 @@ export async function followPlan(plan: TalkPlan, said: string, replyTo: string) 
       return;
     }
     const ask = rule(made.est, false);
-    if (ask === 'go' && started) {
+    // The same failures again, nothing changed, the plan addressing nothing new: it always asks
+    // (designer listens §5), even under the threshold. It only ever adds an ask.
+    const repeat = await repeatFor(
+      req.scope,
+      (plan.addresses ?? []).map((a) => a.sig),
+    ).catch(() => null);
+    if (ask === 'go' && started && !repeat) {
       await run(req, made, atMostOf(made.est), { person: null, turn: newId('turn') });
       return;
     }
@@ -480,6 +489,7 @@ export async function followPlan(plan: TalkPlan, said: string, replyTo: string) 
       estimate: u ? { typical: u.typical, high: u.high, fix: u.fix } : null,
       talk: { replyTo, title: plan.title, intent: plan.intent },
       just: plan.just,
+      ...(repeat ? { repeat } : {}),
     });
   } finally {
     if (started) end();
@@ -511,7 +521,16 @@ async function askOrRun(req: PressRequest) {
   // The rule's own card first (the tab's first run, the limit); dearer only stops a go.
   const ruled = rule(made.est, true);
   const ask = ruled === 'go' && dearer ? 'ask-threshold' : ruled;
-  if (ask === 'go') {
+  // A new design of a scope that failed the same way twice, nothing changed (§5): it asks.
+  // Never for the rooms a stopped option lacks or another idea (those ask for something new).
+  const repeat =
+    !req.finish && !req.alternative
+      ? await repeatFor(
+          req.scope,
+          (req.addresses ?? []).map((a) => a.sig),
+        ).catch(() => null)
+      : null;
+  if (ask === 'go' && !repeat) {
     await run(req, made, atMostOf(made.est), { person: newId('turn'), turn: newId('turn') });
     return;
   }
@@ -522,10 +541,11 @@ async function askOrRun(req: PressRequest) {
     ids: [newId('turn'), newId('turn')],
     scope: req.scope,
     words: req.words,
-    reason: ask,
+    reason: ask === 'go' ? 'ask-threshold' : ask,
     estimate: u ? { typical: u.typical, high: u.high, fix: u.fix } : null,
     finish: req.finish,
     alt: req.alternative ?? null,
+    ...(repeat ? { repeat } : {}),
     // A designer's idea keeps what it is for through its card (P2-2).
     ...(req.talk
       ? {
@@ -634,7 +654,7 @@ async function run(
   if (!here()) return;
   if (req.alternative) {
     const { proposalId, letter } = req.alternative;
-    const option = newOption(letter, req.scope, sp, fp, req.addresses);
+    const option = newOption(letter, req.scope, sp, fp, req.addresses, approved);
     // Only the letter it was priced as: another tab may have added it meanwhile.
     const p = await actProposal(proposalId, (x) =>
       x && nextLetter(x) === letter ? { ...x, options: [...x.options, option] } : null,
@@ -660,7 +680,7 @@ async function run(
   const proposalId = newId('prop');
   const scope = scopeCut(req.scope);
   const words = cut(req.words, DRAFT_CHARS);
-  const option = newOption('A', scope, sp, fp, req.addresses);
+  const option = newOption('A', scope, sp, fp, req.addresses, approved);
   const proposal: Proposal = {
     projectId: project.id,
     id: proposalId,
@@ -703,10 +723,14 @@ function newOption(
   sp: ScopePlan,
   fp: string,
   addresses?: PlanAddress[],
+  approved: number | null = null,
 ): ProposalOption {
   return {
     letter,
     ...(addresses?.length ? { addresses: structuredClone(addresses) } : {}),
+    // What it is asked on (§5's "nothing changed"), and the figure it was approved for.
+    depends: dependsNow(),
+    approved,
     madeAt: nowIso(),
     // The kept pieces it is made with, on its record (read so whatever changes after).
     kept: [...houseKeptFor(designLevelId(), 'new')],
@@ -1431,6 +1455,19 @@ async function runOption(
         },
       });
     }
+    // Fix every check first, and some still don't pass: the app says so in the log, plainly,
+    // the card's own heading's words (designer listens §6), never just "designed".
+    if (status === 'checked' && !keeping) {
+      const line = await strictNotMetLine(p.id, letter).catch(() => null);
+      if (line && doc().id === projectId) {
+        await act({
+          type: 'event',
+          id: newId('turn'),
+          at: nowIso(),
+          event: { type: 'note', text: line },
+        });
+      }
+    }
     // Where next? only after a new design (Keep fixing goes on with the card on the table).
     if (status !== 'failed' && !keeping) {
       await act({ type: 'scopeNext', at: nowIso(), id: newId('turn') });
@@ -1518,6 +1555,12 @@ async function readyText(
   try {
     const got = await cardReportNow(doc(), optionCard(p, o, designLevelId()));
     if (!got) return plain;
+    // Fix every check first, not met: "V8 is back. Couldn't make everything pass: 2 still don't
+    // pass." (UX Accessibility), never "is ready".
+    const n = got.report.failures.length;
+    if (o.brief.fixAll && n > 0) {
+      return `${title} is back. Couldn’t make everything pass: ${n} still ${n === 1 ? 'doesn’t' : 'don’t'} pass.${cost ? ` Cost ${cost}.` : ''}`;
+    }
     // What the app placed itself, free, said once with the rest: "…; the app placed a queen bed,
     // free. Cost US$0.04."
     const free = freePlacedWords(got.changes, got.r);
@@ -1526,6 +1569,27 @@ async function readyText(
   } catch {
     return plain;
   }
+}
+
+/**
+ * The app's line after a run with Fix every check first on that couldn't make everything pass
+ * (designer listens §6, criterion 28): "V8: couldn't make everything pass within US$0.60. 2 still
+ * don't pass: You and Partner have no bed in Main bedroom, and 1 more." Null otherwise.
+ */
+async function strictNotMetLine(proposalId: string, letter: string): Promise<string | null> {
+  const p = useTalk.getState().proposals.find((x) => x.id === proposalId);
+  const o = p?.options.find((x) => x.letter === letter);
+  if (!p || !o || !o.brief.fixAll) return null;
+  const got = await cardReportNow(doc(), optionCard(p, o, designLevelId()));
+  const n = got?.report.failures.length ?? 0;
+  if (!got || !n) return null;
+  const title = optionTitle(p.n, letter, p.options.length);
+  const figure = typeof o.approved === 'number' ? usd(o.approved) : null;
+  const head = notMetHead(figure);
+  return cut(
+    `${title}: ${head.charAt(0).toLowerCase()}${head.slice(1)}. ${n} still ${n === 1 ? 'doesn’t' : 'don’t'} pass: ${firstAndMore(got.report)}.`,
+    TALK_LIMITS.note,
+  );
 }
 
 /** Stops the design run going on (its finished rooms are kept). */

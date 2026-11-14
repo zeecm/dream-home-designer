@@ -22,6 +22,12 @@ import { clean } from '../util';
  */
 
 /**
+ * 5: the designer listens, C: the household's declined free pieces as a structured list
+ * (`declined`, each lasting while its Decision stands; v4's `Decision.free` moves into it), the
+ * strict setting (`brief.fixAll`, What I know's "Before you see a design"), a cost card's repeat
+ * warning and the fix-all fact. A build that knows only 4 sees a 5 as newer and goes read-only,
+ * so it never drops a decline (the app would place a piece the person left out again) or the
+ * strict setting (it would show designs as they are, the owner's complaint again).
  * 4: pointing at the plan (slice 3a: the composer's chips, a sent message's pointers, kept
  * pieces and their 'kept' log line, the tips seen).
  * 3: house rules (slice 3a: the conversation's rules, a reply's rule offer, a Decision's rule).
@@ -29,7 +35,7 @@ import { clean } from '../util';
  * with the newer parts empty. A build that knows only 3 sees a 4 as newer and goes read-only,
  * so it never drops kept pieces (while the brief still holds them in place) or the chips.
  */
-export const TALK_RECORD_VERSION = 4;
+export const TALK_RECORD_VERSION = 5;
 /**
  * 5: the fix-up pool by progress (designer listens B2): a run's checkpoint keeps each room's
  * place in the pool (`RunCheckpoint.fixing`) and the rooms it only sends back to be fixed
@@ -144,6 +150,8 @@ export const QUESTION_KEYS = [
   'anything',
   /** How much the household owns (slice 3b's storage lens). */
   'owns',
+  /** Before you see a design: fix every check first, or show it as it is (designer listens C). */
+  'fix-all',
 ] as const;
 export const QuestionKey = z.enum(QUESTION_KEYS);
 export type QuestionKey = z.infer<typeof QuestionKey>;
@@ -189,6 +197,8 @@ export const FACT_KEYS = [
   'household-note',
   'wish',
   'keep',
+  /** Fix every check before showing a design (choice `on`), or show it as it is (`off`). */
+  'fix-all',
 ] as const;
 export const FactKey = z.enum(FACT_KEYS);
 export type FactKey = z.infer<typeof FactKey>;
@@ -275,18 +285,21 @@ export const Decision = z.object({
   deleted: z.boolean().default(false),
   /** Kept from a rule offer with Just this once: Make this a rule reopens it, free. */
   rule: Rule.optional().catch(undefined),
-  /**
-   * A piece the app placed itself, left out at Accept ("Left out: the app's queen bed in Main
-   * bedroom"): by room and role, so the free fix doesn't offer it again there. New within the
-   * record's version: optional, read tolerantly (a stale tab's write may drop it; the free fix
-   * may then offer the piece again, and the person unticks it).
-   */
-  free: z
-    .object({ room: z.string().max(80), role: z.string().max(40) })
-    .optional()
-    .catch(undefined),
 });
 export type Decision = z.infer<typeof Decision>;
+
+/**
+ * A piece the app placed itself that the person left out at Accept ("Left out: the app's queen
+ * bed in Main bedroom"): by room and role, so the free fix doesn't offer it again there. It lasts
+ * while its Decision stands (deleted, or gone past the cap: lifted). Records 5; in 4 it was the
+ * Decision's own `free`, moved here when a 4 is read (`migrateDeclined`).
+ */
+export const Declined = z.object({
+  decision: z.string(),
+  room: z.string().max(80),
+  role: z.string().max(40),
+});
+export type Declined = z.infer<typeof Declined>;
 
 /** A rule offer's verdict as stored with it (vetRule, when the reply landed). */
 export const RuleVet = z.object({
@@ -350,6 +363,8 @@ export const TalkEvent = z.discriminatedUnion('type', [
     type: z.literal('fact'),
     key: QuestionKey,
     text: z.string().max(TALK_LIMITS.note),
+    /** Taken back with its Undo (the strict setting's line offers one while it is the newest). */
+    undone: z.boolean().optional(),
   }),
   /** Pieces and finishes changed by hand since the last accept: kept where the person put them. */
   z.object({
@@ -383,6 +398,22 @@ const StoredEvent = z.preprocess((v) => {
 }, TalkEvent);
 
 const base = { id: z.string(), at: z.string() };
+
+/** A cost card's repeat warning (designer listens §5, UX "The cost cards"). */
+export const Repeat = z.object({
+  /** The versions that failed the same way, oldest first ("V7", "V8"). */
+  titles: z.array(z.string().max(12)).min(2).max(12),
+  /** The failures, as the person reads them (one line each). */
+  failures: z.array(z.string().max(300)).max(8),
+  count: z.number().int().min(1),
+  /** The newest of them: its card's free fix goes first on the cost card. */
+  card: z.object({ proposalId: z.string(), letter: z.enum(['A', 'B', 'C']) }),
+  /** Said in full once a set of failures: the next card for the same is one line. */
+  again: z.boolean().default(false),
+  /** The failures' signatures (what "said once" is kept by). */
+  sigs: z.array(z.string().max(300)).max(40).default([]),
+});
+export type Repeat = z.infer<typeof Repeat>;
 
 export const Turn = z.discriminatedUnion('kind', [
   /** What the person said or chose, in words. */
@@ -533,6 +564,12 @@ export const Turn = z.discriminatedUnion('kind', [
       .object({ proposalId: z.string(), letter: z.enum(['B', 'C']) })
       .nullable()
       .default(null),
+    /**
+     * It will likely come back with the same failures (designer listens §5): the versions that
+     * repeated them, nothing they depend on changed since, and the plan addresses nothing new.
+     * The card always asks then, even under the threshold (it only ever adds an ask).
+     */
+    repeat: Repeat.nullable().default(null),
   }),
   z.object({ ...base, kind: z.literal('proposal'), proposalId: z.string() }),
   z.object({ ...base, kind: z.literal('event'), event: StoredEvent }),
@@ -570,6 +607,11 @@ export const Conversation = z.object({
   decisions: z
     .array(Decision)
     .max(MAX_DECISIONS * 2)
+    .default([]),
+  /** The app's pieces the person left out at an Accept, each while its Decision stands. */
+  declined: z
+    .array(z.unknown())
+    .transform((items) => readable(Declined, items).slice(-MAX_DECISIONS * 2))
     .default([]),
   turns: z.array(Turn).max(MAX_TURNS),
   /** The composer, kept across closes and reloads. */
@@ -787,6 +829,18 @@ export const ProposalOption = z.object({
    * its card's lead. New within the record's version: optional, read tolerantly.
    */
   appLines: z.array(z.string().max(400)).max(8).optional().catch(undefined),
+  /**
+   * What it was asked on (designer listens §5, `dependsKey`: the brief, What I know, Decisions,
+   * house rules, kept pieces, the plan): asked again on the same is "nothing changed". Optional,
+   * read tolerantly; with talk records 5 no build that drops it can act on its conversation.
+   * Absent: a change is assumed (no repeat warning).
+   */
+  depends: z.string().max(80).optional().catch(undefined),
+  /**
+   * The figure its run was approved for (US$), kept after the run ends: "Couldn't make everything
+   * pass within US$x" (strict mode). Optional, read tolerantly.
+   */
+  approved: z.number().min(0).nullable().optional().catch(undefined),
   /** The id its pieces are seeded with, and its version's id once accepted. */
   designId: z.string(),
   brief: DesignBrief,
@@ -862,9 +916,46 @@ export function conversationFromRecord(raw: unknown): Conversation | null {
   const rec = raw as { recordVersion?: unknown } | null;
   if (!rec || typeof rec !== 'object') return null;
   if (typeof rec.recordVersion === 'number' && rec.recordVersion > TALK_RECORD_VERSION) return null;
-  const r = Conversation.safeParse(raw);
+  const r = Conversation.safeParse(migrateDeclined(raw));
   return r.success ? { ...r.data, recordVersion: TALK_RECORD_VERSION } : null;
 }
+
+/**
+ * Records 1 to 4: a Decision's `free` (B1, read tolerantly then) becomes an entry of the
+ * structured `declined` list, tied to that Decision (a deleted one's is dropped: it no longer
+ * applied). A 5 is read as it is.
+ */
+export function migrateDeclined(raw: unknown): unknown {
+  const rec = raw as { recordVersion?: unknown; decisions?: unknown; declined?: unknown };
+  if (typeof rec.recordVersion === 'number' && rec.recordVersion >= 5) return raw;
+  if (!Array.isArray(rec.decisions)) return raw;
+  const declined: Declined[] = [];
+  const decisions = rec.decisions.map((d: unknown) => {
+    const o = d as { id?: unknown; deleted?: unknown; free?: unknown } | null;
+    if (!o || typeof o !== 'object' || !('free' in o)) return d;
+    const { free, ...rest } = o;
+    const f = Declined.omit({ decision: true }).safeParse(free);
+    if (f.success && typeof o.id === 'string' && o.deleted !== true)
+      declined.push({ decision: o.id, ...f.data });
+    return rest;
+  });
+  const had = Array.isArray(rec.declined) ? rec.declined : [];
+  return { ...rec, decisions, declined: [...had, ...declined] };
+}
+
+/** The declines that stand: their Decision is there and not deleted. */
+export function declinedNow(
+  conv: Pick<Conversation, 'decisions' | 'declined'>,
+): { room: string; role: string }[] {
+  const live = new Set(conv.decisions.filter((d) => !d.deleted).map((d) => d.id));
+  return conv.declined
+    .filter((x) => live.has(x.decision))
+    .map(({ room, role }) => ({ room, role }));
+}
+
+/** Whether a Decision records a piece the app placed that the person left out. */
+export const isDeclineDecision = (conv: Pick<Conversation, 'declined'>, id: string) =>
+  conv.declined.some((x) => x.decision === id);
 
 export function proposalFromRecord(raw: unknown): Proposal | null {
   const rec = raw as { recordVersion?: unknown } | null;

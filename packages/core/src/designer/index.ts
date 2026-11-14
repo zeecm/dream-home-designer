@@ -92,6 +92,8 @@ export {
 export {
   CHARS_PER_TOKEN,
   FIX_PER_RUN,
+  FIX_STRICT,
+  strictAdds,
   firstPassOf,
   OUTPUT,
   PRICES,
@@ -154,6 +156,20 @@ export {
   tableEntries,
   verdictWords,
 } from './report';
+export {
+  type DependsOn,
+  type RepeatFound,
+  type RepeatVersion,
+  blockingHead,
+  dependsKey,
+  failureSigs,
+  notMetHead,
+  repeatAhead,
+  repeatRun,
+  repeatWords,
+  sameFailures,
+  versionsWords,
+} from './repeat';
 export {
   type DesignOptions,
   type DesignProblem,

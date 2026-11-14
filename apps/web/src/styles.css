@@ -9475,6 +9475,72 @@ html[data-proposal] .plan-svg g.clearance {
   }
 }
 
+/*
+ * Designer listens, PR C: the lead's frame (states C and D: "V7 and V8 failed on the same 3
+ * things", "Couldn't make everything pass within US$0.60"), the stopped and limit notices' 1px
+ * border on the surface, no fill, its heading the section's name; the ways forward stacked and
+ * content-width (free, then paid, then Change what I asked), 44 px under a finger. The repeat
+ * cost card's free fix first, Run it anyway outlined (never the near-black primary).
+ */
+.talk-check-frame {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.talk-check-frame-head {
+  font-weight: 600;
+}
+.talk-check-frame-fix {
+  margin: 0;
+}
+.talk-check-frame p.talk-check-did {
+  margin: 0;
+}
+.talk-check-ways {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  margin-top: 4px;
+}
+.talk-check-ways .talk-free-btn,
+.talk-check-ways .talk-keep-fixing {
+  margin-top: 0;
+}
+.talk-change-asked {
+  justify-self: start;
+}
+.talk-repeat {
+  display: grid;
+  gap: 6px;
+}
+.talk-repeat-text:focus:not(:focus-visible) {
+  outline: none;
+}
+.talk-repeat-fails {
+  margin: 0;
+  font-size: var(--fs-hint);
+  color: var(--muted);
+}
+.talk-repeat-ways {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+.talk-strict-line {
+  margin: 0;
+  font-size: var(--fs-hint);
+  color: var(--muted);
+}
+@media (pointer: coarse) {
+  .talk-change-asked,
+  .talk-repeat-ways .btn,
+  .talk-repeat-ways .link-btn,
+  .talk-strict-line .link-btn {
+    min-height: 44px;
+  }
+}
+
 /* What this design set out to fix: 13 px, no frame, under the summary. */
 .talk-set-out {
   display: grid;

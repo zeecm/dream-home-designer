@@ -2,6 +2,7 @@ import {
   BUDGET_CHOICES,
   COOKING_CHOICES,
   type DesignBrief,
+  FIX_ALL_CHOICES,
   type Level,
   MOBILITY_CHOICES,
   OWNS_CHOICES,
@@ -521,6 +522,17 @@ export function FactEditor(p: FactProps) {
           value={b.owns ?? 'typical'}
           // One value with the storage meter's own setting (useTalk keeps the two in step).
           onPick={(v) => p.onDone((c) => ({ ...c, owns: v }))}
+          autoFocus={p.autoFocus}
+        />
+      );
+    case 'fix-all':
+      return (
+        <OneOf
+          label="Before you see a design"
+          choices={FIX_ALL_CHOICES}
+          value={b.fixAll ? 'on' : 'off'}
+          // Free, with Undo on its log line; the larger pool is priced on the next cost card.
+          onPick={(v) => p.onDone((c) => ({ ...c, fixAll: v === 'on' }))}
           autoFocus={p.autoFocus}
         />
       );

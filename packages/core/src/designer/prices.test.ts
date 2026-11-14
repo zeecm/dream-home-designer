@@ -12,6 +12,7 @@ import {
   fixPoolFor,
   meteredPrice,
   priceOf,
+  strictAdds,
   usdOf,
 } from './prices';
 import { runPrompts } from './prompts';
@@ -161,6 +162,23 @@ describe('estimateRun (criterion 21)', () => {
     expect(firstPassOf(3, 1)).toBe(3);
     expect(firstPassOf(6, 2)).toBe(3);
     expect(firstPassOf(3, 5)).toBe(1);
+    // Fix every check first (designer listens C, lead decisions): Thorough 6, Quick two a room up
+    // to 4, priced as that many of the dearest fix request; what it adds is said on the card.
+    expect(fixPoolFor('thorough', 1, true)).toBe(6);
+    expect(fixPoolFor('quick', 1, true)).toBe(2);
+    expect(fixPoolFor('quick', 3, true)).toBe(4);
+    expect(fixPoolFor('quick', 0, true)).toBe(0);
+    const strict = estimateRun(oneRoom, { ...opts, quality: 'thorough', strict: true });
+    expect(strict.fixes).toBe(6);
+    expect(strict.usd?.high).toBeCloseTo(one.usd?.high ?? 0, 10);
+    expect(strict.usd?.fix).toBeCloseTo(6 * (one.usd?.fixOne ?? 0), 10);
+    expect(strictAdds(strict, 'thorough')).toBeCloseTo(3 * (one.usd?.fixOne ?? 0), 10);
+    expect(strictAdds(one, 'thorough')).toBe(0);
+    expect(estimateRun(prompts, { ...opts, quality: 'quick', strict: true }).fixes).toBe(4);
+    // A given pool (carried on, Keep fixing) is its own, strict or not.
+    expect(
+      estimateRun(oneRoom, { ...opts, quality: 'thorough', strict: true, pool: 2 }).fixes,
+    ).toBe(2);
   });
 
   it('a given pool and fix-only rooms: priced as the fix requests they may send', () => {
