@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { LengthField } from '../../../ui/fields';
 import { useAi } from '../../credentials';
 import { useResultsTickN } from '../results';
-import { cannotDesign, tokens, usd } from '../spend';
+import { cannotDesign, tokens, usd, useSpend } from '../spend';
 import { Mark } from './Mark';
 import { cardResult } from './cards';
 import { lightPointer, unkeep } from './pointers';
@@ -504,6 +504,8 @@ function KeptList() {
 export function MakeRule({ d }: { d: Decision }) {
   const busy = useBusy();
   const ai = useAi();
+  // Re-rendered when prices change (a price entered makes the model usable).
+  useSpend();
   const conv = useTalk((s) => s.conv);
   const text = `Make this a rule: ${d.text}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: priced on the conversation as it is

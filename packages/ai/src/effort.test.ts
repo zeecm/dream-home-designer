@@ -1,5 +1,5 @@
 import type { StepPrompt } from '@dhd/core';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AiSettings } from './providers';
 import {
   type Effort,
@@ -85,7 +85,18 @@ describe('OpenAI: reasoning_effort to the models that reason', () => {
   });
 });
 
-describe('Gemini 2.x: a thinking budget, at most half the answer’s limit', () => {
+/** Pins the clock's date (only Date: no timers here). */
+const on = (day: string) => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.parse(`${day}T12:00:00Z`) });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+};
+
+describe('Gemini 2.x until 1 Dec 2026: a thinking budget, at most half the answer’s limit', () => {
+  on('2026-11-14');
   const pro = ai('gemini', 'gemini-2.5-pro');
   it('by effort, for the layout (24k), a room (16k) and a Quick room (8k)', () => {
     const budget = (p: StepPrompt, e: Effort) => thinkingOf(requestFor(pro, p, e).body);
@@ -107,6 +118,27 @@ describe('Gemini 2.x: a thinking budget, at most half the answer’s limit', () 
   });
 });
 
+describe('Gemini 2.5 Pro and Flash from 1 Dec 2026: sent to Gemini 3 models, so by level', () => {
+  on('2026-12-01');
+  it.each(['gemini-2.5-pro', 'gemini-2.5-flash'])('%s', (model) => {
+    const g = ai('gemini', model);
+    for (const e of EFFORTS) {
+      expect(thinkingOf(requestFor(g, room, e).body)).toEqual({
+        includeThoughts: true,
+        thinkingLevel: e,
+      });
+    }
+    expect(lower(g, room, 'high')).toBe('low');
+    expect(lower(g, room, 'low')).toBeNull();
+    expect(fixStepFor(g, room).effort).toBe('low');
+  });
+  it('2.5 Flash-Lite stays, with its budget', () => {
+    const lite = ai('gemini', 'gemini-2.5-flash-lite');
+    expect(thinkingOf(requestFor(lite, room, 'high').body).thinkingBudget).toBe(8000);
+    expect(fixStepFor(lite, room)).toBe(room);
+  });
+});
+
 describe('Gemini 3: thinkingLevel, really lowered (issue #67)', () => {
   const pro = ai('gemini', 'gemini-3.1-pro-preview');
   it.each(EFFORTS)('3.1 Pro at %s sends that level, in a step and a talk call', (e) => {
@@ -123,11 +155,12 @@ describe('Gemini 3: thinkingLevel, really lowered (issue #67)', () => {
     for (const m of ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-3.8-flash']) {
       expect(geminiThinking(m, 'medium', 8000)).toEqual({ thinkingLevel: 'medium' });
     }
-    // 3 Pro Preview takes only low and high (and any model not known to take medium).
+    // 3 Pro Preview takes only low and high.
     expect(geminiThinking('gemini-3-pro-preview', 'medium', 8000)).toEqual({
       thinkingLevel: 'low',
     });
-    expect(geminiThinking('gemini-9-new', 'medium', 8000)).toEqual({ thinkingLevel: 'low' });
+    // Any other takes medium (Google lists the exceptions).
+    expect(geminiThinking('gemini-3.7-flash', 'medium', 8000)).toEqual({ thinkingLevel: 'medium' });
   });
   it('a cut-off answer goes again at low, from high or medium; a low one isn’t sent again', () => {
     expect(lower(pro, room, 'high')).toBe('low');
@@ -147,5 +180,18 @@ describe('Gemini 3: thinkingLevel, really lowered (issue #67)', () => {
     const quick = { ...quickRoom, effort: 'medium' as const };
     expect(thinkingOf(requestFor(pro, quick).body).thinkingLevel).toBe('medium');
     expect(fixStepFor(pro, quick).effort).toBe('low');
+  });
+});
+
+describe('the retry compares only what a request says about thinking', () => {
+  it('a body that differs elsewhere (a picture, the prompt) is not a lower effort', () => {
+    const gpt4o = ai('openai', 'gpt-4o');
+    let n = 0;
+    // Each build differs in its messages, never in its effort: no retry.
+    const build = () => {
+      const r = requestFor(gpt4o, layout, 'high');
+      return { ...r, body: { ...r.body, messages: [{ role: 'user', content: `x${n++}` }] } };
+    };
+    expect(lowerEffort(gpt4o, 'high', build)).toBeNull();
   });
 });

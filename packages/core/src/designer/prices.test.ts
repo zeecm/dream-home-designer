@@ -179,6 +179,13 @@ describe('Gemini 3 prices (issue #67; Google’s pricing page, checked 14 Nov 20
     for (const id of ['gemini-3.6-flash', 'gemini-3.8-flash']) {
       expect(rates(id)).toEqual({ input: 0.75, cachedInput: 0.075, output: 3.75 });
     }
+    // Old endpoints Google routes to 3.6 and 3.8 Flash, at those rates (not listed: unchecked).
+    for (const id of ['gemini-3.5-flash', 'gemini-3.7-flash']) {
+      expect(rates(id)).toEqual({ input: 0.75, cachedInput: 0.075, output: 3.75 });
+      expect(rates(id, JAN)).toEqual({ input: 1.5, cachedInput: 0.15, output: 7.5 });
+      expect(priceOf(id)?.checked).toBe(false);
+    }
+    expect(rates('gemini-2.5-flash-lite')).toEqual({ input: 0.1, cachedInput: 0.01, output: 0.4 });
     // Implicit caching writes for free.
     expect(priceOf('gemini-3.1-pro-preview')?.cacheWrite).toBeNull();
   });
@@ -202,7 +209,8 @@ describe('Gemini 3 prices (issue #67; Google’s pricing page, checked 14 Nov 20
     }
     // 2.5 Pro goes to 3.8 Flash's rates where they pass its own, never under either.
     expect(rates('gemini-2.5-pro', JAN)).toEqual({ input: 1.5, cachedInput: 0.15, output: 10 });
-    expect(priceOf('gemini-2.5-pro', PRICES, JAN)?.above?.output).toBe(15);
+    // A change keeps the long-prompt tier unless it sets its own.
+    expect(priceOf('gemini-2.5-pro', PRICES, JAN)?.above).toEqual(PRICES['gemini-2.5-pro']?.above);
     // A browser's own price has no changes: it stays as entered.
     const own = { ...PRICES, 'gemini-3.8-flash': { ...FLASH_OWN } };
     expect(priceOf('gemini-3.8-flash', own, JAN)?.input).toBe(1);

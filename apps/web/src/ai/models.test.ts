@@ -480,6 +480,9 @@ describe('every model offered for plans has a price, or is marked and refused (i
       'gemini-3.1-flash-lite',
       'gemini-3-flash-preview',
       'gemini-3-pro-preview',
+      // Old endpoints Google routes to 3.6 and 3.8 Flash (its deprecations page).
+      'gemini-3.5-flash',
+      'gemini-3.7-flash',
       'gemini-2.5-pro',
       'gemini-2.5-flash',
       'gemini-2.5-flash-lite',
@@ -509,7 +512,7 @@ describe('every model offered for plans has a price, or is marked and refused (i
 
   it('every Gemini 3 text model Google lists is priced, but the shut-down 3 Pro Preview', () => {
     const g3 = ids(googleNow.text).filter((id) => /^gemini-3/.test(id));
-    expect(g3).toHaveLength(8);
+    expect(g3).toHaveLength(10);
     for (const id of g3) {
       if (id === 'gemini-3-pro-preview') expect(priceOf(id)).toBeNull();
       else expect(priceOf(id), id).not.toBeNull();

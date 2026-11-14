@@ -277,9 +277,14 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
   let saving: Promise<void> = Promise.resolve();
   /** Fix requests the run may still send (the estimate counts this many at most). */
   let fixesLeft = o.fixesLeft ?? FIX_PER_RUN;
+  /**
+   * Fix-ups taken by rooms waiting at their gate (a pause), not yet sent: saved as still left,
+   * so a run carried on after the page closed mid-pause still has them.
+   */
+  let held = 0;
   const save = () => {
     const snapshot = structuredClone(design);
-    const info = { fixesLeft };
+    const info = { fixesLeft: fixesLeft + held };
     saving = saving.then(() => o.onSave?.(snapshot, info)).catch(() => {});
     return saving;
   };
@@ -551,9 +556,13 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
           const rounds = fixRoundsFor(ctx.brief.quality);
           while (now.fixable.length && fixes < rounds && fixesLeft > 0) {
             // Taken from the run's few before any wait (rooms run side by side, and may all
-            // wait on one pause), and given back if the step may not go.
+            // wait on one pause), and given back if the step may not go. Held, it is saved as
+            // still left until the request goes.
             fixesLeft--;
-            if (!(await mayStart({ key: s.key, kind: 'fix' }))) {
+            held++;
+            const go = await mayStart({ key: s.key, kind: 'fix' });
+            held--;
+            if (!go) {
               fixesLeft++;
               break;
             }

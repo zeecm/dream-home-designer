@@ -77,7 +77,8 @@ interface Stored {
  * back to the default. A model that can no longer be used (RETIRED) goes back to the default.
  */
 export function migrateKey(p: Provider, k: SavedKey): SavedKey {
-  const model = k.model && !RETIRED.includes(k.model) ? k.model : PROVIDERS[p].model;
+  const model =
+    k.model && !RETIRED.includes(k.model.trim().toLowerCase()) ? k.model : PROVIDERS[p].model;
   if (k.imageModel || !makesPictures(p) || !/image/i.test(model)) return { ...k, model };
   return { ...k, model: PROVIDERS[p].model, imageModel: model };
 }

@@ -16,7 +16,7 @@ import { type Size, type View, worldToScreen } from '../../../plan/view';
 import { useStore } from '../../../store';
 import { FLOAT_DIALOG } from '../../../ui/dialogs';
 import { useAi } from '../../credentials';
-import { cannotDesign, usd } from '../spend';
+import { cannotDesign, usd, useSpend } from '../spend';
 import { useDesigner } from '../state';
 import {
   type Target,
@@ -228,6 +228,8 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
   const sheets = useSheets();
   const busy = useBusy();
   const ai = useAi();
+  // Re-rendered when prices change (a price entered makes the model usable).
+  useSpend();
   const conv = useTalk((s) => s.conv);
   const pv = useProposalView();
   const [why, setWhy] = useState(false);
@@ -325,10 +327,11 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
   const { shown, words, title, change } = info;
   const level = shown.level;
   const kept = keptOf(target);
+  const cant = ai ? cannotDesign(ai) : null;
   const cantPay = !ai
     ? 'Add your AI key to ask for other ideas.'
-    : cannotDesign(ai)
-      ? cannotDesign(ai)
+    : cant
+      ? cant
       : typeof navigator !== 'undefined' && navigator.onLine === false
         ? 'You’re offline.'
         : busy

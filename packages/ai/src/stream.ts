@@ -110,7 +110,8 @@ const LOWER: Record<Effort, Effort | null> = { high: 'medium', medium: 'low', lo
 export const effortBelow = (e: Effort): Effort | null => LOWER[e];
 
 /**
- * The effort an answer cut off at its limit is asked for again at: on Gemini 3, `low` (the
+ * The effort an answer cut off at its limit is asked for again at: where Gemini thinks by
+ * level (Gemini 3, and 2.x once routed to it), `low` (the
  * owner's cut-off answers had spent about 15k of their 16k tokens thinking); elsewhere the next
  * one down. Only if its request really differs (Gemini 2.x's thinking budget may be capped
  * alike at two levels; a model that takes no effort sends the same request at every level):
@@ -122,16 +123,29 @@ export function lowerEffort(
   effort: Effort,
   build: (e: Effort) => ProviderRequest,
 ): Effort | null {
-  const now = JSON.stringify(build(effort).body);
+  const now = thinkingPart(build(effort).body);
   const steps: Effort[] = [];
   if (thinksByLevel(ai)) steps.push('low');
   else for (let e = LOWER[effort]; e; e = LOWER[e]) steps.push(e);
-  return steps.find((e) => e !== effort && JSON.stringify(build(e).body) !== now) ?? null;
+  return steps.find((e) => e !== effort && thinkingPart(build(e).body) !== now) ?? null;
 }
 
-/** Gemini 3 and later: thinking set by `thinkingLevel` (2.x takes a token budget). */
-const thinksByLevel = (ai: { provider: Provider; model: string }) =>
-  ai.provider === 'gemini' && !/^gemini-2/.test(ai.model.trim().toLowerCase());
+/**
+ * What a request body says about thinking, as text: Claude's effort, OpenAI's reasoning
+ * effort, Gemini's thinking config. Only that is compared (a body can carry pictures).
+ */
+function thinkingPart(body: Record<string, unknown>): string {
+  const o = (v: unknown) => (v && typeof v === 'object' ? (v as Record<string, unknown>) : {});
+  return JSON.stringify([
+    o(body.output_config).effort ?? null,
+    body.reasoning_effort ?? null,
+    o(body.generationConfig).thinkingConfig ?? null,
+  ]);
+}
+
+/** Thinking set by `thinkingLevel`: Gemini 3 and later, and the 2.x models Google routes to one. */
+const thinksByLevel = (ai: { provider: Provider; model: string }, at = Date.now()) =>
+  ai.provider === 'gemini' && geminiByLevel(ai.model.trim().toLowerCase(), at);
 
 /**
  * A fix round's request: on Gemini 3 it starts at `low` (in the owner's runs every fix round
@@ -144,23 +158,39 @@ export function fixStepFor(ai: { provider: Provider; model: string }, p: StepPro
 /** Gemini 2.x thinking budgets by effort, in tokens (at most half the answer's limit). */
 const GEMINI_BUDGET: Record<Effort, number> = { high: 16_384, medium: 8192, low: 2048 };
 /**
- * Gemini 3 models that take thinkingLevel `medium` (Google's thinking guide, 14 Nov 2026):
- * 3.1 Pro, 3 Flash and the 3.x Flash and Flash-Lite models. Others (3 Pro Preview) take
- * only `low` and `high`, so `medium` goes as `low` there: never as `high`.
+ * Gemini 2.x models whose requests Google sends to a Gemini 3 model from this UTC day on (its
+ * deprecations page, 14 Nov 2026: 2.5 Pro to 3.8 Flash, 2.5 Flash to 3.5 Flash-Lite), whose
+ * migration guides say to send `thinkingLevel` in place of `thinkingBudget`. Until then the
+ * 2.x models themselves answer, and take the budget; 2.5 Flash-Lite stays and keeps it.
  */
-const GEMINI_MEDIUM = /^gemini-(3\.1-pro|3-flash|3\.\d+-flash)/;
+const ROUTED_2X: Record<string, string> = {
+  'gemini-2.5-pro': '2026-12-01',
+  'gemini-2.5-flash': '2026-12-01',
+};
+/** Whether a Gemini model takes `thinkingLevel` on the day of `at` (else a budget). */
+function geminiByLevel(m: string, at: number): boolean {
+  if (!/^gemini-2/.test(m)) return true;
+  const from = ROUTED_2X[m];
+  return !!from && new Date(at).toISOString().slice(0, 10) >= from;
+}
+/**
+ * The Gemini models that don't take thinkingLevel `medium` (Google's thinking guide, 14 Nov
+ * 2026), so it goes as `low` there, never as `high`: 3 Pro Preview takes only low and high.
+ */
+const GEMINI_NO_MEDIUM = ['gemini-3-pro-preview'];
 
-/** A Gemini request's `thinkingConfig` thinking part for `effort`. */
+/** A Gemini request's `thinkingConfig` thinking part for `effort`, on the day of `at`. */
 export function geminiThinking(
   model: string,
   effort: Effort,
   maxTokens: number,
+  at: number = Date.now(),
 ): { thinkingBudget: number } | { thinkingLevel: Effort } {
   const m = model.trim().toLowerCase();
-  if (/^gemini-2/.test(m)) {
+  if (!geminiByLevel(m, at)) {
     return { thinkingBudget: Math.min(GEMINI_BUDGET[effort], Math.floor(maxTokens / 2)) };
   }
-  return { thinkingLevel: effort === 'medium' && !GEMINI_MEDIUM.test(m) ? 'low' : effort };
+  return { thinkingLevel: effort === 'medium' && GEMINI_NO_MEDIUM.includes(m) ? 'low' : effort };
 }
 const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 

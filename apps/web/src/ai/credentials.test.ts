@@ -106,7 +106,7 @@ describe('saved AI settings', () => {
       migrateKey('gemini', { key: 'k', model: 'gemini-2.5-pro', imageModel: 'gemini-3-pro-image' }),
     ).toEqual({ key: 'k', model: 'gemini-2.5-pro', imageModel: 'gemini-3-pro-image' });
     // The old default (never a Gemini API id) and the shut-down preview go to today's default.
-    for (const model of ['gemini-3-pro', 'gemini-3-pro-preview']) {
+    for (const model of ['gemini-3-pro', 'gemini-3-pro-preview', ' Gemini-3-Pro ']) {
       expect(migrateKey('gemini', { key: 'k', model, imageModel: 'gemini-3-pro-image' })).toEqual({
         key: 'k',
         model: 'gemini-3.1-pro-preview',

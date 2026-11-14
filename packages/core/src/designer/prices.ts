@@ -30,7 +30,7 @@ export interface Price extends Rates {
   checked: boolean;
   /**
    * Announced changes, oldest first: from the UTC day `from` (YYYY-MM-DD) on, these rates
-   * replace the ones above (a long-prompt tier only if the change has one).
+   * replace the ones above (the long-prompt tier stays unless the change sets its own).
    */
   changes?: ({ from: string } & Rates)[];
 }
@@ -67,9 +67,10 @@ const GEMINI_25_PRO_LONG = {
  * Anthropic's platform.claude.com/docs/en/about-claude/pricing (cache writes at the 5-minute
  * rate) and Google's aistudio.google.com/docs/pricing (where ai.google.dev/gemini-api/docs/pricing
  * now redirects; cached input is its context caching price, and implicit caching writes for
- * free). OpenAI's are not checked. Every Gemini 3 text model Google lists is here; not listed,
- * so unpriced and refused: gemini-3-pro (never a Gemini API id) and gemini-3-pro-preview (shut
- * down 9 Mar 2026). The Gemini 4 models aren't offered yet (their requests aren't checked).
+ * free). OpenAI's are not checked. Every Gemini 3 text model Google lists is here, with the old
+ * endpoints it routes to them; not listed, so unpriced and refused: gemini-3-pro (never a Gemini
+ * API id) and gemini-3-pro-preview (shut down 9 Mar 2026). The Gemini 4 models aren't priced yet
+ * (their requests aren't checked).
  */
 export const PRICES: Record<string, Price> = {
   'claude-opus-5-5': { input: 4, cachedInput: 0.2, cacheWrite: 5, output: 20, checked: true },
@@ -96,6 +97,10 @@ export const PRICES: Record<string, Price> = {
   'gpt-5-mini': { input: 0.25, cachedInput: 0.025, cacheWrite: null, output: 2, checked: false },
   'gemini-3.8-flash': FLASH_38,
   'gemini-3.6-flash': FLASH_38,
+  // Older endpoints Google sends to 3.8 and 3.6 Flash (deprecations page): at those models'
+  // rates, which the pricing page doesn't list for these ids, so not marked checked.
+  'gemini-3.7-flash': { ...FLASH_38, checked: false },
+  'gemini-3.5-flash': { ...FLASH_38, checked: false },
   'gemini-3.5-flash-lite': {
     input: 0.3,
     cachedInput: 0.03,
@@ -135,7 +140,6 @@ export const PRICES: Record<string, Price> = {
         cachedInput: 0.15,
         cacheWrite: null,
         output: 10,
-        above: GEMINI_25_PRO_LONG,
       },
     ],
   },
@@ -145,6 +149,13 @@ export const PRICES: Record<string, Price> = {
     cachedInput: 0.03,
     cacheWrite: null,
     output: 2.5,
+    checked: true,
+  },
+  'gemini-2.5-flash-lite': {
+    input: 0.1,
+    cachedInput: 0.01,
+    cacheWrite: null,
+    output: 0.4,
     checked: true,
   },
 };
@@ -179,7 +190,7 @@ function priceOn(price: Price, at: number): Price {
   const change = price.changes.filter((c) => c.from <= day).at(-1);
   if (!change) return price;
   const { from: _from, ...rates } = change;
-  return { checked: price.checked, ...rates };
+  return { checked: price.checked, ...(price.above ? { above: price.above } : {}), ...rates };
 }
 
 /**

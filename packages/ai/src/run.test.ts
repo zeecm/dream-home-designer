@@ -604,6 +604,8 @@ describe('the requests', () => {
   });
 
   it('Gemini: streamGenerateContent as SSE, with thinking', () => {
+    // 2.5 Pro takes a thinking budget until Google routes it to 3.8 Flash on 1 Dec 2026.
+    vi.setSystemTime(Date.parse('2026-11-14T12:00:00Z'));
     const r = requestFor(AI.gemini, prompt);
     expect(r.url).toMatch(/models\/gemini-2\.5-pro:streamGenerateContent\?alt=sse$/);
     expect(r.headers['x-goog-api-key']).toBe('AIzaTest0000');
@@ -881,6 +883,41 @@ describe('money safety (issue #67)', () => {
     expect(prov.calls.filter(isFix)).toHaveLength(1);
     const fixes = Object.values(design.spaces).reduce((t, s) => t + (s.fixes ?? 0), 0);
     expect(fixes).toBe(1);
+  });
+
+  it('a fix-up held at a paused gate is saved as still left, until its request goes', async () => {
+    // Saved while paused, a run carried on after the page closed would have lost it.
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (living(c) ? sse('anthropic', facingWall()) : null),
+    });
+    let carried = false;
+    const asks: ((go: boolean) => void)[] = [];
+    /** Each save's fix-ups left, and whether the run was paused then. */
+    const saves: { left: number; paused: boolean }[] = [];
+    const r: ReturnType<typeof start> = start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: failing },
+      design: { ...fresh(), brief: failing },
+      fixesLeft: 1,
+      askAgain: true,
+      overLimit: (next) => next?.kind === 'fix' && !carried,
+      confirmOver: () => new Promise<boolean>((res) => asks.push(res)),
+      onSave: (_d, info) => {
+        saves.push({ left: info.fixesLeft, paused: r.last()?.phase === 'paused' });
+      },
+    });
+    await until(() => r.last()?.phase === 'paused', 'paused at a fix gate');
+    // The other rooms finish meanwhile, each saving the run.
+    await vi.advanceTimersByTimeAsync(5000);
+    const paused = saves.filter((x) => x.paused);
+    expect(paused.length).toBeGreaterThan(0);
+    expect(paused.map((x) => x.left)).toEqual(paused.map(() => 1));
+    carried = true;
+    asks[0]?.(true);
+    await r.run;
+    // Sent: spent.
+    expect(saves.at(-1)?.left).toBe(0);
   });
 
   it('after Carry on, each step that waited is checked again against what it allowed', async () => {
