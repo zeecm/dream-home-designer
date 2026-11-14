@@ -1,4 +1,4 @@
-import { PRICES, type Price, priceOf, tokensOf, usdOf } from './prices';
+import { PRICES, type Price, meteredPrice, tokensOf, usdOf } from './prices';
 import type { Provider, Usage } from './schema';
 
 /**
@@ -38,7 +38,7 @@ export interface UsageOpts {
 export function usageOf(provider: Provider, events: unknown[], opts: UsageOpts): Usage {
   const counts = read(provider, events, opts.outputChars ?? 0);
   const model = counts?.model ?? opts.model;
-  const price = priceOf(model, opts.prices ?? PRICES);
+  const price = meteredPrice(model, opts.model, opts.prices ?? PRICES);
   const c = counts ?? {
     input: tokensOf(opts.promptChars ?? 0),
     cachedInput: 0,

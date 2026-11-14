@@ -16,10 +16,10 @@ import {
   until,
 } from './fixtures/runner';
 import { answerFor, promptOf } from './fixtures/sample';
-import { anthropicStream } from './fixtures/streams';
+import { anthropicStream, geminiStream } from './fixtures/streams';
 import { QUIET_MS } from './request';
 import { type RunOptions, runDesign } from './run';
-import { designerCannotUse, requestFor } from './stream';
+import { UNPRICED, designerCannotUse, requestFor } from './stream';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -604,6 +604,8 @@ describe('the requests', () => {
   });
 
   it('Gemini: streamGenerateContent as SSE, with thinking', () => {
+    // 2.5 Pro takes a thinking budget until Google routes it to 3.8 Flash on 1 Dec 2026.
+    vi.setSystemTime(Date.parse('2026-11-14T12:00:00Z'));
     const r = requestFor(AI.gemini, prompt);
     expect(r.url).toMatch(/models\/gemini-2\.5-pro:streamGenerateContent\?alt=sse$/);
     expect(r.headers['x-goog-api-key']).toBe('AIzaTest0000');
@@ -824,5 +826,168 @@ describe('a locked phone: a step cut off while away goes again on return (locked
         .map((s) => s.status)
         .sort(),
     ).toEqual(['done', 'done', 'skipped', 'skipped']);
+  });
+});
+
+describe('money safety (issue #67)', () => {
+  const facingWall = () => {
+    const a = structuredClone(answerFor('furnish "Living')?.answer) as {
+      items: Record<string, unknown>[];
+    };
+    const sofa = a.items.find((i) => i.ref === 'sofa1') as Record<string, unknown>;
+    Object.assign(sofa, { wall: null, along: null, at: { x: 8.15, y: 2.6 }, rotation: 180 });
+    return a;
+  };
+  const sse = (p: 'anthropic' | 'gemini', answer: unknown) =>
+    new Response((p === 'gemini' ? geminiStream : anthropicStream)(answer, USAGE), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  const living = (c: { step: string }) => c.step === 'furnish "Living';
+  /** Living's sofa faces the wall every time, and a child sleeps without a bed in each bedroom. */
+  const failing: DesignBrief = {
+    ...brief,
+    household: { ...brief.household, children: ['primary', 'primary'] },
+    sleeping: {
+      'rm_main-bedroom': ['adult-1', 'adult-2', 'child-1'],
+      rm_bedroom: ['elder-1', 'child-2'],
+    },
+  };
+  const isFix = (c: { body: Record<string, unknown> }) => promptOf(c.body).includes('## Fix round');
+
+  it('rooms paused at the fix gate never take more fix-ups than the run has left', async () => {
+    // The tech lead's case: three rooms whose answers fail, one fix-up left, a pause at the
+    // gate, then Carry on. Before, every room waiting on the pause sent its fix.
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (living(c) ? sse('anthropic', facingWall()) : null),
+    });
+    let carried = false;
+    const asks: ((go: boolean) => void)[] = [];
+    const r = start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: failing },
+      design: { ...fresh(), brief: failing },
+      fixesLeft: 1,
+      askAgain: true,
+      overLimit: (next) => next?.kind === 'fix' && !carried,
+      confirmOver: () => new Promise<boolean>((res) => asks.push(res)),
+    });
+    await until(() => r.last()?.phase === 'paused', 'paused at a fix gate');
+    // Every other room has its answer meanwhile, and reaches its own gate.
+    await vi.advanceTimersByTimeAsync(5000);
+    carried = true;
+    asks[0]?.(true);
+    const { state, design } = await r.run;
+    expect(state.phase).toBe('done');
+    expect(prov.calls.filter(isFix)).toHaveLength(1);
+    const fixes = Object.values(design.spaces).reduce((t, s) => t + (s.fixes ?? 0), 0);
+    expect(fixes).toBe(1);
+  });
+
+  it('a fix-up held at a paused gate is saved as still left, until its request goes', async () => {
+    // Saved while paused, a run carried on after the page closed would have lost it.
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (living(c) ? sse('anthropic', facingWall()) : null),
+    });
+    let carried = false;
+    const asks: ((go: boolean) => void)[] = [];
+    /** Each save's fix-ups left, and whether the run was paused then. */
+    const saves: { left: number; paused: boolean }[] = [];
+    const r: ReturnType<typeof start> = start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: failing },
+      design: { ...fresh(), brief: failing },
+      fixesLeft: 1,
+      askAgain: true,
+      overLimit: (next) => next?.kind === 'fix' && !carried,
+      confirmOver: () => new Promise<boolean>((res) => asks.push(res)),
+      onSave: (_d, info) => {
+        saves.push({ left: info.fixesLeft, paused: r.last()?.phase === 'paused' });
+      },
+    });
+    await until(() => r.last()?.phase === 'paused', 'paused at a fix gate');
+    // The other rooms finish meanwhile, each saving the run.
+    await vi.advanceTimersByTimeAsync(5000);
+    const paused = saves.filter((x) => x.paused);
+    expect(paused.length).toBeGreaterThan(0);
+    expect(paused.map((x) => x.left)).toEqual(paused.map(() => 1));
+    carried = true;
+    asks[0]?.(true);
+    await r.run;
+    // Sent: spent.
+    expect(saves.at(-1)?.left).toBe(0);
+  });
+
+  it('after Carry on, each step that waited is checked again against what it allowed', async () => {
+    // Carry on allows one more fix request: the second room waiting asks again, not sends.
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (living(c) ? sse('anthropic', facingWall()) : null),
+    });
+    let allowed = 0;
+    let started = 0;
+    const asks: ((go: boolean) => void)[] = [];
+    const r = start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: failing },
+      design: { ...fresh(), brief: failing },
+      askAgain: true,
+      onStep: (_key, kind, phase) => {
+        if (kind === 'fix' && phase === 'start') started++;
+      },
+      overLimit: (next) => next?.kind === 'fix' && started >= allowed,
+      confirmOver: () => new Promise<boolean>((res) => asks.push(res)),
+    });
+    await until(() => r.last()?.phase === 'paused', 'paused at a fix gate');
+    await vi.advanceTimersByTimeAsync(5000);
+    allowed = 1;
+    asks[0]?.(true);
+    await until(() => asks.length === 2, 'asked again');
+    expect(started).toBe(1);
+    asks[1]?.(false);
+    const { state } = await r.run;
+    expect(state.phase).toBe('stopped');
+    expect(prov.calls.filter(isFix)).toHaveLength(1);
+  });
+
+  it('Gemini 3: the layout and rooms think at high, fix rounds at low', async () => {
+    const pro = { ...AI.gemini, model: 'gemini-3.1-pro-preview' };
+    const prov = provider('gemini', {
+      auto: true,
+      reply: (c, n) => (living(c) && n === 1 ? sse('gemini', facingWall()) : null),
+    });
+    const { state } = await start('gemini', { fetch: prov.fetch, ai: pro }).run;
+    expect(state.phase).toBe('done');
+    const level = (c: { body: Record<string, unknown> }) =>
+      (
+        (c.body.generationConfig as Record<string, unknown>).thinkingConfig as Record<
+          string,
+          unknown
+        >
+      ).thinkingLevel;
+    const fixes = prov.calls.filter(isFix);
+    expect(fixes.map(level)).toEqual(['low']);
+    const steps = prov.calls.filter((c) => !isFix(c));
+    expect(steps).toHaveLength(5);
+    expect(new Set(steps.map(level))).toEqual(new Set(['high']));
+  });
+
+  it('a model with no price sends nothing: the run halts and says why', async () => {
+    const prov = provider('gemini', { auto: true });
+    const { state } = await start('gemini', {
+      fetch: prov.fetch,
+      ai: { ...AI.gemini, model: 'gemini-3-pro' },
+    }).run;
+    expect(prov.calls).toHaveLength(0);
+    expect(state.phase).toBe('halted');
+    expect(state.halt).toEqual({ kind: 'unpriced', message: UNPRICED });
+    expect(designerCannotUse({ provider: 'gemini', model: 'gemini-3-pro' })).toBe(UNPRICED);
+    // With the person's own price for it, it may run.
+    const own = {
+      'gemini-3-pro': { input: 2, cachedInput: 0.2, cacheWrite: null, output: 12, checked: false },
+    };
+    expect(designerCannotUse({ provider: 'gemini', model: 'gemini-3-pro' }, own)).toBeNull();
   });
 });

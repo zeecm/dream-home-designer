@@ -1,4 +1,3 @@
-import { designerCannotUse } from '@dhd/ai';
 import {
   type Conversation,
   FIX_PER_RUN,
@@ -30,7 +29,7 @@ import { useProject, useStore } from '../../../store';
 import { useAi } from '../../credentials';
 import { CostCheck } from '../CostCheck';
 import { useResultsTickN } from '../results';
-import { capUsd, usd, useSpend } from '../spend';
+import { cannotDesign, capUsd, usd, useSpend } from '../spend';
 import { useDesigner } from '../state';
 import { PointerChips } from './Chips';
 import { FactEditor } from './Facts';
@@ -286,7 +285,7 @@ function Scope({ t, latest }: { t: TurnOf<'scope'>; latest: boolean }) {
     [latest, ai, scopes, conv.brief, prices, project, tick, designs],
   );
   const conflict = level ? sleepingConflict(conv.brief, level) : null;
-  const cant = ai && designerCannotUse(ai);
+  const cant = ai && cannotDesign(ai);
   // Its level gone from the plan: nothing to offer (the panel says why).
   const gone = useLevelGone();
   return (

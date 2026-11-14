@@ -780,6 +780,47 @@ and `runtimes.test.ts` checks a whole-flat run with each provider sends and keep
 both. The run-test harness (`fixtures/runner.ts`, `flat.ts`) is shared with the web's
 `talk/carryOn.test.ts` (a run carried on from its checkpoint, priced as the card prices it).
 
+**AI costs always have a figure (#67, 14 Nov).** The owner's Gemini 3 runs had no price, so no
+cost card had a figure and neither the approved figure nor the tab's limit held.
+- **Prices** (`core designer/prices.ts`, checked 14 Nov against Google's
+  aistudio.google.com/docs/pricing and Anthropic's pricing page; the sources are in the comment
+  over `PRICES`): every Gemini 3 text model Google lists, plus the old endpoints it routes to
+  them (`gemini-3.5-flash`, `gemini-3.7-flash`), and the Claude models the designer takes.
+  `gemini-3-pro` (the old default, never an API id) and `gemini-3-pro-preview` (shut down)
+  stay unpriced. The Gemini default is `gemini-3.1-pro-preview`, and a saved key naming either
+  dead id moves to it (`RETIRED` in `credentials.ts`).
+- **Dated `changes`:** a `Price` can carry announced changes (`{ from: 'YYYY-MM-DD', ...rates }`).
+  `priceOf(model, table, at)` applies the latest change by that UTC day, and keeps the
+  long-prompt tier unless the change sets one. 3.6 and 3.8 Flash double on 1 Jan 2027. 2.5 Pro
+  goes to 3.8 Flash on 1 Dec, so it is kept at the dearer of the two, rate by rate. A browser's
+  own price has no changes.
+- **No figure, no run:** `designerCannotUse(ai, prices)` (`@dhd/ai`) refuses a model with no
+  price (`UNPRICED`). The web asks it through `cannotDesign` (`spend.ts`, the browser's own
+  prices included) on every paid path. `requestStep` halts (`'unpriced'`) before sending,
+  whatever the caller checked, so nothing unpriced goes: runs, fix rounds, carry on, Another
+  idea, talk replies. AI settings marks such a model "no price yet" and never recommends one
+  while a priced model is listed. Entering its prices in AI settings makes it usable.
+- **`meteredPrice(served, asked)`:** usage from a served model the table doesn't know is billed
+  at the asked model's price, never as free.
+- **Thinking per model** (`stream.ts` `geminiThinking`, `lowerEffort`, `fixStepFor`):
+  - Gemini 3 sends the level asked for. `medium` goes as `low` on the exceptions
+    (`GEMINI_NO_MEDIUM`: 3 Pro Preview), never as `high`, so Quick runs and talk calls are
+    medium.
+  - Gemini 3 fix rounds start at `low`.
+  - The retry after a cut-off goes to `low` where Gemini thinks by level, and one step down
+    elsewhere. It goes only when the request's thinking part really differs: a Gemini 2.x
+    budget capped alike at two levels, or a model that takes no effort (gpt-4o), is not sent
+    the same request twice.
+  - Claude sends `output_config.effort`; OpenAI's reasoning models send `reasoning_effort`.
+- **1 Dec 2026:** Google routes `gemini-2.5-pro` to 3.8 Flash and `gemini-2.5-flash` to 3.5
+  Flash-Lite, whose guides say to send `thinkingLevel` in place of `thinkingBudget`. They take
+  the budget until that day and the level from it (`ROUTED_2X`, by date as prices are).
+  2.5 Flash-Lite stays and keeps its budget.
+- **Fix-up pool (tech lead):** a room takes its fix-up before waiting at the gate and gives it
+  back if refused. It is held (`held`) and saved as still left until its request goes. Every
+  step that waited on a pause is checked again after Carry on. Three rooms paused with one
+  fix-up left used to send three.
+
 ## 5. Owner to-dos
 
 - **Before the repo goes public:** `apps/web/public/samples/hdb-3room-type4.pdf` (and its PNG
@@ -906,7 +947,7 @@ renovation (`restore`), taking back its steps already carried, and stays held ba
 nothing. One undo step, which shows Before (`touchedVariant`).
 **AI: walls from a plan image (stage 1, 5 Nov):** bring your own key. Project menu "AI
 assistant…" (`ai/AiSettingsDialog.tsx`): Claude, OpenAI or Gemini, key and model (defaults
-`claude-opus-5-5`, `gpt-5`, `gemini-3-pro` since 6 Nov), Test, Forget; kept in this tab
+`claude-opus-5-5`, `gpt-5`, `gemini-3.1-pro-preview` since 14 Nov, #67), Test, Forget; kept in this tab
 (sessionStorage), or on this device if ticked (`ai/credentials.ts`, key `dhd-ai`), never
 in a project, export, share link or `/api` request (e2e checks). Calls go straight from the
 browser to the provider (`ai/providers.ts`: the Anthropic SDK, lazy-loaded, with

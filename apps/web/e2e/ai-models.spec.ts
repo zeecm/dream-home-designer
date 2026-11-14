@@ -8,7 +8,7 @@ const GEMINI = 'https://generativelanguage.googleapis.com/v1beta';
 const geminiModels = {
   models: [
     ['gemini-2.5-pro', 'Gemini 2.5 Pro', ['generateContent', 'countTokens']],
-    ['gemini-3-pro', 'Gemini 3 Pro', ['generateContent', 'countTokens']],
+    ['gemini-3.1-pro-preview', 'Gemini 3.1 Pro Preview', ['generateContent', 'countTokens']],
     ['gemini-2.5-flash', 'Gemini 2.5 Flash', ['generateContent', 'countTokens']],
     ['gemini-2.5-flash-image', 'Nano Banana', ['generateContent', 'countTokens']],
     ['gemini-3-pro-image', 'Nano Banana Pro', ['generateContent', 'countTokens']],
@@ -68,11 +68,11 @@ test('the model selects fill from the key’s own model list', async ({ page }) 
   const plans = dialog.getByLabel('Model for plans and layouts');
   // The usual ones until the key's own list comes.
   await expect(plans.locator('option')).toHaveText([
-    'Gemini 3 Pro (recommended)',
+    'Gemini 3.1 Pro Preview (recommended)',
     'Gemini 2.5 Pro',
     'Gemini 2.5 Flash',
   ]);
-  await expect(plans).toHaveValue('gemini-3-pro');
+  await expect(plans).toHaveValue('gemini-3.1-pro-preview');
   const pictures = dialog.getByLabel('Model for pictures (photo-real renders)');
   // The cheaper picture model suggested; the dearer one says so.
   await expect(pictures.locator('option')).toHaveText([
@@ -105,7 +105,7 @@ test('when the models can’t be listed, the usual ones are offered', async ({ p
   await dialog.getByLabel('API key').fill(KEY);
   await expect(dialog).toContainText('Couldn’t list the models on this key');
   expect(await optionTexts(page, 'Model for plans and layouts')).toEqual([
-    'Gemini 3 Pro (recommended)',
+    'Gemini 3.1 Pro Preview (recommended)',
     'Gemini 2.5 Pro',
     'Gemini 2.5 Flash',
   ]);
@@ -158,7 +158,7 @@ test('the picture model chosen is the one renders use, and a refusal shows the p
     (await page.evaluate(() => window.sessionStorage.getItem('dhd-ai'))) ?? '{}',
   );
   expect(stored.keys.gemini).toMatchObject({
-    model: 'gemini-3-pro',
+    model: 'gemini-3.1-pro-preview',
     imageModel: 'gemini-3-pro-image',
   });
 
@@ -241,17 +241,17 @@ test('Test checks both models, without making a picture', async ({ page }) => {
   await dialog.getByLabel('Provider').selectOption('gemini');
   await dialog.getByLabel('API key').fill(KEY);
   await expect(dialog.getByLabel('Model for plans and layouts').locator('option')).toHaveText([
-    'Gemini 3 Pro (recommended)',
+    'Gemini 3.1 Pro Preview (recommended)',
     'Gemini 2.5 Pro',
     'Gemini 2.5 Flash',
   ]);
   await dialog.getByRole('button', { name: 'Test' }).click();
   const status = dialog.locator('.ai-status');
-  await expect(status).toContainText('Plans and layouts (gemini-3-pro): it works.');
+  await expect(status).toContainText('Plans and layouts (gemini-3.1-pro-preview): it works.');
   await expect(status).toContainText(
     'Pictures (gemini-2.5-flash-image): Gemini turned the request down (404): models/gemini-2.5-flash-image is not found.',
   );
-  expect(generated).toEqual([`${GEMINI}/models/gemini-3-pro:generateContent`]);
+  expect(generated).toEqual([`${GEMINI}/models/gemini-3.1-pro-preview:generateContent`]);
 });
 
 test('a test still running when the provider changes says nothing afterwards', async ({ page }) => {

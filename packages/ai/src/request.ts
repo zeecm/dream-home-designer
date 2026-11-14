@@ -2,7 +2,15 @@ import { type Price, priceOf, tokensOf, usdOf } from '@dhd/core';
 import { anySignal, failure } from './errors';
 import type { Page } from './page';
 import { type AiSettings, PROVIDERS } from './providers';
-import { type Effort, HttpFail, type StepSink, type StreamHooks, newSink } from './stream';
+import {
+  type Effort,
+  HttpFail,
+  type StepSink,
+  type StreamHooks,
+  UNPRICED,
+  effortBelow,
+  newSink,
+} from './stream';
 
 /**
  * One request to the person's provider, with the runner's rules for when it goes wrong
@@ -33,7 +41,6 @@ export const AWAY_MS = 10 * 60_000;
  * prompt again, so a third cut-off interrupts the run (its card asks before more is spent).
  */
 export const RESENDS = 2;
-const LOWER: Record<Effort, Effort | null> = { high: 'medium', medium: 'low', low: null };
 const ABORT_TEXT = 'Stopped.';
 
 export class Stopped extends Error {}
@@ -75,7 +82,7 @@ function watchPage(page: Page | undefined): Readonly<Away> {
   return away;
 }
 export interface Halt {
-  kind: 'quota' | 'key' | 'offline' | 'network';
+  kind: 'quota' | 'key' | 'offline' | 'network' | 'unpriced';
   message: string;
 }
 export class Halted extends Error {
@@ -195,6 +202,11 @@ export interface RequestOptions<T> {
   /** Sends one attempt, streaming into `sink`. */
   send: (effort: Effort, sink: StepSink, signal: AbortSignal, hooks: StreamHooks) => Promise<void>;
   effort: Effort;
+  /**
+   * The effort an answer cut off at its limit is asked for again at, once, or null for none
+   * (`lowerEffort` on the request: one that really thinks less). One step down by default.
+   */
+  lower?: (effort: Effort) => Effort | null;
   /** The prompt's length and the answer's limit (what a cut-off attempt may still be billed). */
   promptChars: number;
   maxTokens: number;
@@ -230,6 +242,9 @@ export interface RequestOptions<T> {
 /** One request, retried as the rules say: its answer, or null when it failed (`st.error`). */
 export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
   const { ai, st } = o;
+  // No figure, no request: whatever the caller checked, a model with no price never sends one
+  // (what it spent could be neither shown nor held to the figure and the tab's limit).
+  if (!priceOf(ai.model, o.prices)) throw new Halted({ kind: 'unpriced', message: UNPRICED });
   const name = PROVIDERS[ai.provider].short;
   const page = o.page;
   const away = watchPage(page);
@@ -404,7 +419,7 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
     }
     if (sink.stop === 'refusal') return fail(`${st.label}: the model declined this request.`);
     if (sink.stop === 'length') {
-      const lower = LOWER[effort];
+      const lower = (o.lower ?? effortBelow)(effort);
       if (long < 1 && lower) {
         long++;
         st.retries++;
