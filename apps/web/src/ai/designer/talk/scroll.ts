@@ -159,6 +159,12 @@ export function toNewest(log: HTMLElement) {
  * comes into view, not the log's foot (the "Where next?" offer), so its lead is read first.
  * Waited for until the card has worked its checks out (it is short while "Checking…").
  */
+/** Whether the log is at its foot, following what comes (no log on screen: as if it were). */
+export function logFollowing(): boolean {
+  if (typeof document === 'undefined') return false;
+  return document.querySelector<HTMLElement>('.talk-log')?.dataset.pinned !== '0';
+}
+
 export function cardHeadIntoView(cardKey: string, within = 5000) {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   const t0 = Date.now();

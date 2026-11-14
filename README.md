@@ -128,6 +128,11 @@ for any plan.
   sofa, the fridge) where they stand, and checks missed by a centimetre or two are mended by a
   small move (PR 1); the model told why a piece couldn't be kept, and the card offering the
   free fix when the same failures come back (PR 2).
+- The designer listens (issue #66 part 2, PR A): every failure on the card named, a missing bed
+  included, in your names; the card says when it sent a room back to be fixed and how that went;
+  the designer is told what the app found and why a piece was left out, never says it can't
+  check, and says which problems a plan fixes. Next: free fixes, fix rounds while progressing,
+  room vetting, no paying twice for the same failures. [spec](docs/specs/designer-listens.md)
 - AI interior designer v2, slice 3a part B: point at the plan (a piece or a spot, "keep this",
   "why here?", "something else here") with the pointers sent with your message.
 - AI interior designer v2, slice 3b part 2: a second look at each proposal (a picture of the plan

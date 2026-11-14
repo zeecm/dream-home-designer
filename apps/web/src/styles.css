@@ -8743,6 +8743,22 @@ html[data-proposal] .elec-warn circle {
     display: flex;
     align-items: center;
   }
+  /* A flex summary loses its marker: a chevron in its place, turned while open. */
+  .talk summary::before,
+  .talk-names summary::before {
+    content: "";
+    flex: none;
+    width: 6px;
+    height: 6px;
+    margin: 0 10px 0 2px;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: rotate(-45deg);
+  }
+  .talk details[open] > summary::before,
+  .talk-names details[open] > summary::before {
+    transform: rotate(45deg);
+  }
   .talk-cost-card .segmented button {
     min-height: 44px;
   }
@@ -9317,6 +9333,9 @@ html[data-proposal] .plan-svg g.clearance {
 .talk-check-head {
   margin: 0;
   font-size: var(--fs-body);
+}
+/* Only the count is set heavier: the fix rounds' sentence reads as the app's plain line. */
+.talk-check-count {
   font-weight: 600;
 }
 .talk-check-pass {
@@ -9365,6 +9384,8 @@ html[data-proposal] .plan-svg g.clearance {
   margin-top: 4px;
 }
 .talk-check-how ul {
+  padding-left: 0;
+  list-style: none;
   font-size: var(--fs-hint);
   color: var(--muted);
 }
@@ -9391,11 +9412,4 @@ html[data-proposal] .plan-svg g.clearance {
 }
 .talk-plan-for {
   margin-top: 6px;
-}
-@media (pointer: coarse) {
-  /* 44 px to the finger, keeping the disclosure's own marker (a list item). */
-  .talk-check-more > summary,
-  .talk-check-how > summary {
-    padding-block: 12px;
-  }
 }

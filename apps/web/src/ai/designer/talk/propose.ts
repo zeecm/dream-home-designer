@@ -56,7 +56,7 @@ import {
   spentWithInflight,
 } from './pricing';
 import { type RunHold, takeRunLock } from './runLock';
-import { cardHeadIntoView } from './scroll';
+import { cardHeadIntoView, logFollowing } from './scroll';
 import { talkStore } from './talkStore';
 import { threshold } from './threshold';
 import { timeLeft, timeLeftMark } from './timeLeft';
@@ -1126,6 +1126,9 @@ async function runOption(
       ),
     };
   });
+  // Whether the log was following the run (the person hadn't scrolled away): read before the
+  // next turn goes in, which takes the log to its foot.
+  const following = logFollowing();
   // The conversation's lines, only while its plan is open (the record `act` writes is its).
   if (doc().id === projectId) {
     if (state.phase === 'stopped') {
@@ -1165,7 +1168,7 @@ async function runOption(
       );
     }
     // The card's head in view when it's taller than the log (its lead is read first).
-    if (status !== 'failed') cardHeadIntoView(`${p.id}:${letter}`);
+    if (status !== 'failed' && following) cardHeadIntoView(`${p.id}:${letter}`);
   }
   endRun();
 }

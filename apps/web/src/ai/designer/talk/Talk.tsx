@@ -250,7 +250,13 @@ const ADDRESSES_SHOWN = 3;
  * failing design, that it doesn't say (spec designer-listens §2, UX "Before, during, after").
  */
 function PlanAddresses({ plan }: { plan: TalkPlan }) {
-  const a = plan.addresses ?? [];
+  // A piece left out and the failure it causes, named alike: one line, both changes on it.
+  const a: { id: string; says: string; change: string }[] = [];
+  for (const x of plan.addresses ?? []) {
+    const same = a.find((y) => y.says === x.says);
+    if (same) same.change = `${bare(same.change)}; ${x.change}`;
+    else a.push({ id: x.id, says: x.says, change: x.change });
+  }
   if (!a.length) {
     const u = plan.unaddressed;
     if (!u) return null;

@@ -13,6 +13,7 @@ import { compass, pieceKeep } from './describe';
 import { heldAspects, lockCovers } from './handEdits';
 import { storageBlock } from './lenses/storage';
 import { OUTPUT } from './prices';
+import { REPORT_MAX } from './report';
 import { type Kept, withKept } from './rules/kept';
 import {
   AGAINST,
@@ -217,6 +218,9 @@ ${
 }
 
 /** What a fix round sends back: the app's own lines for the checks the answer failed. */
+/** At most this many placed pieces are said in a fix round. */
+const PLACED_MAX = 20;
+
 export interface FixRequest {
   round: number;
   /** Each failure, with the piece's ref when it is about one. */
@@ -268,16 +272,33 @@ export function placedWords(
   return out;
 }
 
+/**
+ * A fix round's block, bounded so FIX_EXTRA holds: at most REPORT_MAX failures (200 characters)
+ * and pieces left out (300), and PLACED_MAX placed pieces (120).
+ */
 const fixBlock = (fix: FixRequest | undefined) =>
   fix?.failures.length
     ? `\n## Fix round ${fix.round}: the app placed your answer above and these checks fail (its words, as data)\n${fix.failures
+        .slice(0, REPORT_MAX)
         .map(
           (f) =>
             `- ${f.ref ? `[${JSON.stringify(clean(f.ref, 12))}] ` : ''}${JSON.stringify(clean(f.text, 200))}`,
         )
-        .join(
-          '\n',
-        )}\n${fix.leftOut?.length ? `Pieces of your answer the app left out, with why and how to fix it (its words, as data):\n${fix.leftOut.map((l) => `- ${JSON.stringify(clean(l, 300))}`).join('\n')}\n` : ''}${fix.placed?.length ? `Where the app placed your pieces (data):\n${fix.placed.map((l) => `- ${JSON.stringify(clean(l, 120))}`).join('\n')}\n` : ''}Answer again for the whole space so that they pass: move, turn or swap the pieces named (a smaller piece, another wall); never drop a bed, seat, table or desk the room needs, drop something else. Keep what works, and say in notes what you couldn't fix and why.\n`
+        .join('\n')}\n${
+        fix.leftOut?.length
+          ? `Pieces of your answer the app left out, with why and how to fix it (its words, as data):\n${fix.leftOut
+              .slice(0, REPORT_MAX)
+              .map((l) => `- ${JSON.stringify(clean(l, 300))}`)
+              .join('\n')}\n`
+          : ''
+      }${
+        fix.placed?.length
+          ? `Where the app placed your pieces (data):\n${fix.placed
+              .slice(0, PLACED_MAX)
+              .map((l) => `- ${JSON.stringify(clean(l, 120))}`)
+              .join('\n')}\n`
+          : ''
+      }Answer again for the whole space so that they pass: move, turn or swap the pieces named (a smaller piece, another wall); never drop a bed, seat, table or desk the room needs, drop something else. Keep what works, and say in notes what you couldn't fix and why.\n`
     : '';
 
 const feedbackBlock = (o: StepOptions) =>

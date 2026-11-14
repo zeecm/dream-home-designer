@@ -4,6 +4,8 @@ import {
   type FixRound,
   type Level,
   type Proposal,
+  type ResultCheck,
+  type RunReport,
   TYPICAL_RATES,
   changeSet,
   designResult,
@@ -38,6 +40,7 @@ import {
   optionCard,
   precheckOn,
   putBackMoves,
+  tickedExtra,
   versionKey,
 } from './cards';
 
@@ -348,20 +351,21 @@ describe('the one list (designer listens: the card bug, criterion 8)', () => {
       [],
       [],
     );
-    expect(v.text).toBe('2 don’t pass');
+    // The couple without a bed for one reason: one line, counted once.
+    expect(v.text).toBe('1 doesn’t pass');
+    expect(rep.failures[0]?.count).toBe(2);
     // No change row carries them (the bed was never placed) …
     for (const f of rep.failures) {
       expect(changes.some((c) => c.checks.includes(f.key))).toBe(false);
     }
     // … and the list names both, in the household's names, with why.
     expect(rep.failures.map((f) => f.says)).toEqual([
-      'You have no bed in Main bedroom.',
-      'Partner has no bed in Main bedroom.',
+      'You and Partner have no bed in Main bedroom.',
     ]);
-    expect(rep.failures[0]?.cause).toMatch(/kept a queen bed that isn’t in your plan/);
-    expect(leadLine(rep.rooms, rep.failures.length)).toBe('2 don’t pass:');
+    expect(rep.failures[0]?.cause).toMatch(/used a queen bed that isn’t in your plan/);
+    expect(leadLine(rep.rooms, rep.failures.length)).toBe('1 doesn’t pass:');
     expect(readyLine('V6', rep, null)).toBe(
-      'V6 is ready. 2 don’t pass: You have no bed in Main bedroom, and 1 more.',
+      'V6 is ready. 1 doesn’t pass: You and Partner have no bed in Main bedroom.',
     );
   });
 
@@ -374,16 +378,18 @@ describe('the one list (designer listens: the card bug, criterion 8)', () => {
     };
     const lead = (rep: ReturnType<typeof withRounds>) => leadLine(rep.rooms, rep.failures.length);
     expect(lead(withRounds([{ outcome: 'fixed', before: 4, after: 2 }], 1, 2))).toBe(
-      'Checked and fixed 2 problems before showing you. 2 still don’t pass:',
+      'Checked and fixed 2 problems before showing you. 1 still doesn’t pass:',
     );
     expect(lead(withRounds([{ outcome: 'cut-off', before: 2, after: 2 }]))).toBe(
-      'Sent back to be fixed, but the answer was cut off at the length limit and wasn’t used. 2 still don’t pass:',
+      'Sent back to be fixed once, but the answer was cut off at the length limit and wasn’t used. 1 still doesn’t pass:',
     );
     expect(lead(withRounds([{ outcome: 'no-better', before: 2, after: 2 }]))).toBe(
-      'Sent back to be fixed once. The answer was no better, so the first one is shown. 2 still don’t pass:',
+      'Sent back to be fixed once. The answer was no better, so the first design is shown. 1 still doesn’t pass:',
     );
-    // fixed is 0 and no rounds were stored (an older build): still not silent.
-    expect(lead(withRounds([], 1, 0))).toMatch(/^Sent back to be fixed once/);
+    // fixed is 0 and no rounds were stored (an older build): not silent, and no claim of why.
+    expect(lead(withRounds([], 1, 0))).toBe(
+      'Sent back to be fixed once; nothing was fixed, so the first design is shown. 1 still doesn’t pass:',
+    );
   });
 
   it('rounds and addresses are read tolerantly: a newer value drops them, never the record', () => {
@@ -408,5 +414,20 @@ describe('the one list (designer listens: the card bug, criterion 8)', () => {
     expect(read?.options[0]?.addresses?.[0]?.change).toBe('a queen bed');
     if (raw.options[0]) raw.options[0].addresses = 'not a list';
     expect(proposalFromRecord(raw)?.options[0]?.addresses).toBeUndefined();
+  });
+});
+
+describe('one count when changes are unticked (tech lead S5)', () => {
+  it('what the ticks fail beyond the version is its own line, never the count', () => {
+    const check = (key: string) =>
+      ({ key, text: key, hard: true, waivable: true, principle: 'P3' }) as ResultCheck;
+    const rep = {
+      failures: [{ key: 'a', keys: ['a', 'b'] }],
+      leftOut: [],
+      rooms: [],
+    } as unknown as RunReport;
+    expect(tickedExtra(rep, [check('a'), check('b'), check('c'), check('d')], ['d'])).toEqual([
+      check('c'),
+    ]);
   });
 });

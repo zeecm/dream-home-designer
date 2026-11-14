@@ -806,7 +806,17 @@ table's F/L ids with their signatures) shows "For “…”: …" under the plan
 doesn't say how it fixes V8's 4 problems."; the option keeps them and its card shows "What this
 design set out to fix" with ✓/⚠. At a run's end the log brings the card's head into view when the
 card is taller than the log. Left for B1/B2/C: free fixes, the fix-up pool, vetting, repeats,
-strict mode; the hover-to-light of a failure line.
+strict mode; the hover-to-light of a failure line. Review fixes (14 Nov): one line a failure as
+the person reads it (the couple without a bed for one reason is "You and Partner have no bed in
+Main bedroom", four chairs at no table are "4 dining chairs aren't at a table"), ordered by
+severity (no bedroom, no bed, HDB, seats, dining, … orphans last), and a merged line counts as one
+everywhere. What a set of ticks fails together beyond that is its own line under Checks, never
+in the count. The filter splits sentences only at a stop followed by a space (never "0.9 m" or
+"e.g."), and the inability must govern a checking verb; notes are dropped only for "the app",
+"the checks", "check results" or mood words. `requestStep` sets `st.failed` (length, unreadable,
+refused, busy, network, limit), so a round reads cut off, declined or "didn't go through", never
+guessed from the error text. An emptied reply shows the app's line in its place with its cost
+(`talk.appLine`). Phone disclosures in the panel get a chevron (a flex `summary` has no marker).
 
 **AI costs always have a figure (#67, 14 Nov).** The owner's Gemini 3 runs had no price, so no
 cost card had a figure and neither the approved figure nor the tab's limit held.

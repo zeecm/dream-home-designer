@@ -425,6 +425,11 @@ export const Turn = z.discriminatedUnion('kind', [
           .default([]),
         concern: TalkConcern.nullable().default(null),
         plan: TalkPlan.nullable().default(null),
+        /**
+         * The app's line said in the reply's place (the claims filter took every sentence out):
+         * the table's verdict. New within the record's version: optional, read tolerantly.
+         */
+        appLine: z.string().max(300).optional().catch(undefined),
         /** A rule it offers to keep (slice 3a), with the app's verdict (dropped if unreadable). */
         offer: RuleOffer.nullable().default(null).catch(null),
       })

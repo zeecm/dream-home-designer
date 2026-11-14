@@ -404,12 +404,14 @@ export function parseSpaceDesign(raw: unknown, bounds: Bounds | null): ParseResu
 /**
  * How one fix round of a space ended, with its hard failures before and after (the space
  * alone): `fixed` (fewer, its answer used), `no-better` (not used), `cut-off` (the answer was
- * cut off at the length limit, not used), `failed` (no readable answer came), or `no-fixups`
+ * cut off at the length limit, not used), `failed` (no readable answer came), `refused` (the
+ * model declined it), `error` (the request didn't go through: busy, a network or provider
+ * failure, or no room left to send it again), or `no-fixups`
  * (not sent: the run's fix-ups were used up). New within the record's version: optional, and
  * read tolerantly (an older build drops it; only the card's fix line loses its detail).
  */
 export const FixRound = z.object({
-  outcome: z.enum(['fixed', 'no-better', 'cut-off', 'failed', 'no-fixups']),
+  outcome: z.enum(['fixed', 'no-better', 'cut-off', 'failed', 'refused', 'error', 'no-fixups']),
   before: z.number().int().min(0),
   after: z.number().int().min(0),
 });

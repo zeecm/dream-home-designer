@@ -3,7 +3,7 @@ import {
   type RunReport,
   addressedIn,
   fixSummary,
-  leadLine,
+  leadParts,
   roundLines,
 } from '@dhd/core';
 import { keepTogether } from '../words';
@@ -11,10 +11,11 @@ import { Mark } from './Mark';
 
 /**
  * How a version was checked, at the top of its card (spec docs/specs/designer-listens.md, UX
- * "The lead", states A and B): the fix rounds' outcome and the card's own count in one line,
- * then each failure named in the person's words with its measured cause, at most three before
- * "and n more"; the rounds room by room under "How it was checked". The app's voice: facts,
- * no apology, no fill. Every failure counted is named (a missing bed has no row to carry it).
+ * "The lead", states A and B): the fix rounds' outcome, then the card's own count (the one part
+ * set heavier), then each failure named in the person's words with its measured cause, at most
+ * three before "and n more"; the rounds room by room under "How it was checked". The app's
+ * voice: facts, no apology, no fill. Every failure counted is named (a missing bed has no row to
+ * carry it); a line the report merged (the couple, four chairs) counts as one.
  */
 
 /** Failures shown before "and n more". */
@@ -25,29 +26,23 @@ export const bare = (s: string) => s.trim().replace(/[.;:]+$/, '');
 
 export function CheckLead({ cardKey, report }: { cardKey: string; report: RunReport }) {
   const failing = report.failures.length;
-  const head = leadLine(report.rooms, failing);
+  const { fix, count } = leadParts(report.rooms, failing);
   const rounds = roundLines(report.rooms);
-  if (!head && !failing) return null;
+  if (!fix && !count) return null;
   const id = `lead-${cardKey}`;
   const shown = report.failures.slice(0, FIRST);
   const more = report.failures.slice(FIRST);
-  const all = report.failures;
-  const item = (f: RunReport['failures'][number]) => {
-    // Failures with one cause (both of a couple without a bed) say it once, under the last.
-    const next = all[all.indexOf(f) + 1];
-    const cause = f.cause && next?.cause !== f.cause ? f.cause : null;
-    return (
-      <li key={f.key} className="talk-check-fail">
-        <span className="talk-app-icon talk-warn-mark">
-          <Mark kind="warn" />
-        </span>
-        <span className="talk-app-text">
-          <span className="talk-check-text">{keepTogether(f.says)}</span>
-          {cause && <span className="talk-check-cause">{keepTogether(cause)}</span>}
-        </span>
-      </li>
-    );
-  };
+  const item = (f: RunReport['failures'][number]) => (
+    <li key={f.id} className="talk-check-fail">
+      <span className="talk-app-icon talk-warn-mark">
+        <Mark kind="warn" />
+      </span>
+      <span className="talk-app-text">
+        <span className="talk-check-text">{keepTogether(f.says)}</span>
+        {f.cause && <span className="talk-check-cause">{keepTogether(f.cause)}</span>}
+      </span>
+    </li>
+  );
   return (
     <section className="talk-check-lead" aria-labelledby={id} data-lead="">
       <p id={id} className={failing ? 'talk-check-head' : 'talk-check-head talk-check-pass'}>
@@ -56,7 +51,11 @@ export function CheckLead({ cardKey, report }: { cardKey: string; report: RunRep
             <Mark kind="check" />
           </span>
         )}
-        {head ?? (failing ? `${failing} ${failing === 1 ? 'doesn’t' : 'don’t'} pass:` : '')}
+        <span>
+          {fix}
+          {fix && count ? ' ' : ''}
+          {count && <strong className="talk-check-count">{count}</strong>}
+        </span>
       </p>
       {failing > 0 && <ul className="talk-check-fails">{shown.map(item)}</ul>}
       {more.length > 0 && (
@@ -85,8 +84,8 @@ export const hasLead = (report: RunReport) =>
 
 /**
  * What this design set out to fix (its plan's `addresses`), each with how it came out on this
- * version's own report: a check when nothing of that failure is left, else a warn mark and
- * "Still doesn't pass". Shown only when the plan said.
+ * version's own report, the outcome first: "Fixed: …", "Still doesn't pass: …", "Still left
+ * out: …", then what the plan said it would do. Shown only when the plan said.
  */
 export function SetOutToFix({
   addresses,
@@ -96,24 +95,23 @@ export function SetOutToFix({
   report: RunReport;
 }) {
   if (!addresses.length) return null;
-  const rows = addressedIn(addresses, report);
+  // A piece left out and the failure it causes may both be named: one row for the two.
+  const rows = addressedIn(addresses, report).filter(
+    (a, i, all) => all.findIndex((b) => b.says === a.says) === i,
+  );
   return (
     <section className="talk-set-out" aria-label="What this design set out to fix">
       <h4 className="talk-set-out-head">What this design set out to fix</h4>
       <ul>
-        {rows.map((a, i) => (
+        {rows.map((a) => (
           <li key={a.says} className="talk-app-line">
             <span className={a.done ? 'talk-app-icon' : 'talk-app-icon talk-warn-mark'}>
               <Mark kind={a.done ? 'check' : 'warn'} />
             </span>
             <span className="talk-app-text">
               <span>
-                {keepTogether(`${bare(a.says)}: ${bare(a.change)}`)}
-                {a.done
-                  ? ''
-                  : addresses[i]?.id.startsWith('L')
-                    ? '. Still left out'
-                    : '. Still doesn’t pass'}
+                {a.done ? 'Fixed' : a.left ? 'Still left out' : 'Still doesn’t pass'}:{' '}
+                {keepTogether(`${bare(a.says)}. The plan: ${bare(a.change)}.`)}
               </span>
             </span>
           </li>

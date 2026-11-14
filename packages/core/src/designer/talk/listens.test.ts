@@ -231,6 +231,10 @@ describe('the claims filter (criterion 6, as the lead fixed it)', () => {
     "I'm not able to fix the problems before you see them.",
     'Unfortunately, I cannot see the checks the app runs.',
     'I do not have access to the check results.',
+    // QA M2: verify governed by the inability.
+    'I am not able to verify the design.',
+    // A decimal point inside a removed sentence doesn't split it.
+    'I can’t run the checks on the 0.9 m walkway before you see it.',
   ];
   const KEPT = [
     'The app’s checks found 4 problems.',
@@ -242,6 +246,12 @@ describe('the claims filter (criterion 6, as the lead fixed it)', () => {
     // Honest limits that aren't about the checks.
     'I can’t fit a king bed in Main bedroom: it’s 2.8 m wide.',
     'I can’t see a way to fit both desks, so one goes in the living room.',
+    // The tech lead's probes: a decimal, a claim of a fit (not of checking), "e.g.".
+    'The 0.9 m walkway stays clear.',
+    'I can’t get both desks in without failing the checks: the room is 3.1 m wide.',
+    'A smaller piece, e.g. a 1.2 m desk, fits under the window.',
+    // What the app doesn't cover, said honestly.
+    'I can’t check the beam depth from the plan; your ID should.',
   ];
 
   it('takes out each banned sentence, and keeps the rest', () => {
@@ -258,6 +268,15 @@ describe('the claims filter (criterion 6, as the lead fixed it)', () => {
       'I completely understand your frustration. As your designer, I suggest the layouts, but the app itself places the items and runs the checks. I will add the queen bed back.',
     );
     expect(filterClaims(KEPT.join(' '))).toEqual({ say: KEPT.join(' '), removed: 0 });
+    // Never cut at a decimal point or after "e.g.": whole sentences stay whole, or go whole.
+    const probes =
+      'The 0.9 m walkway stays clear. I can’t get both desks in without failing the checks: the room is 3.1 m wide. A smaller piece, e.g. a 1.2 m desk, fits.';
+    expect(filterClaims(probes)).toEqual({ say: probes, removed: 0 });
+    expect(
+      filterClaims(
+        'I can’t run the checks on the 0.9 m walkway before you see it. I’ll widen it to 1.0 m.',
+      ),
+    ).toEqual({ say: 'I’ll widen it to 1.0 m.', removed: 1 });
     // Lines and paragraphs stay as they were.
     expect(filterClaims('First line.\nI can’t run the checks myself.\nLast line.').say).toBe(
       'First line.\nLast line.',
@@ -271,6 +290,23 @@ describe('the claims filter (criterion 6, as the lead fixed it)', () => {
     );
     expect(r.ok && r.reply.say).toBe("I'll add the bed.");
     expect(r.ok && r.reply.removed).toBe(1);
+  });
+
+  it('a reply cut off or kept from a closed tab is filtered too', () => {
+    let c = met();
+    c = talk(c, { type: 'send', id: 'p9', at: AT, text: 'Fix it', sent: sentText('Fix it', []) });
+    const cut = talk(c, {
+      type: 'replyCut',
+      turnId: 'p9',
+      ids: ['c1', 'c2'],
+      at: AT,
+      text: 'I can’t run the checks myself. I’ll add the bed',
+      usage: [],
+      cut: 'tab',
+      line: 'Cut off.',
+    });
+    const said = cut.turns.find((t) => t.id === 'c1');
+    expect(said?.kind === 'designer' && said.text).toBe('I’ll add the bed');
   });
 
   it('a reply that is only a banned claim still reads (no paid retry); its say is empty', () => {
@@ -294,6 +330,10 @@ describe('the claims filter (criterion 6, as the lead fixed it)', () => {
       'Lighting design for the living room is for the ID.',
     ]);
     expect(aboutTheApp('Plumbing move for the sink: needs a licensed plumber.')).toBe(false);
+    // Notes for the ID that say "check" or "placement" stay.
+    expect(aboutTheApp('Check beam height before hacking the wardrobe wall.')).toBe(false);
+    expect(aboutTheApp('Power point placement behind the TV console.')).toBe(false);
+    expect(aboutTheApp('The checks run after approval.')).toBe(true);
   });
 });
 

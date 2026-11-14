@@ -541,6 +541,24 @@ describe('fix rounds: the app checks each answer before it is shown (designer v2
     expect(space?.rounds).toEqual([{ outcome: 'cut-off', before: 5, after: 5 }]);
   });
 
+  it('a fix round the model declines is stored as declined, never as “no readable answer”', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) =>
+        living(c) && n === 1
+          ? sse(facingWall())
+          : living(c)
+            ? new Response(anthropicStream(facingWall(), USAGE, { stop: 'refusal' }), {
+                status: 200,
+                headers: { 'content-type': 'text/event-stream' },
+              })
+            : null,
+    });
+    const { design } = await start('anthropic', { fetch: prov.fetch }).run;
+    const space = Object.values(design.spaces).find((s) => s.name.startsWith('Living'));
+    expect(space?.rounds).toEqual([{ outcome: 'refused', before: 5, after: 5 }]);
+  });
+
   it('a room still failing when the run’s fix-ups are used up says so', async () => {
     const twoKids: DesignBrief = {
       ...brief,

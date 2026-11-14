@@ -172,6 +172,8 @@ export function classify(
 }
 
 /** A request's progress as shown: a design step's row, or a talk call's status line. */
+export type FailReason = 'length' | 'unreadable' | 'refused' | 'busy' | 'network' | 'limit';
+
 export interface RequestState {
   label: string;
   status: 'waiting' | 'running' | 'done' | 'failed' | 'cancelled' | 'skipped';
@@ -187,6 +189,11 @@ export interface RequestState {
   } | null;
   retries: number;
   cutOffHigh: number | null;
+  /**
+   * Why it failed, when it did: the answer was cut off at the length limit, couldn't be read,
+   * was declined, the provider kept it waiting or failed, or it may not go again (the limit).
+   */
+  failed?: FailReason;
   /** This request's sends again after the page came back (a locked phone): not a retry. */
   resent?: number;
   /** The row's sends again, across its requests (its fix rounds too): never reset. */
@@ -253,9 +260,10 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
   // row's total, which the cap counts, goes on.
   st.resent = 0;
   const throttle = o.throttle ?? { last: 0 };
-  const fail = (text: string): null => {
+  const fail = (text: string, why: FailReason): null => {
     st.status = 'failed';
     st.error = text;
+    st.failed = why;
     st.thinking = '';
     st.wait = null;
     o.update();
@@ -268,13 +276,14 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
   let unreadable = 0;
   let long = 0;
   let attempt = 0;
+  st.failed = undefined;
   for (;;) {
     if (o.signal.aborted) throw new Stopped(ABORT_TEXT);
     const no = attempt++ > 0 ? (o.mayRetry?.() ?? null) : null;
     // A design run's step isn't failed for it (it would never be asked for again): the run is
     // interrupted with the step left to do, and its card asks.
     if (no && o.resumeOnReturn) throw new Interrupted('limit');
-    if (no) return fail(`${st.label}: ${no}`);
+    if (no) return fail(`${st.label}: ${no}`, 'limit');
     const ctrl = new AbortController();
     const signal = anySignal([o.signal, ctrl.signal]);
     let quiet = false;
@@ -355,7 +364,7 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
         o.onResent?.();
         continue;
       }
-      if (quiet) return fail(`${st.label}: the model went quiet for two minutes.`);
+      if (quiet) return fail(`${st.label}: the model went quiet for two minutes.`, 'network');
       if (error instanceof HttpFail) {
         const kind = classify(ai, error);
         const said = failure(ai.provider, error.status, error.body, ai.key);
@@ -380,7 +389,7 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
             }
             continue;
           }
-          return fail(`${st.label}: ${name} is still limiting requests from your key.`);
+          return fail(`${st.label}: ${name} is still limiting requests from your key.`, 'busy');
         }
         if (kind === 'server' && server < 1) {
           server++;
@@ -393,7 +402,7 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
           }
           continue;
         }
-        return fail(`${st.label}: ${said.message}`);
+        return fail(`${st.label}: ${said.message}`, 'network');
       }
       // The connection dropped (a phone locked, a blip): once back in view and online,
       // try again a couple of times before stopping.
@@ -417,7 +426,9 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
         message: offline ? 'You’re offline.' : `Couldn’t reach ${name}, even after trying again.`,
       });
     }
-    if (sink.stop === 'refusal') return fail(`${st.label}: the model declined this request.`);
+    if (sink.stop === 'refusal') {
+      return fail(`${st.label}: the model declined this request.`, 'refused');
+    }
     if (sink.stop === 'length') {
       const lower = (o.lower ?? effortBelow)(effort);
       if (long < 1 && lower) {
@@ -426,7 +437,7 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
         effort = lower;
         continue;
       }
-      return fail(`${st.label}: the answer was too long for one step.`);
+      return fail(`${st.label}: the answer was too long for one step.`, 'length');
     }
     const value = o.parse(sink.text);
     if (value === null) {
@@ -435,7 +446,7 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
         st.retries++;
         continue;
       }
-      return fail(`${st.label}: the model’s answer couldn’t be read.`);
+      return fail(`${st.label}: the model’s answer couldn’t be read.`, 'unreadable');
     }
     st.status = 'done';
     st.thinking = '';

@@ -52,21 +52,74 @@ export const REPLY_LIMITS = {
 // ------------------------------------------------------------------------- the claims filter
 
 /**
- * A first-person claim of not being able to check, run, see or fix the checks: never true (the
- * app checks every design before it is shown, and sends failures back). Narrow on purpose: the
- * inability, then within the sentence something about the checks, their results, or "before
- * you see". "I can't fit a king bed here" or "I can't see a way to fit both desks" stay.
+ * A first-person claim of not being able to run, see, check or verify the checks: never true
+ * (the app checks every design before it is shown, and sends failures back). Narrow on purpose:
+ * the inability must govern a checking verb ("I can't run the checks", "I'm not able to verify
+ * the design"); "fix" counts only with "before you see". "I can't fit a king bed here", "I
+ * can't see a way to fit both desks" and "I can't get both desks in without failing the
+ * checks" stay, as does an honest limit ("I can't check the beam depth from the plan").
  */
-const CANT =
-  /\bI(?:\s+(?:really|simply|just))?(?:\s+(?:can(?:no|['’])t|cannot|can\s+not|(?:do(?:n['’]t|\s+not)|did(?:n['’]t|\s+not))\s+have\s+(?:the\s+|any\s+)?(?:ability|means|way|access|tools?|power)|am\s+(?:not\s+able|unable)|have\s+no\s+(?:way|ability|access|means))|['’]m\s+(?:not\s+able|unable))/i;
+const CANT = new RegExp(
+  [
+    String.raw`\bI(?:\s+(?:really|simply|just))?`,
+    String.raw`(?:\s+(?:can(?:no|['’])t|cannot|can\s+not|am\s+(?:not\s+able|unable)\s+to|(?:do(?:n['’]t|\s+not)|did(?:n['’]t|\s+not))\s+have\s+(?:the\s+|any\s+)?(?:ability|means|way|tools?|power)\s+to|have\s+no\s+(?:way|ability|means)\s+to)|['’]m\s+(?:not\s+able|unable)\s+to)`,
+    String.raw`\s+(?:actually\s+|directly\s+|myself\s+|personally\s+)?(run|see|check|access|perform|verify|test|fix)\b`,
+  ].join(''),
+  'i',
+);
+/** "I don't have access to the check results." */
+const NO_ACCESS =
+  /\bI\s+(?:do(?:n['’]t|\s+not)\s+have|have\s+no)\s+(?:any\s+)?access\s+to\s+(?:the\s+|its\s+)?(?:checks?|check\s+results|results)\b/i;
+/** What run, see, access and perform must be about to be a claim about the checks. */
 const ABOUT_CHECKS =
-  /\b(?:checks|checked|checking|check\s+results|results|run\s+(?:them|it|the)|before\s+(?:you|they)\s+see|in\s+the\s+background)\b/i;
+  /\b(?:checks|checked|checking|check\s+results|results|before\s+(?:you|they)\s+see|in\s+the\s+background)\b/i;
+/** What the designer may honestly say it can't check: what the app doesn't cover. */
+const NOT_THE_APP =
+  /\b(?:beams?|ceilings?|plumbing|pipes?|wiring|electrical|structur\w*|asbestos|hacking|cabling|termites?|leaks?)\b/i;
+const BEFORE_YOU_SEE = /\bbefore\s+(?:you|they)\s+see\b/i;
 
 /** Whether a sentence is a claim the filter takes out. */
-export const cantClaim = (sentence: string) => {
+export function cantClaim(sentence: string): boolean {
+  if (NO_ACCESS.test(sentence)) return true;
   const m = CANT.exec(sentence);
-  return !!m && ABOUT_CHECKS.test(sentence.slice(m.index));
-};
+  if (!m) return false;
+  const verb = (m[1] ?? '').toLowerCase();
+  const rest = sentence.slice(m.index + m[0].length);
+  if (verb === 'fix') return BEFORE_YOU_SEE.test(rest);
+  if (verb === 'check' || verb === 'verify' || verb === 'test') return !NOT_THE_APP.test(rest);
+  return ABOUT_CHECKS.test(rest);
+}
+
+/** Abbreviations whose full stop doesn't end a sentence ("e.g. a 1.2 m desk"). */
+const ABBREV = /\b(?:e\.g|i\.e|etc|vs|approx|incl|cf|no|mr|mrs|ms|dr|st)$/i;
+
+/**
+ * A text cut into its sentences, each with what follows it up to the next (spaces, line breaks
+ * as parts of their own). A sentence ends at . ! or ? (and a closing quote or bracket) followed
+ * by a space or the end: never at a decimal point ("0.9 m") or after "e.g.".
+ */
+function sentences(text: string): string[] {
+  const out: string[] = [];
+  for (const line of text.split(/(\n+)/)) {
+    if (!line) continue;
+    if (line.startsWith('\n')) {
+      out.push(line);
+      continue;
+    }
+    let from = 0;
+    for (const m of line.matchAll(/[.!?]+["”’)]*(?=\s|$)/g)) {
+      const end = (m.index ?? 0) + m[0].length;
+      if (m[0].startsWith('.') && m[0].length === 1 && ABBREV.test(line.slice(from, m.index))) {
+        continue;
+      }
+      const ws = /^\s*/.exec(line.slice(end))?.[0] ?? '';
+      out.push(line.slice(from, end + ws.length));
+      from = end + ws.length;
+    }
+    if (from < line.length) out.push(line.slice(from));
+  }
+  return out;
+}
 
 /**
  * The designer's words with every first-person "I can't check or fix…" sentence taken out, and
@@ -74,12 +127,12 @@ export const cantClaim = (sentence: string) => {
  * (and never causes a paid retry): an emptied reply is said by the app's own line.
  */
 export function filterClaims(say: string): { say: string; removed: number } {
-  const parts = say.match(/[^.!?\n]+(?:[.!?]+["”’)]*)?[ \t]*|\n+/g) ?? [];
+  const parts = sentences(say);
   let removed = 0;
   const kept: string[] = [];
   for (let i = 0; i < parts.length; i++) {
     const p = parts[i] as string;
-    if (!cantClaim(p)) {
+    if (p.startsWith('\n') || !cantClaim(p)) {
       kept.push(p);
       continue;
     }
@@ -100,11 +153,12 @@ export function filterClaims(say: string): { say: string; removed: number } {
 }
 
 /**
- * A memory note about the app, its checks or the household's mood: never kept (a false positive
- * costs nothing; the notes are for their ID's work the app doesn't cover).
+ * A memory note about the app, its checks or the household's mood: never kept (notes are for
+ * their ID's work the app doesn't cover). "Check beam height before hacking the wardrobe wall"
+ * and "Power point placement behind the TV console" are notes for the ID, and stay.
  */
 export const aboutTheApp = (note: string) =>
-  /\b(?:the\s+app|app['’]s|this\s+app|checks?|checked|checking|placement|frustrat\w*|upset|angry|annoyed|disappoint\w*|mood|cannot\s+be\s+hidden|can['’]t\s+be\s+hidden)\b/i.test(
+  /\b(?:the\s+app|this\s+app|app['’]s|the\s+checks|check\s+results|placement\s+and\s+checks|cannot\s+be\s+hidden|can['’]t\s+be\s+hidden|frustrat\w*|upset|angry|annoyed|disappoint\w*|mood)\b/i.test(
     note,
   );
 
@@ -518,9 +572,10 @@ export function parseTalkReply(raw: unknown, ctx: TalkParseContext): TalkParse {
   const offered = ruleFromReply(m?.rule, { aliases: ctx.aliases, mainDoor: ctx.mainDoor ?? null });
   const rule = offered && 'draft' in offered ? offered.draft : null;
   // A rule object the vocabulary can't hold: the wish in its own words, noted and not checked.
-  const unfit = offered && 'unfit' in offered ? offered.name || cut(say, 160) || null : null;
   // Read as usable first: the filter only ever takes sentences out of a reply that is kept.
   const filtered = filterClaims(say);
+  const unfit =
+    offered && 'unfit' in offered ? offered.name || cut(filtered.say, 160) || null : null;
   return {
     ok: true,
     reply: {

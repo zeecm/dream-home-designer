@@ -7,7 +7,6 @@ import {
   type FactKey,
   type Pointer,
   type QuestionKey,
-  REPORT_MAX,
   STYLE_NAMES,
   type TalkEstimate,
   type TalkFact,
@@ -28,7 +27,6 @@ import {
   handEdits,
   lastAccepted,
   leftOutLines,
-  leftSig,
   liveRules,
   optionTitle,
   pendingReply,
@@ -37,6 +35,7 @@ import {
   reportLine,
   ruleOffer,
   spacesOf,
+  tableEntries,
   tableLines,
   talkAsks,
   talkChars,
@@ -164,14 +163,8 @@ async function onTable(conv: Conversation): Promise<Table> {
         ctx: {
           title,
           failing: report.failures.length,
-          entries: [
-            ...report.failures
-              .slice(0, REPORT_MAX)
-              .map((f) => ({ id: f.id, sig: f.sig, says: f.says })),
-            ...report.leftOut
-              .slice(0, REPORT_MAX)
-              .map((l) => ({ id: l.id, sig: leftSig(l), says: l.says })),
-          ],
+          // An L line that causes a counted failure is named by it (the words the card showed).
+          entries: tableEntries(report),
         },
       };
     } catch {
@@ -670,14 +663,15 @@ async function replyNow(
     // Nothing left once the claims filter took its sentences out: the app's own run-report
     // line says what the table holds instead (free, and never a paid retry).
     const emptied = !res.reply.say && !!res.reply.removed;
-    const lines = emptied ? [await emptiedLine(now), ...res.lines] : res.lines;
+    const appLine = emptied ? await emptiedLine(now) : null;
     const after = await act({
       type: 'replyDone',
       turnId,
       id,
       at: nowIso(),
       reply: res.reply,
-      lines,
+      lines: res.lines,
+      ...(appLine ? { appLine } : {}),
       echo: echoOf(res.reply),
       usage: res.usage,
       probe,
@@ -687,8 +681,8 @@ async function replyNow(
     });
     // The live region: the finished message in short (UX §9.1).
     say(
-      emptied
-        ? `${lines[0] ?? ''} Cost ${usd(cost)}.`
+      appLine
+        ? `${appLine} Cost ${usd(cost)}.`
         : `Designer: ${(res.reply.say.split(/(?<=[.!?])\s/)[0] ?? '').slice(0, 200)} Cost ${usd(cost)}.`,
     );
     // A plan goes on to its design run: priced here, run at once or asked first.

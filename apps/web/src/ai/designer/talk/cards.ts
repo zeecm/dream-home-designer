@@ -267,16 +267,17 @@ export const inCardOf =
 
 /**
  * The card's run report (spec docs/specs/designer-listens.md, UX "One list, one count"): what
- * the version fails in its scope (less what is accepted anyway) and what the ticked changes fail
- * together (`extra`), with the pieces it left out and its fix rounds. The one list for the
- * card's lead and Checks row, the On the table bar, the folded line, the announcement and the
- * talk call.
+ * the version fails in its scope, less what is accepted anyway, one line a failure as the person
+ * reads it, with the pieces it left out and its fix rounds. The one list and the one count for
+ * the card's lead and Checks row, the On the table bar, the folded line, the option tabs, the
+ * announcement and the talk call. What a set of ticks fails together beyond it is the card's
+ * own line under Checks (`tickedExtra`), never part of the count.
  */
 export function cardRunReport(
   card: CardModel,
   r: DesignResult,
   changes: readonly Change[],
-  o: { extra?: readonly ResultCheck[]; waive?: readonly string[]; aliases?: AliasMap } = {},
+  o: { waive?: readonly string[]; aliases?: AliasMap } = {},
 ): RunReport {
   const scope = card.proposal?.scope;
   const rooms = new Set(scope?.spaces.flatMap((k) => k.split('+')) ?? []);
@@ -287,10 +288,23 @@ export function cardRunReport(
   return runReport(r, card.input, {
     waived: [...card.waivers.map((w) => w.key), ...(o.waive ?? [])],
     inScope: inCardOf(changes),
-    ...(o.extra ? { extra: o.extra } : {}),
     ...(spaces ? { spaces } : {}),
     aliases: o.aliases ?? card.input.aliases,
   });
+}
+
+/**
+ * What the ticked changes fail together that the version itself doesn't (unticking a wall and
+ * keeping what needs it): said under the Checks row, and asked about at Accept.
+ */
+export function tickedExtra(
+  rep: RunReport,
+  subset: readonly ResultCheck[],
+  waived: readonly string[],
+): ResultCheck[] {
+  const counted = new Set(rep.failures.flatMap((f) => f.keys));
+  const w = new Set(waived);
+  return subset.filter((c) => !counted.has(c.key) && !w.has(c.key));
 }
 
 /** A card's run report on the plan as it is now, waited for (the talk call, the announcement). */

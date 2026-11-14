@@ -1379,18 +1379,21 @@ test.describe('talking to the designer (slice 2, PR 2)', () => {
     await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
       timeout: 30_000,
     });
-    // 8 and the card bug: the count is named, in their names, the fix round said.
+    // 8 and the card bug: the count is named, in their names, the fix round said. The couple
+    // without a bed for one reason is one line, counted once, on the card and the bar alike.
     const lead = v1.locator('[data-lead]');
     await expect(lead).toContainText(
-      'Sent back to be fixed once. The answer was no better, so the first one is shown. 2 still don’t pass:',
+      'Sent back to be fixed once. The answer was no better, so the first design is shown. 1 still doesn’t pass:',
     );
-    await expect(lead).toContainText(/You have no bed in (Main|Master) bedroom/);
-    await expect(lead).toContainText(/Partner has no bed in (Main|Master) bedroom/);
-    await expect(lead).toContainText('The designer kept a queen bed that isn’t in your plan');
+    await expect(lead.locator('.talk-check-count')).toHaveText('1 still doesn’t pass:');
+    await expect(lead).toContainText(/You and Partner have no bed in (Main|Master) bedroom/);
+    await expect(lead).toContainText(
+      'The designer’s answer used a queen bed that isn’t in your plan, so the app left it out.',
+    );
     await expect(lead).not.toContainText(/Adult \d|\bP99\b|\b[WR]\d+\b/);
-    await expect(v1.locator('.talk-lens')).toContainText('2 don’t pass · listed above');
+    await expect(v1.locator('.talk-lens')).toContainText('1 doesn’t pass · listed above');
     await expect(panel(page).getByRole('region', { name: 'On the table' })).toContainText(
-      '2 don’t pass',
+      '1 doesn’t pass',
     );
     // 4: the fix round was told why the bed went, and how to fix it.
     const fixBody = promptOf(JSON.parse(m.calls.filter(main)[1]?.body ?? '{}'));
@@ -1407,16 +1410,18 @@ test.describe('talking to the designer (slice 2, PR 2)', () => {
       JSON.parse(m.calls.filter((c) => c.step === 'talk')[0]?.body ?? '{}'),
     );
     const table = talkBody.slice(talkBody.indexOf('## On the table (data)'));
-    expect(table).toMatch(/F1 doesn’t pass · (Main|Master) bedroom \(R2\): Adult 1 has no bed/);
+    expect(table).toMatch(
+      /F1 doesn’t pass · (Main|Master) bedroom \(R2\): Adult 1 and Adult 2 have no bed/,
+    );
     expect(table).toContain('L1 left out');
     expect(table).toContain('there’s no piece “P99” in the flat');
-    expect(talkBody).toMatch(/designed; 2 don’t pass, 1 piece left out\./);
+    expect(talkBody).toMatch(/designed; 1 doesn’t pass, 1 piece left out\./);
     expect(talkBody).not.toContain('not you, says whether something passes');
 
     // 7: a plan that says what it fixes: "For “…”: …" under it, and the next card checks it.
     await send(page, 'Put the bed back, please.');
     await expect(log(page)).toContainText(
-      /For “You have no bed in (Main|Master) bedroom”: a queen bed against the long wall\./,
+      /For “You and Partner have no bed in (Main|Master) bedroom”: a queen bed against the long wall\./,
     );
     // Priced first: run at once, or asked on a cost card.
     const go = panel(page).getByRole('button', { name: /^Go ahead( anyway)? · about US\$/ });
@@ -1428,7 +1433,7 @@ test.describe('talking to the designer (slice 2, PR 2)', () => {
     });
     const fix = v2.getByRole('region', { name: 'What this design set out to fix' });
     await expect(fix).toContainText(
-      /You have no bed in (Main|Master) bedroom: a queen bed against the long wall/,
+      /Fixed: You and Partner have no bed in (Main|Master) bedroom\. The plan: a queen bed against the long wall\./,
     );
     await expect(fix).not.toContainText('Still doesn’t pass');
     await shot(page, 'listens-set-out');

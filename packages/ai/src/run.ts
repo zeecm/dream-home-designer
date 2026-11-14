@@ -37,6 +37,7 @@ import { AiError } from './errors';
 import type { Page } from './page';
 import { type AiSettings, PROVIDERS } from './providers';
 import {
+  type FailReason,
   type Halt,
   Halted,
   type InterruptReason,
@@ -46,8 +47,15 @@ import {
 } from './request';
 import { type StepSink, fixStepFor, lowerEffort, requestFor, streamStep } from './stream';
 
-/** A step's error when its answer was cut off at the output limit (request.ts says it so). */
-const CUT_OFF = /too long for one step/;
+/** How a fix round that brought no answer ended, from why its request failed. */
+const NO_ANSWER: Record<FailReason, FixRound['outcome']> = {
+  length: 'cut-off',
+  unreadable: 'failed',
+  refused: 'refused',
+  busy: 'error',
+  network: 'error',
+  limit: 'error',
+};
 
 /**
  * The designer's runner: the layout-and-style step for the whole flat, then one step per
@@ -95,6 +103,8 @@ export interface StepState {
   cutOffHigh: number | null;
   /** Sent back to be fixed: which round, and how many checks it failed. */
   fixing: { round: number; problems: number } | null;
+  /** Why its last request failed, when it did (`requestStep` says it). */
+  failed?: FailReason;
 }
 
 export type { Halt };
@@ -625,7 +635,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
               // The fix didn't come: the answer before it stands, checked as it is, and the
               // card says why (cut off at the length limit, or no readable answer).
               rounds.push({
-                outcome: CUT_OFF.test(st.error ?? '') ? 'cut-off' : 'failed',
+                outcome: st.failed ? NO_ANSWER[st.failed] : 'error',
                 before: left.length,
                 after: left.length,
               });

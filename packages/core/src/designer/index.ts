@@ -119,13 +119,16 @@ export {
   fixSummary,
   addressedIn,
   leadLine,
+  leadParts,
   leftSig,
   leftOutLines,
+  manyOf,
   peopleWords,
   readyLine,
   reportLine,
   roundLines,
   runReport,
+  tableEntries,
   verdictWords,
 } from './report';
 export {
