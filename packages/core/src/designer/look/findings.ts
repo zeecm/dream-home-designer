@@ -1,5 +1,5 @@
 import { AGAINST, type ParseResult, ZONES } from '../schema';
-import { RULE_REPLY_SCHEMA } from '../talk/reply';
+import { RULE_REPLY_SCHEMA, filterClaims } from '../talk/reply';
 import { clean } from '../util';
 
 /**
@@ -152,7 +152,8 @@ export function parseLook(raw: unknown): ParseResult<LookAnswer> {
     const id = alias(t?.id);
     const principle = oneOf(x?.principle, LOOK_PRINCIPLES);
     const severity = oneOf(x?.severity, ['fix', 'consider'] as const);
-    const line = text(x?.line, LOOK_LINE_CHARS);
+    // (A sentence claiming the app can't check its work is taken out, as from a reply.)
+    const line = unclaimed(text(x?.line, LOOK_LINE_CHARS));
     if (!x || !kind || !id || !principle || !severity || !line) continue;
     findings.push({
       target: { kind, id },
@@ -162,5 +163,13 @@ export function parseLook(raw: unknown): ParseResult<LookAnswer> {
       suggest: suggestOf(x.suggest),
     });
   }
-  return { ok: true, value: { findings, summary: text(o.summary, LOOK_SUMMARY_CHARS) }, notes };
+  const summary = unclaimed(text(o.summary, LOOK_SUMMARY_CHARS));
+  return { ok: true, value: { findings, summary }, notes };
 }
+
+/** The model's words with the claims filter's sentences out (null when nothing is left). */
+const unclaimed = (s: string | null): string | null => {
+  if (!s) return s;
+  const out = filterClaims(s).say.trim();
+  return out || null;
+};

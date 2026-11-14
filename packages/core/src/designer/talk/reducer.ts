@@ -942,7 +942,11 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
         kind: 'designer',
         id: a.id,
         at: a.at,
-        text: cutLines(`From my second look at ${a.version}: ${a.line}`, L.designer),
+        // (The claims filter again: a line a record carries is the model's words.)
+        text: cutLines(
+          `From my second look at ${a.version}: ${filterClaims(a.line).say.trim()}`,
+          L.designer,
+        ),
         lines: [],
         after: '',
         talk: {

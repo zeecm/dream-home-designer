@@ -759,8 +759,14 @@ the cost card; a model with no price (its price gone mid-run) sends no look (`LO
 The look is fed the run report (`runReport`: its F lines in place of the check texts, its L
 lines), and its round follows the fix-up pool's rule (taken before `mayStart`, given back if
 refused, `held` saved as left), goes as `fixStepFor`, carries the space's L lines, and writes the
-room's `rounds` record (`fixed`/`no-better`, or why no answer came, `no-fixups`) for a round of
-the app's checks; a round only of taste suggestions is the look's own record. The picture leaves
+room's `rounds` record (`by: 'look'`; `fixed`/`no-better`, or why no answer came, `no-fixups`
+for each space it couldn't send) counting the distinct hard checks it was for; a round only of
+taste suggestions or soft checks is the look's own record. `roundLines` names it "the second
+look's round" and the lead says "after the second look", never as one of the room's tries. The
+checkpoint's `look` turns `done` as soon as its answer is back (`onStep` 'look' 'end'), so a page
+that goes during its round never pays for the look again; a checkpoint written before there was
+a look (no `look`) never gains one on carrying on. The look's summary and lines pass the claims
+filter (`filterClaims`). The picture leaves
 out ceiling lights, clips a piece's room-in-front to its room, and keeps labels a quarter metre
 off each edge (a split's halves overlap by half a metre, so each label is drawn in one). WebKit
 draws the picture's sans-serif labels fine (checked on a screenshot). The runner part lives in

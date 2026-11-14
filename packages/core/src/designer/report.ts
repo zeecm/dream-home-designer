@@ -512,6 +512,8 @@ export interface FixSummary {
   unknown: boolean;
   /** A room still failing was not sent again: the run's fix-ups were used up. */
   usedUp: boolean;
+  /** Rounds sent after the second look (a fix-up each, apart from `sent`). */
+  looked: number;
 }
 
 export function fixSummary(rooms: readonly ReportRoom[]): FixSummary {
@@ -526,6 +528,7 @@ export function fixSummary(rooms: readonly ReportRoom[]): FixSummary {
     noBetter: false,
     unknown: false,
     usedUp: false,
+    looked: 0,
   };
   for (const room of rooms) {
     if (!room.rounds.length) {
@@ -542,8 +545,11 @@ export function fixSummary(rooms: readonly ReportRoom[]): FixSummary {
         f.usedUp = true;
         continue;
       }
-      f.sent++;
-      sentHere = true;
+      if (x.by === 'look') f.looked++;
+      else {
+        f.sent++;
+        sentHere = true;
+      }
       if (x.outcome === 'fixed') f.fixed += Math.max(0, x.before - x.after);
       if (x.outcome === 'cut-off') f.cutOff = true;
       if (x.outcome === 'failed') f.failed = true;
@@ -559,11 +565,14 @@ export function fixSummary(rooms: readonly ReportRoom[]): FixSummary {
 /** The fix rounds' sentence: what was sent back, and how it came out (null: none were). */
 function fixSentence(f: FixSummary): string | null {
   if (f.fixed > 0) return `Checked and fixed ${plural(f.fixed, 'problem')} before showing you.`;
-  if (!f.sent) return null;
+  if (!f.sent && !f.looked) return null;
   const many = f.rooms > 1;
+  const after = f.looked ? `${f.sent ? ', and' : ''} after the second look` : '';
   const sent = many
-    ? `Sent ${f.rooms} rooms back to be fixed`
-    : `Sent back to be fixed ${times(f.sent)}`;
+    ? `Sent ${f.rooms} rooms back to be fixed${after}`
+    : f.sent
+      ? `Sent back to be fixed ${times(f.sent)}${after}`
+      : `Sent back to be fixed${after}`;
   const first = many ? 'the first designs are shown' : 'the first design is shown';
   if (f.cutOff) {
     return many
@@ -578,7 +587,7 @@ function fixSentence(f: FixSummary): string | null {
   if (f.noBetter) {
     return many
       ? `${sent}. ${f.rooms === 2 ? 'Neither answer was' : 'None of the answers was'} better, so ${first}.`
-      : f.sent > 1
+      : f.sent + f.looked > 1
         ? `${sent}. The last answer was no better, so the earlier one is shown.`
         : `${sent}. The answer was no better, so ${first}.`;
   }
@@ -599,14 +608,15 @@ export function leadParts(
   const parts: string[] = [];
   const said = fixSentence(f);
   if (said) parts.push(said);
+  const used = f.sent + f.looked;
   if (failing > 0 && f.usedUp) {
     parts.push(
-      f.sent
-        ? `This design used the ${plural(f.sent, 'fix-up')} it was priced for.`
+      used
+        ? `This design used the ${plural(used, 'fix-up')} it was priced for.`
         : 'This design had no fix-ups left to send it back.',
     );
   }
-  const still = f.sent > 0 || f.usedUp ? ' still' : '';
+  const still = used > 0 || f.usedUp ? ' still' : '';
   return {
     fix: parts.length ? parts.join(' ') : null,
     count: failing > 0 ? `${failing}${still} ${failing === 1 ? 'doesn’t' : 'don’t'} pass:` : null,
@@ -632,21 +642,26 @@ export function roundLines(rooms: readonly ReportRoom[]): string[] {
     }
     let k = 0;
     const parts = room.rounds.map((x) => {
-      if (x.outcome === 'no-fixups') return 'not sent again: the run’s fix-ups were used up';
-      k++;
+      if (x.outcome === 'no-fixups') {
+        return x.by === 'look'
+          ? 'not sent back after the second look: the run’s fix-ups were used up'
+          : 'not sent again: the run’s fix-ups were used up';
+      }
+      // The second look's round is its own, never counted as one of the room's.
+      const name = x.by === 'look' ? 'the second look’s round' : `fix round ${++k}`;
       switch (x.outcome) {
         case 'fixed':
-          return `fix round ${k}: ${x.before} → ${plural(x.after, 'problem')}`;
+          return `${name}: ${x.before} → ${plural(x.after, 'problem')}`;
         case 'no-better':
-          return `fix round ${k}: no better, not used`;
+          return `${name}: no better, not used`;
         case 'cut-off':
-          return `fix round ${k}: cut off at the length limit, not used`;
+          return `${name}: cut off at the length limit, not used`;
         case 'refused':
-          return `fix round ${k}: the model declined it, not used`;
+          return `${name}: the model declined it, not used`;
         case 'error':
-          return `fix round ${k}: the request didn’t go through, not used`;
+          return `${name}: the request didn’t go through, not used`;
         default:
-          return `fix round ${k}: no readable answer, not used`;
+          return `${name}: no readable answer, not used`;
       }
     });
     return [`${room.name} · ${parts.join(' · ')}`];

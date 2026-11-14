@@ -163,6 +163,34 @@ describe('the picture, as QA read it', () => {
 });
 
 describe('the findings (parseLook)', () => {
+  it('the claims filter: a sentence saying it can’t check is taken out of its words', () => {
+    const claim = 'I can’t run the checks before you see the results.';
+    const r = parseLook({
+      summary: `Calm and open. ${claim}`,
+      findings: [
+        {
+          target: { kind: 'room', id: 'R2' },
+          principle: 'taste',
+          severity: 'consider',
+          line: `A lamp would finish it. ${claim}`,
+          suggest: null,
+        },
+        {
+          target: { kind: 'room', id: 'R3' },
+          principle: 'taste',
+          severity: 'consider',
+          line: claim,
+          suggest: null,
+        },
+      ],
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.summary).toBe('Calm and open.');
+    // Nothing left of a finding: it is no finding.
+    expect(r.value.findings.map((f) => f.line)).toEqual(['A lamp would finish it.']);
+  });
+
   it('reads findings leniently: any case, cut lines, storage never a fix, at most 8', () => {
     const many = Array.from({ length: 12 }, (_, i) => ({
       target: { kind: 'PIECE', id: ` p${i + 1} ` },
@@ -254,6 +282,49 @@ describe('what the app does with them (actOnLook): the checks always win', () =>
     expect(JSON.stringify(plan)).not.toContain('The model’s own words.” ');
     // A round that changes nothing is noted in the app's words too, never the model's.
     expect(plan.acted).toEqual([c.text]);
+    // Its record counts the app's hard checks, each once (two findings on one check: one).
+    const twice = actOnLook(
+      look(
+        ['First words.', 'Second words.'].map((line) =>
+          finding({
+            target: { kind: 'piece', id: target },
+            principle: c.principle as 'P2',
+            severity: 'fix',
+            line,
+          }),
+        ),
+      ),
+      ctx,
+    );
+    expect(twice.rounds).toHaveLength(1);
+    expect(twice.rounds[0]?.failures).toHaveLength(1);
+    expect(twice.rounds[0]?.checks).toBe(c.hard ? 1 : 0);
+  });
+
+  it('a round of soft checks or taste only counts no problems (it is the look’s own)', () => {
+    const soft = r0.checks.find((x) => !x.already && !x.hard && x.itemId && r0.refs[x.itemId]);
+    const plan = actOnLook(
+      look([
+        finding({
+          target: { kind: 'room', id: 'R2' },
+          severity: 'fix',
+          line: 'Turn the bed to the window.',
+        }),
+        ...(soft?.itemId
+          ? [
+              finding({
+                target: { kind: 'piece', id: of.get(soft.itemId) as string },
+                principle: soft.principle as 'P2',
+                severity: 'fix',
+                line: 'Soft.',
+              }),
+            ]
+          : []),
+      ]),
+      ctx,
+    );
+    expect(plan.rounds.length).toBeGreaterThan(0);
+    for (const r of plan.rounds) expect(r.checks).toBe(0);
   });
 
   it('a fix the checks don’t agree with is dropped, and kept in the record (criterion 41)', () => {

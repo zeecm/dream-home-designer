@@ -391,6 +391,36 @@ describe('the card’s lead and the app’s lines (criterion 8’s copy)', () =>
         ]),
       ]),
     ).toEqual(['Main bedroom · fix round 1: 3 → 1 problem · fix round 2: no better, not used']);
+    // The second look's round is its own: named so, and never one of the room's tries.
+    expect(
+      roundLines([
+        room([
+          { outcome: 'no-better', before: 2, after: 2 },
+          { outcome: 'fixed', before: 1, after: 0, by: 'look' },
+        ]),
+      ]),
+    ).toEqual([
+      'Main bedroom · fix round 1: no better, not used · the second look’s round: 1 → 0 problems',
+    ]);
+    expect(roundLines([room([{ outcome: 'no-fixups', before: 1, after: 1, by: 'look' }])])).toEqual(
+      ['Main bedroom · not sent back after the second look: the run’s fix-ups were used up'],
+    );
+    expect(leadLine([room([{ outcome: 'no-better', before: 1, after: 1, by: 'look' }])], 1)).toBe(
+      'Sent back to be fixed after the second look. The answer was no better, so the first design is shown. 1 still doesn’t pass:',
+    );
+    expect(
+      leadLine(
+        [
+          room([
+            { outcome: 'no-better', before: 1, after: 1 },
+            { outcome: 'no-better', before: 1, after: 1, by: 'look' },
+          ]),
+        ],
+        1,
+      ),
+    ).toBe(
+      'Sent back to be fixed once, and after the second look. The last answer was no better, so the earlier one is shown. 1 still doesn’t pass:',
+    );
   });
 
   it('the announcement and the line in place of an emptied reply, from the one list', () => {

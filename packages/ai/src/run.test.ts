@@ -971,7 +971,7 @@ describe('the second look in the run: its gate, its checkpoint, a run carried on
       design.spaces[k]?.name?.startsWith('Living'),
     );
     const rounds = design.spaces[key as string]?.rounds ?? [];
-    expect(rounds.at(-1)).toEqual({ outcome: 'no-better', before: 1, after: 1 });
+    expect(rounds.at(-1)).toEqual({ outcome: 'no-better', before: 1, after: 1, by: 'look' });
   });
 
   it('the look’s round under the pool’s rules: refused at its gate, its fix-up is given back', async () => {

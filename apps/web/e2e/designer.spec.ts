@@ -3593,6 +3593,51 @@ test.describe('a locked phone: resume and the wake lock (locked-phone runs, part
     for (const s of after) expect(done.has(s)).toBe(false);
   });
 
+  test('reloaded during the second look’s round: the look is never priced or sent again (B1)', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await setup(page);
+    // A taste fix for each room: the one the proposal designs is its round (the rest dropped).
+    const tasteAll = {
+      findings: ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8'].map((id) => ({
+        target: { kind: 'room', id },
+        principle: 'taste',
+        severity: 'fix',
+        line: 'Turn the bed to face the window.',
+        suggest: null,
+      })),
+      summary: null,
+    };
+    const waits: ((v: undefined | 'abort') => void)[] = [];
+    const m = await mock(page, {
+      look: [tasteAll],
+      // The look's round, held: the page goes while it is on its way.
+      reply: (c) =>
+        /furnish "(Main|Master) bedroom/.test(c.step) && c.body.includes('second look')
+          ? new Promise<undefined | 'abort'>((r) => waits.push(r))
+          : null,
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    await expect.poll(() => waits.length, { timeout: 30_000 }).toBe(1);
+    // Its answer is back: the checkpoint says so before the round goes.
+    await expect
+      .poll(async () => ((await runs(page))[0] as { look?: string } | undefined)?.look)
+      .toBe('done');
+    await page.reload();
+    waits[0]?.('abort');
+    await reopen(page);
+    await expect(card(page, 1).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // One look in all: never sent (or priced) again on carrying on.
+    expect(m.looks).toHaveLength(1);
+    await expect(panel(page).getByText(/and a second look at the result/)).toHaveCount(0);
+  });
+
   test('reloaded, then a wall moved before reopening: it asks once, and sends nothing until Carry on (4, 6)', async ({
     page,
   }) => {

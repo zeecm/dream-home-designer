@@ -624,12 +624,13 @@ export async function runDesign(
       const space = before.spaces.find((x) => x.key === r.space);
       if (!s || !entry?.design || !space) continue;
       if (fixesLeft <= 0) {
+        // Each space it would have sent says so (none goes once the fix-ups are spent).
         records.push({
           space: r.space,
-          round: { outcome: 'no-fixups', before: r.checks, after: r.checks },
+          round: { outcome: 'no-fixups', before: r.checks, after: r.checks, by: 'look' },
           checks: r.checks,
         });
-        break;
+        continue;
       }
       // The pool's rule: taken before any wait, given back if the step may not go (held, it is
       // saved as still left until the request goes).
@@ -684,7 +685,7 @@ export async function runDesign(
         const outcome = st.failed ? NO_ANSWER[st.failed] : 'error';
         records.push({
           space: r.space,
-          round: { outcome, before: r.checks, after: r.checks },
+          round: { outcome, before: r.checks, after: r.checks, by: 'look' },
           checks: r.checks,
         });
         st.error = null;
@@ -702,6 +703,7 @@ export async function runDesign(
           before: x.checks,
           // Kept only once each check it was for passes (`lookNoWorse`).
           after: kept ? 0 : x.checks,
+          by: 'look',
         };
         const sent = round.outcome !== 'no-fixups';
         design.spaces[x.space] = {
@@ -993,9 +995,12 @@ export async function runDesign(
       lookOnly = true;
       if (!designedHere.length) lookSt.status = 'skipped';
       else if (!(await mayStart({ key: lookSt.key, kind: 'look' }))) {
-        // Not sent: the limit was reached and the person said no (or stopped while it asked).
+        // Not sent: the limit was reached and the person said no, or stopped while it asked.
         lookSt.status = 'skipped';
-        look = { ...blankLook(), state: 'skipped', line: 'Not looked at: the run was stopped.' };
+        const line = o.signal.aborted
+          ? 'Not looked at: you stopped the run before the second look.'
+          : 'Not looked at: the second look would have gone past the limit.';
+        look = { ...blankLook(), state: 'skipped', line };
       } else {
         try {
           const scope = asked === 'all' ? null : inLook.flatMap((s) => s.rooms);

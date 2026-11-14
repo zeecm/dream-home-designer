@@ -46,7 +46,10 @@ export interface LookEdit {
 export interface LookRound {
   space: string;
   failures: { ref: string | null; text: string }[];
-  /** Of them, the app's own failing checks (P1–P4): what a fix round's record counts. */
+  /**
+   * The app's own failing hard checks they are for (P1–P4, each once): what a fix round's
+   * record counts. Zero: a round only of taste suggestions or soft checks, the look's own.
+   */
   checks: number;
 }
 
@@ -104,12 +107,17 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
     targets: [],
   };
   let taste = false;
-  const round = (space: string, f: LookRound['failures'][number], check: boolean) => {
+  /** Each round's hard check keys, counted once however many findings hit them. */
+  const hardKeys = new Map<string, Set<string>>();
+  const round = (space: string, f: LookRound['failures'][number], hard: string | null) => {
+    const keys = hardKeys.get(space) ?? new Set<string>();
+    hardKeys.set(space, keys);
+    if (hard) keys.add(hard);
     const r = plan.rounds.find((x) => x.space === space);
     if (r) {
-      r.failures.push(f);
-      if (check) r.checks++;
-    } else plan.rounds.push({ space, failures: [f], checks: check ? 1 : 0 });
+      if (!r.failures.some((x) => x.text === f.text && x.ref === f.ref)) r.failures.push(f);
+      r.checks = keys.size;
+    } else plan.rounds.push({ space, failures: [f], checks: keys.size });
   };
   /** An alias to the ref of the piece it names in a designed space's answer. */
   const refOf = (alias: string | null): string | null => {
@@ -143,6 +151,7 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
     // A fix: P1–P4 only with a failing app check on the same target and principle.
     let failure: string;
     let target: string | null = null;
+    let hard = false;
     if (f.principle === 'taste') {
       if (taste) {
         plan.dropped.push({ finding: f, why: 'taste-once' });
@@ -163,6 +172,7 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
       }
       failure = check.text;
       target = check.key;
+      hard = check.hard;
     }
     // Where it acts: the space of the piece it suggests about, else of its target.
     const about = f.suggest?.piece ? resolveAlias(aliases, f.suggest.piece) : null;
@@ -205,7 +215,7 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
       plan.edits.push({ space, ref, suggest: s, refs, line });
     } else {
       const piece = level.items[id] ? (result.refs[id] ?? null) : null;
-      round(space, { ref: piece, text: failure }, !!target);
+      round(space, { ref: piece, text: failure }, hard ? target : null);
     }
   }
   plan.notes = [...new Set(plan.notes)];

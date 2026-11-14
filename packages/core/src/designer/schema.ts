@@ -414,6 +414,8 @@ export const FixRound = z.object({
   outcome: z.enum(['fixed', 'no-better', 'cut-off', 'failed', 'refused', 'error', 'no-fixups']),
   before: z.number().int().min(0),
   after: z.number().int().min(0),
+  /** Sent after the second look (its one round), not by the room's own checks. */
+  by: z.literal('look').optional(),
 });
 export type FixRound = z.infer<typeof FixRound>;
 export const FixRounds = z.array(FixRound).max(12).optional().catch(undefined);

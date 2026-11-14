@@ -883,9 +883,10 @@ async function runOption(
   const ended = new Promise<void>((resolve) => {
     endRun = resolve;
   });
-  // Thorough with a model that can see ends with the second look (priced in its figure); a run
-  // carried on whose look is done sends none.
-  const looks = looksAt(sp.brief, ai) && from?.run.look !== 'done';
+  // Thorough with a model that can see ends with the second look (priced in its figure). A run
+  // carried on looks only if its checkpoint says the look is still to come: never once it went,
+  // and never for one written before there was a look.
+  const looks = looksAt(sp.brief, ai) && (!from || from.run.look === 'left');
   const runId = from?.run.id ?? newId('run');
   const now = nowIso();
   const prior = from?.run;
@@ -903,7 +904,6 @@ async function runOption(
         approved: approved === null ? null : priorSpent + approved,
         paused: null,
         stopped: false,
-        ...(looks ? { look: 'left' as const } : {}),
       }
     : {
         id: runId,
@@ -1122,6 +1122,9 @@ async function runOption(
       void writeRun();
     },
     onStep: (key, kind, phase) => {
+      // The look's answer is back (or nothing was sent): paid for, so never asked again, even
+      // if the page goes during its round.
+      if (kind === 'look' && phase === 'end' && ck.look === 'left') ck.look = 'done';
       // A step on its way, at its most: counted as spent if the page goes before it is back.
       ck.inflight = ck.inflight.filter((x) => x.step !== key);
       if (phase === 'start') ck.inflight = [...ck.inflight, { step: key, high: highOf(key, kind) }];

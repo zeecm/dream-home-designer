@@ -171,7 +171,7 @@ function SecondLook({ look, usage }: { look: OptionLook; usage: CardModel['usage
         )}
         {cost > 0 && (
           <span className="muted talk-look-cost">
-            {look.round === 'none' ? 'second look' : 'second look, its round included,'} {usd(cost)}
+            {look.round === 'none' ? 'second look' : 'second look and its round'} {usd(cost)}
           </span>
         )}
       </dd>

@@ -90,6 +90,7 @@ describe('a locked phone: a step cut off while away goes again on return (locked
       model: 'claude-opus-5-5',
       plan: { layout: {}, rooms: 'all' },
       layout: 'done',
+      look: 'left',
       rooms: Object.keys(d.spaces),
       fixesLeft: 2,
       approved: null,
@@ -123,6 +124,24 @@ describe('a locked phone: a step cut off while away goes again on return (locked
     // can see, the second look it still ends with).
     expect(priced?.est.steps.filter((s) => s.kind === 'room')).toHaveLength(2);
     expect(priced?.est.steps.map((s) => s.kind)).toEqual(['room', 'room', 'look']);
+    // A look that already answered (or a checkpoint from before there was one): never again.
+    const kindsFor = (r: RunCheckpoint) =>
+      priceRequest({
+        project,
+        levelId: project.levels[0]?.id ?? '',
+        designs: [],
+        brief: d.brief,
+        scope,
+        words: '',
+        resume: { option, run: r, scope },
+        designId: d.id,
+        opts: {},
+        ai: { provider: 'anthropic', model: 'claude-opus-5-5' },
+        prices: PRICES,
+      })?.est.steps.map((s) => s.kind);
+    expect(kindsFor({ ...run, look: 'done' })).toEqual(['room', 'room']);
+    const { look: _none, ...older } = run;
+    expect(kindsFor(older)).toEqual(['room', 'room']);
     // Carry on's figure (criterion 6): those steps at their high, and the fix rounds left.
     const est = priced?.est;
     if (!est?.usd) throw new Error('not priced');

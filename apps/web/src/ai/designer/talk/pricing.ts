@@ -175,9 +175,9 @@ export function priceRequest(i: PriceInput): Priced {
   if (!sp) return null;
   const prompts = plannedPrompts(sp.ctx, sp.draft, sp.plan, i.opts);
   // The look covers what the run was asked for (a run carried on: its checkpoint's), not only
-  // the rooms left; a carried-on run whose look is done sends none.
+  // the rooms left; a carried-on run looks only while its checkpoint says the look is to come.
   const asked = i.resume ? i.resume.run.plan.rooms : sp.plan.rooms;
-  const looks = looksAt(sp.brief, i.ai) && i.resume?.run.look !== 'done';
+  const looks = looksAt(sp.brief, i.ai) && (!i.resume || i.resume.run.look === 'left');
   const est = estimateRun(prompts, {
     provider: i.ai.provider,
     model: i.ai.model,
