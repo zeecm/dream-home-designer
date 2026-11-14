@@ -1,7 +1,6 @@
-import { designerCannotUse } from '@dhd/ai';
 import { type Proposal, RESUME_MS, levelFingerprint } from '@dhd/core';
 import { MODEL_NAMES, aiSettings } from '../../credentials';
-import { wouldPass } from '../spend';
+import { cannotDesign, wouldPass } from '../spend';
 import { useDesigner } from '../state';
 import { cardKey } from './cards';
 import { approvedLeft, resumeFigure } from './pricing';
@@ -114,7 +113,7 @@ async function offer(key: string, p: Proposal, letter: string) {
     return; // asked again when the page is online (checkResume → recheck)
   }
   const ai = aiSettings();
-  const usable = !!ai && !designerCannotUse(ai);
+  const usable = !!ai && !cannotDesign(ai);
   const made = usable ? await resumePriced(p, letter) : null;
   const figure = made ? resumeFigure(made.est, run.fixesLeft) : null;
   const levels = talkLevels();

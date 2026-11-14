@@ -43,7 +43,7 @@ export const PROVIDERS: Record<
   gemini: {
     name: 'Gemini (Google)',
     short: 'Gemini',
-    model: 'gemini-3-pro',
+    model: 'gemini-3.1-pro-preview',
     keyHint: 'AIza…',
     imageModel: 'gemini-2.5-flash-image',
   },

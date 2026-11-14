@@ -1,8 +1,17 @@
-import { AiError } from '@dhd/ai';
+import {
+  AiError,
+  DESIGNER_CLAUDE,
+  PROVIDERS,
+  type Provider,
+  UNPRICED,
+  designerCannotUse,
+} from '@dhd/ai';
+import { priceOf } from '@dhd/core';
 import { describe, expect, it } from 'vitest';
 import { afterEach, vi } from 'vitest';
 import { priceNote } from './credentials';
 import {
+  type ModelLists,
   byBest,
   checkPictureModel,
   curated,
@@ -13,6 +22,7 @@ import {
   parseGemini,
   parseOpenAi,
   recommended,
+  unpricedNote,
 } from './models';
 
 /** Trimmed from Gemini's `GET /v1beta/models` answer. */
@@ -36,6 +46,11 @@ const gemini = {
     {
       name: 'models/gemini-3-pro',
       displayName: 'Gemini 3 Pro',
+      supportedGenerationMethods: ['generateContent', 'countTokens'],
+    },
+    {
+      name: 'models/gemini-3.1-pro-preview',
+      displayName: 'Gemini 3.1 Pro Preview',
       supportedGenerationMethods: ['generateContent', 'countTokens'],
     },
     {
@@ -148,6 +163,7 @@ describe('model lists', () => {
   it('reads Gemini: text and image models apart, by their friendly names', () => {
     const lists = parseGemini(gemini);
     expect(ids(lists.text)).toEqual([
+      'gemini-3.1-pro-preview',
       'gemini-3-pro',
       'gemini-3-pro-preview',
       'gemini-2.5-pro',
@@ -161,7 +177,7 @@ describe('model lists', () => {
       'gemini-2.5-flash-image',
       'nano-banana-pro-preview',
     ]);
-    expect(lists.text[0]?.name).toBe('Gemini 3 Pro');
+    expect(lists.text[0]?.name).toBe('Gemini 3.1 Pro Preview');
     // Two share a name: the preview says so.
     expect(lists.image.map((m) => m.name)).toEqual([
       'Gemini 3.1 Flash Image',
@@ -180,13 +196,30 @@ describe('model lists', () => {
         })),
       }).image.map((m) => m.name),
     ).toEqual(['gemini-x-image-a', 'gemini-x-image-b']);
-    expect(recommended('gemini', 'text', ids(lists.text))).toBe('gemini-3-pro');
+    expect(recommended('gemini', 'text', ids(lists.text))).toBe('gemini-3.1-pro-preview');
     // Every render costs: the cheaper picture model is the one suggested.
     expect(recommended('gemini', 'image', ids(lists.image))).toBe('gemini-2.5-flash-image');
   });
 
   it('recommends the best listed Pro, and the best picture model when the cheap one is not listed', () => {
+    expect(recommended('gemini', 'text', ['gemini-3.1-pro-preview', 'gemini-2.5-pro'])).toBe(
+      'gemini-3.1-pro-preview',
+    );
+    // Only a model with a price, unless none has one (the designer refuses one without).
     expect(recommended('gemini', 'text', ['gemini-3-pro-preview', 'gemini-2.5-pro'])).toBe(
+      'gemini-2.5-pro',
+    );
+    expect(recommended('gemini', 'text', ['gemini-3-pro-preview'])).toBe('gemini-3-pro-preview');
+    const own = {
+      'gemini-3-pro-preview': {
+        input: 2,
+        cachedInput: 0.2,
+        cacheWrite: null,
+        output: 12,
+        checked: false,
+      },
+    };
+    expect(recommended('gemini', 'text', ['gemini-3-pro-preview', 'gemini-2.5-pro'], own)).toBe(
       'gemini-3-pro-preview',
     );
     expect(recommended('gemini', 'image', ['gemini-3.1-flash-image', 'gemini-3-pro-image'])).toBe(
@@ -267,7 +300,9 @@ describe('model lists', () => {
       'claude-sonnet-5-5',
       'claude-haiku-5-5',
     ]);
-    expect(recommended('gemini', 'text', ids(curated('gemini').text))).toBe('gemini-3-pro');
+    expect(recommended('gemini', 'text', ids(curated('gemini').text))).toBe(
+      'gemini-3.1-pro-preview',
+    );
   });
 
   it('sorts newer versions first, a stable name before its preview', () => {
@@ -304,7 +339,7 @@ describe('asking the provider', () => {
   it('lists Gemini’s models with the key in a header, never in the address', async () => {
     const calls = stubFetch(() => json(gemini));
     const lists = await listModels('gemini', ` ${KEY} `, new AbortController().signal);
-    expect(lists.text[0]?.id).toBe('gemini-3-pro');
+    expect(lists.text[0]?.id).toBe('gemini-3.1-pro-preview');
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe(
       'https://generativelanguage.googleapis.com/v1beta/models?pageSize=200',
@@ -421,5 +456,90 @@ describe('asking the provider', () => {
     expect(e.message).toBe(
       'Gemini turned the request down (404): models/x is not found (key [key]).',
     );
+  });
+});
+
+describe('every model offered for plans has a price, or is marked and refused (issue #67)', () => {
+  const textModels = (ids: string[]) =>
+    ids.map((id) => ({
+      name: `models/${id}`,
+      displayName: id,
+      supportedGenerationMethods: ['generateContent'],
+    }));
+  /** The text models on Google's models page (14 Nov 2026), with ids that must be left out. */
+  const googleNow = parseGemini({
+    models: textModels([
+      'gemini-4-carbon',
+      'gemini-4-argon',
+      'gemini-4-hydrogen',
+      'gemini-3.8-flash',
+      'gemini-3.6-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.1-pro-preview',
+      'gemini-3.1-pro-preview-customtools',
+      'gemini-3.1-flash-lite',
+      'gemini-3-flash-preview',
+      'gemini-3-pro-preview',
+      // Old endpoints Google routes to 3.6 and 3.8 Flash (its deprecations page).
+      'gemini-3.5-flash',
+      'gemini-3.7-flash',
+      'gemini-2.5-pro',
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite',
+      'gemini-3.8-flash-tts',
+      'gemini-3.8-live',
+      'gemini-3.1-flash-image',
+    ]),
+  });
+  /** What each provider's own list of a key's models can offer, as this app reads it. */
+  const offered: Record<Provider, ModelLists> = {
+    gemini: { text: [...googleNow.text, ...parseGemini(gemini).text], image: [] },
+    openai: parseOpenAi(openai),
+    anthropic: parseAnthropic({
+      data: [...DESIGNER_CLAUDE, 'claude-fable-5-2', 'claude-haiku-4-5'].map((id) => ({ id })),
+    }),
+  };
+  const ids = (o: { id: string }[]) => o.map((m) => m.id);
+
+  it('the built-in lists and each provider’s default are all priced, so the designer takes them', () => {
+    for (const p of Object.keys(PROVIDERS) as Provider[]) {
+      for (const id of [...ids(curated(p).text), PROVIDERS[p].model]) {
+        expect(priceOf(id), id).not.toBeNull();
+        expect(designerCannotUse({ provider: p, model: id }), id).toBeNull();
+      }
+    }
+  });
+
+  it('every Gemini 3 text model Google lists is priced, but the shut-down 3 Pro Preview', () => {
+    const g3 = ids(googleNow.text).filter((id) => /^gemini-3/.test(id));
+    expect(g3).toHaveLength(10);
+    for (const id of g3) {
+      if (id === 'gemini-3-pro-preview') expect(priceOf(id)).toBeNull();
+      else expect(priceOf(id), id).not.toBeNull();
+    }
+  });
+
+  it('a model a key lists: priced and usable, or marked “no price yet” and refused in words', () => {
+    for (const [p, lists] of Object.entries(offered) as [Provider, ModelLists][]) {
+      for (const { id } of lists.text) {
+        const cant = designerCannotUse({ provider: p, model: id });
+        if (priceOf(id)) {
+          expect(unpricedNote(id), id).toBeUndefined();
+          // Priced, it is refused only as a Claude model the designer isn't written for.
+          if (cant) expect(p === 'anthropic' && !DESIGNER_CLAUDE.includes(id), id).toBe(true);
+        } else {
+          expect(unpricedNote(id), id).toBe('no price yet');
+          expect(cant, id).not.toBeNull();
+          if (p !== 'anthropic' || DESIGNER_CLAUDE.includes(id)) expect(cant, id).toBe(UNPRICED);
+        }
+      }
+      // What is suggested is one the designer can use.
+      const best = recommended(p, 'text', ids(lists.text)) as string;
+      expect(designerCannotUse({ provider: p, model: best }), `${p}: ${best}`).toBeNull();
+    }
+  });
+
+  it('every Claude model the designer is written for has a price', () => {
+    for (const id of DESIGNER_CLAUDE) expect(priceOf(id), id).not.toBeNull();
   });
 });

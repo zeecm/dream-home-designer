@@ -118,6 +118,9 @@ for any plan.
 - AI runs that survive a locked phone, part 1: a designer run saves its progress after each step
   and carries on where it stopped when you come back, never past the figure you approved; a step
   cut off is sent again at most twice before it asks. [spec](docs/specs/locked-phone-runs.md)
+- AI costs always have a figure (#67): prices for every Gemini 3 model, checked against Google's
+  page; a model with no price is refused rather than run unpriced; Gemini 3 thinks less when an
+  answer runs too long, and fix rounds start at low thinking.
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
