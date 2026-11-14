@@ -11,8 +11,10 @@ import {
   designResult,
   freeEssentials,
   levelBounds,
+  mergeChanges,
   parseSpaceDesign,
   sampleFlatProject,
+  subsetReport,
 } from '@dhd/core';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -20,11 +22,13 @@ import sampleMain from '../../../../../../packages/core/src/designer/benchmark/a
   type: 'json',
 };
 import { CheckLead } from './CheckLead';
+import { chosenChecks, isChosen, reportFor } from './cards';
 import {
   appDecisions,
   freeLabel,
   freeLines,
   isAppChange,
+  mustHaveRow,
   placedWords,
   withFree,
   withoutFree,
@@ -136,6 +140,41 @@ describe('rows the app placed (By the app)', () => {
     expect(freeLines([c], r)).toEqual([
       'Put back by the app, free: a queen bed in Main bedroom, against the wall by Bedroom.',
     ]);
+  });
+
+  it('the person’s own bed the app moved is said as theirs, kept and moved, never placed (QA 3)', () => {
+    const c = {
+      verb: 'move',
+      name: 'the queen bed',
+      text: 'Move the queen bed to the wall by Bedroom',
+      groupName: 'Main bedroom',
+      why: '',
+      items: { now: ['it_bed'], target: ['it_bed'] },
+    } as unknown as Change;
+    const r = { refs: { it_bed: 'app:bed' } } as never;
+    expect(freeLines([c], r)).toEqual([
+      'Kept your queen bed, moved by the app to the wall by Bedroom, free.',
+    ]);
+    // Unticked, it stays where it stands.
+    expect(freeLines([c], r, [])).toEqual([
+      'Your queen bed stays where it stands: the app’s move isn’t ticked.',
+    ]);
+    const turned = { ...c, verb: 'turn', text: 'Turn the queen bed' } as Change;
+    expect(freeLines([turned], r)).toEqual([
+      'Kept your queen bed in Main bedroom, turned by the app, free.',
+    ]);
+  });
+
+  it('the row with a must-have’s piece, unticked: found for the bed check of its room (S1)', () => {
+    const { r, changes } = placed();
+    const bed = changes.find((c) => isAppChange(c, r));
+    const check = { key: `P1|bed|${MAIN}|bed`, roomId: MAIN };
+    expect(mustHaveRow(check, changes, [], r)?.id).toBe(bed?.id);
+    // Ticked, it isn't left out; another room's bed check has no row here.
+    expect(mustHaveRow(check, changes, [bed?.id ?? ''], r)).toBeNull();
+    expect(
+      mustHaveRow({ key: 'P1|bed|rm_bedroom|bed', roomId: 'rm_bedroom' }, changes, [], r),
+    ).toBeNull();
   });
 
   it('placedWords: the room after the piece, then where it stands', () => {
@@ -260,7 +299,72 @@ describe('the lead with the app’s own lines', () => {
     expect(html).not.toContain('<button');
   });
 
+  it('rounds sent back no better, the plan passing now: the headline gets no tick (QA)', () => {
+    const report: RunReport = {
+      failures: [],
+      leftOut: [],
+      rooms: [
+        {
+          key: MAIN,
+          name: 'Main bedroom',
+          fixes: 1,
+          fixed: 0,
+          rounds: [{ outcome: 'no-better', before: 1, after: 1 }],
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(<CheckLead cardKey="prp:D" report={report} />);
+    expect(html).toContain('no better');
+    expect(html).not.toContain('talk-check-pass');
+    const fixed: RunReport = {
+      ...report,
+      rooms: [
+        { ...report.rooms[0]!, fixed: 1, rounds: [{ outcome: 'fixed', before: 1, after: 0 }] },
+      ],
+    };
+    expect(renderToStaticMarkup(<CheckLead cardKey="prp:E" report={fixed} />)).toContain(
+      'talk-check-pass',
+    );
+  });
+
   it('nothing the app did and nothing failing: no lead', () => {
     expect(renderToStaticMarkup(<CheckLead cardKey="prp:C" report={empty} />)).toBe('');
+  });
+});
+
+describe('a must-have the person left out (a Decision): theirs, never counted', () => {
+  it('the bed check of that room only is chosen, on the version and on what is ticked', () => {
+    const { level, input } = noBed();
+    const r = designResult(level, level, input);
+    const declined = [{ room: MAIN, role: 'bed' }];
+    const bed = r.checks.filter((c) => c.hard && c.key.startsWith(`P1|bed|${MAIN}`));
+    expect(bed.length).toBeGreaterThan(0);
+    expect(chosenChecks(r, declined).map((c) => c.key)).toEqual(bed.map((c) => c.key));
+    expect(chosenChecks(r, [])).toEqual([]);
+    expect(chosenChecks(r, [{ room: 'rm_bedroom', role: 'bed' }])).toEqual([]);
+    // A piece's own check (its clearance) is never the person's choice.
+    expect(isChosen({ key: `P1|bed|${MAIN}|bed`, roomId: MAIN, itemId: 'it_x' }, declined)).toBe(
+      false,
+    );
+  });
+});
+
+describe('the Cost row with the app’s bed ticked (QA 1)', () => {
+  it('is worked out on the plan as ticked, and an older plan’s report is never shown for it', () => {
+    const { level, r, changes } = placed();
+    const all = changes.map((c) => c.id);
+    const bed = changes.find((c) => isAppChange(c, r))?.id;
+    const on = (ids: string[]) => mergeChanges(level, r.level, changes, ids);
+    const cost = (m: Level) => subsetReport(level, level, r, m, couple).cost;
+    const withBed = on(all);
+    const without = on(all.filter((id) => id !== bed));
+    // The bed is furniture: the work it comes with costs the same, ticked or not.
+    expect(cost(withBed)).toEqual(cost(without));
+    expect(cost(withBed).high).toBeGreaterThan(0);
+    // The card shows a report only for the plan it was worked out on.
+    const worked = { on: without, rep: 'older' };
+    expect(reportFor(worked, withBed)).toBeNull();
+    expect(reportFor({ on: withBed, rep: 'this' }, withBed)).toBe('this');
+    expect(reportFor(null, withBed)).toBeNull();
   });
 });

@@ -1,13 +1,14 @@
 import {
   type Change,
   type DesignResult,
+  type Level,
   type OptionLook,
   type ResultCheck,
   type StorageAmount,
   type SubsetReport,
   WARNING_TEXT,
+  cardPieces,
   defaultTicks,
-  firstTickedPieces,
   keptHolds,
   mergeChanges,
   mergeLines,
@@ -39,18 +40,24 @@ import {
   cardResult,
   cardRunReport,
   cardVerdict,
+  chosenChecks,
+  declinedPieces,
   headLabel,
+  isChosen,
   madeWith,
   midLine,
   nowOf,
   planMoved,
+  reportFor,
   tickedExtra,
 } from './cards';
 import {
+  MUST_WHAT,
   freeLabel,
   freeLines,
   freeOffer,
   isAppChange,
+  mustHaveRow,
   placeFree,
   publishTickedOut,
   useFreeBusy,
@@ -322,25 +329,28 @@ function useSubset(
     () => (b && r ? timed(() => mergeChanges(b.now, r.level, changes, ticked)) : null),
     [b, r, changes, ticked],
   );
-  const [report, setReport] = useState<SubsetReport | null>(null);
+  // The report with the plan it was worked out on, shown only for that plan (`reportFor`).
+  const [worked, setWorked] = useState<{ on: Level; rep: SubsetReport } | null>(null);
+  const report = reportFor(worked, merged);
   // biome-ignore lint/correctness/useExhaustiveDependencies: on what is ticked and the plan
   useEffect(() => {
     if (!b || !r || !merged) return;
     const t = setTimeout(
       () =>
-        setReport(
-          timed(() =>
+        setWorked({
+          on: merged,
+          rep: timed(() =>
             subsetReport(b.now, b.before, r, merged, card.input.brief, {
               rates,
               waived: [...card.waivers.map((w) => w.key), ...waive],
               renovation: !!project.renovation,
               rules: houseRulesFor(card.levelId),
               kept: houseKeptFor(card.levelId, madeWith(card)),
-              firstIn: firstTickedPieces(changes),
+              mustHaves: cardPieces(changes),
             }),
           ),
-        ),
-      report ? 150 : 0,
+        }),
+      worked ? 150 : 0,
     );
     return () => clearTimeout(t);
   }, [merged, rates, waive.join('|'), card.waivers, rulesKey]);
@@ -474,7 +484,12 @@ const willHave = (says: string) => says.replace(/\b(?:has|have) (no|\d+)\b/, 'wi
  * Accept's question, counted as the card counts (one line a failure as the person reads it):
  * "Accept anyway? 1 problem: 4 dining chairs aren't at a table".
  */
-function askLine(checks: readonly ResultCheck[], brief: CardModel['input']['brief']): string {
+function askLine(
+  checks: readonly ResultCheck[],
+  brief: CardModel['input']['brief'],
+  /** The failure of the unticked row with a must-have's piece, when its row fails one. */
+  rowFail: (c: { key: string; roomId: string | null }) => string | null = () => null,
+): string {
   const lines = mergeLines(
     checks.map((c) => ({
       key: c.key,
@@ -486,7 +501,17 @@ function askLine(checks: readonly ResultCheck[], brief: CardModel['input']['brie
   // A must-have the ticks leave unmet is said as what will happen: "will have no bed".
   const said = (l: (typeof lines)[number]) =>
     (ESSENTIAL_KEY.test(l.first.key) ? willHave(l.says) : l.says).replace(/\.$/, '');
-  return `Accept anyway? ${plural(lines.length, 'problem')}: ${lines.map(said).join('; ')}`;
+  const list = `${plural(lines.length, 'problem')}: ${lines.map(said).join('; ')}`;
+  // A bed (the seats, the table, a desk) left out because its own row fails a check: both said,
+  // "Accept without a bed? Its row doesn't pass: …".
+  for (const l of lines) {
+    const code = ESSENTIAL_KEY.test(l.first.key) ? l.first.key.split('|')[1] : undefined;
+    const fail = code ? rowFail(l.first) : null;
+    if (code && fail) {
+      return `Accept without ${MUST_WHAT[code] ?? 'it'}? Its row doesn’t pass: ${fail.replace(/\.$/, '')}. ${list}`;
+    }
+  }
+  return `Accept anyway? ${list}`;
 }
 
 /** What a folded card last said of itself (its checks need the plan worked out again). */
@@ -809,7 +834,26 @@ export const ProposalCard = memo(function ProposalCard({
   const rep = runRep ?? cardRunReport(card, r, changes);
   const waivedKeys = [...fails.waived.map((c) => c.key), ...waive.map((w) => w.key)];
   // What the ticks fail together beyond the version's own count (said under Checks).
-  const extras = tickedExtra(rep, report?.failing ?? [], waivedKeys);
+  // A must-have the person left out (a Decision at an Accept) is theirs: said as such, never
+  // counted nor asked about.
+  const declined = declinedPieces();
+  const chosen = [
+    ...new Set(
+      [
+        ...chosenChecks(r, declined),
+        ...(report?.failing ?? []).filter((c) => isChosen(c, declined)),
+      ].flatMap((c) => {
+        const what = MUST_WHAT[c.key.split('|')[1] ?? ''];
+        const room = c.roomId ? r.level.rooms[c.roomId]?.name : undefined;
+        return what && room ? [`Left out by you: ${what} in ${room}.`] : [];
+      }),
+    ),
+  ];
+  const extras = tickedExtra(
+    rep,
+    (report?.failing ?? []).filter((c) => !isChosen(c, declined)),
+    waivedKeys,
+  );
   const accept = async (w: { key: string; text: string }[]) => {
     setAccepting(true);
     const line = await acceptCard(card, ticked, w).finally(() => setAccepting(false));
@@ -835,6 +879,12 @@ export const ProposalCard = memo(function ProposalCard({
     g;
   // A bed, the seats, the table or a desk the ticks leave out (the version has them): said in
   // the lead as what will happen, counted in the verdict and the bar, and asked about at Accept.
+  /** The failure of the unticked row with a must-have's piece, when its row fails one. */
+  const rowFail = (c: { key: string; roomId: string | null }) => {
+    const row = mustHaveRow(c, changes, ticked, r);
+    const first = row?.checks[0];
+    return first ? (checkText.get(first)?.text ?? null) : null;
+  };
   const essentialsOut = mergeLines(
     extras
       .filter((c) => ESSENTIAL_KEY.test(c.key) && !c.itemId)
@@ -844,15 +894,24 @@ export const ProposalCard = memo(function ProposalCard({
         says: peopleWords(c.text, card.input.brief),
         roomId: c.roomId ?? null,
       })),
-  ).map((l) => `${willHave(l.says).replace(/\.$/, '')}: its row isn’t ticked.`);
-  publishTickedOut(card.key, essentialsOut.length);
+  ).map((l) => {
+    // Unticked by the person, or by the card from the first because its row fails a check of
+    // its own: said either way, with that failure.
+    const fail = rowFail(l.first);
+    return fail
+      ? `${willHave(l.says).replace(/\.$/, '')}: its row doesn’t pass (${fail.replace(/\.$/, '')}).`
+      : `${willHave(l.says).replace(/\.$/, '')}: its row isn’t ticked.`;
+  });
   // The rest of what the ticks fail together: the Checks row's own line.
   const otherExtras = extras.filter((c) => !(ESSENTIAL_KEY.test(c.key) && !c.itemId));
-  // One verdict for the card, from the one list (and the must-haves its ticks leave out).
+  // One list, one count: the version's failures, the must-haves its ticks leave out and what
+  // the ticks fail together, as the Checks row, the bar and Accept's question count them.
+  publishTickedOut(card.key, essentialsOut.length + otherExtras.length);
   const one = cardVerdict(
     [
       ...rep.failures.map((f) => ({ key: f.key })),
       ...essentialsOut.map((_, i) => ({ key: `ticked-out|${i}` })),
+      ...otherExtras.map((c) => ({ key: c.key })),
     ],
     [],
     waivedKeys,
@@ -860,7 +919,7 @@ export const ProposalCard = memo(function ProposalCard({
   );
   const failingLine = report || !running ? { text: one.text, tone: one.tone } : null;
   // What the app did itself (free): the pieces it placed, and its vetting lines.
-  const did = [...freeLines(changes, r, ticked), ...(card.option?.appLines ?? [])];
+  const did = [...freeLines(changes, r, ticked), ...(card.option?.appLines ?? []), ...chosen];
   const missedLines = [...essentialsOut, ...(offer?.missed ?? []).map((m) => m.text)];
   const freeButton =
     offer && offer.added.length > 0 ? (
@@ -1263,7 +1322,7 @@ export const ProposalCard = memo(function ProposalCard({
                           ))}
                           {confirm === c.id && (
                             <div className="talk-confirm notice-warning">
-                              <p>{askLine(fail, card.input.brief)}</p>
+                              <p>{askLine(fail, card.input.brief, rowFail)}</p>
                               <div className="button-row">
                                 <button
                                   type="button"
@@ -1479,7 +1538,7 @@ export const ProposalCard = memo(function ProposalCard({
                     .join('; ')}
                 </p>
               ) : (
-                <p>{askLine(asking.checks, card.input.brief)}</p>
+                <p>{askLine(asking.checks, card.input.brief, rowFail)}</p>
               )}
               <div className="button-row">
                 {!asking.hdb && (

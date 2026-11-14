@@ -51,6 +51,8 @@ vi.mock('../state', () => ({
   houseKeptFor: () => [],
 }));
 vi.mock('../results', () => ({}));
+// The talk store (for the person's Decisions): none here.
+vi.mock('./useTalk', () => ({ useTalk: { getState: () => ({ conv: null }) } }));
 
 const row = (id: string, group: string): Change => ({
   id,

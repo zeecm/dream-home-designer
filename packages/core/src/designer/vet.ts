@@ -139,9 +139,8 @@ export function vetConcept(
     .map((op, i) => ({ op, i, wallId: resolveAlias(aliases, op.wall) }))
     .filter((x) => x.op.op === 'remove_wall' && x.wallId && base.walls[x.wallId])
     .reverse();
-  const already = new Set(
-    joins(wallsOf(new Set(removals.map((x) => x.i)))).map((j) => `${j.bed}|${j.to}`),
-  );
+  // The joins the plan as it is has (worked out on it, before any of the concept's walls).
+  const already = new Set(joins(base).map((j) => `${j.bed}|${j.to}`));
   const fresh = (level: Level) => joins(level).filter((j) => !already.has(`${j.bed}|${j.to}`));
   const skip = new Set<number>();
   let level = wallsOf(skip);

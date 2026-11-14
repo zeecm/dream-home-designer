@@ -18,9 +18,9 @@ import { BATHROOMS, type Concept, type Part } from '../schema';
 import { spacesOf } from '../spaces';
 import {
   acceptChanges,
+  cardPieces,
   changeSet,
   defaultTicks,
-  firstTickedPieces,
   mergeChanges,
   partsOf,
   putPlanBack,
@@ -360,36 +360,43 @@ describe('subsetReport', () => {
     expect(all.cost.high).toBeGreaterThanOrEqual(all.cost.low);
   });
 
-  describe('a must-have the ticks leave out (UX 2, narrowed)', () => {
+  describe('a must-have the ticks leave out (UX 2; tech lead S1)', () => {
     const lvl = sampleFlatProject().levels[0] as Level;
     const design = sampleDesign({ level: lvl, concept: null });
     const r = designResult(lvl, lvl, design);
     const cs = changeSet(lvl, r, design);
-    const isBed = (id: string) => !!r.level.items[id]?.assetId.startsWith('bed-');
     const mainBed = Object.values(r.level.items).find(
       (it) => it.assetId === 'bed-queen' && r.refs[it.id],
     );
     const bedRow = cs.find((c) => !!mainBed && c.items.target.includes(mainBed.id));
     const bedFails = (rep: ReturnType<typeof subsetReport>) =>
       rep.failing.filter((c) => c.key.startsWith('P1|bed|'));
+    /** The card's rows with the bed's own row failing a check of its own (a clearance). */
+    const bedRowFailing = cs.map((c) =>
+      c === bedRow ? { ...c, checks: ['P4|clear|bed'], waivable: true } : c,
+    );
 
     it('the person unticks the bed and the plan the ticks make has none: asked', () => {
       expect(bedRow).toBeDefined();
       const ticked = defaultTicks(cs).filter((id) => id !== bedRow?.id);
       const rep = subsetReport(lvl, lvl, r, mergeChanges(lvl, r.level, cs, ticked), design.brief, {
-        firstIn: firstTickedPieces(cs),
+        mustHaves: cardPieces(cs),
       });
       expect(bedFails(rep).length).toBeGreaterThan(0);
     });
 
-    it('a row the card leaves unticked from the first (it fails a check of its own): not asked again', () => {
-      // As if the bed's row failed a check: the card ticks it off first, and shows it failing.
-      const first = new Set([...firstTickedPieces(cs)].filter((id) => !isBed(id)));
-      const ticked = defaultTicks(cs).filter((id) => id !== bedRow?.id);
-      const rep = subsetReport(lvl, lvl, r, mergeChanges(lvl, r.level, cs, ticked), design.brief, {
-        firstIn: first,
-      });
-      expect(bedFails(rep)).toEqual([]);
+    it('the card leaves the bed’s row unticked (it fails a check of its own): still asked', () => {
+      const ticked = defaultTicks(bedRowFailing);
+      expect(ticked).not.toContain(bedRow?.id);
+      const rep = subsetReport(
+        lvl,
+        lvl,
+        r,
+        mergeChanges(lvl, r.level, bedRowFailing, ticked),
+        design.brief,
+        { mustHaves: cardPieces(bedRowFailing) },
+      );
+      expect(bedFails(rep).length).toBeGreaterThan(0);
     });
 
     it('their own bed already in the plan: a subset without the version’s is no question', () => {
@@ -403,21 +410,31 @@ describe('subsetReport', () => {
         c.items.target.some((id) => r2.level.items[id]?.assetId === 'bed-queen'),
       );
       expect(row).toBeDefined();
-      const ticked = defaultTicks(cs2).filter((id) => id !== row?.id);
-      const rep = subsetReport(
-        own,
-        own,
-        r2,
-        mergeChanges(own, r2.level, cs2, ticked),
-        design.brief,
-        {
-          firstIn: firstTickedPieces(cs2),
-        },
-      );
+      for (const rows of [cs2, cs2.map((c) => (c === row ? { ...c, checks: ['P4|x'] } : c))]) {
+        // Unticked by the person, or by the card from the first: their own bed meets it.
+        const ticked = defaultTicks(rows).filter((id) => id !== row?.id);
+        const rep = subsetReport(
+          own,
+          own,
+          r2,
+          mergeChanges(own, r2.level, rows, ticked),
+          design.brief,
+          { mustHaves: cardPieces(rows) },
+        );
+        expect(bedFails(rep)).toEqual([]);
+      }
+    });
+
+    it('a bed the card has no row for (a room it doesn’t change): never asked (e2e: the kitchen)', () => {
+      const ticked = defaultTicks(cs).filter((id) => id !== bedRow?.id);
+      const rows = cs.filter((c) => c !== bedRow);
+      const rep = subsetReport(lvl, lvl, r, mergeChanges(lvl, r.level, cs, ticked), design.brief, {
+        mustHaves: cardPieces(rows),
+      });
       expect(bedFails(rep)).toEqual([]);
     });
 
-    it('with no first ticks given (another caller): never asked', () => {
+    it('another caller (no mustHaves): never asked', () => {
       const ticked = defaultTicks(cs).filter((id) => id !== bedRow?.id);
       const rep = subsetReport(lvl, lvl, r, mergeChanges(lvl, r.level, cs, ticked), design.brief);
       expect(bedFails(rep)).toEqual([]);

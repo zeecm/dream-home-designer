@@ -27,6 +27,28 @@ import { clean } from './util';
  * exactly as before.
  */
 
+/** The roles that meet each must-have check, by its code. */
+const MEETS: Record<string, readonly string[]> = {
+  bed: ['bed'],
+  seats: ['sofa', 'armchair'],
+  dining: ['dining-table', 'dining-chair', 'stool'],
+  desks: ['desk'],
+};
+
+/**
+ * Whether a must-have check (`P1|bed|room|…`) is one the person chose (a Decision: they left
+ * the app's bed out of that room): theirs, never a failure to fix there.
+ */
+export function isDeclined(
+  key: string,
+  roomId: string,
+  declined: readonly { room: string; role: string }[],
+): boolean {
+  const [principle, code] = key.split('|');
+  const roles = principle === 'P1' && code ? MEETS[code] : undefined;
+  return !!roles && declined.some((d) => d.room === roomId && roles.includes(d.role));
+}
+
 /** The ref prefix of the app's own pieces. A model's ref never has it (`parseSpaceDesign`). */
 export const APP_REF = 'app:';
 export const isAppRef = (ref: string | null | undefined): boolean =>

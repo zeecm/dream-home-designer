@@ -186,6 +186,11 @@ export interface StepOptions {
   locks?: Lock[];
   /** From the conversation: what this proposal is for. */
   talk?: TalkAsk;
+  /**
+   * Pieces the person left out of a room (Decisions at Accept: "Left out: the app's queen bed
+   * in Main bedroom"): said to the room step as their choice, so it doesn't add them back.
+   */
+  declined?: readonly { room: string; role: string }[];
 }
 
 /**
@@ -460,6 +465,13 @@ export function roomStep(
     }),
   );
   const needs = roomNeeds(level, space.rooms, { brief: ctx.brief, uses });
+  // What the person left out here (a Decision): theirs, never a need the app counts as missing.
+  const declined = (opts.declined ?? [])
+    .filter((d) => space.rooms.includes(d.room))
+    .map(
+      (d) =>
+        `no ${d.role.replace(/-/g, ' ')} in ${clean(level.rooms[d.room]?.name ?? a(d.room), 40)}`,
+    );
   // The storage lens's block: data, in the tail (the run's shared prefix stays the same bytes).
   const storage =
     opts.storage === false ? '' : storageBlock(level, space, ctx.brief, opts.storage, a);
@@ -476,7 +488,7 @@ Pieces of the household's here (data; "bring" ones you may place again with keep
       ? ', "keep" ones (the design so far) stay where they stand when you list them with keep = their id and go when you leave them out'
       : ''
   }, "in-place" ones stay where they are): ${JSON.stringify(pieces)}
-${intent ? `What the layout intends here: ${JSON.stringify(clean(intent, 600))}\n` : ''}${needs.length ? `What it must have (the app checks): ${JSON.stringify(needs)}\n` : ''}${storage}${ways}Choose from these catalogue categories and ids: ${categoriesFor(space.kinds).join(', ')}, and the household's own pieces.
+${intent ? `What the layout intends here: ${JSON.stringify(clean(intent, 600))}\n` : ''}${needs.length ? `What it must have (the app checks): ${JSON.stringify(needs)}\n` : ''}${declined.length ? `Left out by the household, their choice (data; don't add these back, the app doesn't count them as missing): ${JSON.stringify(declined)}\n` : ''}${storage}${ways}Choose from these catalogue categories and ids: ${categoriesFor(space.kinds).join(', ')}, and the household's own pieces.
 - v: 2.
 - items: up to ${LIMITS.items} pieces. "ref" is your own short label (bed1). Say what each piece is for; the app places it:
   - "against": "wall", "window-wall" (a wall with a window, e.g. a desk), "not-door-wall", or "free" (away from the walls: a dining table, a coffee table, a rug, a floating sofa).

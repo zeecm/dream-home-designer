@@ -20,6 +20,7 @@ export {
   freeName,
   gaveWayWords,
   isAppRef,
+  isDeclined,
 } from './free';
 export { type VetResult, readsAsBedroom, vetConcept } from './vet';
 export {

@@ -961,9 +961,8 @@ No money change, no record bump (every new field optional and read tolerantly).
   offered again. Unticking a row whose piece meets a must-have (the app's bed or the
   designer's) fails the ticked changes (`subsetReport`: a P1 bed/seats/dining/desks check the
   version meets and the plan the ticks make leaves unmet, though the plan as it is failed it
-  too; only when the person's own unticking made the gap: the piece is one the card ticks first,
-  `firstIn` from `firstTickedPieces`, so a row unticked from the first because it fails a check
-  of its own adds no question, and their own or a kept bed meets it): the lead
+  too, with `mustHaves`: the pieces the card's rows carry, `cardPieces`, so never a room the card
+  doesn't change; their own or a kept bed in the plan meets it): the lead
   says "You and Partner will have no bed in Main bedroom: its row isn't ticked.", the app's line
   "Left out of what you've ticked: …", the Checks row and the bar count it, and Accept asks
   "Accept anyway? 1 problem: You and Partner will have no bed …". The app's rows and the
@@ -987,7 +986,25 @@ No money change, no record bump (every new field optional and read tolerantly).
   (`lookN`, with what faces or goes by it following); `lookFacts` marks the app's pieces
   (`byApp`) and the look's task says never to remove one. `lookNoWorse` refuses a round for a
   new hard failure by signature (`checkSig`), so the same failure under a piece's new id or ref
-  isn't new.
+  isn't new; an HDB or house rule (R) failed by a piece new to the round is new all the same.
+- Review and QA fixes (14 Nov, after 6452815): a must-have row the card leaves unticked from the
+  first (it fails a check of its own) still counts: the lead, Checks and bar say "no bed", and
+  Accept asks "Accept without a bed? Its row doesn't pass: …" (`mustHaveRow`, `MUST_WHAT` in
+  web `talk/free.ts`). One list, one count: the Checks row and the bar count the version's
+  failures, the must-haves the ticks leave out and what the ticks fail together, live. The card
+  shows a subset report only for the plan it was worked out on (`reportFor`: the Cost row read
+  "No renovation work" with the app's bed ticked). After an Accept the run's free pass counts as
+  theirs only what the new answer really carries over (`plan.keep`'s aspects), never a piece of
+  the new answer that shares a ref with the old (a redesign's `side2` made every free bed look
+  worse, so the bed waited for the button). The lead's headline gets no tick beside a round that
+  came out badly ("Sent back… no better"), though the plan passes. The person's own bed the app
+  moved reads "Kept your queen bed, moved by the app to the wall by Bedroom, free". The log line
+  names every piece, and says what gave way only when the card still changes something. **A
+  must-have the person left out** (a Decision with `free`): core `isDeclined`; the runner sends
+  no fix round for it, the room step is told ("Left out by the household, their choice …: no bed
+  in Main bedroom"), and the card counts it nowhere (`chosenChecks` in `cardRunReport`, the ticked
+  subset and Accept's question) and says "Left out by you: a bed in Main bedroom.". Vetting's
+  "already" joins are worked out on the plan as it is.
 
 **AI costs always have a figure (#67, 14 Nov).** The owner's Gemini 3 runs had no price, so no
 cost card had a figure and neither the approved figure nor the tab's limit held.

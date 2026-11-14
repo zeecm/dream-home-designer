@@ -645,6 +645,54 @@ describe('what the app does with them (actOnLook): the checks always win', () =>
     expect(lookNoWorse(noBed, res([['P1|bed|rm_main-bedroom|bed', true]], 1))).toBe(false);
     expect(lookNoWorse(noBed, noBed, ['P1|bed|rm_main-bedroom|bed'])).toBe(false);
   });
+
+  it('an HDB or house rule broken by a piece new to the round is new, its signature aside (N1)', () => {
+    const bed = (id: string) => ({ id, assetId: 'bed-queen' });
+    const res = (items: string[], checks: [string, string][]) =>
+      ({
+        level: { items: Object.fromEntries(items.map((id) => [id, bed(id)])) },
+        checks: checks.map(([key, itemId]) => ({
+          key,
+          itemId,
+          roomId: 'rm_shelter',
+          principle: key.split('|')[0],
+          hard: true,
+          already: false,
+        })),
+        dropped: [],
+      }) as unknown as DesignResult;
+    const one = res(['it_a'], [['HDB|shelter-bed|it_a', 'it_a']]);
+    // A second bed in the shelter, added by the round: the same signature, a new failure.
+    const two = res(
+      ['it_a', 'it_b'],
+      [
+        ['HDB|shelter-bed|it_a', 'it_a'],
+        ['HDB|shelter-bed|it_b', 'it_b'],
+      ],
+    );
+    expect(lookNoWorse(one, two)).toBe(false);
+    const rule = res(
+      ['it_a', 'it_c'],
+      [
+        ['HDB|shelter-bed|it_a', 'it_a'],
+        ['R|rule_1|it_c', 'it_c'],
+      ],
+    );
+    expect(
+      lookNoWorse(
+        res(
+          ['it_a'],
+          [
+            ['HDB|shelter-bed|it_a', 'it_a'],
+            ['R|rule_1|it_a', 'it_a'],
+          ],
+        ),
+        rule,
+      ),
+    ).toBe(false);
+    // The same piece placed again under its own id: the old failure, not refused for it.
+    expect(lookNoWorse(one, one)).toBe(true);
+  });
 });
 
 describe('a suggested house rule: the free Keep as a rule offer (3a’s vetting)', () => {
@@ -937,7 +985,7 @@ describe('the app’s own pieces in the second look (designer listens, B1)', () 
     expect(facts.pieces.find((p) => p.id === bedAlias)).toMatchObject({ byApp: true });
     expect(facts.pieces.filter((p) => p.byApp)).toHaveLength(1);
     const step = lookStep(ctxIn, facts, [{ mediaType: 'image/png', data: 'AAAA' }]);
-    expect(step.tail).toContain('one marked "byApp" the app placed itself');
+    expect(step.tail).toContain('Never suggest removing a piece the app placed (marked "byApp"');
   });
 
   it('a removal of the app’s piece is dropped; a swap renames it (never the app’s then)', () => {

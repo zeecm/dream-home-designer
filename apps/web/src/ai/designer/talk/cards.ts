@@ -14,10 +14,11 @@ import {
   type ResultCheck,
   type RunReport,
   type Usage,
+  cardPieces,
   changeSet,
   checkRoomOf,
   designLevels,
-  firstTickedPieces,
+  isDeclined,
   levelFingerprint,
   mergeChanges,
   optionTitle,
@@ -26,6 +27,39 @@ import {
 } from '@dhd/core';
 import { readLens, readResult, requestResult } from '../results';
 import { type MadeWith, designOpts, houseKeptFor, houseRulesFor } from '../state';
+import { useTalk } from './useTalk';
+
+/**
+ * A report worked out on a plan, shown only for that plan: one for an older plan (the card's
+ * result before the run's end, or before a tick) is never shown as this one's (QA: the Cost row
+ * said "No renovation work" while the app's bed was ticked, until it caught up).
+ */
+export function reportFor<T>(worked: { on: unknown; rep: T } | null, on: unknown): T | null {
+  return worked && on !== null && worked.on === on ? worked.rep : null;
+}
+
+/** Pieces the person left out before (Decisions at Accept): never offered again there. */
+export function declinedPieces(): { room: string; role: string }[] {
+  const ds = useTalk.getState().conv?.decisions ?? [];
+  return ds.flatMap((d) => (!d.deleted && d.free ? [d.free] : []));
+}
+
+/**
+ * The must-have checks the person chose (they left the app's bed out of that room at an Accept:
+ * a Decision): theirs, never counted as failing nor asked about, said as "Left out by you".
+ */
+export function chosenChecks(
+  r: DesignResult,
+  declined: readonly { room: string; role: string }[] = declinedPieces(),
+): ResultCheck[] {
+  return declined.length ? r.checks.filter((c) => c.hard && isChosen(c, declined)) : [];
+}
+
+/** Whether a check is a must-have the person left out of its room (`chosenChecks`). */
+export const isChosen = (
+  c: { key: string; roomId?: string; itemId?: string },
+  declined: readonly { room: string; role: string }[],
+) => !c.itemId && !!c.roomId && isDeclined(c.key, c.roomId, declined);
 
 /**
  * A card in the conversation: a proposal's option, or a version made by v1's form ("Earlier
@@ -299,7 +333,11 @@ export function cardRunReport(
       : null;
   const inCard = inCardOf(changes);
   return runReport(r, card.input, {
-    waived: [...card.waivers.map((w) => w.key), ...(o.waive ?? [])],
+    waived: [
+      ...card.waivers.map((w) => w.key),
+      ...(o.waive ?? []),
+      ...chosenChecks(r).map((c) => c.key),
+    ],
     inScope: unplaced ? (c) => inCard(c) && !unplaced.has(checkRoomOf(r, c) ?? '') : inCard,
     ...(spaces ? { spaces } : {}),
     aliases: o.aliases ?? card.input.aliases,
@@ -360,10 +398,13 @@ export function precheckOn(
     renovation: !!project.renovation,
     rules: houseRulesFor(card.levelId),
     kept: houseKeptFor(card.levelId, madeWith(card)),
-    // A must-have the person's own unticking leaves unmet is asked about.
-    firstIn: firstTickedPieces(changes),
+    // A must-have of the card's rows the ticks leave unmet is asked about.
+    mustHaves: cardPieces(changes),
   });
-  return { failing: rep.failing, hdb: rep.failing.some((c) => !c.waivable), missing: false };
+  // Never one the person left out themselves (a Decision): theirs, not asked about again.
+  const declined = declinedPieces();
+  const failing = rep.failing.filter((c) => !isChosen(c, declined));
+  return { failing, hdb: failing.some((c) => !c.waivable), missing: false };
 }
 
 /**

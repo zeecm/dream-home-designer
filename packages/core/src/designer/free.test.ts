@@ -7,7 +7,7 @@ import sampleBedroom from './benchmark/answers/sample-bedroom.json';
 import sampleLiving from './benchmark/answers/sample-living.json';
 import sampleMain from './benchmark/answers/sample-main-bedroom.json';
 import { ONGS } from './benchmark/benchmark';
-import { APP_REF, freeEssentials, isAppRef } from './free';
+import { APP_REF, freeEssentials, isAppRef, isDeclined } from './free';
 import { runReport } from './report';
 import { designResult } from './result';
 import { Rule } from './rules/schema';
@@ -254,6 +254,19 @@ describe('free fixes: cannot place (criterion 13)', () => {
     expect(out.missed[0]?.text).toMatch(
       /^A queen bed fits in Bedroom only with \d+ other checks failing \(.+\), so the app didn’t place one\.$/,
     );
+  });
+});
+
+describe('a must-have the person left out (a Decision)', () => {
+  const declined = [{ room: 'rm_main-bedroom', role: 'bed' }];
+  it('is theirs in that room only, for the check its piece meets', () => {
+    expect(isDeclined('P1|bed|rm_main-bedroom|bed', 'rm_main-bedroom', declined)).toBe(true);
+    expect(isDeclined('P1|bed|rm_bedroom|bed', 'rm_bedroom', declined)).toBe(false);
+    expect(isDeclined('P1|seats|rm_main-bedroom', 'rm_main-bedroom', declined)).toBe(false);
+    expect(isDeclined('P4|clear|rm_main-bedroom|bed', 'rm_main-bedroom', declined)).toBe(false);
+    const chairs = [{ room: 'rm_living', role: 'dining-chair' }];
+    expect(isDeclined('P1|dining|rm_living', 'rm_living', chairs)).toBe(true);
+    expect(isDeclined('P1|bed|rm_main-bedroom|bed', 'rm_main-bedroom', [])).toBe(false);
   });
 });
 

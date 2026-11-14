@@ -30,6 +30,7 @@ import {
   freeName,
   furnitureKind,
   isAppRef,
+  isDeclined,
   keptAsWas,
   layoutStep,
   leftOutLines,
@@ -573,12 +574,18 @@ export async function runDesign(
       ...design,
       spaces: { [s.key]: { name: s.name, status: 'done', design: answer } },
     };
-    const previous = plan.previous?.[s.key];
+    // Theirs: only what the answer really carries over from the one it changes (the parts kept,
+    // `mergeAnswer`), never a piece of the new answer that happens to share a ref with the old
+    // (QA: after an Accept, a redesign's bedside "side2" made every free bed look worse).
+    const keepAs = plan.keep?.[s.key] ?? [];
+    const carried = (plan.previous?.[s.key]?.items ?? [])
+      .filter((i) => keepAs.includes(aspectOfAnswer(i.assetId, o.result)))
+      .map((i) => i.ref);
     const out = await untilStopped(
       freeAny(ctx.base, ctx.before, trial, o.result, {
         spaces: [s.key],
         ...(o.declined?.length ? { declined: o.declined } : {}),
-        ...(previous ? { theirs: { [s.key]: previous.items.map((i) => i.ref) } } : {}),
+        ...(carried.length ? { theirs: { [s.key]: carried } } : {}),
       }),
       o.signal,
     ).catch((e: unknown) => {
@@ -776,6 +783,7 @@ export async function runDesign(
             ...(storage !== undefined ? { storage } : {}),
             ...(plan.feedback ? { feedback: plan.feedback } : {}),
             ...(plan.talk ? { talk: plan.talk } : {}),
+            ...(o.declined?.length ? { declined: o.declined } : {}),
             locks: plan.locks ?? [],
             previous: entry.design,
             fix,
@@ -939,7 +947,9 @@ export async function runDesign(
     update();
 
     const bounds = levelBounds(r.level);
-    /** The hard checks a space's answer fails (that the plan didn't already), in the app's words. */
+    /** A must-have check of a room where the person left that piece out (`o.declined`). */
+    const declinedCheck = (c: { key: string; roomId?: string; itemId?: string }) =>
+      !c.itemId && !!c.roomId && isDeclined(c.key, c.roomId, o.declined ?? []);
     /**
      * The hard checks one space's answer fails (that the plan didn't already), in the app's
      * words, and where it placed each piece: worked out on that space alone. Failures that
@@ -960,7 +970,9 @@ export async function runDesign(
       );
       return {
         fixable: mine
-          .filter((c) => !c.unfixable)
+          // A must-have the person left out (a Decision: no bed here) is theirs to have: never
+          // sent back to be fixed, never a fix-up spent on it.
+          .filter((c) => !c.unfixable && !declinedCheck(c))
           .map((c) => ({ ref: (c.itemId && res.refs[c.itemId]) || null, text: c.text })),
         placed: placedWords(res.level, s, res.refs, design.aliases, ctx.site?.north ?? 0),
         // The pieces it left out, with why and a hint: so a bed dropped for a keep ref the
@@ -990,6 +1002,7 @@ export async function runDesign(
         ...(storage !== undefined ? { storage } : {}),
         ...(plan.feedback ? { feedback: plan.feedback } : {}),
         ...(plan.talk ? { talk: plan.talk } : {}),
+        ...(o.declined?.length ? { declined: o.declined } : {}),
         locks: plan.locks ?? [],
         previous: plan.previous?.[s.key] ?? null,
       });
@@ -1060,6 +1073,7 @@ export async function runDesign(
                   ...(storage !== undefined ? { storage } : {}),
                   ...(plan.feedback ? { feedback: plan.feedback } : {}),
                   ...(plan.talk ? { talk: plan.talk } : {}),
+                  ...(o.declined?.length ? { declined: o.declined } : {}),
                   locks: plan.locks ?? [],
                   previous: current,
                   fix,

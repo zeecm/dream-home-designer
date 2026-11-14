@@ -11,12 +11,21 @@ import {
   isAppRef,
   roleOf,
   roomIdAt,
+  spacesOf,
 } from '@dhd/core';
 import { create } from 'zustand';
 import { useStore } from '../../../store';
 import { readFree, requestFree, requestResult } from '../results';
 import { designOpts } from '../state';
-import { type CardModel, cardChanges, cardRunReport, madeWith, nowOf, optionCard } from './cards';
+import {
+  type CardModel,
+  cardChanges,
+  cardRunReport,
+  declinedPieces,
+  madeWith,
+  nowOf,
+  optionCard,
+} from './cards';
 import { act, actProposal, newId, nowIso, say, useTalk } from './useTalk';
 
 /**
@@ -28,11 +37,7 @@ import { act, actProposal, newId, nowIso, say, useTalk } from './useTalk';
  * new tab, no request), with a log line whose Undo takes them out again.
  */
 
-/** Pieces the person left out before (Decisions at Accept): never offered again there. */
-export function declinedPieces(): { room: string; role: string }[] {
-  const ds = useTalk.getState().conv?.decisions ?? [];
-  return ds.flatMap((d) => (!d.deleted && d.free ? [d.free] : []));
-}
+export { declinedPieces };
 
 /**
  * A change row the app placed itself: the piece it is about (its first: a row says a bedside
@@ -64,6 +69,64 @@ export function placedWords(c: Change): string {
   return `${lower(what)} in ${c.groupName}${tail ? `, ${tail}` : ''}`;
 }
 
+/** The roles that meet each must-have check, by its code. */
+const MUST_ROLES: Record<string, string[]> = {
+  bed: ['bed'],
+  seats: ['sofa', 'armchair'],
+  dining: ['dining-table', 'dining-chair', 'stool'],
+  desks: ['desk'],
+};
+/** A must-have, as Accept's question names it ("Accept without a bed?"). */
+export const MUST_WHAT: Record<string, string> = {
+  bed: 'a bed',
+  seats: 'the seats',
+  dining: 'a dining table',
+  desks: 'a desk',
+};
+
+/**
+ * The card's unticked row with the version's piece for a must-have check (a bed in that room,
+ * seats or the table in that space), or null: the row the ticks leave out, whether the person
+ * unticked it or the card did from the first (it fails a check of its own).
+ */
+export function mustHaveRow(
+  check: { key: string; roomId?: string | null },
+  changes: readonly Change[],
+  ticked: readonly string[],
+  r: DesignResult,
+): Change | null {
+  const code = check.key.split('|')[1] ?? '';
+  const roles = MUST_ROLES[code];
+  const roomId = check.roomId;
+  if (!roles || !roomId) return null;
+  const rooms = spacesOf(r.level).find((s) => s.rooms.includes(roomId))?.rooms ?? [roomId];
+  return (
+    changes.find(
+      (c) =>
+        !ticked.includes(c.id) &&
+        c.items.target.some((id) => {
+          const it = r.level.items[id];
+          if (!it || !roles.includes(roleOf(furnitureKind(it.assetId)))) return false;
+          const room = roomIdAt(r.level, { x: it.position.x, y: it.position.z });
+          return (
+            !!room && (code === 'bed' || code === 'desks' ? room === roomId : rooms.includes(room))
+          );
+        }),
+    ) ?? null
+  );
+}
+
+/**
+ * "Kept your queen bed, moved by the app to the wall by Bedroom, free": a row where the app's
+ * piece stands for the person's own (moved or turned), said as theirs.
+ */
+export function ownedWords(c: Change): string {
+  const name = c.name.replace(/^the /, '');
+  if (c.verb === 'turn') return `Kept your ${name} in ${c.groupName}, turned by the app, free`;
+  const where = c.text.replace(/^Move the .+?(?= to | against | by | in |,|$)/, '').trim();
+  return `Kept your ${name}, moved by the app ${where || `in ${c.groupName}`}, free`;
+}
+
 /** The lead's lines for the pieces the app placed: "Placed by the app, free: a queen bed in …". */
 export function freeLines(
   changes: readonly Change[],
@@ -75,13 +138,23 @@ export function freeLines(
     .filter((c) => c.verb !== 'remove' && isAppChange(c, r))
     .map((c) => {
       if (ticked && !ticked.includes(c.id)) {
+        // The person's own piece the app moved: it stays where it stands, theirs.
+        if (c.verb === 'move' || c.verb === 'turn') {
+          return `Your ${c.name.replace(/^the /, '')} stays where it stands: the app’s ${c.verb} isn’t ticked.`;
+        }
         return `Left out of what you’ve ticked: ${placedWords(c)}, placed by the app, free.`;
       }
       // A piece a fix round's answer dropped and the app put back (the runner says so), and an
       // extra of the answer that gave way for it (the free pass says so on its row).
-      const head = /^Put back by the app/.test(c.why ?? '') ? 'Put back' : 'Placed';
       const gave = gaveWayOf(c.why);
-      return `${head} by the app, free: ${placedWords(c)}${gave ? `; ${gave}` : ''}.`;
+      const more = gave ? `; ${gave}` : '';
+      // The person's own piece the app's stands for (the same kind where theirs was): theirs,
+      // kept and moved, never "placed".
+      if (c.verb === 'move' || c.verb === 'turn') {
+        return `${ownedWords(c)}${more}.`;
+      }
+      const head = /^Put back by the app/.test(c.why ?? '') ? 'Put back' : 'Placed';
+      return `${head} by the app, free: ${placedWords(c)}${more}.`;
     });
 }
 
@@ -284,10 +357,22 @@ export async function placeFree(card: CardModel): Promise<string | null> {
           }
         : x,
     );
-    const words = added.map(placedWords);
-    // What of the answer gave way for it, said with it (never silently).
-    const gave = out.gaveWay?.length ? gaveWayWords(out.gaveWay) : null;
-    const text = `Placed by the app, free: ${words.join('; ') || 'the missing pieces'}${gave ? `; ${gave}` : ''}.`;
+    // Each piece by its row, or (no row: it stands where the plan has one) by its name and room.
+    const named = new Set(added.flatMap((c) => c.items.target.map((id) => r2.refs[id])));
+    const words = [
+      ...added.map(placedWords),
+      ...out.added
+        .filter((a) => !named.has(a.ref) && heads(out).includes(a))
+        .map((a) => {
+          const name = freeName(a.assetId);
+          const room = r2.level.rooms[a.roomId]?.name ?? 'the room';
+          return `${/^[aeiou8]/i.test(name) ? 'an' : 'a'} ${name} in ${room}`;
+        }),
+    ];
+    // What of the answer gave way for it, said with it (never silently), only where the card
+    // still changes something (with no change from the plan as it is, nothing gave way there).
+    const gave = out.gaveWay?.length && changes.length ? gaveWayWords(out.gaveWay) : null;
+    const text = `Placed by the app, free: ${words.join('; ')}${gave ? `; ${gave}` : ''}.`;
     const id = newId('turn');
     await act({
       type: 'event',

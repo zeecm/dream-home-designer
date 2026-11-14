@@ -833,6 +833,65 @@ describe('free fixes and room vetting (designer listens, B1)', () => {
     const items = design.spaces['rm_main-bedroom']?.design?.items ?? [];
     expect(items.some((i) => i.ref.startsWith('app:'))).toBe(false);
   });
+
+  it('after an Accept, a redesign with no bed gets the app’s bed free, before any fix round (QA)', async () => {
+    // The answer accepted had the app's bed; the new one leaves it out again, with its bedside
+    // tables under the same refs (side1, side2) as the old: they are the new answer's, not
+    // carried over, so the bed's gave-way bedside never makes it look worse.
+    const accepted = parseSpaceDesign(
+      {
+        ...noBed(),
+        items: [...noBed().items, { ...sampleMain.items[0], ref: 'bed9', assetId: 'bed-queen' }],
+      },
+      null,
+    );
+    if (!accepted.ok) throw new Error(accepted.error);
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (main(c) ? sse(noBed()) : null),
+    });
+    const { state, design } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+      plan: {
+        layout: null,
+        rooms: ['rm_main-bedroom'],
+        previous: { 'rm_main-bedroom': accepted.value },
+      },
+    }).run;
+    expect(state.phase).toBe('done');
+    expect(prov.calls.filter(main)).toHaveLength(1);
+    const space = design.spaces['rm_main-bedroom'];
+    expect(space?.fixes).toBeUndefined();
+    expect(
+      space?.design?.items.filter((i) => i.ref.startsWith('app:')).map((i) => i.assetId),
+    ).toEqual(['bed-queen']);
+  });
+
+  it('a bed the person left out (a Decision): no app bed, no fix round, and the room step is told', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (main(c) ? sse(noBed()) : null),
+    });
+    const { state, design } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+      declined: [{ room: 'rm_main-bedroom', role: 'bed' }],
+    }).run;
+    expect(state.phase).toBe('done');
+    const calls = prov.calls.filter(main);
+    // One request: "no bed" is theirs, never sent back to be fixed.
+    expect(calls).toHaveLength(1);
+    expect(JSON.stringify(calls[0]?.body)).toContain(
+      'Left out by the household, their choice (data; don',
+    );
+    expect(JSON.stringify(calls[0]?.body)).toMatch(/no bed in (Master|Main) bedroom/);
+    const space = design.spaces['rm_main-bedroom'];
+    expect(space?.fixes).toBeUndefined();
+    expect(space?.design?.items.some((i) => i.ref.startsWith('app:'))).toBe(false);
+  });
 });
 
 describe('a whole design with each provider (41)', () => {

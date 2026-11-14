@@ -50,6 +50,12 @@ export function CheckLead({
 }) {
   const failing = report.failures.length;
   const { fix, count } = leadParts(report.rooms, failing);
+  // A tick only beside a headline that came out well: never beside "Sent back… no better" (or
+  // cut off, refused…), though the plan passes now (the free fix placed the bed: QA).
+  const f = fixSummary(report.rooms);
+  const badly =
+    f.noBetter || f.cutOff || f.failed || f.refused || f.error || f.unknown || f.stopped;
+  const passMark = !failing && (f.fixed > 0 || !badly);
   const rounds = roundLines(report.rooms);
   if (!fix && !count && !did.length && !missed.length && !action) return null;
   const id = `lead-${cardKey}`;
@@ -99,8 +105,8 @@ export function CheckLead({
   return (
     <section className="talk-check-lead" aria-labelledby={id} data-lead="">
       {!headless && (
-        <p id={id} className={failing ? 'talk-check-head' : 'talk-check-head talk-check-pass'}>
-          {!failing && (
+        <p id={id} className={passMark ? 'talk-check-head talk-check-pass' : 'talk-check-head'}>
+          {passMark && (
             <span className="talk-check-mark">
               <Mark kind="check" />
             </span>

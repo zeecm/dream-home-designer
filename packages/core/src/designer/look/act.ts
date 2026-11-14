@@ -343,6 +343,17 @@ export function lookNoWorse(
   // run report are: a piece placed again under a new ref or id is the same failure, not a new one.
   const wasSigs = sigs(before);
   if ([...sigs(after)].some((s) => !wasSigs.has(s))) return false;
+  // An HDB rule or a house rule failed by a piece new to the round (an "add", a swap's new
+  // piece) refuses it though its signature matches one the plan already failed: a second piece
+  // breaking the same rule in that room is a new failure, never the old one placed again.
+  const newPiece = (c: DesignResult['checks'][number]) =>
+    !!c.itemId && !before.level.items[c.itemId];
+  if (
+    after.checks.some(
+      (c) => c.hard && !c.already && /^(HDB|R)\|/.test(c.key) && !was.has(c.key) && newPiece(c),
+    )
+  )
+    return false;
   if (now.size < was.size) return true;
   const still = new Set(after.checks.filter((c) => !c.already).map((c) => c.key));
   if (targets.some((k) => still.has(k))) return false;
