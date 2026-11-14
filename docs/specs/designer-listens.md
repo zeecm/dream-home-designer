@@ -652,3 +652,353 @@ and proposal records live in the browser's `dhd-talk`)
    of the money diff.
 7. **C** (repeats, the What's blocking this block, the repeat cost card, strict, Keep fixing as a
    fix-only run, replay criteria 30 to 32): talk v5.
+
+## UX design
+
+Designed against the running app (production build, Go API, mocked provider: a Main bedroom answer
+with no bed, then the export's "I don't have the ability…" plan reply). Screenshots of today's cards:
+`d1440-03-card.png`, `d1440-05-after-send.png`, `p390-03-card.png`, `p390-03c-sheet-next.png`,
+`p390-05-after-send.png`, `l844-03-card.png`, `d1280-08-log-dark.png` in the session scratchpad
+(`…/scratchpad/shots/`).
+
+What today's build shows, and what this design answers:
+
+- The card says **"Checks: 2 don't pass"** and lists **neither** failure. The count comes from the
+  whole result (`fails.open`) and the list only from the ticked-subset report's pieces with no row,
+  so a missing bed (no piece, so no row) is counted and never named. This bug alone produces "where
+  is the bed?". Fix it in PR A whatever else ships: **one list makes the count, the lead, the On the
+  table bar and the announcement.**
+- A fix round ran (two `furnish "Main bedroom"` requests) and the card says nothing.
+- After a run the log scrolls to its foot, which is the "Where next?" scope offer. On a 1440 × 900
+  screen the card's head and checks are above the fold of the log. On a phone at peek, only the
+  **On the table** bar is visible (`p390-03-card.png`): no part of the card fits at peek.
+- The reply's banned sentences show in full, and the cost card shows the plan's title with nothing
+  about what it fixes.
+
+### Principles
+
+1. **Three voices, as today.** You: a bubble. The designer: plain text under "Designer". The app:
+   the event line (a 14 px mark, then grey 13 px text, `.talk-app-line`). Everything this spec adds
+   for the person is the app's voice. It's free, it's facts, and it never says sorry. The designer's
+   text is never restyled to look like the app.
+2. **One list, one count.** The run report's F and L lines are the only source for the card's lead,
+   the Checks row, the On the table bar, the folded card line, the announcement and the cost card's
+   repeat line. If two of them disagree, that's a bug.
+3. **Escalate only when it repeats.** A first failure gets a short lead. The framed **What's blocking
+   this** block appears only when the same failures come back (or strict mode couldn't make them
+   pass). So the card doesn't nag the first time and doesn't hide anything the second time.
+4. **A button only if pressing it changes something.** The free fix is offered only when a dry run
+   (in the results worker, free) would place or take out at least one piece. Keep fixing is offered
+   only when the run stopped because it ran out of fix-ups or reached its figure, not when the last
+   round made no progress (paying again would likely give the same result).
+5. **Free reads as free.** Every spend button already ends "· about US$x". The free one ends
+   "· free" in the same place, has no `data-spends`, never shows a price skeleton, and is never the
+   near-black primary. Grammar does the work at a glance. No second colour is needed.
+6. **The person's words, not the solver's.** App lines use the change list's vocabulary ("against
+   the wall opposite the window", "the wall between Main bedroom and the living room") and the
+   household's names as What I know says them ("You and Partner"). Never `W12`, `P7` or "Adult 1"
+   in anything the person reads. Those ids are for the model.
+
+### The card after a run: order
+
+Top to bottom (new parts in **bold**):
+
+1. Head: `V8 · Main bedroom` · Show on plan (unchanged).
+2. A / B / C tabs (unchanged).
+3. **The lead**: how this version was checked (below). It sits *above* the designer's summary,
+   because "did it work?" comes before "what is it?".
+4. The designer's summary, then "Your words: “…”" (unchanged).
+5. **What this design set out to fix** (only when the plan had `addresses`), below.
+6. Changes (unchanged). Rows the app placed itself carry a grey **By the app** tag, the way kept
+   pieces carry **Kept**.
+7. The `Checks` row now holds the count and "Already in your plan: n" only. The failure lines move
+   up into the lead, so they aren't shown twice. When the lead lists them, the row reads
+   `3 don't pass · listed above`.
+8. Electrical, Storage, Cost, the pointing tip, Accept selected, foot (unchanged).
+
+### The lead: four states, one component
+
+`<section aria-labelledby="lead-{card}">` with no fill and no border in states A and B, so it reads
+as part of the card. States C and D take the existing `.talk-stopped`/`.talk-confirm` frame: a 1px
+`--border`, radius 8, 12px padding, white (or `--surface` in dark). No red or amber fill anywhere:
+red goes only on the warn mark and the count. At most **3 failure lines** show, then "and 2 more"
+as a disclosure. At most **2 lines of "what the app did"** show, the rest under "How it was
+checked".
+
+**A. Passes.**
+
+```
+✓ Checked and fixed 3 problems before showing you.
+✓ Placed by the app, free: a queen bed in Main bedroom, against the wall opposite the window.
+```
+
+When there were no fix rounds and no free fixes, there's no lead at all (today's card).
+
+**B. Doesn't pass, first time** (no repeat, strict off).
+
+```
+Checked and fixed 1 problem before showing you. 2 still don't pass:          ← 14/600, ink
+ ⚠ You and Partner have no bed                                                ← 14/400 ink
+   No queen bed fits with the 2.4 m wardrobe and two desks: the longest
+   free wall is 1.4 m, and a queen bed needs 1.6 m.                           ← 13 grey (--muted)
+ ⚠ The living room seats 0
+   The designer's answers left the sofa out (2 tries).
+✓ Main bedroom stays a bedroom: You and Partner sleep there. Who sleeps where ›
+  How it was checked ›                                                        ← disclosure
+[Place a sofa · free]                                                         ← only if the dry run places one
+```
+
+- The headline line joins the fix-round outcome and the count, using the copy table's wording.
+  "Fixed 3" counts from the rounds (the room tried alone). "Still don't pass" is the card's verdict
+  for the whole version, from the one list. They're two facts, so they're two sentences, and the
+  numbers never have to add up to anything.
+  Without fix rounds it's just `2 don't pass:`.
+- Each failure is the app's check text as the main line, with its **measured cause** as the grey
+  subline (from the reason code and the solver's numbers). With no measured cause, it's the
+  try count ("The designer's answers left it out (3 tries)"). With neither, there's no subline.
+- **Can't be fixed by furnishing** (more people than bedrooms, no window): subline "Can't be fixed
+  by furnishing: 3 people sleep here and there are 2 bedrooms." plus a `Who sleeps where ›` link
+  (What I know at that row, the existing `knowAt` pattern).
+- **How it was checked ›** opens a list per room: `Main bedroom · fix round 1: 3 → 1 problem ·
+  fix round 2: cut off at the length limit, not used`, the free fixes made and not made, the
+  vetting lines. This is where multi-room detail goes, so the headline stays one line.
+
+**C. What's blocking this** (the newest two versions of this scope have the same failures).
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ V7 and V8 failed on the same 3 things                        │ ← 14/600, the section's name
+│  ⚠ You and Partner have no bed                               │
+│    Main bedroom is 3.1 m wide. A queen bed, a 2.4 m wardrobe │
+│    and two desks need about 3.8 m.                           │
+│  ⚠ The living room seats 0                                   │
+│    The designer's answers left the sofa out (3 tries).       │
+│  ⚠ A dining chair has no table                               │
+│                                                              │
+│ [Place a queen bed and a sofa · free]                        │
+│ [Keep fixing · at most US$0.40]          ← only per principle 4
+│  Change what I asked                     ← text button, focuses the composer
+└──────────────────────────────────────────────────────────────┘
+```
+
+- The heading names the versions ("V7 and V8", or "V6 to V8" for three in a row) so the person can
+  look back. "The last 2 designs" makes them count.
+- The ways forward are stacked and content-width (as the scope buttons are), each 44 px on a coarse
+  pointer. Order: free, then paid, then the text button.
+- **No "Accept anyway" button in the block.** Accept selected, just below, already asks "Accept
+  anyway? 2 problems: …" (and refuses HDB rules). A second route to the same waiver would split one
+  decision across two places. The block's text says nothing about waiving. The card's own flow does.
+- **Change what I asked** focuses the composer. The placeholder becomes "Say what to change, e.g.
+  one desk instead of two". On a phone the composer's focus already folds the sheet to peek with
+  the keyboard.
+
+**D. Couldn't make everything pass** (strict on, failures left). This is the same frame as C, with
+this heading:
+
+```
+Couldn't make everything pass within US$0.60
+2 still don't pass:
+ ⚠ …
+Same failures as V7.                                    ← only if it's also a repeat
+[Place a queen bed · free]   [Keep fixing · at most US$0.30]   Change what I asked
+```
+
+Precedence: D, then C, then B, then A. One state per card, never two frames.
+
+### The free fixes: shown and undone
+
+**Made during a run (automatic).**
+
+- One line per kind in the lead: "Placed by the app, free: a queen bed in Main bedroom, against the
+  wall opposite the window." Lines past two go under "How it was checked". (The lead decisions take
+  orphans and the 5 cm nudge out of B. If they come back, they use the same line: "Took out a dining
+  chair the answer added, with no table to go with it.")
+- The pieces are rows in Changes, tagged **By the app**, ticked by default like any row, with the
+  reason one tap away ("A bed for You and Partner: nobody had one."). To leave one out, untick it.
+  Once accepted, the accept line's **Undo** takes everything back in one step (as today).
+- Left out at Accept: recorded as a Decision "Left out: the app's queen bed in Main bedroom" (the
+  existing "what you leave out is kept" rule), and the free fix doesn't offer it again for that
+  room. It's recorded **at Accept**, not on untick, so a person trying ticks out records nothing.
+- Couldn't place: a warn line in the lead with the numbers (copy table). There is no button, because
+  nothing can be pressed to make it fit.
+
+**Asked for (Place … · free).**
+
+- It runs in the results worker. The button shows "Placing…" and is disabled. There's no skeleton,
+  no spinner and no price.
+- **It adds rows to the same card**, tagged **By the app**, and the lead and checks are worked out
+  again. It does **not** make a new A/B/C option. Tabs mean "another idea" to the person, and a free
+  correction isn't another idea. The stored answer still gains the `by: 'app'` intents, as the
+  automatic fixes do, so the version rebuilds from what's stored.
+- An app line goes into the log, because it's the person's action, like "You accepted…":
+  `✓ Placed by the app, free: a queen bed in Main bedroom, against the wall opposite the window.
+  Undo`. Undo takes those intents out again. It's offered while this is the newest such action (the
+  "kept" line's rule).
+- The block re-renders. If everything now passes, it drops to state A. If not, it shows what's
+  left, with the free button gone (principle 4).
+- On a phone the sheet folds to peek and the plan zooms to the room (the existing `scopeBox`), with
+  the bed marked **New**.
+
+**Fitting with the lead decisions.** The "By the app" tag comes from the `app:` ref prefix, and the
+vetting lines come from the option's `appLines`. **Keep fixing** is a fix-only run that makes a new
+option. That's right for it: it's paid design work, so its tab reads "B · kept fixing" and is
+compared like any option. The *free* fix should still be rows on the same card, as above. If
+storage keeps it as an option, then its tab reads "B · by the app, free", the log line's Undo
+removes that option and shows A again, and the lead of B says what it added. Either way, the person
+must never see a free correction offered as "another idea".
+
+### Repeats explained, without nagging
+
+- **On the card:** state C appears only on the **newest** card of the scope. Older cards fold to
+  their line as now (`V7 · Main bedroom · 3 don't pass`).
+- **Before a paid run:** the repeat cost card (below) asks only under the spec's conditions (same
+  failures, nothing changed, plan addresses nothing new). The long sentence shows **once per failure
+  signature**. If the person presses Run it anyway and the same thing comes back, the next repeat
+  card is one line: "Likely the same 3 problems again (V7 to V9)." It still asks (that's the money
+  rule) but doesn't lecture.
+- It never stacks with "This plan doesn't say how it fixes…". The repeat sentence replaces it.
+- Nothing about repeats is said in a toast, in the designer's voice, or in more than one place on
+  screen at once.
+
+### Before a run, during it, after it
+
+| When | What's shown | Where |
+|---|---|---|
+| Before (plan reply) | The plan's title; **For “…”: …** lines from `addresses` (up to 3, then "and 1 more"), or "This plan doesn't say how it fixes V8's 4 problems."; the strict line when on; the repeat line when it applies; the price | The cost card, or the plan's line when no cost card is needed |
+| During | Each room's progress line, now with its round: `Main bedroom · fixing 2 problems (round 2)`; `… · the answer was cut off; trying again with less thinking`; `… · placing a bed itself` | The running card (`.talk-progress`) |
+| After | The lead (A to D); **What this design set out to fix** | The card |
+| After, persistent | `On the table: V8 · 3 don't pass` | The bar (as now, but counted from the one list) |
+
+**What this design set out to fix** closes the loop for the owner's turn 31 ("Did you fulfil my
+request?"). For each `addresses` entry, it shows the promise and the outcome, from the same list:
+
+```
+What this design set out to fix
+ ✓ You and Partner have no bed: a queen bed against the long wall
+ ⚠ The living room seats 0: a 2-seat sofa by the window. Still doesn't pass
+```
+
+It's 13 px, with no frame and under the summary. It isn't shown when there were no addresses.
+
+### The cost cards
+
+**Repeat** (asks even under the threshold):
+
+```
+“Restore the queen bed” (Main bedroom)
+This will likely come back with the same 3 problems: V7 and V8 did, and nothing they depend on
+has changed.
+  You and Partner have no bed · The living room seats 0 · A dining chair has no table
+[Place a queen bed and a sofa · free]
+[Run it anyway · about US$0.13]   Not now
+(at most US$1.08, up to 3 fix-ups included)
+```
+
+- The free fix comes first and is listed above the paid button. Run it anyway is an outlined button,
+  not the near-black primary, because nothing on this card should pull toward spending.
+- The failures are named in one line because the card they come from may be far up the log.
+- With no free fix available, the card shows "Change what I asked" (text button) in that slot.
+- Its first sentence gets focus (`tabindex="-1"`), as CostCheck focuses its heading. Focus never
+  lands on a spend button.
+
+**Strict on** (any cost card):
+
+```
+… takes about US$0.21 (at most US$1.62, up to 6 fix-ups included). Go ahead?
+Fix every check first is on: keeps fixing until every check passes, up to 6 fix-ups
+(adds up to US$0.54 at most). Change
+```
+
+"Change" opens What I know at that row. It's a line, not a toggle beside the money buttons (agreeing
+with the spec's lean): a toggle there would change the figure under the finger about to press it.
+
+**Plan with addresses**: up to 3 "For “…”: …" lines, 13 px, under the plan's title in the cost card.
+
+### "Fix every check first" in What I know
+
+- Row label **Before you see a design** (What I know speaks to the person: "Who lives here", "How
+  much you own"). Value: **Fix every check first** or **Show it as it is**. `Change` opens the
+  existing two-option chooser. It saves free.
+- The log line after a change (the existing fact line, plus Undo while it's the newest):
+  `✎ You changed: before you see a design Show it as it is → Fix every check first. Undo`
+- Set by the designer from a reply: the existing "noted" line under the reply, `✓ Noted in What I
+  know: fix every check before you see a design. Edit`. That's the same pattern as other facts the
+  reply records.
+
+### Desktop and phone
+
+**Desktop (1280 to 1440).** The panel is about 420 px wide. When a run ends and the card is taller
+than the log, the log scrolls the **card's head** into view, not the foot, so the lead is the first
+thing read. The bar's `Accept…` already jumps to Accept selected. The failing pieces stay marked on
+the plan as now. Hovering a failure line lights its piece (or its room, for a missing piece), the
+way hovering a change row does.
+
+**Phone, portrait (390 × 844).** At peek, only the **On the table** bar fits. The spec's "block at
+peek" can't hold, so the bar carries it:
+
+```
+V8 · 3 don't pass                [Place a bed · free]
+```
+
+- When the newest card offers a free fix, the bar drops "On the table:" and its button becomes the
+  free fix, with a short label: "Place a bed · free", "Place 2 pieces · free". Otherwise the button
+  is `Accept…` as now. Pressing it does the free fix in place. The sheet is already at peek, the plan
+  zooms to the room, and the bar then reads `V8 · passes [Accept…]` (or what's left).
+- At half or full height, the lead is at the top of the visible log (the head-into-view rule above),
+  so **Undo** on the free fix's line is one drag up.
+- All new buttons and text buttons are at least 44 px. The stacked ways forward are content-width,
+  not full-width bars.
+
+**Phone, landscape (844 × 390).** The side column: the same card, with the head-into-view rule. The
+bar's free button works the same way there.
+
+**Dark mode.** No new colours. The marks use `--pill-warning-ink` (warn) and `--positive` (check),
+and text uses the existing tiers. The frame in C and D is the dark `--border` on `--surface`.
+
+### Accessibility
+
+- **One announcement per run end**, through the existing polite region (`say`), from the one list:
+  "V8 is ready. 3 don't pass: You and Partner have no bed, and 2 more. Cost US$0.31." Strict and not
+  met: "V8 is back. Couldn't make everything pass: 2 still don't pass." Passing: "V8 is ready.
+  Passes all checks; the app fixed 3 problems first." The lead itself is **not** a live region, so
+  nothing is read twice.
+- **Focus isn't moved at run end** (the person may be typing). The bar's button is the next Tab
+  stop from the log's top.
+- **The free fix:** "Placed a queen bed in Main bedroom. 1 still doesn't pass. Undo is available."
+  is announced, and focus goes to the new log line's Undo (as Accept selected does today). On a
+  phone at peek, where the log is hidden, focus goes to the bar's button instead.
+- **Structure:** the lead is a `section` named by its headline. Failures are a `ul`. Each failure
+  hovered or focused lights its piece. Disclosures use `details`/`summary` (as "Already in your
+  plan" does).
+- Red is never the only signal: the warn mark and the words "don't pass" both carry it. The text
+  tiers already pass AA.
+- **Motion:** nothing animates in. The sheet's fold uses its existing transition, which is instant
+  under `prefers-reduced-motion`.
+- Spend buttons are never focused automatically (the existing rule). The free button is ordinary.
+
+### Copy (replaces or refines the table above)
+
+| Where | Copy |
+|---|---|
+| Fixed all | Checked and fixed 3 problems before showing you. |
+| Fixed some | Checked and fixed 3 problems before showing you. 2 still don't pass: |
+| Cut off | Sent back to be fixed, but the answer was cut off at the length limit and wasn't used. 4 still don't pass: |
+| No better | Sent back to be fixed 2 times. The last answer was no better, so the earlier one is shown. |
+| Fix-ups used up | 2 still don't pass. This design used the 3 fix-ups it was priced for. [Keep fixing · at most US$0.30] |
+| Unpriced model | [Keep fixing · up to 3 more requests] |
+| Free fix | Placed by the app, free: a queen bed in Main bedroom, against the wall opposite the window. |
+| Free fix couldn't | No queen bed fits in Main bedroom with the 2.4 m wardrobe and two desks: the longest free wall is 1.4 m, and a queen bed needs 1.6 m. |
+| Vetting | Main bedroom stays a bedroom: You and Partner sleep there. To make it a study, change who sleeps where. |
+| Wall kept | Kept the wall between Main bedroom and the living room: taking it out would join the room You and Partner sleep in to the living room. |
+| Can't be furnished | Can't be fixed by furnishing: 3 people sleep here and there are 2 bedrooms. Who sleeps where › |
+| Blocking heading | V7 and V8 failed on the same 3 things |
+| Strict not met | Couldn't make everything pass within US$0.60 |
+| Free button | Place a queen bed · free / Place 3 missing pieces · free (bar: Place a bed · free) |
+| Repeat cost card | This will likely come back with the same 3 problems: V7 and V8 did, and nothing they depend on has changed. [Place … · free] [Run it anyway · about US$0.13] Not now |
+| Repeat, again | Likely the same 3 problems again (V7 to V9). |
+| Strict on cost card | Fix every check first is on: keeps fixing until every check passes, up to 6 fix-ups (adds up to US$0.54 at most). Change |
+| What I know | Before you see a design: Fix every check first · Show it as it is |
+| Plan addresses | For “You and Partner have no bed”: a queen bed against the long wall, one 1.2 m desk instead of two. |
+| No addresses | This plan doesn't say how it fixes V8's 4 problems. |
+| Reply emptied by the filter | (the app's line in place of the reply) V8: 3 don't pass. You and Partner have no bed, and 2 more. |
+| Announcement | V8 is ready. 3 don't pass: You and Partner have no bed, and 2 more. Cost US$0.31. |
