@@ -34,10 +34,28 @@ export const ROOMS: { match: RegExp; answer: unknown }[] = [
   { match: /furnish "Kitchen"/, answer: kitchen },
 ];
 
+/**
+ * The second look's answer, recorded as a model gives it: a note on the room and how it reads.
+ * Nothing here is a fix, so a mocked run takes no round unless a test answers otherwise.
+ */
+export const LOOK_REPLY = {
+  findings: [
+    {
+      target: { kind: 'room', id: 'R2' },
+      principle: 'taste',
+      severity: 'consider',
+      line: 'A reading lamp by the window would finish the main bedroom.',
+      suggest: null,
+    },
+  ],
+  summary: 'Reads well; the bed has a clear way round it.',
+};
+
 /** The answer a prompt asks for: the concept, a room's, or null. */
 export function answerFor(prompt: string): { step: string; answer: unknown } | null {
   if (prompt.includes('## Your task: the layout and style'))
     return { step: 'layout', answer: CONCEPT };
+  if (prompt.includes('## Your task: a second look')) return { step: 'look', answer: LOOK_REPLY };
   for (const r of ROOMS) {
     const m = r.match.exec(prompt);
     if (m) return { step: m[0], answer: r.answer };

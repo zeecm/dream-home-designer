@@ -3,6 +3,8 @@ import {
   type DesignBrief,
   type DesignOptions,
   type DraftDesign,
+  NO_LOOK,
+  type OptionLook,
   type Price,
   type Project,
   type ProposalOption,
@@ -12,8 +14,12 @@ import {
   type ScopePlan,
   type ScopeRef,
   type TalkAsk,
+  canSee,
   contextFor,
   estimateRun,
+  lookBase,
+  lookPictureSizes,
+  looksAt,
   planScope,
   plannedPrompts,
 } from '@dhd/core';
@@ -170,11 +176,67 @@ export function priceRequest(i: PriceInput): Priced {
           i.talk,
         );
   if (!sp) return null;
-  const est = estimateRun(plannedPrompts(sp.ctx, sp.draft, sp.plan, i.opts), {
+  const prompts = plannedPrompts(sp.ctx, sp.draft, sp.plan, i.opts);
+  // The look covers what the run was asked for (a run carried on: its checkpoint's), not only
+  // the rooms left; a carried-on run looks only while its checkpoint says the look is to come.
+  const asked = i.resume ? i.resume.run.plan.rooms : sp.plan.rooms;
+  const looks = looksAt(sp.brief, i.ai) && (!i.resume || i.resume.run.look === 'left');
+  const est = estimateRun(prompts, {
     provider: i.ai.provider,
     model: i.ai.model,
     quality: sp.brief.quality,
     prices: i.prices,
+    // Thorough with a model that can see ends with the second look, in the same figures: its
+    // pictures as they will be drawn (the scope's rooms, or the whole flat). Their sizes are
+    // the frame's shape at a fixed long side: worked out on the plan before the run, they hold
+    // for the plan it draws, as a layout moves only walls inside the flat's outline and runs
+    // for some rooms have no layout step.
+    look: looks
+      ? {
+          pictures: lookPictureSizes(
+            sp.ctx.base,
+            asked === 'all' ? null : asked.flatMap((k) => k.split('+')),
+          ),
+          ...(prompts.length ? {} : { base: lookBase(sp.ctx) }),
+        }
+      : false,
   });
   return { sp, est };
+}
+
+/** The log's line when the person stopped the second look with every room done. */
+export const LOOK_STOP_NOTE = 'You stopped the second look. The rooms are done and checked.';
+
+/**
+ * The look an option ends with: the run's, else what its checkpoint kept (carried on after it
+ * answered), else, on Thorough with a model that can't see, why there is none; and the log's
+ * line when the person stopped the look with every room done.
+ */
+export function lookAtEnd(o: {
+  looked: OptionLook | null;
+  run: Pick<RunCheckpoint, 'lookResult'>;
+  brief: { quality: string };
+  ai: { provider: RunCheckpoint['provider']; model: string };
+  phase: string;
+  stopped: boolean;
+  at: string;
+}): { look: OptionLook | null; stopNote: string | null } {
+  const look =
+    o.looked ??
+    o.run.lookResult ??
+    (o.brief.quality === 'thorough' && !canSee(o.ai.provider, o.ai.model)
+      ? {
+          state: 'skipped' as const,
+          summary: null,
+          notes: [],
+          findings: [],
+          dropped: [],
+          offers: [],
+          round: 'none' as const,
+          line: NO_LOOK,
+          at: o.at,
+        }
+      : null);
+  const stopNote = o.phase === 'done' && o.stopped && look ? LOOK_STOP_NOTE : null;
+  return { look, stopNote };
 }

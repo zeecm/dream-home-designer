@@ -15,6 +15,7 @@ import {
   type RunReport,
   type Usage,
   changeSet,
+  checkRoomOf,
   designLevels,
   firstTickedPieces,
   levelFingerprint,
@@ -286,9 +287,20 @@ export function cardRunReport(
     !scope || scope.all
       ? undefined
       : r.spaces.filter((s) => s.rooms.some((id) => rooms.has(id))).map((s) => s.key);
+  // Stopped part-way: the rooms it never placed are said as such ("Stopped before …"), never
+  // also counted as failing for want of what they would have held.
+  const unplaced =
+    card.status === 'stopped'
+      ? new Set(
+          r.spaces
+            .filter((s) => !['done', 'copied', 'locked'].includes(s.status))
+            .flatMap((s) => s.rooms),
+        )
+      : null;
+  const inCard = inCardOf(changes);
   return runReport(r, card.input, {
     waived: [...card.waivers.map((w) => w.key), ...(o.waive ?? [])],
-    inScope: inCardOf(changes),
+    inScope: unplaced ? (c) => inCard(c) && !unplaced.has(checkRoomOf(r, c) ?? '') : inCard,
     ...(spaces ? { spaces } : {}),
     aliases: o.aliases ?? card.input.aliases,
   });

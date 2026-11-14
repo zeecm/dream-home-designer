@@ -1,9 +1,10 @@
-import { type StepState, blankStep, interruptText, runDesign } from '@dhd/ai';
+import { type StepKind, type StepState, blankStep, interruptText, runDesign } from '@dhd/ai';
 import {
   type Conversation,
   DRAFT_CHARS,
   type DraftDesign,
   FIX_PER_RUN,
+  type OptionLook,
   PROPOSAL_RECORD_VERSION,
   type PlanAddress,
   type Proposal,
@@ -14,6 +15,7 @@ import {
   type ScopePlan,
   type ScopeRef,
   TALK_LIMITS,
+  type TalkAction,
   type TalkAsk,
   type TalkPlan,
   type TurnOf,
@@ -21,9 +23,15 @@ import {
   askRule,
   atMostOf,
   cut,
+  entranceDoor,
   levelFingerprint,
+  liveRules,
+  lookNote,
+  lookRuleOffer,
+  looksAt,
   nextLetter,
   optionName,
+  optionTitle,
   planScope,
   readyLine,
   ruleSentence,
@@ -32,6 +40,7 @@ import {
 import { meterSetting } from '../../../storage/store';
 import { useStore } from '../../../store';
 import { aiSettings } from '../../credentials';
+import { rasterise } from '../look';
 import { browserPage } from '../page';
 import { freshPrice, readPrice, trialFree, trialResult } from '../results';
 import {
@@ -53,6 +62,7 @@ import {
   approvedLeft,
   figureHolds,
   finishedSpace,
+  lookAtEnd,
   resumeFigure,
   spentWithInflight,
 } from './pricing';
@@ -601,6 +611,7 @@ function newOption(
     accepted: [],
     waivers: [],
     version: null,
+    look: null,
     note: null,
   };
 }
@@ -637,6 +648,57 @@ const anotherRequest = (p: Proposal): PressRequest => {
 export const anotherPrice = (p: Proposal): RunEstimate | null => pressPrice(anotherRequest(p));
 
 const cutNote = (s: string | null) => (s ? cut(s, 300) : null);
+
+/**
+ * The second look's suggested house rules, vetted as a reply's rule is (slice 3a's `vetRule`
+ * through `lookRuleOffer`) on the plan as it is now: each becomes the designer's line with the
+ * free Keep as a rule offer under it; one the app can't hold as a rule stays a note on the card.
+ */
+function lookOffersOf(
+  look: OptionLook | null,
+  p: Proposal,
+  letter: string,
+  design: DraftDesign,
+): { look: OptionLook | null; offers: Extract<TalkAction, { type: 'lookOffer' }>[] } {
+  const conv = useTalk.getState().conv;
+  const level = talkLevel();
+  if (!look?.offers.length || !conv || !level) return { look, offers: [] };
+  const version = optionTitle(p.n, letter, p.options.length);
+  const notes = [...look.notes];
+  const offers: Extract<TalkAction, { type: 'lookOffer' }>[] = [];
+  let rules = liveRules(conv);
+  for (const o of look.offers) {
+    const id = newId('turn');
+    const offer = lookRuleOffer(o.rule, {
+      id: newId('rule'),
+      at: nowIso(),
+      turnId: id,
+      version,
+      levelId: conv.levelId,
+      rules,
+      level,
+      brief: conv.brief,
+      aliases: design.aliases,
+      mainDoor: entranceDoor(level),
+    });
+    if (!offer) {
+      notes.push(lookNote(o.line));
+      continue;
+    }
+    // Two alike in one look: the second is vetted against the first.
+    rules = [...rules, offer.rule];
+    offers.push({
+      type: 'lookOffer',
+      id,
+      at: nowIso(),
+      replyTo: p.turnId,
+      version,
+      line: o.line,
+      offer,
+    });
+  }
+  return { look: { ...look, notes: [...new Set(notes)].slice(0, 12) }, offers };
+}
 
 /** A run carried on from its checkpoint: its lock already held here. */
 interface CarryFrom {
@@ -797,6 +859,10 @@ async function runOption(
   const ended = new Promise<void>((resolve) => {
     endRun = resolve;
   });
+  // Thorough with a model that can see ends with the second look (priced in its figure). A run
+  // carried on looks only if its checkpoint says the look is still to come: never once it went,
+  // and never for one written before there was a look.
+  const looks = looksAt(sp.brief, ai) && (!from || from.run.look === 'left');
   const runId = from?.run.id ?? newId('run');
   const now = nowIso();
   const prior = from?.run;
@@ -825,6 +891,7 @@ async function runOption(
         ...(sp.expected ? { expected: structuredClone(sp.expected) } : {}),
         layout: sp.plan.layout ? 'left' : 'none',
         rooms: null,
+        ...(looks ? { look: 'left' as const } : {}),
         fixesLeft: FIX_PER_RUN,
         approved,
         spent: 0,
@@ -858,6 +925,7 @@ async function runOption(
       ? (sp.expected ?? [])
       : sp.plan.rooms.map((key) => ({ key, label: sp.draft.spaces[key]?.name ?? 'Room' }))
     ).map((r) => blankStep(r.key, r.label, 'room')),
+    ...(looks ? [blankStep('look', 'Second look', 'look')] : []),
   ]);
   const running: Running = {
     designId: sp.draft.id,
@@ -945,6 +1013,10 @@ async function runOption(
       const rooms = runnerSteps.filter((s) => s.kind === 'room').map((s) => s.key);
       if (rooms.length && rooms.every((k) => d.spaces[k])) ck.rooms = rooms;
     }
+    // The look, once it has ended (looked at, skipped or failed), is never asked for again.
+    const lk = runnerSteps.find((s) => s.kind === 'look');
+    if (ck.look === 'left' && lk && ['done', 'failed', 'skipped'].includes(lk.status))
+      ck.look = 'done';
     ck.fixesLeft = fixesLeft;
     ck.spent = spentBefore + spentRun();
     ck.at = nowIso();
@@ -954,7 +1026,7 @@ async function runOption(
    * The most a step sent now may cost: its own estimate; a room the layout made, a room's on
    * average (so the rooms together are what was priced); a fix round, its share of the fixes.
    */
-  const highOf = (key: string, kind: 'layout' | 'room' | 'fix') => {
+  const highOf = (key: string, kind: StepKind) => {
     if (!est.usd) return 0;
     if (kind === 'fix') return est.fixes > 0 ? est.usd.fix / est.fixes : 0;
     const own = est.steps.find((x) => x.step === key)?.usd?.high;
@@ -990,7 +1062,24 @@ async function runOption(
     };
   // Saved at once: a page that goes before the first step ends can carry on from the start.
   await writeRun();
-  const { state, design } = await runDesign({
+  const {
+    state,
+    design,
+    look: looked,
+  } = await runDesign({
+    // At every finished room it was asked for (carried on: the checkpoint's, not only those left).
+    ...(looks
+      ? {
+          look: {
+            rasterise,
+            scope: ck.plan.rooms,
+            // Kept with the checkpoint (the runner saves it next): a reload in its round keeps it.
+            onAnswer: (l: OptionLook) => {
+              ck.lookResult = l;
+            },
+          },
+        }
+      : {}),
     ai,
     ctx: sp.ctx,
     design: sp.draft,
@@ -1025,6 +1114,9 @@ async function runOption(
       void writeRun();
     },
     onStep: (key, kind, phase) => {
+      // The look's answer is back (or nothing was sent): paid for, so never asked again, even
+      // if the page goes during its round.
+      if (kind === 'look' && phase === 'end' && ck.look === 'left') ck.look = 'done';
       // A step on its way, at its most: counted as spent if the page goes before it is back.
       ck.inflight = ck.inflight.filter((x) => x.step !== key);
       if (phase === 'start') ck.inflight = [...ck.inflight, { step: key, high: highOf(key, kind) }];
@@ -1045,7 +1137,7 @@ async function runOption(
         at: nowIso(),
         event: {
           type: 'note',
-          text: `Back. Carrying on from ${st.label}: ${done} of ${rows.length} rooms done, not paid for again.`,
+          text: `Back. Carrying on from ${st.kind === 'look' ? 'the second look' : st.label}: ${done} of ${rows.length} rooms done, not paid for again.`,
         },
       });
     },
@@ -1119,6 +1211,22 @@ async function runOption(
         ? 'checked'
         : 'stopped';
   const cutOff = state.steps.reduce((t, s) => t + (s.cutOffHigh ?? 0), 0);
+  // The look as it ended; carried on after it answered, as the checkpoint kept it.
+  const ending = lookAtEnd({
+    looked,
+    run: ck,
+    brief: sp.brief,
+    ai,
+    phase: state.phase,
+    stopped: ctrl.signal.aborted,
+    at: nowIso(),
+  });
+  const lookNow = ending.look;
+  // A house rule the second look suggests, vetted on the plan as it is (only while open).
+  const { look, offers } =
+    doc().id === projectId
+      ? lookOffersOf(lookNow, p, letter, design)
+      : { look: lookNow, offers: [] };
   await writeOption((o) => {
     // Ended: nothing to carry on from.
     const { run: _ended, ...rest } = o;
@@ -1127,6 +1235,8 @@ async function runOption(
       status,
       // Named by the designer's summary (A keeps its room's name without one).
       name: optionName(o, o.letter === 'A' ? o.name : undefined),
+      // The second look's notes; a round it kept is in the rooms already saved.
+      ...(look ? { look, spaces: structuredClone(design.spaces) } : {}),
       note: cutNote(
         state.halt?.message ?? (failed ? (state.steps.find((s) => s.error)?.error ?? null) : null),
       ),
@@ -1145,6 +1255,17 @@ async function runOption(
         event: { type: 'stopped', usd: cutOff > 0 ? cutOff : null },
       });
     }
+    // Stopped during the look, every room done: said, and the design stands as checked.
+    if (ending.stopNote) {
+      await act({
+        type: 'event',
+        id: newId('turn'),
+        at: nowIso(),
+        event: { type: 'note', text: ending.stopNote },
+      });
+    }
+    // A house rule the second look suggests: offered in the log as a reply's is (free).
+    for (const o of offers) await act(o);
     if (status !== 'failed') await act({ type: 'scopeNext', at: nowIso(), id: newId('turn') });
   }
   hold.release();

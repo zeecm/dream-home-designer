@@ -57,6 +57,7 @@ export {
 } from './principles';
 export { briefData, compass, designContext, planForDesign, type ContextInput } from './describe';
 export * from './lenses';
+export * from './look';
 export { type WallLock, designLocks, wallLocks } from './locks';
 export {
   type AcceptOptions,
@@ -105,6 +106,7 @@ export {
   type FixRequest,
   SPACE_SCHEMA,
   placedWords,
+  type PromptImage,
   SYSTEM_PROMPT,
   type StepOptions,
   type StepPrompt,

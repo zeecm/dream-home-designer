@@ -325,6 +325,7 @@ export function requestFor(
   from: RequestFrom = {},
 ): ProviderRequest {
   const stable = `${p.prefix}${p.shared}`;
+  const images = p.images ?? [];
   if (ai.provider === 'anthropic') {
     const fallback = FALLBACK.test(ai.model.trim());
     // Cache the stable blocks (the prefix, then the room steps' shared concept), each only
@@ -336,6 +337,11 @@ export function requestFor(
     const content = [
       { type: 'text', text: p.prefix, ...mark(sys + p.prefix.length) },
       ...(p.shared ? [{ type: 'text', text: p.shared, ...mark(sys + stable.length) }] : []),
+      // The second look's pictures, after the cached prefix and before the tail.
+      ...images.map((im) => ({
+        type: 'image',
+        source: { type: 'base64', media_type: im.mediaType, data: im.data },
+      })),
       { type: 'text', text: p.tail },
     ];
     return {
@@ -370,14 +376,26 @@ export function requestFor(
         response_format: {
           type: 'json_schema',
           json_schema: {
-            name: p.kind === 'layout' ? 'concept' : 'space',
+            name: p.kind === 'layout' ? 'concept' : p.kind === 'look' ? 'look' : 'space',
             strict: true,
             schema: p.schema,
           },
         },
         messages: [
           { role: 'system', content: p.system },
-          { role: 'user', content: `${stable}${p.tail}` },
+          {
+            role: 'user',
+            content: images.length
+              ? [
+                  { type: 'text', text: stable },
+                  ...images.map((im) => ({
+                    type: 'image_url',
+                    image_url: { url: `data:${im.mediaType};base64,${im.data}`, detail: 'high' },
+                  })),
+                  { type: 'text', text: p.tail },
+                ]
+              : `${stable}${p.tail}`,
+          },
         ],
       },
     };
@@ -388,7 +406,20 @@ export function requestFor(
     headers: { 'x-goog-api-key': ai.key },
     body: {
       systemInstruction: { parts: [{ text: p.system }] },
-      contents: [{ role: 'user', parts: [{ text: `${stable}${p.tail}` }] }],
+      contents: [
+        {
+          role: 'user',
+          parts: images.length
+            ? [
+                { text: stable },
+                ...images.map((im) => ({
+                  inline_data: { mime_type: im.mediaType, data: im.data },
+                })),
+                { text: p.tail },
+              ]
+            : [{ text: `${stable}${p.tail}` }],
+        },
+      ],
       generationConfig: {
         responseMimeType: 'application/json',
         responseJsonSchema: p.schema,

@@ -1,5 +1,12 @@
 import { type DraftDesign, type Page, type RunOptions, runDesign } from '@dhd/ai';
-import { PRICES, type ProposalOption, type RunCheckpoint, sampleFlatProject } from '@dhd/core';
+import {
+  NO_LOOK,
+  type OptionLook,
+  PRICES,
+  type ProposalOption,
+  type RunCheckpoint,
+  sampleFlatProject,
+} from '@dhd/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AI,
@@ -10,8 +17,10 @@ import {
 } from '../../../../../../packages/ai/src/fixtures/runner';
 import { browserPage } from '../page';
 import {
+  LOOK_STOP_NOTE,
   approvedLeft,
   figureHolds,
+  lookAtEnd,
   priceRequest,
   resumeFigure,
   spentWithInflight,
@@ -80,6 +89,7 @@ describe('a locked phone: a step cut off while away goes again on return (locked
       note: null,
       waivers: [],
       version: null,
+      look: null,
     };
     const run: RunCheckpoint = {
       id: 'run_test',
@@ -89,6 +99,7 @@ describe('a locked phone: a step cut off while away goes again on return (locked
       model: 'claude-opus-5-5',
       plan: { layout: {}, rooms: 'all' },
       layout: 'done',
+      look: 'left',
       rooms: Object.keys(d.spaces),
       fixesLeft: 2,
       approved: null,
@@ -118,8 +129,28 @@ describe('a locked phone: a step cut off while away goes again on return (locked
     const key0 = left[0] as string;
     expect(left).toHaveLength(2);
     expect(priced?.sp.plan).toMatchObject({ layout: null, rooms: left });
-    // Priced for what is left only: those two rooms' requests.
-    expect(priced?.est.steps).toHaveLength(2);
+    // Priced for what is left only: those two rooms' requests (and, Thorough with a model that
+    // can see, the second look it still ends with).
+    expect(priced?.est.steps.filter((s) => s.kind === 'room')).toHaveLength(2);
+    expect(priced?.est.steps.map((s) => s.kind)).toEqual(['room', 'room', 'look']);
+    // A look that already answered (or a checkpoint from before there was one): never again.
+    const kindsFor = (r: RunCheckpoint) =>
+      priceRequest({
+        project,
+        levelId: project.levels[0]?.id ?? '',
+        designs: [],
+        brief: d.brief,
+        scope,
+        words: '',
+        resume: { option, run: r, scope },
+        designId: d.id,
+        opts: {},
+        ai: { provider: 'anthropic', model: 'claude-opus-5-5' },
+        prices: PRICES,
+      })?.est.steps.map((s) => s.kind);
+    expect(kindsFor({ ...run, look: 'done' })).toEqual(['room', 'room']);
+    const { look: _none, ...older } = run;
+    expect(kindsFor(older)).toEqual(['room', 'room']);
     // Carry on's figure (criterion 6): those steps at their high, and the fix rounds left.
     const est = priced?.est;
     if (!est?.usd) throw new Error('not priced');
@@ -161,5 +192,54 @@ describe('a locked phone: a step cut off while away goes again on return (locked
     expect(Object.values(again.design.spaces).every((s) => s.status === 'done')).toBe(true);
     // Its earlier usage is kept with it, the new requests' added.
     expect(again.design.usage.length).toBe(d.usage.length + 2);
+  });
+});
+
+describe('the look an option ends with (lookAtEnd)', () => {
+  const found: OptionLook = {
+    state: 'done',
+    summary: 'Calm.',
+    notes: ['Its round didn’t finish, so the rooms are as the first answers left them.'],
+    findings: [],
+    dropped: [],
+    offers: [],
+    round: 'none',
+    line: null,
+    at: '2026-11-14T00:00:00.000Z',
+  };
+  const base = {
+    looked: null,
+    run: {},
+    brief: { quality: 'thorough' },
+    ai: { provider: 'anthropic' as const, model: 'claude-opus-5-5' },
+    phase: 'done',
+    stopped: false,
+    at: '2026-11-14T00:00:00.000Z',
+  };
+
+  it('carried on after the look answered: what the checkpoint kept, never nothing', () => {
+    expect(lookAtEnd({ ...base, run: { lookResult: found } })).toEqual({
+      look: found,
+      stopNote: null,
+    });
+    // The run's own, when it has one.
+    const own = { ...found, summary: 'Own.' };
+    expect(lookAtEnd({ ...base, looked: own, run: { lookResult: found } }).look).toBe(own);
+    // None at all: none (Thorough, a model that can see).
+    expect(lookAtEnd(base).look).toBeNull();
+    // A model that can't see says so.
+    expect(lookAtEnd({ ...base, ai: { provider: 'openai', model: 'gpt-4.1' } }).look?.line).toBe(
+      NO_LOOK,
+    );
+  });
+
+  it('stopped during the look, every room done: the log says so; stopped part-way: not this line', () => {
+    expect(lookAtEnd({ ...base, run: { lookResult: found }, stopped: true }).stopNote).toBe(
+      LOOK_STOP_NOTE,
+    );
+    expect(
+      lookAtEnd({ ...base, run: { lookResult: found }, stopped: true, phase: 'stopped' }).stopNote,
+    ).toBeNull();
+    expect(lookAtEnd({ ...base, stopped: true }).stopNote).toBeNull();
   });
 });

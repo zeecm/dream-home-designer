@@ -95,6 +95,7 @@ function option(letter: 'A' | 'B' | 'C', summary = ''): ProposalOption {
     note: null,
     waivers: [{ key: 'walkway:1', text: 'Corridor 0.80 m', at: AT }],
     version: null,
+    look: null,
   };
 }
 
@@ -112,13 +113,13 @@ const proposal = (options: ProposalOption[], scope = living): Proposal => ({
 });
 
 describe('the kept set a version was made with (slice 3a)', () => {
-  it('proposal records go to 3: a 2 reads as 3 without them, a newer one is not read', () => {
+  it('a 2 proposal record reads as the current one without them, a newer one is not read', () => {
     const v2 = { ...proposal([option('A')]), recordVersion: 2 };
     const read = proposalFromRecord(JSON.parse(JSON.stringify(v2)));
-    expect(PROPOSAL_RECORD_VERSION).toBe(3);
-    expect(read?.recordVersion).toBe(3);
+    expect(PROPOSAL_RECORD_VERSION).toBe(4);
+    expect(read?.recordVersion).toBe(4);
     expect(read?.options[0]?.kept).toBeUndefined();
-    expect(proposalFromRecord({ ...v2, recordVersion: 4 })).toBeNull();
+    expect(proposalFromRecord({ ...v2, recordVersion: 5 })).toBeNull();
   });
 
   it('is on its record, read back as written; an older record reads with none', () => {
@@ -262,6 +263,7 @@ describe('Bring this back (criterion 27)', () => {
       accepted: [],
       usage: [],
       version: null,
+      look: null,
       brief: today,
       base: { variant: 'after', fingerprint: 'fpNow' },
     });

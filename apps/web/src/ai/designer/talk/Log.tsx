@@ -2,12 +2,14 @@ import {
   type Conversation,
   FIX_PER_RUN,
   type Level,
+  NO_LOOK,
   type Proposal,
   type QuestionKey,
   type ScopeRef,
   TALK_LIMITS,
   type Turn,
   type TurnOf,
+  canSee,
   cut,
   meetingOver,
   optionTitle,
@@ -50,7 +52,7 @@ import {
   pressScope,
   scopeRequest,
 } from './propose';
-import { toNewest } from './scroll';
+import { HOLD, toNewest } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { lineTitle, versionTitle } from './titles';
 import {
@@ -452,11 +454,11 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
               const c = useTalk.getState().conv;
               if (c) void act({ type: 'setBrief', brief: { ...c.brief, quality: q } });
             }}
-            what={
+            what={`${
               t.scope.all
                 ? 'one for the layout and style, then one for each room'
                 : `one for ${t.scope.label}`
-            }
+            }${est.steps.some((x) => x.kind === 'look') ? ', and a second look at the result' : ''}`}
             action="Go ahead"
             anyway="Go ahead anyway"
             backLabel="Not now"
@@ -465,6 +467,8 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
             onStart={() => void answerCost(t, 'go')}
             onEditPrices={() => useTalk.setState({ settings: 'prices' })}
           />
+          {(useTalk.getState().conv?.brief.quality ?? 'thorough') === 'thorough' &&
+            !canSee(ai.provider, ai.model) && <p className="muted talk-no-look">{NO_LOOK}</p>}
         </div>
       ) : (
         <div className="button-row talk-cost-buttons">
@@ -747,8 +751,17 @@ export function Log() {
       el.dataset.pinned = pinned.current ? '1' : '0';
       if (pinned.current) setBehind(false);
     };
+    // Put at a card's head at a run's end: held there, as if the person had scrolled.
+    const hold = () => {
+      pinned.current = false;
+      el.dataset.pinned = '0';
+    };
     el.addEventListener('scroll', on, { passive: true });
-    return () => el.removeEventListener('scroll', on);
+    el.addEventListener(HOLD, hold);
+    return () => {
+      el.removeEventListener('scroll', on);
+      el.removeEventListener(HOLD, hold);
+    };
   }, []);
   if (!conv) return <div className="talk-log" />;
   let lastDay = '';

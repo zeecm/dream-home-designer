@@ -31,11 +31,12 @@ import { clean } from '../util';
  */
 export const TALK_RECORD_VERSION = 4;
 /**
- * 3: an option's `madeAt` and the kept pieces it was made with (slice 3a). 1 and 2 are read as
- * 3 with neither (worked out from the proposal's time). A build that knows only 2 reads a 3 as
- * nothing, so it never writes one back without them (a stale tab carrying a run on, say).
+ * 4: an option's second look (slice 3b). 3: an option's `madeAt` and the kept pieces it was made
+ * with (slice 3a). 1 to 3 are read as 4 with defaults (no look; `madeAt` worked out from the
+ * proposal's time). A build that knows only 3 reads a 4 as nothing, so it never writes one back
+ * without the look (or, for 2, without `madeAt` and the kept pieces).
  */
-export const PROPOSAL_RECORD_VERSION = 3;
+export const PROPOSAL_RECORD_VERSION = 4;
 /** Rules kept per conversation, the recently deleted (for Undo) included. */
 export const MAX_RULE_RECORDS = 40;
 /** Pointers in one message (UX §1.2). */
@@ -460,6 +461,11 @@ export const Turn = z.discriminatedUnion('kind', [
         appLine: z.string().max(300).optional().catch(undefined),
         /** A rule it offers to keep (slice 3a), with the app's verdict (dropped if unreadable). */
         offer: RuleOffer.nullable().default(null).catch(null),
+        /**
+         * A proposal's second look offering a rule (slice 3b), not a reply to a message:
+         * `replyTo` is the proposal's turn, and it is never repeated as history.
+         */
+        look: z.boolean().default(false),
       })
       .optional(),
   }),
@@ -621,6 +627,32 @@ export const Conversation = z.object({
 });
 export type Conversation = z.infer<typeof Conversation>;
 
+/** An option's second look (tech 3b §2.7), as the card shows it and case files read it. */
+export const OptionLook = z.object({
+  /** done: findings read; skipped: no picture or a model that can't see; failed; stopped. */
+  state: z.enum(['done', 'skipped', 'failed', 'stopped']),
+  /** The designer's one line on how it reads. */
+  summary: z.string().max(200).nullable().default(null),
+  /** "Designer's second look: …" notes, and what a round left as it was. */
+  notes: z.array(z.string().max(TALK_LIMITS.note)).max(12).default([]),
+  /** The findings as read (for case files), and those dropped with why. */
+  findings: z.array(z.unknown()).max(8).default([]),
+  dropped: z
+    .array(z.object({ line: z.string().max(200), why: z.string().max(40) }))
+    .max(8)
+    .default([]),
+  /** Suggested house rules: offered once the house rules vet them, never kept on their own. */
+  offers: z
+    .array(z.object({ rule: z.unknown(), line: z.string().max(200) }))
+    .max(8)
+    .default([]),
+  /** The round it took: none, kept (no worse), or left as it was. */
+  round: z.enum(['none', 'kept', 'refused']).default('none'),
+  /** Why it was skipped or failed, in the app's words. */
+  line: z.string().max(300).nullable().default(null),
+  at: z.string(),
+});
+export type OptionLook = z.infer<typeof OptionLook>;
 /** How far ahead an interrupted run carries on by itself, from its last progress (ms). */
 export const RESUME_MS = 10 * 60_000;
 
@@ -661,6 +693,13 @@ export const RunCheckpoint = z.object({
   /** The room rows before the layout is known. */
   expected: z.array(z.object({ key: z.string(), label: z.string() })).optional(),
   layout: z.enum(['none', 'left', 'done']),
+  /**
+   * The second look (Thorough, a model that can see): still to come, or done (looked at, or
+   * skipped or failed: never asked again). Absent: none asked for, or an older build's.
+   */
+  look: z.enum(['left', 'done']).optional(),
+  /** What the look found, kept once read (a page that goes during its round still shows it). */
+  lookResult: OptionLook.optional().catch(undefined),
   /** The rooms it designs, once known (after the layout, or from the start without one). */
   rooms: z.array(z.string()).nullable(),
   /** Fix requests it may still send. */
@@ -762,6 +801,8 @@ export const ProposalOption = z.object({
   waivers: z.array(z.object({ key: z.string(), text: z.string(), at: z.string() })).default([]),
   /** The version made by its first accept. */
   version: z.string().nullable().default(null),
+  /** Its second look (Thorough, a model that can see); null: none (yet). */
+  look: OptionLook.nullable().default(null),
   /**
    * While it runs: where to carry on from (an older build leaves it out). One that can't be
    * read is dropped, never the proposal with it: the card is then today's stopped one.
