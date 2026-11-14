@@ -1,3 +1,4 @@
+import { AiError, PROVIDERS } from '@dhd/ai';
 import {
   type LayoutOp,
   type Level,
@@ -13,9 +14,8 @@ import { changeText } from '../ui/Renovation';
 import { icons } from '../ui/icons';
 import { AiSettingsDialog } from './AiSettingsDialog';
 import { MiniLayout } from './MiniLayout';
-import { PROVIDERS, useAi } from './credentials';
+import { useAi } from './credentials';
 import { type Brief, WISHES, suggestLayouts } from './layouts';
-import { AiError } from './providers';
 
 interface Option {
   name: string;

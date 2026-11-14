@@ -1,7 +1,16 @@
 import { type Price, priceOf, tokensOf, usdOf } from '@dhd/core';
-import { type AiSettings, PROVIDERS } from '../credentials';
-import { anySignal, failure } from '../providers';
-import { type Effort, HttpFail, type StepSink, type StreamHooks, newSink } from './stream';
+import { anySignal, failure } from './errors';
+import type { Page } from './page';
+import { type AiSettings, PROVIDERS } from './providers';
+import {
+  type Effort,
+  HttpFail,
+  type StepSink,
+  type StreamHooks,
+  UNPRICED,
+  effortBelow,
+  newSink,
+} from './stream';
 
 /**
  * One request to the person's provider, with the runner's rules for when it goes wrong
@@ -32,7 +41,6 @@ export const AWAY_MS = 10 * 60_000;
  * prompt again, so a third cut-off interrupts the run (its card asks before more is spent).
  */
 export const RESENDS = 2;
-const LOWER: Record<Effort, Effort | null> = { high: 'medium', medium: 'low', low: null };
 const ABORT_TEXT = 'Stopped.';
 
 export class Stopped extends Error {}
@@ -49,25 +57,32 @@ export class Interrupted extends Error {
 }
 
 /**
- * When the page last went out of view (ms since the epoch), and how long it was away the last
- * time it came back, for the document watched.
+ * When a page last went out of view (ms since the epoch), and how long it was away the last
+ * time it came back: watched from its first request on. A server has no page, never away.
  */
-let watched: Document | null = null;
-let hiddenAt = Number.NEGATIVE_INFINITY;
-let awayFor = 0;
-const isHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
-function watchPage() {
-  if (typeof document === 'undefined' || watched === document) return;
-  watched = document;
-  hiddenAt = isHidden() ? Date.now() : Number.NEGATIVE_INFINITY;
-  awayFor = 0;
-  document.addEventListener('visibilitychange', () => {
-    if (isHidden()) hiddenAt = Date.now();
-    else awayFor = Date.now() - hiddenAt;
+interface Away {
+  hiddenAt: number;
+  awayFor: number;
+}
+const watched = new WeakMap<Page, Away>();
+const NEVER_AWAY: Readonly<Away> = { hiddenAt: Number.NEGATIVE_INFINITY, awayFor: 0 };
+function watchPage(page: Page | undefined): Readonly<Away> {
+  if (!page) return NEVER_AWAY;
+  const known = watched.get(page);
+  if (known) return known;
+  const away: Away = {
+    hiddenAt: page.hidden() ? Date.now() : Number.NEGATIVE_INFINITY,
+    awayFor: 0,
+  };
+  watched.set(page, away);
+  page.onVisibility(() => {
+    if (page.hidden()) away.hiddenAt = Date.now();
+    else away.awayFor = Date.now() - away.hiddenAt;
   });
+  return away;
 }
 export interface Halt {
-  kind: 'quota' | 'key' | 'offline' | 'network';
+  kind: 'quota' | 'key' | 'offline' | 'network' | 'unpriced';
   message: string;
 }
 export class Halted extends Error {
@@ -80,16 +95,14 @@ export class Halted extends Error {
  * Resolves once the page is in view and online (a phone suspends a hidden tab's requests,
  * so trying while it is hidden only fails again), or after BACK_MS.
  */
-function backOnline(signal: AbortSignal, limit = BACK_MS): Promise<void> {
-  const ready = () =>
-    (typeof document === 'undefined' || document.visibilityState !== 'hidden') &&
-    (typeof navigator === 'undefined' || navigator.onLine !== false);
-  if (ready()) return Promise.resolve();
+function backOnline(page: Page | undefined, signal: AbortSignal, limit = BACK_MS): Promise<void> {
+  const ready = () => !page || (!page.hidden() && !page.offline());
+  if (!page || ready()) return Promise.resolve();
   return new Promise((resolve) => {
     const done = () => {
       clearTimeout(timer);
-      document.removeEventListener('visibilitychange', check);
-      window.removeEventListener('online', check);
+      stopVisibility();
+      stopOnline();
       signal.removeEventListener('abort', done);
       resolve();
     };
@@ -98,8 +111,8 @@ function backOnline(signal: AbortSignal, limit = BACK_MS): Promise<void> {
     };
     // (A delay past 2^31 ms fires at once: no limit means no timer.)
     const timer = Number.isFinite(limit) ? setTimeout(done, limit) : undefined;
-    document.addEventListener('visibilitychange', check);
-    window.addEventListener('online', check);
+    const stopVisibility = page.onVisibility(check);
+    const stopOnline = page.onOnline(check);
     signal.addEventListener('abort', done);
   });
 }
@@ -159,6 +172,8 @@ export function classify(
 }
 
 /** A request's progress as shown: a design step's row, or a talk call's status line. */
+export type FailReason = 'length' | 'unreadable' | 'refused' | 'busy' | 'network' | 'limit';
+
 export interface RequestState {
   label: string;
   status: 'waiting' | 'running' | 'done' | 'failed' | 'cancelled' | 'skipped';
@@ -174,6 +189,11 @@ export interface RequestState {
   } | null;
   retries: number;
   cutOffHigh: number | null;
+  /**
+   * Why it failed, when it did: the answer was cut off at the length limit, couldn't be read,
+   * was declined, the provider kept it waiting or failed, or it may not go again (the limit).
+   */
+  failed?: FailReason;
   /** This request's sends again after the page came back (a locked phone): not a retry. */
   resent?: number;
   /** The row's sends again, across its requests (its fix rounds too): never reset. */
@@ -183,10 +203,17 @@ export interface RequestState {
 export interface RequestOptions<T> {
   ai: AiSettings;
   signal: AbortSignal;
+  /** The browser page it runs in (out of view, offline); none on a server. */
+  page?: Page;
   prices?: Record<string, Price>;
   /** Sends one attempt, streaming into `sink`. */
   send: (effort: Effort, sink: StepSink, signal: AbortSignal, hooks: StreamHooks) => Promise<void>;
   effort: Effort;
+  /**
+   * The effort an answer cut off at its limit is asked for again at, once, or null for none
+   * (`lowerEffort` on the request: one that really thinks less). One step down by default.
+   */
+  lower?: (effort: Effort) => Effort | null;
   /** The prompt's length and the answer's limit (what a cut-off attempt may still be billed). */
   promptChars: number;
   maxTokens: number;
@@ -222,15 +249,21 @@ export interface RequestOptions<T> {
 /** One request, retried as the rules say: its answer, or null when it failed (`st.error`). */
 export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
   const { ai, st } = o;
+  // No figure, no request: whatever the caller checked, a model with no price never sends one
+  // (what it spent could be neither shown nor held to the figure and the tab's limit).
+  if (!priceOf(ai.model, o.prices)) throw new Halted({ kind: 'unpriced', message: UNPRICED });
   const name = PROVIDERS[ai.provider].short;
-  watchPage();
+  const page = o.page;
+  const away = watchPage(page);
+  const isHidden = () => !!page?.hidden();
   // This request's own count (a row's fix round is a request of its own: timed apart); the
   // row's total, which the cap counts, goes on.
   st.resent = 0;
   const throttle = o.throttle ?? { last: 0 };
-  const fail = (text: string): null => {
+  const fail = (text: string, why: FailReason): null => {
     st.status = 'failed';
     st.error = text;
+    st.failed = why;
     st.thinking = '';
     st.wait = null;
     o.update();
@@ -243,13 +276,14 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
   let unreadable = 0;
   let long = 0;
   let attempt = 0;
+  st.failed = undefined;
   for (;;) {
     if (o.signal.aborted) throw new Stopped(ABORT_TEXT);
     const no = attempt++ > 0 ? (o.mayRetry?.() ?? null) : null;
     // A design run's step isn't failed for it (it would never be asked for again): the run is
     // interrupted with the step left to do, and its card asks.
     if (no && o.resumeOnReturn) throw new Interrupted('limit');
-    if (no) return fail(`${st.label}: ${no}`);
+    if (no) return fail(`${st.label}: ${no}`, 'limit');
     const ctrl = new AbortController();
     const signal = anySignal([o.signal, ctrl.signal]);
     let quiet = false;
@@ -316,12 +350,12 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
       // Cut off while out of view (a locked phone, another app; a stream that went quiet
       // meanwhile too): not a bad connection. Once the page is back and online it goes again
       // at once, as often as that happens.
-      if (o.resumeOnReturn && !(error instanceof HttpFail) && (isHidden() || hiddenAt >= t0)) {
+      if (o.resumeOnReturn && !(error instanceof HttpFail) && (isHidden() || away.hiddenAt >= t0)) {
         st.wait = { seconds: 0, attempt: 0, away: true };
         o.update();
-        await backOnline(o.signal, Number.POSITIVE_INFINITY);
+        await backOnline(page, o.signal, Number.POSITIVE_INFINITY);
         if (o.signal.aborted) throw new Stopped(ABORT_TEXT);
-        if (awayFor > AWAY_MS) throw new Interrupted('away');
+        if (away.awayFor > AWAY_MS) throw new Interrupted('away');
         if ((st.resentAll ?? 0) >= RESENDS) throw new Interrupted('resent');
         if (o.mayRetry?.()) throw new Interrupted('limit');
         st.resent = (st.resent ?? 0) + 1;
@@ -330,7 +364,7 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
         o.onResent?.();
         continue;
       }
-      if (quiet) return fail(`${st.label}: the model went quiet for two minutes.`);
+      if (quiet) return fail(`${st.label}: the model went quiet for two minutes.`, 'network');
       if (error instanceof HttpFail) {
         const kind = classify(ai, error);
         const said = failure(ai.provider, error.status, error.body, ai.key);
@@ -355,7 +389,7 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
             }
             continue;
           }
-          return fail(`${st.label}: ${name} is still limiting requests from your key.`);
+          return fail(`${st.label}: ${name} is still limiting requests from your key.`, 'busy');
         }
         if (kind === 'server' && server < 1) {
           server++;
@@ -368,7 +402,7 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
           }
           continue;
         }
-        return fail(`${st.label}: ${said.message}`);
+        return fail(`${st.label}: ${said.message}`, 'network');
       }
       // The connection dropped (a phone locked, a blip): once back in view and online,
       // try again a couple of times before stopping.
@@ -378,7 +412,7 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
         st.retries++;
         st.wait = { seconds, attempt: net, net: true };
         o.update();
-        await backOnline(o.signal);
+        await backOnline(page, o.signal);
         for (let s = seconds; s > 0; s--) {
           st.wait = { seconds: s, attempt: net, net: true };
           o.update();
@@ -386,22 +420,24 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
         }
         continue;
       }
-      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      const offline = !!page?.offline();
       throw new Halted({
         kind: offline ? 'offline' : 'network',
         message: offline ? 'You’re offline.' : `Couldn’t reach ${name}, even after trying again.`,
       });
     }
-    if (sink.stop === 'refusal') return fail(`${st.label}: the model declined this request.`);
+    if (sink.stop === 'refusal') {
+      return fail(`${st.label}: the model declined this request.`, 'refused');
+    }
     if (sink.stop === 'length') {
-      const lower = LOWER[effort];
+      const lower = (o.lower ?? effortBelow)(effort);
       if (long < 1 && lower) {
         long++;
         st.retries++;
         effort = lower;
         continue;
       }
-      return fail(`${st.label}: the answer was too long for one step.`);
+      return fail(`${st.label}: the answer was too long for one step.`, 'length');
     }
     const value = o.parse(sink.text);
     if (value === null) {
@@ -410,7 +446,7 @@ export async function requestStep<T>(o: RequestOptions<T>): Promise<T | null> {
         st.retries++;
         continue;
       }
-      return fail(`${st.label}: the model’s answer couldn’t be read.`);
+      return fail(`${st.label}: the model’s answer couldn’t be read.`, 'unreadable');
     }
     st.status = 'done';
     st.thinking = '';

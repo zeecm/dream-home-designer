@@ -5,17 +5,19 @@ import {
   type TalkPrompt,
   type TalkReply,
   type Usage,
+  filterClaims,
+  meteredPrice,
   parseTalkReply,
   partialTalk,
-  priceOf,
   talkChars,
   tokensOf,
   usageOf,
   usdOf,
 } from '@dhd/core';
-import type { AiSettings } from '../../credentials';
-import { type Halt, Halted, type RequestState, Stopped, requestStep } from '../request';
-import { streamRequest, talkRequestFor } from '../stream';
+import type { Page } from './page';
+import type { AiSettings } from './providers';
+import { type Halt, Halted, type RequestState, Stopped, requestStep } from './request';
+import { lowerEffort, streamRequest, talkRequestFor } from './stream';
 
 /**
  * One talk call (tech §2.8): sent with the runner's retry rules, its text read as it streams
@@ -29,6 +31,8 @@ export interface TalkCallOptions {
   prompt: TalkPrompt;
   parseCtx: TalkParseContext;
   signal: AbortSignal;
+  /** The browser page it runs in (a dropped connection is tried again once it is back). */
+  page?: Page;
   prices?: Record<string, Price>;
   fetch?: typeof fetch;
   /** The reply's words so far (and its kind once known), at most every `paintMs`. */
@@ -79,10 +83,19 @@ export async function talkCall(o: TalkCallOptions): Promise<TalkCallResult> {
     const value = await requestStep({
       ai,
       signal: o.signal,
+      ...(o.page ? { page: o.page } : {}),
       ...(o.prices ? { prices: o.prices } : {}),
       send: (effort, sink, signal, hooks) =>
-        streamRequest(ai, talkRequestFor(ai, prompt, effort), sink, signal, hooks, o.fetch),
+        streamRequest(
+          ai,
+          talkRequestFor(ai, prompt, effort, { browser: !!o.page }),
+          sink,
+          signal,
+          hooks,
+          o.fetch,
+        ),
       effort: prompt.effort,
+      lower: (e) => lowerEffort(ai, e, (x) => talkRequestFor(ai, prompt, x)),
       promptChars: chars.all,
       maxTokens: prompt.maxTokens,
       st,
@@ -101,7 +114,7 @@ export async function talkCall(o: TalkCallOptions): Promise<TalkCallResult> {
         if (!finished) {
           // Cut off before its usage came: what streamed, counted from its characters.
           const output = Math.max(u.output, tokensOf(outputChars));
-          const price = priceOf(u.model, o.prices);
+          const price = meteredPrice(u.model, ai.model, o.prices);
           u = { ...u, output, estimated: true, usd: price ? usdOf({ ...u, output }, price) : null };
         }
         usage.push(u);
@@ -133,13 +146,15 @@ export async function talkCall(o: TalkCallOptions): Promise<TalkCallResult> {
     read = value;
   } catch (e) {
     settle();
-    const say = partialTalk(text).say ?? '';
+    // What streamed is kept as far as it went: filtered as the final reply is (never while
+    // streaming, where the text is always a prefix of the final one).
+    const say = filterClaims(partialTalk(text).say ?? '').say;
     if (e instanceof Stopped) return { status: 'stopped', usage, say };
     if (e instanceof Halted) return { status: 'halted', halt: e.halt, usage, say };
     return { status: 'failed', error: 'Something went wrong.', usage, say };
   }
   settle();
-  const say = partialTalk(text).say ?? '';
+  const say = filterClaims(partialTalk(text).say ?? '').say;
   if (!read) {
     return {
       status: 'failed',

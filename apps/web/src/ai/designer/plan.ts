@@ -1,3 +1,4 @@
+import type { AiSettings } from '@dhd/ai';
 import {
   type DesignBrief,
   type Price,
@@ -5,7 +6,6 @@ import {
   type StepPrompt,
   estimateRun,
 } from '@dhd/core';
-import type { AiSettings } from '../credentials';
 
 /**
  * What a run will cost on the person's key. Working out what it asks for (the level a design

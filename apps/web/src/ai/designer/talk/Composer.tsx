@@ -10,9 +10,8 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAi } from '../../credentials';
 import { useResultsTickN } from '../results';
-import { capUsd, spent, tokens, usd, useSpend } from '../spend';
+import { cannotDesign, capUsd, spent, tokens, usd, useSpend } from '../spend';
 import { useDesigner } from '../state';
-import { designerCannotUse } from '../stream';
 import { PointerChips } from './Chips';
 import { usePointerUi } from './pointers';
 import { pressScope, scopePrice, stopTalkRun } from './propose';
@@ -216,7 +215,7 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
         ].slice(0, 6)
       : [];
   const elsewhere = !!pendingReply(conv) && !replying;
-  const cant = ai ? designerCannotUse(ai) : null;
+  const cant = ai ? cannotDesign(ai) : null;
   const cap = capUsd();
   const passes = !!est && talkAsks(est, spent().usd, cap);
   // Its usual figure fits the limit, only its most doesn't: Send anyway, never a dead end (P2-6).

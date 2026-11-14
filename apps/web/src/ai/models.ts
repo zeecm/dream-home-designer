@@ -1,5 +1,15 @@
-import { type AiSettings, CURATED, MODEL_NAMES, PROVIDERS, type Provider } from './credentials';
-import { AiError, anySignal, errorBody, failure, timeoutSignal } from './providers';
+import {
+  AiError,
+  type AiSettings,
+  PROVIDERS,
+  type Provider,
+  anySignal,
+  errorBody,
+  failure,
+} from '@dhd/ai';
+import { PRICES, type Price, priceOf } from '@dhd/core';
+import { CURATED, MODEL_NAMES } from './credentials';
+import { timeoutSignal } from './providers';
 
 /** A model to choose: its id exactly as the provider lists it, and a name to show. */
 export interface ModelOption {
@@ -161,6 +171,13 @@ export function parseAnthropic(body: unknown): ModelLists {
   return { text: tidy(text), image: [] };
 }
 
+/**
+ * What a model for plans with no price says in its list ("no price yet"): the designer refuses
+ * it until it has one (listed, or the person's own).
+ */
+export const unpricedNote = (id: string, prices: Record<string, Price> = PRICES) =>
+  priceOf(id, prices) ? undefined : 'no price yet';
+
 /** The built-in lists, for when the provider's can't be had. */
 export function curated(p: Provider): ModelLists {
   const opt = (id: string) => ({ id, name: modelName(id) });
@@ -170,13 +187,17 @@ export function curated(p: Provider): ModelLists {
 /**
  * The model to suggest from those listed: the provider's default when listed (for pictures,
  * the cheaper gemini-2.5-flash-image and gpt-image-1: every render costs); for Gemini's
- * plans, the best Pro; otherwise the best listed.
+ * plans, the best Pro; otherwise the best listed. For plans, only a model with a price (the
+ * designer refuses one without) unless none has one.
  */
 export function recommended(
   p: Provider,
   kind: keyof ModelLists,
-  ids: string[],
+  listed: string[],
+  prices: Record<string, Price> = PRICES,
 ): string | undefined {
+  const priced = kind === 'text' ? listed.filter((id) => priceOf(id, prices)) : listed;
+  const ids = priced.length ? priced : listed;
   if (p === 'gemini' && kind === 'text') {
     return ids.find((id) => rank(id).tier === 0 && !SNAPSHOT.test(id)) ?? ids[0];
   }

@@ -1,16 +1,8 @@
-import concept from '../../../../../../packages/core/src/designer/fixtures/concept.json' with {
-  type: 'json',
-};
-import bedroom from '../../../../../../packages/core/src/designer/fixtures/room-bedroom.json' with {
-  type: 'json',
-};
-import kitchen from '../../../../../../packages/core/src/designer/fixtures/room-kitchen.json' with {
-  type: 'json',
-};
-import living from '../../../../../../packages/core/src/designer/fixtures/room-living.json' with {
-  type: 'json',
-};
-import mainBedroom from '../../../../../../packages/core/src/designer/fixtures/room-main-bedroom.json' with {
+import concept from '../../../core/src/designer/fixtures/concept.json' with { type: 'json' };
+import bedroom from '../../../core/src/designer/fixtures/room-bedroom.json' with { type: 'json' };
+import kitchen from '../../../core/src/designer/fixtures/room-kitchen.json' with { type: 'json' };
+import living from '../../../core/src/designer/fixtures/room-living.json' with { type: 'json' };
+import mainBedroom from '../../../core/src/designer/fixtures/room-main-bedroom.json' with {
   type: 'json',
 };
 

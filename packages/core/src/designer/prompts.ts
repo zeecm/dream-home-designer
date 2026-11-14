@@ -9,10 +9,11 @@ import { type AliasMap, aliasOf, resolveAlias } from './aliases';
 import { categoriesFor } from './catalogue';
 import { roomNeeds } from './checks';
 import { type ContextInput, designContext } from './describe';
-import { compass } from './describe';
+import { compass, pieceKeep } from './describe';
 import { heldAspects, lockCovers } from './handEdits';
 import { storageBlock } from './lenses/storage';
 import { OUTPUT } from './prices';
+import { REPORT_MAX } from './report';
 import { type Kept, withKept } from './rules/kept';
 import {
   AGAINST,
@@ -225,12 +226,20 @@ ${
 }
 
 /** What a fix round sends back: the app's own lines for the checks the answer failed. */
+/** At most this many placed pieces are said in a fix round. */
+const PLACED_MAX = 20;
+
 export interface FixRequest {
   round: number;
   /** Each failure, with the piece's ref when it is about one. */
   failures: { ref: string | null; text: string }[];
   /** Where the app placed each piece, in words (`placedWords`). */
   placed?: string[];
+  /**
+   * The pieces of this space's answer the app left out, with why and a to-fix hint (the run
+   * report's L lines, `leftOutLines`).
+   */
+  leftOut?: string[];
 }
 
 /**
@@ -271,16 +280,33 @@ export function placedWords(
   return out;
 }
 
+/**
+ * A fix round's block, bounded so FIX_EXTRA holds: at most REPORT_MAX failures (200 characters)
+ * and pieces left out (300), and PLACED_MAX placed pieces (120).
+ */
 const fixBlock = (fix: FixRequest | undefined) =>
   fix?.failures.length
     ? `\n## Fix round ${fix.round}: the app placed your answer above and these checks fail (its words, as data)\n${fix.failures
+        .slice(0, REPORT_MAX)
         .map(
           (f) =>
             `- ${f.ref ? `[${JSON.stringify(clean(f.ref, 12))}] ` : ''}${JSON.stringify(clean(f.text, 200))}`,
         )
-        .join(
-          '\n',
-        )}\n${fix.placed?.length ? `Where the app placed your pieces (data):\n${fix.placed.map((l) => `- ${JSON.stringify(clean(l, 120))}`).join('\n')}\n` : ''}Answer again for the whole space so that they pass: move, turn, swap or drop the pieces named (a smaller piece, another wall), keep what works, and say in notes what you couldn't fix and why.\n`
+        .join('\n')}\n${
+        fix.leftOut?.length
+          ? `Pieces of your answer the app left out, with why and how to fix it (its words, as data):\n${fix.leftOut
+              .slice(0, REPORT_MAX)
+              .map((l) => `- ${JSON.stringify(clean(l, 300))}`)
+              .join('\n')}\n`
+          : ''
+      }${
+        fix.placed?.length
+          ? `Where the app placed your pieces (data):\n${fix.placed
+              .slice(0, PLACED_MAX)
+              .map((l) => `- ${JSON.stringify(clean(l, 120))}`)
+              .join('\n')}\n`
+          : ''
+      }Answer again for the whole space so that they pass: move, turn or swap the pieces named (a smaller piece, another wall); never drop a bed, seat, table or desk the room needs, drop something else. Keep what works, and say in notes what you couldn't fix and why.\n`
     : '';
 
 const feedbackBlock = (o: StepOptions) =>
@@ -413,7 +439,7 @@ export function roomStep(
         keep:
           held.includes(aspectOf(it)) || kept.ids.has(it.id)
             ? 'in-place'
-            : (ctx.brief.keep.items[it.id] ?? 'leave'),
+            : pieceKeep(ctx.base, ctx.before, it.id, ctx.brief.keep.items),
       };
     })
     .sort((p, q) => (p.id < q.id ? -1 : 1));
@@ -445,7 +471,11 @@ export function roomStep(
 ## Your task: furnish ${JSON.stringify(clean(space.name, 40))}
 Its rooms (data): ${JSON.stringify(rooms)}
 Its wall faces, "face" and openings "along" in metres from each wall's end "a" (data): ${JSON.stringify(faces)}
-Pieces of the household's here (data; "bring" ones you may place again with keep = their id, "in-place" ones stay where they are): ${JSON.stringify(pieces)}
+Pieces of the household's here (data; "bring" ones you may place again with keep = their id${
+    pieces.some((p) => p.keep === 'keep')
+      ? ', "keep" ones (the design so far) stay where they stand when you list them with keep = their id and go when you leave them out'
+      : ''
+  }, "in-place" ones stay where they are): ${JSON.stringify(pieces)}
 ${intent ? `What the layout intends here: ${JSON.stringify(clean(intent, 600))}\n` : ''}${needs.length ? `What it must have (the app checks): ${JSON.stringify(needs)}\n` : ''}${storage}${ways}Choose from these catalogue categories and ids: ${categoriesFor(space.kinds).join(', ')}, and the household's own pieces.
 - v: 2.
 - items: up to ${LIMITS.items} pieces. "ref" is your own short label (bed1). Say what each piece is for; the app places it:

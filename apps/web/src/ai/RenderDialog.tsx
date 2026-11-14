@@ -1,3 +1,4 @@
+import { AiError, PROVIDERS } from '@dhd/ai';
 import {
   OVERHEAD_HEIGHT,
   type SceneCamera,
@@ -13,8 +14,7 @@ import { capture3dFrom, capture3dView, download, fileStem, view3dCamera } from '
 import { useLevel, useProject } from '../store';
 import { icons } from '../ui/icons';
 import { AiSettingsDialog } from './AiSettingsDialog';
-import { PROVIDERS, imageSettings, useAi } from './credentials';
-import { AiError } from './providers';
+import { imageSettings, useAi } from './credentials';
 import { MAX_IDEAS, RENDER_STYLES, type RenderStyle, planImage, renderPhoto } from './render';
 
 const STYLE_NAMES: Record<RenderStyle, string> = {

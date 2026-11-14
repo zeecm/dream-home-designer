@@ -323,7 +323,10 @@ const spaceSchemas = (ctx: Ctx) => {
   const Item = z.object({
     ref: text(ctx, LIMITS.ref),
     assetId: text(ctx, 80),
-    /** A piece of the flat's (its alias, P3) the brief brings along. */
+    /**
+     * A piece of the level designed (its alias, P3): on the flat as it is, one the brief brings
+     * along; on After, one of the design so far, kept where it stands.
+     */
     keep: alias(ctx).nullable(),
     /** A wall of the space (W4) it backs onto. */
     wall: alias(ctx).nullable(),
@@ -397,6 +400,23 @@ export function parseSpaceDesign(raw: unknown, bounds: Bounds | null): ParseResu
 }
 
 // ------------------------------------------------------------------------------ versions
+
+/**
+ * How one fix round of a space ended, with its hard failures before and after (the space
+ * alone): `fixed` (fewer, its answer used), `no-better` (not used), `cut-off` (the answer was
+ * cut off at the length limit, not used), `failed` (no readable answer came), `refused` (the
+ * model declined it), `error` (the request didn't go through: busy, a network or provider
+ * failure, or no room left to send it again), or `no-fixups`
+ * (not sent: the run's fix-ups were used up). New within the record's version: optional, and
+ * read tolerantly (an older build drops it; only the card's fix line loses its detail).
+ */
+export const FixRound = z.object({
+  outcome: z.enum(['fixed', 'no-better', 'cut-off', 'failed', 'refused', 'error', 'no-fixups']),
+  before: z.number().int().min(0),
+  after: z.number().int().min(0),
+});
+export type FixRound = z.infer<typeof FixRound>;
+export const FixRounds = z.array(FixRound).max(12).optional().catch(undefined);
 
 export const Provider = z.enum(['anthropic', 'openai', 'gemini']);
 export type Provider = z.infer<typeof Provider>;
@@ -518,6 +538,7 @@ export const Design = z.object({
       /** Fix rounds its answer took (sent back with the checks it failed), and what they fixed. */
       fixes: z.number().int().min(0).optional(),
       fixed: z.number().int().min(0).optional(),
+      rounds: FixRounds,
     }),
   ),
   usage: z.array(Usage),

@@ -8,7 +8,17 @@ import {
   levelFingerprint,
   parseSpaceDesign,
 } from '@dhd/core';
+import { answerFor, promptOf } from '../../../packages/ai/src/fixtures/sample';
+import {
+  type FixtureUsage,
+  anthropicStream,
+  geminiStream,
+  openaiStream,
+} from '../../../packages/ai/src/fixtures/streams';
 import living from '../../../packages/core/src/designer/fixtures/room-living.json' with {
+  type: 'json',
+};
+import mainBedroom from '../../../packages/core/src/designer/fixtures/room-main-bedroom.json' with {
   type: 'json',
 };
 import {
@@ -23,13 +33,6 @@ import {
   REPLY_WISH,
   ruleReply,
 } from '../../../packages/core/src/designer/talk/fixtures/rule-wordings';
-import { answerFor, promptOf } from '../src/ai/designer/fixtures/sample';
-import {
-  type FixtureUsage,
-  anthropicStream,
-  geminiStream,
-  openaiStream,
-} from '../src/ai/designer/fixtures/streams';
 import { waitSaved } from './helpers';
 import { type Page, type Route, devices, expect, test } from './test';
 
@@ -65,6 +68,8 @@ interface Call {
   provider: P;
   step: string;
   body: string;
+  /** Claude's browser header, as sent (a server run sends none; this browser must). */
+  browser: string | null;
 }
 
 /**
@@ -117,7 +122,8 @@ async function mock(
         unanswered.push(req.url());
         return route.abort('failed');
       }
-      const call = { provider: p, step: a.step, body: raw };
+      const browser = req.headers()['anthropic-dangerous-direct-browser-access'] ?? null;
+      const call = { provider: p, step: a.step, body: raw, browser };
       const sent = a.step === 'look' ? looks : calls;
       sent.push(call);
       const custom = opts.reply?.(call, sent.filter((c) => c.step === call.step).length);
@@ -539,6 +545,44 @@ test.describe('desktop', () => {
     expect(m.calls.length).toBeGreaterThan(0);
     expect(m.looks).toHaveLength(0);
     await expect(card(page, 1).locator('[data-look]')).toHaveCount(0);
+  });
+
+  test('the second look: a model that can’t see says so, before and after (QA M2)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    // An OpenAI model that reads no pictures, with the person's own price for it (no figure,
+    // no run).
+    await setup(page, 'openai', {
+      'dhd-ai-prices': JSON.stringify({
+        'gpt-4.1': { input: 2, cachedInput: 0.5, cacheWrite: null, output: 8 },
+      }),
+    });
+    await page.addInitScript((k) => {
+      window.sessionStorage.setItem(
+        'dhd-ai',
+        JSON.stringify({ active: 'openai', keys: { openai: { key: k, model: 'gpt-4.1' } } }),
+      );
+    }, KEYS.openai.key);
+    const m = await mock(page);
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await panel(page)
+      .getByRole('button', { name: /^(Main|Master) bedroom · about / })
+      .click();
+    const noLook = 'This model can’t look at pictures, so there’s no second look.';
+    await expect(panel(page).getByText(/and a second look at the result/)).toHaveCount(0);
+    await expect(panel(page).getByText(noLook)).toBeVisible();
+    await panel(page)
+      .getByRole('button', { name: /^Go ahead/ })
+      .first()
+      .click();
+    await expect(card(page, 1).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    expect(m.looks).toHaveLength(0);
+    await expect(card(page, 1).locator('[data-look]')).toContainText(noLook);
   });
 
   test('the storage lens: the meter’s own household wins once set there (3b)', async ({ page }) => {
@@ -1456,6 +1500,8 @@ test.describe('talking to the designer (slice 2, PR 2)', () => {
       timeout: 30_000,
     });
     expect(m.calls.map((c) => c.step)).toEqual(['talk', 'furnish "Living']);
+    // From this browser, Claude is told so: the talk reply and the design run alike.
+    expect(m.calls.map((c) => c.browser)).toEqual(['true', 'true']);
     // The run carries the designer's plan and the household's words (the talk block).
     expect(m.calls[1]?.body).toContain('What this proposal is for');
     expect(m.calls[1]?.body).toContain('Sofa on the wall facing the TV');
@@ -1473,6 +1519,113 @@ test.describe('talking to the designer (slice 2, PR 2)', () => {
         .map((c) => c.step)
         .sort(),
     ).toEqual(['furnish "Living', 'furnish "Main bedroom"'].sort());
+  });
+
+  test('designer listens (A): a bed left out is named on the card and told to the designer; “I can’t check” is taken out; the plan says what it fixes (2, 6, 7, 8, 10)', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    // The owner's V6: the bed kept as a piece the plan doesn't have, so the app leaves it out.
+    // The fix round gives the same answer back; the third answer (after the plan) is right.
+    const noBed = {
+      ...mainBedroom,
+      items: mainBedroom.items.map((i) => (i.ref === 'bed1' ? { ...i, keep: 'P99' } : i)),
+    };
+    const main = (c: Call) => /furnish "(Main|Master) bedroom"/.test(c.step);
+    const claim = {
+      ...REPLY_TEXT,
+      say: "I don't have the ability to run the checks. I'll add the bed.",
+    };
+    const plan = {
+      ...REPLY_PLAN,
+      say: 'I’ll put the queen bed back against the long wall.',
+      plan: {
+        ...REPLY_PLAN.plan,
+        title: 'The queen bed back',
+        rooms: ['R2'],
+        options: [{ name: 'A', intent: 'A new queen bed against the long wall.' }],
+        assumptions: [],
+        addresses: [{ id: 'F1', change: 'a queen bed against the long wall' }],
+      },
+    };
+    const m = await mock(page, {
+      talk: [claim, plan],
+      reply: (c, n) =>
+        main(c) && n <= 2
+          ? {
+              status: 200,
+              body: anthropicStream(noBed, USAGE),
+              headers: { 'content-type': 'text/event-stream' },
+            }
+          : null,
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // 8 and the card bug: the count is named, in their names, the fix round said. The couple
+    // without a bed for one reason is one line, counted once, on the card and the bar alike.
+    const lead = v1.locator('[data-lead]');
+    await expect(lead).toContainText(
+      'Sent back to be fixed once. The answer was no better, so the first design is shown. 1 still doesn’t pass:',
+    );
+    await expect(lead.locator('.talk-check-count')).toHaveText('1 still doesn’t pass:');
+    await expect(lead).toContainText(/You and Partner have no bed in (Main|Master) bedroom/);
+    await expect(lead).toContainText(
+      'The designer’s answer used a queen bed that isn’t in your plan, so the app left it out.',
+    );
+    await expect(lead).not.toContainText(/Adult \d|\bP99\b|\b[WR]\d+\b/);
+    await expect(v1.locator('.talk-lens')).toContainText('1 doesn’t pass · listed above');
+    await expect(panel(page).getByRole('region', { name: 'On the table' })).toContainText(
+      '1 doesn’t pass',
+    );
+    // 4: the fix round was told why the bed went, and how to fix it.
+    const fixBody = promptOf(JSON.parse(m.calls.filter(main)[1]?.body ?? '{}'));
+    expect(fixBody).toContain('L1 left out');
+    expect(fixBody).toContain('there’s no piece “P99” in the flat');
+    expect(fixBody).toContain('with keep: null');
+    await shot(page, 'listens-card');
+
+    // 2 and 10: the next talk request carries the F line and the drop reason.
+    await send(page, 'Where is the bed?');
+    await expect(log(page).getByText("I'll add the bed.", { exact: true })).toBeVisible();
+    await expect(log(page)).not.toContainText('ability to run');
+    const talkBody = promptOf(
+      JSON.parse(m.calls.filter((c) => c.step === 'talk')[0]?.body ?? '{}'),
+    );
+    const table = talkBody.slice(talkBody.indexOf('## On the table (data)'));
+    expect(table).toMatch(
+      /F1 doesn’t pass · (Main|Master) bedroom \(R2\): Adult 1 and Adult 2 have no bed/,
+    );
+    expect(table).toContain('L1 left out');
+    expect(table).toContain('there’s no piece “P99” in the flat');
+    expect(talkBody).toMatch(/designed; 1 doesn’t pass, 1 piece left out\./);
+    expect(talkBody).not.toContain('not you, says whether something passes');
+
+    // 7: a plan that says what it fixes: "For “…”: …" under it, and the next card checks it.
+    await send(page, 'Put the bed back, please.');
+    await expect(log(page)).toContainText(
+      /For “You and Partner have no bed in (Main|Master) bedroom”: a queen bed against the long wall\./,
+    );
+    // Priced first: run at once, or asked on a cost card.
+    const go = panel(page).getByRole('button', { name: /^Go ahead( anyway)? · about US\$/ });
+    const v2 = card(page, 2);
+    await expect(go.or(v2).first()).toBeVisible();
+    if (await go.isVisible()) await go.click();
+    await expect(v2.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    const fix = v2.getByRole('region', { name: 'What this design set out to fix' });
+    await expect(fix).toContainText(
+      /Fixed: You and Partner have no bed in (Main|Master) bedroom\. The plan: a queen bed against the long wall\./,
+    );
+    await expect(fix).not.toContainText('Still doesn’t pass');
+    await shot(page, 'listens-set-out');
   });
 
   test('a question back answers free from a chip; a pushback shows the app’s own line', async ({
@@ -1966,6 +2119,91 @@ test.describe('iterating (slice 2, PR 3)', () => {
     await expect(log(page).getByText(/^You put your plan back as it was on /)).toBeVisible();
     await expect(folded).not.toContainText('In your renovation');
     await expect(folded).not.toContainText('Accepted');
+  });
+
+  test('after an Accept, a wall moved by hand into the kept bed: the bed is placed again, never removed (#66, QA H1)', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await setup(page);
+    // The Master bedroom asked again keeps every piece its prompt lists as "keep", by alias,
+    // as the owner's model did.
+    const keepAll = (c: Call) => {
+      if (!/furnish "(Main|Master) bedroom"/.test(c.step)) return null;
+      const text = promptOf(JSON.parse(c.body));
+      const line = text.split('\n').find((l) => l.startsWith("Pieces of the household's here"));
+      if (!line?.includes('"keep":"keep"')) return null;
+      const pieces = JSON.parse(line.slice(line.indexOf('): ') + 3)) as {
+        id: string;
+        kind: string;
+        keep: string;
+      }[];
+      const items = pieces
+        .filter((p) => p.keep === 'keep')
+        .map((p, i) => ({
+          ref: `p${i}`,
+          assetId: p.kind,
+          keep: p.id,
+          wall: null,
+          along: null,
+          at: null,
+          rotation: null,
+          width: null,
+          depth: null,
+          height: null,
+          why: 'Kept.',
+          against: 'wall',
+          faces: null,
+          near: null,
+          zone: null,
+        }));
+      const answer = { v: 2, items, faces: [], notes: [], summary: 'Everything kept.' };
+      return {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+        body: STREAM[c.provider](answer, USAGE),
+      };
+    };
+    await mock(page, { reply: (c) => keepAll(c) });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^The whole flat · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 60_000,
+    });
+    await v1.getByRole('button', { name: /^Accept selected/ }).click();
+    await expect(log(page).getByText(/^You accepted \d+ changes from V1\./)).toBeVisible();
+    const bed = Object.values(
+      (await saved(page)).renovation.levels[0].items as Record<
+        string,
+        { id: string; assetId: string }
+      >,
+    ).find((i) => i.assetId === 'bed-queen');
+    expect(bed).toBeTruthy();
+    // The wall between the bedrooms bent into the Master bedroom, into its bed, by hand: a
+    // double-click below the bed makes a corner there, and Shift+← moves it 0.1 m at a time.
+    const wall = page.locator('[data-hit="wall:w_bedroom_main-bedroom"]').first();
+    const w = await wall.boundingBox();
+    if (!w) throw new Error('no wall');
+    await page.mouse.dblclick(w.x + w.width / 2, w.y + w.height * 0.85);
+    for (let i = 0; i < 4; i++) await page.keyboard.press('Shift+ArrowLeft');
+    await page.keyboard.press('Escape');
+    await waitSaved(page);
+    await shot(page, 'h1-wall-bent');
+    // The rooms are as they were (the bedroom still a room of its own), its wall now bent.
+    await expect(page.getByRole('button', { name: /^Master bedroom/ })).toHaveCount(1);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    const v2 = card(page, 2);
+    await expect(v2.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 60_000,
+    });
+    await shot(page, 'h1-wall-moved-v2');
+    // The bed is still in the version: moved, never removed, and nobody is without a bed.
+    await expect(v2.getByText(/Remove the queen bed/)).toHaveCount(0);
+    await expect(v2.getByText(/^Move the queen bed/).first()).toBeVisible();
+    await expect(v2.getByText(/has no bed/)).toHaveCount(0);
   });
 
   test('Copy as text and Download conversation: the decisions, facts, accepted changes; no key', async ({

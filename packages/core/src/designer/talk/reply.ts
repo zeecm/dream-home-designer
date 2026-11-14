@@ -45,7 +45,137 @@ export const REPLY_LIMITS = {
   notes: 3,
   note: 200,
   fold: 1200,
+  addresses: 8,
+  change: 200,
 } as const;
+
+// ------------------------------------------------------------------------- the claims filter
+
+/**
+ * A first-person claim of not being able to run, see, check or verify the checks: never true
+ * (the app checks every design before it is shown, and sends failures back). Narrow on purpose:
+ * the inability must govern a checking verb ("I can't run the checks", "I'm not able to verify
+ * the design"); "fix" counts only with "before you see". "I can't fit a king bed here", "I
+ * can't see a way to fit both desks" and "I can't get both desks in without failing the
+ * checks" stay, as does an honest limit ("I can't check the beam depth from the plan").
+ */
+const CANT = new RegExp(
+  [
+    String.raw`\bI(?:\s+(?:really|simply|just))?`,
+    String.raw`(?:\s+(?:can(?:no|['’])t|cannot|can\s+not|am\s+(?:not\s+able|unable)\s+to|(?:do(?:n['’]t|\s+not)|did(?:n['’]t|\s+not))\s+have\s+(?:the\s+|any\s+)?(?:ability|means|way|tools?|power)\s+to|have\s+no\s+(?:way|ability|means)\s+to)|['’]m\s+(?:not\s+able|unable)\s+to)`,
+    String.raw`\s+(?:actually\s+|directly\s+|myself\s+|personally\s+)?(run|see|check|access|perform|verify|test|fix)\b`,
+  ].join(''),
+  'i',
+);
+/** "I don't have access to the check results." */
+const NO_ACCESS =
+  /\bI\s+(?:do(?:n['’]t|\s+not)\s+have|have\s+no)\s+(?:any\s+)?access\s+to\s+(?:the\s+|its\s+)?(?:checks?|check\s+results|results)\b/i;
+/** What a checking verb must be about to be a claim about the checks (not the lift's size). */
+const ABOUT_CHECKS =
+  /\b(?:checks|checked|checking|check\s+results|results|before\s+(?:you|they)\s+see|in\s+the\s+background)\b/i;
+/** Check, verify and test about the design itself: the checks, the layout, whether it passes. */
+const ABOUT_DESIGN =
+  /\b(?:the\s+checks?|checks|check\s+results|results|the\s+(?:design|layout|proposal)|whether\s+(?:it|they|this|that|the\s+\w+)\s+pass(?:es)?|before\s+(?:you|they)\s+see)\b/i;
+/** Or a bare "it", "them", "this" or "that" ending the sentence ("I can't check it."). */
+const BARE_OBJECT = /^\s*(?:it|them|this|that)\s*[.!?"”’)]*\s*$/i;
+const BEFORE_YOU_SEE = /\bbefore\s+(?:you|they)\s+see\b/i;
+
+/** A signature list kept within the record's 300 characters, whole signatures only. */
+function sigCut(sig: string): string {
+  let out = '';
+  for (const s of sig.split(' ')) {
+    const next = out ? `${out} ${s}` : s;
+    if (next.length > 300) break;
+    out = next;
+  }
+  return out;
+}
+
+/** Whether a sentence is a claim the filter takes out. */
+export function cantClaim(sentence: string): boolean {
+  if (NO_ACCESS.test(sentence)) return true;
+  const m = CANT.exec(sentence);
+  if (!m) return false;
+  const verb = (m[1] ?? '').toLowerCase();
+  const rest = sentence.slice(m.index + m[0].length);
+  if (verb === 'fix') return BEFORE_YOU_SEE.test(rest);
+  if (verb === 'check' || verb === 'verify' || verb === 'test') {
+    return ABOUT_DESIGN.test(rest) || BARE_OBJECT.test(rest);
+  }
+  return ABOUT_CHECKS.test(rest);
+}
+
+/** Abbreviations whose full stop doesn't end a sentence ("e.g. a 1.2 m desk"). */
+const ABBREV = /\b(?:e\.g|i\.e|etc|vs|approx|incl|cf|mr|mrs|ms|dr|st)$/i;
+
+/**
+ * A text cut into its sentences, each with what follows it up to the next (spaces, line breaks
+ * as parts of their own). A sentence ends at . ! or ? (and a closing quote or bracket) followed
+ * by a space or the end: never at a decimal point ("0.9 m") or after "e.g.".
+ */
+function sentences(text: string): string[] {
+  const out: string[] = [];
+  for (const line of text.split(/(\n+)/)) {
+    if (!line) continue;
+    if (line.startsWith('\n')) {
+      out.push(line);
+      continue;
+    }
+    let from = 0;
+    for (const m of line.matchAll(/[.!?]+["”’)]*(?=\s|$)/g)) {
+      const end = (m.index ?? 0) + m[0].length;
+      if (m[0].startsWith('.') && m[0].length === 1 && ABBREV.test(line.slice(from, m.index))) {
+        continue;
+      }
+      const ws = /^\s*/.exec(line.slice(end))?.[0] ?? '';
+      out.push(line.slice(from, end + ws.length));
+      from = end + ws.length;
+    }
+    if (from < line.length) out.push(line.slice(from));
+  }
+  return out;
+}
+
+/**
+ * The designer's words with every first-person "I can't check or fix…" sentence taken out, and
+ * how many went. Run on a reply already read as usable, so it never makes a reply unusable
+ * (and never causes a paid retry): an emptied reply is said by the app's own line.
+ */
+export function filterClaims(say: string): { say: string; removed: number } {
+  const parts = sentences(say);
+  let removed = 0;
+  const kept: string[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i] as string;
+    if (p.startsWith('\n') || !cantClaim(p)) {
+      kept.push(p);
+      continue;
+    }
+    removed++;
+    // A line of its own goes with its line break (the lines either side stay as they were).
+    const prev = kept[kept.length - 1];
+    if ((prev === undefined || prev.startsWith('\n')) && parts[i + 1]?.startsWith('\n')) i++;
+  }
+  if (!removed) return { say, removed };
+  return {
+    say: kept
+      .join('')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim(),
+    removed,
+  };
+}
+
+/**
+ * A memory note about the app, its checks or the household's mood: never kept (notes are for
+ * their ID's work the app doesn't cover). "Check beam height before hacking the wardrobe wall"
+ * and "Power point placement behind the TV console" are notes for the ID, and stay.
+ */
+export const aboutTheApp = (note: string) =>
+  /\b(?:the\s+app|this\s+app|app['’]s|the\s+checks|check\s+results|placement\s+and\s+checks|cannot\s+be\s+hidden|can['’]t\s+be\s+hidden|frustrat\w*|upset|angry|annoyed|disappoint\w*|mood)\b/i.test(
+    note,
+  );
 
 const str = { type: 'string' };
 const num = { type: 'number' };
@@ -119,6 +249,7 @@ export const TALK_SCHEMA = obj({
       aspects: arr({ type: 'string', enum: ['furniture', 'built-ins', 'finishes'] }),
       options: arr(obj({ name: str, intent: str })),
       assumptions: arr(str),
+      addresses: arr(obj({ id: str, change: str })),
     }),
   ),
   memory: obj({
@@ -168,6 +299,8 @@ export interface TalkFact {
 export interface TalkReply {
   kind: TalkKind;
   say: string;
+  /** Sentences the claims filter took out of `say` (absent: none). */
+  removed?: number;
   questions: TalkQuestion[];
   concern: {
     rule: TalkConcern['rule'];
@@ -187,8 +320,20 @@ export interface TalkReply {
   fold: string | null;
 }
 
+/** A failure or a piece left out on the table, as the reply's `addresses` may name it. */
+export interface TableEntry {
+  /** F1, L2 */
+  id: string;
+  /** The same failure across runs (the run report's signature). */
+  sig: string;
+  /** In the person's words. */
+  says: string;
+}
+
 export interface TalkParseContext {
   aliases: AliasMap;
+  /** The run report on the table when the message went (its F and L lines), if any. */
+  table?: { title: string; entries: readonly TableEntry[]; failing: number };
   /** The plan's spaces: key, name and rooms (a plan names rooms; a run asks for spaces). */
   spaces: { key: string; name: string; rooms: string[] }[];
   walls: DesignBrief['walls'];
@@ -270,6 +415,22 @@ function planOf(raw: unknown, ctx: TalkParseContext, lines: string[]): TalkPlan 
     asStr(options[0]?.intent, REPLY_LIMITS.intent) ||
     asStr(options[0]?.name, REPLY_LIMITS.intent) ||
     title;
+  // Which of the table's F and L lines it deals with: read tolerantly, unknown ids dropped.
+  const table = ctx.table;
+  const addresses = table
+    ? asList(p.addresses)
+        .map(asObj)
+        .flatMap((a) => {
+          const id = typeof a?.id === 'string' ? a.id.trim().toUpperCase() : '';
+          const e = table.entries.find((x) => x.id === id);
+          const change = asStr(a?.change, REPLY_LIMITS.change);
+          return e && change
+            ? [{ id: e.id, sig: sigCut(e.sig), says: cut(e.says, 200), change }]
+            : [];
+        })
+        .filter((a, i, all) => all.findIndex((b) => b.id === a.id) === i)
+        .slice(0, REPLY_LIMITS.addresses)
+    : [];
   return {
     title,
     scope,
@@ -279,6 +440,11 @@ function planOf(raw: unknown, ctx: TalkParseContext, lines: string[]): TalkPlan 
       .map((a) => asStr(a, REPLY_LIMITS.assumption))
       .filter(Boolean)
       .slice(0, REPLY_LIMITS.assumptions),
+    ...(addresses.length ? { addresses } : {}),
+    // A plan after a failing design that says nothing of how it fixes it: the app says so.
+    ...(table && table.failing > 0 && !addresses.length
+      ? { unaddressed: { title: cut(table.title, 12), failing: table.failing } }
+      : {}),
   };
 }
 
@@ -423,18 +589,22 @@ export function parseTalkReply(raw: unknown, ctx: TalkParseContext): TalkParse {
     .slice(0, REPLY_LIMITS.facts);
   const notes = asList(m?.notes)
     .map((n) => asStr(n, REPLY_LIMITS.note))
-    .filter(Boolean)
+    .filter((n) => n && !aboutTheApp(n))
     .slice(0, REPLY_LIMITS.notes);
   const fold = asStr(o.fold, REPLY_LIMITS.fold) || null;
   const offered = ruleFromReply(m?.rule, { aliases: ctx.aliases, mainDoor: ctx.mainDoor ?? null });
   const rule = offered && 'draft' in offered ? offered.draft : null;
   // A rule object the vocabulary can't hold: the wish in its own words, noted and not checked.
-  const unfit = offered && 'unfit' in offered ? offered.name || cut(say, 160) || null : null;
+  // Read as usable first: the filter only ever takes sentences out of a reply that is kept.
+  const filtered = filterClaims(say);
+  const unfit =
+    offered && 'unfit' in offered ? offered.name || cut(filtered.say, 160) || null : null;
   return {
     ok: true,
     reply: {
       kind,
-      say,
+      say: filtered.say,
+      ...(filtered.removed ? { removed: filtered.removed } : {}),
       questions,
       concern,
       plan,

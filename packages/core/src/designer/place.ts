@@ -93,13 +93,19 @@ export const shape = (poly: Vec2[]): Shape => ({ poly, box: boxOf(poly) });
 export interface SpaceIndex {
   rooms: { outer: Vec2[]; holes: Vec2[][] }[];
   solid: Shape[];
-  doorways: Shape[];
+  /** Each doorway's gap and its throat, by the opening's id. */
+  doorways: (Shape & { openingId: string; throat: boolean })[];
   sweeps: Shape[];
   /** In front of each window, kept clear above its sill. */
   windows: (Shape & { sill: number })[];
   placed: Placed[];
   /** Ways being kept clear (a walkway a piece narrowed). */
   keepOut: Shape[];
+  /**
+   * Openings the design adds or moves (not in the level it starts from, or not where they
+   * were): a piece kept where it stands must keep clear of their throats too.
+   */
+  fresh?: ReadonlySet<string>;
 }
 
 /** The index for a space of `level`: its rooms, and walls, windows and doors within a metre. */
@@ -129,7 +135,11 @@ export function spaceIndex(level: Level, geom: PlanGeometry, rooms: string[]): S
         x: f.a.x + f.d.x * u + f.n.x * k,
         y: f.a.y + f.d.y * u + f.n.y * k,
       });
-      return [shape(o.polygon), shape([at(u0, -v), at(u1, -v), at(u1, v), at(u0, v)])];
+      const openingId = o.opening.id;
+      return [
+        { ...shape(o.polygon), openingId, throat: false },
+        { ...shape([at(u0, -v), at(u1, -v), at(u1, v), at(u0, v)]), openingId, throat: true },
+      ];
     })
     .filter(near);
   const sweeps = Object.values(level.openings)
@@ -250,6 +260,26 @@ export function fixedHitOf(
     const high = ix.windows.filter((w) => top > w.sill - FIT.sill);
     if (hit(high, 0.01)) return { kind: 'opening', window: true };
   }
+  return null;
+}
+
+/**
+ * What stops a piece kept where it stands (Want.stays) from staying: outside the rooms, a
+ * wall, a doorway, a door's sweep, a way kept clear. Not the throat of a doorway it stood by
+ * already, as fixedHit has for a new piece (the checks judge the ways past it), but the
+ * throat of one the design adds or moves (`ix.fresh`). Not a window either.
+ */
+export function stayHit(ix: SpaceIndex, kind: FurnitureKind, fp: Vec2[]): Hit | null {
+  if (!inset(fp).every((p) => inRooms(ix, p))) return { kind: 'outside' };
+  if (!blocksFloor(kind)) return null;
+  const box = boxOf(fp);
+  const hit = (shapes: Shape[], depth: number) =>
+    shapes.some((s) => !apart(s.box, box) && overlapDepth(fp, s.poly) > depth);
+  if (hit(ix.solid, 0.01)) return { kind: 'wall' };
+  const doorways = ix.doorways.filter((d) => !d.throat || ix.fresh?.has(d.openingId));
+  if (hit(doorways, 0.01)) return { kind: 'doorway' };
+  if (hit(ix.sweeps, 0.005)) return { kind: 'door' };
+  if (hit(ix.keepOut, 0.01)) return { kind: 'keep-out' };
   return null;
 }
 
@@ -483,6 +513,12 @@ export interface Want {
   ceiling: number;
   /** A piece of the flat's own, brought along. */
   brought: Item | null;
+  /**
+   * `brought` is a piece of the renovation the design starts from (an accepted version's, or
+   * put in by hand) that the answer keeps: it stands where it is, or a few cm off, while it
+   * still fits there; only otherwise is it placed again, like a piece brought along.
+   */
+  stays?: boolean;
 }
 
 export interface PlaceOutcome {
@@ -551,11 +587,12 @@ export function placePiece(ix: SpaceIndex, want: Want): PlaceOutcome {
   const dropped: Note[] = [];
   let tries = 0;
   const note = (text: string) => ({ text, ref: want.ref, itemId: want.id });
-  const drop = (why: string): PlaceOutcome => {
+  const drop = (why: string, code: NonNullable<Note['code']>, wall?: number): PlaceOutcome => {
     const text = want.brought
       ? `Your ${want.w.toFixed(2)} m ${name} doesn’t fit here: ${why}.`
       : `Left out the ${name}: ${why}.`;
-    return { item: null, repaired, dropped: [note(text)], tries };
+    const numbers = wall === undefined ? {} : { need: want.w, longest: wall };
+    return { item: null, repaired, dropped: [{ ...note(text), code, ...numbers }], tries };
   };
   const builtIn = !!want.kind.carpentry;
 
@@ -636,15 +673,19 @@ export function placePiece(ix: SpaceIndex, want: Want): PlaceOutcome {
       addToIndex(ix, fallback.item, want.kind);
       return { item: fallback.item, repaired, dropped, tries };
     }
-    return drop(firstWhy ?? 'no wall in the room is long enough');
+    const longest = Math.max(
+      0,
+      ...faces.flatMap((f) => clearStretches(f, bottom, top).map(([a, b]) => b - a)),
+    );
+    return drop(firstWhy ?? 'no wall in the room is long enough', 'no-wall', longest);
   }
 
-  if (!want.at) return drop('it had no place');
+  if (!want.at) return drop('it had no place', 'no-place');
   const at = want.at;
-  if (!inRooms(ix, at)) return drop('it was placed outside this room');
+  if (!inRooms(ix, at)) return drop('it was placed outside this room', 'outside');
   const result = repairFree(ix, want, at);
   tries += result.tries;
-  if (!result.item) return drop(result.why);
+  if (!result.item) return drop(result.why, 'no-place');
   repaired.push(...result.notes.map(note));
   addToIndex(ix, result.item, want.kind);
   return { item: result.item, repaired, dropped, tries };

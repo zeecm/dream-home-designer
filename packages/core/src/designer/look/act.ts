@@ -46,6 +46,8 @@ export interface LookEdit {
 export interface LookRound {
   space: string;
   failures: { ref: string | null; text: string }[];
+  /** Of them, the app's own failing checks (P1–P4): what a fix round's record counts. */
+  checks: number;
 }
 
 export interface LookPlan {
@@ -102,10 +104,12 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
     targets: [],
   };
   let taste = false;
-  const round = (space: string, f: LookRound['failures'][number]) => {
+  const round = (space: string, f: LookRound['failures'][number], check: boolean) => {
     const r = plan.rounds.find((x) => x.space === space);
-    if (r) r.failures.push(f);
-    else plan.rounds.push({ space, failures: [f] });
+    if (r) {
+      r.failures.push(f);
+      if (check) r.checks++;
+    } else plan.rounds.push({ space, failures: [f], checks: check ? 1 : 0 });
   };
   /** An alias to the ref of the piece it names in a designed space's answer. */
   const refOf = (alias: string | null): string | null => {
@@ -201,7 +205,7 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
       plan.edits.push({ space, ref, suggest: s, refs, line });
     } else {
       const piece = level.items[id] ? (result.refs[id] ?? null) : null;
-      round(space, { ref: piece, text: failure });
+      round(space, { ref: piece, text: failure }, !!target);
     }
   }
   plan.notes = [...new Set(plan.notes)];

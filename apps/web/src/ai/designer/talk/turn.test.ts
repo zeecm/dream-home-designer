@@ -1,8 +1,8 @@
 import { type Level, sampleFlatProject } from '@dhd/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { create } from 'zustand';
+import { anthropicStream } from '../../../../../../packages/ai/src/fixtures/streams';
 import { REPLY_PLAN } from '../../../../../../packages/core/src/designer/talk/fixtures/replies';
-import { anthropicStream } from '../fixtures/streams';
 
 /**
  * A Send's reply under the plan's reply lock (tech-lead B1): whatever fails after the paid call
@@ -147,7 +147,7 @@ describe('another tab’s reply: never cut off by guesswork', () => {
   it('without Web Locks a recent reply is left alone; one older than any reply is cut off', async () => {
     vi.stubGlobal('navigator', { ...globalThis.navigator, onLine: true, locks: undefined });
     const { recoverPending } = await import('./turn');
-    const { QUIET_MS } = await import('../request');
+    const { QUIET_MS } = await import('@dhd/ai');
     const fresh = await waiting(1000);
     await recoverPending();
     expect(await stateOf(fresh)).toBe('pending');

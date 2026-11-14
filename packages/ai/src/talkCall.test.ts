@@ -12,10 +12,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   REPLY_PLAN as REPLY_PLAN_FIXTURE,
   REPLY_TEXT as REPLY_TEXT_FIXTURE,
-} from '../../../../../../packages/core/src/designer/talk/fixtures/replies';
-import type { AiSettings } from '../../credentials';
-import { anthropicStream } from '../fixtures/streams';
-import { NET_WAITS } from '../request';
+} from '../../core/src/designer/talk/fixtures/replies';
+import { fakePhone } from './fixtures/runner';
+import { anthropicStream } from './fixtures/streams';
+import type { AiSettings } from './providers';
+import { NET_WAITS } from './request';
+import { UNPRICED } from './stream';
 import { type TalkCallResult, talkCall } from './talkCall';
 
 const level = sampleFlatProject('prj_t').levels[0] as Level;
@@ -52,6 +54,7 @@ const parseCtx = {
 
 interface Held {
   body: Record<string, unknown>;
+  headers: Record<string, string>;
   signal: AbortSignal;
   release: () => void;
 }
@@ -71,7 +74,12 @@ function provider(
     const gate = new Promise<void>((r) => {
       release = r;
     });
-    const call: Held = { body, signal: init?.signal as AbortSignal, release };
+    const call: Held = {
+      body,
+      headers: init?.headers as Record<string, string>,
+      signal: init?.signal as AbortSignal,
+      release,
+    };
     calls.push(call);
     const custom = opts.reply?.(calls.length);
     if (custom instanceof Error) throw custom;
@@ -171,6 +179,26 @@ describe('talkCall', () => {
     });
   });
 
+  it('from a browser page Claude is told so; from a server (no page), not', async () => {
+    const header = 'anthropic-dangerous-direct-browser-access';
+    for (const page of [fakePhone().page, undefined]) {
+      const p = provider(REPLY_TEXT_FIXTURE);
+      const ctrl = new AbortController();
+      const done = talkCall({
+        ai: AI,
+        prompt,
+        parseCtx,
+        signal: ctrl.signal,
+        fetch: p.fetch,
+        ...(page ? { page } : {}),
+      });
+      await until(() => p.calls.length > 0, 'the request');
+      expect(p.calls[0]?.headers[header]).toBe(page ? 'true' : undefined);
+      p.calls[0]?.release();
+      expect((await done).status).toBe('done');
+    }
+  });
+
   it('Stop: the request is aborted, the text so far kept, its cost estimated (~)', async () => {
     const p = provider(REPLY_TEXT_FIXTURE);
     const s = start(p.fetch);
@@ -182,6 +210,35 @@ describe('talkCall', () => {
     expect(r.status).toBe('stopped');
     expect(r.say.length).toBeGreaterThan(0);
     expect(r.usage[0]?.estimated).toBe(true);
+  });
+
+  it('the claims filter: on the reply read, and on the text kept at Stop; never while streaming', async () => {
+    const claim = {
+      ...REPLY_TEXT_FIXTURE,
+      say: 'I don’t have the ability to run the checks before you see the results. I’ll add the queen bed against the long wall, and move the desk to the window.',
+    };
+    // Read to the end: only the claim goes, and no second (paid) request is made.
+    const done = provider(claim);
+    const a = start(done.fetch);
+    await until(() => a.texts.some((t) => t.length > 0), 'first words');
+    // Streaming shows what came, unfiltered (a prefix of the final text, as ever).
+    expect(a.texts.some((t) => t.startsWith('I don’t have'))).toBe(true);
+    done.calls[0]?.release();
+    await until(() => a.result() !== null, 'the end');
+    const r = a.result() as unknown as TalkCallResult;
+    expect(r.status).toBe('done');
+    if (r.status === 'done') expect(r.reply.say).toMatch(/^I’ll add the queen bed/);
+    expect(done.calls).toHaveLength(1);
+    // Stopped part-way, past the claim: the text kept is filtered too.
+    const head = anthropicStream(claim, { input: 1000, cached: 3000, output: 400 });
+    const p = provider(claim, { head: head.indexOf('message_delta') });
+    const s = start(p.fetch);
+    await until(() => s.texts.some((t) => t.includes('before you see')), 'the claim streamed');
+    s.ctrl.abort();
+    await until(() => s.result() !== null, 'stopped');
+    const cut = s.result() as unknown as TalkCallResult;
+    expect(cut.status).toBe('stopped');
+    expect(cut.say).not.toMatch(/ability to run/);
   });
 
   it('a dropped connection is tried again and its text starts afresh', async () => {
@@ -257,5 +314,19 @@ describe('talkCall', () => {
       if (r.status === 'halted') expect(r.halt.kind).toBe(kind);
       expect(p.calls).toHaveLength(1);
     }
+  });
+
+  it('a model with no price sends nothing (issue #67)', async () => {
+    const p = provider(REPLY_TEXT_FIXTURE);
+    const r = await talkCall({
+      ai: { provider: 'gemini', key: 'AIza-test', model: 'gemini-3-pro' },
+      prompt,
+      parseCtx,
+      signal: new AbortController().signal,
+      fetch: p.fetch,
+    });
+    expect(p.calls).toHaveLength(0);
+    expect(r).toMatchObject({ status: 'halted', halt: { kind: 'unpriced', message: UNPRICED } });
+    expect(r.usage).toEqual([]);
   });
 });

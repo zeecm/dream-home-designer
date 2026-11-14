@@ -1,3 +1,4 @@
+import { type AiSettings, PROVIDERS, type Provider } from '@dhd/ai';
 import { useSyncExternalStore } from 'react';
 
 /**
@@ -7,52 +8,6 @@ import { useSyncExternalStore } from 'react';
  * browser. One provider is the one in use for reading plans; renders use one that can make
  * pictures (OpenAI or Gemini).
  */
-export type Provider = 'anthropic' | 'openai' | 'gemini';
-
-export interface AiSettings {
-  provider: Provider;
-  key: string;
-  /** Reads plans and suggests layouts. */
-  model: string;
-  /** Makes pictures (OpenAI and Gemini); the provider's default when not chosen. */
-  imageModel?: string;
-  /** Kept on this device (localStorage); otherwise only until the tab closes. */
-  remember?: boolean;
-}
-
-export const PROVIDERS: Record<
-  Provider,
-  {
-    name: string;
-    /** In sentences: "Gemini turned the request down". */
-    short: string;
-    model: string;
-    keyHint: string;
-    /** The picture model when none was chosen (a key saved before the choice existed). */
-    imageModel?: string;
-  }
-> = {
-  anthropic: {
-    name: 'Claude (Anthropic)',
-    short: 'Claude',
-    model: 'claude-opus-5-5',
-    keyHint: 'sk-ant-…',
-  },
-  openai: {
-    name: 'OpenAI',
-    short: 'OpenAI',
-    model: 'gpt-5',
-    keyHint: 'sk-…',
-    imageModel: 'gpt-image-1',
-  },
-  gemini: {
-    name: 'Gemini (Google)',
-    short: 'Gemini',
-    model: 'gemini-3-pro',
-    keyHint: 'AIza…',
-    imageModel: 'gemini-2.5-flash-image',
-  },
-};
 
 /**
  * The models to offer when the provider's own list can't be had (a network or key problem),
@@ -62,7 +17,7 @@ export const CURATED: Record<Provider, { text: string[]; image: string[] }> = {
   anthropic: { text: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'], image: [] },
   openai: { text: ['gpt-5'], image: ['gpt-image-1'] },
   gemini: {
-    text: ['gemini-3-pro', 'gemini-2.5-pro', 'gemini-2.5-flash'],
+    text: ['gemini-3.1-pro-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
     image: ['gemini-3-pro-image', 'gemini-3.1-flash-image', 'gemini-2.5-flash-image'],
   },
 };
@@ -75,7 +30,7 @@ export const MODEL_NAMES: Record<string, string> = {
   'claude-opus-5-5': 'Claude Opus 5.5',
   'claude-sonnet-5-5': 'Claude Sonnet 5.5',
   'claude-haiku-5-5': 'Claude Haiku 5.5',
-  'gemini-3-pro': 'Gemini 3 Pro',
+  'gemini-3.1-pro-preview': 'Gemini 3.1 Pro Preview',
   'gemini-2.5-pro': 'Gemini 2.5 Pro',
   'gemini-2.5-flash': 'Gemini 2.5 Flash',
   'gemini-3-pro-image': 'Gemini 3 Pro Image',
@@ -96,6 +51,12 @@ export function priceNote(id: string): string | undefined {
 /** Whether a provider makes pictures. */
 export const makesPictures = (p: Provider) => !!PROVIDERS[p].imageModel;
 
+/**
+ * Text models a saved key may name that no longer work: gemini-3-pro (the old default, never
+ * a Gemini API id) and gemini-3-pro-preview (shut down on 9 Mar 2026). Neither has a price.
+ */
+const RETIRED = ['gemini-3-pro', 'gemini-3-pro-preview'];
+
 interface SavedKey {
   key: string;
   model: string;
@@ -113,10 +74,11 @@ interface Stored {
  * A saved key brought up to date. Before the picture model had its own choice, some people
  * put an image model (gemini-3-pro-image, say) in the one Model field: it was never used
  * for pictures, and it made reading plans fail. It becomes the picture model, and plans go
- * back to the default.
+ * back to the default. A model that can no longer be used (RETIRED) goes back to the default.
  */
 export function migrateKey(p: Provider, k: SavedKey): SavedKey {
-  const model = k.model || PROVIDERS[p].model;
+  const model =
+    k.model && !RETIRED.includes(k.model.trim().toLowerCase()) ? k.model : PROVIDERS[p].model;
   if (k.imageModel || !makesPictures(p) || !/image/i.test(model)) return { ...k, model };
   return { ...k, model: PROVIDERS[p].model, imageModel: model };
 }

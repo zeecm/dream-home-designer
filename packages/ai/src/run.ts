@@ -7,6 +7,7 @@ import {
   type DraftDesign,
   FIX_PER_RUN,
   type FixRequest,
+  type FixRound,
   type Level,
   type LookImage,
   type OptionLook,
@@ -25,27 +26,31 @@ import {
   fixRoundsFor,
   keptAsWas,
   layoutStep,
+  leftOutLines,
   lensOn,
   lensReports,
   levelBounds,
   lookFacts,
   lookNoWorse,
   lookStep,
+  meteredPrice,
   parseConcept,
   parseLook,
   parseSpaceDesign,
   placedWords,
-  priceOf,
   resolveAsset,
   roomIdAt,
   roomStep,
+  runReport,
   tokensOf,
   usageOf,
   usdOf,
 } from '@dhd/core';
-import { type AiSettings, PROVIDERS } from '../credentials';
-import { AiError } from '../providers';
+import { AiError } from './errors';
+import type { Page } from './page';
+import { type AiSettings, PROVIDERS } from './providers';
 import {
+  type FailReason,
   type Halt,
   Halted,
   type InterruptReason,
@@ -53,7 +58,17 @@ import {
   Stopped,
   requestStep,
 } from './request';
-import { type StepSink, streamStep } from './stream';
+import { type StepSink, fixStepFor, lowerEffort, requestFor, streamStep } from './stream';
+
+/** How a fix round that brought no answer ended, from why its request failed. */
+const NO_ANSWER: Record<FailReason, FixRound['outcome']> = {
+  length: 'cut-off',
+  unreadable: 'failed',
+  refused: 'refused',
+  busy: 'error',
+  network: 'error',
+  limit: 'error',
+};
 
 /**
  * The designer's runner: the layout-and-style step for the whole flat, then one step per
@@ -101,6 +116,8 @@ export interface StepState {
   cutOffHigh: number | null;
   /** Sent back to be fixed: which round, and how many checks it failed. */
   fixing: { round: number; problems: number } | null;
+  /** Why its last request failed, when it did (`requestStep` says it). */
+  failed?: FailReason;
 }
 
 export type { Halt };
@@ -129,9 +146,16 @@ export type { DraftDesign, RunPlan };
 /** The card's line when the provider refuses the second look's picture. */
 export const PICTURE_REFUSED = 'The model couldn’t take the picture, so there’s no second look.';
 
-/** Whether a failed request's line is the provider refusing a picture (a 400 about the image). */
-export const pictureRefused = (line: string) =>
-  /\(400\)/.test(line) && /image|picture|modality/i.test(line);
+/** The card's line when the model has no price: no figure, so no look. */
+export const LOOK_UNPRICED =
+  'This model has no price in the app, so there’s no second look. Add its price in AI settings.';
+
+/**
+ * Whether a failed request is the provider refusing a picture (a 400 about the image): by the
+ * request's reason when it says one, else by its line.
+ */
+export const pictureRefused = (line: string, failed?: FailReason) =>
+  (failed === 'refused' || /\(400\)/.test(line)) && /image|picture|modality/i.test(line);
 
 /** A request a run sends: the layout, a room's answer, a fix round, the second look. */
 export type StepKind = 'layout' | 'room' | 'fix' | 'look';
@@ -143,6 +167,11 @@ export interface RunOptions {
   design: DraftDesign;
   plan: RunPlan;
   signal: AbortSignal;
+  /**
+   * The browser page it runs in: a step cut off while it was out of view goes again on its
+   * return. None on a server (no page to wait for, no browser-only header).
+   */
+  page?: Page;
   prices?: Record<string, Price>;
   result?: DesignOptions;
   /** Labels for the room rows before the layout is known. */
@@ -198,8 +227,6 @@ export interface RunOptions {
     scope?: RunPlan['rooms'];
   };
 }
-
-export { NET_WAITS, QUIET_MS, classify } from './request';
 
 /** Furniture or built-ins: which part an answer's piece is. */
 function aspectOfAnswer(assetId: string, o: DesignOptions | undefined): Aspect {
@@ -312,9 +339,14 @@ export async function runDesign(
   let saving: Promise<void> = Promise.resolve();
   /** Fix requests the run may still send (the estimate counts this many at most). */
   let fixesLeft = o.fixesLeft ?? FIX_PER_RUN;
+  /**
+   * Fix-ups taken by rooms waiting at their gate (a pause), not yet sent: saved as still left,
+   * so a run carried on after the page closed mid-pause still has them.
+   */
+  let held = 0;
   const save = () => {
     const snapshot = structuredClone(design);
-    const info = { fixesLeft };
+    const info = { fixesLeft: fixesLeft + held };
     saving = saving.then(() => o.onSave?.(snapshot, info)).catch(() => {});
     return saving;
   };
@@ -338,25 +370,32 @@ export async function runDesign(
       if (next) o.onStep?.(next.key, next.kind, 'start');
       return true;
     };
-    if (stopping || o.signal.aborted) return false;
-    if (allowOver || !o.overLimit?.(next)) return reserve();
-    if (!asking) {
-      state.phase = 'paused';
-      say(`Paused: this tab has reached its limit. ${usdText(spentSoFar())} spent on this design.`);
-      update();
-      asking = (o.confirmOver?.() ?? Promise.resolve(false)).then((go) => {
-        state.phase = 'running';
-        if (go && !o.askAgain) allowOver = true;
-        if (!go) stopping = true;
-        // Asked once for this figure; the next one is asked afresh.
-        if (go && o.askAgain) asking = null;
+    for (;;) {
+      if (stopping || o.signal.aborted) return false;
+      if (allowOver || !o.overLimit?.(next)) return reserve();
+      if (!asking) {
+        state.phase = 'paused';
+        say(
+          `Paused: this tab has reached its limit. ${usdText(spentSoFar())} spent on this design.`,
+        );
         update();
-        return go;
-      });
+        asking = (o.confirmOver?.() ?? Promise.resolve(false)).then((go) => {
+          state.phase = 'running';
+          if (go && !o.askAgain) allowOver = true;
+          if (!go) stopping = true;
+          // Asked once for this figure; the next one is asked afresh.
+          if (go && o.askAgain) asking = null;
+          update();
+          return go;
+        });
+      }
+      // Stop while paused ends the wait too.
+      const go = await Promise.race([asking, aborted]);
+      if (!go || o.signal.aborted) return false;
+      // Carried on: every step that waited on the answer is checked again, one at a time,
+      // against what it allowed (each reserved as it goes), so only those that fit it go; one
+      // that doesn't asks afresh.
     }
-    // Stop while paused ends the wait too.
-    const go = await Promise.race([asking, aborted]);
-    return go && !o.signal.aborted && reserve();
   };
 
   let cap = 2;
@@ -377,7 +416,7 @@ export async function runDesign(
       // Cut off before its usage arrived (a locked phone, a dropped connection): it may be
       // billed in full, its whole prompt and output to its limit, and is counted so (the
       // figure it is held to never assumes less). Stop's cut-off is said apart, at that most.
-      const price = priceOf(u.model, o.prices);
+      const price = meteredPrice(u.model, ai.model, o.prices);
       const most = {
         input: tokensOf(promptChars),
         cachedInput: 0,
@@ -388,7 +427,7 @@ export async function runDesign(
     } else if (!finished) {
       // Cut off by Stop: what streamed, counted from its characters.
       const output = Math.max(u.output, tokensOf(outputChars));
-      const price = priceOf(u.model, o.prices);
+      const price = meteredPrice(u.model, ai.model, o.prices);
       u = { ...u, output, estimated: true, usd: price ? usdOf({ ...u, output }, price) : null };
     }
     state.usage.push(u);
@@ -410,10 +449,12 @@ export async function runDesign(
     return requestStep({
       ai,
       signal: o.signal,
+      ...(o.page ? { page: o.page } : {}),
       ...(o.prices ? { prices: o.prices } : {}),
       send: (effort, sink, signal, hooks) =>
-        streamStep(ai, p, effort, sink, signal, hooks, doFetch),
+        streamStep(ai, p, effort, sink, signal, hooks, doFetch, { browser: !!o.page }),
       effort: p.effort,
+      lower: (e) => lowerEffort(ai, e, (x) => requestFor(ai, p, x)),
       promptChars: p.system.length + p.prefix.length + p.shared.length + p.tail.length,
       maxTokens: p.maxTokens,
       st,
@@ -488,9 +529,23 @@ export async function runDesign(
     scope: string[] | null,
   ): Promise<OptionLook> {
     const out = blankLook();
+    // Its model's price, or no look (every paid request is metered; nothing goes unpriced).
+    if (!meteredPrice(ai.model, ai.model, o.prices)) {
+      o.onStep?.(st.key, 'look', 'end');
+      st.status = 'skipped';
+      return { ...out, state: 'skipped', line: LOOK_UNPRICED };
+    }
     const before = await place(ctx.base, ctx.before, design, o.result);
     design.aliases = aliasesFor(before.level, design.aliases);
+    /** The run's report on the version (its F and L lines), for these spaces or all of them. */
+    const reportOf = (spaces?: string[]) =>
+      runReport(
+        before,
+        { spaces: design.spaces, brief: ctx.brief },
+        { aliases: design.aliases, ...(spaces ? { spaces } : {}) },
+      );
     const facts = lookFacts(before, ctx.base, {
+      report: reportOf(scope ? designed.map((d) => d.key) : undefined),
       aliases: design.aliases,
       scope,
       brief: ctx.brief,
@@ -520,7 +575,7 @@ export async function runDesign(
       // The look ends there; the design stands. A picture the provider refused (a 400 about
       // the image) is no failure of the design's: skipped, in plain words, never sent again.
       const why = (st.error ?? '').replace(`${st.label}: `, '');
-      if (pictureRefused(why)) {
+      if (pictureRefused(why, st.failed)) {
         st.status = 'skipped';
         st.error = null;
         return { ...out, state: 'skipped', line: PICTURE_REFUSED };
@@ -557,13 +612,35 @@ export async function runDesign(
       changed = true;
     });
     const bounds = levelBounds(before.level);
+    /**
+     * Each space's round, for its record (a fix round of the app's checks, as a room's are; a
+     * round only of taste suggestions is the look's own, said on its card section). Those that
+     * came back are settled once the round is kept or not.
+     */
+    const records: { space: string; round: FixRound | null; checks: number }[] = [];
     for (const r of acted.rounds) {
       const s = designed.find((x) => x.key === r.space);
       const entry = next.spaces[r.space];
       const space = before.spaces.find((x) => x.key === r.space);
       if (!s || !entry?.design || !space) continue;
-      if (fixesLeft <= 0 || !(await mayStart({ key: st.key, kind: 'fix' }))) break;
+      if (fixesLeft <= 0) {
+        records.push({
+          space: r.space,
+          round: { outcome: 'no-fixups', before: r.checks, after: r.checks },
+          checks: r.checks,
+        });
+        break;
+      }
+      // The pool's rule: taken before any wait, given back if the step may not go (held, it is
+      // saved as still left until the request goes).
       fixesLeft--;
+      held++;
+      const go = await mayStart({ key: st.key, kind: 'fix' });
+      held--;
+      if (!go) {
+        fixesLeft++;
+        break;
+      }
       st.fixing = { round: 1, problems: r.failures.length };
       st.status = 'running';
       say(`Second look: sending ${s.name} back once.`);
@@ -572,18 +649,22 @@ export async function runDesign(
         round: (entry.fixes ?? 0) + 1,
         failures: r.failures,
         placed: placedWords(before.level, space, before.refs, design.aliases, ctx.site?.north ?? 0),
+        leftOut: leftOutLines(reportOf([r.space])),
       };
       const again = await step(
-        roomStep(ctx, space, before.level, design.aliases, {
-          concept: design.concept,
-          ...(o.result?.kept?.length ? { kept: o.result.kept } : {}),
-          ...(storage !== undefined ? { storage } : {}),
-          ...(plan.feedback ? { feedback: plan.feedback } : {}),
-          ...(plan.talk ? { talk: plan.talk } : {}),
-          locks: plan.locks ?? [],
-          previous: entry.design,
-          fix,
-        }),
+        fixStepFor(
+          ai,
+          roomStep(ctx, space, before.level, design.aliases, {
+            concept: design.concept,
+            ...(o.result?.kept?.length ? { kept: o.result.kept } : {}),
+            ...(storage !== undefined ? { storage } : {}),
+            ...(plan.feedback ? { feedback: plan.feedback } : {}),
+            ...(plan.talk ? { talk: plan.talk } : {}),
+            locks: plan.locks ?? [],
+            previous: entry.design,
+            fix,
+          }),
+        ),
         st,
         (raw) => parseSpaceDesign(raw, bounds),
       );
@@ -597,16 +678,54 @@ export async function runDesign(
           o.result,
         );
         changed = true;
+        records.push({ space: r.space, round: null, checks: r.checks });
+      } else {
+        // No answer: what was there stands, and its record says why.
+        const outcome = st.failed ? NO_ANSWER[st.failed] : 'error';
+        records.push({
+          space: r.space,
+          round: { outcome, before: r.checks, after: r.checks },
+          checks: r.checks,
+        });
+        st.error = null;
       }
     }
     st.status = 'done';
-    if (!changed) return out;
+    /** Writes each check round's record on the space as it stands now. */
+    const record = (kept: boolean) => {
+      for (const x of records) {
+        if (!x.checks) continue;
+        const entry = design.spaces[x.space];
+        if (!entry || entry.status !== 'done') continue;
+        const round: FixRound = x.round ?? {
+          outcome: kept ? 'fixed' : 'no-better',
+          before: x.checks,
+          // Kept only once each check it was for passes (`lookNoWorse`).
+          after: kept ? 0 : x.checks,
+        };
+        const sent = round.outcome !== 'no-fixups';
+        design.spaces[x.space] = {
+          ...entry,
+          ...(sent ? { fixes: (entry.fixes ?? 0) + 1 } : {}),
+          ...(round.outcome === 'fixed'
+            ? { fixed: (entry.fixed ?? 0) + round.before - round.after }
+            : {}),
+          rounds: [...(entry.rounds ?? []), round].slice(-12),
+        };
+      }
+    };
+    if (!changed) {
+      record(false);
+      return out;
+    }
     const after = await place(ctx.base, ctx.before, next, o.result);
     // Kept only if no worse, and each app check a P1–P4 fix was for passes now.
     if (lookNoWorse(before, after, acted.targets)) {
       design.spaces = next.spaces;
+      record(true);
       return { ...out, round: 'kept' };
     }
+    record(false);
     return {
       ...out,
       round: 'refused',
@@ -687,6 +806,15 @@ export async function runDesign(
           .filter((c) => !c.unfixable)
           .map((c) => ({ ref: (c.itemId && res.refs[c.itemId]) || null, text: c.text })),
         placed: placedWords(res.level, s, res.refs, design.aliases, ctx.site?.north ?? 0),
+        // The pieces it left out, with why and a hint: so a bed dropped for a keep ref the
+        // plan doesn't have is said as that, not only as "has no bed".
+        leftOut: leftOutLines(
+          runReport(
+            res,
+            { spaces: trial.spaces, brief: ctx.brief },
+            { aliases: design.aliases, spaces: [s.key] },
+          ),
+        ),
       };
     };
     // A run-stopping error (a refused key, a quota): set before the first room's gate opens,
@@ -722,34 +850,53 @@ export async function runDesign(
           const first = await failing(s, current);
           let fixes = 0;
           let now = first;
-          const rounds = fixRoundsFor(ctx.brief.quality);
-          while (
-            now.fixable.length &&
-            fixes < rounds &&
-            fixesLeft > 0 &&
-            (await mayStart({ key: s.key, kind: 'fix' }))
-          ) {
-            // Taken from the run's few before the request goes (rooms run side by side).
+          const most = fixRoundsFor(ctx.brief.quality);
+          /** How each round went (and one not sent for want of fix-ups), for the card. */
+          const rounds: FixRound[] = [];
+          while (now.fixable.length && fixes < most) {
+            if (fixesLeft <= 0) {
+              const n = now.fixable.length;
+              rounds.push({ outcome: 'no-fixups', before: n, after: n });
+              break;
+            }
+            // Taken from the run's few before any wait (rooms run side by side, and may all
+            // wait on one pause), and given back if the step may not go. Held, it is saved as
+            // still left until the request goes.
             fixesLeft--;
+            held++;
+            const go = await mayStart({ key: s.key, kind: 'fix' });
+            held--;
+            if (!go) {
+              fixesLeft++;
+              break;
+            }
             fixes++;
             const left = now.fixable;
             st.fixing = { round: fixes, problems: left.length };
             st.status = 'running';
             say(`${s.name}: checking… fixing ${plural(left.length, 'problem')}.`);
             update();
-            const fix: FixRequest = { round: fixes, failures: left, placed: now.placed };
+            const fix: FixRequest = {
+              round: fixes,
+              failures: left,
+              placed: now.placed,
+              leftOut: now.leftOut,
+            };
             const tf = Date.now();
             const again = await step(
-              roomStep(ctx, s, r.level, design.aliases, {
-                concept: design.concept,
-                ...(o.result?.kept?.length ? { kept: o.result.kept } : {}),
-                ...(storage !== undefined ? { storage } : {}),
-                ...(plan.feedback ? { feedback: plan.feedback } : {}),
-                ...(plan.talk ? { talk: plan.talk } : {}),
-                locks: plan.locks ?? [],
-                previous: current,
-                fix,
-              }),
+              fixStepFor(
+                ai,
+                roomStep(ctx, s, r.level, design.aliases, {
+                  concept: design.concept,
+                  ...(o.result?.kept?.length ? { kept: o.result.kept } : {}),
+                  ...(storage !== undefined ? { storage } : {}),
+                  ...(plan.feedback ? { feedback: plan.feedback } : {}),
+                  ...(plan.talk ? { talk: plan.talk } : {}),
+                  locks: plan.locks ?? [],
+                  previous: current,
+                  fix,
+                }),
+              ),
               st,
               parse,
             );
@@ -757,7 +904,13 @@ export async function runDesign(
             if (!st.resent) o.onTimed?.('fix', Date.now() - tf);
             st.fixing = null;
             if (!again) {
-              // The fix didn't come: the answer before it stands, checked as it is.
+              // The fix didn't come: the answer before it stands, checked as it is, and the
+              // card says why (cut off at the length limit, or no readable answer).
+              rounds.push({
+                outcome: st.failed ? NO_ANSWER[st.failed] : 'error',
+                before: left.length,
+                after: left.length,
+              });
               st.status = 'done';
               st.error = null;
               break;
@@ -765,10 +918,15 @@ export async function runDesign(
             const next = await failing(s, merge(again));
             // Kept only if it fails less; no better twice running is a room that can't pass,
             // and the second round isn't spent on it.
+            const out = { before: left.length, after: next.fixable.length };
             if (next.fixable.length < left.length) {
+              rounds.push({ outcome: 'fixed', ...out });
               current = merge(again);
               now = next;
-            } else break;
+            } else {
+              rounds.push({ outcome: 'no-better', ...out });
+              break;
+            }
           }
           design.spaces[s.key] = {
             name: s.name,
@@ -777,6 +935,7 @@ export async function runDesign(
             ...(fixes
               ? { fixes, fixed: Math.max(0, first.fixable.length - now.fixable.length) }
               : {}),
+            ...(rounds.length ? { rounds } : {}),
           };
           say(`${s.name} done. ${usdText(spentSoFar())} so far.`);
         } else {

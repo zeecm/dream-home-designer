@@ -6,6 +6,7 @@ import type { LensReport } from '../lenses/lens';
 import { OUTPUT } from '../prices';
 import { peopleOf, sleepingPlan } from '../principles';
 import { type PromptImage, SYSTEM_PROMPT, type StepPrompt } from '../prompts';
+import { type RunReport, failureLines, leftOutLines } from '../report';
 import type { DesignResult } from '../result';
 import { type Kept, keptHolds } from '../rules/kept';
 import type { Rule } from '../rules/schema';
@@ -27,7 +28,11 @@ export interface LookFacts {
   household: { sleeping: { room: string; people: string[] }[]; elders: string[] };
   /** The household's house rules, in the app's sentences (so it suggests none they have). */
   rules: string[];
-  checks: { passes: boolean; hard: string[]; soft: string[] };
+  /**
+   * The app's checks: with the run's report, its F lines (room, pieces, the app's words) and
+   * its L lines (the pieces it left out, with why), as the room steps are told them.
+   */
+  checks: { passes: boolean; hard: string[]; soft: string[]; leftOut?: string[] };
   lenses: Record<string, unknown>;
   pieces: {
     id: string;
@@ -58,6 +63,8 @@ export function lookFacts(
     rules?: readonly Rule[];
     /** The pieces kept where they are that the version was made with. */
     kept?: readonly Kept[];
+    /** The run's report on this version (`runReport`): its failures and left-out pieces. */
+    report?: RunReport;
     roomOf: (it: Item) => string | null;
   },
 ): LookFacts {
@@ -119,10 +126,13 @@ export function lookFacts(
     rules: (o.rules ?? []).map((r) => clean(ruleSentence(r, level), 200)),
     checks: {
       passes: result.passes,
-      hard: fresh
-        .filter((c) => c.hard)
-        .map((c) => clean(c.text, 200))
-        .slice(0, 12),
+      hard: o.report
+        ? failureLines(o.report, o.aliases).slice(0, 12)
+        : fresh
+            .filter((c) => c.hard)
+            .map((c) => clean(c.text, 200))
+            .slice(0, 12),
+      ...(o.report?.leftOut.length ? { leftOut: leftOutLines(o.report).slice(0, 8) } : {}),
       soft: fresh
         .filter((c) => !c.hard)
         .map((c) => clean(c.text, 200))

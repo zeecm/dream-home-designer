@@ -1,6 +1,6 @@
+import { AiError, type AiSettings } from '@dhd/ai';
 import { PlanReading } from '@dhd/core';
-import type { AiSettings } from './credentials';
-import { AiError, type ModelImage, askForJson, lowerEnums } from './providers';
+import { type ModelImage, askForJson, lowerEnums } from './providers';
 
 /** The longest side sent to a model: plenty for a plan, inside every provider's limits. */
 const MAX_SIDE = 1568;

@@ -1,163 +1,33 @@
-import {
-  type DesignBrief,
-  type Level,
-  PRICES,
-  type ProposalOption,
-  type Rule,
-  type RunCheckpoint,
-  aliasesFor,
-  defaultBrief,
-  designResult,
-  sampleFlatProject,
-  usageTotals,
-} from '@dhd/core';
+import { type DesignBrief, PRICES, type Rule, designResult, usageTotals } from '@dhd/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AiSettings, Provider } from '../credentials';
+import {
+  AI,
+  type Call,
+  type Phone,
+  USAGE,
+  away as awayOn,
+  brief,
+  ctx,
+  fakePhone,
+  fresh,
+  level,
+  midRun as midRunOn,
+  provider,
+  rowOf,
+  start,
+  until,
+} from './fixtures/runner';
 import { answerFor, promptOf } from './fixtures/sample';
-import { type FixtureUsage, anthropicStream, geminiStream, openaiStream } from './fixtures/streams';
+import { anthropicStream, geminiStream } from './fixtures/streams';
+import { QUIET_MS } from './request';
 import {
   type DraftDesign,
+  LOOK_UNPRICED,
   PICTURE_REFUSED,
-  QUIET_MS,
   type RunOptions,
-  type RunState,
   runDesign,
 } from './run';
-import { designerCannotUse, requestFor } from './stream';
-import {
-  approvedLeft,
-  figureHolds,
-  priceRequest,
-  resumeFigure,
-  spentWithInflight,
-} from './talk/pricing';
-
-const level = sampleFlatProject('prj_test').levels[0] as Level;
-const brief: DesignBrief = {
-  ...defaultBrief(),
-  household: { ...defaultBrief().household, elders: ['frame'] },
-  budget: { low: 40_000, high: 60_000 },
-};
-const aliases = aliasesFor(level);
-const ctx = { base: level, before: level, brief, aliases };
-const AI: Record<Provider, AiSettings> = {
-  anthropic: { provider: 'anthropic', key: 'sk-ant-test-0000', model: 'claude-opus-5-5' },
-  openai: { provider: 'openai', key: 'sk-test-0000', model: 'gpt-5' },
-  gemini: { provider: 'gemini', key: 'AIzaTest0000', model: 'gemini-2.5-pro' },
-};
-const USAGE: FixtureUsage = { input: 1000, cached: 3000, output: 2000, thoughts: 500 };
-const STREAMS = { anthropic: anthropicStream, openai: openaiStream, gemini: geminiStream };
-
-const fresh = (): DraftDesign => ({
-  id: 'dsn_run',
-  brief,
-  aliases,
-  concept: null,
-  spaces: {},
-  usage: [],
-});
-
-interface Call {
-  step: string;
-  body: Record<string, unknown>;
-  headers: Record<string, string>;
-  signal: AbortSignal;
-  release: () => void;
-  /** Cuts its stream off part-way, as a locked phone or a dropped connection does. */
-  cut: () => void;
-  done: boolean;
-}
-
-/**
- * A provider that streams each answer's first event at once and the rest when released
- * (`auto` releases at once); `reply` can answer a call itself (a 429, say).
- */
-function provider(
-  p: Provider,
-  opts: { auto?: boolean; reply?: (c: Call, n: number) => Response | null } = {},
-) {
-  const calls: Call[] = [];
-  const fn = async (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    const a = answerFor(promptOf(body));
-    if (!a) throw new Error('no fixture answers this request');
-    let release: () => void = () => {};
-    const gate = new Promise<void>((r) => {
-      release = r;
-    });
-    const call: Call = {
-      step: a.step,
-      body,
-      headers: init?.headers as Record<string, string>,
-      signal: init?.signal as AbortSignal,
-      release,
-      cut: () => {},
-      done: false,
-    };
-    calls.push(call);
-    const custom = opts.reply?.(call, calls.filter((c) => c.step === call.step).length);
-    if (custom) {
-      call.done = true;
-      return custom;
-    }
-    if (opts.auto) release();
-    const text = STREAMS[p](a.answer, USAGE);
-    const end = /\r?\n\r?\n/.exec(text);
-    const cut = end ? end.index + end[0].length : text.length;
-    const bytes = new TextEncoder();
-    const stream = new ReadableStream<Uint8Array>({
-      async start(ctrl) {
-        const abort = () => {
-          call.done = true;
-          ctrl.error(new DOMException('The operation was aborted.', 'AbortError'));
-        };
-        if (call.signal.aborted) return abort();
-        call.signal.addEventListener('abort', abort, { once: true });
-        call.cut = () => {
-          if (call.done) return;
-          call.done = true;
-          ctrl.error(new TypeError('network error'));
-        };
-        ctrl.enqueue(bytes.encode(text.slice(0, cut)));
-        await gate;
-        if (call.signal.aborted || call.done) return;
-        ctrl.enqueue(bytes.encode(text.slice(cut)));
-        call.done = true;
-        ctrl.close();
-      },
-    });
-    return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } });
-  };
-  return { calls, fetch: fn as typeof fetch };
-}
-
-/** Lets streams and promises run (timers stay put unless asked). */
-async function until(cond: () => boolean, what = 'condition') {
-  for (let i = 0; i < 400; i++) {
-    if (cond()) return;
-    await vi.advanceTimersByTimeAsync(0);
-  }
-  throw new Error(`never: ${what}`);
-}
-
-function start(p: Provider, extra: Partial<RunOptions> & { fetch: typeof fetch }) {
-  const ctrl = new AbortController();
-  const states: RunState[] = [];
-  const saved: DraftDesign[] = [];
-  const run = runDesign({
-    ai: AI[p],
-    ctx,
-    design: fresh(),
-    plan: { layout: {}, rooms: 'all' },
-    signal: ctrl.signal,
-    onUpdate: (s) => states.push(s),
-    onSave: (d) => {
-      saved.push(d);
-    },
-    ...extra,
-  });
-  return { run, ctrl, states, saved, last: () => states[states.length - 1] };
-}
+import { UNPRICED, designerCannotUse, requestFor } from './stream';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -641,6 +511,111 @@ describe('fix rounds: the app checks each answer before it is shown (designer v2
     expect(space?.fixes).toBe(1);
   });
 
+  it('each round is stored with how it ended (fixed, no better), for the card', async () => {
+    const better = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => (living(c) && n === 1 ? sse(facingWall()) : null),
+    });
+    const one = await start('anthropic', { fetch: better.fetch }).run;
+    const fixedRoom = Object.values(one.design.spaces).find((s) => s.name.startsWith('Living'));
+    expect(fixedRoom?.rounds).toEqual([{ outcome: 'fixed', before: 5, after: 0 }]);
+    // Rooms that passed first time have no rounds.
+    expect(Object.values(one.design.spaces).filter((s) => s.rounds).length).toBe(1);
+    const same = provider('anthropic', {
+      auto: true,
+      reply: (c) => (living(c) ? sse(facingWall()) : null),
+    });
+    const two = await start('anthropic', { fetch: same.fetch }).run;
+    const stuck = Object.values(two.design.spaces).find((s) => s.name.startsWith('Living'));
+    expect(stuck?.rounds).toEqual([{ outcome: 'no-better', before: 5, after: 5 }]);
+  });
+
+  it('a fix round cut off at the length limit twice is stored as cut off, not silent', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) =>
+        living(c) && n === 1
+          ? sse(facingWall())
+          : living(c)
+            ? new Response(anthropicStream(facingWall(), USAGE, { stop: 'max_tokens' }), {
+                status: 200,
+                headers: { 'content-type': 'text/event-stream' },
+              })
+            : null,
+    });
+    const { design } = await start('anthropic', { fetch: prov.fetch }).run;
+    const space = Object.values(design.spaces).find((s) => s.name.startsWith('Living'));
+    expect(space?.status).toBe('done');
+    expect(space?.rounds).toEqual([{ outcome: 'cut-off', before: 5, after: 5 }]);
+  });
+
+  it('a fix round the model declines is stored as declined, never as “no readable answer”', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) =>
+        living(c) && n === 1
+          ? sse(facingWall())
+          : living(c)
+            ? new Response(anthropicStream(facingWall(), USAGE, { stop: 'refusal' }), {
+                status: 200,
+                headers: { 'content-type': 'text/event-stream' },
+              })
+            : null,
+    });
+    const { design } = await start('anthropic', { fetch: prov.fetch }).run;
+    const space = Object.values(design.spaces).find((s) => s.name.startsWith('Living'));
+    expect(space?.rounds).toEqual([{ outcome: 'refused', before: 5, after: 5 }]);
+  });
+
+  it('a room still failing when the run’s fix-ups are used up says so', async () => {
+    const twoKids: DesignBrief = {
+      ...brief,
+      household: { ...brief.household, children: ['primary', 'primary'] },
+      sleeping: {
+        'rm_main-bedroom': ['adult-1', 'adult-2', 'child-1'],
+        rm_bedroom: ['elder-1', 'child-2'],
+      },
+    };
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (living(c) ? sse(facingWall()) : null),
+    });
+    const { design } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: twoKids },
+      design: { ...fresh(), brief: twoKids },
+      fixesLeft: 1,
+    }).run;
+    const outcomes = Object.values(design.spaces).flatMap((s) => s.rounds ?? []);
+    expect(outcomes.filter((x) => x.outcome !== 'no-fixups')).toHaveLength(1);
+    expect(outcomes.some((x) => x.outcome === 'no-fixups')).toBe(true);
+  });
+
+  it('a bed left out for a keep ref the plan doesn’t have: the fix round names it, with the hint', async () => {
+    const keptGone = () => {
+      const a = structuredClone(answerFor('furnish "Master bedroom"')?.answer) as {
+        items: Record<string, unknown>[];
+      };
+      const bed = a.items.find((i) => i.ref === 'bed1') as Record<string, unknown>;
+      bed.keep = 'P99';
+      return a;
+    };
+    const main = (c: { step: string }) => /furnish "(Master|Main) bedroom"/.test(c.step);
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => (main(c) && n === 1 ? sse(keptGone()) : null),
+    });
+    await start('anthropic', { fetch: prov.fetch }).run;
+    const calls = prov.calls.filter(main);
+    expect(calls).toHaveLength(2);
+    const body = promptOf(calls[1]?.body);
+    expect(body).toMatch(/has no bed in /);
+    expect(body).toContain('Pieces of your answer the app left out, with why and how to fix it');
+    expect(body).toContain('L1 left out');
+    expect(body).toContain('“bed1”: there’s no piece “P99” in the flat.');
+    expect(body).toContain('Place a new `bed-queen` with keep: null');
+  });
+
   it('the fix round says where the app placed each piece', async () => {
     const prov = provider('anthropic', {
       auto: true,
@@ -955,6 +930,100 @@ describe('the second look in the run: its gate, its checkpoint, a run carried on
     expect(none).toEqual(['look:start', 'look:end']);
   });
 
+  /** Living's sofa faces the wall in every answer: a P2 failure no answer fixes. */
+  const sofaWall = () => {
+    const a = structuredClone(answerFor('furnish "Living')?.answer) as {
+      items: Record<string, unknown>[];
+    };
+    const sofa = a.items.find((i) => i.ref === 'sofa1') as Record<string, unknown>;
+    Object.assign(sofa, { wall: null, along: null, at: { x: 8.15, y: 2.6 }, rotation: 180 });
+    return a;
+  };
+  /** A P1–P4 fix on the living room's sofa, in each principle (the one the checks share goes). */
+  const onSofa = (c: Call) => {
+    const sofa = factsOf(c).pieces.find((x) => x.kind.startsWith('sofa'))?.id ?? 'P0';
+    return ['P2', 'P3', 'P4'].map((principle) => ({
+      target: { kind: 'piece', id: sofa },
+      principle,
+      severity: 'fix',
+      line: `MODEL-${principle}: the sofa.`,
+      suggest: null,
+    }));
+  };
+  const livingOrLook = (c: Call) =>
+    c.step === 'furnish "Living' ? sse(sofaWall()) : lookReply(onSofa)(c);
+
+  it('a P1–P4 round: in the app’s words, with its left-out lines, recorded in the room’s rounds', async () => {
+    const prov = provider('anthropic', { auto: true, reply: livingOrLook });
+    const r = start('anthropic', { fetch: prov.fetch, look: { rasterise: async () => PNG } });
+    const { look, design } = await r.run;
+    expect(look?.dropped.map((d) => d.why).sort()).toEqual(['checks-disagree', 'checks-disagree']);
+    // The round went (the same answer came back: no better, left as it was).
+    const fixes = prov.calls.filter((c) => c.step === 'furnish "Living');
+    const round = fixes.at(-1);
+    const text = promptOf(round?.body);
+    expect(text).toContain('## Fix round');
+    expect(text).not.toContain('MODEL-P');
+    expect(look?.round).toBe('refused');
+    // Its note is the app's check line, never the model's words.
+    expect(look?.notes.some((n) => n.includes('MODEL-P'))).toBe(false);
+    const key = Object.keys(design.spaces).find((k) =>
+      design.spaces[k]?.name?.startsWith('Living'),
+    );
+    const rounds = design.spaces[key as string]?.rounds ?? [];
+    expect(rounds.at(-1)).toEqual({ outcome: 'no-better', before: 1, after: 1 });
+  });
+
+  it('the look’s round under the pool’s rules: refused at its gate, its fix-up is given back', async () => {
+    const prov = provider('anthropic', { auto: true, reply: livingOrLook });
+    const left: number[] = [];
+    let atLook = -1;
+    const r = start('anthropic', {
+      fetch: prov.fetch,
+      look: { rasterise: async () => PNG },
+      onSave: (_d, info) => {
+        left.push(info.fixesLeft);
+      },
+      onStep: (key, kind, phase) => {
+        if (key === 'look' && kind === 'look' && phase === 'start') atLook = left.at(-1) ?? -1;
+      },
+      overLimit: (next) => next?.kind === 'fix' && next.key === 'look',
+      confirmOver: async () => false,
+    });
+    const { state, look, design } = await r.run;
+    expect(atLook).toBeGreaterThan(0);
+    // Not sent: the fix-ups it had before are what is saved after.
+    expect(left.at(-1)).toBe(atLook);
+    const living = prov.calls.filter((c) => c.step === 'furnish "Living');
+    expect(living.every((c) => !promptOf(c.body).includes('second look'))).toBe(true);
+    expect(look?.round).toBe('none');
+    expect(state.phase).toBe('done');
+    const key = Object.keys(design.spaces).find((k) =>
+      design.spaces[k]?.name?.startsWith('Living'),
+    );
+    // Its own rounds only: none from the look, which never went.
+    expect(design.spaces[key as string]?.rounds?.every((x) => x.outcome !== 'fixed')).toBe(true);
+  });
+
+  it('a model whose price goes before the look: no look, in plain words, nothing sent', async () => {
+    const prov = provider('anthropic', { auto: true });
+    // Priced for the rooms; its price gone (prices edited meanwhile) by the time the look goes.
+    const prices = structuredClone(PRICES);
+    const r = start('anthropic', {
+      fetch: prov.fetch,
+      look: { rasterise: async () => PNG },
+      prices,
+      onStep: (key, kind, phase) => {
+        if (key === 'look' && kind === 'look' && phase === 'start')
+          for (const k of Object.keys(prices)) delete prices[k];
+      },
+    });
+    const { look, state } = await r.run;
+    expect(prov.calls.some((c) => c.step === 'look')).toBe(false);
+    expect(look).toMatchObject({ state: 'skipped', line: LOOK_UNPRICED });
+    expect(state.phase).toBe('done');
+  });
+
   it('a look that doesn’t fit asks; a no ends the run done, the look skipped, nothing sent', async () => {
     const prov = provider('anthropic', { auto: true });
     const asked: string[] = [];
@@ -1131,7 +1200,7 @@ describe('the requests', () => {
   };
 
   it('Claude: streamed, JSON schema, adaptive thinking, the stable prefix cached', () => {
-    const r = requestFor(AI.anthropic, prompt);
+    const r = requestFor(AI.anthropic, prompt, undefined, { browser: true });
     expect(r.url).toBe('https://api.anthropic.com/v1/messages');
     expect(r.headers['anthropic-version']).toBe('2026-10-21');
     expect(r.headers['anthropic-dangerous-direct-browser-access']).toBe('true');
@@ -1222,6 +1291,8 @@ describe('the requests', () => {
   });
 
   it('Gemini: streamGenerateContent as SSE, with thinking', () => {
+    // 2.5 Pro takes a thinking budget until Google routes it to 3.8 Flash on 1 Dec 2026.
+    vi.setSystemTime(Date.parse('2026-11-14T12:00:00Z'));
     const r = requestFor(AI.gemini, prompt);
     expect(r.url).toMatch(/models\/gemini-2\.5-pro:streamGenerateContent\?alt=sse$/);
     expect(r.headers['x-goog-api-key']).toBe('AIzaTest0000');
@@ -1237,53 +1308,44 @@ describe('the requests', () => {
       generationConfig: { thinkingConfig: { thinkingLevel: 'low' } },
     });
   });
+
+  it('tells Claude it comes from a browser only from one: a server sends the same request without', () => {
+    const header = 'anthropic-dangerous-direct-browser-access';
+    const server = requestFor(AI.anthropic, prompt);
+    const browser = requestFor(AI.anthropic, prompt, undefined, { browser: true });
+    expect(server.headers[header]).toBeUndefined();
+    expect(browser.headers).toEqual({ ...server.headers, [header]: 'true' });
+    expect(browser.body).toEqual(server.body);
+    // Only Claude's requests carry it.
+    for (const p of ['openai', 'gemini'] as const) {
+      expect(requestFor(AI[p], prompt, undefined, { browser: true })).toEqual(
+        requestFor(AI[p], prompt),
+      );
+    }
+  });
+
+  it('a run sends the browser header from its page only', async () => {
+    const header = 'anthropic-dangerous-direct-browser-access';
+    for (const page of [fakePhone().page, undefined]) {
+      const prov = provider('anthropic', { auto: true });
+      const { state } = await start('anthropic', { fetch: prov.fetch, ...(page ? { page } : {}) })
+        .run;
+      expect(state.phase).toBe('done');
+      expect(prov.calls).toHaveLength(5);
+      for (const c of prov.calls) expect(c.headers[header]).toBe(page ? 'true' : undefined);
+    }
+  });
 });
 
 describe('a locked phone: a step cut off while away goes again on return (locked-phone runs, part 1)', () => {
-  class Page extends EventTarget {
-    visibilityState: 'visible' | 'hidden' = 'visible';
-  }
-  let page: Page;
+  let phone: Phone;
   beforeEach(() => {
-    page = new Page();
-    vi.stubGlobal('document', page);
-    vi.stubGlobal('window', new EventTarget());
+    phone = fakePhone();
   });
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-  const turn = (to: 'visible' | 'hidden') => {
-    page.visibilityState = to;
-    page.dispatchEvent(new Event('visibilitychange'));
-  };
-
-  /** A whole flat with rooms 1 and 2 done, rooms 3 and 4 in flight; room 3's label. */
-  async function midRun(extra: Partial<RunOptions> = {}) {
-    const prov = provider('anthropic');
-    const r = start('anthropic', { fetch: prov.fetch, ...extra });
-    await until(() => prov.calls.length === 1, 'layout');
-    prov.calls[0]?.release();
-    await until(() => prov.calls.length === 4, 'rooms 1 to 3');
-    prov.calls[1]?.release();
-    prov.calls[2]?.release();
-    await until(() => prov.calls.length === 5, 'room 4');
-    const room3 = prov.calls[3]?.step as string;
-    const of = (step: string) => prov.calls.filter((c) => c.step === step);
-    return { prov, r, room3, of };
-  }
-  /** A step's row, by the fixture's step name ('furnish "Living' is Living and dining). */
-  const rowOf = (state: RunState, step: string) => {
-    const name = step.replace(/^furnish "/, '').replace(/"$/, '');
-    return state.steps.find((s) => s.label.startsWith(name));
-  };
-
-  /** Cut off while hidden, and away `ms` before the page is back. */
-  async function away(r: Awaited<ReturnType<typeof midRun>>['r'], cut: () => void, ms: number) {
-    turn('hidden');
-    cut();
-    await until(() => !!r.last()?.steps.some((s) => s.wait?.away), 'waiting for the page');
-    await vi.advanceTimersByTimeAsync(ms);
-  }
+  const turn = (to: 'visible' | 'hidden') => phone.turn(to);
+  const midRun = (extra: Partial<RunOptions> = {}) => midRunOn(phone, extra);
+  const away = (r: Awaited<ReturnType<typeof midRun>>['r'], cut: () => void, ms: number) =>
+    awayOn(phone, r, cut, ms);
 
   it('the step in flight is sent again once the page is back; four returns in a run carry on; finished steps never (criteria 1, 2)', async () => {
     const resent: string[] = [];
@@ -1370,6 +1432,7 @@ describe('a locked phone: a step cut off while away goes again on return (locked
     let rooms = 0;
     const prov = provider('anthropic');
     const r = start('anthropic', {
+      page: phone.page,
       fetch: prov.fetch,
       onUsage: (u) => {
         spent += u.usd ?? 0;
@@ -1451,115 +1514,167 @@ describe('a locked phone: a step cut off while away goes again on return (locked
         .sort(),
     ).toEqual(['done', 'done', 'skipped', 'skipped']);
   });
+});
 
-  it('killed mid-step, then carried on from its checkpoint: only the room left is asked for', async () => {
-    const { prov, r, room3, of } = await midRun();
-    await away(r, () => of(room3)[0]?.cut(), 11 * 60_000);
-    turn('visible');
-    for (const c of prov.calls) c.release();
+describe('money safety (issue #67)', () => {
+  const facingWall = () => {
+    const a = structuredClone(answerFor('furnish "Living')?.answer) as {
+      items: Record<string, unknown>[];
+    };
+    const sofa = a.items.find((i) => i.ref === 'sofa1') as Record<string, unknown>;
+    Object.assign(sofa, { wall: null, along: null, at: { x: 8.15, y: 2.6 }, rotation: 180 });
+    return a;
+  };
+  const sse = (p: 'anthropic' | 'gemini', answer: unknown) =>
+    new Response((p === 'gemini' ? geminiStream : anthropicStream)(answer, USAGE), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  const living = (c: { step: string }) => c.step === 'furnish "Living';
+  /** Living's sofa faces the wall every time, and a child sleeps without a bed in each bedroom. */
+  const failing: DesignBrief = {
+    ...brief,
+    household: { ...brief.household, children: ['primary', 'primary'] },
+    sleeping: {
+      'rm_main-bedroom': ['adult-1', 'adult-2', 'child-1'],
+      rm_bedroom: ['elder-1', 'child-2'],
+    },
+  };
+  const isFix = (c: { body: Record<string, unknown> }) => promptOf(c.body).includes('## Fix round');
+
+  it('rooms paused at the fix gate never take more fix-ups than the run has left', async () => {
+    // The tech lead's case: three rooms whose answers fail, one fix-up left, a pause at the
+    // gate, then Carry on. Before, every room waiting on the pause sent its fix.
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (living(c) ? sse('anthropic', facingWall()) : null),
+    });
+    let carried = false;
+    const asks: ((go: boolean) => void)[] = [];
+    const r = start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: failing },
+      design: { ...fresh(), brief: failing },
+      fixesLeft: 1,
+      askAgain: true,
+      overLimit: (next) => next?.kind === 'fix' && !carried,
+      confirmOver: () => new Promise<boolean>((res) => asks.push(res)),
+    });
+    await until(() => r.last()?.phase === 'paused', 'paused at a fix gate');
+    // Every other room has its answer meanwhile, and reaches its own gate.
+    await vi.advanceTimersByTimeAsync(5000);
+    carried = true;
+    asks[0]?.(true);
+    const { state, design } = await r.run;
+    expect(state.phase).toBe('done');
+    expect(prov.calls.filter(isFix)).toHaveLength(1);
+    const fixes = Object.values(design.spaces).reduce((t, s) => t + (s.fixes ?? 0), 0);
+    expect(fixes).toBe(1);
+  });
+
+  it('a fix-up held at a paused gate is saved as still left, until its request goes', async () => {
+    // Saved while paused, a run carried on after the page closed would have lost it.
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (living(c) ? sse('anthropic', facingWall()) : null),
+    });
+    let carried = false;
+    const asks: ((go: boolean) => void)[] = [];
+    /** Each save's fix-ups left, and whether the run was paused then. */
+    const saves: { left: number; paused: boolean }[] = [];
+    const r: ReturnType<typeof start> = start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: failing },
+      design: { ...fresh(), brief: failing },
+      fixesLeft: 1,
+      askAgain: true,
+      overLimit: (next) => next?.kind === 'fix' && !carried,
+      confirmOver: () => new Promise<boolean>((res) => asks.push(res)),
+      onSave: (_d, info) => {
+        saves.push({ left: info.fixesLeft, paused: r.last()?.phase === 'paused' });
+      },
+    });
+    await until(() => r.last()?.phase === 'paused', 'paused at a fix gate');
+    // The other rooms finish meanwhile, each saving the run.
+    await vi.advanceTimersByTimeAsync(5000);
+    const paused = saves.filter((x) => x.paused);
+    expect(paused.length).toBeGreaterThan(0);
+    expect(paused.map((x) => x.left)).toEqual(paused.map(() => 1));
+    carried = true;
+    asks[0]?.(true);
     await r.run;
-    // What the page kept: the version as last saved, and the checkpoint written with it.
-    const d = r.saved.at(-1) as DraftDesign;
-    const project = sampleFlatProject('prj_test');
-    const option: ProposalOption = {
-      letter: 'A',
-      name: 'Whole flat',
-      designId: d.id,
-      brief: d.brief,
-      aliases: d.aliases,
-      concept: d.concept,
-      spaces: d.spaces,
-      locks: [],
-      usage: d.usage,
-      base: { variant: 'before', fingerprint: 'fp' },
-      status: 'running',
-      ticks: null,
-      accepted: [],
-      note: null,
-      waivers: [],
-      version: null,
-      look: null,
-    };
-    const run: RunCheckpoint = {
-      id: 'run_test',
-      startedAt: new Date().toISOString(),
-      at: new Date().toISOString(),
-      provider: 'anthropic',
-      model: 'claude-opus-5-5',
-      plan: { layout: {}, rooms: 'all' },
-      layout: 'done',
-      rooms: Object.keys(d.spaces),
-      fixesLeft: 2,
-      approved: null,
-      spent: 0,
-      inflight: [],
-      stopped: false,
-      paused: null,
-      times: [],
-    };
-    const scope = { label: 'Whole flat', spaces: [], all: true };
-    const priced = priceRequest({
-      project,
-      levelId: project.levels[0]?.id ?? '',
-      designs: [],
-      brief: d.brief,
-      scope,
-      words: '',
-      resume: { option, run, scope },
-      designId: d.id,
-      opts: {},
-      ai: { provider: 'anthropic', model: 'claude-opus-5-5' },
-      prices: PRICES,
+    // Sent: spent.
+    expect(saves.at(-1)?.left).toBe(0);
+  });
+
+  it('after Carry on, each step that waited is checked again against what it allowed', async () => {
+    // Carry on allows one more fix request: the second room waiting asks again, not sends.
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (living(c) ? sse('anthropic', facingWall()) : null),
     });
-    const left = Object.entries(d.spaces)
-      .filter(([, s]) => s.status !== 'done')
-      .map(([k]) => k);
-    const key0 = left[0] as string;
-    expect(left).toHaveLength(2);
-    expect(priced?.sp.plan).toMatchObject({ layout: null, rooms: left });
-    // Priced for what is left only: those two rooms' requests (and, Thorough with a model that
-    // can see, the second look it still ends with).
-    expect(priced?.est.steps.filter((s) => s.kind === 'room')).toHaveLength(2);
-    expect(priced?.est.steps.map((s) => s.kind)).toEqual(['room', 'room', 'look']);
-    // Carry on's figure (criterion 6): those steps at their high, and the fix rounds left.
-    const est = priced?.est;
-    if (!est?.usd) throw new Error('not priced');
-    const high = est.steps.reduce((t, s) => t + (s.usd?.high ?? 0), 0);
-    expect(est.usd.high).toBeCloseTo(high, 6);
-    expect(resumeFigure(est, run.fixesLeft)).toBeCloseTo(
-      high + (est.usd.fix * run.fixesLeft) / est.fixes,
-      6,
-    );
-    expect(resumeFigure(est, 0)).toBeCloseTo(high, 6);
-    // Bound to the figure its button showed: priced higher now, it asks again.
-    expect(figureHolds(0.4, 0.4)).toBe(true);
-    expect(figureHolds(0.4, 0.39)).toBe(true);
-    expect(figureHolds(0.4, 0.41)).toBe(false);
-    expect(figureHolds(null, 0.4)).toBe(false);
-    // By itself it may spend what is left of its figure, less what it spent and the steps
-    // that were in flight at their most (a page that died mid-step never metered them).
-    const cut = { ...run, approved: 1, spent: 0.2, inflight: [{ step: key0, high: 0.3 }] };
-    expect(spentWithInflight(cut)).toBeCloseTo(0.5, 9);
-    expect(approvedLeft(cut)).toBeCloseTo(0.5, 9);
-    expect(approvedLeft({ ...cut, spent: 0.9 })).toBe(0);
-    expect(approvedLeft({ ...cut, approved: null })).toBeNull();
-    const prov2 = provider('anthropic', { auto: true });
-    const again = await runDesign({
-      ai: AI.anthropic,
-      ctx: priced?.sp.ctx as RunOptions['ctx'],
-      design: priced?.sp.draft as DraftDesign,
-      plan: priced?.sp.plan as RunOptions['plan'],
-      signal: new AbortController().signal,
-      fetch: prov2.fetch,
-      fixesLeft: run.fixesLeft,
+    let allowed = 0;
+    let started = 0;
+    const asks: ((go: boolean) => void)[] = [];
+    const r = start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: failing },
+      design: { ...fresh(), brief: failing },
+      askAgain: true,
+      onStep: (_key, kind, phase) => {
+        if (kind === 'fix' && phase === 'start') started++;
+      },
+      overLimit: (next) => next?.kind === 'fix' && started >= allowed,
+      confirmOver: () => new Promise<boolean>((res) => asks.push(res)),
     });
-    // Only the two rooms left: never the layout or a finished room again.
-    expect(prov2.calls).toHaveLength(2);
-    expect(prov2.calls.map((c) => c.step)).toContain(room3);
-    expect(prov2.calls.some((c) => c.step === 'layout')).toBe(false);
-    expect(again.state.phase).toBe('done');
-    expect(Object.values(again.design.spaces).every((s) => s.status === 'done')).toBe(true);
-    // Its earlier usage is kept with it, the new requests' added.
-    expect(again.design.usage.length).toBe(d.usage.length + 2);
+    await until(() => r.last()?.phase === 'paused', 'paused at a fix gate');
+    await vi.advanceTimersByTimeAsync(5000);
+    allowed = 1;
+    asks[0]?.(true);
+    await until(() => asks.length === 2, 'asked again');
+    expect(started).toBe(1);
+    asks[1]?.(false);
+    const { state } = await r.run;
+    expect(state.phase).toBe('stopped');
+    expect(prov.calls.filter(isFix)).toHaveLength(1);
+  });
+
+  it('Gemini 3: the layout and rooms think at high, fix rounds at low', async () => {
+    const pro = { ...AI.gemini, model: 'gemini-3.1-pro-preview' };
+    const prov = provider('gemini', {
+      auto: true,
+      reply: (c, n) => (living(c) && n === 1 ? sse('gemini', facingWall()) : null),
+    });
+    const { state } = await start('gemini', { fetch: prov.fetch, ai: pro }).run;
+    expect(state.phase).toBe('done');
+    const level = (c: { body: Record<string, unknown> }) =>
+      (
+        (c.body.generationConfig as Record<string, unknown>).thinkingConfig as Record<
+          string,
+          unknown
+        >
+      ).thinkingLevel;
+    const fixes = prov.calls.filter(isFix);
+    expect(fixes.map(level)).toEqual(['low']);
+    const steps = prov.calls.filter((c) => !isFix(c));
+    expect(steps).toHaveLength(5);
+    expect(new Set(steps.map(level))).toEqual(new Set(['high']));
+  });
+
+  it('a model with no price sends nothing: the run halts and says why', async () => {
+    const prov = provider('gemini', { auto: true });
+    const { state } = await start('gemini', {
+      fetch: prov.fetch,
+      ai: { ...AI.gemini, model: 'gemini-3-pro' },
+    }).run;
+    expect(prov.calls).toHaveLength(0);
+    expect(state.phase).toBe('halted');
+    expect(state.halt).toEqual({ kind: 'unpriced', message: UNPRICED });
+    expect(designerCannotUse({ provider: 'gemini', model: 'gemini-3-pro' })).toBe(UNPRICED);
+    // With the person's own price for it, it may run.
+    const own = {
+      'gemini-3-pro': { input: 2, cachedInput: 0.2, cacheWrite: null, output: 12, checked: false },
+    };
+    expect(designerCannotUse({ provider: 'gemini', model: 'gemini-3-pro' }, own)).toBeNull();
   });
 });

@@ -1,13 +1,14 @@
-import type { StepPrompt, TalkPrompt } from '@dhd/core';
-import type { AiSettings, Provider } from '../credentials';
-import { errorBody } from '../providers';
+import { PRICES, type Price, type StepPrompt, type TalkPrompt, priceOf } from '@dhd/core';
+import { errorBody } from './errors';
+import type { AiSettings, Provider } from './providers';
 import { readSse } from './sse';
 
 /**
- * One designer request, streamed, straight from this browser to the person's provider with
- * their own key: the request each provider takes (its documented REST shape) and the reading
- * of its events. Every step sends the system prompt and the run's stable prefix first, byte
- * for byte, so the provider can cache them; Claude is told where (`cache_control`).
+ * One designer request, streamed, straight to the person's provider with their own key (from
+ * their browser, or from our server for a run they ask it to carry on): the request each
+ * provider takes (its documented REST shape) and the reading of its events. Every step sends
+ * the system prompt and the run's stable prefix first, byte for byte, so the provider can
+ * cache them; Claude is told where (`cache_control`).
  */
 
 export type Effort = StepPrompt['effort'];
@@ -82,10 +83,114 @@ const FALLBACK = /^claude-opus-5(-5)?$/;
 /** OpenAI models that take `reasoning_effort`. */
 const REASONING = /^(gpt-5|o\d)/;
 
-/** Why the designer can't use this model, or null when it can. */
-export function designerCannotUse(ai: { provider: string; model: string }): string | null {
-  if (ai.provider !== 'anthropic' || DESIGNER_CLAUDE.includes(ai.model.trim())) return null;
-  return `The designer works with Claude Opus 5.5 or 5, Sonnet 5.5 or 5, Haiku 5.5 and Fable 5; “${ai.model}” isn’t one of them. Choose one in AI settings.`;
+/**
+ * Why a model with no price is refused: no designer request (a design run, its fix rounds,
+ * carrying it on, a talk reply) goes without a figure the person has seen.
+ */
+export const UNPRICED =
+  'We don’t know this model’s price yet, so the designer can’t use it. Pick another model in AI settings, or enter its prices there.';
+
+/**
+ * Why the designer can't use this model, or null when it can: a Claude model its requests
+ * aren't written for, or a model with no price in `prices` (the list prices, with the
+ * browser's own where it has them).
+ */
+export function designerCannotUse(
+  ai: { provider: string; model: string },
+  prices: Record<string, Price> = PRICES,
+): string | null {
+  if (ai.provider === 'anthropic' && !DESIGNER_CLAUDE.includes(ai.model.trim())) {
+    return `The designer works with Claude Opus 5.5 or 5, Sonnet 5.5 or 5, Haiku 5.5 and Fable 5; “${ai.model}” isn’t one of them. Choose one in AI settings.`;
+  }
+  return priceOf(ai.model, prices) ? null : UNPRICED;
+}
+
+const LOWER: Record<Effort, Effort | null> = { high: 'medium', medium: 'low', low: null };
+/** One step down in effort, or null from low. */
+export const effortBelow = (e: Effort): Effort | null => LOWER[e];
+
+/**
+ * The effort an answer cut off at its limit is asked for again at: where Gemini thinks by
+ * level (Gemini 3, and 2.x once routed to it), `low` (the
+ * owner's cut-off answers had spent about 15k of their 16k tokens thinking); elsewhere the next
+ * one down. Only if its request really differs (Gemini 2.x's thinking budget may be capped
+ * alike at two levels; a model that takes no effort sends the same request at every level):
+ * else the next one down again, or null when none does, so the same request is never paid for
+ * twice.
+ */
+export function lowerEffort(
+  ai: { provider: Provider; model: string },
+  effort: Effort,
+  build: (e: Effort) => ProviderRequest,
+): Effort | null {
+  const now = thinkingPart(build(effort).body);
+  const steps: Effort[] = [];
+  if (thinksByLevel(ai)) steps.push('low');
+  else for (let e = LOWER[effort]; e; e = LOWER[e]) steps.push(e);
+  return steps.find((e) => e !== effort && thinkingPart(build(e).body) !== now) ?? null;
+}
+
+/**
+ * What a request body says about thinking, as text: Claude's effort, OpenAI's reasoning
+ * effort, Gemini's thinking config. Only that is compared (a body can carry pictures).
+ */
+function thinkingPart(body: Record<string, unknown>): string {
+  const o = (v: unknown) => (v && typeof v === 'object' ? (v as Record<string, unknown>) : {});
+  return JSON.stringify([
+    o(body.output_config).effort ?? null,
+    body.reasoning_effort ?? null,
+    o(body.generationConfig).thinkingConfig ?? null,
+  ]);
+}
+
+/** Thinking set by `thinkingLevel`: Gemini 3 and later, and the 2.x models Google routes to one. */
+const thinksByLevel = (ai: { provider: Provider; model: string }, at = Date.now()) =>
+  ai.provider === 'gemini' && geminiByLevel(ai.model.trim().toLowerCase(), at);
+
+/**
+ * A fix round's request: on Gemini 3 it starts at `low` (in the owner's runs every fix round
+ * was cut off at its 16k limit by thinking); elsewhere at the room step's own effort.
+ */
+export function fixStepFor(ai: { provider: Provider; model: string }, p: StepPrompt): StepPrompt {
+  return thinksByLevel(ai) ? { ...p, effort: 'low' } : p;
+}
+
+/** Gemini 2.x thinking budgets by effort, in tokens (at most half the answer's limit). */
+const GEMINI_BUDGET: Record<Effort, number> = { high: 16_384, medium: 8192, low: 2048 };
+/**
+ * Gemini 2.x models whose requests Google sends to a Gemini 3 model from this UTC day on (its
+ * deprecations page, 14 Nov 2026: 2.5 Pro to 3.8 Flash, 2.5 Flash to 3.5 Flash-Lite), whose
+ * migration guides say to send `thinkingLevel` in place of `thinkingBudget`. Until then the
+ * 2.x models themselves answer, and take the budget; 2.5 Flash-Lite stays and keeps it.
+ */
+const ROUTED_2X: Record<string, string> = {
+  'gemini-2.5-pro': '2026-12-01',
+  'gemini-2.5-flash': '2026-12-01',
+};
+/** Whether a Gemini model takes `thinkingLevel` on the day of `at` (else a budget). */
+function geminiByLevel(m: string, at: number): boolean {
+  if (!/^gemini-2/.test(m)) return true;
+  const from = ROUTED_2X[m];
+  return !!from && new Date(at).toISOString().slice(0, 10) >= from;
+}
+/**
+ * The Gemini models that don't take thinkingLevel `medium` (Google's thinking guide, 14 Nov
+ * 2026), so it goes as `low` there, never as `high`: 3 Pro Preview takes only low and high.
+ */
+const GEMINI_NO_MEDIUM = ['gemini-3-pro-preview'];
+
+/** A Gemini request's `thinkingConfig` thinking part for `effort`, on the day of `at`. */
+export function geminiThinking(
+  model: string,
+  effort: Effort,
+  maxTokens: number,
+  at: number = Date.now(),
+): { thinkingBudget: number } | { thinkingLevel: Effort } {
+  const m = model.trim().toLowerCase();
+  if (!geminiByLevel(m, at)) {
+    return { thinkingBudget: Math.min(GEMINI_BUDGET[effort], Math.floor(maxTokens / 2)) };
+  }
+  return { thinkingLevel: effort === 'medium' && GEMINI_NO_MEDIUM.includes(m) ? 'low' : effort };
 }
 const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 
@@ -105,12 +210,22 @@ export interface ProviderRequest {
   body: Record<string, unknown>;
 }
 
-const anthropicHeaders = (ai: AiSettings, fallback: boolean): Record<string, string> => ({
+/** Where a request is sent from: the person's browser, or a server (the default). */
+export interface RequestFrom {
+  /** From a browser: Claude is told so (a header a server must not send). */
+  browser?: boolean;
+}
+
+const anthropicHeaders = (
+  ai: AiSettings,
+  fallback: boolean,
+  from: RequestFrom,
+): Record<string, string> => ({
   'x-api-key': ai.key,
   'anthropic-version': ANTHROPIC_VERSION,
   ...(fallback ? { 'anthropic-beta': FALLBACK_BETA } : {}),
   // The person's own key in their own browser: what this header is for.
-  'anthropic-dangerous-direct-browser-access': 'true',
+  ...(from.browser ? { 'anthropic-dangerous-direct-browser-access': 'true' } : {}),
 });
 
 /**
@@ -121,6 +236,7 @@ export function talkRequestFor(
   ai: AiSettings,
   p: TalkPrompt,
   effort: Effort = p.effort,
+  from: RequestFrom = {},
 ): ProviderRequest {
   const text = (m: TalkPrompt['messages'][number]) => m.blocks.map((b) => b.text).join('');
   if (ai.provider === 'anthropic') {
@@ -143,7 +259,7 @@ export function talkRequestFor(
     }));
     return {
       url: 'https://api.anthropic.com/v1/messages',
-      headers: anthropicHeaders(ai, fallback),
+      headers: anthropicHeaders(ai, fallback, from),
       body: {
         model: ai.model,
         max_tokens: p.maxTokens,
@@ -179,8 +295,6 @@ export function talkRequestFor(
       },
     };
   }
-  const older = /^gemini-2/.test(ai.model);
-  const budget = { high: 16_384, medium: 8192, low: 2048 }[effort];
   return {
     url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(ai.model)}:streamGenerateContent?alt=sse`,
     headers: { 'x-goog-api-key': ai.key },
@@ -196,9 +310,7 @@ export function talkRequestFor(
         maxOutputTokens: p.maxTokens,
         thinkingConfig: {
           includeThoughts: true,
-          ...(older
-            ? { thinkingBudget: Math.min(budget, Math.floor(p.maxTokens / 2)) }
-            : { thinkingLevel: effort === 'low' ? 'low' : 'high' }),
+          ...geminiThinking(ai.model, effort, p.maxTokens),
         },
       },
     },
@@ -210,6 +322,7 @@ export function requestFor(
   ai: AiSettings,
   p: StepPrompt,
   effort: Effort = p.effort,
+  from: RequestFrom = {},
 ): ProviderRequest {
   const stable = `${p.prefix}${p.shared}`;
   const images = p.images ?? [];
@@ -233,7 +346,7 @@ export function requestFor(
     ];
     return {
       url: 'https://api.anthropic.com/v1/messages',
-      headers: anthropicHeaders(ai, fallback),
+      headers: anthropicHeaders(ai, fallback, from),
       body: {
         model: ai.model,
         max_tokens: p.maxTokens,
@@ -288,8 +401,6 @@ export function requestFor(
     };
   }
   // Gemini caches matching prefixes by itself (implicit caching).
-  const older = /^gemini-2/.test(ai.model);
-  const budget = { high: 16_384, medium: 8192, low: 2048 }[effort];
   return {
     url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(ai.model)}:streamGenerateContent?alt=sse`,
     headers: { 'x-goog-api-key': ai.key },
@@ -315,9 +426,7 @@ export function requestFor(
         maxOutputTokens: p.maxTokens,
         thinkingConfig: {
           includeThoughts: true,
-          ...(older
-            ? { thinkingBudget: Math.min(budget, Math.floor(p.maxTokens / 2)) }
-            : { thinkingLevel: effort === 'low' ? 'low' : 'high' }),
+          ...geminiThinking(ai.model, effort, p.maxTokens),
         },
       },
     },
@@ -357,8 +466,9 @@ export function streamStep(
   signal: AbortSignal,
   hooks: StreamHooks = {},
   doFetch: typeof fetch = fetch,
+  from: RequestFrom = {},
 ): Promise<void> {
-  return streamRequest(ai, requestFor(ai, p, effort), sink, signal, hooks, doFetch);
+  return streamRequest(ai, requestFor(ai, p, effort, from), sink, signal, hooks, doFetch);
 }
 
 /** Sends a request and reads its stream into `sink` (as `streamStep`). */

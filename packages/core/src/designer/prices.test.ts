@@ -1,11 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TYPICAL_RATES, costEstimate, electricalLines } from '../cost';
 import { aliasesFor } from './aliases';
 import { sampleDesign, sampleLevel, tanBrief } from './fixtures/sample';
 import anthropic from './fixtures/usage-anthropic.json';
 import gemini from './fixtures/usage-gemini.json';
 import openai from './fixtures/usage-openai.json';
-import { PRICES, estimateRun, priceOf, usdOf } from './prices';
+import { PRICES, estimateRun, meteredPrice, priceOf, usdOf } from './prices';
 import { runPrompts } from './prompts';
 import { designResult } from './result';
 import { spacesOf } from './spaces';
@@ -78,8 +78,8 @@ describe('estimateRun (criterion 21)', () => {
       const out = i === 0 ? 8000 : 5000;
       const max = i === 0 ? 24_000 : 16_000;
       high += (input * 4 + max * 20) / 1e6;
-      // A room step's two fix rounds: the prompt with the answer and the failures.
-      if (i > 0) fixOnes.push(...Array(2).fill(((input + out + 600) * 4 + max * 20) / 1e6));
+      // A room step's two fix rounds: the prompt, the failures and the pieces left out.
+      if (i > 0) fixOnes.push(...Array(2).fill(((input + out + 2100) * 4 + max * 20) / 1e6));
       if (i <= 0) typical += (input * 4 + out * 20) / 1e6;
       else if (i === 1) typical += ((input - stable) * 4 + stable * 5 + out * 20) / 1e6;
       else typical += ((input - stable) * 4 + stable * 0.2 + out * 20) / 1e6;
@@ -158,6 +158,80 @@ describe('estimateRun (criterion 21)', () => {
   });
 });
 
+describe('Gemini 3 prices (issue #67; Google’s pricing page, checked 14 Nov 2026)', () => {
+  const NOV = Date.parse('2026-11-14T12:00:00Z');
+  const JAN = Date.parse('2027-01-01T00:00:00Z');
+  const rates = (id: string, at = NOV) => {
+    const p = priceOf(id, PRICES, at);
+    return p && { input: p.input, cachedInput: p.cachedInput, output: p.output };
+  };
+
+  it('has every Gemini 3 text model Google lists, at its standard paid rates', () => {
+    expect(rates('gemini-3.1-pro-preview')).toEqual({ input: 2, cachedInput: 0.2, output: 12 });
+    expect(rates('gemini-3.1-pro-preview-customtools')).toEqual(rates('gemini-3.1-pro-preview'));
+    expect(rates('gemini-3-flash-preview')).toEqual({ input: 0.5, cachedInput: 0.05, output: 3 });
+    expect(rates('gemini-3.1-flash-lite')).toEqual({
+      input: 0.25,
+      cachedInput: 0.025,
+      output: 1.5,
+    });
+    expect(rates('gemini-3.5-flash-lite')).toEqual({ input: 0.3, cachedInput: 0.03, output: 2.5 });
+    for (const id of ['gemini-3.6-flash', 'gemini-3.8-flash']) {
+      expect(rates(id)).toEqual({ input: 0.75, cachedInput: 0.075, output: 3.75 });
+    }
+    // Old endpoints Google routes to 3.6 and 3.8 Flash, at those rates (not listed: unchecked).
+    for (const id of ['gemini-3.5-flash', 'gemini-3.7-flash']) {
+      expect(rates(id)).toEqual({ input: 0.75, cachedInput: 0.075, output: 3.75 });
+      expect(rates(id, JAN)).toEqual({ input: 1.5, cachedInput: 0.15, output: 7.5 });
+      expect(priceOf(id)?.checked).toBe(false);
+    }
+    expect(rates('gemini-2.5-flash-lite')).toEqual({ input: 0.1, cachedInput: 0.01, output: 0.4 });
+    // Implicit caching writes for free.
+    expect(priceOf('gemini-3.1-pro-preview')?.cacheWrite).toBeNull();
+  });
+
+  it('bills a 3.1 Pro prompt over 200k tokens at its long-context rates', () => {
+    const p = priceOf('gemini-3.1-pro-preview') as NonNullable<ReturnType<typeof priceOf>>;
+    const short = { input: 200_000, cachedInput: 0, cacheWrite: 0, output: 1000 };
+    expect(usdOf(short, p)).toBeCloseTo((200_000 * 2 + 1000 * 12) / 1e6, 10);
+    const long = { input: 150_000, cachedInput: 50_001, cacheWrite: 0, output: 1000 };
+    expect(usdOf(long, p)).toBeCloseTo((150_000 * 4 + 50_001 * 0.4 + 1000 * 18) / 1e6, 10);
+  });
+
+  it('applies announced changes from their day on: 3.6 and 3.8 Flash double on 1 Jan 2027', () => {
+    expect(rates('gemini-3.8-flash', JAN - 1)).toEqual({
+      input: 0.75,
+      cachedInput: 0.075,
+      output: 3.75,
+    });
+    for (const id of ['gemini-3.6-flash', 'gemini-3.8-flash']) {
+      expect(rates(id, JAN)).toEqual({ input: 1.5, cachedInput: 0.15, output: 7.5 });
+    }
+    // 2.5 Pro goes to 3.8 Flash's rates where they pass its own, never under either.
+    expect(rates('gemini-2.5-pro', JAN)).toEqual({ input: 1.5, cachedInput: 0.15, output: 10 });
+    // A change keeps the long-prompt tier unless it sets its own.
+    expect(priceOf('gemini-2.5-pro', PRICES, JAN)?.above).toEqual(PRICES['gemini-2.5-pro']?.above);
+    // A browser's own price has no changes: it stays as entered.
+    const own = { ...PRICES, 'gemini-3.8-flash': { ...FLASH_OWN } };
+    expect(priceOf('gemini-3.8-flash', own, JAN)?.input).toBe(1);
+  });
+
+  it('leaves the Gemini 3 ids Google doesn’t list unpriced (so the designer refuses them)', () => {
+    expect(priceOf('gemini-3-pro')).toBeNull();
+    expect(priceOf('gemini-3-pro-preview')).toBeNull();
+  });
+
+  it('meters a served model it doesn’t know at the asked model’s price, never as free', () => {
+    expect(meteredPrice('gemini-3.1-pro-preview-0219', 'gemini-3.1-pro-preview')).toBe(
+      PRICES['gemini-3.1-pro-preview'],
+    );
+    expect(meteredPrice('gemini-3.8-flash', 'gemini-2.5-pro')).toBe(priceOf('gemini-3.8-flash'));
+    expect(meteredPrice('nobody', 'nothing')).toBeNull();
+  });
+});
+
+const FLASH_OWN = { input: 1, cachedInput: 0.1, cacheWrite: null, output: 5, checked: false };
+
 describe('usageOf (criterion 22)', () => {
   it('reads Claude’s events: input without the cache, reads and writes apart', () => {
     const u = usageOf('anthropic', anthropic, { step: 'rm_bedroom', model: 'x', ms: 41_000 });
@@ -204,7 +278,13 @@ describe('usageOf (criterion 22)', () => {
     expect(u.usd).toBeCloseTo(((6350 - 4096) * 1.25 + 4096 * 0.125 + 5210 * 10) / 1e6, 10);
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('reads Gemini’s last chunk: output billed is candidates plus thoughts', () => {
+    // At the 2.5 Pro price as it stands in Nov 2026 (it changes in Jan 2027).
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.parse('2026-11-14T12:00:00Z') });
     const u = usageOf('gemini', gemini, { step: 'layout', model: 'gemini-2.5-pro', ms: 1 });
     expect(u).toMatchObject({
       input: 6402 - 2048,
@@ -212,7 +292,7 @@ describe('usageOf (criterion 22)', () => {
       output: 1310 + 2960,
       reasoning: 2960,
     });
-    expect(u.usd).toBeCloseTo(((6402 - 2048) * 1.25 + 2048 * 0.31 + 4270 * 10) / 1e6, 10);
+    expect(u.usd).toBeCloseTo(((6402 - 2048) * 1.25 + 2048 * 0.125 + 4270 * 10) / 1e6, 10);
   });
 
   it('a Claude step stopped before its final count meters what streamed, marked estimated', () => {

@@ -752,9 +752,24 @@ The look is told the house rules (in the app's sentences) and which pieces are k
 accepted: a tab of an older build (house rules part B) that rewrites the conversation drops
 `talk.look`, so the next talk prompt's `eventsSince` may stop at the offer and leave out the
 events before it.
-The card shows "Second look": its line, three notes then "and N more", its cost. WebKit draws
-the picture's sans-serif labels fine (checked on a screenshot). Not yet: a refused picture ends
-as `failed` (the design stands), case files and "Save a case" (PR 3), cloud runs.
+The card shows "Second look": its line, three notes then "and N more", its cost (its round's
+included). A picture the provider refuses (a 400 about the image, or `st.failed` refused) ends
+the look `skipped` with `PICTURE_REFUSED`; a model that can't see says `NO_LOOK` on the card and
+the cost card; a model with no price (its price gone mid-run) sends no look (`LOOK_UNPRICED`).
+The look is fed the run report (`runReport`: its F lines in place of the check texts, its L
+lines), and its round follows the fix-up pool's rule (taken before `mayStart`, given back if
+refused, `held` saved as left), goes as `fixStepFor`, carries the space's L lines, and writes the
+room's `rounds` record (`fixed`/`no-better`, or why no answer came, `no-fixups`) for a round of
+the app's checks; a round only of taste suggestions is the look's own record. The picture leaves
+out ceiling lights, clips a piece's room-in-front to its room, and keeps labels a quarter metre
+off each edge (a split's halves overlap by half a metre, so each label is drawn in one). WebKit
+draws the picture's sans-serif labels fine (checked on a screenshot). The runner part lives in
+`@dhd/ai` (`packages/ai/src/run.ts`); the rasteriser stays in web
+(`apps/web/src/ai/designer/look.ts`) and is injected as `look.rasterise`. The look's own drops
+are `OptionLook.dropped` (`why`: target, checks-disagree, taste-once, not-designed, suggest,
+kept); what its edits leave out is the solver's, with its `DropCode`. Not yet: case files and
+"Save a case" (PR 3), the look in cloud runs. Known: in landscape on a phone (844×390) the log
+between On the table and the composer is about 80 px tall; that layout predates the look.
 
 **Drag on big plans (task #69):** room labels are fitted once per room (`fitRoomLabel`,
 memo keyed on everything the fit reads) with `placeLabel` filtering far circles and searching
@@ -796,6 +811,146 @@ the time left (`talk/timeLeft.ts`), on phones with "Keep this screen open". Mone
 review): a step is sent again at most twice and never past the figure or the tab's limit; spending
 and the steps in flight (at their most) are written as they happen and counted on carrying on;
 Stop or another plan opened marks the checkpoint stopped and writes the end by plan id.
+
+**AI runs that survive a locked phone, part 2 step 1 (8 Nov): `@dhd/ai` (`packages/ai`).** The
+designer's provider requests moved out of the web app, unchanged, so the edge can run them too
+(cloud runs, tech §2): `run.ts` (`runDesign`), `request.ts` (`requestStep`, the retry, resend and
+interrupt rules), `stream.ts` and `sse.ts`, `talkCall.ts`, `errors.ts` (`AiError`, `failure`,
+`redact`, `providerMessage`, `errorBody`, `anySignal`, `TO_SETTINGS`, from the web's
+`providers.ts`, which keeps `inSettings`) and `providers.ts` (`Provider`, `AiSettings`, `PROVIDERS`, from
+`credentials.ts`; key storage stays in the web). It is runtime-neutral TS: no DOM, checked by
+its tsconfig (no `dom` lib) and by Biome (`noRestrictedGlobals`: `document`, `window`,
+`navigator`, storage, IndexedDB, `process`, `Buffer`; `noNodejsModules`). What the request rules need of the browser comes in as a
+`Page` (`hidden`, `offline`, `onVisibility`, `onOnline`; long-lived, one per document): the web passes `browserPage()`
+(`ai/designer/page.ts`) to `runDesign` and `talkCall`; a server passes none, so nothing is ever
+away and no `anthropic-dangerous-direct-browser-access` header goes (`requestFor(…, { browser })`).
+Its tests run in Node and in workerd (`vitest.workers.config.ts`, `@cloudflare/vitest-pool-workers`),
+and `runtimes.test.ts` checks a whole-flat run with each provider sends and keeps the same in
+both. The run-test harness (`fixtures/runner.ts`, `flat.ts`) is shared with the web's
+`talk/carryOn.test.ts` (a run carried on from its checkpoint, priced as the card prices it).
+
+**The designer listens, PR A (issue #66 part 2, 14 Nov):** spec `docs/specs/designer-listens.md`
+(its Lead decisions and UX design win). One run report, core `designer/report.ts` (`runReport`,
+pure, from a `DesignResult` and the stored space entries): F lines (hard checks caused, not
+waived, with a signature principle|code|room|role) and L lines (pieces the answer asked for and
+the app left out, with the reason's `Note.code` and a to-fix hint: keep ref not in the plan,
+brief keeps it, no wall long enough with `need`/`longest`, no place, wet, not in the catalogue).
+It feeds the talk call (F and L lines replace "Doesn't pass" in On the table, at most 8 + 8; the
+history's bytes are unchanged; "Since your last reply" says `designed; 2 don’t pass, 1 piece left
+out`), fix rounds (`FixRequest.leftOut`; the fix prompt no longer invites dropping a bed, seat,
+table or desk; `FIX_EXTRA` 600 → 2,100 tokens) and the web card's one list (`cardRunReport`): the
+lead (`CheckLead.tsx`: the rounds' outcome and the count, every failure named in the household's
+names via `peopleWords`, with its measured cause; "How it was checked" per room), the Checks row
+("· listed above"), On the table, the folded line, Options' tab and the run-end announcement. The
+card bug ("2 don't pass" naming neither: a missing bed has no row) is gone. Each room's fix rounds
+are stored as `rounds` (`fixed`, `no-better`, `cut-off`, `failed`, `no-fixups`; optional, read
+tolerantly, no record bump). `TALK_SYSTEM` says how the app really works (checks before the person
+sees it, failures back up to the priced rounds) and drops "it, not you"; memory notes are for work
+the app doesn't cover, and stored notes about the app or the checks are no longer sent. The claims
+filter (`filterClaims`, `cantClaim` in `talk/reply.ts`) takes only first-person "I can't
+check/run/fix … the checks/results/before you see" sentences out, after the reply is read as
+usable (never a paid retry; an emptied reply shows the app's run-report line), on salvaged
+stopped or cut-off text too, never while streaming. `plan.addresses` (optional, read against the
+table's F/L ids with their signatures) shows "For “…”: …" under the plan's reply, or "This plan
+doesn't say how it fixes V8's 4 problems."; the option keeps them and its card shows "What this
+design set out to fix" with ✓/⚠. At a run's end the log brings the card's head into view when the
+card is taller than the log. Left for B1/B2/C: free fixes, the fix-up pool, vetting, repeats,
+strict mode; the hover-to-light of a failure line. Review fixes (14 Nov): one line a failure as
+the person reads it (the couple without a bed for one reason is "You and Partner have no bed in
+Main bedroom", four chairs at no table are "4 dining chairs aren't at a table"), ordered by
+severity (no bedroom, no bed, HDB, seats, dining, … orphans last), and a merged line counts as one
+everywhere. What a set of ticks fails together beyond that is its own line under Checks, never
+in the count. The filter splits sentences only at a stop followed by a space (never "0.9 m" or
+"e.g."), and the inability must govern a checking verb; notes are dropped only for "the app",
+"the checks", "check results" or mood words. `requestStep` sets `st.failed` (length, unreadable,
+refused, busy, network, limit), so a round reads cut off, declined or "didn't go through", never
+guessed from the error text. An emptied reply shows the app's line in its place with its cost
+(`talk.appLine`). Phone disclosures in the panel get a chevron (a flex `summary` has no marker).
+Re-review: a plan's L address named by the failure it caused carries that failure's
+signatures too, so it never reads "Fixed" while the failure stands; check, verify and test are
+claims only about the checks, the design or "it" ("I can't check the lift size" stays); Accept's
+question counts with the same `mergeLines`; a round with no progress reads "no better" (no
+count).
+
+**AI costs always have a figure (#67, 14 Nov).** The owner's Gemini 3 runs had no price, so no
+cost card had a figure and neither the approved figure nor the tab's limit held.
+- **Prices** (`core designer/prices.ts`, checked 14 Nov against Google's
+  aistudio.google.com/docs/pricing and Anthropic's pricing page; the sources are in the comment
+  over `PRICES`): every Gemini 3 text model Google lists, plus the old endpoints it routes to
+  them (`gemini-3.5-flash`, `gemini-3.7-flash`), and the Claude models the designer takes.
+  `gemini-3-pro` (the old default, never an API id) and `gemini-3-pro-preview` (shut down)
+  stay unpriced. The Gemini default is `gemini-3.1-pro-preview`, and a saved key naming either
+  dead id moves to it (`RETIRED` in `credentials.ts`).
+- **Dated `changes`:** a `Price` can carry announced changes (`{ from: 'YYYY-MM-DD', ...rates }`).
+  `priceOf(model, table, at)` applies the latest change by that UTC day, and keeps the
+  long-prompt tier unless the change sets one. 3.6 and 3.8 Flash double on 1 Jan 2027. 2.5 Pro
+  goes to 3.8 Flash on 1 Dec, so it is kept at the dearer of the two, rate by rate. A browser's
+  own price has no changes.
+- **No figure, no run:** `designerCannotUse(ai, prices)` (`@dhd/ai`) refuses a model with no
+  price (`UNPRICED`). The web asks it through `cannotDesign` (`spend.ts`, the browser's own
+  prices included) on every paid path. `requestStep` halts (`'unpriced'`) before sending,
+  whatever the caller checked, so nothing unpriced goes: runs, fix rounds, carry on, Another
+  idea, talk replies. AI settings marks such a model "no price yet" and never recommends one
+  while a priced model is listed. Entering its prices in AI settings makes it usable.
+- **`meteredPrice(served, asked)`:** usage from a served model the table doesn't know is billed
+  at the asked model's price, never as free.
+- **Thinking per model** (`stream.ts` `geminiThinking`, `lowerEffort`, `fixStepFor`):
+  - Gemini 3 sends the level asked for. `medium` goes as `low` on the exceptions
+    (`GEMINI_NO_MEDIUM`: 3 Pro Preview), never as `high`, so Quick runs and talk calls are
+    medium.
+  - Gemini 3 fix rounds start at `low`.
+  - The retry after a cut-off goes to `low` where Gemini thinks by level, and one step down
+    elsewhere. It goes only when the request's thinking part really differs: a Gemini 2.x
+    budget capped alike at two levels, or a model that takes no effort (gpt-4o), is not sent
+    the same request twice.
+  - Claude sends `output_config.effort`; OpenAI's reasoning models send `reasoning_effort`.
+- **1 Dec 2026:** Google routes `gemini-2.5-pro` to 3.8 Flash and `gemini-2.5-flash` to 3.5
+  Flash-Lite, whose guides say to send `thinkingLevel` in place of `thinkingBudget`. They take
+  the budget until that day and the level from it (`ROUTED_2X`, by date as prices are).
+  2.5 Flash-Lite stays and keeps its budget.
+- **Fix-up pool (tech lead):** a room takes its fix-up before waiting at the gate and gives it
+  back if refused. It is held (`held`) and saved as still left until its request goes. Every
+  step that waited on a pause is checked again after Carry on. Three rooms paused with one
+  fix-up left used to send three.
+
+**Designer: keeping pieces after an Accept (issue #66 PR 1, 14 Nov).** After an Accept every
+design starts from After (cards' `nowOf`, the run's `planScope` → `contextFor`, `brief.start`
+'after'), and its answers keep the accepted pieces by alias (`keep: "P7"`). `designResult`
+dropped every one: `resolveWant` took only pieces the brief's keep list brings (`brief.keep` is
+about the household's furniture in the flat as it is, and empty), so V6–V9 of the owner's
+conversation lost the bed, sofa, dining set and fridge whatever was said. Now, on After
+(`startsFromAfter(base, before)`, levels.ts) a piece the answer keeps is a `Want` with `stays`,
+if any of it stands in that space, it isn't kept with Keep this and its room isn't held by a
+hand edit (else a left-out line says why); a piece the brief brings is still placed anew, as
+on the flat as it is, and one alias kept twice is placed once. The solver places a kept piece
+first where it stands (`stayAt`, `stayHit`: walls, door swings, ways kept clear and doorways,
+and the throats of openings the design adds or moves, `ix.fresh`, not of those it stood by;
+then nudges of up to 0.10 m), places what goes with it round it (a new TV faces the kept
+sofa) and never swaps it. One that can't stay (a wall moved by hand runs through it) is placed
+again by its own priority, a bed before the pieces kept round it, which follow it, and says
+"Moved the queen bed: it no longer fits where it stood."; nothing a space before placed is
+cleared by a later one. Pieces in scope it leaves out go, as before. The prompts say so
+(`pieceKeep`: "keep", or "in-place" for held and Keep-this pieces, `inPlaceOf` into the shared
+context), and a scoped run's aliases are the shared context's (`planScope` draft), so P7 is
+the same piece in every step and in the result. The solve memo key carries the pieces kept or
+brought (kind, pose, stays), and `designResultKey` whether it starts from After. Near misses
+(`designer/nudge.ts`): a hard walkway or room-to-use check failing by at most 0.06 m is mended
+by moving the version's piece (with the pieces that then fail with it, a coffee table with its
+sofa) the shortfall plus 2–4 cm, kept only if fewer hard checks fail and none new ("Moved the
+3-seat sofa 3 cm to leave the fridge the room it needs."); only pieces of the spaces asked for
+(`nudgeable`: not copied or locked ones), at most `NUDGE_BUDGET` (20) checks of the level, and
+looked for only when the walkways or clearances show one. Regression:
+`designer/fixtures/owner-after-accept.json` (trimmed export) and `afterAccept.test.ts`; the
+bent-wall case in `talk/plan.test.ts` and the e2e "a wall moved by hand into the kept bed".
+Not in the benchmark: the recorded V6–V9 answers still crowd two desks into the main bedroom
+(a real "desk short of room" the fix rounds would send back). Known, for PR 2: the talk card
+shows no repaired or left-out notes at all (only change rows and checks), so a kept piece left
+out is said only by its "Remove …" row; Compare counts advice (a bed side at 0.01 m) as
+"Problems" where the card says "Passes all checks"; a room asked again shows the copied
+whole-flat concept summary. Accepted risks: old cards re-compute with fewer rows; a card whose
+earlier accept removed a piece shows "no piece P7"; nudges may add small "Move…" rows when an
+old card is reopened. PR 2 (being specified): the drop reasons sent to the model, fix rounds
+until no progress, the free deterministic fix on the card.
 
 ## 5. Owner to-dos
 
@@ -923,7 +1078,7 @@ renovation (`restore`), taking back its steps already carried, and stays held ba
 nothing. One undo step, which shows Before (`touchedVariant`).
 **AI: walls from a plan image (stage 1, 5 Nov):** bring your own key. Project menu "AI
 assistant…" (`ai/AiSettingsDialog.tsx`): Claude, OpenAI or Gemini, key and model (defaults
-`claude-opus-5-5`, `gpt-5`, `gemini-3-pro` since 6 Nov), Test, Forget; kept in this tab
+`claude-opus-5-5`, `gpt-5`, `gemini-3.1-pro-preview` since 14 Nov, #67), Test, Forget; kept in this tab
 (sessionStorage), or on this device if ticked (`ai/credentials.ts`, key `dhd-ai`), never
 in a project, export, share link or `/api` request (e2e checks). Calls go straight from the
 browser to the provider (`ai/providers.ts`: the Anthropic SDK, lazy-loaded, with
@@ -1018,7 +1173,7 @@ while a changed key's is looked up, falling back per job. If listing fails, `CUR
 plans model with JSON and the picture model without making a picture (Gemini `countTokens`,
 OpenAI `GET /v1/models/{id}`), a line each; changing the provider, key or a model stops it.
 Every failed provider call (trace, layouts, render, Test, listing) now shows what the
-provider said (`failure`/`providerMessage` in `providers.ts`: `error.message`, cut to 200
+provider said (`failure`/`providerMessage`, now in `@dhd/ai`'s `errors.ts`: `error.message`, cut to 200
 characters, shown as text, with keys and tokens redacted: sk-…, sk_live_…, AIza…, AQ.…,
 ya29.…, Bearer …, and long mixed-case or hex runs; lower-case model names stay): "Gemini
 turned the request down (400): …". Gemini's 400 "API key not valid" counts as a refused key.

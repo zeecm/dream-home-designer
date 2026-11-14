@@ -1,11 +1,10 @@
+import { type AiSettings, PROVIDERS, designerCannotUse } from '@dhd/ai';
 import { type DesignBrief, PRICES_AS_OF, type RunEstimate, priceOf } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { Segmented } from '../../ui/fields';
-import { type AiSettings, PROVIDERS } from '../credentials';
 import { LARGE_INPUT, MAX_STEP_INPUT } from './plan';
 import { tokens, usd, useSpend } from './spend';
 import { useDesigner } from './state';
-import { designerCannotUse } from './stream';
 import { useTalk } from './talk/useTalk';
 
 /**
@@ -79,7 +78,7 @@ export function CostCheck(p: CostCheckProps) {
   const high = p.est.usd ? p.est.usd.high + fix : null;
   const over = cap !== null && high !== null && spend.usd + high > cap;
   const tooBig = p.est.steps.some((s) => s.input > MAX_STEP_INPUT);
-  const unsupported = designerCannotUse(p.ai);
+  const unsupported = designerCannotUse(p.ai, prices);
   // Pressed once: it waits while the run starts (a double click starts one run).
   const [pressed, setPressed] = useState(false);
   const replying = useTalk((s) => !!s.reply);
@@ -110,8 +109,8 @@ export function CostCheck(p: CostCheckProps) {
           <>
             <p className="cost-figure num">About {tokens(p.est.tokens.typical)} tokens</p>
             <p className="cost-sub">
-              We don’t have prices for “{p.ai.model}”. Enter them in AI settings to see the cost.
-              Your limit can’t be checked without prices.
+              No price for “{p.ai.model}”, so this can’t start: with no figure, neither it nor your
+              limit could be held to one.
             </p>
           </>
         )}

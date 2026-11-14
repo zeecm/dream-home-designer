@@ -1,4 +1,12 @@
 import {
+  type AiSettings,
+  type StepKind,
+  type StepState,
+  blankStep,
+  interruptText,
+  runDesign,
+} from '@dhd/ai';
+import {
   type Conversation,
   DRAFT_CHARS,
   type DraftDesign,
@@ -6,6 +14,7 @@ import {
   NO_LOOK,
   type OptionLook,
   PROPOSAL_RECORD_VERSION,
+  type PlanAddress,
   type Proposal,
   type ProposalOption,
   type RunCheckpoint,
@@ -33,18 +42,28 @@ import {
   optionName,
   optionTitle,
   planScope,
+  readyLine,
   ruleSentence,
   scopeCut,
 } from '@dhd/core';
 import { meterSetting } from '../../../storage/store';
 import { useStore } from '../../../store';
-import { type AiSettings, aiSettings } from '../../credentials';
+import { aiSettings } from '../../credentials';
 import { rasterise } from '../look';
+import { browserPage } from '../page';
 import { freshPrice, readPrice, trialResult } from '../results';
-import { type StepKind, type StepState, blankStep, interruptText, runDesign } from '../run';
-import { addUsage, capUsd, countRun, overLimit, priceTable, spent, usd } from '../spend';
+import {
+  addUsage,
+  cannotDesign,
+  capUsd,
+  countRun,
+  overLimit,
+  priceTable,
+  spent,
+  usd,
+} from '../spend';
 import { type MadeWith, type Running, designOpts, houseKeptFor, useDesigner } from '../state';
-import { designerCannotUse } from '../stream';
+import { cardReportNow, optionCard } from './cards';
 import {
   type PriceInput,
   type Priced,
@@ -55,6 +74,7 @@ import {
   spentWithInflight,
 } from './pricing';
 import { type RunHold, takeRunLock } from './runLock';
+import { cardHeadIntoView, logFollowing } from './scroll';
 import { talkStore } from './talkStore';
 import { threshold } from './threshold';
 import { timeLeft, timeLeftMark } from './timeLeft';
@@ -96,6 +116,8 @@ export interface PressRequest {
   title?: string;
   /** Another idea as the next option (B, C) of a proposal, for the same rooms. */
   alternative?: { proposalId: string; letter: 'B' | 'C' };
+  /** What the designer's plan said it fixes (its `addresses`): kept on the option it makes. */
+  addresses?: PlanAddress[];
 }
 
 /** The house rules on the level designed, as the app says them. */
@@ -126,13 +148,20 @@ export const planRequest = (plan: TalkPlan, said: string, scope?: ScopeRef): Pre
   words: said,
   finish: null,
   talk: { intent: plan.intent, said, decided: decided() },
+  ...(plan.addresses?.length ? { addresses: plan.addresses } : {}),
 });
+
+/** The plan a designer's reply made (a cost card's `talk.replyTo`), for its `addresses`. */
+const replyPlan = (turnId: string): TalkPlan | null => {
+  const t = useTalk.getState().conv?.turns.find((x) => x.id === turnId);
+  return t?.kind === 'designer' ? (t.talk?.plan ?? null) : null;
+};
 
 /** What pricing a request needs, as plain data (what the worker is sent). */
 function priceInput(req: PressRequest, designId: string): Omit<PriceInput, 'designs'> | null {
   const conv = useTalk.getState().conv;
   const ai = aiSettings();
-  if (!conv || !ai || designerCannotUse(ai) || levelGone()) return null;
+  if (!conv || !ai || cannotDesign(ai) || levelGone()) return null;
   const project = doc();
   let finish: PriceInput['finish'];
   // What it is placed with: a new design's kept pieces now; finishing an option, its own.
@@ -410,6 +439,9 @@ export const cardRequest = (card: TurnOf<'cost-ask'>, cheaper?: ScopeRef): Press
         ...(card.talk
           ? { talk: { intent: card.talk.intent, said: card.words, decided: decided() } }
           : {}),
+        ...(card.talk?.replyTo && replyPlan(card.talk.replyTo)?.addresses?.length
+          ? { addresses: replyPlan(card.talk.replyTo)?.addresses }
+          : {}),
         // Another idea's card: the option it adds (the cheaper room is a new card of its own).
         ...(card.alt && !cheaper ? { alternative: card.alt } : {}),
       };
@@ -493,7 +525,7 @@ async function run(
   if (!here()) return;
   if (req.alternative) {
     const { proposalId, letter } = req.alternative;
-    const option = newOption(letter, req.scope, sp, fp);
+    const option = newOption(letter, req.scope, sp, fp, req.addresses);
     // Only the letter it was priced as: another tab may have added it meanwhile.
     const p = await actProposal(proposalId, (x) =>
       x && nextLetter(x) === letter ? { ...x, options: [...x.options, option] } : null,
@@ -519,7 +551,7 @@ async function run(
   const proposalId = newId('prop');
   const scope = scopeCut(req.scope);
   const words = cut(req.words, DRAFT_CHARS);
-  const option = newOption('A', scope, sp, fp);
+  const option = newOption('A', scope, sp, fp, req.addresses);
   const proposal: Proposal = {
     projectId: project.id,
     id: proposalId,
@@ -561,9 +593,11 @@ function newOption(
   scope: ScopeRef,
   sp: ScopePlan,
   fp: string,
+  addresses?: PlanAddress[],
 ): ProposalOption {
   return {
     letter,
+    ...(addresses?.length ? { addresses: structuredClone(addresses) } : {}),
     madeAt: nowIso(),
     // The kept pieces it is made with, on its record (read so whatever changes after).
     kept: [...houseKeptFor(designLevelId(), 'new')],
@@ -719,7 +753,7 @@ export async function resumePriced(p: Proposal, letter: string): Promise<Priced>
   const o = p.options.find((x) => x.letter === letter);
   const conv = useTalk.getState().conv;
   const ai = aiSettings();
-  if (!o?.run || !conv || !ai || designerCannotUse(ai) || levelGone()) return null;
+  if (!o?.run || !conv || !ai || cannotDesign(ai) || levelGone()) return null;
   const project = doc();
   return freshPrice({
     project,
@@ -1062,6 +1096,7 @@ async function runOption(
     design: sp.draft,
     plan: sp.plan,
     signal: ctrl.signal,
+    page: browserPage(),
     prices: priceTable(),
     // Placed as its card will be: with the kept pieces it was made with.
     result: designOpts(project, designLevelId(), madeOf(p, letter)),
@@ -1201,6 +1236,9 @@ async function runOption(
       ),
     };
   });
+  // Whether the log was following the run (the person hadn't scrolled away): read before the
+  // next turn goes in, which takes the log to its foot.
+  const following = logFollowing();
   // The conversation's lines, only while its plan is open (the record `act` writes is its).
   if (doc().id === projectId) {
     if (state.phase === 'stopped') {
@@ -1224,16 +1262,46 @@ async function runOption(
   if (useTalk.getState().live?.ctrl === ctrl) useTalk.setState({ live: null });
   const r = useDesigner.getState().run;
   if (r?.ctrl === ctrl) useDesigner.setState({ run: null });
-  // Said only where its plan is open (never in another plan's live region).
-  if (doc().id === projectId)
-    say(
-      status === 'checked'
-        ? `V${p.n}${p.options.length > 1 || letter !== 'A' ? letter : ''} is ready. ${state.usage.length ? `Cost ${usd(state.usage.reduce((t, u) => t + (u.usd ?? 0), 0))}.` : ''}`
-        : status === 'stopped'
+  // Said only where its plan is open (never in another plan's live region): one announcement,
+  // from the card's one list ("V8 is ready. 3 don’t pass: You have no bed …, and 2 more.").
+  if (doc().id === projectId) {
+    const title = `V${p.n}${p.options.length > 1 || letter !== 'A' ? letter : ''}`;
+    const cost = state.usage.length ? usd(state.usage.reduce((t, u) => t + (u.usd ?? 0), 0)) : null;
+    if (status === 'checked') {
+      // Once its checks are worked out (the worker has it), never holding the run's end up.
+      void readyText(p.id, letter, title, cost).then((t) => {
+        if (doc().id === projectId) say(t);
+      });
+    } else {
+      say(
+        status === 'stopped'
           ? 'Stopped. Finished rooms are kept.'
           : (state.halt?.message ?? 'The design didn’t work.'),
-    );
+      );
+    }
+    // The card's head in view when it's taller than the log (its lead is read first).
+    if (status !== 'failed' && following) cardHeadIntoView(`${p.id}:${letter}`);
+  }
   endRun();
+}
+
+/** The run's end in the live region, from the card's run report (its one list). */
+async function readyText(
+  proposalId: string,
+  letter: string,
+  title: string,
+  cost: string | null,
+): Promise<string> {
+  const p = useTalk.getState().proposals.find((x) => x.id === proposalId);
+  const o = p?.options.find((x) => x.letter === letter);
+  const plain = `${title} is ready.${cost ? ` Cost ${cost}.` : ''}`;
+  if (!p || !o) return plain;
+  try {
+    const got = await cardReportNow(doc(), optionCard(p, o, designLevelId()));
+    return got ? readyLine(title, got.report, cost) : plain;
+  } catch {
+    return plain;
+  }
 }
 
 /** Stops the design run going on (its finished rooms are kept). */
