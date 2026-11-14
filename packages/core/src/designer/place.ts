@@ -254,6 +254,23 @@ export function fixedHitOf(
 }
 
 /**
+ * What stops a piece kept where it stands (Want.stays) from staying: outside the rooms, a
+ * wall, a door's sweep, a way kept clear. Not a doorway's throat or a window, as fixedHit
+ * has for a new piece: it stood there already, and the checks judge the ways past it.
+ */
+export function stayHit(ix: SpaceIndex, kind: FurnitureKind, fp: Vec2[]): Hit | null {
+  if (!inset(fp).every((p) => inRooms(ix, p))) return { kind: 'outside' };
+  if (!blocksFloor(kind)) return null;
+  const box = boxOf(fp);
+  const hit = (shapes: Shape[], depth: number) =>
+    shapes.some((s) => !apart(s.box, box) && overlapDepth(fp, s.poly) > depth);
+  if (hit(ix.solid, 0.01)) return { kind: 'wall' };
+  if (hit(ix.sweeps, 0.005)) return { kind: 'door' };
+  if (hit(ix.keepOut, 0.01)) return { kind: 'keep-out' };
+  return null;
+}
+
+/**
  * What a piece at this position runs into (empty: it can stand there). `fixedChecked`: its
  * fixed hits (fixedHit) are known to be none. `fp`: its footprint, when already worked out.
  */
@@ -483,6 +500,12 @@ export interface Want {
   ceiling: number;
   /** A piece of the flat's own, brought along. */
   brought: Item | null;
+  /**
+   * `brought` is a piece of the renovation the design starts from (an accepted version's, or
+   * put in by hand) that the answer keeps: it stands where it is, or a few cm off, while it
+   * still fits there; only otherwise is it placed again, like a piece brought along.
+   */
+  stays?: boolean;
 }
 
 export interface PlaceOutcome {

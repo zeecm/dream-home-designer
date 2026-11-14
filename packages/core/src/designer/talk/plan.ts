@@ -489,7 +489,9 @@ function planScopeOnly(
       scope,
       brief: v.brief,
       plan: made.plan,
-      draft: { ...made.design, brief: v.brief },
+      // The pieces' aliases as the shared context numbers them on After (P7 is the bed in every
+      // step), so a room step's `keep: "P7"` is the piece the context and the result mean.
+      draft: { ...made.design, brief: v.brief, aliases: ctx.aliases },
       ctx,
       locks: made.locks,
       expected: r.spaces

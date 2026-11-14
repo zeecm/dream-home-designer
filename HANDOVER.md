@@ -780,6 +780,32 @@ and `runtimes.test.ts` checks a whole-flat run with each provider sends and keep
 both. The run-test harness (`fixtures/runner.ts`, `flat.ts`) is shared with the web's
 `talk/carryOn.test.ts` (a run carried on from its checkpoint, priced as the card prices it).
 
+**Designer: keeping pieces after an Accept (issue #66 PR 1, 14 Nov).** After an Accept every
+design starts from After (cards' `nowOf`, the run's `planScope` → `contextFor`, `brief.start`
+'after'), and its answers keep the accepted pieces by alias (`keep: "P7"`). `designResult`
+dropped every one: `resolveWant` took only pieces the brief's keep list brings (`brief.keep` is
+about the household's furniture in the flat as it is, and empty), so V6–V9 of the owner's
+conversation lost the bed, sofa, dining set and fridge whatever was said. Now, on After
+(`startsFromAfter(base, before)`, levels.ts) a piece the answer keeps is a `Want` with `stays`:
+the solver places it first, where it stands (`stayAt`, `stayHit`: walls, door swings and ways
+kept clear only, not doorway throats; then nudges of up to 0.10 m), places what goes with it
+round it (anchors turned round: a new TV faces the kept sofa), never swaps it, and only if it
+no longer fits places it again ("Moved the queen bed: it no longer fits where it stood.").
+Pieces in scope it leaves out go, as before; the flat as it is keeps the brief's rules. The
+prompts say so (`pieceKeep`: "keep" ones in the context and the room step), and a scoped run's
+aliases are the shared context's (`planScope` draft), so P7 is the same piece in every step
+and in the result. The solve memo key now carries the pieces kept or brought (a bring/leave
+change used to hit a stale solve). Near misses (`designer/nudge.ts`): a hard walkway or
+room-to-use check failing by at most 0.06 m is mended by moving the version's piece (with the
+pieces that then fail with it, a coffee table with its sofa) the shortfall plus 2–4 cm, kept
+only if fewer hard checks fail and none new ("Moved the fridge 3 cm to keep the room it
+needs."); looked for only when the walkways or clearances show one. Regression:
+`designer/fixtures/owner-after-accept.json` (trimmed export) and `afterAccept.test.ts`. Not in
+the benchmark: the recorded V6–V9 answers still crowd two desks into the main bedroom (a real
+"desk short of room" the fix rounds would send back), so they can't meet its 0-failures bar.
+PR 2 (being specified): the drop reasons sent to the model, fix rounds until no progress, the
+free deterministic fix on the card.
+
 ## 5. Owner to-dos
 
 - **Before the repo goes public:** `apps/web/public/samples/hdb-3room-type4.pdf` (and its PNG

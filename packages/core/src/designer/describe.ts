@@ -1,5 +1,6 @@
 import { FLOOR_FINISHES, PAINTS, WALLPAPERS } from '../finishes';
 import { furnitureKind, itemSize } from '../furniture';
+import { startsFromAfter } from '../levels';
 import { doorStyle } from '../plan';
 import { roomArea, roomShapes } from '../rooms';
 import {
@@ -18,6 +19,24 @@ import { peopleOf } from './principles';
 import { type DesignBrief, STYLE_NAMES } from './schema';
 import { roomIdAt, roomsBeside } from './spaces';
 import { clean, levelFingerprint, pt, r2, stableJson } from './util';
+
+/**
+ * What becomes of a piece of the level a design starts from, as the prompts say it: on After
+ * (once a version is in), "keep" — the design so far, kept where it stands if the answer keeps
+ * it (`keep` = its alias) and gone if it leaves it out; on the flat as it is, what the brief
+ * says ("bring", "in-place"), else "leave".
+ */
+export function pieceKeep(
+  base: Level,
+  before: Level,
+  id: string,
+  keep: DesignBrief['keep']['items'],
+): 'keep' | 'bring' | 'in-place' | 'leave' {
+  const how = keep[id];
+  if (how === 'in-place') return how;
+  if (startsFromAfter(base, before) && base.items[id]) return 'keep';
+  return how ?? 'leave';
+}
 
 /**
  * The flat as a model reads it: walls (with what either side and whether they may change),
@@ -139,7 +158,7 @@ export function planForDesign(
         size: [r2(sz.w), r2(sz.d), r2(sz.h)],
         room: a(room),
         at: pt({ x: it.position.x, y: it.position.z }),
-        keep: opts.keep?.[it.id] ?? 'leave',
+        keep: pieceKeep(level, before, it.id, opts.keep ?? {}),
       };
     }),
   );

@@ -8,21 +8,25 @@ import {
   designResult,
   dispatch,
   emptyHistory,
+  levelBounds,
   levelFingerprint,
+  parseSpaceDesign,
   sampleFlatProject,
   spacesOf,
   undo,
   updateItem,
   updateWall,
 } from '../../index';
-import { SAMPLE_KEYS, sampleDesign } from '../fixtures/sample';
+import { SAMPLE_KEYS, parsed, sampleDesign } from '../fixtures/sample';
 import {
   acceptedNow,
   changeFrom,
   changePlan,
   lastAccepted,
   onPlanNow,
+  planScope,
   resultFor,
+  roomPrompts,
   wallsStillIn,
 } from './plan';
 
@@ -379,5 +383,69 @@ describe('changePlan with hand-edit locks', () => {
     const free = changePlan(from.v, r, { ...req, aspects: [...req.aspects], held: [] }, 'dsn_v3');
     expect(free?.plan.keep?.[SAMPLE_KEYS.living] ?? []).not.toContain('furniture');
     expect(free?.locks.some((l) => l.by === 'hand-edit')).toBe(false);
+  });
+});
+
+describe('a room asked again after an Accept (issue #66)', () => {
+  it('its prompts name After’s pieces as the result resolves them, kept or left out', () => {
+    const s0 = fresh();
+    const v1 = record(flatOf(s0), 'dsn_v1', 1);
+    const { s: s1, d: v1a } = accept(s0, v1, '2026-11-06T11:00:00.000Z');
+    const after = afterOf(s1);
+    const scope = { label: 'Main bedroom', spaces: [SAMPLE_KEYS.main], all: false };
+    const sp = planScope(scope, v1.brief, s1.doc, flatOf(s1).id, [v1a], '', 'dsn_v2', {});
+    if (!sp) throw new Error('no plan');
+    expect(sp.ctx.variant).toBe('after');
+    // The run's map is the shared context's: P7 is the same piece in every step and the result.
+    for (const [a, id] of Object.entries(sp.ctx.aliases)) expect(sp.draft.aliases[a]).toBe(id);
+    const [step] = roomPrompts(sp.ctx, sp.draft, sp.plan, {});
+    const line = step?.tail.split('\n').find((l) => l.startsWith("Pieces of the household's here"));
+    expect(line).toContain('"keep" ones (the design so far) stay where they stand');
+    const pieces = JSON.parse(line?.slice(line.indexOf('): ') + 3) ?? '[]') as {
+      id: string;
+      kind: string;
+      keep: string;
+    }[];
+    expect(pieces.length).toBeGreaterThan(0);
+    for (const p of pieces) {
+      expect(p.keep).toBe('keep');
+      expect(after.items[sp.draft.aliases[p.id] ?? '']?.assetId).toBe(p.kind);
+    }
+    // An answer keeping the bed by that alias keeps the very bed, where it stands.
+    const bed = pieces.find((p) => p.kind.startsWith('bed-'));
+    if (!bed) throw new Error('no bed in the main bedroom');
+    const bedId = sp.draft.aliases[bed.id] as string;
+    const item = {
+      ref: 'bed1',
+      assetId: bed.kind,
+      keep: bed.id,
+      wall: null,
+      along: null,
+      at: null,
+      rotation: null,
+      width: null,
+      depth: null,
+      height: null,
+      why: '',
+      against: 'wall',
+      faces: null,
+      near: null,
+      zone: 'sleep',
+    };
+    const answer = parsed(
+      parseSpaceDesign(
+        { v: 2, items: [item], faces: [], notes: [], summary: 'The bed stays.' },
+        levelBounds(after),
+      ),
+    );
+    const r = designResult(after, flatOf(s1), {
+      ...sp.draft,
+      spaces: {
+        ...sp.draft.spaces,
+        [SAMPLE_KEYS.main]: { name: 'Main bedroom', status: 'done', design: answer },
+      },
+    });
+    expect(r.level.items[bedId]?.position).toEqual(after.items[bedId]?.position);
+    expect(r.refs[bedId]).toBe('bed1');
   });
 });

@@ -5,6 +5,7 @@ import { type Delivery, deliverable, deliveryCheck, entranceDoor, partsNote } fr
 import { FLOOR_FINISHES, PAINTS, WALLPAPERS, customPaint } from '../finishes';
 import { type FurnitureKind, furnitureKind, itemFootprint, itemSize } from '../furniture';
 import { placeLabel, pointInPolygon } from '../geometry';
+import { startsFromAfter } from '../levels';
 import { planGeometry } from '../plan';
 import { roomShapes } from '../rooms';
 import { ElecPoint } from '../schema';
@@ -22,6 +23,7 @@ import { BED_ACCESS } from './checks';
 import { bathroomsHeld, heldAspects, wallsHeld } from './handEdits';
 import { type LensId, type Steer, steerFor, steerOnly } from './lenses';
 import { WET } from './locks';
+import { nudgeNearMisses, shortOf } from './nudge';
 import {
   type SpaceIndex,
   type Want,
@@ -266,6 +268,8 @@ function work(
   const notes: Note[] = (concept?.notes ?? []).map((text) => ({ text }));
   const start = settled(baseLevel);
   const before = settled(beforeLevel);
+  /** Designing on After: the pieces it has are the design so far. */
+  const fromAfter = startsFromAfter(baseLevel, beforeLevel);
   // Parts the person changed by hand since accepting stay as the plan has them.
   const locks = design.request?.locks;
   const held = (rooms: readonly string[]) => heldAspects(locks, rooms);
@@ -504,6 +508,11 @@ function work(
       const fixedKey = ix.placed.map(
         (p) => `${p.id}:${p.fp.map((q) => q.x.toFixed(3) + q.y.toFixed(3)).join()}`,
       );
+      // The pieces it keeps, as they stand (one kept where it is moved by hand solves again).
+      for (const w of wants) {
+        const b = w.brought;
+        if (b) fixedKey.push(`${w.id}~${stableJson([b.position, b.rotationY, b.scale])}`);
+      }
       // What the lenses ask of the solver here (a short bedroom keeps its wardrobe): weights
       // only, from the level as this space is about to be furnished, and only for the roles
       // the answer has (a space with none solves as it would with no lens).
@@ -723,8 +732,10 @@ function work(
       return null;
     };
     let brought: Item | null = null;
+    let stays = false;
     let kind: FurnitureKind | null;
     if (a.keep) {
+      // Kept by its alias in the level the design starts from (After, once a version is in).
       const id = resolveAlias(aliases, a.keep);
       const it = id ? start.items[id] : undefined;
       if (!id || !it) return leftOut(`“${a.ref}”: there’s no piece “${a.keep}” in the flat.`);
@@ -732,8 +743,11 @@ function work(
       kind = furnitureKind(it.assetId) ?? null;
       const what = kind ? nameOf(kind) : 'piece';
       if (how === 'in-place') return leftOut(`Your ${what} stays where it is, as the brief says.`);
-      if (how !== 'bring') return leftOut(`Your ${what}: the brief leaves it out.`);
+      // The brief's keep list is about the household's furniture in the flat as it is. On After
+      // the pieces are the design so far: one the answer keeps stays where it stands.
+      if (!fromAfter && how !== 'bring') return leftOut(`Your ${what}: the brief leaves it out.`);
       brought = it;
+      stays = fromAfter;
     } else {
       kind = resolveAsset(a.assetId, opts.models);
     }
@@ -759,9 +773,13 @@ function work(
     } else {
       [w, d, h] = [clamp(a.width, k.size.w), clamp(a.depth, k.size.d), clamp(a.height, k.size.h)];
     }
-    const wallId = resolveAlias(aliases, a.wall);
+    // Answers of version 1 place by coordinates: a piece kept from After goes where it stands
+    // (placePiece moves it a little if it must).
+    const here =
+      stays && !ctx.v2 && brought ? { at: centreOf(brought), r: brought.rotationY } : null;
+    const wallId = here ? null : resolveAlias(aliases, a.wall);
     let face = wallId ? (ctx.faces.find((f) => f.wallId === wallId) ?? null) : null;
-    if (a.wall && !face && !ctx.v2) {
+    if (a.wall && !face && !ctx.v2 && !here) {
       if (!k.againstWall && !k.carpentry && a.at === null) {
         return leftOut(`The ${nameOf(k)}: ${a.wall} isn’t a wall of ${ctx.s.name}.`);
       }
@@ -772,7 +790,7 @@ function work(
       });
       face = null;
     }
-    const free = !face && a.at !== null;
+    const free = !face && (a.at !== null || !!here);
     if (!face && !free && !k.againstWall && !k.carpentry && !ctx.v2) {
       return leftOut(`The ${nameOf(k)}: the designer didn’t say where it goes.`);
     }
@@ -815,10 +833,11 @@ function work(
       face,
       faces: free && !ctx.v2 ? [] : ctx.byLength,
       along: a.along,
-      at: free || ctx.v2 ? a.at : null,
-      rotation: rotationOf(a.rotation ?? 0),
+      at: here ? here.at : free || ctx.v2 ? a.at : null,
+      rotation: here ? here.r : rotationOf(a.rotation ?? 0),
       ceiling: lvl.ceilingHeight,
       brought,
+      ...(stays ? { stays } : {}),
       priority: priorityOf(k),
     };
   }
@@ -838,7 +857,7 @@ function work(
   // from the main door (or to a bed) is moved off it where it can be, else left for the
   // checks to say.
   const resolves: DesignResult['resolves'] = [];
-  const walked =
+  let walked =
     opts.walkways === false
       ? null
       : keepWalkwaysClear(lvl, runs, repaired, resolves, {
@@ -851,6 +870,38 @@ function work(
                 .map((c) => c.key),
             ),
         });
+  // Near misses: a check the version fails by a centimetre or two (a walkway at 0.89 m of
+  // 0.90 m) is mended by moving one of its pieces a few cm, where that leaves nothing else
+  // failing, rather than shown or sent back.
+  // Looked for first in the walkways as last checked and the room to use each piece (cheap),
+  // and only then in the whole checks.
+  const nearMiss =
+    opts.walkways !== false &&
+    (!walked ||
+      walked.issues.some((i) => shortOf(i, lvl) !== null) ||
+      clearanceIssues(lvl).some((i) => shortOf(i, lvl) !== null));
+  if (nearMiss) {
+    const movable = new Set([...placedNew, ...placedBrought].filter((id) => !keptIds.has(id)));
+    const nudges = nudgeNearMisses(lvl, movable, (l) =>
+      designChecks({ ...l, items: { ...l.items } }, { brief, uses, ...rulesOpt }).filter(
+        (c) => c.hard,
+      ),
+    );
+    if (nudges.length) walked = null;
+    for (const n of nudges) {
+      const it = lvl.items[n.itemId];
+      const kind = it && furnitureKind(it.assetId);
+      const space = resultSpaces.find((s) => s.items.includes(n.itemId))?.key;
+      repaired.push({
+        text: `Moved the ${kind ? nameOf(kind) : 'piece'} ${Math.round(n.by * 100)} cm to keep ${
+          n.key.startsWith('P3|') ? 'the way clear' : 'the room it needs'
+        }.`,
+        itemId: n.itemId,
+        ...(refs[n.itemId] ? { ref: refs[n.itemId] } : {}),
+        ...(space ? { space } : {}),
+      });
+    }
+  }
   // The notes of each space solved by intent, as finally placed.
   for (const run of runs) {
     if (!run.outcome) continue;
