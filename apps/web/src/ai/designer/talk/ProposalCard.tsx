@@ -14,7 +14,6 @@ import {
   keptHolds,
   mergeChanges,
   mergeLines,
-  notMetHead,
   peopleWords,
   spentOf,
   subsetReport,
@@ -77,7 +76,7 @@ import {
   pressScope,
   scopePrice,
 } from './propose';
-import { blockingFor } from './repeat';
+import { blockingFor, notMetOf } from './repeat';
 import { pressCarryOn, pressKeep } from './resume';
 import { focusInLog, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
@@ -676,7 +675,7 @@ export const ProposalCard = memo(function ProposalCard({
   // ever on the newest card of its scope (`blockingFor`).
   const versionsN = useTalk((s) => s.proposals.length);
   const failingN = runRep?.failures.length ?? 0;
-  const [blocking, setBlocking] = useState<{ titles: string[] } | null>(null);
+  const [blocking, setBlocking] = useState<{ titles: string[]; same: boolean } | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: worked out again as versions come
   useEffect(() => {
     if (!active || running || card.kind !== 'proposal' || card.status !== 'checked' || !failingN) {
@@ -1024,15 +1023,21 @@ export const ProposalCard = memo(function ProposalCard({
   // else the same failures as the versions before it.
   const strictNotMet =
     !running && card.status === 'checked' && !!card.option?.brief.fixAll && rep.failures.length > 0;
-  const approvedFigure =
-    typeof card.option?.approved === 'number' ? usd(card.option.approved) : null;
-  const frame: LeadFrame | null = strictNotMet
+  const notMetNow = strictNotMet && card.option ? notMetOf(card.option) : null;
+  const earlier = blocking ? versionsWords(blocking.titles.slice(0, -1)) : '';
+  const frame: LeadFrame | null = notMetNow
     ? {
         kind: 'strict',
-        heading: notMetHead(approvedFigure),
-        same: blocking ? `Same failures as ${versionsWords(blocking.titles.slice(0, -1))}.` : null,
+        heading: notMetNow.head,
+        why: notMetNow.why,
+        // The same set (or more) is "the same"; fewer, every one failed before: "also".
+        same: blocking
+          ? blocking.same
+            ? `Same failures as ${earlier}.`
+            : `Also failed in ${earlier}.`
+          : null,
       }
-    : blocking && rep.failures.length > 0 && !running
+    : blocking?.same && rep.failures.length > 0 && !running
       ? { kind: 'blocking', heading: blockingHead(blocking.titles, rep.failures.length) }
       : null;
   const verdict = running ? 'Checking…' : (failingLine?.text ?? 'Checking…');

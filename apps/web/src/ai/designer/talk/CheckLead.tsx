@@ -42,7 +42,9 @@ const SLEEPS = /To make it a study, change who sleeps where\.$/;
 export interface LeadFrame {
   kind: 'blocking' | 'strict';
   heading: string;
-  /** D only: "Same failures as V7." */
+  /** D only: why it stopped, with what it spent of the figure (when not used up). */
+  why?: string | null;
+  /** D only: "Same failures as V7." (or "Also failed in V7." for fewer). */
   same?: string | null;
 }
 
@@ -124,9 +126,8 @@ export function CheckLead({
       data-app-line="left-out"
       {...(headless ? { id } : {})}
     >
-      <span className="talk-app-icon">
-        <Mark kind="dot" />
-      </span>
+      {/* The disclosure's own triangle is its mark (one, not a dot as well: UX review nit). */}
+      <span className="talk-app-icon" />
       <span className="talk-app-text">
         <details className="talk-already talk-check-left">
           <summary>{keepTogether(out.line)}</summary>
@@ -209,6 +210,7 @@ export function CheckLead({
         <p id={id} className="talk-check-head talk-check-frame-head">
           {frame.heading}
         </p>
+        {frame.why && <p className="talk-check-did talk-check-frame-fix">{frame.why}</p>}
         {fix && <p className="talk-check-did talk-check-frame-fix">{fix}</p>}
         {frame.kind === 'strict' && count && (
           <p className="talk-check-head">

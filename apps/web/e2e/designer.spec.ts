@@ -2744,11 +2744,13 @@ test.describe('designer listens, C: no paying twice, fix every check first', () 
     await expect(strictCost).toBeVisible({ timeout: 30_000 });
     await expect(panel(page).locator('[data-repeat]')).toHaveCount(0);
     await expect(strictCost).toContainText(/up to 6 fix-ups included\)/);
-    // Turned on by the reply: this is the one ask it owes (S1), saying so.
-    await expect(strictCost.locator('[data-strict-ask]')).toBeVisible();
-    await expect(strictCost.locator('[data-strict-line]')).toHaveText(
-      /Fix every check first is on: keeps fixing until every check passes, up to 6 fix-ups \(adds up to US\$\d+\.\d\d at most\)\. Change$/,
+    // Turned on by the reply: this is the one ask it owes (S1), said in one sentence, focused.
+    const strictLine = strictCost.locator('[data-strict-line]');
+    await expect(strictLine).toHaveAttribute('data-strict-ask', '');
+    await expect(strictLine).toHaveText(
+      /^You asked me to fix every check first, so this keeps fixing until every check passes: up to 6 fix-ups, adding up to US\$\d+\.\d\d at most\. Change$/,
     );
+    await expect(strictLine).toBeFocused();
     await shot(page, 'c-strict-cost');
     const figure = (await strictCost.textContent())?.match(/at most (US\$\d+\.\d\d)/)?.[1] ?? '';
     expect(figure).not.toBe('');
@@ -2760,13 +2762,18 @@ test.describe('designer listens, C: no paying twice, fix every check first', () 
     });
     // The answer never gets better: one round, then it stops (never all 6).
     expect(m.calls.filter(main)).toHaveLength(before + 2);
-    // 28: never just "designed": Couldn't make everything pass within the figure, each failure
-    // with what's known, the ways forward; the app's line in the log says the same.
+    // 28: never just "designed": Couldn't make everything pass, why it stopped and what it
+    // spent of the figure (never "within" it: the figure wasn't used up), each failure with
+    // what's known, the ways forward; the app's line in the log says the same.
     const lead = v3.locator('[data-lead]');
     await expect(lead).toHaveAttribute('data-frame', 'strict');
     await expect(lead.locator('.talk-check-frame-head')).toHaveText(
-      `Couldn’t make everything pass within ${figure}`,
+      'Couldn’t make everything pass',
     );
+    const stopped = new RegExp(
+      `The fix round made no progress, so it stopped \\(US\\$\\d+\\.\\d\\d of up to ${figure.replace('$', '\\$')}\\)\\.`,
+    );
+    await expect(lead).toContainText(stopped);
     await expect(lead).toContainText('1 still doesn’t pass:');
     await expect(lead).toContainText(/desk chairs? (isn’t|aren’t) at a table/);
     await expect(lead).toContainText(/Same failures as V1 and V2\./);
@@ -2774,7 +2781,7 @@ test.describe('designer listens, C: no paying twice, fix every check first', () 
     await expect(
       log(page).getByText(
         new RegExp(
-          `^V3: couldn’t make everything pass within ${figure.replace('$', '\\$')}\\. 1 still doesn’t pass: `,
+          `^V3: couldn’t make everything pass\\. The fix round made no progress, so it stopped \\(US\\$\\d+\\.\\d\\d of up to ${figure.replace('$', '\\$')}\\)\\. 1 still doesn’t pass: `,
         ),
       ),
     ).toBeVisible();
@@ -2834,8 +2841,17 @@ test.describe('designer listens, C: no paying twice, fix every check first', () 
     await expect(cost).toBeVisible({ timeout: 30_000 });
     await expect(cost.locator('[data-strict-ask]')).toBeVisible();
     await expect(cost.locator('[data-strict-line]')).toContainText(
-      /keeps fixing until every check passes, up to 6 fix-ups \(adds up to US\$\d+\.\d\d at most\)/,
+      /keeps fixing until every check passes: up to 6 fix-ups, adding up to US\$\d+\.\d\d at most/,
     );
+    await expect(cost.locator('[data-strict-line]')).toBeFocused();
+    // Change opens What I know at that row, its chooser in focus, with what it costs.
+    await cost.locator('[data-strict-line]').getByRole('button', { name: 'Change' }).click();
+    const fixRow = know(page).locator('[data-fact="fix-all"]');
+    await expect(fixRow.getByRole('radio', { name: 'Fix every check first' })).toBeFocused();
+    await expect(fixRow.locator('[data-fix-all-hint]')).toHaveText(
+      'Keeps sending fixes until every check passes, up to 6 fix-ups, so a design can cost up to about twice as much. You always see the figure before it runs.',
+    );
+    await know(page).getByRole('button', { name: '‹ Conversation' }).click();
     await expect(cost).toContainText(/up to 6 fix-ups included\)/);
     await page.waitForTimeout(500);
     expect(m.calls.filter(main)).toHaveLength(before);
@@ -2906,6 +2922,7 @@ test.describe('designer listens, C: no paying twice, fix every check first', () 
         planR2(t.replies.bed, { rooms: ['all'] }),
         planR2(t.replies.fixAll, { facts: [STRICT], rooms: ['all'] }),
         planR2(t.replies.again, { rooms: ['all'] }),
+        planR2(t.replies.again, { rooms: ['all'] }),
       ],
       reply: (c) => {
         // The export's V4 layout once; a later run keeps the walls as they are now.
@@ -2965,8 +2982,9 @@ test.describe('designer listens, C: no paying twice, fix every check first', () 
     const lead = v3.locator('[data-lead]');
     await expect(lead).toHaveAttribute('data-frame', 'strict');
     await expect(lead.locator('.talk-check-frame-head')).toHaveText(
-      /^Couldn’t make everything pass within US\$\d+\.\d\d$/,
+      'Couldn’t make everything pass',
     );
+    await expect(lead).toContainText(/The fix round made no progress, so it stopped/);
     await expect(lead).toContainText(/desk chairs? (isn’t|aren’t) at a table/);
     // The bed is in (the run's own free pass): no free fix to offer, Change what I asked is.
     await expect(lead).not.toContainText(/have no bed/);
@@ -3003,6 +3021,80 @@ test.describe('designer listens, C: no paying twice, fix every check first', () 
     await expect(log(page)).not.toContainText(/ability to run|I can’t check|I can't check/);
     await ask.getByRole('button', { name: 'Not now' }).click();
     expect(m.calls.filter(main)).toHaveLength(presses);
+    // Asked again, nothing changed: the card asks again in one line, not the long sentence;
+    // on a phone held sideways its buttons come into view as it arrives.
+    await page.setViewportSize({ width: 844, height: 390 });
+    await send(page, t.owner.again);
+    const again = panel(page).locator('[data-repeat]');
+    await expect(again).toBeVisible({ timeout: 30_000 });
+    await expect(again.locator('.talk-repeat-text')).toHaveText(
+      /^Likely the same (problem|\d+ problems) again \(V2 to V3\)\.$/,
+    );
+    await expect(again.getByRole('button', { name: /^Run it anyway/ })).toBeInViewport();
+    await shot(page, 'c-owner-again-844');
+    await again.getByRole('button', { name: 'Not now' }).click();
+    expect(m.calls.filter(main)).toHaveLength(presses);
+  });
+
+  test('a dear run that would fail the same way: the repeat card keeps CostCheck’s details, but no primary button, the free fix first, the price said once (UX blocker 1)', async ({
+    page,
+  }) => {
+    test.setTimeout(240_000);
+    await setup(page);
+    const m = await mock(page, {
+      reply: (c) => (main(c) ? answer(chairs(2, false)) : null),
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^The whole flat · about US\$/);
+    await expect(card(page, 1).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 90_000,
+    });
+    await panel(page)
+      .getByRole('button', { name: /^The whole flat · about US\$/ })
+      .last()
+      .click();
+    await ran(page, 2);
+    // As an older build kept them: both versions lack the bed, so a free fix is offered.
+    await stripAppPieces(page);
+    await page.reload();
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    await page.getByRole('button', { name: /^Designer · V2 on the table$/ }).click();
+    await expect(card(page, 2).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 60_000,
+    });
+    const calls = m.calls.length;
+    await panel(page)
+      .getByRole('button', { name: /^The whole flat · about US\$/ })
+      .last()
+      .click();
+    const ask = panel(page).locator('[data-repeat]');
+    await expect(ask).toBeVisible({ timeout: 30_000 });
+    // A dear run (US$0.50 or more): CostCheck's details, in the repeat card's terms.
+    await expect(ask.locator('.cost-check')).toBeVisible();
+    await expect(ask.locator('.btn-primary')).toHaveCount(0);
+    const row = ask.locator('.talk-repeat-row');
+    await expect(row.locator('[data-free-fix="repeat"]')).toHaveText('Place a queen bed · free');
+    const anyway = row.getByRole('button', { name: /^Run it anyway/ });
+    await expect(anyway).toHaveAttribute('data-spends', '');
+    expect(
+      await row
+        .locator('[data-free-fix="repeat"]')
+        .evaluate(
+          (a, b) => !!(a.compareDocumentPosition(b as Node) & Node.DOCUMENT_POSITION_FOLLOWING),
+          await anyway.elementHandle(),
+        ),
+    ).toBe(true);
+    // The price said once (CostCheck's), never the card's sentence as well.
+    await expect(ask).not.toContainText('takes about');
+    await expect(ask.locator('.cost-figure')).toHaveCount(1);
+    await shot(page, 'c-repeat-dear');
+    await page.waitForTimeout(500);
+    expect(m.calls).toHaveLength(calls);
+    await ask.getByRole('button', { name: 'Not now' }).click();
+    expect(m.calls).toHaveLength(calls);
   });
 });
 

@@ -30,7 +30,7 @@ import {
   lookRuleOffer,
   looksAt,
   nextLetter,
-  notMetHead,
+  notMetText,
   optionName,
   optionTitle,
   planScope,
@@ -69,7 +69,7 @@ import {
   spentWithInflight,
   stepHigh,
 } from './pricing';
-import { dependsNow, repeatFor } from './repeat';
+import { dependsNow, notMetOf, repeatFor } from './repeat';
 import { type RunHold, takeRunLock } from './runLock';
 import { cardHeadIntoView, logFollowing } from './scroll';
 import { talkStore } from './talkStore';
@@ -1603,10 +1603,9 @@ async function strictNotMetLine(proposalId: string, letter: string): Promise<str
   const n = got?.report.failures.length ?? 0;
   if (!got || !n) return null;
   const title = optionTitle(p.n, letter, p.options.length);
-  const figure = typeof o.approved === 'number' ? usd(o.approved) : null;
-  const head = notMetHead(figure);
+  const words = notMetText(notMetOf(o));
   return cut(
-    `${title}: ${head.charAt(0).toLowerCase()}${head.slice(1)}. ${n} still ${n === 1 ? 'doesn’t' : 'don’t'} pass: ${firstAndMore(got.report)}.`,
+    `${title}: ${words} ${n} still ${n === 1 ? 'doesn’t' : 'don’t'} pass: ${firstAndMore(got.report)}.`,
     TALK_LIMITS.note,
   );
 }

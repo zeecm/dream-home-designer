@@ -9527,6 +9527,14 @@ html[data-proposal] .plan-svg g.clearance {
   justify-items: start;
   gap: 6px;
 }
+/* The repeat card's CostCheck row: the free fix, Run it anyway, Not now; each on one line. */
+.talk-repeat-row {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.talk-repeat-row .btn {
+  white-space: nowrap;
+}
 .talk-strict-line {
   margin: 0;
   font-size: var(--fs-hint);

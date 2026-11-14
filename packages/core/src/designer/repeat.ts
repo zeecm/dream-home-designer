@@ -158,3 +158,31 @@ export function repeatWords(r: Pick<RepeatFound, 'titles' | 'count'>, again: boo
 /** The strict card's heading when its failures are left: "Couldn't make everything pass within US$0.60". */
 export const notMetHead = (figure: string | null) =>
   `Couldn’t make everything pass${figure ? ` within ${figure}` : ''}`;
+
+/**
+ * Fix every check first, failures left (UX review 2): "within US$x" only when the fix-ups or
+ * the figure were used up; otherwise why it stopped, with what it spent of the figure ("The fix
+ * round made no progress, so it stopped (US$0.13 of up to US$2.94)."), never a figure that
+ * reads as spent.
+ */
+export function notMet(o: {
+  figure: string | null;
+  spent: string | null;
+  usedUp: boolean;
+  noProgress: boolean;
+}): { head: string; why: string | null } {
+  if (o.usedUp) return { head: notMetHead(o.figure), why: null };
+  const of = o.spent && o.figure ? ` (${o.spent} of up to ${o.figure})` : '';
+  return {
+    head: notMetHead(null),
+    why: o.noProgress
+      ? `The fix round made no progress, so it stopped${of}.`
+      : of
+        ? `It stopped${of}.`
+        : null,
+  };
+}
+
+/** One sentence of `notMet` (the log's line): "couldn't make everything pass. The fix round …". */
+export const notMetText = (n: ReturnType<typeof notMet>) =>
+  `${n.head.charAt(0).toLowerCase()}${n.head.slice(1)}.${n.why ? ` ${n.why}` : ''}`;

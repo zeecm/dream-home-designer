@@ -6,6 +6,7 @@ import {
   type ScopeRef,
   dependsKey,
   levelFingerprint,
+  notMet,
   optionTitle,
   repeatAhead,
   repeatRun,
@@ -14,6 +15,7 @@ import {
 import { meterSetting } from '../../../storage/store';
 import { useStore } from '../../../store';
 import { aiSettings } from '../../credentials';
+import { usd } from '../spend';
 import { houseKeptFor } from '../state';
 import { type CardModel, cardReportNow, declinedPieces, optionCard } from './cards';
 import { designLevelId, rulesOn, talkLevels, useTalk } from './useTalk';
@@ -46,6 +48,21 @@ export function dependsNow(): string {
       levelId,
       model: aiSettings() ? [aiSettings()?.provider, aiSettings()?.model] : null,
     },
+  });
+}
+
+/**
+ * How a strict version stopped with failures left (UX review 2): its fix-ups used up (a room's
+ * last round `no-fixups`), or a round no better, and what it spent of its figure.
+ */
+export function notMetOf(o: ProposalOption) {
+  const last = Object.values(o.spaces).map((s) => s.rounds?.at(-1)?.outcome);
+  const spent = o.usage.reduce((t, u) => t + (u.usd ?? 0), 0);
+  return notMet({
+    figure: typeof o.approved === 'number' ? usd(o.approved) : null,
+    spent: o.usage.length ? usd(spent) : null,
+    usedUp: last.includes('no-fixups'),
+    noProgress: last.includes('no-better'),
   });
 }
 
@@ -152,9 +169,13 @@ export async function repeatFor(
 
 /**
  * The card's "What's blocking this" (UX state C): the newest card of its scope whose versions
- * before it failed the same way. Null for any other card.
+ * before it failed the same way (`same`: the same failures, the newest maybe more). With fewer
+ * (a subset), `same` is false: said "Also failed in V1 and V2.", never "the same" (UX review
+ * 3), and no blocking frame. Null for any other card.
  */
-export async function blockingFor(card: CardModel): Promise<{ titles: string[] } | null> {
+export async function blockingFor(
+  card: CardModel,
+): Promise<{ titles: string[]; same: boolean } | null> {
   const p = card.proposal;
   if (!p || !card.option) return null;
   const opts = scopeOptions(p.scope, 6);
@@ -162,5 +183,20 @@ export async function blockingFor(card: CardModel): Promise<{ titles: string[] }
   if (!last || opts.length < 2 || last.p.id !== p.id || last.o.letter !== card.option.letter)
     return null;
   const run = repeatRun(await repeatedVersions(opts).catch(() => []));
-  return run ? { titles: run.titles } : null;
+  if (run) return { titles: run.titles, same: true };
+  // Fewer failures than the version before, every one of them in it: also failed there.
+  const two = opts.slice(-2);
+  const project = useStore.getState().editor.doc;
+  const reps = await Promise.all(
+    two.map(({ p: q, o }) =>
+      cardReportNow(project, optionCard(q, o, designLevelId())).catch(() => null),
+    ),
+  );
+  const [older, newer] = reps;
+  const a = two[0];
+  if (!older || !newer || !a || !sameFailures(newer.report, older.report)) return null;
+  return {
+    titles: [optionTitle(a.p.n, a.o.letter, a.p.options.length), card.title],
+    same: false,
+  };
 }

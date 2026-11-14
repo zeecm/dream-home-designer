@@ -1238,6 +1238,21 @@ fixing, orphans, what was left out.** Proposal records 5.
   `dependsKey`'s inputs; a fact line keeps `was` and its Undo restores that; Keep fixing writes
   its figure to `ProposalOption.approved` (the heading says the latest); the cost card's strict
   line follows its own estimate's pool (`strictAdds` > 0), not the setting as it is now.
+- **UX review (14 Nov):** the repeat card under a cost-check or limit reason embeds CostCheck
+  with `repeat={{ lead }}`: its spend button outlined (never primary), the free fix (or Change
+  what I asked) first in the same row, its own price sentence and limit notice not repeated
+  (e2e: a dear whole-flat repeat). Strict not met says "Couldn't make everything pass" with why
+  and what it spent of the figure ("The fix round made no progress, so it stopped (US$0.13 of
+  up to US$2.94)."; core `notMet`, web `notMetOf`), and "within US$x" only when a room's last
+  round was `no-fixups`; the log line likewise. Fewer failures than the version before (a
+  subset) read "Also failed in V1." and get no blocking frame; "Same failures as …" only for the
+  same set or more. The strict cost line is one sentence; on the owed ask (S1) "You asked me to
+  fix every check first, so this keeps fixing until every check passes: up to 6 fix-ups, adding
+  up to US$1.25 at most. Change", focused. What I know's chooser has the hint on what it costs;
+  Change opens it at that row with the chooser focused (`Back` no longer takes focus when
+  `knowAt` is set). A cost card arriving in the side column scrolls its buttons (the repeat
+  card's too) into view, again after 350 and 800 ms. The left-out line has the disclosure's
+  triangle only. e2e: the one-line "again" card (arriving at 844 × 390, its buttons in view).
 - Known, not done: the hover-to-light of a failure line.
 
 **AI costs always have a figure (#67, 14 Nov).** The owner's Gemini 3 runs had no price, so no

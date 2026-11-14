@@ -445,17 +445,19 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
   const strictNow = useTalk((s) => !!s.conv?.brief.fixAll);
   const adds = est ? strictAdds(est, quality) : null;
   const strict = est?.usd ? (adds ?? 0) > 0 : strictNow;
+  const fixes = est?.fixes ?? FIX_PER_RUN;
+  const strictText = useRef<HTMLParagraphElement>(null);
   const strictLine = strict ? (
-    <p className="talk-strict-line" data-strict-line="">
-      {t.strict && (
-        // The one ask owed after a reply turned it on (money review S1).
-        <span data-strict-ask="">
-          The designer noted Fix every check first from your words, so this asks before it runs.{' '}
-        </span>
-      )}
-      Fix every check first is on: keeps fixing until every check passes, up to{' '}
-      {est?.fixes ?? FIX_PER_RUN} fix-ups
-      {adds !== null && adds > 0 ? ` (adds up to ${usd(adds)} at most)` : ''}.{' '}
+    <p
+      className="talk-strict-line"
+      data-strict-line=""
+      // The one ask owed after a reply turned it on (money review S1): its sentence takes
+      // focus, as the repeat card's does; one sentence, said once (UX review 4).
+      {...(t.strict ? { 'data-strict-ask': '', tabIndex: -1, ref: strictText } : {})}
+    >
+      {t.strict
+        ? `You asked me to fix every check first, so this keeps fixing until every check passes: up to ${fixes} fix-ups${adds !== null && adds > 0 ? `, adding up to ${usd(adds)} at most` : ''}.`
+        : `Fix every check first is on: keeps fixing until every check passes, up to ${fixes} fix-ups${adds !== null && adds > 0 ? ` (adds up to ${usd(adds)} at most)` : ''}.`}{' '}
       <button
         type="button"
         className="link-btn"
@@ -487,7 +489,8 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
   // Its first sentence takes focus (as CostCheck's heading does); never a spend button.
   useEffect(() => {
     if (open && repeat) repeatText.current?.focus({ preventScroll: true });
-  }, [open, repeat]);
+    else if (open && t.strict) strictText.current?.focus({ preventScroll: true });
+  }, [open, repeat, t.strict]);
   // Answered: your bubble says it ("Not now"), and the card that follows shows the run.
   if (t.state !== 'open') return null;
   const priceSentence = t.estimate ? (
@@ -545,11 +548,13 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
           )}
           {strictLine}
           <div className="talk-repeat-ways">
-            {freeFirst}
             {ai && est && t.reason !== 'ask-threshold' ? (
+              // A dear run, the limit, the tab's first: CostCheck's details, its spend button
+              // outlined and the free fix first in its button group; its price and limit said
+              // once (UX review blocker 1).
               <div className="talk-costcheck">
-                {priceSentence}
                 <CostCheck
+                  repeat={{ lead: freeFirst }}
                   ai={ai}
                   est={est}
                   quality={quality}
@@ -568,25 +573,28 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
                 />
               </div>
             ) : (
-              <div className="button-row talk-cost-buttons">
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={busy}
-                  data-spends=""
-                  data-run-anyway=""
-                  onClick={() => void answerCost(t, 'go')}
-                >
-                  Run it anyway{t.estimate ? ` · about ${usd(t.estimate.typical)}` : ''}
-                </button>
-                <button
-                  type="button"
-                  className="link-btn"
-                  onClick={() => void answerCost(t, 'not-now')}
-                >
-                  Not now
-                </button>
-              </div>
+              <>
+                {freeFirst}
+                <div className="button-row talk-cost-buttons">
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={busy}
+                    data-spends=""
+                    data-run-anyway=""
+                    onClick={() => void answerCost(t, 'go')}
+                  >
+                    Run it anyway{t.estimate ? ` · about ${usd(t.estimate.typical)}` : ''}
+                  </button>
+                  <button
+                    type="button"
+                    className="link-btn"
+                    onClick={() => void answerCost(t, 'not-now')}
+                  >
+                    Not now
+                  </button>
+                </div>
+              </>
             )}
           </div>
           {t.estimate && !(ai && est && t.reason !== 'ask-threshold') && (

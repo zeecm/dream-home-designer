@@ -4,7 +4,9 @@ import {
   blockingHead,
   dependsKey,
   failureSigs,
+  notMet,
   notMetHead,
+  notMetText,
   repeatAhead,
   repeatRun,
   repeatWords,
@@ -192,5 +194,22 @@ describe('the words (UX copy)', () => {
     );
     expect(notMetHead('US$0.60')).toBe('Couldn’t make everything pass within US$0.60');
     expect(notMetHead(null)).toBe('Couldn’t make everything pass');
+    // "Within" only when the fix-ups or the figure were used up; else why, with what it spent.
+    const stopped = notMet({
+      figure: 'US$2.94',
+      spent: 'US$0.13',
+      usedUp: false,
+      noProgress: true,
+    });
+    expect(stopped).toEqual({
+      head: 'Couldn’t make everything pass',
+      why: 'The fix round made no progress, so it stopped (US$0.13 of up to US$2.94).',
+    });
+    expect(notMetText(stopped)).toBe(
+      'couldn’t make everything pass. The fix round made no progress, so it stopped (US$0.13 of up to US$2.94).',
+    );
+    expect(
+      notMet({ figure: 'US$2.94', spent: 'US$2.80', usedUp: true, noProgress: false }),
+    ).toEqual({ head: 'Couldn’t make everything pass within US$2.94', why: null });
   });
 });
