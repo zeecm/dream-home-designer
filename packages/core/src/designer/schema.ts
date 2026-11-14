@@ -323,7 +323,10 @@ const spaceSchemas = (ctx: Ctx) => {
   const Item = z.object({
     ref: text(ctx, LIMITS.ref),
     assetId: text(ctx, 80),
-    /** A piece of the flat's (its alias, P3) the brief brings along. */
+    /**
+     * A piece of the level designed (its alias, P3): on the flat as it is, one the brief brings
+     * along; on After, one of the design so far, kept where it stands.
+     */
     keep: alias(ctx).nullable(),
     /** A wall of the space (W4) it backs onto. */
     wall: alias(ctx).nullable(),
