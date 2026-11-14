@@ -13,6 +13,7 @@ import {
 } from '@dhd/core';
 import { meterSetting } from '../../../storage/store';
 import { useStore } from '../../../store';
+import { aiSettings } from '../../credentials';
 import { houseKeptFor } from '../state';
 import { type CardModel, cardReportNow, declinedPieces, optionCard } from './cards';
 import { designLevelId, rulesOn, talkLevels, useTalk } from './useTalk';
@@ -39,7 +40,12 @@ export function dependsNow(): string {
       levels ? levelFingerprint(levels.before) : null,
       levels?.after ? levelFingerprint(levels.after) : null,
     ],
-    extra: { meter: meterSetting(useStore.getState().editor.doc.id), levelId },
+    // The model too: another model may well not fail the same way (money review nit).
+    extra: {
+      meter: meterSetting(useStore.getState().editor.doc.id),
+      levelId,
+      model: aiSettings() ? [aiSettings()?.provider, aiSettings()?.model] : null,
+    },
   });
 }
 

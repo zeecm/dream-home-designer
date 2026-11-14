@@ -440,10 +440,19 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
   // what it adds at most; "Change" opens What I know at that row (a line, not a toggle beside
   // the money buttons: it would change the figure under the finger about to press it).
   const quality = useTalk((s) => s.conv?.brief.quality ?? 'thorough');
-  const strict = useTalk((s) => !!s.conv?.brief.fixAll);
-  const adds = strict && est ? strictAdds(est, quality) : null;
+  // From what the card is priced with (its estimate's pool), never the setting as it is now
+  // beside an estimate made before (money review N3); with no price, the setting.
+  const strictNow = useTalk((s) => !!s.conv?.brief.fixAll);
+  const adds = est ? strictAdds(est, quality) : null;
+  const strict = est?.usd ? (adds ?? 0) > 0 : strictNow;
   const strictLine = strict ? (
     <p className="talk-strict-line" data-strict-line="">
+      {t.strict && (
+        // The one ask owed after a reply turned it on (money review S1).
+        <span data-strict-ask="">
+          The designer noted Fix every check first from your words, so this asks before it runs.{' '}
+        </span>
+      )}
       Fix every check first is on: keeps fixing until every check passes, up to{' '}
       {est?.fixes ?? FIX_PER_RUN} fix-ups
       {adds !== null && adds > 0 ? ` (adds up to ${usd(adds)} at most)` : ''}.{' '}
@@ -752,10 +761,7 @@ function Event({ t }: { t: TurnOf<'event'> }) {
               type="button"
               className="link-btn"
               data-undo-fact={t.id}
-              onClick={() => {
-                const b = useTalk.getState().conv?.brief;
-                if (b) void act({ type: 'factUndo', eventId: t.id, fixAll: !b.fixAll });
-              }}
+              onClick={() => void act({ type: 'factUndo', eventId: t.id })}
             >
               Undo
             </button>

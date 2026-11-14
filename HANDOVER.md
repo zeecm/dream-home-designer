@@ -1214,8 +1214,31 @@ fixing, orphans, what was left out.** Proposal records 5.
   listens, C" describe): the owner's pattern on the sample flat with `owner-v4.json`'s layout and
   `fixtures/owner-talk.json` (three of the owner's messages and the designer's plan replies,
   word for word, nothing else).
-- Known, not done: the hover-to-light of a failure line; the first run after the designer turns
-  strict on doesn't ask by itself (the threshold decides, as for any figure).
+- **The missing bed the replay found** (31c, fixed): after V1 with the owner's V4 layout was
+  accepted (Main bedroom and Bedroom one Master bedroom), an answer with no bed kept its two
+  bedside tables (`near` the bed it dropped) and two desk chairs. The bedsides, placed first,
+  took the walls the bed needed, so the app's queen bed only fitted by a desk chair's way (a
+  new failure: refused); then the orphan step took the bedsides out "with no bed", and the
+  card's dry run on that answer placed the bed, so the run and the card disagreed. Now
+  `freeEssentials` (core `free.ts`), after its usual tries, tries the bed with the answer's own
+  unattached bedsides going by the app's bed, then with them making way and put back one at a
+  time while they break nothing (here one stays by the bed; the other is said "Took out a
+  bedside table the designer added in Master bedroom to make room for the queen bed the app
+  placed.", `madeWayLines`, an app line from the run). Kept and carried-over (theirs) pieces
+  are never moved or lost. And where the orphan step made room in a space whose essential was
+  missed, the essentials go once more (a bedside taken out then made way instead), so what the
+  run keeps is one the card's dry run places nothing more in. Test `ownerBed.test.ts` with
+  `fixtures/owner-after-v4.json` (the plan V2 was designed on in the replay, brief, aliases,
+  concept); the e2e asserts the run placed it. The bench report is unchanged.
+- **Money review (tech lead, 14 Nov), S1:** strict turned on by a reply's fact sets
+  `Conversation.strictAsk`; the next run (`followPlan`, `askOrRun`) asks once whatever the
+  threshold, its card marked `strict` ("The designer noted Fix every check first from your
+  words, so this asks before it runs.") with the strict line and what it adds; that ask, or the
+  person setting it in What I know (or its Undo), clears it. Nits: the model and provider are in
+  `dependsKey`'s inputs; a fact line keeps `was` and its Undo restores that; Keep fixing writes
+  its figure to `ProposalOption.approved` (the heading says the latest); the cost card's strict
+  line follows its own estimate's pool (`strictAdds` > 0), not the setting as it is now.
+- Known, not done: the hover-to-light of a failure line.
 
 **AI costs always have a figure (#67, 14 Nov).** The owner's Gemini 3 runs had no price, so no
 cost card had a figure and neither the approved figure nor the tab's limit held.

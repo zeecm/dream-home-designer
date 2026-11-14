@@ -365,6 +365,8 @@ export const TalkEvent = z.discriminatedUnion('type', [
     text: z.string().max(TALK_LIMITS.note),
     /** Taken back with its Undo (the strict setting's line offers one while it is the newest). */
     undone: z.boolean().optional(),
+    /** The strict setting's value before this change: what its Undo restores. */
+    was: z.boolean().optional(),
   }),
   /** Pieces and finishes changed by hand since the last accept: kept where the person put them. */
   z.object({
@@ -570,6 +572,8 @@ export const Turn = z.discriminatedUnion('kind', [
      * The card always asks then, even under the threshold (it only ever adds an ask).
      */
     repeat: Repeat.nullable().default(null),
+    /** The first run after a reply turned Fix every check first on: it asks once (money S1). */
+    strict: z.boolean().default(false),
   }),
   z.object({ ...base, kind: z.literal('proposal'), proposalId: z.string() }),
   z.object({ ...base, kind: z.literal('event'), event: StoredEvent }),
@@ -608,6 +612,12 @@ export const Conversation = z.object({
     .array(Decision)
     .max(MAX_DECISIONS * 2)
     .default([]),
+  /**
+   * Fix every check first was turned on by a reply's fact (on the person's word, but they saw
+   * no figure): the next design run asks once, even under the threshold, with what strict adds.
+   * Cleared by that ask, or when the person sets it themselves in What I know.
+   */
+  strictAsk: z.boolean().default(false),
   /** The app's pieces the person left out at an Accept, each while its Decision stands. */
   declined: z
     .array(z.unknown())

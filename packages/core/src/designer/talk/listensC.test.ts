@@ -152,16 +152,79 @@ describe('Fix every check first, as a fact (§6, criterion 27)', () => {
       text: 'You changed: before you see a design Show it as it is → Fix every check first.',
     });
     expect(on.brief.fixAll).toBe(true);
-    const undone = talk(on, { type: 'factUndo', eventId: 'ev1', fixAll: false });
+    const undone = talk(on, { type: 'factUndo', eventId: 'ev1' });
     expect(undone.brief.fixAll).toBe(false);
     expect(undone.turns).toHaveLength(on.turns.length);
     expect((undone.turns.at(-1) as TurnOf<'event'>).event).toMatchObject({ undone: true });
     // Once: a second Undo does nothing.
-    expect(talk(undone, { type: 'factUndo', eventId: 'ev1', fixAll: true })).toBe(undone);
+    expect(talk(undone, { type: 'factUndo', eventId: 'ev1' })).toBe(undone);
     // Kept through the record, as 5.
     const back = conversationFromRecord(JSON.parse(JSON.stringify(undone)));
     expect(back?.recordVersion).toBe(5);
     expect((back?.turns.at(-1) as TurnOf<'event'>).event).toMatchObject({ undone: true });
+  });
+
+  it('Undo restores the value before the change (kept on the line), never the opposite of now (N1)', () => {
+    const c = met();
+    const on = talk(c, {
+      type: 'editFact',
+      key: 'fix-all',
+      brief: { ...c.brief, fixAll: true },
+      at: AT,
+      id: 'ev1',
+      level,
+    });
+    expect((on.turns.at(-1) as TurnOf<'event'>).event).toMatchObject({ was: false });
+    // Changed since by other means (a reply turned it off): Undo still puts back "off" as it was.
+    const off = { ...on, brief: { ...on.brief, fixAll: false } };
+    expect(talk(off, { type: 'factUndo', eventId: 'ev1' }).brief.fixAll).toBe(false);
+  });
+
+  it('turned on by a reply’s fact: the next run owes one ask; the person setting it, or that ask, clears it (S1)', () => {
+    const pid = id();
+    let c = talk(met(), { type: 'send', id: pid, at: AT, text: 'Fix them all first', sent: 'x' });
+    const r = parseTalkReply(strictPlan, ctx());
+    if (!r.ok) throw new Error(r.error);
+    c = talk(c, {
+      type: 'replyDone',
+      turnId: pid,
+      id: id(),
+      at: AT,
+      reply: r.reply,
+      lines: r.lines,
+      echo: echoOf(r.reply),
+      usage: [],
+      probe: null,
+      ids: Array.from({ length: 8 }, id),
+      fold: null,
+    });
+    expect(c.brief.fixAll).toBe(true);
+    expect(c.strictAsk).toBe(true);
+    // The one ask: a cost card marked strict clears it.
+    const asked = talk(c, {
+      type: 'ask',
+      at: AT,
+      ids: [id(), 'cost-s'],
+      scope: { label: 'Main bedroom', spaces: ['rm_main'], all: false },
+      words: '',
+      reason: 'ask-threshold',
+      estimate: null,
+      strict: true,
+    });
+    expect(asked.strictAsk).toBe(false);
+    expect((asked.turns.find((t) => t.id === 'cost-s') as TurnOf<'cost-ask'>).strict).toBe(true);
+    // The person setting it in What I know owes no ask either.
+    const set = talk(c, {
+      type: 'editFact',
+      key: 'fix-all',
+      brief: { ...c.brief, fixAll: true },
+      at: AT,
+      id: 'ev2',
+      level,
+    });
+    expect(set.strictAsk).toBe(false);
+    // Read back as stored.
+    expect(conversationFromRecord(JSON.parse(JSON.stringify(c)))?.strictAsk).toBe(true);
   });
 });
 

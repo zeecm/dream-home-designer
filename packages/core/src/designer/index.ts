@@ -24,6 +24,7 @@ export {
   gaveWayWords,
   isAppRef,
   isDeclined,
+  madeWayLines,
   orphanLines,
 } from './free';
 export { type VetResult, readsAsBedroom, vetConcept } from './vet';

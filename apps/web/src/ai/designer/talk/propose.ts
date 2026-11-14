@@ -381,7 +381,11 @@ export async function keepFixing(
         ? {
             ...x,
             options: x.options.map((y) =>
-              y.letter === letter ? { ...y, status: 'running' as const, note: null } : y,
+              // Its figure is now Keep fixing's: "Couldn't make everything pass within US$x"
+              // says the latest one (money review N2).
+              y.letter === letter
+                ? { ...y, status: 'running' as const, note: null, approved: shown }
+                : y,
             ),
           }
         : x,
@@ -474,7 +478,9 @@ export async function followPlan(plan: TalkPlan, said: string, replyTo: string) 
       req.scope,
       (plan.addresses ?? []).map((a) => a.sig),
     ).catch(() => null);
-    if (ask === 'go' && started && !repeat) {
+    // Strict turned on by a reply (no figure seen yet): this run asks once (money review S1).
+    const strict = strictOwed();
+    if (ask === 'go' && started && !repeat && !strict) {
       await run(req, made, atMostOf(made.est), { person: null, turn: newId('turn') });
       return;
     }
@@ -490,11 +496,22 @@ export async function followPlan(plan: TalkPlan, said: string, replyTo: string) 
       talk: { replyTo, title: plan.title, intent: plan.intent },
       just: plan.just,
       ...(repeat ? { repeat } : {}),
+      ...(strict ? { strict } : {}),
     });
   } finally {
     if (started) end();
   }
 }
+
+/**
+ * Fix every check first was turned on by a designer's reply, on the person's word but with no
+ * figure seen: the next run asks once whatever the threshold (money review S1), then the usual
+ * rules apply. Only ever adds an ask.
+ */
+const strictOwed = () => {
+  const c = useTalk.getState().conv;
+  return !!c?.strictAsk && !!c.brief.fixAll;
+};
 
 const rule = (est: RunEstimate, pressedPriced: boolean) =>
   askRule(est, {
@@ -530,7 +547,8 @@ async function askOrRun(req: PressRequest) {
           (req.addresses ?? []).map((a) => a.sig),
         ).catch(() => null)
       : null;
-  if (ask === 'go' && !repeat) {
+  const strict = strictOwed();
+  if (ask === 'go' && !repeat && !strict) {
     await run(req, made, atMostOf(made.est), { person: newId('turn'), turn: newId('turn') });
     return;
   }
@@ -546,6 +564,7 @@ async function askOrRun(req: PressRequest) {
     finish: req.finish,
     alt: req.alternative ?? null,
     ...(repeat ? { repeat } : {}),
+    ...(strict ? { strict } : {}),
     // A designer's idea keeps what it is for through its card (P2-2).
     ...(req.talk
       ? {

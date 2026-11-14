@@ -2744,8 +2744,10 @@ test.describe('designer listens, C: no paying twice, fix every check first', () 
     await expect(strictCost).toBeVisible({ timeout: 30_000 });
     await expect(panel(page).locator('[data-repeat]')).toHaveCount(0);
     await expect(strictCost).toContainText(/up to 6 fix-ups included\)/);
+    // Turned on by the reply: this is the one ask it owes (S1), saying so.
+    await expect(strictCost.locator('[data-strict-ask]')).toBeVisible();
     await expect(strictCost.locator('[data-strict-line]')).toHaveText(
-      /^Fix every check first is on: keeps fixing until every check passes, up to 6 fix-ups \(adds up to US\$\d+\.\d\d at most\)\. Change$/,
+      /Fix every check first is on: keeps fixing until every check passes, up to 6 fix-ups \(adds up to US\$\d+\.\d\d at most\)\. Change$/,
     );
     await shot(page, 'c-strict-cost');
     const figure = (await strictCost.textContent())?.match(/at most (US\$\d+\.\d\d)/)?.[1] ?? '';
@@ -2803,6 +2805,51 @@ test.describe('designer listens, C: no paying twice, fix every check first', () 
     );
     await know(page).getByRole('button', { name: '‹ Conversation' }).click();
     expect(m.calls.filter(main)).toHaveLength(before + 2);
+  });
+
+  test('strict turned on by a reply: the next run asks once with what it adds, even never asking; then the usual rules (money S1)', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    // The threshold set never to ask: only the owed ask shows a card.
+    await setup(page, 'anthropic', { 'dhd-ai-ask': 'never' });
+    const m = await mock(page, {
+      talk: [
+        planR2('I’ll keep fixing until every check passes before you see it.', {
+          facts: [STRICT],
+        }),
+        planR2('The main bedroom once more.'),
+      ],
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    await expect(card(page, 1).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 60_000,
+    });
+    const before = m.calls.filter(main).length;
+    await send(page, 'Fix them all before coming back to me');
+    const cost = panel(page).locator('.talk-cost-card');
+    await expect(cost).toBeVisible({ timeout: 30_000 });
+    await expect(cost.locator('[data-strict-ask]')).toBeVisible();
+    await expect(cost.locator('[data-strict-line]')).toContainText(
+      /keeps fixing until every check passes, up to 6 fix-ups \(adds up to US\$\d+\.\d\d at most\)/,
+    );
+    await expect(cost).toContainText(/up to 6 fix-ups included\)/);
+    await page.waitForTimeout(500);
+    expect(m.calls.filter(main)).toHaveLength(before);
+    await shot(page, 'c-strict-ask');
+    await cost.getByRole('button', { name: /^Go ahead( anyway)? · about US\$/ }).click();
+    await expect(card(page, 2).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 60_000,
+    });
+    // Asked once: the next plan goes at once, as the threshold says.
+    await send(page, 'Once more, please');
+    await expect(card(page, 3).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 60_000,
+    });
+    await expect(panel(page).locator('.talk-cost-card')).toHaveCount(0);
   });
 
   test('Fix every check first set by the person, every check fixed by round 3: the normal card, and requests = rooms + 3 (29)', async ({
@@ -2888,21 +2935,20 @@ test.describe('designer listens, C: no paying twice, fix every check first', () 
     if (await anyway.isVisible().catch(() => false)) await anyway.click();
     await expect(log(page).getByText(/^You accepted \d+( of \d+)? changes from V1/)).toBeVisible();
     expect(priced()).toBe(presses);
-    // c. "Where is the bed?": the fix round is said, and the bed goes back free. (Known, from
-    // this replay: in the merged Master bedroom after the accept the run's own free pass keeps
-    // no bed, while the card's dry run places one; the card offers it, and it is free.)
+    // c. "Where is the bed?": the run itself puts the bed back, free, in the merged Master
+    // bedroom (its bedsides by it, or making way, never taken out as orphans), and the fix
+    // round is said. Nothing is left for the card to offer.
     await send(page, t.owner.bed);
     const v2 = await ran(page, 2);
-    await expect(v2.locator('[data-lead]')).toContainText(/Sent back to be fixed once/);
-    const sentBefore = m.calls.length;
-    await v2.locator('[data-lead] [data-free-fix]').click();
-    await expect(
-      log(page)
-        .locator('article.talk-app')
-        .getByText(/^Placed by the app, free: a queen bed in (Main|Master) bedroom/),
-    ).toBeVisible();
-    await expect(v2.locator('[data-lead]')).not.toContainText(/have no bed/);
-    expect(m.calls).toHaveLength(sentBefore);
+    const lead2 = v2.locator('[data-lead]');
+    // The accepted plan has their queen bed: the app puts it back in the merged room (moved).
+    await expect(lead2).toContainText(
+      /Placed by the app, free: a queen bed in (Main|Master) bedroom|Kept your queen bed, moved by the app/,
+    );
+    await expect(lead2).toContainText(/Sent back to be fixed once/);
+    await expect(lead2).not.toContainText(/have no bed/);
+    await expect(lead2).not.toContainText(/with no bed to go with/);
+    await expect(v2.locator('[data-free-fix]')).toHaveCount(0);
     // d. "Fix them all before coming back": noted, the banned sentence gone, F/L lines sent.
     await send(page, t.owner.fixAll);
     await expect(log(page)).toContainText(
@@ -2922,12 +2968,15 @@ test.describe('designer listens, C: no paying twice, fix every check first', () 
       /^Couldn’t make everything pass within US\$\d+\.\d\d$/,
     );
     await expect(lead).toContainText(/desk chairs? (isn’t|aren’t) at a table/);
-    await expect(lead.locator('[data-free-fix]')).toHaveText('Place a queen bed · free');
+    // The bed is in (the run's own free pass): no free fix to offer, Change what I asked is.
+    await expect(lead).not.toContainText(/have no bed/);
+    await expect(lead.locator('[data-free-fix]')).toHaveCount(0);
+    await expect(lead.locator('[data-change-asked]')).toBeVisible();
     await shot(page, 'c-owner-e');
     // 32: at a phone's peek, the bar says what's on the table, its button in view.
     await page.setViewportSize({ width: 390, height: 844 });
     const bar = panel(page).getByRole('region', { name: 'On the table' });
-    await expect(bar).toContainText(/V3 · \d+ don/);
+    await expect(bar).toContainText(/V3 · \d+ (don’t|doesn’t) pass/);
     await expect(bar.getByRole('button').first()).toBeInViewport();
     await shot(page, 'c-owner-e-390');
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -2939,8 +2988,10 @@ test.describe('designer listens, C: no paying twice, fix every check first', () 
     await expect(ask.locator('.talk-repeat-text')).toHaveText(
       /^This will likely come back with the same (problem|\d+ problems): V2 and V3 did, and nothing they depend on has changed\.$/,
     );
-    // The free fix first, then Run it anyway, priced.
-    await expect(ask.locator('[data-free-fix="repeat"]')).toHaveText('Place a queen bed · free');
+    // Nothing left for the app to place: Change what I asked in the free fix's slot, then Run
+    // it anyway, priced.
+    await expect(ask.locator('[data-free-fix="repeat"]')).toHaveCount(0);
+    await expect(ask.locator('[data-change-asked]')).toBeVisible();
     await expect(ask.getByRole('button', { name: /^Run it anyway/ })).toHaveAttribute(
       'data-spends',
       '',

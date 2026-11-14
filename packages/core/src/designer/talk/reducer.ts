@@ -124,7 +124,7 @@ export type TalkAction =
   | { type: 'editFact'; key: QuestionKey; brief: DesignBrief; at: string; id: string; level: Level }
   | { type: 'confirmFact'; key: QuestionKey }
   /** The strict setting's "You changed" line taken back (its Undo): the setting as it was. */
-  | { type: 'factUndo'; eventId: string; fixAll: boolean }
+  | { type: 'factUndo'; eventId: string }
   /** A setting of the brief that is no fact of What I know (Thorough or Quick, say). */
   | { type: 'setBrief'; brief: DesignBrief }
   | { type: 'draft'; text: string }
@@ -143,6 +143,8 @@ export type TalkAction =
       alt?: TurnOf<'cost-ask'>['alt'];
       /** It will likely fail the same way again (designer listens §5): always asks. */
       repeat?: TurnOf<'cost-ask'>['repeat'];
+      /** The first run after a reply turned strict on: this ask is that one ask. */
+      strict?: boolean;
     }
   /** The figure on an open cost card, worked out again (the plan or the prices moved). */
   | { type: 'costRefresh'; turnId: string; estimate: TurnOf<'cost-ask'>['estimate'] }
@@ -334,6 +336,7 @@ export function newConversation(a: Extract<TalkAction, { type: 'start' }>): Conv
     nextN: a.nextN,
     decisions: [],
     declined: [],
+    strictAsk: false,
     turns: [],
     draft: '',
     aliases: {},
@@ -599,7 +602,13 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
     case 'editFact': {
       const was = factText(a.key, conv.brief, a.level);
       const now = factText(a.key, a.brief, a.level);
-      const next = { ...conv, brief: a.brief, assumed: conv.assumed.filter((k) => k !== a.key) };
+      const next = {
+        ...conv,
+        brief: a.brief,
+        assumed: conv.assumed.filter((k) => k !== a.key),
+        // Set by the person themselves: no ask on the designer's behalf is owed any more.
+        ...(a.key === 'fix-all' ? { strictAsk: false } : {}),
+      };
       if (was === now) return next;
       return push(next, {
         kind: 'event',
@@ -609,6 +618,7 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
           type: 'fact',
           key: a.key,
           text: cut(`You changed: ${label(a.key)} ${was} → ${now}.`, L.note),
+          ...(a.key === 'fix-all' ? { was: !!conv.brief.fixAll } : {}),
         },
       });
     }
@@ -619,8 +629,10 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
       // it was, said on the line ("… Undone."), never a second "You changed".
       const t = findTurn(conv, a.eventId, 'event');
       if (!t || t.event.type !== 'fact' || t.event.key !== 'fix-all' || t.event.undone) return conv;
+      // The value it had before the change (kept on the line), never just the opposite of now.
+      const fixAll = t.event.was ?? !conv.brief.fixAll;
       return replaceTurn(
-        { ...conv, brief: { ...conv.brief, fixAll: a.fixAll } },
+        { ...conv, brief: { ...conv.brief, fixAll }, strictAsk: false },
         { ...t, event: { ...t.event, undone: true } },
       );
     }
@@ -630,7 +642,7 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
       return conv.draft === a.text ? conv : { ...conv, draft: a.text.slice(0, DRAFT_CHARS) };
     case 'ask':
       return push(
-        conv,
+        a.strict ? { ...conv, strictAsk: false } : conv,
         ...(a.talk
           ? []
           : [
@@ -662,6 +674,7 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
           just: a.just ? scopeCut(a.just) : null,
           alt: a.alt ?? null,
           repeat: a.repeat ?? null,
+          strict: !!a.strict,
         },
       );
     case 'costAnswer': {
@@ -1350,7 +1363,14 @@ function replyDone(
   const facts = r.memory.facts.filter((x) => !wide.includes(x));
   if (facts.length) {
     const f = applyFacts(next.brief, facts);
-    next = { ...next, brief: f.brief, assumed: next.assumed.filter((k) => !f.keys.includes(k)) };
+    // Strict turned on by the reply: the next run asks once with its figure (money review S1).
+    const strictAsk = !!f.brief.fixAll === !!next.brief.fixAll ? next.strictAsk : !!f.brief.fixAll;
+    next = {
+      ...next,
+      brief: f.brief,
+      strictAsk,
+      assumed: next.assumed.filter((k) => !f.keys.includes(k)),
+    };
     f.lines.forEach((l, k) =>
       noted.push({
         kind: 'fact',

@@ -42,6 +42,7 @@ import {
   lookFacts,
   lookNoWorse,
   lookStep,
+  madeWayLines,
   meteredPrice,
   orphanLines,
   parseConcept,
@@ -676,7 +677,10 @@ export async function runDesign(
       out?.added.length || out?.removed?.length ? out.spaces[s.key]?.design : undefined;
     if (!placed) return answer;
     // The orphans it took out are said with the answer, once it is the one used (`write`).
-    const lines = orphanLines(out?.removed ?? [], () => s.name);
+    const lines = [
+      ...orphanLines(out?.removed ?? [], () => s.name),
+      ...(out ? madeWayLines(out, () => s.name) : []),
+    ];
     const said = (d: SpaceDesign) => {
       if (lines.length) took.set(d, lines);
       return d;

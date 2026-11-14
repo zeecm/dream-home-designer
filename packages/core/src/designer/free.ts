@@ -492,17 +492,104 @@ export function freeEssentials(
     const first = ORDER.find((c) => wants.some((w) => codeOf(w) === c));
     const alone = wants.filter((w) => codeOf(w) === first);
     const sets = alone.length < wants.length ? [wants, alone] : [wants];
+    // The answer's bedside tables that go with no bed of its own (their bed was left out, or
+    // never asked for): placed before the app's bed, they can take the walls it needs (the
+    // owner's replay: a merged Master bedroom, its bedsides against the long wall, and the queen
+    // bed then only by a desk chair's way). When the bed doesn't fit as they stand, they go by
+    // the app's bed instead; failing that, they make way for it. Never taken out as orphans
+    // while a bed for the room's sleepers can be placed (essentials first, orphans after).
+    const bedWant = wants.find((w) => w.role === 'bed');
+    const refs = new Set(answer.items.map((a) => a.ref));
+    const bedRefs = new Set(
+      answer.items.filter((a) => roleOf(furnitureKind(a.assetId)) === 'bed').map((a) => a.ref),
+    );
+    // Only this answer's own: a kept piece or one carried over (theirs) is never moved or lost.
+    const theirsHere = new Set([...(o.theirs?.[key] ?? []), ...(o.theirs?.[s.key] ?? [])]);
+    const loose = bedWant
+      ? answer.items.filter(
+          (a) =>
+            roleOf(furnitureKind(a.assetId)) === 'bedside' &&
+            !a.keep &&
+            !theirsHere.has(a.ref) &&
+            !isAppRef(a.ref) &&
+            !(a.near && refs.has(a.near) && bedRefs.has(a.near)),
+        )
+      : [];
+    const looseRefs = new Set(loose.map((a) => a.ref));
+    const withBeds = sets.find((set) => set.some((w) => w.role === 'bed'));
+    type Try = { set: Want[]; items: SpaceDesign['items']; madeWay: string[] };
+    const tryList: Try[] = sets.map((set) => ({ set, items: answer.items, madeWay: [] }));
+    if (bedWant && withBeds && loose.length) {
+      tryList.push(
+        {
+          set: withBeds,
+          items: answer.items.map((a) =>
+            looseRefs.has(a.ref) ? { ...a, near: bedWant.item.ref } : a,
+          ),
+          madeWay: [],
+        },
+        {
+          set: withBeds,
+          items: answer.items.filter((a) => !looseRefs.has(a.ref)),
+          madeWay: [...looseRefs],
+        },
+      );
+    }
     const was = sideOf(r, current, o.theirs);
-    let kept: { wants: Want[]; r: DesignResult; design: DesignInput } | null = null;
+    let kept: { wants: Want[]; r: DesignResult; design: DesignInput; madeWay: string[] } | null =
+      null;
     let lastTry: DesignResult | null = null;
-    for (const set of sets) {
+    for (const t of tryList) {
+      // The last try (the bedsides made way): each put back by the bed, one at a time, while
+      // it breaks nothing the bed alone didn't (one bedside, as a tight room allows).
+      if (t.madeWay.length && kept === null) {
+        const nextOf = (items: SpaceDesign['items']): DesignInput => ({
+          ...current,
+          spaces: {
+            ...current.spaces,
+            [key]: {
+              ...(current.spaces[key] as DesignInput['spaces'][string]),
+              design: { ...answer, items: [...items, ...t.set.map((w) => w.item)] },
+            },
+          },
+        });
+        let items = t.items;
+        let next = nextOf(items);
+        tries++;
+        let rn = designResult(base, before, next, opts);
+        lastTry ??= rn;
+        if (!freeBetter(was, sideOf(rn, next, o.theirs))) continue;
+        const madeWay = [...t.madeWay];
+        for (const side of loose) {
+          const more = [...items, { ...side, near: bedWant?.item.ref ?? side.near }];
+          const n2 = nextOf(more);
+          tries++;
+          const r2 = designResult(base, before, n2, opts);
+          const a = sideOf(rn, next, o.theirs);
+          const b = sideOf(r2, n2, o.theirs);
+          const placed = !r2.dropped.some((d) => d.space === key && d.ref === side.ref);
+          if (
+            placed &&
+            piecesNoWorse(a, b) &&
+            [...b.sigs].every((x) => a.sigs.has(x)) &&
+            b.keys.size <= a.keys.size
+          ) {
+            items = more;
+            next = n2;
+            rn = r2;
+            madeWay.splice(madeWay.indexOf(side.ref), 1);
+          }
+        }
+        kept = { wants: t.set, r: rn, design: next, madeWay };
+        break;
+      }
       const next: DesignInput = {
         ...current,
         spaces: {
           ...current.spaces,
           [key]: {
             ...(current.spaces[key] as DesignInput['spaces'][string]),
-            design: { ...answer, items: [...answer.items, ...set.map((w) => w.item)] },
+            design: { ...answer, items: [...t.items, ...t.set.map((w) => w.item)] },
           },
         },
       };
@@ -510,7 +597,7 @@ export function freeEssentials(
       const rn = designResult(base, before, next, opts);
       lastTry ??= rn;
       if (freeBetter(was, sideOf(rn, next, o.theirs))) {
-        kept = { wants: set, r: rn, design: next };
+        kept = { wants: t.set, r: rn, design: next, madeWay: t.madeWay };
         break;
       }
     }
@@ -552,6 +639,11 @@ export function freeEssentials(
           };
         }
         gaveWay.push(...lost);
+      }
+      // The answer's bedsides that made way for the app's bed (its last try): said as such.
+      for (const ref of kept.madeWay) {
+        const a = answer.items.find((i) => i.ref === ref);
+        if (a) gaveWay.push({ space: key, ref: a.ref, assetId: a.assetId });
       }
       r = kept.r;
       for (const w of kept.wants) {
@@ -622,6 +714,37 @@ export function freeEssentials(
       }
     }
   }
+  // Essentials first, orphans after, and once more where the orphans made room: the answer this
+  // returns is one a dry run (the card's Place … · free) would place nothing more in, so the
+  // card never offers what the run refused.
+  const roomed = [...new Set(removed.map((x) => x.space))].filter((k) =>
+    missed.some((m) => m.space === k),
+  );
+  if (roomed.length) {
+    const again = freeEssentials(base, before, { ...design, spaces: current.spaces }, opts, {
+      ...o,
+      orphans: false,
+      spaces: roomed,
+    });
+    tries += again.tries;
+    if (again.added.length) {
+      current = { ...current, spaces: again.spaces };
+      added.push(...again.added);
+      gaveWay.push(...again.gaveWay);
+      for (let i = missed.length - 1; i >= 0; i--)
+        if (roomed.includes(missed[i]?.space ?? '')) missed.splice(i, 1);
+      missed.push(...again.missed);
+      // A bedside taken out "with no bed" where a bed then went in made way for it instead.
+      const bedIn = new Set(again.added.filter((a) => a.role === 'bed').map((a) => a.space));
+      for (let i = removed.length - 1; i >= 0; i--) {
+        const x = removed[i];
+        if (x && x.role === 'bedside' && bedIn.has(x.space)) {
+          removed.splice(i, 1);
+          gaveWay.push({ space: x.space, ref: x.ref, assetId: x.assetId });
+        }
+      }
+    }
+  }
   return {
     spaces: current.spaces,
     added,
@@ -675,6 +798,28 @@ function orphansOf(
  * The app's line for the orphans it took out of a space: "Took out 2 dining chairs the answer
  * added in Living and dining, with no table to go with them."
  */
+/**
+ * The app's line for the answer's pieces taken out to make room for the app's bed (they are no
+ * longer in the answer, so no left-out line can say them): "Took out a bedside table the
+ * designer added in Master bedroom to make room for the queen bed the app placed."
+ */
+export function madeWayLines(out: FreeOutcome, spaceName: (key: string) => string): string[] {
+  const lines: string[] = [];
+  for (const key of new Set(out.gaveWay.map((g) => g.space))) {
+    const items = out.spaces[key]?.design?.items ?? [];
+    const gone = out.gaveWay.filter((g) => g.space === key && !items.some((i) => i.ref === g.ref));
+    const bed = out.added.find((a) => a.space === key && a.role === 'bed');
+    const first = gone[0];
+    if (!first || !bed) continue;
+    const name = freeName(first.assetId);
+    const what = gone.length === 1 ? an(name) : `${gone.length} ${name}s`;
+    lines.push(
+      `Took out ${what} the designer added in ${spaceName(key)} to make room for the ${freeName(bed.assetId)} the app placed.`,
+    );
+  }
+  return lines;
+}
+
 export function orphanLines(removed: readonly FreeRemove[], spaceName: (key: string) => string) {
   const groups = new Map<string, FreeRemove[]>();
   for (const x of removed) {
