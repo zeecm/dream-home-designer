@@ -11,6 +11,7 @@ import {
 import { roomStep } from './prompts';
 import {
   type ReportLeftOut,
+  type ReportRoom,
   type RunReport,
   addressedIn,
   failureLines,
@@ -636,5 +637,91 @@ describe('the designer’s pieces left out, on the card (B2, from QA)', () => {
     ).toBeNull();
     expect(leftOutWords(rep([]))).toBeNull();
     expect(readyLine('V4', rep([]), null)).toBe('V4 is ready. Passes all checks.');
+  });
+});
+
+describe('Keep fixing on the card, and the left-out line’s wording (B2, UX review)', () => {
+  const room = (rounds: ReportRoom['rounds']): ReportRoom => ({
+    key: 'rm_main',
+    name: 'Main bedroom',
+    fixes: rounds.length,
+    fixed: 0,
+    rounds,
+  });
+  const run = [
+    { outcome: 'fixed' as const, before: 4, after: 3 },
+    { outcome: 'fixed' as const, before: 3, after: 2 },
+    { outcome: 'fixed' as const, before: 2, after: 1 },
+  ];
+
+  it('rounds Keep fixing sent are said apart from those before the version was shown', () => {
+    const kept = room([...run, { outcome: 'fixed', before: 1, after: 0, by: 'keep' }]);
+    expect(leadParts([kept], 0).fix).toBe(
+      'Checked and fixed 3 problems before showing you, and 1 more when you asked to keep fixing.',
+    );
+    expect(roundLines([kept])).toEqual([
+      'Main bedroom · fix round 1: 4 → 3 problems',
+      'Main bedroom · fix round 2: 3 → 2 problems',
+      'Main bedroom · fix round 3: 2 → 1 problem',
+      'Main bedroom · fix round 4 (Keep fixing): 1 → 0 problems',
+    ]);
+    const none = room([...run, { outcome: 'no-better', before: 1, after: 1, by: 'keep' }]);
+    expect(leadParts([none], 1)).toEqual({
+      fix: 'Checked and fixed 3 problems before showing you. Nothing more was fixed when you asked to keep fixing.',
+      count: '1 still doesn’t pass:',
+    });
+    const out = room([
+      ...run,
+      { outcome: 'fixed', before: 3, after: 2, by: 'keep' },
+      { outcome: 'no-fixups', before: 2, after: 2, by: 'keep' },
+    ]);
+    expect(leadParts([out], 2).fix).toBe(
+      'Checked and fixed 3 problems before showing you, and 1 more when you asked to keep fixing. Keep fixing used the 1 fix-up it was priced for.',
+    );
+    // Two rounds stay on one line.
+    expect(roundLines([room(run.slice(0, 2))])).toEqual([
+      'Main bedroom · fix round 1: 4 → 3 problems · fix round 2: 3 → 2 problems',
+    ]);
+  });
+
+  const out = (
+    ref: string,
+    assetId: string,
+    extra: Partial<ReportLeftOut> = {},
+  ): ReportLeftOut => ({
+    id: `L-${ref}`,
+    ref,
+    assetId,
+    space: 'rm_main',
+    room: 'Main bedroom',
+    text: '',
+    code: 'no-wall',
+    hint: '',
+    cause: 'The walls in Main bedroom that could take it are taken by other pieces.',
+    says: 'It was left out',
+    role: assetId === 'bedside' ? 'bedside' : 'wardrobe',
+    causes: null,
+    ...extra,
+  });
+
+  it('a second of a kind, bedside tables first, the walls taken said once a room', () => {
+    const takers = 'the queen bed and the built-in wardrobe';
+    const w = leftOutWords({
+      failures: [],
+      rooms: [],
+      leftOut: [
+        out('bw2', 'built-in-wardrobe', { another: true, takers }),
+        out('w1', 'wardrobe', { takers }),
+        out('w2', 'wardrobe', { takers }),
+        out('side1', 'bedside', { takers }),
+        out('side2', 'bedside', { takers }),
+      ],
+    });
+    expect(w?.line).toBe(
+      'Left out, didn’t fit: 2 bedside tables, a second built-in wardrobe, 2 wardrobes.',
+    );
+    expect(w?.reasons).toEqual([
+      'No free wall left in Main bedroom for these: the queen bed and the built-in wardrobe take the walls.',
+    ]);
   });
 });

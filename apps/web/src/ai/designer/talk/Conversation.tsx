@@ -19,6 +19,7 @@ import { useResultsTickN } from '../results';
 import { tokens, usd, useSpend } from '../spend';
 import { closePanel, openCompare, useDesigner } from '../state';
 import { Composer } from './Composer';
+import { useKeepAsk } from './KeepFixing';
 import { Log } from './Log';
 import { YourRules, rulesLabel } from './Rules';
 import { Back, Decisions, StartOverDialog, Versions, WhatIKnow } from './Views';
@@ -147,6 +148,12 @@ function OnTheTable() {
   // With the must-haves its ticks leave out (a bed unticked), as the card's lead says them.
   const tickedOut = useTickedOut((s) => (last ? (s[last.key] ?? 0) : 0));
   const open = failures + tickedOut;
+  // While its run sends fix rounds (Keep fixing), the bar says so, as the card's progress line.
+  const fixingNow = useTalk((s) =>
+    last && s.live && `${s.live.proposalId}:${s.live.letter}` === last.key
+      ? s.live.state.steps.reduce((t, x) => t + (x.fixing?.problems ?? 0), 0)
+      : 0,
+  );
   if (!last) return null;
   if (!r) {
     // Being placed and checked by the designer's worker: said calmly, nothing to press yet.
@@ -173,7 +180,9 @@ function OnTheTable() {
   const undo = line && lineState(line) === 'undo' ? line : null;
   const verdict =
     last.status === 'running'
-      ? 'Checking…'
+      ? fixingNow
+        ? `Checking… fixing ${fixingNow} problem${fixingNow === 1 ? '' : 's'}`
+        : 'Checking…'
       : last.status === 'failed'
         ? 'Didn’t finish'
         : accepted.length
@@ -579,6 +588,25 @@ export function TalkPanel() {
     });
     return () => cancelAnimationFrame(f);
   }, [costCard, sheet]);
+  // Keep fixing's own cost card (B2), as a cost card: full height on a phone, its buttons in
+  // sight at every size (a phone on its side has a log about 75 px tall).
+  const keepAsk = useKeepAsk((s) => s.card);
+  useEffect(() => {
+    if (!keepAsk) return;
+    if (sheet) {
+      before.current = null;
+      setSize('full');
+    }
+    const f = requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const row = document.querySelector(
+          `[data-card="${CSS.escape(keepAsk)}"] [data-keep-fixing-buttons]`,
+        );
+        row?.scrollIntoView({ block: 'nearest' });
+      }),
+    );
+    return () => cancelAnimationFrame(f);
+  }, [keepAsk, sheet]);
   // A card going on the plan for the first time is seen there before Accept. On a phone the
   // cost card has taken the sheet to full height, over the whole stage, so the sheet folds to
   // peek (the On the table bar and Accept… stay in reach). A new proposal on a phone showing

@@ -19,6 +19,8 @@ export {
   type FreeRemove,
   freeEssentials,
   freeName,
+  madeWay,
+  madeWayFor,
   gaveWayWords,
   isAppRef,
   isDeclined,

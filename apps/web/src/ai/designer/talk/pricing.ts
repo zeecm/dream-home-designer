@@ -142,9 +142,13 @@ function keepFixingPlan(
  * pool. Carried on, they send only their next round (never their room step or a round they had).
  */
 export function roomsFixing(o: ProposalOption, run: RunCheckpoint): string[] {
-  return Object.entries(run.fixing)
-    .filter(([k, f]) => !f.settled && o.spaces[k]?.status === 'done' && !!o.spaces[k]?.design)
+  const answered = (k: string) => o.spaces[k]?.status === 'done' && !!o.spaces[k]?.design;
+  // Keep fixing's rooms still queued (no place in the pool yet) go on too (tech lead S3).
+  const queued = (run.plan.fixOnly ?? []).filter((k) => !run.fixing[k] && answered(k));
+  const open = Object.entries(run.fixing)
+    .filter(([k, f]) => !f.settled && answered(k))
     .map(([k]) => k);
+  return [...new Set([...open, ...queued])];
 }
 
 /** A room an interrupted run finished (done, or failed after its answer): never sent again. */

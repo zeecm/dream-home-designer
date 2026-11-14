@@ -666,6 +666,11 @@ export type OptionLook = z.infer<typeof OptionLook>;
 export const RoomFix = z.object({
   left: z.number().int().min(0),
   settled: z.boolean(),
+  /**
+   * A fix round's answer that came back and isn't judged yet (merged, before the free pass and
+   * the checks): paid for, so a run carried on judges it from here and never sends it again.
+   */
+  pending: SpaceDesign.optional(),
 });
 export type RoomFix = z.infer<typeof RoomFix>;
 

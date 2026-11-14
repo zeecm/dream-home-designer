@@ -457,8 +457,13 @@ export const FixRound = z.object({
   ]),
   before: z.number().int().min(0),
   after: z.number().int().min(0),
-  /** Sent after the second look (its one round), not by the room's own checks. */
-  by: z.literal('look').optional(),
+  /**
+   * Sent after the second look (its one round), not by the room's own checks; or by Keep fixing
+   * (B2: a round the person asked and paid for after the version was shown). New within the
+   * record's version: a build that knows only 'look' drops the room's rounds (read tolerantly),
+   * so only the card's detail is lost.
+   */
+  by: z.enum(['look', 'keep']).optional(),
 });
 export type FixRound = z.infer<typeof FixRound>;
 export const FixRounds = z.array(FixRound).max(12).optional().catch(undefined);

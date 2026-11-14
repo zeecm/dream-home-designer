@@ -1025,16 +1025,24 @@ fixing, orphans, what was left out.** Proposal records 5.
   as the one it changes (`stableJson`, after the merge and the free pass) has stalled. It stops at
   the first of: everything passes; a round no better (that answer isn't used, the room is
   settled); no answer (cut off twice, unreadable, declined: said); the pool used up (`no-fixups`,
-  said). Turns: in its first pass a room may take max(1, ⌊pool / rooms⌋); once every room has had
-  its pass, what is left goes one fix-up at a time to each room still progressing, in room order
-  (2 at a time), until it is used up or none progresses. The second look's round draws on what is
-  left, last. The race fix stays: a fix-up is taken and `held` before `mayStart`, given back if
-  refused, saved as `fixesLeft + held`, and saved as gone as soon as its request goes.
+  said). Turns: in its first pass a room may take max(1, ⌊pool / rooms⌋), and only from what the
+  rooms before it in room order haven't claimed (their first-pass fix-ups left, until their pass is
+  over: `claimedBefore`), so when rooms outnumber the pool the first rooms in order get them
+  whichever answer comes first; a room that can't take one then isn't settled. Once every room
+  has had its pass, what is left goes one fix-up at a time to each room still progressing, in
+  room order (2 at a time), until it is used up or none progresses. The second look's round draws
+  on what is left, last. The race fix stays: a fix-up is taken and `held` before `mayStart`, given
+  back if refused, saved as `fixesLeft + held`. When its request goes, the fix-ups left (its own
+  taken) go with its reservation (`onStep(key, 'fix', 'start', { fixesLeft })`, written in the
+  same checkpoint write as `inflight`), and the checkpoint's count only ever goes down in a run.
 - **Money** (tech-lead money review): `estimateRun` prices the pool as `pool × the dearest fix
   request` (`usd.fixOne`, also on each step), `fixes = pool`; a fix round is reserved at its own
   room's `fixOne` (`stepHigh` in web `pricing.ts`; the look's round and a room the layout made:
-  the dearest), so any sharing of the pool fits the figure. `remainingHigh` (Finish after a pause)
-  counts the fix-ups left at the dearest. A carried-on run is priced with `pool: fixesLeft` and its
+  the dearest), so any sharing of the pool fits the figure. A fix request is priced with the answer
+  it changes at its most (`out.max`, not typical: "reserved at its most" literally; the sample
+  flat's Thorough figure on Opus went from US$3.00 to US$3.13 at most). `remainingHigh` (Finish
+  after a pause) counts the fix-ups left at the dearest; it still counts a room in its rounds at
+  its room step's high (generous) and adds nothing for a fix round already on its way. A carried-on run is priced with `pool: fixesLeft` and its
   rooms in their rounds as `fixOnly` (their room step not priced, typical one fix round);
   `resumeFigure` is the steps left at their high plus `fixOne × fixesLeft`. A new run's checkpoint
   starts with `fixesLeft: est.fixes` (the pool its figure priced). The pause at the figure and
@@ -1045,20 +1053,32 @@ fixing, orphans, what was left out.** Proposal records 5.
   `fixRoomsOf`/`keepFixingPlan`): offered in the lead of a checked card with failures, nothing
   accepted from it, and a room whose last round is `no-fixups` (never after a round no better).
   "Keep fixing · at most US$x" opens its own cost card in the lead's frame (always asks; its
-  first sentence takes focus, never the spend button): "Keep fixing Main bedroom: up to 3 more
-  fix-ups, each sent only while the last made progress. About US$a, at most US$b." Go runs a
+  first sentence takes focus, never the spend button; Not now or Escape give focus back to the
+  button; on a phone the sheet goes full height and its buttons scroll into view, as a cost
+  card's do: `useKeepAsk`): "Keep fixing Main bedroom takes about US$a (at most US$b, up to 3 more
+  fix-ups, only while each one helps). Go ahead?" Go puts focus on the card's heading and runs a
   fix-only run (`RunPlan.fixOnly`) on the same option: its stored answers stand, no room step, no
   second look, the room's last `no-fixups` round answered (popped), its rounds, `fixes` and
   `fixed` going on from the stored ones; bound to the figure shown (priced higher since: the card
   shows the new figure and asks again). The cost card is the card's own, not a `cost-ask` turn
-  (a new turn kind would make a talk-record v4 tab drop the whole conversation).
-- **Locked phone**: a room's answer is saved `done` right after its first answer (with the free
-  pass, checked) and after each round, with `RunCheckpoint.fixing` (each room's first-pass
-  fix-ups left and `settled`) and `fixesLeft`. Carried on, `resumePlan` sends the rooms left and
-  the unsettled rooms in their rounds as `fixOnly`: their next round, never their room step or a
-  round they had ("## Fix round 2" after round 1). A fix-only room with no stored answer sends
-  nothing.
-- **Records**: `PROPOSAL_RECORD_VERSION` 5 (`RunCheckpoint.fixing`, `plan.fixOnly`). A v4 tab
+  (a new turn kind would make a talk-record v4 tab drop the whole conversation). Its rounds are
+  `FixRound.by: 'keep'` (new within the record's version, read tolerantly: a build that knows only
+  'look' drops that room's rounds, so only the card's detail goes), said apart: "Checked and fixed
+  3 problems before showing you, and 1 more when you asked to keep fixing.", "fix round 4 (Keep
+  fixing): 1 → 0 problems" (several rounds: one a line), "Keep fixing used the 1 fix-up it was
+  priced for."; the log says "You kept fixing V1: the app fixed 1 more problem, for US$0.04."; the
+  announcement "Kept fixing V1: passes all checks now. Cost US$0.04 more."; no "Where next?"
+  after it. The On the table bar says "Checking… fixing 1 problem" while it runs.
+- **Locked phone**: a room's answer is saved `done` the moment it arrives (merged, before the
+  free pass and the checks run in the worker), again once checked, and after each round, with
+  `RunCheckpoint.fixing` (each room's first-pass fix-ups left, `settled`, and a fix round's answer
+  that came back and isn't judged yet, `pending`) and `fixesLeft`. Carried on, `resumePlan` sends
+  the rooms left and, as `fixOnly`, the unsettled rooms in their rounds and Keep fixing's rooms
+  still queued (`roomsFixing`): a fix-only room gets its free pass again (it does nothing a second
+  time), its pending answer is judged with no request, and its next round goes ("## Fix round 2"
+  after round 1); never its room step or a round it had. A fix-only room with no stored answer
+  sends nothing.
+- **Records**: `PROPOSAL_RECORD_VERSION` 5 (`RunCheckpoint.fixing` with `pending`, `plan.fixOnly`). A v4 tab
   reads a 5 as nothing (`proposalFromRecord`) and its writes return null for it, so it never
   writes one back without the pool's state; 1–4 read as 5 with `fixing: {}`.
 - **Orphans** (criterion 12; the caller's call over the lead's "out of B"): core `freeEssentials`
@@ -1067,27 +1087,36 @@ fixing, orphans, what was left out.** Proposal records 5.
   pieces this answer added (no `keep`, not carried over, not `app:`, not one another piece faces
   or goes beside). Kept by the free pass's rule with the orphans counted: no more hard failures
   (a chair with no table fails P2 belongs, so it goes down), none new, `piecesNoWorse`. Said as an
-  app line ("Took out a dining chair the answer added in Main bedroom, with no table to go with
+  app line ("Took out a dining chair the designer added in Main bedroom, with no table to go with
   it."; `orphanLines`) in the option's `appLines` (a run with no layout step adds to the option's
   own). The bench runs it too; its layouts are byte-identical (no orphans in the recorded
   answers). The look's round doesn't take orphans out.
 - **Near misses** (criterion 15): a 0.89 m walkway of 0.90 m is mended and passes; 0.84 m is not a
   near miss. The boundary was 6 cm by float luck (0.9 − 0.84 rounds above 0.06, 0.9 + (2.97 −
   3.03) below): now `short < NEAR_MISS − 1e-6`, so a 6 cm miss never is one. Bench byte-identical.
-- **Left out, on the card** (QA): when the answer's own pieces are left out (no `app:` piece, not
-  one already said as a failure's cause), the lead says "Left out, didn't fit: built-in wardrobe,
-  2 wardrobes, 2 bedside tables." ("Left out: …" when some went for another reason), the reasons
-  under it in a disclosure (`leftOutWords`), with a warn mark, and the headline gets no tick; the
-  run-end announcement adds the line. The Checks row still says "Passes all checks" (they do).
-  Known: a bedside table that gave way for the app's bed is said both on the bed's line and here.
+- **Left out, on the card** (QA, then UX): when the answer's own pieces are left out (no `app:`
+  piece, not one already said as a failure's cause), the lead says "Left out, didn't fit: 2 bedside
+  tables, a second built-in wardrobe, 2 wardrobes." (bedside tables first; "a second" when the
+  version has one of that kind; "Left out: …" when some went for another reason), with the app's
+  neutral mark (nothing fails for it) and the headline's tick following the checks. The reasons
+  are a tap away (`leftOutWords`), each once: walls taken by the version's pieces are one sentence
+  a room ("No free wall left in Main bedroom for these: the queen bed and the built-in wardrobe
+  take the walls."; `ReportLeftOut.takers`). A piece that gave way for the app's is said only
+  here: the free pass sets its reason to "Made way for the queen bed the app placed." (`madeWay`;
+  data on the answer), and the app's bed line and the announcements no longer add "one bedside
+  table no longer fits" (the Place … · free log line still does). The run-end announcement adds
+  the line. The Checks row still says "Passes all checks" (they do).
 - **Prompts**: `TALK_SYSTEM` says the rounds go on while each fails less, as many as the price
   allows, and that the app takes out an added dining chair with no table or bedside with no bed
   (lead blocker 5; the talk call's cached system prompt changes once).
-- Tests: core (pool and pricing, orphans, near misses, left-out words, records), ai (criteria
-  16–19 with scripted checks, Keep fixing's fix-only run, the orphan line), web (`carryOn.test.ts`:
-  every room progressing never passes its figure and never asks; Keep fixing priced and run;
-  carried on in a room's rounds), e2e ("designer listens, B2": Keep fixing end to end; the
-  left-out line).
+- Tests: core (pool and pricing, orphans, near misses, left-out words, Keep fixing's lines,
+  records), ai (criteria 16–19 with scripted checks, Keep fixing's fix-only run and marks, the
+  orphan line; the money review's S1 both windows, S2 and N1), web (`carryOn.test.ts`: every room
+  progressing never passes its figure and never asks; Keep fixing priced and run; carried on in a
+  room's rounds; Keep fixing's queued rooms, S3), e2e ("designer listens, B2": Keep fixing end to
+  end with its focus, Escape and phone layouts; the left-out line).
+- Known, not done: in dark mode a part-ticked group's checkbox draws an empty box, not "−"
+  (older than B2).
 
 **AI costs always have a figure (#67, 14 Nov).** The owner's Gemini 3 runs had no price, so no
 cost card had a figure and neither the approved figure nor the tab's limit held.

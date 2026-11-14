@@ -107,6 +107,13 @@ export interface FreeOutcome {
   tries: number;
 }
 
+/** A piece's reason once it gave way for the app's: "Made way for the queen bed the app placed." */
+export const madeWayFor = (assetId: string) =>
+  `Made way for the ${freeName(assetId)} the app placed.`;
+/** Whether an answer's piece gave way for the app's (its reason says so). */
+export const madeWay = (why: string | null | undefined) =>
+  /^Made way for the .+ the app placed\.$/.test(why ?? '');
+
 /** "one bedside table no longer fits and is left out" (without a full stop). */
 export function gaveWayWords(lost: readonly { assetId: string }[]): string {
   const names = lost.map((l) => `one ${freeName(l.assetId)}`);
@@ -114,8 +121,6 @@ export function gaveWayWords(lost: readonly { assetId: string }[]): string {
     names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
   return `${list} no longer ${names.length > 1 ? 'fit and are' : 'fits and is'} left out`;
 }
-
-const cap = (s: string) => (s ? `${s[0]?.toUpperCase()}${s.slice(1)}` : s);
 
 export interface FreeOptions {
   /** Only these spaces (by result or stored key); every designed space when absent. */
@@ -516,8 +521,11 @@ export function freeEssentials(
       });
       current = kept.design;
       if (lost.length) {
-        const head = kept.wants[0]?.item.ref;
-        const said = gaveWayWords(lost);
+        // Said once, in the card's left-out line (UX, B2): each piece that gave way says what it
+        // made way for, as data on the answer ("Made way for the queen bed the app placed.").
+        const head = kept.wants[0]?.item;
+        const said = head ? madeWayFor(head.assetId) : '';
+        const gone = new Set(lost.map((l) => l.ref));
         const d = current.spaces[key]?.design;
         if (d) {
           current = {
@@ -529,7 +537,7 @@ export function freeEssentials(
                 design: {
                   ...d,
                   items: d.items.map((i) =>
-                    i.ref === head ? { ...i, why: clean(`${i.why} ${cap(said)}.`, LIMITS.why) } : i,
+                    gone.has(i.ref) ? { ...i, why: clean(said, LIMITS.why) } : i,
                   ),
                 },
               },
@@ -672,6 +680,6 @@ export function orphanLines(removed: readonly FreeRemove[], spaceName: (key: str
     const name = freeName(first.assetId);
     const what = n === 1 ? an(name) : `${n} ${name}s`;
     const lacks = first.role === 'bedside' ? 'no bed' : 'no table';
-    return `Took out ${what} the answer added in ${spaceName(first.space)}, with ${lacks} to go with ${n === 1 ? 'it' : 'them'}.`;
+    return `Took out ${what} the designer added in ${spaceName(first.space)}, with ${lacks} to go with ${n === 1 ? 'it' : 'them'}.`;
   });
 }

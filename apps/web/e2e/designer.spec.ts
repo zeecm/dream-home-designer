@@ -2176,10 +2176,14 @@ test.describe('designer listens, B1: free fixes and room vetting', () => {
       .locator('article.talk-app')
       .getByText(/^Placed by the app, free: a queen bed in (Main|Master) bedroom/);
     await expect(line).toBeVisible();
-    // What gave way for the bed is said with it, never silently.
+    // What gave way for the bed is said with the action in the log, and on the card once, in
+    // the lead's left-out line (UX B2), never on the bed's own line.
     await expect(line).toContainText('one bedside table no longer fits and is left out');
-    await expect(v1.locator('[data-lead]')).toContainText(
-      'one bedside table no longer fits and is left out',
+    const leftOut = v1.locator('[data-lead] [data-app-line="left-out"]');
+    await expect(leftOut.locator('summary')).toHaveText(/a second bedside table/);
+    await expect(leftOut).toContainText('Made way for the queen bed the app placed.');
+    await expect(v1.locator('[data-lead] [data-app-line="did"]').first()).not.toContainText(
+      'no longer fits',
     );
     await expect(appRow(v1)).toHaveCount(1);
     await expect(v1.locator('[data-lead]')).not.toContainText(/no bed/);
@@ -2327,33 +2331,66 @@ test.describe('designer listens, B2: fix rounds by progress, Keep fixing, what w
     await keep.click();
     const ask = v1.locator('[data-keep-fixing-card]');
     await expect(ask).toContainText(
-      /^Keep fixing (Main|Master) bedroom: up to 3 more fix-ups, each sent only while the last made progress\. About US\$\d+\.\d\d, at most US\$\d+\.\d\d\./,
+      /^Keep fixing (Main|Master) bedroom takes about US\$\d+\.\d\d \(at most US\$\d+\.\d\d, up to 3 more fix-ups, only while each one helps\)\. Go ahead\?/,
     );
+    await expect(ask.locator('p')).toBeFocused();
+    // Escape closes it, focus back on the button that opened it.
+    await page.keyboard.press('Escape');
+    await expect(ask).toHaveCount(0);
+    await expect(keep).toBeFocused();
+    await keep.click();
     await expect(ask.locator('p')).toBeFocused();
     await shot(page, 'b2-keep-fixing-ask');
     if (process.env.SHOTS) {
       await page.emulateMedia({ colorScheme: 'dark' });
       await shot(page, 'b2-keep-fixing-ask-dark');
       await page.emulateMedia({ colorScheme: 'light' });
-      await page.setViewportSize({ width: 390, height: 844 });
-      await ask.scrollIntoViewIfNeeded();
-      await shot(page, 'b2-keep-fixing-ask-390');
-      await page.setViewportSize({ width: 1440, height: 900 });
     }
+    // On a phone, as a cost card: its buttons come into view when it opens (a log only about
+    // 75 px tall on its side, the sheet at peek upright).
+    for (const [width, height] of [
+      [390, 844],
+      [844, 390],
+    ] as const) {
+      await page.keyboard.press('Escape');
+      await page.setViewportSize({ width, height });
+      await keep.scrollIntoViewIfNeeded();
+      await keep.click();
+      await expect(ask.getByRole('button', { name: 'Not now' })).toBeInViewport();
+      await expect(ask.getByRole('button', { name: /^Keep fixing · at most/ })).toBeInViewport();
+      await shot(page, `b2-keep-fixing-ask-${width}`);
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
     await ask.getByRole('button', { name: 'Not now' }).click();
     await expect(ask).toHaveCount(0);
+    await expect(keep).toBeFocused();
     expect(m.calls.filter(main)).toHaveLength(4);
+    const scopes = await log(page).getByText('Where next?').count();
     await keep.click();
     await v1
       .locator('[data-keep-fixing-card]')
       .getByRole('button', { name: /^Keep fixing · at most US\$/ })
       .click();
+    // As a run starting: focus on the card's heading.
+    await expect(v1.getByRole('heading', { name: /^V1 · / })).toBeFocused();
     // Fix rounds only, on the same card: one more, and it passes.
     await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
       timeout: 60_000,
     });
-    await expect(lead).toContainText('Checked and fixed 4 problems before showing you.');
+    // The paid round is said apart from those before the version was shown.
+    await expect(lead).toContainText(
+      'Checked and fixed 3 problems before showing you, and 1 more when you asked to keep fixing.',
+    );
     await expect(lead).not.toContainText('doesn’t pass');
+    await lead.getByText('How it was checked').click();
+    await expect(lead).toContainText(/fix round 4 \(Keep fixing\): 1 → 0 problems/);
+    // The log says Keep fixing ran, as an accept is said; no new "Where next?".
+    await expect(
+      log(page).getByText(
+        /^You kept fixing V1: the app fixed 1 more problem, for US\$\d+\.\d\d\.$/,
+      ),
+    ).toBeVisible();
+    expect(await log(page).getByText('Where next?').count()).toBe(scopes);
     await expect(v1.locator('[data-keep-fixing]')).toHaveCount(0);
     const calls = m.calls.filter(main);
     expect(calls).toHaveLength(5);
@@ -2398,17 +2435,19 @@ test.describe('designer listens, B2: fix rounds by progress, Keep fixing, what w
     await expect(v1.locator('.talk-lens')).toContainText('Passes all checks');
     const lead = v1.locator('[data-lead]');
     const left = lead.locator('[data-app-line="left-out"]');
-    // (Its words keep together: a non-breaking hyphen in "built-in".)
+    // (Its words keep together: a non-breaking hyphen in "built-in".) Bedside tables first; the
+    // built-in wardrobe the version has already is "a second" one.
     await expect(left.locator('summary')).toHaveText(
-      /^Left out, didn’t fit: built.in wardrobe, 2 wardrobes, 2 bedside tables\.$/,
+      /^Left out, didn’t fit: 2 bedside tables, a second built.in wardrobe, 2 wardrobes\.$/,
     );
-    await expect(lead.locator('.talk-check-pass')).toHaveCount(0);
-    // The reason, one tap away.
-    await expect(left.getByText(/taken by other pieces|longest free wall/).first()).toBeHidden();
+    // The app's neutral mark: nothing fails for it.
+    await expect(left.locator('.talk-warn-mark')).toHaveCount(0);
+    // The reason, one tap away, said once for the room.
+    await expect(left.getByText(/No free wall left/)).toBeHidden();
     await left.locator('summary').click();
-    await expect(left.getByText(/wardrobe/).nth(1)).toBeVisible();
+    await expect(left.locator('li')).toHaveCount(1);
     await expect(left).toContainText(
-      /The walls in (Main|Master) bedroom that could take the wardrobe are taken by other pieces\.|The wardrobe needs [\d.]+ m of wall/,
+      /No free wall left in (Main|Master) bedroom for these: .+ take the walls\./,
     );
     await shot(page, 'b2-left-out');
     if (process.env.SHOTS) {

@@ -1021,6 +1021,19 @@ async function runOption(
         times: [],
       };
   const spentBefore = ck.spent;
+  /** Keep fixing (B2): a fix-only run the person asked for on a version already shown. */
+  const keeping = !!ck.plan.fixOnly?.length;
+  /** Problems Keep fixing had fixed on this option before this run (its log line counts on). */
+  const keptOf = (spaces: ProposalOption['spaces']) =>
+    Object.values(spaces).reduce(
+      (t, s) =>
+        t +
+        (s.rounds ?? [])
+          .filter((x) => x.by === 'keep' && x.outcome === 'fixed')
+          .reduce((a, x) => a + Math.max(0, x.before - x.after), 0),
+      0,
+    );
+  const keptBefore = keptOf(p.options.find((o) => o.letter === letter)?.spaces ?? {});
   // Carried on: the steps it finished before, shown done above the ones it goes on with.
   const option0 = p.options.find((o) => o.letter === letter);
   const before: StepState[] = [];
@@ -1140,7 +1153,9 @@ async function runOption(
     const lk = runnerSteps.find((s) => s.kind === 'look');
     if (ck.look === 'left' && lk && ['done', 'failed', 'skipped'].includes(lk.status))
       ck.look = 'done';
-    ck.fixesLeft = fixesLeft;
+    // Only ever down within a run (a save's count may be older than a round's reservation, which
+    // already took its fix-up: `onStep`).
+    ck.fixesLeft = Math.min(ck.fixesLeft, fixesLeft);
     ck.fixing = structuredClone(fixing);
     ck.spent = spentBefore + spentRun();
     ck.at = nowIso();
@@ -1217,6 +1232,8 @@ async function runOption(
     declined: declinedPieces(),
     fixesLeft: ck.fixesLeft,
     fixing: ck.fixing,
+    // Keep fixing's rounds are said apart on the card (asked and paid for after it was shown).
+    ...(keeping ? { roundsBy: 'keep' as const } : {}),
     ...(sp.expected ? { expected: sp.expected } : {}),
     onUpdate: (st) => {
       runnerSteps = st.steps;
@@ -1236,10 +1253,13 @@ async function runOption(
       ck.spent = spentBefore + spentHere;
       void writeRun();
     },
-    onStep: (key, kind, phase) => {
+    onStep: (key, kind, phase, info) => {
       // The look's answer is back (or nothing was sent): paid for, so never asked again, even
       // if the page goes during its round.
       if (kind === 'look' && phase === 'end' && ck.look === 'left') ck.look = 'done';
+      // A fix round's fix-up is gone in the same write as its reservation (tech lead S2): a page
+      // that dies between the two never carries on with it still left.
+      if (info) ck.fixesLeft = Math.min(ck.fixesLeft, info.fixesLeft);
       // A step on its way, at its most: counted as spent if the page goes before it is back.
       ck.inflight = ck.inflight.filter((x) => x.step !== key);
       if (phase === 'start') ck.inflight = [...ck.inflight, { step: key, high: highOf(key, kind) }];
@@ -1291,6 +1311,10 @@ async function runOption(
             ck.paused = null;
             if (go) screen.hold();
             if (go && by === 'tab') pastTab = true;
+            // The new figure (tech lead N3): what is spent, the steps not done at their high (a
+            // room in its fix rounds still counts at its room step's high, which is generous),
+            // and the fix-ups left at the dearest fix request; a fix round already on its way
+            // isn't added again (its fix-up is no longer left, and what it spends is metered).
             if (go && by === 'approved') cap = more === null ? null : spentRun() + more;
             resolve(go);
           },
@@ -1389,7 +1413,25 @@ async function runOption(
     }
     // A house rule the second look suggests: offered in the log as a reply's is (free).
     for (const o of offers) await act(o);
-    if (status !== 'failed') await act({ type: 'scopeNext', at: nowIso(), id: newId('turn') });
+    if (keeping && status !== 'failed') {
+      // Keep fixing is the person's own action, said in the log as an accept is (UX B2).
+      const more = keptOf(design.spaces) - keptBefore;
+      const spentNow = state.usage.reduce((t, u) => t + (u.usd ?? 0), 0);
+      const title = optionTitle(p.n, letter, p.options.length);
+      await act({
+        type: 'event',
+        id: newId('turn'),
+        at: nowIso(),
+        event: {
+          type: 'note',
+          text: `You kept fixing ${title}: ${more ? `the app fixed ${more} more problem${more === 1 ? '' : 's'}` : 'nothing more was fixed'}${state.usage.length ? `, for ${usd(spentNow)}` : ''}.`,
+        },
+      });
+    }
+    // Where next? only after a new design (Keep fixing goes on with the card on the table).
+    if (status !== 'failed' && !keeping) {
+      await act({ type: 'scopeNext', at: nowIso(), id: newId('turn') });
+    }
   }
   hold.release();
   // Nothing designed: no empty version stays on the plan (N3).
@@ -1407,7 +1449,9 @@ async function runOption(
     const cost = state.usage.length ? usd(state.usage.reduce((t, u) => t + (u.usd ?? 0), 0)) : null;
     if (status === 'checked') {
       // Once its checks are worked out (the worker has it), never holding the run's end up.
-      void readyText(p.id, letter, title, cost).then((t) => {
+      void (
+        keeping ? keptText(p.id, letter, title, cost) : readyText(p.id, letter, title, cost)
+      ).then((t) => {
         if (doc().id === projectId) say(t);
       });
     } else {
@@ -1421,6 +1465,29 @@ async function runOption(
     if (status !== 'failed' && following) cardHeadIntoView(`${p.id}:${letter}`);
   }
   endRun();
+}
+
+/** Keep fixing's end in the live region: "Kept fixing V1: passes all checks now. Cost US$0.04 more." */
+async function keptText(
+  proposalId: string,
+  letter: string,
+  title: string,
+  cost: string | null,
+): Promise<string> {
+  const p = useTalk.getState().proposals.find((x) => x.id === proposalId);
+  const o = p?.options.find((x) => x.letter === letter);
+  const tail = cost ? ` Cost ${cost} more.` : '';
+  if (!p || !o) return `Kept fixing ${title}.${tail}`;
+  try {
+    const got = await cardReportNow(doc(), optionCard(p, o, designLevelId()));
+    const n = got?.report.failures.length ?? null;
+    if (n === null) return `Kept fixing ${title}.${tail}`;
+    return n
+      ? `Kept fixing ${title}: ${n} still ${n === 1 ? 'doesn’t' : 'don’t'} pass.${tail}`
+      : `Kept fixing ${title}: passes all checks now.${tail}`;
+  } catch {
+    return `Kept fixing ${title}.${tail}`;
+  }
 }
 
 /** The run's end in the live region, from the card's run report (its one list). */

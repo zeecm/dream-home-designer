@@ -79,6 +79,13 @@ export interface ReportLeftOut {
   role: Role;
   /** The failure it causes (its F id), when it causes a counted one. */
   causes: string | null;
+  /** Another piece of the same kind stands in its space (said "a second built-in wardrobe"). */
+  another?: boolean;
+  /**
+   * No wall long enough was free (with no numbers to say): the version's pieces that take its
+   * space's walls, as said ("the queen bed, the built-in wardrobe and the desk").
+   */
+  takers?: string | null;
 }
 
 export interface ReportRoom {
@@ -345,6 +352,33 @@ export function runReport(
 
   // Left out: the answer's pieces, each with its catalogue id from the stored answer.
   const leftOut: ReportLeftOut[] = [];
+  const dropped = new Set(r.dropped.flatMap((n) => (n.ref ? [`${n.space}|${n.ref}`] : [])));
+  /** The kinds the version placed in a space (its stored answer's pieces that stand). */
+  const placedIn = (s: (typeof r.spaces)[number]) =>
+    Object.values(r.level.items).filter((it) => {
+      const id = roomIdAt(r.level, { x: it.position.x, y: it.position.z });
+      return !!id && s.rooms.includes(id);
+    });
+  /** The pieces of the answer standing against a space's walls, as said (at most three). */
+  const takersOf = (s: (typeof r.spaces)[number] | undefined) => {
+    const stored = s?.storedKey ? input.spaces[s.storedKey]?.design : undefined;
+    if (!s || !stored) return null;
+    const names = [
+      ...new Set(
+        stored.items
+          .filter(
+            (a) =>
+              !dropped.has(`${s.key}|${a.ref}`) &&
+              (a.against === 'wall' ||
+                a.against === 'window-wall' ||
+                a.against === 'not-door-wall' ||
+                !!a.wall),
+          )
+          .map((a) => `the ${kindName(a.assetId)}`),
+      ),
+    ].slice(0, 3);
+    return names.length ? andList(names) : null;
+  };
   for (const n of r.dropped) {
     if (!n.ref) continue;
     if (opts.spaces && (!n.space || !opts.spaces.includes(n.space))) continue;
@@ -356,6 +390,13 @@ export function runReport(
     const room = s?.name ?? null;
     const roomRef = s ? (short.get(s.main) ?? s.name) : 'the room';
     const name = kindName(assetId);
+    // A piece that made way for the app's (its reason says so on the answer): said as that.
+    const madeWay =
+      item && /^Made way for the .+ the app placed\.$/.test(item.why) ? item.why : null;
+    // No wall was too short: the walls long enough were taken by the version's other pieces.
+    const bare =
+      n.code === 'no-wall' &&
+      !(n.need !== undefined && n.longest !== undefined && n.longest + 0.005 < n.need);
     leftOut.push({
       id: `L${leftOut.length + 1}`,
       ref: n.ref,
@@ -365,10 +406,12 @@ export function runReport(
       text: n.text,
       code: n.code ?? null,
       hint: hintFor(n, n.ref, assetId, roomRef),
-      cause: causeFor(n, name, room ?? 'the room'),
+      cause: madeWay ?? causeFor(n, name, room ?? 'the room'),
       says: `${kind ? `The ${name}` : 'A piece not in the catalogue'} in ${room ?? 'the room'} was left out`,
       role: roleOf(kind),
       causes: null,
+      another: !!assetId && !!s && placedIn(s).some((it) => it.assetId === assetId),
+      ...(bare && !madeWay ? { takers: takersOf(s) } : {}),
     });
   }
 
@@ -531,6 +574,9 @@ export interface FixSummary {
   looked: number;
   /** A round was on its way when the person stopped the run. */
   stopped: boolean;
+  /** Rounds Keep fixing sent (asked and paid for after the version was shown), and what they fixed. */
+  keepSent: number;
+  kept: number;
 }
 
 export function fixSummary(rooms: readonly ReportRoom[]): FixSummary {
@@ -547,6 +593,8 @@ export function fixSummary(rooms: readonly ReportRoom[]): FixSummary {
     usedUp: false,
     looked: 0,
     stopped: false,
+    keepSent: 0,
+    kept: 0,
   };
   for (const room of rooms) {
     if (!room.rounds.length) {
@@ -561,6 +609,12 @@ export function fixSummary(rooms: readonly ReportRoom[]): FixSummary {
     for (const x of room.rounds) {
       if (x.outcome === 'no-fixups') {
         f.usedUp = true;
+        continue;
+      }
+      if (x.by === 'keep') {
+        // Asked for after the version was shown: said apart, never as fixed "before showing you".
+        f.keepSent++;
+        if (x.outcome === 'fixed') f.kept += Math.max(0, x.before - x.after);
         continue;
       }
       if (x.by === 'look') f.looked++;
@@ -581,8 +635,24 @@ export function fixSummary(rooms: readonly ReportRoom[]): FixSummary {
   return f;
 }
 
-/** The fix rounds' sentence: what was sent back, and how it came out (null: none were). */
+/**
+ * The fix rounds' sentence, and what Keep fixing did after the version was shown: "Checked and
+ * fixed 3 problems before showing you, and 1 more when you asked to keep fixing." (null: none.)
+ */
 function fixSentence(f: FixSummary): string | null {
+  const before = fixBefore(f);
+  if (!f.keepSent) return before;
+  if (before && f.fixed > 0 && f.kept > 0) {
+    return `${before.replace(/\.$/, '')}, and ${f.kept} more when you asked to keep fixing.`;
+  }
+  const keep = f.kept
+    ? `Fixed ${plural(f.kept, 'problem')} when you asked to keep fixing.`
+    : 'Nothing more was fixed when you asked to keep fixing.';
+  return before ? `${before} ${keep}` : keep;
+}
+
+/** The rounds' sentence before the version was shown (null: none were sent). */
+function fixBefore(f: FixSummary): string | null {
   if (f.fixed > 0) return `Checked and fixed ${plural(f.fixed, 'problem')} before showing you.`;
   if (!f.sent && !f.looked) return null;
   const many = f.rooms > 1;
@@ -631,12 +701,14 @@ export function leadParts(
   const used = f.sent + f.looked;
   if (failing > 0 && f.usedUp) {
     parts.push(
-      used
-        ? `This design used the ${plural(used, 'fix-up')} it was priced for.`
-        : 'This design had no fix-ups left to send it back.',
+      f.keepSent
+        ? `Keep fixing used the ${plural(f.keepSent, 'fix-up')} it was priced for.`
+        : used
+          ? `This design used the ${plural(used, 'fix-up')} it was priced for.`
+          : 'This design had no fix-ups left to send it back.',
     );
   }
-  const still = used > 0 || f.usedUp ? ' still' : '';
+  const still = used > 0 || f.keepSent > 0 || f.usedUp ? ' still' : '';
   return {
     fix: parts.length ? parts.join(' ') : null,
     count: failing > 0 ? `${failing}${still} ${failing === 1 ? 'doesn’t' : 'don’t'} pass:` : null,
@@ -667,8 +739,12 @@ export function roundLines(rooms: readonly ReportRoom[]): string[] {
           ? 'not sent back after the second look: the run’s fix-ups were used up'
           : 'not sent again: the run’s fix-ups were used up';
       }
-      // The second look's round is its own, never counted as one of the room's.
-      const name = x.by === 'look' ? 'the second look’s round' : `fix round ${++k}`;
+      // The second look's round is its own, never counted as one of the room's; Keep fixing's
+      // rounds go on from the room's, marked.
+      const name =
+        x.by === 'look'
+          ? 'the second look’s round'
+          : `fix round ${++k}${x.by === 'keep' ? ' (Keep fixing)' : ''}`;
       switch (x.outcome) {
         case 'fixed':
           return `${name}: ${x.before} → ${plural(x.after, 'problem')}`;
@@ -686,7 +762,10 @@ export function roundLines(rooms: readonly ReportRoom[]): string[] {
           return `${name}: no readable answer, not used`;
       }
     });
-    return [`${room.name} · ${parts.join(' · ')}`];
+    // Several rounds: one a line, each with its room, so a long run reads down, not across.
+    return parts.length > 2
+      ? parts.map((p) => `${room.name} · ${p}`)
+      : [`${room.name} · ${parts.join(' · ')}`];
   });
 }
 
@@ -710,21 +789,44 @@ const NO_FIT = new Set<DropCode>(['no-wall', 'no-place', 'outside']);
  * out is "You and Partner have no bed …"). Null when none was.
  */
 export function leftOutWords(rep: RunReport): { line: string; reasons: string[] } | null {
-  const own = rep.leftOut.filter((l) => !l.ref.startsWith('app:') && !l.causes);
+  // Bedside tables first (losing both for a couple matters), then as the answer had them.
+  const own = rep.leftOut
+    .filter((l) => !l.ref.startsWith('app:') && !l.causes)
+    .sort((a, b) => Number(b.role === 'bedside') - Number(a.role === 'bedside'));
   if (!own.length) return null;
-  const names = new Map<string, number>();
+  const names = new Map<string, { name: string; another: boolean; k: number }>();
   for (const l of own) {
-    const n = kindName(l.assetId);
-    names.set(n, (names.get(n) ?? 0) + 1);
+    const name = kindName(l.assetId);
+    const key = `${name}|${!!l.another}`;
+    const g = names.get(key) ?? { name, another: !!l.another, k: 0 };
+    g.k++;
+    names.set(key, g);
   }
-  const list = [...names].map(([n, k]) => (k > 1 ? `${k} ${pluralNoun(n)}` : n)).join(', ');
+  // One of a kind the version has already is "a second built-in wardrobe", never as if none.
+  const list = [...names.values()]
+    .map((g) =>
+      g.another
+        ? g.k > 1
+          ? `${g.k} more ${pluralNoun(g.name)}`
+          : `a second ${g.name}`
+        : g.k > 1
+          ? `${g.k} ${pluralNoun(g.name)}`
+          : g.name,
+    )
+    .join(', ');
   const fit = own.every((l) => !!l.code && NO_FIT.has(l.code));
-  return {
-    line: `${fit ? 'Left out, didn’t fit' : 'Left out'}: ${list}.`,
-    // Each in the person's words, the piece and its room named: the measured cause, else that
-    // it was left out (two wardrobes for the same reason: said once).
-    reasons: [...new Set(own.map((l) => (l.cause ?? `${l.says}.`).replace(/\.?$/, '.')))],
-  };
+  // The pieces no free wall was left for, one sentence a room ("No free wall left in Main bedroom
+  // for these: the queen bed and the built-in wardrobe take the walls."); the rest in the person's
+  // words, the measured cause else that it was left out, each said once.
+  const reasons: string[] = [];
+  for (const l of own) {
+    const line =
+      l.takers !== undefined
+        ? `No free wall left in ${l.room ?? 'the room'} for ${own.filter((x) => x.takers !== undefined && x.room === l.room).length > 1 ? 'these' : 'it'}${l.takers ? `: ${l.takers} take the walls` : ''}.`
+        : (l.cause ?? `${l.says}.`).replace(/\.?$/, '.');
+    if (!reasons.includes(line)) reasons.push(line);
+  }
+  return { line: `${fit ? 'Left out, didn’t fit' : 'Left out'}: ${list}.`, reasons };
 }
 
 /** The announcement at a run's end (one, through the polite region), from the one list. */

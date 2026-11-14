@@ -386,10 +386,10 @@ export function estimateRun(
             }
           : { input, cachedInput: 0, cacheWrite: 0, output: out.typical };
       const high = usdOf({ input, cachedInput: 0, cacheWrite: 0, output: out.max }, price);
-      // A fix round sends the prompt again with the answer and the failures (about a typical
-      // answer's length more), and may write as much as the first.
+      // A fix round sends the prompt again with the answer it changes (at most a whole answer's
+      // length: reserved at its most, literally) and the failures, and may write as much again.
       const fixOne = usdOf(
-        { input: input + out.typical + FIX_EXTRA, cachedInput: 0, cacheWrite: 0, output: out.max },
+        { input: input + out.max + FIX_EXTRA, cachedInput: 0, cacheWrite: 0, output: out.max },
         price,
       );
       if (p.kind === 'room') fixOnes.push(fixOne);
@@ -431,7 +431,7 @@ export function estimateRun(
         ? Math.max(...fixOnes)
         : usdOf(
             {
-              input: bare + out.typical + FIX_EXTRA,
+              input: bare + out.max + FIX_EXTRA,
               cachedInput: 0,
               cacheWrite: 0,
               output: out.max,

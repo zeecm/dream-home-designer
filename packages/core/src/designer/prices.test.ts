@@ -87,7 +87,7 @@ describe('estimateRun (criterion 21)', () => {
       const max = i === 0 ? 24_000 : 16_000;
       high += (input * 4 + max * 20) / 1e6;
       // A room step's fix round: the prompt, the failures and the pieces left out.
-      if (i > 0) fixOnes.push(((input + out + 2100) * 4 + max * 20) / 1e6);
+      if (i > 0) fixOnes.push(((input + max + 2100) * 4 + max * 20) / 1e6);
       if (i <= 0) typical += (input * 4 + out * 20) / 1e6;
       else if (i === 1) typical += ((input - stable) * 4 + stable * 5 + out * 20) / 1e6;
       else typical += ((input - stable) * 4 + stable * 0.2 + out * 20) / 1e6;

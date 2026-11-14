@@ -951,6 +951,7 @@ export const ProposalCard = memo(function ProposalCard({
   const keepFixingButton =
     !running && fixRooms.length > 0 && rep.failures.length > 0 && card.proposal && card.option ? (
       <KeepFixing
+        cardKey={card.key}
         proposal={card.proposal}
         letter={card.option.letter}
         rooms={fixRooms.map((k) => card.option?.spaces[k]?.name ?? 'a room')}

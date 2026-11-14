@@ -51,16 +51,16 @@ export function CheckLead({
 }) {
   const failing = report.failures.length;
   const { fix, count } = leadParts(report.rooms, failing);
-  // The designer's own pieces the app left out (they didn't fit): said in one line, the reason a
-  // tap away, so a card whose checks pass never reads as all done when they were dropped.
+  // The designer's own pieces the app left out (they didn't fit): said in one line with the app's
+  // neutral mark, the reason a tap away. A piece whose loss fails a check is said with that
+  // failure instead, so the line never warns, and the headline's tick follows the checks (UX B2).
   const out = leftOutWords(report);
   // A tick only beside a headline that came out well: never beside "Sent back… no better" (or
-  // cut off, refused…), though the plan passes now (the free fix placed the bed: QA), nor when
-  // the designer's pieces were left out.
+  // cut off, refused…), though the plan passes now (the free fix placed the bed: QA).
   const f = fixSummary(report.rooms);
   const badly =
     f.noBetter || f.cutOff || f.failed || f.refused || f.error || f.unknown || f.stopped;
-  const passMark = !failing && !out && (f.fixed > 0 || !badly);
+  const passMark = !failing && (f.fixed > 0 || f.kept > 0 || !badly);
   const rounds = roundLines(report.rooms);
   if (!fix && !count && !did.length && !missed.length && !action && !out) return null;
   const id = `lead-${cardKey}`;
@@ -76,8 +76,8 @@ export function CheckLead({
       data-app-line="left-out"
       {...(headless ? { id } : {})}
     >
-      <span className="talk-app-icon talk-warn-mark">
-        <Mark kind="warn" />
+      <span className="talk-app-icon">
+        <Mark kind="dot" />
       </span>
       <span className="talk-app-text">
         <details className="talk-already talk-check-left">

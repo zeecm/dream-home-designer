@@ -8,7 +8,7 @@ import sampleLiving from './benchmark/answers/sample-living.json';
 import sampleMain from './benchmark/answers/sample-main-bedroom.json';
 import { ONGS } from './benchmark/benchmark';
 import { APP_REF, freeEssentials, isAppRef, isDeclined, orphanLines } from './free';
-import { runReport } from './report';
+import { leftOutWords, runReport } from './report';
 import { designResult } from './result';
 import { Rule } from './rules/schema';
 import { type DesignBrief, type DesignInput, type SpaceDesign, parseSpaceDesign } from './schema';
@@ -95,13 +95,23 @@ describe('free fixes: beds (criterion 11)', () => {
     expect(bed && after.level.items[bed[0]]?.assetId).toBe('bed-queen');
     // The answer carries it as data: the version rebuilds from what is stored.
     const items = out.spaces[MAIN]?.design?.items ?? [];
-    // One of the answer's bedside tables gave way for it: said on the bed's own row.
+    // One of the answer's bedside tables gave way for it: said once, by that piece (UX B2), in
+    // the card's left-out line; the bed's own row says only why it is there.
     expect(items.filter((i) => isAppRef(i.ref)).map((i) => i.why)).toEqual([
-      'A bed for Rachel and Daniel: nobody had one. One bedside table no longer fits and is left out.',
+      'A bed for Rachel and Daniel: nobody had one.',
     ]);
+    expect(items.find((i) => i.ref === 'side2')?.why).toBe(
+      'Made way for the queen bed the app placed.',
+    );
     expect(out.gaveWay).toEqual([{ space: MAIN, ref: 'side2', assetId: 'bedside' }]);
     // The run report names the piece by its app ref; no failure is left for it.
     const rep = runReport(after, { ...d, spaces: out.spaces });
+    const side = rep.leftOut.find((l) => l.ref === 'side2');
+    expect(side?.cause).toBe('Made way for the queen bed the app placed.');
+    expect(leftOutWords(rep)).toEqual({
+      line: 'Left out, didn’t fit: a second bedside table.',
+      reasons: ['Made way for the queen bed the app placed.'],
+    });
     expect(rep.failures.filter((f) => f.key.startsWith('P1|bed|'))).toEqual([]);
   });
 
@@ -218,7 +228,7 @@ describe('free fixes: orphans (criterion 12, B2)', () => {
     // The living room's chairs are at its table: never orphans.
     expect(refsOf(out, LIVING)).toEqual(expect.arrayContaining(['chair1', 'chair4']));
     expect(orphanLines(out.removed ?? [], () => 'Main bedroom')).toEqual([
-      'Took out a dining chair the answer added in Main bedroom, with no table to go with it.',
+      'Took out a dining chair the designer added in Main bedroom, with no table to go with it.',
     ]);
   });
 
@@ -248,7 +258,7 @@ describe('free fixes: orphans (criterion 12, B2)', () => {
     expect(out.added).toEqual([]);
     expect((out.removed ?? []).map((x) => x.ref).sort()).toEqual(['side1', 'side2']);
     expect(orphanLines(out.removed ?? [], () => 'Main bedroom')).toEqual([
-      'Took out 2 bedside tables the answer added in Main bedroom, with no bed to go with them.',
+      'Took out 2 bedside tables the designer added in Main bedroom, with no bed to go with them.',
     ]);
     // A card's dry run never asks for it: nothing taken out.
     const dry = freeEssentials(lvl, lvl, d, {}, { declined });

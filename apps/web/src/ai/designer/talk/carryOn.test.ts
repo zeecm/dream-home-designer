@@ -468,6 +468,51 @@ describe('the fix-up pool, priced as it is spent (designer listens B2, criteria 
     expect(settled?.sp.plan.rooms).toEqual([main]);
     expect(settled?.sp.plan.fixOnly).toBeUndefined();
   });
+
+  it('Keep fixing carried on: a room still queued (no place in the pool yet) goes on too (S3)', () => {
+    const made = priced();
+    if (!made) throw new Error('not priced');
+    const answered = (k: string) => ({
+      name: k,
+      status: 'done' as const,
+      design: answerFor(k === living ? 'furnish "Living' : 'furnish "Main bedroom"')
+        ?.answer as never,
+      rounds: [{ outcome: 'no-fixups' as const, before: 2, after: 2 }],
+    });
+    const option = optionOf({
+      ...made.sp.draft,
+      spaces: { [living]: answered(living), [main]: answered(main) },
+    });
+    // Keep fixing for both rooms; the page went while the first was in its rounds and the
+    // second hadn't started.
+    const run: RunCheckpoint = {
+      id: 'run_kf',
+      startedAt: new Date().toISOString(),
+      at: new Date().toISOString(),
+      provider: 'anthropic',
+      model: 'claude-opus-5-5',
+      plan: { layout: null, rooms: [living, main], fixOnly: [living, main] },
+      layout: 'none',
+      rooms: [living, main],
+      fixesLeft: 2,
+      fixing: { [living]: { left: 0, settled: false } },
+      approved: null,
+      spent: 0,
+      inflight: [],
+      stopped: false,
+      paused: null,
+      times: [],
+    };
+    const again = priced({ resume: { option, run, scope } });
+    expect(again?.sp.plan).toMatchObject({ rooms: [living, main], fixOnly: [living, main] });
+    expect(again?.est.usd?.high).toBe(0);
+    expect(again?.est.fixes).toBe(2);
+    // One settled is left out; the queued one still goes.
+    const one = priced({
+      resume: { option, run: { ...run, fixing: { [living]: { left: 0, settled: true } } }, scope },
+    });
+    expect(one?.sp.plan).toMatchObject({ rooms: [main], fixOnly: [main] });
+  });
 });
 
 /** An option holding a run's version, as the proposal keeps it. */

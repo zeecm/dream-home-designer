@@ -224,7 +224,18 @@ export interface RunOptions {
    * room's answer, a fix round (by the row's key). Not ended when the run stops or is
    * interrupted mid-step.
    */
-  onStep?: (key: string, kind: StepKind, phase: 'start' | 'end') => void;
+  onStep?: (
+    key: string,
+    kind: StepKind,
+    phase: 'start' | 'end',
+    /** A fix round's start: the run's fix-ups left once it goes (its own taken). */
+    info?: { fixesLeft: number },
+  ) => void;
+  /**
+   * Keep fixing (B2): every round this run sends is marked `by: 'keep'` (asked and paid for after
+   * the version was shown), so the card says it apart.
+   */
+  roundsBy?: 'keep';
   onUsage?: (u: Usage) => void;
   /** Where a version is placed and checked (the designer's worker); else here, at once. */
   results?: (
@@ -435,7 +446,16 @@ export async function runDesign(
    */
   const mayStart = async (next?: { key: string; kind: StepKind }): Promise<boolean> => {
     const reserve = () => {
-      if (next) o.onStep?.(next.key, next.kind, 'start');
+      // A fix round goes with its fix-up already taken (held until now): the fix-ups left are
+      // said with its reservation, so both are written at once (tech lead S2).
+      if (next) {
+        o.onStep?.(
+          next.key,
+          next.kind,
+          'start',
+          next.kind === 'fix' ? { fixesLeft: fixesLeft + held - 1 } : undefined,
+        );
+      }
       return true;
     };
     for (;;) {
@@ -635,8 +655,8 @@ export async function runDesign(
         refs.has(i.ref) && isAppRef(i.ref)
           ? {
               ...i,
-              // (What gave way for it, when something did, is still said.)
-              why: `Put back by the app: the fix round’s answer left out the ${freeName(i.assetId)}.${/ One .+ left out\.$/.exec(i.why)?.[0] ?? ''}`,
+              // (What gave way for it, when something did, says so on its own piece.)
+              why: `Put back by the app: the fix round’s answer left out the ${freeName(i.assetId)}.`,
             }
           : i,
       ),
@@ -1062,6 +1082,20 @@ export async function runDesign(
       rounds: FixRound[];
     }
     const open = new Map<string, Fixing>();
+    /** Keep fixing's rounds are marked so (asked and paid for after the version was shown). */
+    const by = o.roundsBy === 'keep' ? { by: 'keep' as const } : {};
+    /**
+     * The first pass in room order (tech lead N1): a room takes a first-pass fix-up only from what
+     * the rooms before it in order haven't claimed yet (their first-pass fix-ups left, until their
+     * pass is over); what it can't take now it may get once every room has had its pass.
+     */
+    const order = spaces.map((s) => s.key);
+    const passed = new Set<string>();
+    const claimedBefore = (key: string) =>
+      order
+        .slice(0, Math.max(0, order.indexOf(key)))
+        .filter((k) => !passed.has(k) && !fixing[k]?.settled)
+        .reduce((t, k) => t + (fixing[k]?.left ?? quota), 0);
     // The app's lines about the version: the layout's vetting, then the orphans each room's
     // answer in use had taken out.
     const vetLines = [...(design.appLines ?? [])];
@@ -1090,9 +1124,50 @@ export async function runDesign(
     const merge = (s: RunSpace, a: SpaceDesign) =>
       mergeAnswer(plan.previous?.[s.key], a, plan.keep?.[s.key] ?? [], o.result);
     /**
+     * Judges a fix round's answer (merged, as it came): with the free pass, kept only if it makes
+     * progress (strictly fewer hard failures, none new; the same answer again has stalled). True
+     * when it did and the room still fails. A run carried on judges a pending one from here.
+     */
+    const judge = async (f: Fixing, merged: SpaceDesign): Promise<boolean> => {
+      const { s, st } = f;
+      const rf = placeOf(s.key);
+      const left = f.now.fixable;
+      const settle = (round: FixRound) => {
+        f.rounds.push(round);
+        rf.settled = true;
+        delete rf.pending;
+        st.status = 'done';
+        write(f);
+        void save();
+        return false;
+      };
+      const fixedAnswer = await withFree(s, merged, f.current);
+      // The same answer again: stalled, and not placed again to find out.
+      if (sameAnswer(fixedAnswer, f.current)) {
+        return settle({ outcome: 'no-better', before: left.length, after: left.length, ...by });
+      }
+      const next = await failing(s, fixedAnswer);
+      // Progress: strictly fewer hard failures, and none that wasn't there before.
+      const progress =
+        next.fixable.length < left.length && [...next.sigs].every((x) => f.now.sigs.has(x));
+      const out = { before: left.length, after: next.fixable.length, ...by };
+      if (!progress) return settle({ outcome: 'no-better', ...out });
+      f.rounds.push({ outcome: 'fixed', ...out });
+      f.fixed += left.length - next.fixable.length;
+      f.current = fixedAnswer;
+      f.now = next;
+      delete rf.pending;
+      if (!next.fixable.length) rf.settled = true;
+      st.status = 'done';
+      write(f);
+      void save();
+      return !rf.settled;
+    };
+    /**
      * One fix round for a room, from the pool: true when it made progress and still fails (it
      * may have another). The fix-up is taken before any wait and given back if the step may not
-     * go (held meanwhile, so saved as still left); once taken it is saved as gone.
+     * go (held meanwhile, so saved as still left); once taken it is gone, written with the
+     * round's reservation (`onStep`'s `fixesLeft`) and saved.
      */
     const fixOnce = async (f: Fixing): Promise<boolean> => {
       const { s, st } = f;
@@ -1103,7 +1178,7 @@ export async function runDesign(
         return false;
       }
       if (fixesLeft <= 0) {
-        f.rounds.push({ outcome: 'no-fixups', before: left.length, after: left.length });
+        f.rounds.push({ outcome: 'no-fixups', before: left.length, after: left.length, ...by });
         rf.settled = true;
         write(f);
         void save();
@@ -1121,7 +1196,9 @@ export async function runDesign(
       }
       if (rf.left > 0) rf.left--;
       f.fixes++;
-      // The fix-up is gone once its request goes: written now, never counted twice on carrying on.
+      // The fix-up is gone once its request goes: written now (the round counted on the room),
+      // never counted twice on carrying on.
+      write(f);
       void save();
       st.fixing = { round: f.fixes, problems: left.length };
       st.status = 'running';
@@ -1155,48 +1232,33 @@ export async function runDesign(
       o.onStep?.(st.key, 'fix', 'end');
       if (!st.resent) o.onTimed?.('fix', Date.now() - tf);
       st.fixing = null;
-      const settle = (round: FixRound) => {
-        f.rounds.push(round);
+      if (!again) {
+        // The fix didn't come: the answer before it stands, checked as it is, and the card says
+        // why (cut off at the length limit, or no readable answer).
+        st.error = null;
+        f.rounds.push({
+          outcome: st.failed ? NO_ANSWER[st.failed] : 'error',
+          before: left.length,
+          after: left.length,
+          ...by,
+        });
         rf.settled = true;
         st.status = 'done';
         write(f);
         void save();
         return false;
-      };
-      if (!again) {
-        // The fix didn't come: the answer before it stands, checked as it is, and the card says
-        // why (cut off at the length limit, or no readable answer).
-        st.error = null;
-        return settle({
-          outcome: st.failed ? NO_ANSWER[st.failed] : 'error',
-          before: left.length,
-          after: left.length,
-        });
       }
-      const fixedAnswer = await withFree(s, merge(s, again), f.current);
-      // The same answer again: stalled, and not placed again to find out.
-      if (sameAnswer(fixedAnswer, f.current)) {
-        return settle({ outcome: 'no-better', before: left.length, after: left.length });
-      }
-      const next = await failing(s, fixedAnswer);
-      // Progress: strictly fewer hard failures, and none that wasn't there before.
-      const progress =
-        next.fixable.length < left.length && [...next.sigs].every((x) => f.now.sigs.has(x));
-      const out = { before: left.length, after: next.fixable.length };
-      if (!progress) return settle({ outcome: 'no-better', ...out });
-      f.rounds.push({ outcome: 'fixed', ...out });
-      f.fixed += left.length - next.fixable.length;
-      f.current = fixedAnswer;
-      f.now = next;
-      if (!next.fixable.length) rf.settled = true;
-      write(f);
+      // Paid for: kept as it came (merged) before the free pass and the checks, so a page that
+      // goes while they run judges it on carrying on, never sending it again (tech lead S1).
+      const merged = merge(s, again);
+      rf.pending = merged;
       void save();
-      return !rf.settled;
+      return judge(f, merged);
     };
     /** A Stop in a room's fix round: its checked answer is kept, with that round said. */
     const stoppedIn = (f: Fixing) => {
       const n = f.st.fixing?.problems ?? 0;
-      write(f, { outcome: 'stopped', before: n, after: n });
+      write(f, { outcome: 'stopped', before: n, after: n, ...by });
       placeOf(f.s.key).settled = true;
     };
 
@@ -1234,11 +1296,14 @@ export async function runDesign(
           // A round "not sent: the fix-ups were used up" is what this run now answers.
           const rounds = [...(stored.rounds ?? [])];
           if (rounds.at(-1)?.outcome === 'no-fixups') rounds.pop();
+          // Its free pass again (it does nothing a second time): an answer saved as it came,
+          // before the page went, gets it now.
+          const current = await withFree(s, stored.design);
           f = {
             s,
             st,
-            current: stored.design,
-            now: await failing(s, stored.design),
+            current,
+            now: await failing(s, current),
             fixes: stored.fixes ?? 0,
             fixed: stored.fixed ?? 0,
             rounds,
@@ -1253,7 +1318,14 @@ export async function runDesign(
             design.spaces[s.key] = { name: s.name, status: 'failed', error: st.error ?? '' };
             return;
           }
-          const current = await withFree(s, merge(s, answer));
+          // Paid for: saved as it came (merged), done, with its place in the pool, before the
+          // free pass and the checks run (tech lead S1). A page that goes now carries it on with
+          // those, never with its room step again.
+          const merged = merge(s, answer);
+          design.spaces[s.key] = { name: s.name, status: 'done', design: merged };
+          placeOf(s.key);
+          void save();
+          const current = await withFree(s, merged);
           f = { s, st, current, now: await failing(s, current), fixes: 0, fixed: 0, rounds: [] };
         }
         open.set(s.key, f);
@@ -1263,8 +1335,16 @@ export async function runDesign(
         // them, never with its room step again.
         write(f);
         void save();
-        // Its first pass: what it fails goes back to the designer while each round makes progress.
-        while (rf.left > 0 && !rf.settled && (await fixOnce(f))) {}
+        // A fix round's answer that came back before the page went: judged now, not sent again.
+        if (rf.pending && !rf.settled && !(await judge(f, rf.pending))) rf.left = 0;
+        // Its first pass: what it fails goes back to the designer while each round makes
+        // progress, from what the rooms before it in order haven't claimed.
+        while (
+          rf.left > 0 &&
+          !rf.settled &&
+          fixesLeft - claimedBefore(s.key) > 0 &&
+          (await fixOnce(f))
+        ) {}
         say(`${s.name} done. ${usdText(spentSoFar())} so far.`);
       } catch (e) {
         if (e instanceof Stopped) {
@@ -1274,6 +1354,7 @@ export async function runDesign(
         }
         runError ??= e;
       } finally {
+        passed.add(s.key);
         onStart?.();
         update();
         void save();
