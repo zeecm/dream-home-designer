@@ -382,6 +382,27 @@ describe('the card’s lead and the app’s lines (criterion 8’s copy)', () =>
     expect(leadLine([room([], 0)], 0)).toBeNull();
   });
 
+  it('“left it out (N tries)” counts the room’s own answers, never the second look’s round', () => {
+    const answers = sampleAnswers(level);
+    const main = answers[SAMPLE_KEYS.main];
+    if (!main) throw new Error('sample answers');
+    main.items = main.items.filter((i) => !i.assetId.startsWith('bed-'));
+    const d = sampleDesign({ level, answers, brief: couple });
+    const r = designResult(level, level, d);
+    const entry = d.spaces[SAMPLE_KEYS.main];
+    if (!entry) throw new Error('no main bedroom');
+    const causeOf = (rounds: FixRound[]) =>
+      runReport(r, {
+        ...d,
+        spaces: { ...d.spaces, [SAMPLE_KEYS.main]: { ...entry, rounds } },
+      }).failures.find((f) => /no bed/.test(f.says))?.cause ?? null;
+    const own: FixRound = { outcome: 'no-better', before: 1, after: 1 };
+    const look: FixRound = { outcome: 'no-better', before: 1, after: 1, by: 'look' };
+    expect(causeOf([own])).toBe('The designer’s answers left it out (2 tries).');
+    expect(causeOf([own, look])).toBe('The designer’s answers left it out (2 tries).');
+    expect(causeOf([look])).toBeNull();
+  });
+
   it('How it was checked, room by room', () => {
     expect(
       roundLines([
@@ -391,6 +412,43 @@ describe('the card’s lead and the app’s lines (criterion 8’s copy)', () =>
         ]),
       ]),
     ).toEqual(['Main bedroom · fix round 1: 3 → 1 problem · fix round 2: no better, not used']);
+    // The second look's round is its own: named so, and never one of the room's tries.
+    expect(
+      roundLines([
+        room([
+          { outcome: 'no-better', before: 2, after: 2 },
+          { outcome: 'fixed', before: 1, after: 0, by: 'look' },
+        ]),
+      ]),
+    ).toEqual([
+      'Main bedroom · fix round 1: no better, not used · the second look’s round: 1 → 0 problems',
+    ]);
+    // A round you stopped: said so, and the first design stands.
+    expect(roundLines([room([{ outcome: 'stopped', before: 1, after: 1 }])])).toEqual([
+      'Main bedroom · fix round 1: stopped, not used',
+    ]);
+    expect(leadLine([room([{ outcome: 'stopped', before: 1, after: 1 }])], 1)).toBe(
+      'Sent back to be fixed once, but you stopped the run, so the first design is shown. 1 still doesn’t pass:',
+    );
+    expect(roundLines([room([{ outcome: 'no-fixups', before: 1, after: 1, by: 'look' }])])).toEqual(
+      ['Main bedroom · not sent back after the second look: the run’s fix-ups were used up'],
+    );
+    expect(leadLine([room([{ outcome: 'no-better', before: 1, after: 1, by: 'look' }])], 1)).toBe(
+      'Sent back to be fixed after the second look. The answer was no better, so the first design is shown. 1 still doesn’t pass:',
+    );
+    expect(
+      leadLine(
+        [
+          room([
+            { outcome: 'no-better', before: 1, after: 1 },
+            { outcome: 'no-better', before: 1, after: 1, by: 'look' },
+          ]),
+        ],
+        1,
+      ),
+    ).toBe(
+      'Sent back to be fixed once, and after the second look. The last answer was no better, so the earlier one is shown. 1 still doesn’t pass:',
+    );
   });
 
   it('the announcement and the line in place of an emptied reply, from the one list', () => {

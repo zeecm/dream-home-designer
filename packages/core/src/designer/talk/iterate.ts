@@ -177,6 +177,7 @@ export function broughtBack(
     note: null,
     waivers: from.waivers,
     version: null,
+    look: null,
   });
   return {
     projectId: from.projectId,

@@ -58,6 +58,7 @@ const proposal = (id: string, projectId = 'prj_a'): Proposal => ({
       accepted: [],
       waivers: [],
       version: null,
+      look: null,
       note: null,
     },
   ],

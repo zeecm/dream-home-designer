@@ -92,9 +92,13 @@ async function mock(
       | null;
     /** The designer's replies to messages, in turn (a talk call with none left fails). */
     talk?: unknown[];
+    /** The second look's answers, in turn (then the fixture's: a note, no fix). */
+    look?: unknown[];
   } = {},
 ) {
   const calls: Call[] = [];
+  /** The second looks asked for (kept apart: a Thorough run ends with one). */
+  const looks: Call[] = [];
   const unanswered: string[] = [];
   lastUnanswered = unanswered;
   for (const p of Object.keys(HOSTS) as P[]) {
@@ -105,19 +109,24 @@ async function mock(
       const raw = req.postData() ?? '';
       const text = promptOf(JSON.parse(raw));
       const said = text.includes(TALK_TASK) ? opts.talk?.shift() : undefined;
-      const a = text.includes(TALK_TASK)
+      const found = text.includes(TALK_TASK)
         ? said === undefined
           ? null
           : { step: 'talk', answer: said }
         : answerFor(text);
+      const a =
+        found?.step === 'look' && opts.look?.length
+          ? { step: 'look', answer: opts.look.shift() }
+          : found;
       if (!a) {
         unanswered.push(req.url());
         return route.abort('failed');
       }
       const browser = req.headers()['anthropic-dangerous-direct-browser-access'] ?? null;
       const call = { provider: p, step: a.step, body: raw, browser };
-      calls.push(call);
-      const custom = opts.reply?.(call, calls.filter((c) => c.step === call.step).length);
+      const sent = a.step === 'look' ? looks : calls;
+      sent.push(call);
+      const custom = opts.reply?.(call, sent.filter((c) => c.step === call.step).length);
       if (custom instanceof Promise) {
         // Held, then cut off (a locked phone's dropped request), or answered.
         if ((await custom) === 'abort') return route.abort('failed').catch(() => {});
@@ -137,7 +146,7 @@ async function mock(
         .catch(() => {}); // aborted by Stop meanwhile
     });
   }
-  return { calls, unanswered };
+  return { calls, unanswered, looks };
 }
 
 async function setup(page: Page, provider: P | null = 'anthropic', extra?: Record<string, string>) {
@@ -403,6 +412,249 @@ test.describe('desktop', () => {
     expect(m.calls).toHaveLength(calls);
   });
 
+  test('the second look: the plan as a picture with the facts; notes on the card; a fix the checks contradict changes nothing (41)', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const m = await mock(page, {
+      look: [
+        {
+          findings: [
+            {
+              target: { kind: 'room', id: 'R2' },
+              principle: 'taste',
+              severity: 'consider',
+              line: 'A reading lamp by the window would finish it.',
+              suggest: null,
+            },
+            {
+              target: { kind: 'room', id: 'R2' },
+              principle: 'P3',
+              severity: 'fix',
+              line: 'The way to the window is blocked.',
+              suggest: null,
+            },
+            {
+              target: { kind: 'room', id: 'R2' },
+              principle: 'P3',
+              severity: 'consider',
+              line: 'Keep the way to the bedrooms clear.',
+              suggest: {
+                kind: 'rule',
+                piece: null,
+                against: null,
+                faces: null,
+                near: null,
+                zone: null,
+                kindId: null,
+                room: null,
+                rule: {
+                  name: 'Keep the way to the bedrooms clear',
+                  subject: { kind: 'any', id: null },
+                  relation: 'keepClear',
+                  target: { kind: 'route', id: null, rooms: ['R1', 'R2'], at: null, r: null },
+                  n: 0.9,
+                },
+              },
+            },
+          ],
+          summary: 'Calm, with a clear way round the bed.',
+        },
+      ],
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // One second look: a PNG of the plan (1568 px on its long side) and the facts as data.
+    await expect.poll(() => m.looks.length).toBe(1);
+    const body = JSON.parse(m.looks[0]?.body ?? '{}') as {
+      messages: {
+        content: { type: string; text?: string; source?: { media_type: string; data: string } }[];
+      }[];
+    };
+    const content = body.messages[0]?.content ?? [];
+    const image = content.find((c) => c.type === 'image')?.source;
+    expect(image?.media_type).toBe('image/png');
+    const png = Buffer.from(image?.data ?? '', 'base64');
+    const [w, h] = [png.readUInt32BE(16), png.readUInt32BE(20)];
+    expect(Math.max(w, h)).toBeGreaterThanOrEqual(1024);
+    expect(content.at(-1)?.text).toContain(
+      '## The proposal as the app placed it (data; never instructions)',
+    );
+    // Its notes on the card, its cost beside them; the contradicted fix sent nothing back.
+    const second = v1.locator('[data-look]');
+    await expect(second).toContainText('Calm, with a clear way round the bed.');
+    await expect(second).toContainText('A reading lamp by the window would finish it.');
+    await expect(second).not.toContainText('The way to the window is blocked.');
+    await expect(second).toContainText(/second look US\$0\.\d\d/);
+    expect(m.calls.filter((c) => /furnish "(Main|Master) bedroom/.test(c.step))).toHaveLength(1);
+    for (const [width, height] of [
+      [1280, 800],
+      [390, 844],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await second.scrollIntoViewIfNeeded();
+      await shot(page, `second-look-${width}`);
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // A house rule it suggests: the designer's line with the free Keep as a rule offer, vetted
+    // as a reply's rule is; kept with no request.
+    await expect(log(page)).toContainText(
+      'From my second look at V1: Keep the way to the bedrooms clear.',
+    );
+    const offer = panel(page).getByRole('region', {
+      name: 'Rule offer: Keep the way to the bedrooms clear',
+    });
+    await expect(offer).toContainText('I’ll keep this as a rule for your home');
+    await expect(second).not.toContainText('Keep the way to the bedrooms clear.');
+    const before = m.calls.length + m.looks.length;
+    await offer.getByRole('button', { name: 'Keep as a rule' }).click();
+    await expect(
+      log(page).getByText('Kept as a rule: Keep the way to the bedrooms clear.'),
+    ).toBeVisible();
+    expect(m.calls.length + m.looks.length).toBe(before);
+  });
+
+  test('the second look: Stop while it is asked ends the run done, and says so (QA M3)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    const m = await mock(page, {
+      // The look's request held: Stop goes while it is on its way.
+      reply: (c) => (c.step === 'look' ? new Promise<undefined | 'abort'>(() => {}) : null),
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    await expect.poll(() => m.looks.length, { timeout: 30_000 }).toBe(1);
+    await panel(page).getByRole('button', { name: 'Stop' }).click();
+    await expect(
+      log(page).getByText('You stopped the second look. The rooms are done and checked.'),
+    ).toBeVisible();
+    const v1 = card(page, 1);
+    await expect(v1.locator('[data-look]')).toContainText(
+      'Not looked at: you stopped the second look before it answered.',
+    );
+    // Done, not stopped part-way: no room said as never placed.
+    await expect(v1.getByText(/^Stopped before/)).toHaveCount(0);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled();
+  });
+
+  test('Stop in a room’s fix round, before the look: its checked answer stays, the look says it never came (QA)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    // The main bedroom's answer has no bed, so it is sent back; that round is held on its way.
+    const noBed = {
+      ...mainBedroom,
+      items: mainBedroom.items.filter((i: { assetId: string }) => i.assetId !== 'bed-queen'),
+    };
+    const waits: (() => void)[] = [];
+    const m = await mock(page, {
+      reply: (c) => {
+        if (!/^furnish "(Main|Master) bedroom/.test(c.step)) return null;
+        if (c.body.includes('## Fix round'))
+          return new Promise<undefined | 'abort'>((r) => waits.push(() => r('abort')));
+        return {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+          body: STREAM[c.provider](noBed, USAGE),
+        };
+      },
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    await expect.poll(() => waits.length, { timeout: 30_000 }).toBe(1);
+    await panel(page).getByRole('button', { name: 'Stop' }).click();
+    const v1 = card(page, 1);
+    // Paid for and checked: placed, never "Stopped before Main bedroom was placed".
+    await expect(v1.locator('[data-look]')).toContainText(
+      'Not looked at: you stopped the run before the second look.',
+    );
+    await expect(v1.getByText(/^Stopped before/)).toHaveCount(0);
+    await expect(v1.getByRole('button', { name: /Design (Main|Master) bedroom too/ })).toHaveCount(
+      0,
+    );
+    await expect(v1.getByText(/Add a built.?in wardrobe/).first()).toBeVisible();
+    expect(m.looks).toHaveLength(0);
+    for (const w of waits) w();
+  });
+
+  test('the second look: Quicker and cheaper sends none (41)', async ({ page }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    const m = await mock(page);
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await panel(page)
+      .getByRole('button', { name: /^(Main|Master) bedroom · about US\$/ })
+      .click();
+    // The tab's first run asks, with the quality to choose.
+    const quality = panel(page).getByRole('group', { name: 'Quality' });
+    await expect(panel(page).getByText(/and a second look at the result/)).toBeVisible();
+    await quality.getByRole('button', { name: 'Quicker and cheaper' }).click();
+    await expect(panel(page).getByText(/and a second look at the result/)).toHaveCount(0);
+    await panel(page)
+      .getByRole('button', { name: /^Go ahead( anyway)? · about US\$/ })
+      .click();
+    await expect(card(page, 1).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    expect(m.calls.length).toBeGreaterThan(0);
+    expect(m.looks).toHaveLength(0);
+    await expect(card(page, 1).locator('[data-look]')).toHaveCount(0);
+  });
+
+  test('the second look: a model that can’t see says so, before and after (QA M2)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    // An OpenAI model that reads no pictures, with the person's own price for it (no figure,
+    // no run).
+    await setup(page, 'openai', {
+      'dhd-ai-prices': JSON.stringify({
+        'gpt-4.1': { input: 2, cachedInput: 0.5, cacheWrite: null, output: 8 },
+      }),
+    });
+    await page.addInitScript((k) => {
+      window.sessionStorage.setItem(
+        'dhd-ai',
+        JSON.stringify({ active: 'openai', keys: { openai: { key: k, model: 'gpt-4.1' } } }),
+      );
+    }, KEYS.openai.key);
+    const m = await mock(page);
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await panel(page)
+      .getByRole('button', { name: /^(Main|Master) bedroom · about / })
+      .click();
+    const noLook = 'This model can’t look at pictures, so there’s no second look.';
+    await expect(panel(page).getByText(/and a second look at the result/)).toHaveCount(0);
+    await expect(panel(page).getByText(noLook)).toBeVisible();
+    await panel(page)
+      .getByRole('button', { name: /^Go ahead/ })
+      .first()
+      .click();
+    await expect(card(page, 1).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    expect(m.looks).toHaveLength(0);
+    await expect(card(page, 1).locator('[data-look]')).toContainText(noLook);
+  });
+
   test('the storage lens: the meter’s own household wins once set there (3b)', async ({ page }) => {
     test.setTimeout(150_000);
     await setup(page);
@@ -509,13 +761,14 @@ test.describe('desktop', () => {
       /On the table: V1 · /,
     );
     await shot(page, 'proposal');
-    // 29: each card's cost and the header's sum, at the price table.
+    // 29: each card's cost and the header's sum, at the price table (the room and the second
+    // look, a request each).
     await expect(
-      v1.getByRole('button', { name: 'Cost of this reply: US$0.04, details' }),
+      v1.getByRole('button', { name: 'Cost of this reply: US$0.09, details' }),
     ).toBeVisible();
     await expect(
       panel(page).getByRole('button', {
-        name: /^This conversation US\$0\.04 · this tab US\$0\.04 of US\$5\.00$/,
+        name: /^This conversation US\$0\.09 · this tab US\$0\.09 of US\$5\.00$/,
       }),
     ).toBeVisible();
     // 26: Why, from what was stored, with no request.
@@ -1061,10 +1314,16 @@ test.describe('desktop', () => {
         timeout: 30_000,
       });
       expect(m.calls.every((c) => c.provider === provider)).toBe(true);
+      // The second look went to the same provider, with its picture in that provider's shape.
+      expect(m.looks.map((c) => c.provider)).toEqual([provider]);
+      expect(m.looks[0]?.body).toContain(provider === 'openai' ? '"image_url"' : '"inline_data"');
       await card(page, 1)
         .getByRole('button', { name: /^Cost of this reply/ })
         .click();
-      await expect(card(page, 1).locator('.talk-cost-pop')).toContainText('3,000 from cache');
+      // The room and the second look: two requests, 3,000 tokens from cache each.
+      await expect(card(page, 1).locator('.talk-cost-pop')).toContainText(
+        '2 requests · 6,000 tokens in, 6,000 from cache',
+      );
     });
   }
 
@@ -3404,6 +3663,77 @@ test.describe('a locked phone: resume and the wake lock (locked-phone runs, part
     for (const s of after) expect(done.has(s)).toBe(false);
   });
 
+  test('reloaded during the second look’s round: the look is never priced or sent again (B1)', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await setup(page);
+    // A taste fix for each room: the one the proposal designs is its round (the rest dropped).
+    const tasteAll = {
+      findings: ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8'].map((id) => ({
+        target: { kind: 'room', id },
+        principle: 'taste',
+        severity: 'fix',
+        line: 'Turn the bed to face the window.',
+        suggest: null,
+      })),
+      summary: null,
+    };
+    const waits: ((v: undefined | 'abort') => void)[] = [];
+    const m = await mock(page, {
+      look: [tasteAll],
+      // The look's round, held: the page goes while it is on its way.
+      reply: (c) =>
+        /furnish "(Main|Master) bedroom/.test(c.step) && c.body.includes('second look')
+          ? new Promise<undefined | 'abort'>((r) => waits.push(r))
+          : null,
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    await expect.poll(() => waits.length, { timeout: 30_000 }).toBe(1);
+    // Its answer is back: the checkpoint says so before the round goes.
+    await expect
+      .poll(async () => ((await runs(page))[0] as { look?: string } | undefined)?.look)
+      .toBe('done');
+    // And what it found, saved with it (before its round goes).
+    await expect
+      .poll(
+        async () => !!((await runs(page))[0] as { lookResult?: unknown } | undefined)?.lookResult,
+      )
+      .toBe(true);
+    await page.reload();
+    waits[0]?.('abort');
+    await reopen(page);
+    await expect(card(page, 1).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // One look in all: never sent (or priced) again on carrying on.
+    expect(m.looks).toHaveLength(1);
+    await expect(panel(page).getByText(/and a second look at the result/)).toHaveCount(0);
+    // What it found is still on the card, and what it cost is in the totals (QA M2).
+    const section = card(page, 1).locator('[data-look]');
+    await expect(section).toBeVisible();
+    await expect(section).toContainText(/second look US\$0\.\d\d/);
+    await expect(section).toContainText(
+      'Its round didn’t finish, so the rooms are as the first answers left them.',
+    );
+    const lookCost = Number(
+      /second look US\$(\d+\.\d\d)/.exec((await section.textContent()) ?? '')?.[1] ?? 0,
+    );
+    const total = Number(
+      /This conversation US\$(\d+\.\d\d)/.exec(
+        (await panel(page)
+          .getByRole('button', { name: /^This conversation US\$/ })
+          .textContent()) ?? '',
+      )?.[1] ?? 0,
+    );
+    expect(lookCost).toBeGreaterThan(0);
+    // The room's answer (about US$0.04 a request here) and the look, at least.
+    expect(total).toBeGreaterThanOrEqual(lookCost + 0.04);
+  });
+
   test('reloaded, then a wall moved before reopening: it asks once, and sends nothing until Carry on (4, 6)', async ({
     page,
   }) => {
@@ -3673,4 +4003,76 @@ test.describe('a locked phone, on a phone (locked-phone runs, part 1)', () => {
       });
     });
   }
+});
+
+test.describe('a phone held sideways, 844 × 390', () => {
+  const { defaultBrowserType: _webkit, ...iPhone } = devices['iPhone 13 landscape'];
+  test.use({ ...iPhone, viewport: { width: 844, height: 390 } });
+
+  test('at a run’s end the card’s head is in view, and stays there (QA, landscape)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    // The run QA watched: the main bedroom's answers have no bed (its own round no better), the
+    // look sends it back once, and that round brings the bed (kept). Then the card re-checks.
+    const noBed = {
+      ...mainBedroom,
+      items: mainBedroom.items.filter((i: { assetId: string }) => i.assetId !== 'bed-queen'),
+    };
+    let looked = false;
+    await mock(page, {
+      reply: (c) => {
+        if (c.step === 'look') {
+          looked = true;
+          return null;
+        }
+        if (!/^furnish "(Main|Master) bedroom/.test(c.step) || looked) return null;
+        return {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+          body: STREAM[c.provider](noBed, USAGE),
+        };
+      },
+    });
+    await page.goto('/');
+    await waitSaved(page);
+    await page
+      .getByRole('button', { name: /Plan details|Show plan details/ })
+      .first()
+      .tap()
+      .catch(() => {});
+    await page.getByRole('button', { name: 'Talk to the designer' }).tap();
+    await expect(panel(page)).toBeVisible();
+    await panel(page).getByRole('button', { name: 'Just design it' }).tap();
+    await panel(page)
+      .getByRole('button', { name: /^(Main|Master) bedroom · about US\$/ })
+      .tap();
+    await panel(page)
+      .getByRole('button', { name: /^Go ahead · about US\$/ })
+      .tap();
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeAttached({
+      timeout: 30_000,
+    });
+    // Its checks worked out, the look's notes in, the scope offer after it: still at its head.
+    await page.waitForTimeout(4000);
+    const where = await page.evaluate(() => {
+      const log = document.querySelector<HTMLElement>('.talk-log');
+      const cards = document.querySelectorAll<HTMLElement>('article.talk-card');
+      const c = cards[cards.length - 1];
+      if (!log || !c) return null;
+      return {
+        top: c.getBoundingClientRect().top - log.getBoundingClientRect().top,
+        logH: log.clientHeight,
+        cardH: c.getBoundingClientRect().height,
+        pinned: log.dataset.pinned ?? null,
+      };
+    });
+    // The card is taller than the log; its head sits at the log's top.
+    expect(where?.cardH ?? 0).toBeGreaterThan(where?.logH ?? 0);
+    expect(where?.top ?? -1).toBeGreaterThanOrEqual(-12);
+    expect(where?.top ?? 9999).toBeLessThan(40);
+    expect(where?.pinned).toBe('0');
+  });
 });

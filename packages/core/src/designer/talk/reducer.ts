@@ -277,6 +277,21 @@ export type TalkAction =
       at: string;
     }
   | { type: 'ruleOnce'; turnId: string; id: string; at: string }
+  /**
+   * A proposal's second look suggested a house rule (slice 3b): the designer's line with the
+   * offer under it, answered as a reply's offer is (Keep as a rule, Just this once). Free.
+   */
+  | {
+      type: 'lookOffer';
+      id: string;
+      at: string;
+      /** The proposal's turn. */
+      replyTo: string;
+      /** "V4", for the line. */
+      version: string;
+      line: string;
+      offer: { rule: Rule; vet: RuleVet };
+    }
   | { type: 'ruleReplace'; turnId: string; at: string }
   | { type: 'ruleKeepYours'; turnId: string }
   /** Just this once's Make it a rule (free): the offer opens again, vetted again. */
@@ -921,6 +936,37 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
     case 'ruleDelete':
     case 'ruleRestore':
       return ruleAction(conv, a);
+    case 'lookOffer': {
+      if (conv.turns.some((t) => t.id === a.id)) return conv;
+      const said: Turn = {
+        kind: 'designer',
+        id: a.id,
+        at: a.at,
+        // (The claims filter again: a line a record carries is the model's words.)
+        text: cutLines(
+          `From my second look at ${a.version}: ${filterClaims(a.line).say.trim()}`,
+          L.designer,
+        ),
+        lines: [],
+        after: '',
+        talk: {
+          replyTo: a.replyTo,
+          kind: 'reply',
+          echo: '',
+          usage: [],
+          cut: null,
+          noted: [],
+          questions: [],
+          answered: {},
+          confirms: [],
+          concern: null,
+          plan: null,
+          offer: { ...a.offer, state: a.offer.vet.ok ? 'open' : 'refused' },
+          look: true,
+        },
+      };
+      return push(conv, said);
+    }
     case 'pointerAdd': {
       const p = a.pointer;
       const same = conv.draftPointers.some(
@@ -1200,6 +1246,7 @@ function cutTurn(
       concern: null,
       plan: null,
       offer: null,
+      look: false,
     },
   };
 }
@@ -1323,6 +1370,7 @@ function replyDone(
       offer: offer
         ? { rule: offer.rule, vet: offer.vet, state: offer.vet.ok ? 'open' : 'refused' }
         : null,
+      look: false,
     },
   };
   const appLines: Turn[] = [...a.lines.slice(0, 3), ...ruleLines].map((text) => ({

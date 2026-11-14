@@ -234,7 +234,7 @@ export function eventsSince(conv: Conversation, digests: Record<string, string> 
   let from = 0;
   for (let i = conv.turns.length - 1; i >= 0; i--) {
     const t = conv.turns[i] as Turn;
-    if (t.kind === 'designer' && t.talk) {
+    if (t.kind === 'designer' && t.talk && !t.talk.look) {
       from = i + 1;
       break;
     }

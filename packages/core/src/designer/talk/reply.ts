@@ -91,9 +91,15 @@ function sigCut(sig: string): string {
   return out;
 }
 
+/** A claim it can't check, verify or test something itself. */
+const MYSELF =
+  /\bI\s+(?:can(?:no|['’])?t|cannot|am\s+unable\s+to)\s+(?:check|verify|test)\b[^.!?]*\bmyself\b/i;
+
 /** Whether a sentence is a claim the filter takes out. */
 export function cantClaim(sentence: string): boolean {
   if (NO_ACCESS.test(sentence)) return true;
+  // "I can't check the walkway myself": the app does, before anyone sees it.
+  if (MYSELF.test(sentence)) return true;
   const m = CANT.exec(sentence);
   if (!m) return false;
   const verb = (m[1] ?? '').toLowerCase();
@@ -190,6 +196,29 @@ const obj = (properties: Record<string, unknown>) => ({
 const arr = (items: unknown) => ({ type: 'array', items });
 const point = obj({ x: num, y: num });
 
+/**
+ * A house rule as a model answers with one (a reply's memory, a second look's suggestion):
+ * the app reads it (`ruleFromReply`), vets it and offers it; never kept on its own.
+ */
+export const RULE_REPLY_SCHEMA = nullable(
+  obj({
+    name: str,
+    subject: obj({
+      kind: { type: 'string', enum: ['any', 'category', 'kind', 'item'] },
+      id: nullable(str),
+    }),
+    relation: { type: 'string', enum: [...RULE_RELATIONS] },
+    target: obj({
+      kind: { type: 'string', enum: [...TARGET_KINDS] },
+      id: nullable(str),
+      rooms: arr(str),
+      at: nullable(point),
+      r: nullable(num),
+    }),
+    n: nullable(num),
+  }),
+);
+
 /** One schema for every reply (closed, every property required, unused ones null or []). */
 export const TALK_SCHEMA = obj({
   kind: { type: 'string', enum: [...TALK_KINDS] },
@@ -250,24 +279,7 @@ export const TALK_SCHEMA = obj({
      * A lasting wish as a house rule (slice 3a): the app checks it, says it in its own words
      * and offers it to the person to keep. Flat: every field required, unused ones null or [].
      */
-    rule: nullable(
-      obj({
-        name: str,
-        subject: obj({
-          kind: { type: 'string', enum: ['any', 'category', 'kind', 'item'] },
-          id: nullable(str),
-        }),
-        relation: { type: 'string', enum: [...RULE_RELATIONS] },
-        target: obj({
-          kind: { type: 'string', enum: [...TARGET_KINDS] },
-          id: nullable(str),
-          rooms: arr(str),
-          at: nullable(point),
-          r: nullable(num),
-        }),
-        n: nullable(num),
-      }),
-    ),
+    rule: RULE_REPLY_SCHEMA,
   }),
   fold: nullable(str),
 });

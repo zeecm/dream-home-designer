@@ -722,6 +722,79 @@ writing a conversation drops it and the next load takes it back from the meter (
 The solver's memo keys carry the house rules where a choice depends on them (the steered solve, a
 settled outcome); the plain first solve stays shared.
 
+**AI designer v2, slice 3b PR 2 (the second look, criterion 41, 8 Nov):** core `designer/look/`.
+A Thorough run with a model that can see (`looksAt`, `VISION` and the families `claude-*`,
+`gpt-5*`, `gemini-*`) ends with one more request: `critiqueSketch` draws the proposal as placed
+(SVG, 1568 px long side, at least 30 px a metre or two pictures; short ids and names on pieces
+and rooms, pinches and short fronts with their figures, new and moved pieces green, taken out
+dashed; names escaped), the web turns it into PNGs on the main thread (`ai/designer/look.ts`),
+and `lookStep` sends the run's prefix (cached), the facts sheet (`lookFacts`, data) and the
+pictures (image blocks in `requestFor` for Claude, OpenAI and Gemini). `parseLook` reads the
+findings leniently (aliases only; storage is never a fix). `actOnLook`: a P1–P4 fix is acted on
+only when an app check on the same target and principle fails (sent back in the app's words),
+else dropped as `checks-disagree`; one taste fix an option; consider findings are notes; a rule
+suggestion is read in the house rules' vocabulary and vetted (`lookRuleOffer`: `ruleFromReply`,
+`ruleOffer`/`vetRule`), then posted as the designer's line "From my second look at V4: …" with
+3a's free Keep as a rule offer under it (`lookOffer`, a designer turn with `talk.look`: never
+history, and the events since the last reply see past it); one the app can't hold is a card
+note; intent, swap, remove and add are edits to the answer
+with no request, anything else a room request. The round counts against `FIX_PER_RUN` and is
+kept only if `lookNoWorse`. Priced in `estimateRun` (`look: true`: the step and one round in
+`fix`). Stored as `ProposalOption.look`; proposals are records of 4 (`PROPOSAL_RECORD_VERSION`;
+3 is house rules part B's `madeAt` and `kept`). The option's kept pieces are never edited: a
+taste fix about one is dropped ('kept'), and a round's request carries the kept set. The look's
+request and its round are reserved in the run's checkpoint like any step (`StepKind` 'look'),
+and the checkpoint says whether the look is still to come (`RunCheckpoint.look`): a run carried
+on looks at every finished room it was asked for, whichever session designed it, and prices the
+look on the prefix alone (`lookBase`) when no room is left. A Stop or a "no" at the limit with
+only the look left ends the run done (the look `stopped` or `skipped`), never stopped part-way.
+The look is told the house rules (in the app's sentences) and which pieces are kept. Known and
+accepted: a tab of an older build (house rules part B) that rewrites the conversation drops
+`talk.look`, so the next talk prompt's `eventsSince` may stop at the offer and leave out the
+events before it.
+The card shows "Second look": its line, three notes then "and N more", its cost (its round's
+included). A picture the provider refuses (a 400 about the image, or `st.failed` refused) ends
+the look `skipped` with `PICTURE_REFUSED`; a model that can't see says `NO_LOOK` on the card and
+the cost card; a model with no price (its price gone mid-run) sends no look (`LOOK_UNPRICED`).
+The look is fed the run report (`runReport`: its F lines in place of the check texts, its L
+lines), and its round follows the fix-up pool's rule (taken before `mayStart`, given back if
+refused, `held` saved as left), goes as `fixStepFor`, carries the space's L lines, and writes the
+room's `rounds` record (`by: 'look'`; `fixed`/`no-better`, or why no answer came, `no-fixups`
+for each space it couldn't send) counting the distinct hard checks it was for; a round only of
+taste suggestions or soft checks is the look's own record. `roundLines` names it "the second
+look's round" and the lead says "after the second look", never as one of the room's tries. The
+checkpoint's `look` turns `done` as soon as its answer is back (`onStep` 'look' 'end'), so a page
+that goes during its round never pays for the look again; a checkpoint written before there was
+a look (no `look`) never gains one on carrying on. The look's summary and lines pass the claims
+filter (`filterClaims`, which also takes out "I can't check … myself"). QA round 2 (14 Nov): the
+round is judged as a room's fix round is (`lookNoWorse`: fewer hard failures wins, soft notes
+only break a tie, never a new kept-piece or house-rule failure), so a round that brings a bed
+back is used and recorded `fixed` (its count from the checks still failing after it); "left it
+out (N tries)" counts only the room's own answers. Its findings go to the checkpoint as soon as
+read (`look.onAnswer`, `RunCheckpoint.lookResult`, saved with the usage), so a reload in its
+round keeps the card's section and its cost ("Its round didn't finish, so the rooms are as the
+first answers left them."). Every
+Stop says so (`LOOK_STOPPED`: before the look, while it is asked, in its round; the limit apart),
+and a Stop during the look posts "You stopped the second look. The rooms are done and checked."
+A stopped card's lead leaves out the rooms it never placed (`cardRunReport`). The log is held at
+a card's head at a run's end (`HOLD`, from the first frame while the card works its checks out,
+up to 12 s), so a later write doesn't take it back to the foot (an e2e at 844×390 checks it).
+Round 3 (14 Nov): any new hard failure refuses the look's round (HDB, kept pieces, rules,
+anything); a round records `fixed` only when its own checks went down. A Stop in a room's fix
+round keeps its checked first answer (placed, the round `stopped`: a new `FixRound` outcome read
+tolerantly; "Sent back to be fixed once, but you stopped the run…"). `lookAtEnd` (pricing.ts)
+picks the look an option ends with and the stop line. A refused round's note uses the run
+report's words ("You and Partner have no bed in Main bedroom"). The picture leaves
+out ceiling lights, clips a piece's room-in-front to its room, and keeps labels a quarter metre
+off each edge (a split's halves overlap by half a metre, so each label is drawn in one). WebKit
+draws the picture's sans-serif labels fine (checked on a screenshot). The runner part lives in
+`@dhd/ai` (`packages/ai/src/run.ts`); the rasteriser stays in web
+(`apps/web/src/ai/designer/look.ts`) and is injected as `look.rasterise`. The look's own drops
+are `OptionLook.dropped` (`why`: target, checks-disagree, taste-once, not-designed, suggest,
+kept); what its edits leave out is the solver's, with its `DropCode`. Not yet: case files and
+"Save a case" (PR 3), the look in cloud runs. Known: in landscape on a phone (844×390) the log
+between On the table and the composer is about 80 px tall; that layout predates the look.
+
 **Drag on big plans (task #69):** room labels are fitted once per room (`fitRoomLabel`,
 memo keyed on everything the fit reads) with `placeLabel` filtering far circles and searching
 nearest-first (exact, ties kept); `wallStatuses`, `planGeometry`, `roomShapes` and

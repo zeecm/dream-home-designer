@@ -233,6 +233,7 @@ describe('the accept precheck fails closed (tech lead)', () => {
         accepted: [],
         waivers: [],
         version: null,
+        look: null,
         note: null,
       },
     ],
@@ -367,6 +368,16 @@ describe('the one list (designer listens: the card bug, criterion 8)', () => {
     expect(readyLine('V6', rep, null)).toBe(
       'V6 is ready. 1 doesn’t pass: You and Partner have no bed in Main bedroom.',
     );
+  });
+
+  it('stopped before a room was placed: its missing bed is the stopped line, never also a failure', () => {
+    const spaces = structuredClone(design.spaces);
+    spaces[SAMPLE_KEYS.main] = { name: 'Main bedroom', status: 'cancelled' };
+    const { rep } = reportOf(option({ spaces, status: 'stopped' }));
+    expect(rep.failures.some((f) => /no bed/.test(f.says))).toBe(false);
+    // Checked (not stopped), the same room counts.
+    const checked = reportOf(option({ spaces, status: 'checked' })).rep;
+    expect(checked.failures.some((f) => /no bed/.test(f.says))).toBe(true);
   });
 
   it('the fix line from stored rounds: fixed, still failing, cut off and no better each say so', () => {

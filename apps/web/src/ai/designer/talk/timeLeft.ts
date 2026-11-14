@@ -14,7 +14,7 @@ const AT_ONCE = 2;
 const MINUTE = 60_000;
 
 export interface StepLike {
-  kind: 'layout' | 'room';
+  kind: 'layout' | 'room' | 'look';
   status: string;
   fixing: { round: number; problems: number } | null;
 }
@@ -45,7 +45,9 @@ export function msLeft(steps: StepLike[], times: { kind: TimedKind; ms: number }
   // A room being fixed has its answer: what is left of it is the fix round.
   const rooms = steps.filter((s) => s.kind === 'room' && open(s) && !s.fixing).length;
   const fixing = steps.filter((s) => s.kind === 'room' && open(s) && s.fixing).length;
-  return layout + Math.ceil(rooms / AT_ONCE) * t.room + Math.ceil(fixing / AT_ONCE) * t.fix;
+  // The second look (one request, after the rooms; not timed on its own): about a room's.
+  const look = steps.some((s) => s.kind === 'look' && open(s)) ? t.room : 0;
+  return layout + Math.ceil(rooms / AT_ONCE) * t.room + Math.ceil(fixing / AT_ONCE) * t.fix + look;
 }
 
 export interface TimeLeft {
