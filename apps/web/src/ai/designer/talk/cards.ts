@@ -16,6 +16,7 @@ import {
   type Usage,
   changeSet,
   designLevels,
+  firstTickedPieces,
   levelFingerprint,
   mergeChanges,
   optionTitle,
@@ -347,6 +348,8 @@ export function precheckOn(
     renovation: !!project.renovation,
     rules: houseRulesFor(card.levelId),
     kept: houseKeptFor(card.levelId, madeWith(card)),
+    // A must-have the person's own unticking leaves unmet is asked about.
+    firstIn: firstTickedPieces(changes),
   });
   return { failing: rep.failing, hdb: rep.failing.some((c) => !c.waivable), missing: false };
 }

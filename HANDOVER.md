@@ -887,7 +887,10 @@ No money change, no record bump (every new field optional and read tolerantly).
   with touch), and after a free fix at peek focus goes to the bar, after Undo to the button
   offered again. Unticking a row whose piece meets a must-have (the app's bed or the
   designer's) fails the ticked changes (`subsetReport`: a P1 bed/seats/dining/desks check the
-  version meets and the ticks leave unmet, though the plan as it is failed it too): the lead
+  version meets and the plan the ticks make leaves unmet, though the plan as it is failed it
+  too; only when the person's own unticking made the gap: the piece is one the card ticks first,
+  `firstIn` from `firstTickedPieces`, so a row unticked from the first because it fails a check
+  of its own adds no question, and their own or a kept bed meets it): the lead
   says "You and Partner will have no bed in Main bedroom: its row isn't ticked.", the app's line
   "Left out of what you've ticked: …", the Checks row and the bar count it, and Accept asks
   "Accept anyway? 1 problem: You and Partner will have no bed …". The app's rows and the

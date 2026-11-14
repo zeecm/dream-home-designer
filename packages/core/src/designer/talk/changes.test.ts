@@ -20,6 +20,7 @@ import {
   acceptChanges,
   changeSet,
   defaultTicks,
+  firstTickedPieces,
   mergeChanges,
   partsOf,
   putPlanBack,
@@ -353,26 +354,73 @@ describe('subsetReport', () => {
       design.brief,
     );
     expect(none.delta).toBe(0);
-    // With nothing ticked, only what the version's own beds, seats and table would have met.
-    expect(
-      none.failing.every((c) => /^P1\|(bed|seats|dining|desks)\|/.test(c.key) && !c.itemId),
-    ).toBe(true);
+    expect(none.failing).toEqual([]);
     expect(all.failing).toEqual([]);
     expect(all.delta).toBeGreaterThan(0);
     expect(all.cost.high).toBeGreaterThanOrEqual(all.cost.low);
   });
 
-  it('unticking the row with the bed fails the ticked changes, though the plan had none either (UX 2)', () => {
+  describe('a must-have the ticks leave out (UX 2, narrowed)', () => {
     const lvl = sampleFlatProject().levels[0] as Level;
     const design = sampleDesign({ level: lvl, concept: null });
     const r = designResult(lvl, lvl, design);
     const cs = changeSet(lvl, r, design);
-    const bedRow = cs.find((c) =>
-      c.items.target.some((id) => r.level.items[id]?.assetId.startsWith('bed-')),
+    const isBed = (id: string) => !!r.level.items[id]?.assetId.startsWith('bed-');
+    const mainBed = Object.values(r.level.items).find(
+      (it) => it.assetId === 'bed-queen' && r.refs[it.id],
     );
-    expect(bedRow).toBeDefined();
-    const ticked = cs.filter((c) => c !== bedRow).map((c) => c.id);
-    const rep = subsetReport(lvl, lvl, r, mergeChanges(lvl, r.level, cs, ticked), design.brief);
-    expect(rep.failing.some((c) => c.key.startsWith('P1|bed|'))).toBe(true);
+    const bedRow = cs.find((c) => !!mainBed && c.items.target.includes(mainBed.id));
+    const bedFails = (rep: ReturnType<typeof subsetReport>) =>
+      rep.failing.filter((c) => c.key.startsWith('P1|bed|'));
+
+    it('the person unticks the bed and the plan the ticks make has none: asked', () => {
+      expect(bedRow).toBeDefined();
+      const ticked = defaultTicks(cs).filter((id) => id !== bedRow?.id);
+      const rep = subsetReport(lvl, lvl, r, mergeChanges(lvl, r.level, cs, ticked), design.brief, {
+        firstIn: firstTickedPieces(cs),
+      });
+      expect(bedFails(rep).length).toBeGreaterThan(0);
+    });
+
+    it('a row the card leaves unticked from the first (it fails a check of its own): not asked again', () => {
+      // As if the bed's row failed a check: the card ticks it off first, and shows it failing.
+      const first = new Set([...firstTickedPieces(cs)].filter((id) => !isBed(id)));
+      const ticked = defaultTicks(cs).filter((id) => id !== bedRow?.id);
+      const rep = subsetReport(lvl, lvl, r, mergeChanges(lvl, r.level, cs, ticked), design.brief, {
+        firstIn: first,
+      });
+      expect(bedFails(rep)).toEqual([]);
+    });
+
+    it('their own bed already in the plan: a subset without the version’s is no question', () => {
+      // The plan as it is has the couple's own king bed where the version puts its queen.
+      const own = structuredClone(lvl);
+      if (mainBed)
+        own.items.my_bed = { ...structuredClone(mainBed), id: 'my_bed', assetId: 'bed-king' };
+      const r2 = designResult(own, own, design);
+      const cs2 = changeSet(own, r2, design);
+      const row = cs2.find((c) =>
+        c.items.target.some((id) => r2.level.items[id]?.assetId === 'bed-queen'),
+      );
+      expect(row).toBeDefined();
+      const ticked = defaultTicks(cs2).filter((id) => id !== row?.id);
+      const rep = subsetReport(
+        own,
+        own,
+        r2,
+        mergeChanges(own, r2.level, cs2, ticked),
+        design.brief,
+        {
+          firstIn: firstTickedPieces(cs2),
+        },
+      );
+      expect(bedFails(rep)).toEqual([]);
+    });
+
+    it('with no first ticks given (another caller): never asked', () => {
+      const ticked = defaultTicks(cs).filter((id) => id !== bedRow?.id);
+      const rep = subsetReport(lvl, lvl, r, mergeChanges(lvl, r.level, cs, ticked), design.brief);
+      expect(bedFails(rep)).toEqual([]);
+    });
   });
 });

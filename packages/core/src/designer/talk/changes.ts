@@ -581,6 +581,10 @@ function foldBelongs(
 export const defaultTicks = (changes: Change[]): string[] =>
   changes.filter((c) => !c.checks.length).map((c) => c.id);
 
+/** The pieces the rows ticked first put in (`subsetReport`'s `firstIn`). */
+export const firstTickedPieces = (changes: readonly Change[]): Set<string> =>
+  new Set(changes.filter((c) => !c.checks.length).flatMap((c) => c.items.target));
+
 /**
  * The ids that can go in together: a change that needs the walls is left out without them.
  */
@@ -709,6 +713,11 @@ export function subsetReport(
     rules?: readonly Rule[];
     /** The pieces kept where they are (slice 3a). */
     kept?: readonly Kept[];
+    /**
+     * The proposal's pieces the card ticks first (`defaultTicks`' rows), by item id: a must-have
+     * one of them meets, unticked by the person, fails the ticks (see above).
+     */
+    firstIn?: ReadonlySet<string>;
   } = {},
 ): SubsetReport {
   const rules = {
@@ -735,9 +744,13 @@ export function subsetReport(
   const waived = new Set(opts.waived ?? []);
   // A must-have the version meets (a bed for the couple, the seats) that the ticked changes
   // leave unmet fails them, even when the plan as it is failed it too: unticking the bed leaves
-  // them with no bed, and that is said and asked about at Accept.
-  // Only when a piece the version places for it (a bed, a sofa, the table, a desk, in that room)
-  // is left out of the ticked changes.
+  // them with no bed, and that is said and asked about at Accept. Judged on the plan the ticks
+  // make (a bed of their own, or a kept one, meets it), and only when the person's own unticking
+  // made the gap: a piece the version places for it (a bed, a sofa, the table, a desk, in that
+  // room) that the card ticks first (`opts.firstIn`) and the person took out. A row unticked
+  // from the first (it fails a check of its own) is already shown failing. Without `firstIn`,
+  // none of this is asked.
+  const firstIn = opts.firstIn;
   const versionFails = new Set(r.checks.filter((c) => c.hard).map((c) => c.key));
   const NEED: Record<string, Role[]> = {
     bed: ['bed'],
@@ -750,10 +763,11 @@ export function subsetReport(
   const essentialLeft = (c: { key: string; itemId?: string; roomId?: string }) => {
     const [principle, code] = c.key.split('|');
     const roles = principle === 'P1' && code ? NEED[code] : undefined;
-    if (c.itemId || !roles || !c.roomId || versionFails.has(c.key)) return false;
+    if (!firstIn || c.itemId || !roles || !c.roomId || versionFails.has(c.key)) return false;
     const rooms = spaceRooms(c.roomId);
     return Object.values(r.level.items).some((it) => {
-      if (merged.items[it.id] || !roles.includes(roleOf(furnitureKind(it.assetId)))) return false;
+      if (merged.items[it.id] || !firstIn.has(it.id)) return false;
+      if (!roles.includes(roleOf(furnitureKind(it.assetId)))) return false;
       const room = roomIdAt(r.level, centre(it));
       return (
         !!room && (code === 'bed' || code === 'desks' ? room === c.roomId : rooms.includes(room))

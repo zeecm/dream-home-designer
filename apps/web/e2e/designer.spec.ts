@@ -722,7 +722,7 @@ test.describe('desktop', () => {
     await shot(page, 'v2-kitchen-only');
     // Full: everything of V2 in; the next room proposes neither room again.
     await v2.getByRole('button', { name: /^Accept selected \(\d+\)$/ }).click();
-    await acceptedLine(page, v2, /^You accepted \d+ changes from V2\.$/);
+    await expect(log(page).getByText(/^You accepted \d+ changes from V2\.$/)).toBeVisible();
     const before = Object.keys((await saved(page)).renovation.levels[0].items).sort();
     await design(page, /^(Main|Master) bedroom · about US\$/);
     const v3 = card(page, 3);
@@ -736,7 +736,7 @@ test.describe('desktop', () => {
     await expect(page.getByText('Previewing V3, not in your plan yet')).toBeVisible();
     // Accepting V3 keeps every piece already in, with its id.
     await v3.getByRole('button', { name: /^Accept selected \(\d+\)$/ }).click();
-    await acceptedLine(page, v3, /^You accepted \d+ changes from V3\.$/);
+    await expect(log(page).getByText(/^You accepted \d+ changes from V3\.$/)).toBeVisible();
     const after = Object.keys((await saved(page)).renovation.levels[0].items);
     for (const id of before) expect(after).toContain(id);
     // What was left out of V1 is remembered in Decisions.
@@ -1104,10 +1104,10 @@ test.describe('desktop', () => {
   });
 });
 
-/** Sends a message with Send (its price on it). */
 /**
- * After Accept selected: says yes when it asks first (B1: a bed, the seats or the table the
- * version has and the ticks leave out is a question), then waits for the accept line.
+ * After Accept selected on part of a card: says yes when it asks first (B1: unticking the rows
+ * of a bed, the seats or the table leaves the plan without them, and that is a question), then
+ * waits for the accept line.
  */
 async function acceptedLine(page: Page, v: ReturnType<typeof card>, line: RegExp | string) {
   const anyway = v.getByRole('button', { name: 'Accept anyway' });
@@ -1117,6 +1117,7 @@ async function acceptedLine(page: Page, v: ReturnType<typeof card>, line: RegExp
   await expect(said).toBeVisible();
 }
 
+/** Sends a message with Send (its price on it). */
 async function send(page: Page, text: string) {
   await panel(page).getByRole('textbox', { name: 'Message the designer' }).fill(text);
   await panel(page)
@@ -1912,9 +1913,9 @@ test.describe('designer listens, B1: free fixes and room vetting', () => {
     }
     await free.click();
     // The same card (no new tab), its row By the app, the lead worked out again.
-    const line = log(page).getByText(
-      /^Placed by the app, free: a queen bed in (Main|Master) bedroom/,
-    );
+    const line = log(page)
+      .locator('article.talk-app')
+      .getByText(/^Placed by the app, free: a queen bed in (Main|Master) bedroom/);
     await expect(line).toBeVisible();
     // What gave way for the bed is said with it, never silently.
     await expect(line).toContainText('one bedside table no longer fits and is left out');
@@ -2391,18 +2392,15 @@ test.describe('iterating (slice 2, PR 3)', () => {
     await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
       timeout: 30_000,
     });
-    // One row left out: a decision.
+    // One row left out (not a bed, seat, table or desk, which would ask first): a decision.
     await v1
-      .getByRole('checkbox', { name: /^Accept: / })
+      .getByRole('checkbox', { name: /^Accept: (?!.*\b(bed|sofa|armchair|table|chair|desk)\b)/ })
       .first()
       .uncheck();
     await v1.getByRole('button', { name: /^Accept selected/ }).click();
-    await acceptedLine(page, v1, /^You accepted \d+ of \d+ changes from V1\./);
+    await expect(log(page).getByText(/^You accepted \d+ of \d+ changes from V1\./)).toBeVisible();
     await menu(page, 'Copy as text');
-    // (Leaving out a must-have asks first: a waiver is a decision too.)
-    await expect(
-      page.getByText(/^Copied: (1 decision|2 decisions) and \d+ accepted changes\.$/),
-    ).toBeVisible();
+    await expect(page.getByText(/^Copied: 1 decision and \d+ accepted changes\.$/)).toBeVisible();
     const text = await page.evaluate(() => navigator.clipboard.readText());
     expect(text).toContain('Decisions\n- Left out of V1:');
     expect(text).toContain('What I know about you\n- Who lives here:');
