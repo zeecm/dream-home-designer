@@ -7,6 +7,7 @@ import sampleBedroom from './benchmark/answers/sample-bedroom.json';
 import sampleLiving from './benchmark/answers/sample-living.json';
 import sampleMain from './benchmark/answers/sample-main-bedroom.json';
 import { ONGS } from './benchmark/benchmark';
+import livingV1 from './fixtures/room-living.json';
 import { APP_REF, freeEssentials, isAppRef, isDeclined, orphanLines } from './free';
 import { leftOutWords, runReport } from './report';
 import { designResult } from './result';
@@ -505,5 +506,31 @@ describe('free fixes: PERF', () => {
     expect(out?.added).toEqual([]);
     expect(out?.missed.map((m) => m.role)).toEqual(['sofa', 'dining-chair', 'dining-chair']);
     expect(free).toBeLessThan(BOUND);
+  });
+});
+
+describe('free fixes on an answer by position (v1; QA, B2)', () => {
+  it('a living room with no sofa and no dining table: the app places them, or says why', () => {
+    const noSofa = {
+      ...livingV1,
+      items: livingV1.items.filter((i) => !['sofa1', 'dine1'].includes(i.ref)),
+    };
+    const { lvl, d } = version('dsn_free_v1', { [LIVING]: noSofa });
+    expect(d.spaces[LIVING]?.design?.v).toBeUndefined();
+    const failingP1 = (r: ReturnType<typeof designResult>) =>
+      r.checks
+        .filter((c) => c.hard && !c.already && /^P1\|(seats|dining)\|/.test(c.key))
+        .map((c) => c.key.split('|')[1]);
+    expect(failingP1(designResult(lvl, lvl, d)).sort()).toEqual(['dining', 'seats']);
+    const out = freeEssentials(lvl, lvl, d, {}, { orphans: true });
+    const after = designResult(lvl, lvl, { ...d, spaces: out.spaces });
+    // Each must-have is placed by the app, or said why it couldn't be: never silent.
+    for (const code of ['seats', 'dining']) {
+      const placed = out.added.some((a) => a.key.startsWith(`P1|${code}|`));
+      const said = out.missed.some((m) => m.key.startsWith(`P1|${code}|`));
+      expect(placed || said).toBe(true);
+      if (placed) expect(failingP1(after)).not.toContain(code);
+    }
+    expect(out.tries).toBeGreaterThan(0);
   });
 });

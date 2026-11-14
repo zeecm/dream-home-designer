@@ -31,7 +31,7 @@ import { cannotDesign, tokens, usd, useSpend } from '../spend';
 import { houseKeptFor, houseRulesFor, openCompare, useDesigner } from '../state';
 import { keepTogether } from '../words';
 import { CheckLead, SetOutToFix, hasLead } from './CheckLead';
-import { KeepFixing } from './KeepFixing';
+import { KeepFixing, useKeepAsk } from './KeepFixing';
 import { Mark } from './Mark';
 import { acceptCard, precheckNow } from './accept';
 import {
@@ -576,6 +576,15 @@ export const ProposalCard = memo(function ProposalCard({
     !resume &&
     !starting;
   const running = card.status === 'running' && !stale;
+  // Keep fixing started from this card (QA): its heading holds focus while the run goes, even as
+  // the card is worked out again under it (a heading that mounts again takes it back from the
+  // page's body), until the run has ended and the card shows its result.
+  const keepFocus = useKeepAsk((s) => s.focus === card.key);
+  const headRef = (el: HTMLHeadingElement | null) => {
+    if (!el || useKeepAsk.getState().focus !== card.key) return;
+    const at = document.activeElement;
+    if (!at || at === document.body || !at.isConnected) el.focus();
+  };
   const [expanded, setExpanded] = useState(newest);
   // The newest card opens; once a newer one comes it folds to its line (opened again by a
   // tap), so a long conversation works out one or two cards, not every one (QA P4-6).
@@ -603,6 +612,16 @@ export const ProposalCard = memo(function ProposalCard({
     () => (r ? timed(() => cardChanges(project, card, r)) : []),
     [project, card, r],
   );
+  // Keep fixing's run has ended and its card shows its result: its heading lets focus go.
+  const sawRun = useRef(false);
+  useEffect(() => {
+    if (!keepFocus) return;
+    if (running) sawRun.current = true;
+    else if (sawRun.current && r) {
+      sawRun.current = false;
+      useKeepAsk.setState({ focus: null });
+    }
+  }, [keepFocus, running, r]);
   // The storage meter's household and amount: the lens reads them (worked out again on change,
   // with no request).
   const meter = useStorage((s) => s.setting);
@@ -819,7 +838,7 @@ export const ProposalCard = memo(function ProposalCard({
     // Being placed and checked by the designer's worker: a calm line, the card's head kept.
     return (
       <article className="talk-card" data-card={card.key} aria-labelledby={`card-${card.key}`}>
-        <h3 className="talk-card-title" id={`card-${card.key}`}>
+        <h3 className="talk-card-title" id={`card-${card.key}`} ref={headRef} tabIndex={-1}>
           {card.title} · {headLabel(project, card)}
         </h3>
         {nowOf(project, card.levelId) ? (
@@ -981,7 +1000,7 @@ export const ProposalCard = memo(function ProposalCard({
   const cantDesign = !ai || !!cannotDesign(ai);
   const head = (
     <div className="talk-card-head">
-      <h3 className="talk-card-title" id={`card-${card.key}`}>
+      <h3 className="talk-card-title" id={`card-${card.key}`} ref={headRef} tabIndex={-1}>
         {card.title} · {headLabel(project, card)}
       </h3>
       {card.status !== 'failed' && (

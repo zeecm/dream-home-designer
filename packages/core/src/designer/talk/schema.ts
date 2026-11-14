@@ -670,7 +670,9 @@ export const RoomFix = z.object({
    * A fix round's answer that came back and isn't judged yet (merged, before the free pass and
    * the checks): paid for, so a run carried on judges it from here and never sends it again.
    */
-  pending: SpaceDesign.optional(),
+  pending: SpaceDesign.optional().catch(undefined),
+  /** The second look's round for this space was on its way (recorded as gone if the page went). */
+  look: z.boolean().optional().catch(undefined),
 });
 export type RoomFix = z.infer<typeof RoomFix>;
 

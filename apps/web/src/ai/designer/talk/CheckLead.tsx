@@ -59,7 +59,7 @@ export function CheckLead({
   // cut off, refused…), though the plan passes now (the free fix placed the bed: QA).
   const f = fixSummary(report.rooms);
   const badly =
-    f.noBetter || f.cutOff || f.failed || f.refused || f.error || f.unknown || f.stopped;
+    f.noBetter || f.cutOff || f.failed || f.refused || f.error || f.unknown || f.stopped || f.away;
   const passMark = !failing && (f.fixed > 0 || f.kept > 0 || !badly);
   const rounds = roundLines(report.rooms);
   if (!fix && !count && !did.length && !missed.length && !action && !out) return null;

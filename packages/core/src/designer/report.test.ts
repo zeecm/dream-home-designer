@@ -725,3 +725,63 @@ describe('Keep fixing on the card, and the left-out line’s wording (B2, UX rev
     ]);
   });
 });
+
+describe('the left-out line across rooms (QA, B2)', () => {
+  it('names each room when the pieces are in more than one', () => {
+    const l = (ref: string, assetId: string, room: string, another = false): ReportLeftOut => ({
+      id: `L-${ref}`,
+      ref,
+      assetId,
+      space: room,
+      room,
+      text: '',
+      code: 'no-place',
+      hint: '',
+      cause: null,
+      says: `The ${assetId} in ${room} was left out`,
+      role: 'bedside',
+      causes: null,
+      another,
+    });
+    const w = leftOutWords({
+      failures: [],
+      rooms: [],
+      leftOut: [
+        l('side2', 'bedside', 'Main bedroom', true),
+        l('dc1', 'desk-chair', 'Study'),
+        l('dc2', 'desk-chair', 'Study'),
+      ],
+    });
+    expect(w?.line).toBe(
+      'Left out, didn’t fit: Main bedroom: a second bedside table; Study: 2 desk chairs.',
+    );
+  });
+});
+
+describe('a fix round cut off when the page went (QA, B2)', () => {
+  it('is counted as used and said, in the headline and room by room', () => {
+    const room: ReportRoom = {
+      key: 'rm_main',
+      name: 'Main bedroom',
+      fixes: 3,
+      fixed: 2,
+      rounds: [
+        { outcome: 'fixed', before: 4, after: 3 },
+        { outcome: 'fixed', before: 3, after: 2 },
+        { outcome: 'away', before: 2, after: 2 },
+        { outcome: 'no-fixups', before: 2, after: 2 },
+      ],
+    };
+    expect(leadParts([room], 2)).toEqual({
+      fix: 'Checked and fixed 2 problems before showing you; a fix round was cut off when the page went (it may still be billed). This design used the 3 fix-ups it was priced for.',
+      count: '2 still don’t pass:',
+    });
+    expect(roundLines([room])).toContain(
+      'Main bedroom · fix round 3: cut off when the page went; it may still be billed',
+    );
+    const only: ReportRoom = { ...room, rounds: [{ outcome: 'away', before: 2, after: 2 }] };
+    expect(leadParts([only], 2).fix).toBe(
+      'Sent back to be fixed once, but the page went while it was on its way, so the first design is shown; it may still be billed.',
+    );
+  });
+});

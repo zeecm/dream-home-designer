@@ -434,8 +434,9 @@ export function freeEssentials(
     if (!key || s.status !== 'done') continue;
     if (o.spaces && !o.spaces.includes(s.key) && !o.spaces.includes(key)) continue;
     const answer = current.spaces[key]?.design;
-    // Only answers by intent: the solver places the pieces (a first answer by position can't).
-    if (!answer || answer.v !== 2) continue;
+    // Answers by position (v1) too: the app's piece is placed against the longest free wall, as
+    // the v1 placer does, and is kept only by the same rule (strictly better, nothing worse).
+    if (!answer) continue;
     // Never where the person kept the furniture (a lock, or changed by hand since accepting).
     const held = (design.request?.locks ?? []).some(
       (l) => l.aspect === 'furniture' && (l.space === '*' || lockCovers(l, s.rooms)),
@@ -580,7 +581,7 @@ export function freeEssentials(
       if (!key || s.status !== 'done') continue;
       if (o.spaces && !o.spaces.includes(s.key) && !o.spaces.includes(key)) continue;
       const answer = current.spaces[key]?.design;
-      if (!answer || answer.v !== 2) continue;
+      if (!answer) continue;
       const held = (design.request?.locks ?? []).some(
         (l) => l.aspect === 'furniture' && (l.space === '*' || lockCovers(l, s.rooms)),
       );

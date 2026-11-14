@@ -1232,6 +1232,9 @@ async function runOption(
     declined: declinedPieces(),
     fixesLeft: ck.fixesLeft,
     fixing: ck.fixing,
+    // Carried on: what was on its way when the page went (a fix round among it is recorded as
+    // gone, never sent again).
+    ...(prior?.inflight.length ? { lost: prior.inflight.map((x) => x.step) } : {}),
     // Keep fixing's rounds are said apart on the card (asked and paid for after it was shown).
     ...(keeping ? { roundsBy: 'keep' as const } : {}),
     ...(sp.expected ? { expected: sp.expected } : {}),
@@ -1446,7 +1449,17 @@ async function runOption(
   // from the card's one list ("V8 is ready. 3 don’t pass: You have no bed …, and 2 more.").
   if (doc().id === projectId) {
     const title = `V${p.n}${p.options.length > 1 || letter !== 'A' ? letter : ''}`;
-    const cost = state.usage.length ? usd(state.usage.reduce((t, u) => t + (u.usd ?? 0), 0)) : null;
+    // Carried on: what this session spent and what the option has cost in all (QA: the card and
+    // the conversation show the whole), else this run's.
+    const here = state.usage.reduce((t, u) => t + (u.usd ?? 0), 0);
+    const all = design.usage.reduce((t, u) => t + (u.usd ?? 0), 0);
+    const cost = !state.usage.length
+      ? prior && all > 0
+        ? `${usd(all)} in all`
+        : null
+      : prior
+        ? `${usd(here)} since you came back, ${usd(all)} in all`
+        : usd(here);
     if (status === 'checked') {
       // Once its checks are worked out (the worker has it), never holding the run's end up.
       void (
@@ -1476,7 +1489,8 @@ async function keptText(
 ): Promise<string> {
   const p = useTalk.getState().proposals.find((x) => x.id === proposalId);
   const o = p?.options.find((x) => x.letter === letter);
-  const tail = cost ? ` Cost ${cost} more.` : '';
+  // "US$0.04 more" for its own run; carried on, the phrase says both figures already.
+  const tail = cost ? ` Cost ${cost}${/in all$/.test(cost) ? '' : ' more'}.` : '';
   if (!p || !o) return `Kept fixing ${title}.${tail}`;
   try {
     const got = await cardReportNow(doc(), optionCard(p, o, designLevelId()));

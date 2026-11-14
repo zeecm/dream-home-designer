@@ -2681,3 +2681,126 @@ describe('B2 money review: no paid answer lost, no fix-up past the pool, first p
     ]);
   });
 });
+
+describe('a fix round on its way when the page went (QA, B2)', () => {
+  const sse = (answer: unknown) =>
+    new Response(anthropicStream(answer, USAGE), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  const LIVING = 'furnish "Living';
+  const isFix = (c: { body: Record<string, unknown> }) => promptOf(c.body).includes('## Fix round');
+  const failingBy = (step: string, n: number) => ({
+    ...(answerFor(step)?.answer as Record<string, unknown>),
+    summary: `fails ${n} f`,
+  });
+  const scripted: NonNullable<RunOptions['results']> = async (base, before, d, opts) => {
+    const r = designResult(base, before, d, opts);
+    const extra = r.spaces.flatMap((s) => {
+      const m = /fails (\d+) (\w+)/.exec(
+        (s.storedKey && d.spaces[s.storedKey]?.design?.summary) || '',
+      );
+      const room = s.rooms[0];
+      if (!m || !room) return [];
+      return Array.from({ length: Number(m[1]) }, (_, i) => ({
+        key: `P2|madeup|${room}|${m[2]}${i}`,
+        principle: 'P2' as const,
+        hard: true,
+        waivable: true,
+        text: `Made-up failure ${m[2]}${i}.`,
+        roomId: room,
+        already: false,
+        part: null,
+      }));
+    });
+    return { ...r, checks: [...r.checks, ...extra] };
+  };
+  const spaces = designResult(level, level, { ...fresh(), spaces: {} }).spaces;
+  const living = spaces.find((s) => /^Living/.test(s.name))?.key as string;
+  type Saved = { design: DraftDesign; fixesLeft: number; fixing: Record<string, RoomFix> };
+
+  it('is recorded as gone (counted, said), never sent again; the next round goes on from it', async () => {
+    const answers = (step: string, n: number) => (step === LIVING ? failingBy(step, 5 - n) : null);
+    const saves: Saved[] = [];
+    await start('anthropic', {
+      fetch: provider('anthropic', {
+        auto: true,
+        reply: (c, n) => {
+          const a = answers(c.step, n);
+          return a ? sse(a) : null;
+        },
+      }).fetch,
+      plan: { layout: null, rooms: [living] },
+      results: scripted,
+      onSave: (d, info) => {
+        saves.push({ design: structuredClone(d), ...structuredClone(info) });
+      },
+    }).run;
+    // The checkpoint as round 2's request had gone (its fix-up taken, nothing back yet).
+    const at = saves.find(
+      (s) =>
+        s.design.spaces[living]?.fixes === 2 &&
+        s.design.spaces[living]?.rounds?.length === 1 &&
+        !s.fixing[living]?.pending,
+    ) as Saved;
+    expect(at.fixesLeft).toBe(1);
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => {
+        const a = answers(c.step, n + 3);
+        return a ? sse(a) : null;
+      },
+    });
+    const { design } = await runDesign({
+      ai: AI.anthropic,
+      ctx,
+      design: at.design,
+      plan: { layout: null, rooms: [living], fixOnly: [living] },
+      signal: new AbortController().signal,
+      fetch: prov.fetch,
+      results: scripted,
+      fixesLeft: at.fixesLeft,
+      fixing: at.fixing,
+      lost: [living],
+    });
+    // Round 2 isn't sent again; round 3 is the pool's last.
+    expect(prov.calls.filter(isFix)).toHaveLength(1);
+    expect(promptOf(prov.calls[0]?.body)).toContain('## Fix round 3');
+    expect(design.spaces[living]?.rounds).toEqual([
+      { outcome: 'fixed', before: 4, after: 3 },
+      { outcome: 'away', before: 3, after: 3 },
+      { outcome: 'fixed', before: 3, after: 1 },
+      { outcome: 'no-fixups', before: 1, after: 1 },
+    ]);
+    expect(design.spaces[living]?.fixes).toBe(3);
+  });
+
+  it('the second look’s round on its way: recorded as gone on its space, nothing sent', async () => {
+    const d = structuredClone(fresh());
+    const prov0 = provider('anthropic', { auto: true });
+    const { design: done } = await start('anthropic', {
+      fetch: prov0.fetch,
+      design: d,
+      plan: { layout: null, rooms: [living] },
+    }).run;
+    const prov = provider('anthropic', { auto: true });
+    const { design } = await runDesign({
+      ai: AI.anthropic,
+      ctx,
+      design: done,
+      plan: { layout: null, rooms: [] },
+      signal: new AbortController().signal,
+      fetch: prov.fetch,
+      fixesLeft: 0,
+      fixing: { [living]: { left: 0, settled: true, look: true } },
+    });
+    expect(prov.calls).toHaveLength(0);
+    expect(design.spaces[living]?.rounds?.at(-1)).toEqual({
+      outcome: 'away',
+      before: 0,
+      after: 0,
+      by: 'look',
+    });
+    expect(design.spaces[living]?.fixes).toBe(1);
+  });
+});

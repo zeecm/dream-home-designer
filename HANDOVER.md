@@ -915,7 +915,7 @@ No money change, no record bump (every new field optional and read tolerantly).
   model can't pose as the app; the stored schema keeps them. `solveSpace` and `designResult` are
   untouched: the benchmark layouts are byte-identical. PERF test: the post-pass on a heavy living
   room within 2x the first solve's 300 ms bound (about 175 ms kept at one try, 330 ms for two).
-  Only answers by intent (`v: 2`) get one.
+  Only answers by intent (`v: 2`) got one (B2 takes in v1 answers too).
 - **The runner** (`@dhd/ai` `run.ts`): each room's answer, and each fix round's, goes through the
   free pass (`RunOptions.free`, the web's worker ask `trialFree`; core directly on a server) on the
   space alone, as `failing` checks it; `declined` comes from the Decisions.
@@ -1055,8 +1055,10 @@ fixing, orphans, what was left out.** Proposal records 5.
   "Keep fixing · at most US$x" opens its own cost card in the lead's frame (always asks; its
   first sentence takes focus, never the spend button; Not now or Escape give focus back to the
   button; on a phone the sheet goes full height and its buttons scroll into view, as a cost
-  card's do: `useKeepAsk`): "Keep fixing Main bedroom takes about US$a (at most US$b, up to 3 more
-  fix-ups, only while each one helps). Go ahead?" Go puts focus on the card's heading and runs a
+  card's do: `useKeepAsk`; the whole ask where it fits, its buttons where it doesn't): "Keep fixing
+  Main bedroom takes about US$a (at most US$b, up to 3 more fix-ups, only while each one helps).
+  Go ahead?" Go puts focus on the card's heading, which keeps it while the run goes (a heading
+  drawn again takes focus back from the page's body: `useKeepAsk.focus`), and runs a
   fix-only run (`RunPlan.fixOnly`) on the same option: its stored answers stand, no room step, no
   second look, the room's last `no-fixups` round answered (popped), its rounds, `fixes` and
   `fixed` going on from the stored ones; bound to the figure shown (priced higher since: the card
@@ -1077,7 +1079,16 @@ fixing, orphans, what was left out.** Proposal records 5.
   still queued (`roomsFixing`): a fix-only room gets its free pass again (it does nothing a second
   time), its pending answer is judged with no request, and its next round goes ("## Fix round 2"
   after round 1); never its room step or a round it had. A fix-only room with no stored answer
-  sends nothing.
+  sends nothing. A fix round that was on its way when the page went (QA: a step in flight in the
+  checkpoint, `RunOptions.lost`, its room answered with no pending answer; the second look's by
+  its space's `RoomFix.look` mark) isn't sent again (its fix-up was taken and it may be billed):
+  it is recorded as `FixRound` outcome `away`, counted as used ("This design used the 3 fix-ups
+  it was priced for"), numbered with the rounds ("fix round 2: cut off when the page went; it may
+  still be billed"; the next request is round 3), and said in the headline ("…; a fix round was
+  cut off when the page went (it may still be billed)."). Keep fixing stays offered while
+  failures are left. A carried-on run's announcement gives "Cost US$0.04 since you came back,
+  US$0.18 in all.". `FixRound.by` and `RoomFix.pending` are each `.catch(undefined)` on their
+  own.
 - **Records**: `PROPOSAL_RECORD_VERSION` 5 (`RunCheckpoint.fixing` with `pending`, `plan.fixOnly`). A v4 tab
   reads a 5 as nothing (`proposalFromRecord`) and its writes return null for it, so it never
   writes one back without the pool's state; 1–4 read as 5 with `fixing: {}`.
@@ -1091,13 +1102,19 @@ fixing, orphans, what was left out.** Proposal records 5.
   it."; `orphanLines`) in the option's `appLines` (a run with no layout step adds to the option's
   own). The bench runs it too; its layouts are byte-identical (no orphans in the recorded
   answers). The look's round doesn't take orphans out.
+- **Answers by position (v1)** get the free pass and orphans too (QA: a v1 living room with no
+  sofa and no table got neither, and a paid round instead): the app's piece goes to `placePiece`
+  (against the longest free wall, as v1 places), kept only by the same rule, else said with why
+  (`missed`). The B1 guard (`v: 2` only) is gone; the bench is byte-identical (its recorded v1
+  answers miss no essential).
 - **Near misses** (criterion 15): a 0.89 m walkway of 0.90 m is mended and passes; 0.84 m is not a
   near miss. The boundary was 6 cm by float luck (0.9 − 0.84 rounds above 0.06, 0.9 + (2.97 −
   3.03) below): now `short < NEAR_MISS − 1e-6`, so a 6 cm miss never is one. Bench byte-identical.
 - **Left out, on the card** (QA, then UX): when the answer's own pieces are left out (no `app:`
   piece, not one already said as a failure's cause), the lead says "Left out, didn't fit: 2 bedside
   tables, a second built-in wardrobe, 2 wardrobes." (bedside tables first; "a second" when the
-  version has one of that kind; "Left out: …" when some went for another reason), with the app's
+  version has one of that kind; "Main bedroom: …; Study: …" when they are in more than one room;
+  "Left out: …" when some went for another reason), with the app's
   neutral mark (nothing fails for it) and the headline's tick following the checks. The reasons
   are a tap away (`leftOutWords`), each once: walls taken by the version's pieces are one sentence
   a room ("No free wall left in Main bedroom for these: the queen bed and the built-in wardrobe

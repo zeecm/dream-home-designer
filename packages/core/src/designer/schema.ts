@@ -454,16 +454,18 @@ export const FixRound = z.object({
     'no-fixups',
     // You stopped the run while it was on its way: the answer before it stands.
     'stopped',
+    // On its way when the page went (a run carried on): not sent again, and it may be billed.
+    'away',
   ]),
   before: z.number().int().min(0),
   after: z.number().int().min(0),
   /**
    * Sent after the second look (its one round), not by the room's own checks; or by Keep fixing
    * (B2: a round the person asked and paid for after the version was shown). New within the
-   * record's version: a build that knows only 'look' drops the room's rounds (read tolerantly),
-   * so only the card's detail is lost.
+   * record's version, read tolerantly on its own: a value this build doesn't know drops only
+   * `by` (a build that knows only 'look' drops the room's rounds; only the card's detail goes).
    */
-  by: z.enum(['look', 'keep']).optional(),
+  by: z.enum(['look', 'keep']).optional().catch(undefined),
 });
 export type FixRound = z.infer<typeof FixRound>;
 export const FixRounds = z.array(FixRound).max(12).optional().catch(undefined);

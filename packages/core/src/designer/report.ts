@@ -574,6 +574,8 @@ export interface FixSummary {
   looked: number;
   /** A round was on its way when the person stopped the run. */
   stopped: boolean;
+  /** A round was on its way when the page went (not sent again; it may be billed). */
+  away: boolean;
   /** Rounds Keep fixing sent (asked and paid for after the version was shown), and what they fixed. */
   keepSent: number;
   kept: number;
@@ -593,6 +595,7 @@ export function fixSummary(rooms: readonly ReportRoom[]): FixSummary {
     usedUp: false,
     looked: 0,
     stopped: false,
+    away: false,
     keepSent: 0,
     kept: 0,
   };
@@ -615,6 +618,7 @@ export function fixSummary(rooms: readonly ReportRoom[]): FixSummary {
         // Asked for after the version was shown: said apart, never as fixed "before showing you".
         f.keepSent++;
         if (x.outcome === 'fixed') f.kept += Math.max(0, x.before - x.after);
+        if (x.outcome === 'away') f.away = true;
         continue;
       }
       if (x.by === 'look') f.looked++;
@@ -629,6 +633,7 @@ export function fixSummary(rooms: readonly ReportRoom[]): FixSummary {
       if (x.outcome === 'error') f.error = true;
       if (x.outcome === 'no-better') f.noBetter = true;
       if (x.outcome === 'stopped') f.stopped = true;
+      if (x.outcome === 'away') f.away = true;
     }
     if (sentHere) f.rooms++;
   }
@@ -653,7 +658,13 @@ function fixSentence(f: FixSummary): string | null {
 
 /** The rounds' sentence before the version was shown (null: none were sent). */
 function fixBefore(f: FixSummary): string | null {
-  if (f.fixed > 0) return `Checked and fixed ${plural(f.fixed, 'problem')} before showing you.`;
+  if (f.fixed > 0) {
+    // A round on its way when the page went is said too, never silently (QA).
+    const lost = f.away
+      ? '; a fix round was cut off when the page went (it may still be billed)'
+      : '';
+    return `Checked and fixed ${plural(f.fixed, 'problem')} before showing you${lost}.`;
+  }
   if (!f.sent && !f.looked) return null;
   const many = f.rooms > 1;
   const after = f.looked ? `${f.sent ? ', and' : ''} after the second look` : '';
@@ -669,6 +680,9 @@ function fixBefore(f: FixSummary): string | null {
       : `${sent}, but the answer was cut off at the length limit and wasn’t used.`;
   }
   if (f.stopped) return `${sent}, but you stopped the run, so ${first}.`;
+  if (f.away) {
+    return `${sent}, but the page went while ${many ? 'a round' : 'it'} was on its way, so ${first}; it may still be billed.`;
+  }
   if (f.failed) {
     return `${sent}, but no readable answer came, so ${first}.`;
   }
@@ -758,6 +772,8 @@ export function roundLines(rooms: readonly ReportRoom[]): string[] {
           return `${name}: the request didn’t go through, not used`;
         case 'stopped':
           return `${name}: stopped, not used`;
+        case 'away':
+          return `${name}: cut off when the page went; it may still be billed`;
         default:
           return `${name}: no readable answer, not used`;
       }
@@ -794,26 +810,40 @@ export function leftOutWords(rep: RunReport): { line: string; reasons: string[] 
     .filter((l) => !l.ref.startsWith('app:') && !l.causes)
     .sort((a, b) => Number(b.role === 'bedside') - Number(a.role === 'bedside'));
   if (!own.length) return null;
-  const names = new Map<string, { name: string; another: boolean; k: number }>();
-  for (const l of own) {
-    const name = kindName(l.assetId);
-    const key = `${name}|${!!l.another}`;
-    const g = names.get(key) ?? { name, another: !!l.another, k: 0 };
-    g.k++;
-    names.set(key, g);
-  }
-  // One of a kind the version has already is "a second built-in wardrobe", never as if none.
-  const list = [...names.values()]
-    .map((g) =>
-      g.another
-        ? g.k > 1
-          ? `${g.k} more ${pluralNoun(g.name)}`
-          : `a second ${g.name}`
-        : g.k > 1
-          ? `${g.k} ${pluralNoun(g.name)}`
-          : g.name,
-    )
-    .join(', ');
+  // By room when they are in more than one ("Main bedroom: a second bedside table; Study: 2 desk
+  // chairs"), in the order the rooms come.
+  const roomsOf = [...new Set(own.map((l) => l.room ?? ''))];
+  const listFor = (pieces: ReportLeftOut[]) => {
+    const names = new Map<string, { name: string; another: boolean; k: number }>();
+    for (const l of pieces) {
+      const name = kindName(l.assetId);
+      const key = `${name}|${!!l.another}`;
+      const g = names.get(key) ?? { name, another: !!l.another, k: 0 };
+      g.k++;
+      names.set(key, g);
+    }
+    // One of a kind the version has already is "a second built-in wardrobe", never as if none.
+    return [...names.values()]
+      .map((g) =>
+        g.another
+          ? g.k > 1
+            ? `${g.k} more ${pluralNoun(g.name)}`
+            : `a second ${g.name}`
+          : g.k > 1
+            ? `${g.k} ${pluralNoun(g.name)}`
+            : g.name,
+      )
+      .join(', ');
+  };
+  const list =
+    roomsOf.length > 1
+      ? roomsOf
+          .map(
+            (room) =>
+              `${room || 'Another room'}: ${listFor(own.filter((l) => (l.room ?? '') === room))}`,
+          )
+          .join('; ')
+      : listFor(own);
   const fit = own.every((l) => !!l.code && NO_FIT.has(l.code));
   // The pieces no free wall was left for, one sentence a room ("No free wall left in Main bedroom
   // for these: the queen bed and the built-in wardrobe take the walls."); the rest in the person's

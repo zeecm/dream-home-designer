@@ -599,10 +599,15 @@ export function TalkPanel() {
     }
     const f = requestAnimationFrame(() =>
       requestAnimationFrame(() => {
-        const row = document.querySelector(
-          `[data-card="${CSS.escape(keepAsk)}"] [data-keep-fixing-buttons]`,
+        const ask = document.querySelector<HTMLElement>(
+          `[data-card="${CSS.escape(keepAsk)}"] [data-keep-fixing-card]`,
         );
-        row?.scrollIntoView({ block: 'nearest' });
+        const row = ask?.querySelector('[data-keep-fixing-buttons]');
+        const log = ask?.closest<HTMLElement>('.talk-log') ?? null;
+        // The whole ask where it fits (its first lines never under the bar above the log, QA);
+        // where it doesn't (a phone on its side), its buttons.
+        const fits = !!ask && (!log || ask.offsetHeight + 16 <= log.clientHeight);
+        (fits ? ask : row)?.scrollIntoView({ block: 'nearest' });
       }),
     );
     return () => cancelAnimationFrame(f);

@@ -17,7 +17,11 @@ import { keepFixing, keepFixingPrice } from './propose';
  * The card whose Keep fixing cost card is open: on a phone the sheet goes to full height and
  * its buttons scroll into view, as a cost card's do (Conversation).
  */
-export const useKeepAsk = create(() => ({ card: null as string | null }));
+export const useKeepAsk = create(() => ({
+  card: null as string | null,
+  /** A card whose Keep fixing run just started: its heading takes focus once it shows running. */
+  focus: null as string | null,
+}));
 
 export function KeepFixing({
   cardKey,
@@ -53,7 +57,7 @@ export function KeepFixing({
       button.current?.focus();
     }
     useKeepAsk.setState((s) =>
-      asking ? { card: cardKey } : s.card === cardKey ? { card: null } : s,
+      asking ? { card: cardKey } : s.card === cardKey ? { card: null } : {},
     );
   }, [asking, cardKey]);
   useEffect(
@@ -95,14 +99,11 @@ export function KeepFixing({
     try {
       const out = await keepFixing(proposal, letter, most);
       if (typeof out === 'object') setDearer(out.dearer);
+      // As a run starting: the card's heading takes focus, and keeps it while the run goes
+      // (ProposalCard gives it back if the card is drawn again under it).
       else if (out === 'started') {
-        // As a run starting: focus on the card's heading, where its progress shows.
-        requestAnimationFrame(() => {
-          const h = document.getElementById(`card-${cardKey}`);
-          if (!h) return;
-          if (!h.hasAttribute('tabindex')) h.setAttribute('tabindex', '-1');
-          h.focus({ preventScroll: false });
-        });
+        useKeepAsk.setState({ focus: cardKey });
+        requestAnimationFrame(() => document.getElementById(`card-${cardKey}`)?.focus());
       }
     } finally {
       setGoing(false);

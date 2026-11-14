@@ -236,6 +236,11 @@ export interface RunOptions {
    * the version was shown), so the card says it apart.
    */
   roundsBy?: 'keep';
+  /**
+   * The steps that were on their way when the page went (a run carried on: its checkpoint's
+   * `inflight`): a room's fix round among them is recorded as gone (`away`), never sent again.
+   */
+  lost?: string[];
   onUsage?: (u: Usage) => void;
   /** Where a version is placed and checked (the designer's worker); else here, at once. */
   results?: (
@@ -429,6 +434,38 @@ export async function runDesign(
     saving = saving.then(() => o.onSave?.(snapshot, info)).catch(() => {});
     return saving;
   };
+  /**
+   * A fix round that was on its way when the page went (QA, B2): its fix-up was taken and it may
+   * still be billed, so it isn't sent again; it is recorded as a round that went (`away`), so the
+   * card counts it and says so. A room's round by its reservation (`o.lost`: the checkpoint's
+   * steps in flight, a room answered and saved with no pending answer); the second look's by its
+   * space's `look` mark.
+   */
+  {
+    const by = o.roundsBy === 'keep' ? { by: 'keep' as const } : {};
+    const away = (key: string, round: FixRound) => {
+      const e = design.spaces[key];
+      if (e?.status !== 'done' || !e.design) return;
+      const n = e.rounds?.at(-1)?.after ?? 0;
+      design.spaces[key] = {
+        ...e,
+        rounds: [...(e.rounds ?? []), { ...round, before: n, after: n }].slice(-12),
+      };
+    };
+    for (const k of o.lost ?? []) {
+      const rf = fixing[k];
+      if (!rf || rf.settled || rf.pending) continue;
+      away(k, { outcome: 'away', before: 0, after: 0, ...by });
+    }
+    for (const [k, rf] of Object.entries(fixing)) {
+      if (!rf.look) continue;
+      away(k, { outcome: 'away', before: 0, after: 0, by: 'look' });
+      delete rf.look;
+      // (Its space's fix count went up when its request went: `fixes` is the rounds sent.)
+      const e = design.spaces[k];
+      if (e) design.spaces[k] = { ...e, fixes: (e.fixes ?? 0) + 1 };
+    }
+  }
 
   // The limit: checked before each step; one question at a time while paused.
   let asking: Promise<boolean> | null = null;
@@ -827,6 +864,9 @@ export async function runDesign(
         fixesLeft++;
         break;
       }
+      // On its way for this space: a page that goes before it is back records it as gone (QA).
+      fixing[r.space] = { ...(fixing[r.space] ?? { left: 0, settled: true }), look: true };
+      void save();
       st.fixing = { round: 1, problems: r.failures.length };
       st.status = 'running';
       say(`Second look: sending ${s.name} back once.`);
@@ -856,6 +896,9 @@ export async function runDesign(
         (raw) => parseSpaceDesign(raw, bounds),
       );
       o.onStep?.(st.key, 'fix', 'end');
+      // Back (with an answer or not): no longer on its way.
+      const marked = fixing[r.space];
+      if (marked) delete marked.look;
       st.fixing = null;
       if (again) {
         // With the app's free fixes, as a room's fix round has them: a bed the answer dropped

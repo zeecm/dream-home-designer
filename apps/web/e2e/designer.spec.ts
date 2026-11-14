@@ -2357,6 +2357,8 @@ test.describe('designer listens, B2: fix rounds by progress, Keep fixing, what w
       await keep.scrollIntoViewIfNeeded();
       await keep.click();
       await expect(ask.getByRole('button', { name: 'Not now' })).toBeInViewport();
+      // Upright, the whole ask, its first line too (never under the bar above the log).
+      if (width === 390) await expect(ask.locator('p')).toBeInViewport({ ratio: 1 });
       await expect(ask.getByRole('button', { name: /^Keep fixing · at most/ })).toBeInViewport();
       await shot(page, `b2-keep-fixing-ask-${width}`);
     }
@@ -2382,6 +2384,8 @@ test.describe('designer listens, B2: fix rounds by progress, Keep fixing, what w
       'Checked and fixed 3 problems before showing you, and 1 more when you asked to keep fixing.',
     );
     await expect(lead).not.toContainText('doesn’t pass');
+    // The heading kept focus through the run, the card worked out again under it and all.
+    await expect(v1.getByRole('heading', { name: /^V1 · / })).toBeFocused();
     await lead.getByText('How it was checked').click();
     await expect(lead).toContainText(/fix round 4 \(Keep fixing\): 1 → 0 problems/);
     // The log says Keep fixing ran, as an accept is said; no new "Where next?".
@@ -4220,6 +4224,96 @@ test.describe('a locked phone: resume and the wake lock (locked-phone runs, part
     const after = m.calls.slice(before).map((c) => c.step);
     expect(after).toContain(KITCHEN);
     for (const s of after) expect(done.has(s)).toBe(false);
+  });
+
+  test('reloaded during a fix round: it isn’t sent again, and the card counts it and says so (B2, QA)', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await setup(page);
+    const piece = (p: Record<string, unknown>) => ({
+      keep: null,
+      wall: null,
+      along: null,
+      at: null,
+      rotation: null,
+      width: null,
+      depth: null,
+      height: null,
+      why: '',
+      against: null,
+      faces: null,
+      near: null,
+      zone: null,
+      ...p,
+    });
+    /** The main bedroom with `k` desk chairs and no desk: k checks fail. */
+    const chairs = (k: number) => ({
+      ...sampleMainV2,
+      items: [
+        ...sampleMainV2.items,
+        ...Array.from({ length: k }, (_, i) =>
+          piece({ ref: `dc${i + 1}`, assetId: 'desk-chair', against: 'free', zone: 'work' }),
+        ),
+      ],
+    });
+    let release: (v: unknown) => void = () => {};
+    const held = new Promise((r) => {
+      release = r;
+    });
+    // Four chairs, then three; fix round 2 is held (the page goes), round 3 leaves one.
+    const m = await mock(page, {
+      reply: (c, n) =>
+        mainStep(c)
+          ? n === 3
+            ? held
+            : {
+                status: 200,
+                body: anthropicStream(chairs(n === 1 ? 4 : n === 2 ? 3 : 1), USAGE),
+                headers: { 'content-type': 'text/event-stream' },
+              }
+          : null,
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    await expect.poll(() => m.calls.filter(mainStep).length).toBe(3);
+    await expect
+      .poll(async () => (await runs(page))[0]?.inflight.map((x) => x.step) ?? [])
+      .toEqual(['rm_main-bedroom']);
+    await page.reload();
+    release('abort');
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    await page.getByRole('button', { name: /^Designer · V1 on the table$/ }).click();
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 60_000,
+    });
+    // Round 2 went once (it may be billed) and is never sent again; round 3 is the pool's last.
+    const sent = m.calls
+      .filter(mainStep)
+      .map((c) => /## Fix round \d+/.exec(promptOf(JSON.parse(c.body)))?.[0] ?? 'room');
+    expect(sent).toEqual(['room', '## Fix round 1', '## Fix round 2', '## Fix round 3']);
+    const lead = v1.locator('[data-lead]');
+    await expect(lead).toContainText(
+      'a fix round was cut off when the page went (it may still be billed)',
+    );
+    await expect(lead).toContainText('This design used the 3 fix-ups it was priced for.');
+    await lead.getByText('How it was checked').click();
+    await expect(lead).toContainText(
+      'fix round 2: cut off when the page went; it may still be billed',
+    );
+    // Failures are left: Keep fixing is offered.
+    await expect(v1.locator('[data-keep-fixing]')).toBeVisible();
+    // The announcement gives what it cost since the reload and in all (QA).
+    await expect(
+      page.locator('[aria-live]').filter({
+        hasText: /Cost US\$\d+\.\d\d since you came back, US\$\d+\.\d\d in all\./,
+      }),
+    ).toHaveCount(1);
+    await shot(page, 'b2-reload-fix');
   });
 
   test('reloaded during the second look’s round: the look is never priced or sent again (B1)', async ({
