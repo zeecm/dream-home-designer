@@ -9,6 +9,7 @@ import {
   optionTitle,
   repeatAhead,
   repeatRun,
+  sameFailures,
 } from '@dhd/core';
 import { meterSetting } from '../../../storage/store';
 import { useStore } from '../../../store';
@@ -52,50 +53,80 @@ export const sameScope = (a: ScopeRef, b: ScopeRef) =>
 export const newestOption = (p: Proposal): ProposalOption | undefined =>
   [...p.options].sort((a, b) => (a.madeAt ?? p.at).localeCompare(b.madeAt ?? p.at)).at(-1);
 
-/** The newest checked versions of a scope, oldest first, each with its card and run report. */
-export async function scopeVersions(
-  scope: ScopeRef,
-  last = 6,
-): Promise<(RepeatVersion & { card: CardModel; option: ProposalOption; proposal: Proposal })[]> {
-  const project = useStore.getState().editor.doc;
-  const ps = useTalk
+type ScopeVersion = RepeatVersion & {
+  card: CardModel;
+  option: ProposalOption;
+  proposal: Proposal;
+};
+
+/** The checked versions of a scope (each proposal's newest option), oldest first, unworked. */
+function scopeOptions(scope: ScopeRef, last: number) {
+  return useTalk
     .getState()
     .proposals.filter((p) => sameScope(p.scope, scope))
     .sort((a, b) => a.n - b.n)
+    .flatMap((p) => {
+      const o = newestOption(p);
+      return o && o.status === 'checked' ? [{ p, o }] : [];
+    })
     .slice(-last);
-  const out: (RepeatVersion & { card: CardModel; option: ProposalOption; proposal: Proposal })[] =
-    [];
-  for (const p of ps) {
-    const o = newestOption(p);
-    if (!o || o.status !== 'checked') continue;
+}
+
+/**
+ * The run of versions, newest back, worked out lazily (each report from the worker, free): the
+ * newest, then the one before, then further back only while each failed the same way. Oldest
+ * first; empty when the newest two don't repeat (so a press waits for two reports at most
+ * before it knows).
+ */
+async function repeatedVersions(
+  opts: readonly { p: Proposal; o: ProposalOption }[],
+): Promise<ScopeVersion[]> {
+  const project = useStore.getState().editor.doc;
+  const work = async ({ p, o }: { p: Proposal; o: ProposalOption }) => {
     const card = optionCard(p, o, designLevelId());
     const got = await cardReportNow(project, card).catch(() => null);
-    if (!got) continue;
-    out.push({
-      title: optionTitle(p.n, o.letter, p.options.length),
-      report: got.report,
-      depends: o.depends,
-      waived: o.waivers.length > 0,
-      addressed: (o.addresses ?? []).map((a) => a.sig),
-      card,
-      option: o,
-      proposal: p,
-    });
+    return got
+      ? {
+          title: optionTitle(p.n, o.letter, p.options.length),
+          report: got.report,
+          depends: o.depends,
+          waived: o.waivers.length > 0,
+          addressed: (o.addresses ?? []).map((a) => a.sig),
+          card,
+          option: o,
+          proposal: p,
+        }
+      : null;
+  };
+  const out: ScopeVersion[] = [];
+  for (let i = opts.length - 1; i >= 0; i--) {
+    const at = opts[i];
+    const v = at ? await work(at) : null;
+    if (!v) break;
+    const next = out[0];
+    if (next ? !sameFailures(v.report, next.report) : !v.report.failures.length) break;
+    out.unshift(v);
   }
-  return out;
+  return out.length >= 2 ? out : [];
 }
 
 /**
  * Whether a paid run for `scope` asked now will likely come back with the same failures (§5),
  * as the cost card keeps it: null when it won't, or when that can't be told (then the usual
- * rules decide: it only ever adds an ask).
+ * rules decide: it only ever adds an ask). The cheap tests first (the newest's key, a waiver),
+ * so a press with anything changed works out no report at all.
  */
 export async function repeatFor(
   scope: ScopeRef,
   addressed: readonly string[],
 ): Promise<Repeat | null> {
-  const vs = await scopeVersions(scope).catch(() => []);
-  const found = repeatAhead(vs, dependsNow(), { addressed });
+  const opts = scopeOptions(scope, 6);
+  const newest = opts.at(-1)?.o;
+  const now = dependsNow();
+  if (opts.length < 2 || !newest?.depends || newest.depends !== now || newest.waivers.length)
+    return null;
+  const vs = await repeatedVersions(opts).catch(() => []);
+  const found = repeatAhead(vs, now, { addressed });
   const last = vs.at(-1);
   if (!found || !last) return null;
   // Said in full once for a set of failures; the next card for the same is one line.
@@ -120,9 +151,10 @@ export async function repeatFor(
 export async function blockingFor(card: CardModel): Promise<{ titles: string[] } | null> {
   const p = card.proposal;
   if (!p || !card.option) return null;
-  const vs = await scopeVersions(p.scope).catch(() => []);
-  const last = vs.at(-1);
-  if (!last || last.proposal.id !== p.id || last.option.letter !== card.option.letter) return null;
-  const run = repeatRun(vs);
+  const opts = scopeOptions(p.scope, 6);
+  const last = opts.at(-1);
+  if (!last || opts.length < 2 || last.p.id !== p.id || last.o.letter !== card.option.letter)
+    return null;
+  const run = repeatRun(await repeatedVersions(opts).catch(() => []));
   return run ? { titles: run.titles } : null;
 }

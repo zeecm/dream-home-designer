@@ -2113,7 +2113,10 @@ test.describe('designer listens, B1: free fixes and room vetting', () => {
     await expect(accepted).toContainText('Left out: the app’s queen bed');
     // The Decision, at Accept: by room and role, so the free fix doesn't offer it again.
     await expect.poll(() => dumpIdb(page)).toContain('Left out: the app’s queen bed in');
-    expect(await dumpIdb(page)).toContain('"free":{"room":"rm_main-bedroom","role":"bed"}');
+    // Talk records 5: a decline in the structured list, tied to its Decision.
+    expect(await dumpIdb(page)).toMatch(
+      /"declined":\[\{"decision":"dec_[^"]+","room":"rm_main-bedroom","role":"bed"\}\]/,
+    );
     await panel(page).getByRole('button', { name: 'Designer menu' }).click();
     await page.getByRole('menuitem', { name: 'Decisions' }).click();
     await expect(
