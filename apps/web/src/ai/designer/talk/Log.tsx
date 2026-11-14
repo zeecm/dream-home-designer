@@ -42,6 +42,7 @@ import { ReplyParts, ReplyText, SentState, Streaming } from './Talk';
 import { lineState, redoLine, undoLine } from './accept';
 import { type CardModel, designCard, earlierDesign, nowOf, optionCard } from './cards';
 import { dayMark } from './days';
+import { focusFreeButton, freeUndoable, undoFree } from './free';
 import { unkeep } from './pointers';
 import {
   answerCost,
@@ -547,10 +548,16 @@ function Event({ t }: { t: TurnOf<'event'> }) {
   } else if (e.type === 'kept') {
     icon = e.undone ? 'undo' : 'check';
     text = e.undone ? `${e.text} Undone.` : e.text;
+  } else if (e.type === 'note' && e.free) {
+    // A free fix asked for from a card: the app's own line, with Undo while it is the newest.
+    icon = e.free.undone ? 'undo' : 'check';
+    text = e.free.undone ? `${e.text} Undone.` : e.text;
   } else {
     icon = e.type === 'fact' ? 'edit' : /^Couldn’t/.test(e.text) ? 'warn' : 'dot';
     text = e.text;
   }
+  // Read again as the turns and the proposals move (a newer free line, an accept since).
+  const freeUndo = useTalk((s) => e.type === 'note' && !!e.free && !!s.conv && freeUndoable(t.id));
   return (
     <article className="talk-turn talk-app" aria-labelledby={`h-${t.id}`}>
       <h3 id={`h-${t.id}`} className="visually-hidden">
@@ -564,6 +571,16 @@ function Event({ t }: { t: TurnOf<'event'> }) {
           <span>{text}</span>
           {e.type === 'kept' && !e.undone && newestKept === t.id && (
             <button type="button" className="link-btn" onClick={() => void undoKept(e.keptId)}>
+              Undo
+            </button>
+          )}
+          {freeUndo && (
+            <button
+              type="button"
+              className="link-btn"
+              data-undo-free={t.id}
+              onClick={() => void undoFree(t.id).then(focusFreeButton)}
+            >
               Undo
             </button>
           )}

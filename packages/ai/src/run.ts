@@ -8,6 +8,8 @@ import {
   FIX_PER_RUN,
   type FixRequest,
   type FixRound,
+  type FreeOptions,
+  type FreeOutcome,
   type Level,
   type LookImage,
   type OptionLook,
@@ -24,6 +26,11 @@ import {
   critiqueSketch,
   designResult,
   fixRoundsFor,
+  freeEssentials,
+  freeName,
+  furnitureKind,
+  isAppRef,
+  isDeclined,
   keptAsWas,
   layoutStep,
   leftOutLines,
@@ -40,12 +47,14 @@ import {
   peopleWords,
   placedWords,
   resolveAsset,
+  roleOf,
   roomIdAt,
   roomStep,
   runReport,
   tokensOf,
   usageOf,
   usdOf,
+  vetConcept,
 } from '@dhd/core';
 import { AiError } from './errors';
 import type { Page } from './page';
@@ -77,9 +86,11 @@ const NO_ANSWER: Record<FailReason, FixRound['outcome']> = {
  * starts (so the others read the prompt cache it wrote), then two more at a time, one at a
  * time after a rate limit. Each step is kept as it finishes; Stop aborts every request in
  * flight and keeps what's done. Every request's tokens are metered, a cut-off one estimated.
- * Each room's answer is placed and checked as it arrives: hard checks it fails go back to the
- * designer (once a room on Quick, twice on Thorough, FIX_PER_RUN requests in a run at most,
- * with the app's own lines) before the version is shown.
+ * The layout is vetted as it arrives (`vetConcept`: a room where someone sleeps stays a
+ * bedroom). Each room's answer gets the app's free fixes (a missing bed, seats, dining table or
+ * desk, `freeEssentials`, no request), is placed and checked: hard checks it fails go back to
+ * the designer (once a room on Quick, twice on Thorough, FIX_PER_RUN requests in a run at most,
+ * with the app's own lines), each answer again with its free fixes, before the version is shown.
  */
 
 export type StepStatus = 'waiting' | 'running' | 'done' | 'failed' | 'cancelled' | 'skipped';
@@ -205,6 +216,20 @@ export interface RunOptions {
     opts?: DesignOptions,
   ) => Promise<DesignResult>;
   /**
+   * Where a space's free fixes are worked out (the designer's worker, as `results`); else here.
+   * The missing essentials of a must-have check, added to the answer and kept only when
+   * strictly better (core's `freeEssentials`). No request.
+   */
+  free?: (
+    base: Level,
+    before: Level,
+    design: DesignInput,
+    opts: DesignOptions | undefined,
+    o: FreeOptions,
+  ) => Promise<FreeOutcome>;
+  /** Pieces the person left out before (room and role): the free fixes never add them again. */
+  declined?: FreeOptions['declined'];
+  /**
    * Whether the tab's limit (or the run's figure) has been reached, counting `next` (the step
    * about to be sent) at its most: before each step, and before any request is sent again.
    */
@@ -315,6 +340,9 @@ function untilStopped<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
+/** A space a run designs: its key, name and rooms. */
+type RunSpace = { key: string; name: string; rooms: string[] };
+
 export async function runDesign(
   o: RunOptions,
 ): Promise<{ state: RunState; design: DraftDesign; look: OptionLook | null }> {
@@ -323,6 +351,9 @@ export async function runDesign(
   // ends the run, even while a check is out (a worker that hangs or dies says nothing).
   const placeAny = o.results ?? ((b, f, d, opts) => Promise.resolve(designResult(b, f, d, opts)));
   const place: typeof placeAny = (b, f, d, opts) => untilStopped(placeAny(b, f, d, opts), o.signal);
+  const freeAny =
+    o.free ??
+    ((b, f, d, opts, fo) => Promise.resolve().then(() => freeEssentials(b, f, d, opts, fo)));
   const doFetch = o.fetch ?? fetch.bind(globalThis);
   const design: DraftDesign = structuredClone(o.design);
   const name = PROVIDERS[ai.provider].short;
@@ -524,6 +555,71 @@ export async function runDesign(
   // The storage lens's block in each room step (what the space should hold), unless it's off.
   const storage = o.result && !lensOn(o.result, 'storage') ? false : o.result?.storage;
 
+  /**
+   * An answer with the app's free fixes (the missing essentials of its must-have checks),
+   * worked out on the space alone as `failing` checks it, and kept only when strictly better.
+   * Never in a space whose furniture the person kept (Change something, a lock); the pieces the
+   * answer carries over from the one it changes count as theirs, so "no worse" leaves out only
+   * what this answer added. It fails open: a free pass that can't be worked out leaves the paid
+   * answer as it is (only Stop ends the room).
+   */
+  const withFree = async (
+    s: RunSpace,
+    answer: SpaceDesign,
+    /** The answer a fix round changed: a piece of it the new one dropped and the app puts back. */
+    prior?: SpaceDesign,
+  ) => {
+    if (furnitureHeld(s)) return answer;
+    const trial: DraftDesign = {
+      ...design,
+      spaces: { [s.key]: { name: s.name, status: 'done', design: answer } },
+    };
+    // Theirs: only what the answer really carries over from the one it changes (the parts kept,
+    // `mergeAnswer`), never a piece of the new answer that happens to share a ref with the old
+    // (QA: after an Accept, a redesign's bedside "side2" made every free bed look worse).
+    const keepAs = plan.keep?.[s.key] ?? [];
+    const carried = (plan.previous?.[s.key]?.items ?? [])
+      .filter((i) => keepAs.includes(aspectOfAnswer(i.assetId, o.result)))
+      .map((i) => i.ref);
+    const out = await untilStopped(
+      freeAny(ctx.base, ctx.before, trial, o.result, {
+        spaces: [s.key],
+        ...(o.declined?.length ? { declined: o.declined } : {}),
+        ...(carried.length ? { theirs: { [s.key]: carried } } : {}),
+      }),
+      o.signal,
+    ).catch((e: unknown) => {
+      if (e instanceof Stopped) throw e;
+      return null;
+    });
+    const placed = out?.added.length ? out.spaces[s.key]?.design : undefined;
+    if (!placed) return answer;
+    // A piece the fix round's answer dropped, put back by the app: its row says so.
+    const had = new Set((prior?.items ?? []).map((i) => roleOf(furnitureKind(i.assetId))));
+    const back = (out?.added ?? []).filter((a) => a.space === s.key && had.has(a.role));
+    if (!back.length) return placed;
+    const refs = new Set(back.map((a) => a.ref));
+    return {
+      ...placed,
+      items: placed.items.map((i) =>
+        refs.has(i.ref) && isAppRef(i.ref)
+          ? {
+              ...i,
+              // (What gave way for it, when something did, is still said.)
+              why: `Put back by the app: the fix round’s answer left out the ${freeName(i.assetId)}.${/ One .+ left out\.$/.exec(i.why)?.[0] ?? ''}`,
+            }
+          : i,
+      ),
+    };
+  };
+  /** The person kept this space's furniture: by the plan (Change something) or a lock. */
+  const furnitureHeld = (s: RunSpace) =>
+    !!plan.keep?.[s.key]?.includes('furniture') ||
+    (plan.locks ?? []).some(
+      (l) =>
+        l.aspect === 'furniture' &&
+        (l.space === '*' || l.space.split('+').some((id) => s.rooms.includes(id))),
+    );
   const blankLook = (): OptionLook => ({
     state: 'done',
     summary: null,
@@ -555,11 +651,21 @@ export async function runDesign(
     const before = await place(ctx.base, ctx.before, design, o.result);
     design.aliases = aliasesFor(before.level, design.aliases);
     /** The run's report on the version (its F and L lines), for these spaces or all of them. */
+    // A must-have the person left out (a Decision) is theirs: never a failure the look is shown.
+    const chosen = before.checks
+      .filter(
+        (c) => c.hard && !c.itemId && !!c.roomId && isDeclined(c.key, c.roomId, o.declined ?? []),
+      )
+      .map((c) => c.key);
     const reportOf = (spaces?: string[]) =>
       runReport(
         before,
         { spaces: design.spaces, brief: ctx.brief },
-        { aliases: design.aliases, ...(spaces ? { spaces } : {}) },
+        {
+          aliases: design.aliases,
+          ...(spaces ? { spaces } : {}),
+          ...(chosen.length ? { waived: chosen } : {}),
+        },
       );
     const facts = lookFacts(before, ctx.base, {
       report: reportOf(scope ? designed.map((d) => d.key) : undefined),
@@ -613,6 +719,7 @@ export async function runDesign(
       answers,
       ...(o.result?.models ? { models: o.result.models } : {}),
       ...(o.result?.kept?.length ? { kept: o.result.kept } : {}),
+      ...(o.declined?.length ? { declined: o.declined } : {}),
     });
     out.notes = acted.notes;
     out.offers = acted.offers.map((x) => ({ rule: x.rule, line: x.line }));
@@ -687,6 +794,7 @@ export async function runDesign(
             ...(storage !== undefined ? { storage } : {}),
             ...(plan.feedback ? { feedback: plan.feedback } : {}),
             ...(plan.talk ? { talk: plan.talk } : {}),
+            ...(o.declined?.length ? { declined: o.declined } : {}),
             locks: plan.locks ?? [],
             previous: entry.design,
             fix,
@@ -698,11 +806,13 @@ export async function runDesign(
       o.onStep?.(st.key, 'fix', 'end');
       st.fixing = null;
       if (again) {
-        entry.design = mergeAnswer(
-          plan.previous?.[r.space],
-          again,
-          plan.keep?.[r.space] ?? [],
-          o.result,
+        // With the app's free fixes, as a room's fix round has them: a bed the answer dropped
+        // is put back (and said so), and the round is judged with it (`lookNoWorse`, `record`).
+        const prior = entry.design;
+        entry.design = await withFree(
+          s,
+          mergeAnswer(plan.previous?.[r.space], again, plan.keep?.[r.space] ?? [], o.result),
+          prior,
         );
         changed = true;
         records.push({ space: r.space, round: null, checks: r.checks, keys: r.keys });
@@ -806,7 +916,19 @@ export async function runDesign(
       // (A step sent again after the page was away took the time away too: not timed.)
       if (!st.resent) o.onTimed?.('layout', Date.now() - t0);
       if (!concept) return ended('failed');
-      design.concept = concept;
+      // Vetted before any room is sent (free): a room where someone sleeps stays a bedroom, and a
+      // wall whose removal joins it to a living room stays. The concept is stored as vetted.
+      const vetted = vetConcept(
+        concept,
+        ctx.base,
+        ctx.before,
+        design.brief,
+        design.aliases,
+        design.id,
+      );
+      design.concept = vetted.concept;
+      if (vetted.lines.length) design.appLines = vetted.lines;
+      else delete design.appLines;
       say(`Layout and style done. ${usdText(spentSoFar())} so far.`);
       update();
     }
@@ -836,7 +958,9 @@ export async function runDesign(
     update();
 
     const bounds = levelBounds(r.level);
-    /** The hard checks a space's answer fails (that the plan didn't already), in the app's words. */
+    /** A must-have check of a room where the person left that piece out (`o.declined`). */
+    const declinedCheck = (c: { key: string; roomId?: string; itemId?: string }) =>
+      !c.itemId && !!c.roomId && isDeclined(c.key, c.roomId, o.declined ?? []);
     /**
      * The hard checks one space's answer fails (that the plan didn't already), in the app's
      * words, and where it placed each piece: worked out on that space alone. Failures that
@@ -857,7 +981,9 @@ export async function runDesign(
       );
       return {
         fixable: mine
-          .filter((c) => !c.unfixable)
+          // A must-have the person left out (a Decision: no bed here) is theirs to have: never
+          // sent back to be fixed, never a fix-up spent on it.
+          .filter((c) => !c.unfixable && !declinedCheck(c))
           .map((c) => ({ ref: (c.itemId && res.refs[c.itemId]) || null, text: c.text })),
         placed: placedWords(res.level, s, res.refs, design.aliases, ctx.site?.north ?? 0),
         // The pieces it left out, with why and a hint: so a bed dropped for a keep ref the
@@ -887,6 +1013,7 @@ export async function runDesign(
         ...(storage !== undefined ? { storage } : {}),
         ...(plan.feedback ? { feedback: plan.feedback } : {}),
         ...(plan.talk ? { talk: plan.talk } : {}),
+        ...(o.declined?.length ? { declined: o.declined } : {}),
         locks: plan.locks ?? [],
         previous: plan.previous?.[s.key] ?? null,
       });
@@ -901,7 +1028,7 @@ export async function runDesign(
         if (answer) {
           const merge = (a: SpaceDesign) =>
             mergeAnswer(plan.previous?.[s.key], a, plan.keep?.[s.key] ?? [], o.result);
-          let current = merge(answer);
+          let current = await withFree(s, merge(answer));
           // Placed and checked: what fails goes back to the designer, at most twice.
           const first = await failing(s, current);
           let fixes = 0;
@@ -957,6 +1084,7 @@ export async function runDesign(
                   ...(storage !== undefined ? { storage } : {}),
                   ...(plan.feedback ? { feedback: plan.feedback } : {}),
                   ...(plan.talk ? { talk: plan.talk } : {}),
+                  ...(o.declined?.length ? { declined: o.declined } : {}),
                   locks: plan.locks ?? [],
                   previous: current,
                   fix,
@@ -980,13 +1108,14 @@ export async function runDesign(
               st.error = null;
               break;
             }
-            const next = await failing(s, merge(again));
+            const fixedAnswer = await withFree(s, merge(again), current);
+            const next = await failing(s, fixedAnswer);
             // Kept only if it fails less; no better twice running is a room that can't pass,
             // and the second round isn't spent on it.
             const out = { before: left.length, after: next.fixable.length };
             if (next.fixable.length < left.length) {
               rounds.push({ outcome: 'fixed', ...out });
-              current = merge(again);
+              current = fixedAnswer;
               now = next;
             } else {
               rounds.push({ outcome: 'no-better', ...out });

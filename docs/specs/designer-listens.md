@@ -150,6 +150,8 @@ rebuilt from what's stored):
   elder), seats for the living room (3-seat sofa, then 2-seat, then armchairs), a dining table for
   the household (with the existing swaps), a desk and chair for each person working from home where
   the plan or brief has a study. Placed by the solver with the space's other pieces.
+  A queen goes in only when both partners have no bed in the same room (both their checks fail
+  there). A single adult without a bed gets a super single, even when their partner has one.
 - **Orphans:** a dining chair with no table, a bedside with no bed: taken out, but only pieces this
   answer added, never the person's own or kept pieces.
 - **Near misses** (issue item 4): a clearance short by 5 cm or less (0.89 m against 0.90 m) is fixed

@@ -3,8 +3,15 @@ import { sampleFlatProject } from '../../fixtures/sampleFlat';
 import { levelBounds } from '../../geometry';
 import type { Level } from '../../schema';
 import { aliasesFor } from '../aliases';
+import { freeEssentials } from '../free';
 import { type DesignResult, designResult } from '../result';
-import { type DesignBrief, type SpaceDesign, defaultBrief, parseSpaceDesign } from '../schema';
+import {
+  type DesignBrief,
+  type DesignInput,
+  type SpaceDesign,
+  defaultBrief,
+  parseSpaceDesign,
+} from '../schema';
 import hdb4Bed2 from './answers/hdb4-bed2.json';
 import hdb4Bed3 from './answers/hdb4-bed3.json';
 import hdb4Kitchen from './answers/hdb4-kitchen.json';
@@ -13,6 +20,7 @@ import hdb4Master from './answers/hdb4-master.json';
 import ownerBedroom from './answers/owner-bedroom.json';
 import ownerDiningFix from './answers/owner-dining-fix.json';
 import ownerDining from './answers/owner-dining.json';
+import ownerV8Main from './answers/owner-v8-main.json';
 import sampleBedroom from './answers/sample-bedroom.json';
 import sampleKitchen from './answers/sample-kitchen.json';
 import sampleLiving from './answers/sample-living.json';
@@ -52,6 +60,8 @@ export interface BenchReport {
   /** Pieces left out. */
   dropped: number;
   pieces: number;
+  /** Pieces the app placed itself, free (the missing essentials: `freeEssentials`). */
+  free: string[];
   ms: number;
   result: DesignResult;
 }
@@ -139,6 +149,35 @@ export const BENCHMARK: BenchFlat[] = [
     },
     answers: { 'rm_dry-kitchen+rm_living-and-dining': [ownerDining, ownerDiningFix] },
   },
+  {
+    id: 'owner-no-bed',
+    name: 'Owner, 9 Nov (V8): the main bedroom keeps a bed the plan doesn’t have; the app places one',
+    level: sample,
+    brief: {
+      ...defaultBrief(),
+      lifestyle: { wfh: 2, cooking: 'daily', guests: false },
+      sleeping: { 'rm_main-bedroom': ['adult-1', 'adult-2'] },
+    },
+    // Kept by aliases of an accepted version (P1–P15): on the flat as it is they aren't there.
+    known: {
+      bed1: 'kept as P7, not in the plan: the app places its own queen bed instead',
+      chest1: 'kept as P2, not in the plan',
+      bs1: 'kept as P10, not in the plan',
+      arm1: 'kept as P1, not in the plan',
+    },
+    answers: { 'rm_main-bedroom': [ownerV8Main] },
+  },
+  {
+    id: 'living-no-sofa',
+    name: 'The sample living room answered with no sofa: the app places one',
+    level: sample,
+    brief: ONGS,
+    answers: {
+      'rm_dry-kitchen+rm_living-and-dining': [
+        { ...sampleLiving, items: sampleLiving.items.filter((i) => i.ref !== 'sofa1') },
+      ],
+    },
+  },
 ];
 
 const parsedAnswer = (raw: unknown, level: Level): SpaceDesign => {
@@ -147,27 +186,37 @@ const parsedAnswer = (raw: unknown, level: Level): SpaceDesign => {
   return r.value;
 };
 
-/** One flat, placed and checked as the app does, with its recorded fix rounds. */
+/**
+ * One flat, placed and checked as the app does, with its recorded fix rounds. Each answer gets
+ * the app's free fixes first, as the runner gives them (a version where nothing fails is the
+ * same object, so its layout is unchanged).
+ */
 export function runFlat(flat: BenchFlat): BenchReport {
   const level = flat.level();
   const t0 = performance.now();
   const round = new Map(Object.keys(flat.answers).map((k) => [k, 0]));
-  const design = (id: string) => ({
-    id,
-    brief: flat.brief,
-    aliases: aliasesFor(level),
-    concept: null,
-    spaces: Object.fromEntries(
-      Object.entries(flat.answers).map(([k, list]) => [
-        k,
-        {
-          name: k,
-          status: 'done' as const,
-          design: parsedAnswer(list[round.get(k) ?? 0], level),
-        },
-      ]),
-    ),
-  });
+  const free: string[] = [];
+  const design = (id: string): DesignInput => {
+    const d: DesignInput = {
+      id,
+      brief: flat.brief,
+      aliases: aliasesFor(level),
+      concept: null,
+      spaces: Object.fromEntries(
+        Object.entries(flat.answers).map(([k, list]) => [
+          k,
+          {
+            name: k,
+            status: 'done' as const,
+            design: parsedAnswer(list[round.get(k) ?? 0], level),
+          },
+        ]),
+      ),
+    };
+    const out = freeEssentials(level, level, d);
+    free.splice(0, free.length, ...out.added.map((a) => `${a.ref} ${a.assetId}`));
+    return { ...d, spaces: out.spaces };
+  };
   let result = designResult(level, level, design(`dsn_bench_${flat.id}`));
   let caught = 0;
   let fixRounds = 0;
@@ -194,6 +243,7 @@ export function runFlat(flat: BenchFlat): BenchReport {
     bedless: result.checks.filter((c) => !c.already && c.key.startsWith('P1|bed|')).length,
     dropped: result.dropped.length,
     pieces: Object.keys(result.level.items).length,
+    free,
     ms: performance.now() - t0,
     result,
   };
@@ -204,7 +254,7 @@ export function benchText(reports: BenchReport[]): string {
   return reports
     .map(
       (r) =>
-        `${r.id}: ${r.shown.length} failing shown, ${r.caught} caught before, ${r.fixRounds} fix rounds, ${r.bedless} without a bed, ${r.dropped} left out, ${r.pieces} pieces, ${r.ms.toFixed(0)} ms${r.shown.length ? `\n  ${r.shown.join('\n  ')}` : ''}`,
+        `${r.id}: ${r.shown.length} failing shown, ${r.caught} caught before, ${r.fixRounds} fix rounds, ${r.bedless} without a bed, ${r.dropped} left out, ${r.pieces} pieces${r.free.length ? `, placed by the app: ${r.free.join(', ')}` : ''}, ${r.ms.toFixed(0)} ms${r.shown.length ? `\n  ${r.shown.join('\n  ')}` : ''}`,
     )
     .join('\n');
 }

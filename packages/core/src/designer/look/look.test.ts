@@ -9,6 +9,7 @@ import sampleLiving from '../benchmark/answers/sample-living.json';
 import sampleMain from '../benchmark/answers/sample-main-bedroom.json';
 import { ONGS } from '../benchmark/benchmark';
 import { SAMPLE_KEYS, parsed, sampleDesign, sampleLevel } from '../fixtures/sample';
+import { freeEssentials } from '../free';
 import { estimateRun } from '../prices';
 import { roomStep } from '../prompts';
 import { type DesignResult, designResult } from '../result';
@@ -429,7 +430,11 @@ describe('what the app does with them (actOnLook): the checks always win', () =>
     expect(edit?.space).toBe(SAMPLE_KEYS.living);
     const d = answers[SAMPLE_KEYS.living] as SpaceDesign;
     const swapped = applyLookEdit(d, edit!, 1);
-    expect(swapped.items.find((i) => i.ref === 'sofa1')?.assetId).toBe('sofa-2');
+    // A swapped piece is a new piece, with a ref of its own (tech lead N1); what faced or went
+    // by the old one follows it.
+    expect(swapped.items.find((i) => i.ref === 'look1')?.assetId).toBe('sofa-2');
+    expect(swapped.items.some((i) => i.ref === 'sofa1')).toBe(false);
+    expect(swapped.items.some((i) => i.faces === 'sofa1' || i.near === 'sofa1')).toBe(false);
     const removed = applyLookEdit(
       d,
       { ...edit!, suggest: { ...base, kind: 'remove', piece: sofa } },
@@ -643,6 +648,54 @@ describe('what the app does with them (actOnLook): the checks always win', () =>
     ).toBe(false);
     expect(lookNoWorse(noBed, res([['P1|bed|rm_main-bedroom|bed', true]], 1))).toBe(false);
     expect(lookNoWorse(noBed, noBed, ['P1|bed|rm_main-bedroom|bed'])).toBe(false);
+  });
+
+  it('an HDB or house rule broken by a piece new to the round is new, its signature aside (N1)', () => {
+    const bed = (id: string) => ({ id, assetId: 'bed-queen' });
+    const res = (items: string[], checks: [string, string][]) =>
+      ({
+        level: { items: Object.fromEntries(items.map((id) => [id, bed(id)])) },
+        checks: checks.map(([key, itemId]) => ({
+          key,
+          itemId,
+          roomId: 'rm_shelter',
+          principle: key.split('|')[0],
+          hard: true,
+          already: false,
+        })),
+        dropped: [],
+      }) as unknown as DesignResult;
+    const one = res(['it_a'], [['HDB|shelter-bed|it_a', 'it_a']]);
+    // A second bed in the shelter, added by the round: the same signature, a new failure.
+    const two = res(
+      ['it_a', 'it_b'],
+      [
+        ['HDB|shelter-bed|it_a', 'it_a'],
+        ['HDB|shelter-bed|it_b', 'it_b'],
+      ],
+    );
+    expect(lookNoWorse(one, two)).toBe(false);
+    const rule = res(
+      ['it_a', 'it_c'],
+      [
+        ['HDB|shelter-bed|it_a', 'it_a'],
+        ['R|rule_1|it_c', 'it_c'],
+      ],
+    );
+    expect(
+      lookNoWorse(
+        res(
+          ['it_a'],
+          [
+            ['HDB|shelter-bed|it_a', 'it_a'],
+            ['R|rule_1|it_a', 'it_a'],
+          ],
+        ),
+        rule,
+      ),
+    ).toBe(false);
+    // The same piece placed again under its own id: the old failure, not refused for it.
+    expect(lookNoWorse(one, one)).toBe(true);
   });
 });
 
@@ -893,5 +946,121 @@ describe('the request and its price', () => {
     expect(back?.options[0]?.madeAt).toBe('2026-11-08T00:00:00Z');
     expect(back?.options[0]?.kept).toEqual([]);
     expect(proposalFromRecord({ ...p, recordVersion: 5 })).toBeNull();
+  });
+});
+
+describe('the app’s own pieces in the second look (designer listens, B1)', () => {
+  const base = {
+    piece: null,
+    against: null,
+    faces: null,
+    near: null,
+    zone: null,
+    kindId: null,
+    room: null,
+    rule: null,
+  } as const;
+  const ctxIn = { base: level, before: level, brief: ONGS, aliases: aliasesFor(level) };
+  /** The main bedroom answered with no bed, and the app's free bed put in. */
+  const noBed = v2({ ...sampleMain, items: sampleMain.items.filter((i) => i.ref !== 'bed1') });
+  const d0 = sampleDesign({
+    level,
+    answers: { [SAMPLE_KEYS.main]: noBed },
+    brief: ONGS,
+    concept: null,
+    id: 'dsn_look_free',
+  });
+  const input = { ...d0, aliases: aliasesFor(level) };
+  const fixed = { ...input, spaces: freeEssentials(level, level, input).spaces };
+  const rf = designResult(level, level, fixed);
+  const al = aliasesFor(rf.level, aliasesFor(level));
+  const appBed = Object.entries(rf.refs).find(([, x]) => x === 'app:bed')?.[0] as string;
+  const bedAlias = aliasOf(al).get(appBed) as string;
+
+  it('the facts mark the app’s piece, and the task says never to remove it', () => {
+    expect(appBed).toBeDefined();
+    const facts = lookFacts(rf, level, {
+      aliases: al,
+      scope: null,
+      brief: ONGS,
+      lenses: [],
+      roomOf: () => 'rm_main-bedroom',
+    });
+    expect(facts.pieces.find((p) => p.id === bedAlias)).toMatchObject({ byApp: true });
+    expect(facts.pieces.filter((p) => p.byApp)).toHaveLength(1);
+    const step = lookStep(ctxIn, facts, [{ mediaType: 'image/png', data: 'AAAA' }]);
+    expect(step.tail).toContain('Never suggest removing a piece the app placed (marked "byApp"');
+  });
+
+  it('a removal of the app’s piece is dropped; a swap renames it (never the app’s then)', () => {
+    const answers = Object.fromEntries(
+      Object.entries(fixed.spaces).flatMap(([k, s]) => (s.design ? [[k, s.design]] : [])),
+    );
+    const plan = actOnLook(
+      look([
+        finding({
+          target: { kind: 'piece', id: bedAlias },
+          principle: 'taste',
+          severity: 'fix',
+          line: 'The bed crowds the room.',
+          suggest: { ...base, kind: 'remove', piece: bedAlias },
+        }),
+      ]),
+      { result: rf, aliases: al, answers },
+    );
+    expect(plan.edits).toEqual([]);
+    expect(plan.dropped.map((d) => d.why)).toEqual(['kept']);
+    const d = answers[SAMPLE_KEYS.main] as SpaceDesign;
+    const withSide = {
+      ...d,
+      items: d.items.map((i) => (i.assetId === 'bedside' ? { ...i, near: 'app:bed' } : i)),
+    };
+    const swapped = applyLookEdit(
+      withSide,
+      {
+        space: SAMPLE_KEYS.main,
+        ref: 'app:bed',
+        suggest: { ...base, kind: 'swap', piece: bedAlias, kindId: 'bed-king' },
+        refs: {},
+        line: 'A king bed.',
+      },
+      3,
+    );
+    expect(swapped.items.some((i) => i.ref.startsWith('app:'))).toBe(false);
+    expect(swapped.items.find((i) => i.ref === 'look3')?.assetId).toBe('bed-king');
+    expect(swapped.items.filter((i) => i.assetId === 'bedside').map((i) => i.near)).toContain(
+      'look3',
+    );
+  });
+
+  it('a round is refused for a new failure by signature, not for the same one under new ids', () => {
+    // A dining table that doesn't belong in the bedroom: a hard failure on a piece.
+    const withTable = v2({
+      ...sampleMain,
+      items: [
+        ...sampleMain.items,
+        { ...sampleMain.items[0], ref: 'dt1', assetId: 'dining-4', why: '', against: 'free' },
+      ],
+    });
+    const at = (id: string) => {
+      const d = sampleDesign({
+        level,
+        answers: { [SAMPLE_KEYS.main]: withTable },
+        brief: ONGS,
+        concept: null,
+        id,
+      });
+      return designResult(level, level, { ...d, aliases: aliasesFor(level) });
+    };
+    const a = at('dsn_sig_a');
+    const b2 = at('dsn_sig_b');
+    const keys = (r: DesignResult) =>
+      r.checks.filter((c) => c.hard && !c.already).map((c) => c.key);
+    // The same failure, under each version's own piece ids.
+    expect(keys(a).some((k) => k.startsWith('P1|not|'))).toBe(true);
+    expect(keys(a)).not.toEqual(keys(b2));
+    expect(lookNoWorse(a, b2)).toBe(true);
+    // A new failure (the table where there was none) still refuses it.
+    expect(lookNoWorse(r0, a)).toBe(false);
   });
 });

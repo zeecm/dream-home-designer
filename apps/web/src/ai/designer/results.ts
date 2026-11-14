@@ -2,10 +2,13 @@ import {
   type DesignInput,
   type DesignOptions,
   type DesignResult,
+  type FreeOptions,
+  type FreeOutcome,
   type LensReport,
   type Level,
   designResult,
   designResultKey,
+  freeEssentials,
   lensReports,
 } from '@dhd/core';
 import { freeze } from 'immer';
@@ -254,6 +257,82 @@ export function readLens(
     () => looking.delete(key),
   );
   return null;
+}
+
+/**
+ * A version's free fixes (the missing essentials its must-have checks need), from the worker:
+ * a run's room asks once (`trialFree`, not kept); a card's dry run reads them (`readFree`, kept
+ * by the result's key and what it was asked for), and a press asks afresh (`requestFree`).
+ */
+export function trialFree(
+  base: Level,
+  before: Level,
+  design: DesignInput,
+  opts: DesignOptions | undefined,
+  o: FreeOptions,
+): Promise<FreeOutcome> {
+  return send<FreeOutcome>({ kind: 'free', base, before, design, opts: opts ?? {}, o });
+}
+
+const frees = new Map<string, FreeOutcome>();
+const freeing = new Set<string>();
+const freeKey = (
+  base: Level,
+  before: Level,
+  design: DesignInput,
+  opts: DesignOptions,
+  o: FreeOptions,
+) =>
+  `${designResultKey(base, before, design, opts)}|${JSON.stringify([o.spaces ?? null, o.declined ?? []])}`;
+
+/** A card's dry run: its free fixes if they are here; else null, and they are asked for. */
+export function readFree(
+  base: Level,
+  before: Level,
+  design: DesignInput,
+  opts: DesignOptions,
+  o: FreeOptions,
+): FreeOutcome | null {
+  const key = freeKey(base, before, design, opts, o);
+  const hit = frees.get(key);
+  if (hit) return hit;
+  if (freeing.has(key)) return null;
+  freeing.add(key);
+  if (!getWorker()) {
+    // No worker: worked out after this paint (it may place a space twice), never in the
+    // render that asked; `useResultsTick` says when it lands.
+    setTimeout(() => {
+      try {
+        keep(frees, key, freeze(freeEssentials(base, before, design, opts, o), true));
+      } finally {
+        freeing.delete(key);
+        bump();
+      }
+    }, 0);
+    return null;
+  }
+  trialFree(base, before, design, opts, o).then(
+    (v) => {
+      keep(frees, key, freeze(v, true));
+      freeing.delete(key);
+      bump();
+    },
+    () => freeing.delete(key),
+  );
+  return null;
+}
+
+/** The free fixes worked out now, waited for (a press of Place … · free). */
+export function requestFree(
+  base: Level,
+  before: Level,
+  design: DesignInput,
+  opts: DesignOptions,
+  o: FreeOptions,
+): Promise<FreeOutcome> {
+  const key = freeKey(base, before, design, opts, o);
+  const hit = frees.get(key);
+  return hit ? Promise.resolve(hit) : trialFree(base, before, design, opts, o);
 }
 
 const priced = new Map<string, Priced>();

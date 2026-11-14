@@ -135,8 +135,11 @@ for any plan.
 - The designer listens (issue #66 part 2, PR A): every failure on the card named, a missing bed
   included, in your names; the card says when it sent a room back to be fixed and how that went;
   the designer is told what the app found and why a piece was left out, never says it can't
-  check, and says which problems a plan fixes. Next: free fixes, fix rounds while progressing,
-  room vetting, no paying twice for the same failures. [spec](docs/specs/designer-listens.md)
+  check, and says which problems a plan fixes. PR B1: a missing bed, sofa, dining table or desk
+  is placed by the app itself, free, shown on the card as "By the app" and left out like any
+  row (a Place a queen bed · free button on older cards); a room where someone sleeps stays a
+  bedroom, and a wall that would open it onto the living room is kept. Next: fix rounds while
+  progressing, no paying twice for the same failures. [spec](docs/specs/designer-listens.md)
 - AI interior designer v2, slice 3a part B: point at the plan (a piece or a spot, "keep this",
   "why here?", "something else here") with the pointers sent with your message.
 - AI runs that survive a locked phone, part 2: opt-in cloud runs that keep going while the phone is

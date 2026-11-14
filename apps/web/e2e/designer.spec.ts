@@ -15,6 +15,12 @@ import {
   geminiStream,
   openaiStream,
 } from '../../../packages/ai/src/fixtures/streams';
+import sampleMainV2 from '../../../packages/core/src/designer/benchmark/answers/sample-main-bedroom.json' with {
+  type: 'json',
+};
+import ownerV4 from '../../../packages/core/src/designer/fixtures/owner-v4.json' with {
+  type: 'json',
+};
 import living from '../../../packages/core/src/designer/fixtures/room-living.json' with {
   type: 'json',
 };
@@ -793,7 +799,7 @@ test.describe('desktop', () => {
     await expect(v1.getByText(`2 of ${names.length} ticked`)).toBeVisible();
     await v1.getByRole('button', { name: 'Accept selected (2)' }).click();
     const line = log(page).getByText(`You accepted 2 of ${names.length} changes from V1.`);
-    await expect(line).toBeVisible();
+    await acceptedLine(page, v1, `You accepted 2 of ${names.length} changes from V1.`);
     await expect(panel(page).getByRole('button', { name: 'Undo' }).first()).toBeFocused();
     await expect(v1.getByText(`2 of ${names.length} changes in your renovation`)).toBeVisible();
     // What was left out stays out: nothing is ticked again.
@@ -949,7 +955,7 @@ test.describe('desktop', () => {
       .first()
       .check();
     await v1.getByRole('button', { name: 'Accept selected (1)' }).click();
-    await expect(log(page).getByText(/^You accepted 1 of \d+ changes from V1\./)).toBeVisible();
+    await acceptedLine(page, v1, /^You accepted 1 of \d+ changes from V1\./);
     // The kitchen next: none of the living room comes back, left out or accepted.
     await design(page, /^Kitchen · about US\$/);
     const v2 = card(page, 2);
@@ -1142,7 +1148,7 @@ test.describe('desktop', () => {
     await old.getByRole('checkbox', { name: 'Accept all of Living and dining' }).uncheck();
     await old.getByRole('checkbox', { name: /^Accept: Add a 3.seat sofa/ }).check();
     await old.getByRole('button', { name: 'Accept selected (1)' }).click();
-    await expect(log(page).getByText(/^You accepted 1 of \d+ changes from V1\./)).toBeVisible();
+    await acceptedLine(page, old, /^You accepted 1 of \d+ changes from V1\./);
     const after = await saved(page);
     const kinds = Object.values(
       after.renovation.levels[0].items as Record<string, { assetId: string }>,
@@ -1356,6 +1362,19 @@ test.describe('desktop', () => {
     ).toHaveCount(0);
   });
 });
+
+/**
+ * After Accept selected on part of a card: says yes when it asks first (B1: unticking the rows
+ * of a bed, the seats or the table leaves the plan without them, and that is a question), then
+ * waits for the accept line.
+ */
+async function acceptedLine(page: Page, v: ReturnType<typeof card>, line: RegExp | string) {
+  const anyway = v.getByRole('button', { name: 'Accept anyway' });
+  const said = log(page).getByText(line);
+  await expect(anyway.or(said).first()).toBeVisible();
+  if (await anyway.isVisible()) await anyway.click();
+  await expect(said).toBeVisible();
+}
 
 /** Sends a message with Send (its price on it). */
 async function send(page: Page, text: string) {
@@ -1961,6 +1980,346 @@ async function menu(page: Page, item: string) {
   await panel(page).getByRole('menuitem', { name: item }).click();
 }
 
+/** B1: the benchmark's main bedroom answer (by intent) with its bed left out. */
+const noBed = {
+  ...sampleMainV2,
+  items: sampleMainV2.items.filter((i) => i.ref !== 'bed1'),
+};
+const mainStep = (c: Call) => /furnish "(Main|Master) bedroom"/.test(c.step);
+const noBedReply = (c: Call) =>
+  mainStep(c)
+    ? {
+        status: 200,
+        body: anthropicStream(noBed, USAGE),
+        headers: { 'content-type': 'text/event-stream' },
+      }
+    : null;
+/** A card's rows the app placed itself (tagged By the app). */
+const appRow = (v: ReturnType<typeof card>) =>
+  v.locator('.talk-rows > li').filter({ has: v.page().locator('[data-by-app]') });
+/** The stored proposals as a build before B1 kept them: no app piece in any answer. */
+const stripAppPieces = (page: Page) =>
+  page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const r = indexedDB.open('dhd-talk');
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+    const tx = db.transaction('proposals', 'readwrite');
+    const store = tx.objectStore('proposals');
+    const rows = await new Promise<Record<string, unknown>[]>((resolve) => {
+      const q = store.getAll();
+      q.onsuccess = () => resolve(q.result as Record<string, unknown>[]);
+    });
+    for (const p of rows) {
+      const options = p.options as {
+        spaces: Record<string, { design?: { items: { ref: string }[] } }>;
+      }[];
+      for (const o of options) {
+        for (const s of Object.values(o.spaces)) {
+          if (s.design) s.design.items = s.design.items.filter((i) => !i.ref.startsWith('app:'));
+        }
+      }
+      store.put(p);
+    }
+    await new Promise((resolve) => {
+      tx.oncomplete = resolve;
+    });
+    db.close();
+  });
+
+test.describe('designer listens, B1: free fixes and room vetting', () => {
+  const main = mainStep;
+
+  test('a bed missing from the answer is placed by the app, free; left out at Accept it is a Decision; Undo takes it all back (11)', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const m = await mock(page, { reply: noBedReply });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // One request for the room: the app placed the bed itself, with no fix round.
+    expect(m.calls.filter(main)).toHaveLength(1);
+    const lead = v1.locator('[data-lead]');
+    await expect(lead).toContainText(
+      /Placed by the app, free: a queen bed in (Main|Master) bedroom/,
+    );
+    await expect(lead).not.toContainText(/no bed/);
+    // Its row is tagged By the app, ticked like any row; no free button (nothing left to place).
+    await expect(appRow(v1)).toHaveCount(1);
+    await expect(appRow(v1)).toContainText(/By the app\s*Add a queen bed/);
+    // The designer's own bedside table is its own row: unticking the app's bed never takes it.
+    await expect(appRow(v1)).not.toContainText('bedside');
+    await expect(appRow(v1).getByRole('checkbox')).toBeChecked();
+    // A screen reader hears it too.
+    await expect(appRow(v1).getByRole('checkbox')).toHaveAccessibleName(
+      /^Accept: Add a queen bed.*, placed by the app, free$/,
+    );
+    await expect(v1.locator('[data-free-fix]')).toHaveCount(0);
+    await shot(page, 'b1-free-card');
+    if (process.env.SHOTS) {
+      await page.emulateMedia({ colorScheme: 'dark' });
+      await shot(page, 'b1-free-card-dark');
+      await page.emulateMedia({ colorScheme: 'light' });
+      for (const [width, height] of [
+        [390, 844],
+        [844, 390],
+      ] as const) {
+        await page.setViewportSize({ width, height });
+        await appRow(v1).scrollIntoViewIfNeeded();
+        await shot(page, `b1-free-card-${width}`);
+      }
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+    // The reason, one tap away.
+    await appRow(v1)
+      .getByRole('button', { name: /^Why: Add a queen bed/ })
+      .click();
+    await expect(appRow(v1)).toContainText('A bed for You and Partner: nobody had one.');
+    // Unticked: nothing is recorded yet (trying ticks out records nothing).
+    await appRow(v1).getByRole('checkbox').uncheck();
+    expect(await dumpIdb(page)).not.toContain('Left out: the app’s');
+    // Unticked, the bed is said as what will happen: in the lead, the Checks row and the bar.
+    await expect(lead).toContainText(
+      /You and Partner will have no bed in (Main|Master) bedroom: its row isn’t ticked\./,
+    );
+    await expect(lead).toContainText(
+      /Left out of what you’ve ticked: a queen bed in (Main|Master) bedroom/,
+    );
+    await expect(v1.locator('.talk-lens')).toContainText('1 doesn’t pass · listed above');
+    await expect(panel(page).getByRole('region', { name: 'On the table' })).toContainText(
+      'V1 · 1 doesn’t pass',
+    );
+    await shot(page, 'b1-unticked');
+    const prior = Object.keys((await saved(page)).renovation?.levels?.[0]?.items ?? {}).sort();
+    // Accept asks first: they will have no bed.
+    await v1.locator('[data-accept-selected]').click();
+    await expect(v1).toContainText(
+      /Accept anyway\? 1 problem: You and Partner will have no bed in (Main|Master) bedroom/,
+    );
+    await v1.getByRole('button', { name: 'Accept anyway' }).click();
+    const accepted = log(page).getByText(/^You accepted \d+ of \d+ changes from V1\./);
+    await expect(accepted).toBeVisible();
+    await expect(accepted).toContainText('Left out: the app’s queen bed');
+    // The Decision, at Accept: by room and role, so the free fix doesn't offer it again.
+    await expect.poll(() => dumpIdb(page)).toContain('Left out: the app’s queen bed in');
+    expect(await dumpIdb(page)).toContain('"free":{"room":"rm_main-bedroom","role":"bed"}');
+    await panel(page).getByRole('button', { name: 'Designer menu' }).click();
+    await page.getByRole('menuitem', { name: 'Decisions' }).click();
+    await expect(
+      panel(page).getByText(/^Left out: the app’s queen bed in (Main|Master) bedroom/),
+    ).toBeVisible();
+    await panel(page).getByRole('button', { name: '‹ Conversation' }).click();
+    // Never offered again for that room: no free button on the card.
+    await expect(v1.locator('[data-free-fix]')).toHaveCount(0);
+    // Accept's Undo takes the whole accept back.
+    await log(page).locator('[data-undo-line]').first().click();
+    await expect(log(page).getByText(/^Undone: the \d+ changes from V1/)).toBeVisible();
+    const after = await saved(page);
+    expect(Object.keys(after.renovation?.levels?.[0]?.items ?? {}).sort()).toEqual(prior);
+    expect(m.calls.filter(main)).toHaveLength(1);
+  });
+
+  test('Place a queen bed · free on a card an older build made: no request, rows on the same card, a log line with Undo; on a phone the bar carries it', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const m = await mock(page, { reply: noBedReply });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // As a build before this one kept it: the answer with no app piece in it.
+    await stripAppPieces(page);
+    await page.reload();
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    await page.getByRole('button', { name: /^Designer · V1 on the table$/ }).click();
+    const calls = m.calls.length;
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    await expect(v1.locator('[data-lead]')).toContainText(/have no bed in (Main|Master) bedroom/);
+    // Offered: a dry run in the worker would place a bed. "· free", never priced or primary.
+    const free = v1.locator('[data-free-fix]');
+    await expect(free).toHaveText('Place a queen bed · free');
+    await expect(free).not.toHaveAttribute('data-spends', /.*/);
+    await expect(free).not.toHaveClass(/btn-primary/);
+    await shot(page, 'b1-free-button');
+    if (process.env.SHOTS) {
+      // The same card in dark mode, and on a phone held sideways (the column).
+      await page.emulateMedia({ colorScheme: 'dark' });
+      await free.scrollIntoViewIfNeeded();
+      await shot(page, 'b1-free-button-dark');
+      await page.emulateMedia({ colorScheme: 'light' });
+      await page.setViewportSize({ width: 844, height: 390 });
+      await expect(free).toBeVisible();
+      await free.scrollIntoViewIfNeeded();
+      await shot(page, 'b1-free-button-844');
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+    await free.click();
+    // The same card (no new tab), its row By the app, the lead worked out again.
+    const line = log(page)
+      .locator('article.talk-app')
+      .getByText(/^Placed by the app, free: a queen bed in (Main|Master) bedroom/);
+    await expect(line).toBeVisible();
+    // What gave way for the bed is said with it, never silently.
+    await expect(line).toContainText('one bedside table no longer fits and is left out');
+    await expect(v1.locator('[data-lead]')).toContainText(
+      'one bedside table no longer fits and is left out',
+    );
+    await expect(appRow(v1)).toHaveCount(1);
+    await expect(v1.locator('[data-lead]')).not.toContainText(/no bed/);
+    await expect(v1.locator('[data-free-fix]')).toHaveCount(0);
+    await expect(v1.getByRole('tab')).toHaveCount(0);
+    const undo = log(page).locator('[data-undo-free]');
+    await expect(undo).toBeFocused();
+    await shot(page, 'b1-free-placed');
+    // No request: free.
+    expect(m.calls).toHaveLength(calls);
+    // Undo takes those pieces out again; the button is back.
+    await undo.click();
+    await expect(log(page).getByText(/^Placed by the app, free: .* Undone\.$/)).toBeVisible();
+    await expect(appRow(v1)).toHaveCount(0);
+    await expect(v1.locator('[data-free-fix]')).toHaveText('Place a queen bed · free');
+    // Focus goes back to the button that is offered again.
+    await expect(v1.locator('[data-free-fix]')).toBeFocused();
+    // A phone at peek: the On the table bar carries the free fix, with its short label.
+    await page.setViewportSize({ width: 390, height: 844 });
+    const bar = panel(page).getByRole('region', { name: 'On the table' });
+    const barFree = bar.locator('[data-free-fix="bar"]');
+    await expect(barFree).toHaveText('Place a bed · free');
+    await expect(bar).not.toContainText('On the table:');
+    await expect(bar).toContainText(/V1 · 1 doesn’t pass/);
+    await shot(page, 'b1-phone-bar');
+    await barFree.click();
+    await expect(bar.locator('[data-free-fix]')).toHaveCount(0);
+    await expect(bar).toContainText(/V1 · Passes all checks|V1 · \d+ don/);
+    await expect(bar.getByRole('button', { name: 'Accept…' })).toBeVisible();
+    await shot(page, 'b1-phone-placed');
+    expect(m.calls).toHaveLength(calls);
+  });
+
+  test('the owner’s V4 layout: the walls to the living room are kept, Main bedroom stays a bedroom, the bigger master goes through (20)', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const v4 = {
+      ...ownerV4.concept,
+      // The mocked rooms are found by name: the master bedroom's as the fixtures have it.
+      rooms: ownerV4.concept.rooms.map((r) =>
+        r.name === 'Master Bedroom' ? { ...r, name: 'Master bedroom' } : r,
+      ),
+    };
+    const m = await mock(page, {
+      reply: (c) =>
+        c.step === 'layout'
+          ? {
+              status: 200,
+              body: anthropicStream(v4, USAGE),
+              headers: { 'content-type': 'text/event-stream' },
+            }
+          : null,
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^The whole flat · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 60_000,
+    });
+    const lead = v1.locator('[data-lead]');
+    await expect(lead).toContainText(
+      'Kept the walls between Bedroom (now part of Master bedroom) and the living room: taking them out would join the room You and Partner sleep in to the living room.',
+    );
+    await expect(v1).not.toContainText('doesn’t belong');
+    // The bigger master bedroom: the wall to Bedroom comes out.
+    await expect(v1).toContainText('Hack the wall between Main bedroom and Bedroom');
+    await expect(v1).not.toContainText(
+      /Hack the wall between (Living and dining and Bedroom|Bedroom and Living and dining)/,
+    );
+    // No room was asked for as a living room where they sleep.
+    expect(m.calls.some((c) => /furnish "Master bedroom"/.test(c.step))).toBe(true);
+    await shot(page, 'b1-vetting');
+  });
+});
+
+test.describe('designer listens, B1, on a phone (fingers only)', () => {
+  const { defaultBrowserType: _webkit, ...iPhone } = devices['iPhone 13'];
+  test.use({ ...iPhone, viewport: { width: 390, height: 844 } });
+  /** The designer opened by finger (past the plan's details sheet, when it shows). */
+  const openTalkByFinger = async (page: Page) => {
+    await page
+      .getByRole('button', { name: /Plan details|Show plan details/ })
+      .first()
+      .tap()
+      .catch(() => {});
+    await page
+      .getByRole('button', { name: /^(Talk to the designer|Designer · V\d+ on the table)$/ })
+      .tap();
+  };
+
+  test('with the composer focused, one tap on the bar’s Place a bed · free places it (UX 1, 6)', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const m = await mock(page, { reply: noBedReply });
+    await page.goto('/');
+    await waitSaved(page);
+    await openTalkByFinger(page);
+    await panel(page).getByRole('button', { name: 'Just design it' }).tap();
+    await panel(page)
+      .getByRole('button', { name: /^(Main|Master) bedroom · about US\$/ })
+      .tap();
+    const go = panel(page).getByRole('button', { name: /^Go ahead( anyway)? · about US\$/ });
+    const v1 = card(page, 1);
+    await expect(go.or(v1).first()).toBeVisible();
+    if (await go.isVisible()) await go.tap();
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // A card an older build made: no app piece in it.
+    await stripAppPieces(page);
+    await page.reload();
+    await waitSaved(page);
+    await openTalkByFinger(page);
+    const bar = panel(page).getByRole('region', { name: 'On the table' });
+    const barFree = bar.locator('[data-free-fix="bar"]');
+    await expect(barFree).toHaveText('Place a bed · free', { timeout: 30_000 });
+    // The composer has focus when the finger comes down on the bar (as opening the designer
+    // from the top bar leaves it): its blur used to resize the sheet under the finger.
+    await panel(page).getByRole('textbox', { name: 'Message the designer' }).focus();
+    const calls = m.calls.length;
+    await barFree.tap();
+    // One tap: placed (the button doesn't move away under the finger before the tap lands).
+    await expect(bar.locator('[data-free-fix]')).toHaveCount(0);
+    await expect.poll(() => dumpIdb(page)).toContain('Placed by the app, free: a queen bed');
+    await expect(bar.getByRole('button', { name: 'Accept…' })).toBeVisible();
+    // At peek the log is behind the composer: focus is on the bar's button, not a hidden Undo.
+    if (await panel(page).evaluate((el) => el.classList.contains('talk-peek'))) {
+      await expect(bar.getByRole('button', { name: 'Accept…' })).toBeFocused();
+    }
+    await shot(page, 'b1-phone-one-tap');
+    expect(m.calls).toHaveLength(calls);
+  });
+});
+
 test.describe('iterating (slice 2, PR 3)', () => {
   test('alternatives A/B/C: Another idea adds B to the card; switching is free and keeps each option’s ticks (25)', async ({
     page,
@@ -2026,7 +2385,7 @@ test.describe('iterating (slice 2, PR 3)', () => {
     expect(m.calls).toHaveLength(afterB);
     // Accepting B makes V1B a version.
     await b.getByRole('button', { name: /^Accept selected/ }).click();
-    await expect(log(page).getByText(/^You accepted \d+ of \d+ changes from V1B\./)).toBeVisible();
+    await acceptedLine(page, b, /^You accepted \d+ of \d+ changes from V1B\./);
     await menu(page, 'Versions');
     const versions = panel(page).getByRole('region', { name: 'Versions' });
     await expect(versions.locator('[data-version="V1B"]')).toContainText('Accepted');
@@ -2292,9 +2651,9 @@ test.describe('iterating (slice 2, PR 3)', () => {
     await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
       timeout: 30_000,
     });
-    // One row left out: a decision.
+    // One row left out (not a bed, seat, table or desk, which would ask first): a decision.
     await v1
-      .getByRole('checkbox', { name: /^Accept: / })
+      .getByRole('checkbox', { name: /^Accept: (?!.*\b(bed|sofa|armchair|table|chair|desk)\b)/ })
       .first()
       .uncheck();
     await v1.getByRole('button', { name: /^Accept selected/ }).click();
@@ -3330,7 +3689,7 @@ test.describe('phone, 390 px, fingers only (35)', () => {
     await v1.getByRole('checkbox', { name: 'Accept all of Living and dining' }).tap();
     await v1.getByRole('checkbox', { name: /^Accept: Add a 3.seat sofa/ }).tap();
     await v1.getByRole('button', { name: 'Accept selected (1)' }).tap();
-    await expect(log(page).getByText(/^You accepted 1 of \d+ changes from V1\./)).toBeVisible();
+    await acceptedLine(page, v1, /^You accepted 1 of \d+ changes from V1\./);
     await panel(page).getByRole('button', { name: 'Undo' }).first().tap();
     await expect(log(page).getByText(/^Undone: /)).toBeVisible();
     await panel(page).getByRole('button', { name: 'Make the designer smaller' }).tap();

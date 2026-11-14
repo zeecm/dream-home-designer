@@ -30,6 +30,7 @@ import {
   lastAccepted,
   onPlanNow,
   planScope,
+  plannedPrompts,
   resultFor,
   roomPrompts,
   wallsStillIn,
@@ -392,6 +393,22 @@ describe('changePlan with hand-edit locks', () => {
 });
 
 describe('a room asked again after an Accept (issue #66)', () => {
+  it('the estimate’s prompts tell the room step what the person left out, as the run does', () => {
+    const s0 = fresh();
+    const v1 = record(flatOf(s0), 'dsn_v1', 1);
+    const scope = { label: 'Main bedroom', spaces: [SAMPLE_KEYS.main], all: false };
+    const sp = planScope(scope, v1.brief, s0.doc, flatOf(s0).id, [v1], '', 'dsn_v2', {});
+    if (!sp) throw new Error('no plan');
+    const said = (declined: { room: string; role: string }[]) =>
+      plannedPrompts(sp.ctx, sp.draft, sp.plan, {}, declined)
+        .map((p) => p.tail)
+        .join('\n');
+    expect(said([])).not.toContain('Left out by the household');
+    expect(said([{ room: SAMPLE_KEYS.main, role: 'bed' }])).toMatch(
+      /Left out by the household, their choice .*"no bed in /,
+    );
+  });
+
   it('its prompts name After’s pieces as the result resolves them, kept or left out', () => {
     const s0 = fresh();
     const v1 = record(flatOf(s0), 'dsn_v1', 1);

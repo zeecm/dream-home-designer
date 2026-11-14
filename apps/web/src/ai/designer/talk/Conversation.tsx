@@ -24,6 +24,7 @@ import { YourRules, rulesLabel } from './Rules';
 import { Back, Decisions, StartOverDialog, Versions, WhatIKnow } from './Views';
 import { lineState, undoLine } from './accept';
 import { cardChanges, cardResult, cardRunReport, optionCard, versionKey } from './cards';
+import { freeLabel, freeOffer, placeFree, useFreeBusy, useFreePlaced, useTickedOut } from './free';
 import { copyConversation, downloadConversation, showStart } from './iterate';
 import { stopTalkRun } from './propose';
 import { useRuleShown } from './rules';
@@ -78,6 +79,12 @@ const SHORT_Q = '(max-height: 500px)';
 const coversPlan = (s: Size) =>
   s === 'full' || (s === 'half' && !!window.matchMedia?.(SHORT_Q).matches);
 
+/**
+ * A press on the bar keeps focus where it is: on a phone the composer losing focus resizes the
+ * sheet, which would move the button out from under the finger before the tap lands.
+ */
+const keepTap = (e: { preventDefault: () => void }) => e.preventDefault();
+
 /** "On the table: V4 · Passes all checks [Accept…]" (UX §5.2). */
 function OnTheTable() {
   // The plan once edits pause (off the drag path).
@@ -111,12 +118,35 @@ function OnTheTable() {
     () => (last && r ? timed(() => cardChanges(project, last, r)).length : 0),
     [project, last, r],
   );
-  const open = useMemo(() => {
+  // On a phone (a sheet, or the column on its side), the bar carries the newest card's free fix
+  // (its dry run from the plan once edits have paused a full second, never during a drag).
+  const slowProject = useSettledProject(1000);
+  const sheet = useMedia(sheetNow);
+  const side = useMedia(sideNow);
+  const freeBusy = useFreeBusy((s) => s.card);
+  const declinedKey = useTalk((s) =>
+    (s.conv?.decisions ?? [])
+      .filter((d) => !d.deleted && d.free)
+      .map((d) => d.id)
+      .join(','),
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
+  const offer = useMemo(
+    () =>
+      (sheet || side) && last && r && last.status !== 'running'
+        ? timed(() => freeOffer(slowProject, last))
+        : null,
+    [sheet, side, last, r, slowProject, tick, declinedKey],
+  );
+  const failures = useMemo(() => {
     if (!r || !last) return 0;
     // Counted from the card's one list (its run report), as the card counts it.
     const changes = timed(() => cardChanges(project, last, r));
     return cardRunReport(last, r, changes).failures.length;
   }, [r, last, project]);
+  // With the must-haves its ticks leave out (a bed unticked), as the card's lead says them.
+  const tickedOut = useTickedOut((s) => (last ? (s[last.key] ?? 0) : 0));
+  const open = failures + tickedOut;
   if (!last) return null;
   if (!r) {
     // Being placed and checked by the designer's worker: said calmly, nothing to press yet.
@@ -151,6 +181,8 @@ function OnTheTable() {
           : open
             ? `${open} ${open === 1 ? 'doesn’t' : 'don’t'} pass`
             : 'Passes all checks';
+  // The free fix in the bar (UX "Phone, portrait"): "V8 · 3 don't pass [Place a bed · free]".
+  const free = !allIn && offer && offer.added.length > 0 ? offer : null;
   return (
     <section className="talk-table" aria-label="On the table">
       {other && otherN ? (
@@ -167,25 +199,66 @@ function OnTheTable() {
       ) : (
         <>
           <button type="button" className="talk-table-text link-plain" onClick={() => go(false)}>
-            {allIn ? `${last.title} is in your renovation` : `On the table: ${last.title} · `}
+            {allIn
+              ? `${last.title} is in your renovation`
+              : free
+                ? `${last.title} · `
+                : `On the table: ${last.title} · `}
             {!allIn && (
               <span className={open && last.status !== 'running' ? 'negative' : ''}>{verdict}</span>
             )}
           </button>
-          {allIn
-            ? undo && (
-                <button type="button" className="btn btn-small" onClick={() => undoLine(undo)}>
-                  Undo
-                </button>
-              )
-            : last.status !== 'running' &&
-              last.status !== 'failed' &&
-              // Nothing to accept (the plan already has it all): no Accept… to press.
-              remaining > 0 && (
-                <button type="button" className="btn btn-small" onClick={() => go(true)}>
-                  Accept…
-                </button>
-              )}
+          {free ? (
+            <button
+              type="button"
+              className="btn btn-small talk-free-btn"
+              data-free-fix="bar"
+              disabled={!!freeBusy}
+              onPointerDown={keepTap}
+              onClick={() => {
+                void placeFree(last).then((line) => {
+                  if (!line) return;
+                  // At peek the log is behind the composer: focus stays on the bar (its button
+                  // is Accept… now). Above peek, the line's Undo.
+                  requestAnimationFrame(() => {
+                    const undo = document.querySelector<HTMLButtonElement>(
+                      `[data-undo-free="${line}"]`,
+                    );
+                    const peek = document.documentElement.dataset.talkSheet === 'peek';
+                    if (undo && !peek) focusInLog(undo);
+                    else document.querySelector<HTMLButtonElement>('.talk-table .btn')?.focus();
+                  });
+                });
+              }}
+            >
+              {freeBusy === last.key ? 'Placing…' : freeLabel(free, true)}
+            </button>
+          ) : allIn ? (
+            undo && (
+              <button
+                type="button"
+                className="btn btn-small"
+                onPointerDown={keepTap}
+                onClick={() => undoLine(undo)}
+              >
+                Undo
+              </button>
+            )
+          ) : (
+            last.status !== 'running' &&
+            last.status !== 'failed' &&
+            // Nothing to accept (the plan already has it all): no Accept… to press.
+            remaining > 0 && (
+              <button
+                type="button"
+                className="btn btn-small"
+                onPointerDown={keepTap}
+                onClick={() => go(true)}
+              >
+                Accept…
+              </button>
+            )
+          )}
         </>
       )}
     </section>
@@ -525,6 +598,11 @@ export function TalkPanel() {
     const ed = useEditor.getState();
     if (oneView && !ed.walking && !ed.elevation && shownViewNow() === '3d') ed.setViewMode('plan');
   }, [ruleShown]);
+  // A free fix placed (Place … · free): the sheet folds to peek so the new pieces are in sight.
+  const freePlaced = useFreePlaced((st) => st.n);
+  useEffect(() => {
+    if (freePlaced && sheet) setSize((s) => (s === 'peek' ? s : 'peek'));
+  }, [freePlaced, sheet]);
   const seen = useRef(new Set<string>());
   const mountedAt = useRef(Date.now());
   useEffect(() => {

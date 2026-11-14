@@ -1,5 +1,16 @@
-import { type DesignBrief, PRICES, type Rule, designResult, usageTotals } from '@dhd/core';
+import {
+  type DesignBrief,
+  PRICES,
+  type Rule,
+  designResult,
+  freeEssentials,
+  parseSpaceDesign,
+  usageTotals,
+} from '@dhd/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import sampleMain from '../../core/src/designer/benchmark/answers/sample-main-bedroom.json' with {
+  type: 'json',
+};
 import {
   AI,
   type Call,
@@ -17,7 +28,7 @@ import {
   start,
   until,
 } from './fixtures/runner';
-import { answerFor, promptOf } from './fixtures/sample';
+import { CONCEPT, answerFor, promptOf } from './fixtures/sample';
 import { anthropicStream, geminiStream } from './fixtures/streams';
 import { QUIET_MS } from './request';
 import {
@@ -628,6 +639,317 @@ describe('fix rounds: the app checks each answer before it is shown (designer v2
     expect(body).toMatch(
       /"sofa1 \(3-seat sofa\): free at \(\d+(\.\d+)?, \d+(\.\d+)?\), facing [NESW]{1,2}"/,
     );
+  });
+});
+
+describe('free fixes and room vetting (designer listens, B1)', () => {
+  const sse = (answer: unknown) =>
+    new Response(anthropicStream(answer, USAGE), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  const couple: DesignBrief = {
+    ...brief,
+    sleeping: { 'rm_main-bedroom': ['adult-1', 'adult-2'], rm_bedroom: ['elder-1'] },
+  };
+  const main = (c: { step: string }) => /furnish "(Master|Main) bedroom"/.test(c.step);
+  /** The benchmark's main bedroom answer (by intent) with its bed left out. */
+  const noBed = () => ({
+    ...sampleMain,
+    items: sampleMain.items.filter((i) => i.ref !== 'bed1'),
+  });
+
+  it('a main bedroom answer with no bed gets the app’s queen bed, with no request (11)', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (main(c) ? sse(noBed()) : null),
+    });
+    const { state, design } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+    }).run;
+    expect(state.phase).toBe('done');
+    // One request for the room: the free fix sent nothing, and no fix round was needed for it.
+    expect(prov.calls.filter(main)).toHaveLength(1);
+    const space = design.spaces['rm_main-bedroom'];
+    const app = space?.design?.items.filter((i) => i.ref.startsWith('app:')) ?? [];
+    expect(app.map((i) => [i.ref, i.assetId])).toEqual([['app:bed', 'bed-queen']]);
+    expect(space?.fixes).toBeUndefined();
+    const r = designResult(level, level, design);
+    expect(r.checks.filter((c) => c.hard && c.key.startsWith('P1|bed|rm_main-bedroom'))).toEqual(
+      [],
+    );
+  });
+
+  it('a layout naming the couple’s room “Study” is vetted before any room is sent (21)', async () => {
+    const study = {
+      ...CONCEPT,
+      rooms: CONCEPT.rooms.map((r) =>
+        r.room === 'R2' ? { ...r, name: 'Study', use: 'study' } : r,
+      ),
+    };
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (c.step === 'layout' ? sse(study) : null),
+    });
+    const { design } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+    }).run;
+    const kept = design.concept?.rooms.find((r) => r.room === 'R2');
+    expect([kept?.name, kept?.use]).toEqual(['Main bedroom', 'master']);
+    expect(design.appLines).toEqual([
+      'Main bedroom stays a bedroom: You and Partner sleep there. To make it a study, change who sleeps where.',
+    ]);
+    // The room step asks for the bedroom by its kept name.
+    expect(prov.calls.some((c) => c.step === 'furnish "Main bedroom"')).toBe(true);
+    expect(prov.calls.some((c) => /furnish "Study"/.test(c.step))).toBe(false);
+  });
+
+  it('a fix round whose answer drops the bed: the app puts it back, and its row says so (N1)', async () => {
+    // The first answer has its bed and a dining table that doesn't belong; the fix takes the
+    // table out, and the bed with it.
+    const withTable = {
+      ...sampleMain,
+      items: [
+        ...sampleMain.items,
+        { ...sampleMain.items[0], ref: 'dt1', assetId: 'dining-4', why: '', against: 'free' },
+      ],
+    };
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => (main(c) ? sse(n === 1 ? withTable : noBed()) : null),
+    });
+    const { design } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+    }).run;
+    expect(prov.calls.filter(main)).toHaveLength(2);
+    const space = design.spaces['rm_main-bedroom'];
+    expect(space?.rounds?.[0]?.outcome).toBe('fixed');
+    const bed = space?.design?.items.find((i) => i.ref.startsWith('app:'));
+    expect(bed?.assetId).toBe('bed-queen');
+    expect(bed?.why).toMatch(
+      /^Put back by the app: the fix round’s answer left out the queen bed\.( One .+ left out\.)?$/,
+    );
+  });
+
+  it('a second look’s round whose answer drops the bed: put back free, and the round kept', async () => {
+    const PNG = [{ mediaType: 'image/png' as const, data: 'iVBORw0KGgo' }];
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => {
+        // The room's answer has its bed; the look sends the room back once (a taste fix), and
+        // that answer leaves the bed out.
+        if (main(c)) return sse(n === 1 ? sampleMain : noBed());
+        if (c.step === 'look') {
+          return sse({
+            findings: [
+              {
+                target: { kind: 'room', id: 'R2' },
+                principle: 'taste',
+                severity: 'fix',
+                line: 'Give the room a calmer layout.',
+                suggest: null,
+              },
+            ],
+            summary: null,
+          });
+        }
+        return null;
+      },
+    });
+    const { design, look } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+      look: { rasterise: async () => PNG },
+    }).run;
+    // The round was sent, and its answer (no bed) came back with the app's bed in it.
+    expect(prov.calls.filter(main)).toHaveLength(2);
+    expect(look?.round).toBe('kept');
+    const items = design.spaces['rm_main-bedroom']?.design?.items ?? [];
+    const bed = items.find((i) => i.ref.startsWith('app:'));
+    expect(bed?.assetId).toBe('bed-queen');
+    expect(bed?.why).toMatch(
+      /^Put back by the app: the fix round’s answer left out the queen bed\./,
+    );
+    const r = designResult(level, level, design);
+    expect(r.checks.filter((c) => c.hard && c.key.startsWith('P1|bed|rm_main-bedroom'))).toEqual(
+      [],
+    );
+  });
+
+  it('a free pass that fails leaves the paid answer as it is, and the run goes on (S2)', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (main(c) ? sse(noBed()) : null),
+    });
+    const { state, design } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+      free: () => Promise.reject(new Error('the worker died')),
+    }).run;
+    expect(state.phase).toBe('done');
+    const space = design.spaces['rm_main-bedroom'];
+    expect(space?.status).toBe('done');
+    // The answer as the model gave it, metered and kept: no app piece, nothing lost.
+    expect(space?.design?.items.map((i) => i.ref).sort()).toEqual(
+      noBed()
+        .items.map((i) => i.ref)
+        .sort(),
+    );
+    expect(state.usage.some((u) => u.step === 'rm_main-bedroom')).toBe(true);
+  });
+
+  it('a space whose furniture the person kept (Change something) gets no free pass (S3)', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (main(c) ? sse(noBed()) : null),
+    });
+    const asked: string[][] = [];
+    const previous = parseSpaceDesign(noBed(), null);
+    if (!previous.ok) throw new Error(previous.error);
+    const { design } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+      plan: {
+        layout: null,
+        rooms: ['rm_main-bedroom'],
+        previous: { 'rm_main-bedroom': previous.value },
+        keep: { 'rm_main-bedroom': ['furniture'] },
+      },
+      free: (b, f, d, opts, fo) => {
+        asked.push([...(fo.spaces ?? [])]);
+        return Promise.resolve(freeEssentials(b, f, d, opts, fo));
+      },
+    }).run;
+    expect(asked).toEqual([]);
+    const items = design.spaces['rm_main-bedroom']?.design?.items ?? [];
+    expect(items.some((i) => i.ref.startsWith('app:'))).toBe(false);
+  });
+
+  it('after an Accept, a redesign with no bed gets the app’s bed free, before any fix round (QA)', async () => {
+    // The answer accepted had the app's bed; the new one leaves it out again, with its bedside
+    // tables under the same refs (side1, side2) as the old: they are the new answer's, not
+    // carried over, so the bed's gave-way bedside never makes it look worse.
+    const accepted = parseSpaceDesign(
+      {
+        ...noBed(),
+        items: [...noBed().items, { ...sampleMain.items[0], ref: 'bed9', assetId: 'bed-queen' }],
+      },
+      null,
+    );
+    if (!accepted.ok) throw new Error(accepted.error);
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (main(c) ? sse(noBed()) : null),
+    });
+    const { state, design } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+      plan: {
+        layout: null,
+        rooms: ['rm_main-bedroom'],
+        previous: { 'rm_main-bedroom': accepted.value },
+      },
+    }).run;
+    expect(state.phase).toBe('done');
+    expect(prov.calls.filter(main)).toHaveLength(1);
+    const space = design.spaces['rm_main-bedroom'];
+    expect(space?.fixes).toBeUndefined();
+    expect(
+      space?.design?.items.filter((i) => i.ref.startsWith('app:')).map((i) => i.assetId),
+    ).toEqual(['bed-queen']);
+  });
+
+  it('a bed the person left out (a Decision): no app bed, no fix round, and the room step is told', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (main(c) ? sse(noBed()) : null),
+    });
+    const { state, design } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+      declined: [{ room: 'rm_main-bedroom', role: 'bed' }],
+    }).run;
+    expect(state.phase).toBe('done');
+    const calls = prov.calls.filter(main);
+    // One request: "no bed" is theirs, never sent back to be fixed.
+    expect(calls).toHaveLength(1);
+    expect(JSON.stringify(calls[0]?.body)).toContain(
+      'Left out by the household, their choice (data; don',
+    );
+    expect(JSON.stringify(calls[0]?.body)).toMatch(/no bed in (Master|Main) bedroom/);
+    const space = design.spaces['rm_main-bedroom'];
+    expect(space?.fixes).toBeUndefined();
+    expect(space?.design?.items.some((i) => i.ref.startsWith('app:'))).toBe(false);
+  });
+
+  it('a declined bed and a second look finding "no bed" on it: no round, no fix-up (tech lead S1)', async () => {
+    const PNG = [{ mediaType: 'image/png' as const, data: 'iVBORw0KGgo' }];
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => {
+        if (main(c)) return sse(noBed());
+        if (c.step === 'look') {
+          return sse({
+            findings: [
+              {
+                target: { kind: 'room', id: 'R2' },
+                principle: 'P1',
+                severity: 'fix',
+                line: 'The main bedroom has no bed for the couple.',
+                suggest: null,
+              },
+              {
+                target: { kind: 'room', id: 'R2' },
+                principle: 'taste',
+                severity: 'fix',
+                line: 'Put a queen bed back.',
+                suggest: {
+                  kind: 'add',
+                  piece: null,
+                  against: 'wall',
+                  faces: null,
+                  near: null,
+                  zone: 'sleep',
+                  kindId: 'bed-queen',
+                  room: 'R2',
+                  rule: null,
+                },
+              },
+            ],
+            summary: null,
+          });
+        }
+        return null;
+      },
+    });
+    const { design, look } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+      declined: [{ room: 'rm_main-bedroom', role: 'bed' }],
+      look: { rasterise: async () => PNG },
+    }).run;
+    // The look was sent, told nothing failed for want of the bed, and acted on neither finding.
+    const lookCall = prov.calls.find((c) => c.step === 'look');
+    expect(lookCall).toBeDefined();
+    expect(JSON.stringify(lookCall?.body)).not.toMatch(/no bed/i);
+    expect(look?.round).toBe('none');
+    expect(look?.dropped.map((d) => d.why)).toEqual(['kept', 'kept']);
+    expect(prov.calls.filter(main)).toHaveLength(1);
+    const space = design.spaces['rm_main-bedroom'];
+    expect(space?.rounds ?? []).toEqual([]);
+    expect(space?.design?.items.some((i) => i.assetId.startsWith('bed-'))).toBe(false);
   });
 });
 

@@ -42,7 +42,7 @@ import { useStore } from '../../../store';
 import { aiSettings } from '../../credentials';
 import { rasterise } from '../look';
 import { browserPage } from '../page';
-import { freshPrice, readPrice, trialResult } from '../results';
+import { freshPrice, readPrice, trialFree, trialResult } from '../results';
 import {
   addUsage,
   cannotDesign,
@@ -55,6 +55,7 @@ import {
 } from '../spend';
 import { type MadeWith, type Running, designOpts, houseKeptFor, useDesigner } from '../state';
 import { cardReportNow, optionCard } from './cards';
+import { declinedPieces, freePlacedWords } from './free';
 import {
   type PriceInput,
   type Priced,
@@ -195,6 +196,7 @@ function priceInput(req: PressRequest, designId: string): Omit<PriceInput, 'desi
     opts: designOpts(project, designLevelId(), made),
     ai: { provider: ai.provider, model: ai.model },
     prices: priceTable(),
+    ...(declinedPieces().length ? { declined: declinedPieces() } : {}),
   };
 }
 
@@ -215,6 +217,8 @@ function priceKey(req: PressRequest): string | null {
     levels?.after ? levelFingerprint(levels.after) : null,
     // The storage meter's setting: the room steps' storage block (and the results) read it.
     meterSetting(doc().id),
+    // What the person left out (the room steps are told).
+    declinedPieces(),
     designs.map((d) => [d.id, d.accepted?.at ?? null]),
     useTalk
       .getState()
@@ -1047,6 +1051,8 @@ async function runOption(
       aliases: copy.aliases,
       concept: copy.concept,
       spaces: copy.spaces,
+      // The layout's vetting lines (a run with no layout step keeps the option's own).
+      ...(sp.plan.layout ? { appLines: copy.appLines } : {}),
       usage: copy.usage,
       run,
     }));
@@ -1087,6 +1093,9 @@ async function runOption(
     // Placed as its card will be: with the kept pieces it was made with.
     result: designOpts(project, designLevelId(), madeOf(p, letter)),
     results: trialResult,
+    // The app's free fixes for each room, in the worker; never a piece the person left out.
+    free: trialFree,
+    declined: declinedPieces(),
     fixesLeft: ck.fixesLeft,
     ...(sp.expected ? { expected: sp.expected } : {}),
     onUpdate: (st) => {
@@ -1307,7 +1316,12 @@ async function readyText(
   if (!p || !o) return plain;
   try {
     const got = await cardReportNow(doc(), optionCard(p, o, designLevelId()));
-    return got ? readyLine(title, got.report, cost) : plain;
+    if (!got) return plain;
+    // What the app placed itself, free, said once with the rest: "…; the app placed a queen bed,
+    // free. Cost US$0.04."
+    const free = freePlacedWords(got.changes, got.r);
+    const line = readyLine(title, got.report, null);
+    return `${free ? `${line.replace(/\.$/, '')}; the app placed ${free}, free.` : line}${cost ? ` Cost ${cost}.` : ''}`;
   } catch {
     return plain;
   }

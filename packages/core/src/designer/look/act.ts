@@ -1,6 +1,10 @@
+import { furnitureKind } from '../../furniture';
 import type { Project } from '../../schema';
 import { type AliasMap, resolveAlias } from '../aliases';
 import { categoriesFor, resolveAsset } from '../catalogue';
+import { isDeclined } from '../free';
+import { roleOf } from '../principles';
+import { checkSig } from '../report';
 import type { DesignResult } from '../result';
 import { type Kept, keptHolds } from '../rules/kept';
 import { type OfferCtx, ruleOffer } from '../rules/offer';
@@ -84,6 +88,11 @@ export interface LookCtx {
    * about one goes back as a round, whose request says it is kept.
    */
   kept?: readonly Kept[];
+  /**
+   * Pieces the person left out of a room (Decisions at Accept): a finding about a must-have
+   * they declined there, or one adding such a piece back, is dropped ('kept'), never a round.
+   */
+  declined?: readonly { room: string; role: string }[];
 }
 
 const NOTE = (line: string) => `Designer’s second look: ${line}`;
@@ -128,6 +137,7 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
     return id && level.items[id] ? (result.refs[id] ?? null) : null;
   };
   const kept = ctx.kept ?? [];
+  const declined = ctx.declined ?? [];
   /** Whether a piece on the plan stands for a kept one. */
   const isKept = (id: string | null) => {
     const it = id ? level.items[id] : undefined;
@@ -173,6 +183,11 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
         plan.dropped.push({ finding: f, why: 'checks-disagree' });
         continue;
       }
+      // A must-have the person left out there (no bed, by their choice): theirs, no round.
+      if (!check.itemId && check.roomId && isDeclined(check.key, check.roomId, declined)) {
+        plan.dropped.push({ finding: f, why: 'kept' });
+        continue;
+      }
       failure = check.text;
       target = check.key;
       hard = check.hard;
@@ -180,9 +195,29 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
     // Where it acts: the space of the piece it suggests about, else of its target.
     const about = f.suggest?.piece ? resolveAlias(aliases, f.suggest.piece) : null;
     const addTo = f.suggest?.kind === 'add' ? resolveAlias(aliases, f.suggest.room) : null;
+    // Never adding back a piece the person left out of that room.
+    const addKind =
+      f.suggest?.kind === 'add' && f.suggest.kindId
+        ? resolveAsset(f.suggest.kindId, ctx.models)
+        : null;
+    if (
+      addTo &&
+      addKind &&
+      declined.some((d) => d.room === addTo && d.role === roleOf(furnitureKind(addKind.id)))
+    ) {
+      plan.dropped.push({ finding: f, why: 'kept' });
+      continue;
+    }
     // A kept piece stays as it is: a suggestion about it (its taste fix) is not acted on.
     const onKept = f.suggest?.kind !== 'add' && (isKept(about) || (!about && isKept(id)));
     if (onKept && f.principle === 'taste') {
+      plan.dropped.push({ finding: f, why: 'kept' });
+      continue;
+    }
+    // A piece the app placed itself for a must-have (its ref starts `app:`) is never taken out:
+    // that would leave the bed, the seats or the table missing again.
+    const aboutRef = about && level.items[about] ? result.refs[about] : null;
+    if (f.suggest?.kind === 'remove' && aboutRef?.startsWith('app:')) {
       plan.dropped.push({ finding: f, why: 'kept' });
       continue;
     }
@@ -260,10 +295,29 @@ export function applyLookEdit(d: SpaceDesign, e: LookEdit, n: number): SpaceDesi
       if (s.faces && refOr(s.faces)) it.faces = refOr(s.faces);
       if (s.near && refOr(s.near)) it.near = refOr(s.near);
       return { ...d, items };
-    case 'swap':
+    case 'swap': {
       if (!it || !s.kindId) return d;
-      items[at] = { ...it, assetId: s.kindId, keep: null, width: null, depth: null, height: null };
+      // A piece swapped for another is a new piece: it takes a ref of its own (and what faces or
+      // goes by it follows), so the app's own is never tagged as the app's after, and
+      // `lookNoWorse` judges what it breaks as new (tech lead N1).
+      const ref = `look${n}`;
+      items[at] = {
+        ...it,
+        ref,
+        assetId: s.kindId,
+        keep: null,
+        width: null,
+        depth: null,
+        height: null,
+      };
+      if (ref !== it.ref) {
+        for (const x of items) {
+          if (x.faces === it.ref) x.faces = ref;
+          if (x.near === it.ref) x.near = ref;
+        }
+      }
       return { ...d, items };
+    }
     case 'remove':
       if (!it) return d;
       return { ...d, items: items.filter((x) => x.ref !== e.ref) };
@@ -307,11 +361,26 @@ export function lookNoWorse(
 ): boolean {
   const hard = (r: DesignResult) =>
     new Set(r.checks.filter((c) => c.hard && !c.already).map((c) => c.key));
+  const sigs = (r: DesignResult) =>
+    new Set(r.checks.filter((c) => c.hard && !c.already).map((c) => checkSig(r, c)));
   const was = hard(before);
   const now = hard(after);
   // A new hard failure refuses it, whatever it fixes: HDB rules, kept pieces (K) and house rules
-  // (R) above all.
-  if ([...now].some((k) => !was.has(k))) return false;
+  // (R) above all. Judged by signature (principle|code|room|role), as the free fixes and the
+  // run report are: a piece placed again under a new ref or id is the same failure, not a new one.
+  const wasSigs = sigs(before);
+  if ([...sigs(after)].some((s) => !wasSigs.has(s))) return false;
+  // An HDB rule or a house rule failed by a piece new to the round (an "add", a swap's new
+  // piece) refuses it though its signature matches one the plan already failed: a second piece
+  // breaking the same rule in that room is a new failure, never the old one placed again.
+  const newPiece = (c: DesignResult['checks'][number]) =>
+    !!c.itemId && !before.level.items[c.itemId];
+  if (
+    after.checks.some(
+      (c) => c.hard && !c.already && /^(HDB|R)\|/.test(c.key) && !was.has(c.key) && newPiece(c),
+    )
+  )
+    return false;
   if (now.size < was.size) return true;
   const still = new Set(after.checks.filter((c) => !c.already).map((c) => c.key));
   if (targets.some((k) => still.has(k))) return false;

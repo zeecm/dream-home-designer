@@ -29,6 +29,7 @@ import {
   precheckOn,
   putBackMoves,
 } from './cards';
+import { appDecisions, isAppChange } from './free';
 import { focusInLog } from './scroll';
 import { talkStore } from './talkStore';
 import { lineTitle } from './titles';
@@ -266,8 +267,22 @@ async function acceptOnce(
     proposalId: card.proposal?.id ?? '',
   });
   // What was left out is a rejection the designer remembers (spec: Remembers), one line a time.
-  if (left.length) {
-    const names = left.map((c) => c.name);
+  // A piece the app placed itself and left out is its own Decision, recorded here at Accept
+  // (never on untick), so the free fix doesn't offer it again for that room.
+  const theirs = left.filter((c) => !isAppChange(c, r));
+  for (const d of appDecisions(left, r)) {
+    await act({
+      type: 'decisionAdd',
+      id: newId('dec'),
+      at,
+      kind: 'rejected',
+      text: cut(d.text, 160),
+      from: title,
+      ...(d.free ? { free: d.free } : {}),
+    });
+  }
+  if (theirs.length) {
+    const names = theirs.map((c) => c.name);
     const shown = names.slice(0, 3).join(', ');
     const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
     await act({
@@ -298,7 +313,12 @@ async function acceptOnce(
     letter: card.option?.letter ?? 'A',
     changes: ids,
     total,
-    left: left.map((c) => cut(c.name, TALK_LIMITS.left)).slice(0, 20),
+    // The app's own pieces said as the app's ("Left out: the app's queen bed").
+    left: left
+      .map((c) =>
+        cut(isAppChange(c, r) ? c.name.replace(/^the /, 'the app’s ') : c.name, TALK_LIMITS.left),
+      )
+      .slice(0, 20),
   });
   say(`Accepted ${plural(ids.length, 'change')} from ${title}. Undo is available.`);
   return eventId;

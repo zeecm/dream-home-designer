@@ -396,7 +396,40 @@ export function parseConcept(raw: unknown, bounds: Bounds | null): ParseResult<C
 /** A model's answer for one space, checked; `bounds` is the plan's (points ±1 m). */
 export function parseSpaceDesign(raw: unknown, bounds: Bounds | null): ParseResult<SpaceDesign> {
   const ctx: Ctx = { notes: new Set(), bounds };
-  return parseWith(spaceSchemas(ctx).SpaceDesign, ctx, raw);
+  const r = parseWith(spaceSchemas(ctx).SpaceDesign, ctx, raw);
+  return r.ok ? { ...r, value: ownRefs(r.value) } : r;
+}
+
+/** The ref prefix the app's own pieces carry (free.ts): a model's answer never has it. */
+const APP_PREFIX = /^\s*app:/i;
+
+/**
+ * A model's answer with no ref posing as the app's: "app:bed" becomes "bed" (or "bed2" when
+ * that is taken), and what faces or goes beside it follows. A fix round sends the app's pieces
+ * back with their refs; answered again, they are the model's own.
+ */
+function ownRefs(d: SpaceDesign): SpaceDesign {
+  if (!d.items.some((i) => APP_PREFIX.test(i.ref))) return d;
+  const used = new Set(d.items.filter((i) => !APP_PREFIX.test(i.ref)).map((i) => i.ref));
+  const renamed = new Map<string, string>();
+  for (const i of d.items) {
+    if (!APP_PREFIX.test(i.ref) || renamed.has(i.ref)) continue;
+    const stem = i.ref.replace(APP_PREFIX, '').trim() || 'piece';
+    let out = stem;
+    for (let n = 2; used.has(out); n++) out = `${stem}${n}`;
+    used.add(out);
+    renamed.set(i.ref, out);
+  }
+  const to = (ref: string | null | undefined) => (ref ? (renamed.get(ref) ?? ref) : ref);
+  return {
+    ...d,
+    items: d.items.map((i) => ({
+      ...i,
+      ref: to(i.ref) as string,
+      ...(i.faces !== undefined ? { faces: to(i.faces) ?? null } : {}),
+      ...(i.near !== undefined ? { near: to(i.near) ?? null } : {}),
+    })),
+  };
 }
 
 // ------------------------------------------------------------------------------ versions

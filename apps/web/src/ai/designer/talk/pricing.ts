@@ -46,6 +46,8 @@ export interface PriceInput {
   opts: DesignOptions;
   ai: { provider: 'anthropic' | 'openai' | 'gemini'; model: string };
   prices: Record<string, Price>;
+  /** Pieces the person left out of a room (Decisions): the room steps are told, as the run is. */
+  declined?: { room: string; role: string }[];
 }
 
 export type Priced = { sp: ScopePlan; est: RunEstimate } | null;
@@ -176,7 +178,7 @@ export function priceRequest(i: PriceInput): Priced {
           i.talk,
         );
   if (!sp) return null;
-  const prompts = plannedPrompts(sp.ctx, sp.draft, sp.plan, i.opts);
+  const prompts = plannedPrompts(sp.ctx, sp.draft, sp.plan, i.opts, i.declined ?? []);
   // The look covers what the run was asked for (a run carried on: its checkpoint's), not only
   // the rooms left; a carried-on run looks only while its checkpoint says the look is to come.
   const asked = i.resume ? i.resume.run.plan.rooms : sp.plan.rooms;
