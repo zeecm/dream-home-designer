@@ -467,3 +467,188 @@ order; the replay criteria 30–32 land with C.
   (criterion 6 has both lists).
 - The run report goes in the live facts block, not in `sent`, so the history's cache bytes don't
   change.
+
+## Lead decisions (tech lead, 14 Nov 2026)
+
+Checked against `main` at 1f859d4 (`packages/ai/src/run.ts`, `request.ts`, `stream.ts`,
+`core/designer/{result,prices,prompts,schema}.ts`, `core/designer/talk/{prompt,reply,schema}.ts`,
+web `talk/{turn,propose,pricing}.ts`), the part 1 WIP (`designer-keep-after-accept`), the #67 WIP
+(`gemini3-prices`), the second look (`claude/designer-v2-slice3b-second-look`) and the owner's
+export. Where these decisions differ from the text above, they win.
+
+### Blockers (settle before building)
+
+1. **The fix-up pool can already be overspent (confirmed, `run.ts:544-551`).** A room checks
+   `fixesLeft > 0`, then awaits `mayStart`, then decrements. While a run is paused at a limit,
+   every room that reaches its fix gate waits on the same `asking` promise. After one Carry on,
+   each of them calls `reserve()` without checking `overLimit` again (`run.ts:326-327`), and each
+   decrements. A scratch test (three rooms failing, `fixesLeft: 1`, a pause, then Carry on) sent
+   **3** fix requests. Progress-based rounds make this more likely, so PR B must fix it first. Take
+   the fix-up synchronously, before any await, and give it back if the gate refuses. After a pause,
+   loop back through `overLimit(next)` before `reserve()`. Add the scratch scenario as a test.
+2. **Pricing a shared pool.** `estimateRun` prices the dearest FIX_PER_RUN fix requests from
+   `fixRoundsFor` copies per room. Once a room may take the whole pool, that under-prices it. The
+   pool's price is **P × the dearest room's fix request**, `fixes = P`. The reservation for a fix
+   round (`highOf('fix')`, `propose.ts:931`) is **that room's own** fix price (expose `fixOne` on
+   `StepEstimate`), not the average. `FIX_EXTRA` (600 tokens) has to grow with the fix block: the
+   L lines and hints are capped at 8 + 8 lines of at most 300 characters, so 600 becomes 2,100.
+   With these, "keep going while progressing" can't pass the figure. Every round is still
+   reserved at its most before it goes, and the pool is a hard request cap whatever the price.
+3. **At the figure, keep today's pause and ask.** `confirmOver` and "Carry on · at most US$x" were
+   reviewed under #62. Don't replace them with "the run ends and offers Keep fixing". **Keep
+   fixing** is only for a run that ended with its pool used up and fixable failures left. It is a
+   new run kind: fix rounds only, starting from the stored answers, priced as fix requests. It is a
+   new option on the same card, built in PR C. It is not part of B.
+4. **No paid retry caused by the filter.** If filtering empties `say`, the reply must still parse
+   ok. Today, "no kind and nothing said" is treated as unreadable and sent again (paid). Run the
+   filter after the ok/not-ok decision, and never let it turn a readable reply into an unusable
+   one.
+5. **The prompt must stay true in each PR.** A's `TALK_SYSTEM` may say only what A's build does:
+   the checks run before the design is shown, and failures go back up to the priced number of fix
+   rounds. "Places missing essentials itself" goes in with B1. "As many rounds as the price allows"
+   goes in with B2.
+
+### Decisions
+
+**Where each piece goes, and the data that already exists**
+- `DesignResult` already has `dropped` (`Note`, with `ref` and `space` but no code), `repaired`,
+  `refused`, `checks` (`hard`, `already`, `unfixable`, `part`, `itemId`) and `refs`. Space entries
+  have `fixes` and `fixed`. The runner's `failing()` (`run.ts:489`) sends **checks only**, and its
+  fix block (`prompts.ts:266`) appears only when a check fails. So a bed left out for a keep ref
+  shows up as "has no bed" with no reason. That is the loop seen in V6 to V9.
+- `runReport` goes in core, in `designer/report.ts`. It is pure and is built from a
+  `DesignResult` plus the space entries. Each F line carries a **failure signature**
+  (principle|code|room|role, not item ids) that B's progress rule and C's repeats reuse. A version
+  that isn't accepted has no P ids for its new pieces: name them by the answer's ref and catalogue
+  id, and use P ids only for kept and plan pieces.
+- Drop reasons: `Note.code` (the spec's list), plus `need` and `longest` numbers where the solver
+  has them. They are set in `result.ts:resolveWant` and in `place.ts`'s `drop(...)`, which part 1
+  also edits, so this lands after part 1. `Note` is computed, not stored: no record change.
+- Talk call: **no second block.** The F and L lines replace the 6 "Doesn't pass" lines in "On the
+  table" (`tableLines`, web `turn.ts:onTable`), capped at 8 + 8. They stay live facts, so the
+  history bytes are unchanged. The "Since your last reply" verdict is frozen into `sent` at Send,
+  which is safe for the cache.
+
+**The excuse filter: the prompt does most of the work, the filter stays narrow**
+- The root causes are the prompt's "it, not you", missing information, and one the spec missed.
+  The task block asks for memory notes "for their ID about what the app can't do"
+  (`prompt.ts:272`). That is exactly what the model saved twice, and the notes are re-sent every
+  turn. Change it to "work the app doesn't cover (beams, plumbing, curtains, products)".
+- `say` filter: **only first-person claims of not being able to check or fix** (I can't / don't
+  have the ability to / am not able to … check, run, see or fix …). Criterion 6 changes. "The app
+  itself places the items and runs the checks" and "The app removed the bed because it doesn't
+  allow sleeping furniture in Living & Study" are *true* and must be **kept** (add both to the
+  keep list). Blaming the app in the third person is a voice rule for the prompt, not something to
+  filter.
+- Notes: drop any note about the app, the checks or the client's mood (a false positive costs
+  nothing). Also apply this when `factsBlock` is built, so the owner's two stored notes stop being
+  re-sent. No record migration.
+- The filter runs on the final parse and on salvaged stopped or cut-off replies. Streaming stays
+  unfiltered: `partialTalk`'s invariant is "always a prefix of the final", and a sentence that
+  vanishes at the end is rare once the prompt is fixed.
+
+**Free fixes: a post-pass on the answer, not inside the solver**
+- `designer/free.ts` (core, pure): from the **failing P1 must-have checks only** (never straight
+  from the brief, so it never invents a requirement the checks don't have), it adds intents to the
+  answer and re-runs `designResult`. The solver then re-solves the space with its usual budgets,
+  and the result is kept by `acceptResolve` with signatures: strictly fewer hard failures, no new
+  hard signature (R, K and HDB included) and `piecesNoWorse`. At most 2 tries a room a round (all
+  missing essentials together, then beds alone). In the web it is a worker ask, passed to
+  `runDesign` like `results`. On a server it calls core directly.
+- `solveSpace` and `designResult` don't change, so **benchmark layouts are unchanged by
+  construction** and the PERF bounds hold. Add a PERF-gated test: a free fix on the heavy living
+  room in at most 2× the first solve's bound. Add benchmark cases for free fixes.
+- Stored as data: app items are ordinary answer items with a reserved ref prefix `app:`.
+  `parseSpaceDesign` renames any model ref with that prefix, so the model can't pose as the app.
+  The card's "Placed by the app" lines come from the prefix. No schema field, and a stale tab
+  keeps them.
+- **Out of B:** orphan removal and the 5 cm nudge. Orphans fail no hard check, so taking them out
+  can never meet the "strictly fewer" rule. The model often uses a dining chair as a desk chair.
+  Placing the missing table is the real fix. The nudge would have to go in `designResult`, which
+  changes layouts, and walkways are measured on a 5 cm raster (`walkway.ts` CELL), so a 5 cm move
+  is within measurement noise. File it as a follow-up with a PERF and benchmark diff. Criterion 15
+  moves there. Criterion 12 drops the orphan chair.
+
+**Vetting: the runner rewrites the concept as data**
+- `vetConcept(concept, startLevel, brief, aliases)` in core (`designer/vet.ts`, with tests) runs
+  after `parseConcept` and before the room steps. It reverts renames and uses of rooms where
+  someone sleeps. Where entries land in one space, it merges them, sleeping use first. It refuses
+  `remove_wall` ops whose result puts a room where someone sleeps in the same space as a living,
+  dining or kitchen room: newest first, until none does. It is bounded by LIMITS.ops and is cheap
+  (walls and spaces only). Two bedrooms joining is allowed.
+- Not in `designResult`: that would change old and accepted versions (their change ids, and Put it
+  back). The vetting lines are cosmetic, so they go in an optional `appLines` on the option, read
+  tolerantly.
+- Criterion 20 uses the export's V4 concept exactly, and its `add_wall` ops at x = 4.5 stay.
+  Check that the walls left don't make a room with no door.
+
+**Fix rounds by progress (B2)**
+- Pool P: Thorough 3 (strict 6). Quick min(3, rooms) (strict min(4, 2 × rooms)). The second
+  look's round draws from the same pool, last.
+- Turns: in the first pass, each room may take up to max(1, ⌊P / rooms⌋). After every room's first
+  pass, rooms that are still progressing take what's left one at a time, in room order (2 at a
+  time). That is deterministic for criterion 17.
+- Progress means strictly fewer hard failures and no new signature. The count of fixable checks
+  alone, as today (`run.ts:586`), can swap one failure for another. If the answer is the same as
+  before after the merge (`stableJson`), the room has stalled.
+- Checkpoint: the room's answer is saved with status `done` after its first answer and after each
+  round (today `save()` runs only when the room ends, so a resume runs the room step again).
+  Per-room `rounds`, a stalled flag and the pass go on `RunCheckpoint`, and `fixesLeft` is written
+  when a fix-up is taken. An older build must never carry such a run on: **proposal record bump**.
+- The fix prompt says "move, turn, swap or **drop** the pieces named" (`prompts.ts:275`). Make it
+  "never drop a bed, seat, table or desk the room needs; drop something else".
+- Unpriced models: #67 WIP says the designer won't run on an unpriced model. If that holds, delete
+  the spec's unpriced branches. If not, "up to N requests" must count retries, or say "steps".
+
+**Output limit (#67 owns it, not A)**
+- Confirmed in `stream.ts:213`: on Gemini 3, both `high` and `medium` send `thinkingLevel:
+  'high'`. That includes **every Quick run**, and the talk call (effort `medium`, 4,000 tokens).
+  #67 maps effort per model (low and high on 3.x Pro; Flash also has medium) and sends the length
+  retry at `low`.
+- My call on starting lower: **fix rounds on Gemini 3 start at `low`**. In V6 to V9, every fix
+  round was cut off at about 15.36k thinking tokens, so nothing is lost. Room steps stay `high`.
+  Claude and OpenAI stay as they are (no evidence). `maxTokens` and the figure are unchanged.
+- Retries aren't in the estimate. Once #67's prices bind, a cut-off step's retry uses up room in
+  the figure and brings the pause sooner. Accept that for now, and look at the pause rate after
+  #67 lands.
+
+**Records and versions** (no project schema change, no `SCHEMA_VERSION` bump, no API deploy: talk
+and proposal records live in the browser's `dhd-talk`)
+- A: **no bump.** `rounds` on the space entry and `plan.addresses` are optional and read tolerantly
+  (`.catch(undefined)`), as the precedent of `owns` within v3 allows. If a stale tab drops them,
+  only the fix line's detail is lost, and repeats err towards asking.
+- B2: **proposal record bump** (checkpoint money fields). It takes **v5** if the second look (v4)
+  has merged. Otherwise whichever lands second takes the next number.
+- C: **talk record v5.** The strict setting (`DesignBrief.fixAll`, kept out of `briefData` so room
+  prefixes stay cached) must not be lost silently by a stale tab: that is the owner's complaint
+  again. A structured `declined: {room, role}[]` for rejected free fixes goes there too, because
+  Decision text can't be read reliably. The free-fix option's marker joins B2's proposal bump if C
+  follows soon after; otherwise it is v6.
+- §5 "the plan addresses them in the same way": compare the set of F and L ids only, not the text.
+
+### Should-fix in the spec
+
+- Criterion 6: move the two true third-person sentences to the keep list (above).
+- Criteria 9 and 16 to 19: 9 goes to #67. Add the pause and Carry on race (blocker 1) to 18.
+- Criteria 12 and 15: orphans and the nudge are out (above).
+- "Card, no progress" copy: today the loop breaks after the first no-better round, so "Sent back to
+  be fixed twice" needs two rounds. Word it from the stored `rounds`.
+- "Fixed n" comes from the rounds (the room tried alone) and "still don't pass" from the card's
+  verdict (the whole version): name them so, or the numbers won't add up.
+- The repeat cost card can only add asks, never remove one. Say so in §5.
+
+### PR order
+
+1. **Part 1** (`designer-keep-after-accept`: result, place and solve). Nothing brings the bed back
+   without it.
+2. **#67** (Gemini 3 prices, per-model thinking map, a real low retry, fix rounds at low on
+   Gemini 3). B prices the pool on it.
+3. **A** (report, Note codes, prompt, notes and the narrow filter, `addresses`, fix line). It can
+   be built alongside 1 and 2, but rebase it on part 1 for `Note.code`.
+4. **Second look** whenever it's ready. It must first rebase on #65 (its branch still has the run
+   code in web), and it takes proposal v4.
+5. **B1** (vetting and free essentials): core and runner, no money change.
+6. **B2** (pool by progress, the race fix, checkpoint, pricing): proposal bump. Tech-lead review
+   of the money diff.
+7. **C** (repeats, the What's blocking this block, the repeat cost card, strict, Keep fixing as a
+   fix-only run, replay criteria 30 to 32): talk v5.
