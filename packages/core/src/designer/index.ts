@@ -16,11 +16,15 @@ export {
   type FreeMiss,
   type FreeOptions,
   type FreeOutcome,
+  type FreeRemove,
   freeEssentials,
   freeName,
+  madeWay,
+  madeWayFor,
   gaveWayWords,
   isAppRef,
   isDeclined,
+  orphanLines,
 } from './free';
 export { type VetResult, readsAsBedroom, vetConcept } from './vet';
 export {
@@ -88,7 +92,7 @@ export {
 export {
   CHARS_PER_TOKEN,
   FIX_PER_RUN,
-  FIX_ROUNDS,
+  firstPassOf,
   OUTPUT,
   PRICES,
   PRICES_AS_OF,
@@ -96,7 +100,7 @@ export {
   type RunEstimate,
   type StepEstimate,
   estimateRun,
-  fixRoundsFor,
+  fixPoolFor,
   meteredPrice,
   priceOf,
   tokensOf,
@@ -140,6 +144,7 @@ export {
   mergeLines,
   type Mergeable,
   leftOutLines,
+  leftOutWords,
   manyOf,
   peopleWords,
   readyLine,
@@ -205,7 +210,7 @@ export {
   spacesOf,
 } from './spaces';
 export { type UsageOpts, usageOf, usageTotals } from './usage';
-export { clean, levelFingerprint } from './util';
+export { clean, levelFingerprint, stableJson } from './util';
 export {
   type DropCode,
   KEEP_TEXT,

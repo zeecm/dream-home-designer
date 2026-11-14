@@ -64,6 +64,7 @@ export function estimatePlan(ests: RunEstimate[]): RunEstimate | null {
               typical: t.usd.typical + e.usd.typical,
               high: t.usd.high + e.usd.high,
               fix: t.usd.fix + e.usd.fix,
+              fixOne: Math.max(t.usd.fixOne, e.usd.fixOne),
             }
           : null,
       fixes: t.fixes + e.fixes,

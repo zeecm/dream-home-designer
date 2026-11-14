@@ -144,17 +144,15 @@ export function freeLines(
         }
         return `Left out of what you’ve ticked: ${placedWords(c)}, placed by the app, free.`;
       }
-      // A piece a fix round's answer dropped and the app put back (the runner says so), and an
-      // extra of the answer that gave way for it (the free pass says so on its row).
-      const gave = gaveWayOf(c.why);
-      const more = gave ? `; ${gave}` : '';
+      // A piece a fix round's answer dropped and the app put back (the runner says so). What
+      // gave way for it is said once, in the lead's left-out line (UX, B2).
       // The person's own piece the app's stands for (the same kind where theirs was): theirs,
       // kept and moved, never "placed".
       if (c.verb === 'move' || c.verb === 'turn') {
-        return `${ownedWords(c)}${more}.`;
+        return `${ownedWords(c)}.`;
       }
       const head = /^Put back by the app/.test(c.why ?? '') ? 'Put back' : 'Placed';
-      return `${head} by the app, free: ${placedWords(c)}${more}.`;
+      return `${head} by the app, free: ${placedWords(c)}.`;
     });
 }
 
@@ -172,12 +170,6 @@ export function freePlacedWords(changes: readonly Change[], r: DesignResult): st
     ? (names[0] as string)
     : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 }
-
-/** "one bedside table no longer fits and is left out", from an app piece's reason. */
-export const gaveWayOf = (why: string | null | undefined): string | null => {
-  const m = /(One .+? no longer fits? and (?:is|are) left out)\.?$/.exec(why ?? '');
-  return m?.[1] ? lower(m[1]) : null;
-};
 
 /** The room and role of a row the app placed (its first piece), for a Decision. */
 export function appRowOf(c: Change, r: DesignResult): { room: string; role: string } | null {
@@ -393,7 +385,7 @@ export async function placeFree(card: CardModel): Promise<string | null> {
     const n = rep.failures.length;
     const what = words.map((w) => w.replace(/,.*$/, '')).join(' and ');
     say(
-      `Placed ${what}${gave ? `; ${gave}` : ''}. ${n ? `${n} still ${n === 1 ? 'doesn’t' : 'don’t'} pass.` : 'Passes all checks.'} Undo is available.`,
+      `Placed ${what}. ${n ? `${n} still ${n === 1 ? 'doesn’t' : 'don’t'} pass.` : 'Passes all checks.'} Undo is available.`,
     );
     useFreePlaced.setState((s) => ({ n: s.n + 1, card: card.key }));
     useTalk.setState({ shown: card.key });

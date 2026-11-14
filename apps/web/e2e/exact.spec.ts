@@ -96,6 +96,9 @@ async function renderCamera(page: Page): Promise<Cam> {
   return JSON.parse(raw ?? 'null') as Cam;
 }
 
+/** The longest a first path-traced sample may take on a slow CI runner. */
+const FIRST_SAMPLE = 120_000;
+
 test('opens on Exact and renders by itself, on this device: stop, carry on, switch, download, close', async ({
   page,
 }) => {
@@ -145,9 +148,11 @@ test('opens on Exact and renders by itself, on this device: stop, carry on, swit
   await expect(dialog.locator('.exact-picture')).toHaveAttribute('data-ceilings', 'true');
   await expect(dialog.getByText('Drawn by the app from your 3D model')).toBeVisible();
 
-  // It starts by itself, and the samples rise.
+  // It starts by itself, and the samples rise. The first sample takes about 36 s on a normal CI
+  // runner and half as long again on a slow one, so the waits for a first sample allow 2 min:
+  // this checks that it starts, not how fast.
   const progress = dialog.getByTestId('exact-progress');
-  await expect(progress).toHaveText(/^Sample \d+ of 16 · \d:\d\d$/, { timeout: 60_000 });
+  await expect(progress).toHaveText(/^Sample \d+ of 16 · \d:\d\d$/, { timeout: FIRST_SAMPLE });
   const reads: number[] = [];
   for (let i = 0; i < 3; i++) {
     const before = reads.at(-1) ?? 0;
@@ -207,7 +212,7 @@ test('opens on Exact and renders by itself, on this device: stop, carry on, swit
   // From this view: a new render, of the cut-away view (no ceilings).
   await dialog.getByRole('button', { name: /^From this view/ }).click();
   await expect(dialog.locator('.exact-picture')).toHaveAttribute('data-ceilings', 'false');
-  await expect(progress).toHaveText(/^Sample [1-4] of 16/, { timeout: 60_000 });
+  await expect(progress).toHaveText(/^Sample [1-4] of 16/, { timeout: FIRST_SAMPLE });
   // Back to eye height: its finished picture is still there, to download; and this view's,
   // left part way, is kept too.
   await eye.click();
@@ -216,7 +221,7 @@ test('opens on Exact and renders by itself, on this device: stop, carry on, swit
   await dialog.getByRole('button', { name: /^From this view/ }).click();
   await expect(progress).toHaveText(/^Stopped · \d+ of 16 samples/);
   await dialog.getByRole('button', { name: 'Render again' }).click();
-  await expect(progress).toHaveText(/^Sample [1-4] of 16/, { timeout: 60_000 });
+  await expect(progress).toHaveText(/^Sample [1-4] of 16/, { timeout: FIRST_SAMPLE });
 
   // Nor for the second (a download counts itself, as every download does).
   expect(outside(sent).filter((u) => !u.endsWith('/api/telemetry'))).toEqual([]);

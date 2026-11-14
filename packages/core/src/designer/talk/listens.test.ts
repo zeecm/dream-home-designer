@@ -152,16 +152,18 @@ describe('TALK_SYSTEM tells the truth about the app (criterion 5)', () => {
       'How the app works (fact): once they approve a plan, the app places the pieces you design and runs every check',
     );
     expect(TALK_SYSTEM).toContain('before they see the design');
-    expect(TALK_SYSTEM).toContain('up to the fix rounds the design was priced for');
+    expect(TALK_SYSTEM).toContain('round after round while each fails less');
     expect(TALK_SYSTEM).toMatch(/never say you can.t see, run or act on the checks/);
     expect(TALK_SYSTEM).toContain('Apologise at most once');
     expect(TALK_SYSTEM).toMatch(/don.t promise "no problems"/);
     expect(TALK_SYSTEM).toContain('plan.addresses');
     // Only what this build does (lead blocker 5): B1 places missing essentials itself and
-    // vets rooms; "as many rounds as the price allows" waits for B2.
+    // vets rooms; B2 keeps fixing while each round fails less, as the price allows, and takes
+    // the answer's orphans out.
     expect(TALK_SYSTEM).toContain('the app places the missing piece itself, free');
     expect(TALK_SYSTEM).toContain('A room where someone sleeps stays a bedroom');
-    expect(TALK_SYSTEM).not.toMatch(/as many rounds/i);
+    expect(TALK_SYSTEM).toContain("as many rounds as the design's price allows");
+    expect(TALK_SYSTEM).toContain('a dining chair your answer added with no table');
     expect(TALK_SYSTEM).toMatchSnapshot();
   });
 

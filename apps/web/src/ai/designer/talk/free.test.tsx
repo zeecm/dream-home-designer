@@ -91,9 +91,8 @@ describe('rows the app placed (By the app)', () => {
     const { r, changes } = placed();
     const app = changes.filter((c) => isAppChange(c, r));
     expect(app.map((c) => c.text)).toEqual([expect.stringMatching(/^Add a queen bed/)]);
-    expect(app[0]?.why).toBe(
-      'A bed for You and Partner: nobody had one. One bedside table no longer fits and is left out.',
-    );
+    // What gave way for it is said once, in the lead's left-out line (UX B2), not on its row.
+    expect(app[0]?.why).toBe('A bed for You and Partner: nobody had one.');
     // The designer's bedside table is its own row, never folded into the app's bed.
     expect(app[0]?.text).not.toMatch(/bedside/);
     expect(changes.filter((c) => !isAppChange(c, r)).length).toBeGreaterThan(0);
@@ -104,7 +103,7 @@ describe('rows the app placed (By the app)', () => {
     const lines = freeLines(changes, r);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toBe(
-      'Placed by the app, free: a queen bed in Main bedroom, against the wall by Bedroom; one bedside table no longer fits and is left out.',
+      'Placed by the app, free: a queen bed in Main bedroom, against the wall by Bedroom.',
     );
   });
 

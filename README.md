@@ -138,8 +138,14 @@ for any plan.
   check, and says which problems a plan fixes. PR B1: a missing bed, sofa, dining table or desk
   is placed by the app itself, free, shown on the card as "By the app" and left out like any
   row (a Place a queen bed · free button on older cards); a room where someone sleeps stays a
-  bedroom, and a wall that would open it onto the living room is kept. Next: fix rounds while
-  progressing, no paying twice for the same failures. [spec](docs/specs/designer-listens.md)
+  bedroom, and a wall that would open it onto the living room is kept. PR B2: a room is sent
+  back to be fixed again and again while each round makes progress, the rooms taking the run's
+  fix-ups in turn, all inside the figure you approved; when they run out with problems left, the
+  card offers Keep fixing · at most US$x, which always asks first; a dining chair with no table
+  or a bedside table with no bed that the answer added is taken out, free; the designer's pieces
+  that didn't fit are said on the card ("Left out, didn't fit: built-in wardrobe, 2 wardrobes");
+  a run carried on after a locked phone never repeats a fix round. Next: no paying twice for the
+  same failures, and "fix every check first". [spec](docs/specs/designer-listens.md)
 - AI interior designer v2, slice 3a part B: point at the plan (a piece or a spot, "keep this",
   "why here?", "something else here") with the pointers sent with your message.
 - AI runs that survive a locked phone, part 2: opt-in cloud runs that keep going while the phone is
