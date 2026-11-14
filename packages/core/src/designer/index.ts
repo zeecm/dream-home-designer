@@ -11,6 +11,17 @@ export {
 } from './aliases';
 export { categoriesFor, catalogueText, priorityOf, resolveAsset } from './catalogue';
 export {
+  APP_REF,
+  type FreeAdd,
+  type FreeMiss,
+  type FreeOptions,
+  type FreeOutcome,
+  freeEssentials,
+  freeName,
+  isAppRef,
+} from './free';
+export { type VetResult, readsAsBedroom, vetConcept } from './vet';
+export {
   type CheckOptions,
   type DesignCheck,
   type Principle,
@@ -114,6 +125,7 @@ export {
   type ReportRoom,
   type RunReport,
   checkRoomOf,
+  checkSig,
   failureLines,
   firstAndMore,
   fixSummary,

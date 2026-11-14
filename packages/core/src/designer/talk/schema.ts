@@ -270,6 +270,16 @@ export const Decision = z.object({
   deleted: z.boolean().default(false),
   /** Kept from a rule offer with Just this once: Make this a rule reopens it, free. */
   rule: Rule.optional().catch(undefined),
+  /**
+   * A piece the app placed itself, left out at Accept ("Left out: the app's queen bed in Main
+   * bedroom"): by room and role, so the free fix doesn't offer it again there. New within the
+   * record's version: optional, read tolerantly (a stale tab's write may drop it; the free fix
+   * may then offer the piece again, and the person unticks it).
+   */
+  free: z
+    .object({ room: z.string().max(80), role: z.string().max(40) })
+    .optional()
+    .catch(undefined),
 });
 export type Decision = z.infer<typeof Decision>;
 
@@ -296,6 +306,15 @@ export const RuleOffer = z.object({
 });
 export type RuleOffer = z.infer<typeof RuleOffer>;
 
+/** What a free fix asked for from a card put in: the option, and each piece by space and ref. */
+export const FreeLine = z.object({
+  proposalId: z.string(),
+  letter: z.enum(['A', 'B', 'C']),
+  refs: z.array(z.object({ space: z.string(), ref: z.string().max(40) })).max(40),
+  undone: z.boolean().default(false),
+});
+export type FreeLine = z.infer<typeof FreeLine>;
+
 /** An app line in the log (UX §6.6). */
 export const TalkEvent = z.discriminatedUnion('type', [
   z.object({
@@ -312,7 +331,16 @@ export const TalkEvent = z.discriminatedUnion('type', [
     undone: z.boolean().default(false),
   }),
   z.object({ type: z.literal('stopped'), usd: z.number().min(0).nullable() }),
-  z.object({ type: z.literal('note'), text: z.string().max(TALK_LIMITS.note) }),
+  z.object({
+    type: z.literal('note'),
+    text: z.string().max(TALK_LIMITS.note),
+    /**
+     * A free fix asked for from a card (Place a queen bed · free): the pieces it added to the
+     * option's answers, for its Undo. New within the record's version: optional, read
+     * tolerantly (an older build shows the line without Undo).
+     */
+    free: FreeLine.optional().catch(undefined),
+  }),
   z.object({
     type: z.literal('fact'),
     key: QuestionKey,
@@ -684,6 +712,11 @@ export const ProposalOption = z.object({
    * this option's own result. New within the record's version: optional, read tolerantly.
    */
   addresses: z.array(PlanAddress).max(8).optional().catch(undefined),
+  /**
+   * The app's own lines about it (room vetting: "Main bedroom stays a bedroom: …"), shown in
+   * its card's lead. New within the record's version: optional, read tolerantly.
+   */
+  appLines: z.array(z.string().max(400)).max(8).optional().catch(undefined),
   /** The id its pieces are seeded with, and its version's id once accepted. */
   designId: z.string(),
   brief: DesignBrief,

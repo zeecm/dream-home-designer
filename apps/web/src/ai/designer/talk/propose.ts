@@ -33,7 +33,7 @@ import { meterSetting } from '../../../storage/store';
 import { useStore } from '../../../store';
 import { aiSettings } from '../../credentials';
 import { browserPage } from '../page';
-import { freshPrice, readPrice, trialResult } from '../results';
+import { freshPrice, readPrice, trialFree, trialResult } from '../results';
 import {
   addUsage,
   cannotDesign,
@@ -46,6 +46,7 @@ import {
 } from '../spend';
 import { type MadeWith, type Running, designOpts, houseKeptFor, useDesigner } from '../state';
 import { cardReportNow, optionCard } from './cards';
+import { declinedPieces } from './free';
 import {
   type PriceInput,
   type Priced,
@@ -975,6 +976,8 @@ async function runOption(
       aliases: copy.aliases,
       concept: copy.concept,
       spaces: copy.spaces,
+      // The layout's vetting lines (a run with no layout step keeps the option's own).
+      ...(sp.plan.layout ? { appLines: copy.appLines } : {}),
       usage: copy.usage,
       run,
     }));
@@ -998,6 +1001,9 @@ async function runOption(
     // Placed as its card will be: with the kept pieces it was made with.
     result: designOpts(project, designLevelId(), madeOf(p, letter)),
     results: trialResult,
+    // The app's free fixes for each room, in the worker; never a piece the person left out.
+    free: trialFree,
+    declined: declinedPieces(),
     fixesLeft: ck.fixesLeft,
     ...(sp.expected ? { expected: sp.expected } : {}),
     onUpdate: (st) => {

@@ -157,8 +157,11 @@ describe('TALK_SYSTEM tells the truth about the app (criterion 5)', () => {
     expect(TALK_SYSTEM).toContain('Apologise at most once');
     expect(TALK_SYSTEM).toMatch(/don.t promise "no problems"/);
     expect(TALK_SYSTEM).toContain('plan.addresses');
-    // Only what this build does: nothing about the app placing missing pieces itself.
-    expect(TALK_SYSTEM).not.toMatch(/missing essentials|places? (the )?missing|as many rounds/i);
+    // Only what this build does (lead blocker 5): B1 places missing essentials itself and
+    // vets rooms; "as many rounds as the price allows" waits for B2.
+    expect(TALK_SYSTEM).toContain('the app places the missing piece itself, free');
+    expect(TALK_SYSTEM).toContain('A room where someone sleeps stays a bedroom');
+    expect(TALK_SYSTEM).not.toMatch(/as many rounds/i);
     expect(TALK_SYSTEM).toMatchSnapshot();
   });
 

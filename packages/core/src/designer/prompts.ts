@@ -298,7 +298,7 @@ const fixBlock = (fix: FixRequest | undefined) =>
               .map((l) => `- ${JSON.stringify(clean(l, 120))}`)
               .join('\n')}\n`
           : ''
-      }Answer again for the whole space so that they pass: move, turn or swap the pieces named (a smaller piece, another wall); never drop a bed, seat, table or desk the room needs, drop something else. Keep what works, and say in notes what you couldn't fix and why.\n`
+      }Answer again for the whole space so that they pass: move, turn or swap the pieces named (a smaller piece, another wall); never drop a bed, seat, table or desk the room needs, drop something else. Pieces whose ref starts app: the app placed itself for a missing essential: keep, move or replace them, with refs of your own. Keep what works, and say in notes what you couldn't fix and why.\n`
     : '';
 
 const feedbackBlock = (o: StepOptions) =>

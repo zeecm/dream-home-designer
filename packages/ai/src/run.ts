@@ -8,6 +8,8 @@ import {
   FIX_PER_RUN,
   type FixRequest,
   type FixRound,
+  type FreeOptions,
+  type FreeOutcome,
   type Level,
   type ParseResult,
   type Price,
@@ -18,6 +20,7 @@ import {
   aliasesFor,
   designResult,
   fixRoundsFor,
+  freeEssentials,
   layoutStep,
   leftOutLines,
   lensOn,
@@ -32,6 +35,7 @@ import {
   tokensOf,
   usageOf,
   usdOf,
+  vetConcept,
 } from '@dhd/core';
 import { AiError } from './errors';
 import type { Page } from './page';
@@ -63,9 +67,11 @@ const NO_ANSWER: Record<FailReason, FixRound['outcome']> = {
  * starts (so the others read the prompt cache it wrote), then two more at a time, one at a
  * time after a rate limit. Each step is kept as it finishes; Stop aborts every request in
  * flight and keeps what's done. Every request's tokens are metered, a cut-off one estimated.
- * Each room's answer is placed and checked as it arrives: hard checks it fails go back to the
- * designer (once a room on Quick, twice on Thorough, FIX_PER_RUN requests in a run at most,
- * with the app's own lines) before the version is shown.
+ * The layout is vetted as it arrives (`vetConcept`: a room where someone sleeps stays a
+ * bedroom). Each room's answer gets the app's free fixes (a missing bed, seats, dining table or
+ * desk, `freeEssentials`, no request), is placed and checked: hard checks it fails go back to
+ * the designer (once a room on Quick, twice on Thorough, FIX_PER_RUN requests in a run at most,
+ * with the app's own lines), each answer again with its free fixes, before the version is shown.
  */
 
 export type StepStatus = 'waiting' | 'running' | 'done' | 'failed' | 'cancelled' | 'skipped';
@@ -174,6 +180,20 @@ export interface RunOptions {
     opts?: DesignOptions,
   ) => Promise<DesignResult>;
   /**
+   * Where a space's free fixes are worked out (the designer's worker, as `results`); else here.
+   * The missing essentials of a must-have check, added to the answer and kept only when
+   * strictly better (core's `freeEssentials`). No request.
+   */
+  free?: (
+    base: Level,
+    before: Level,
+    design: DesignInput,
+    opts: DesignOptions | undefined,
+    o: FreeOptions,
+  ) => Promise<FreeOutcome>;
+  /** Pieces the person left out before (room and role): the free fixes never add them again. */
+  declined?: FreeOptions['declined'];
+  /**
    * Whether the tab's limit (or the run's figure) has been reached, counting `next` (the step
    * about to be sent) at its most: before each step, and before any request is sent again.
    */
@@ -265,6 +285,8 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
   // ends the run, even while a check is out (a worker that hangs or dies says nothing).
   const placeAny = o.results ?? ((b, f, d, opts) => Promise.resolve(designResult(b, f, d, opts)));
   const place: typeof placeAny = (b, f, d, opts) => untilStopped(placeAny(b, f, d, opts), o.signal);
+  const freeAny =
+    o.free ?? ((b, f, d, opts, fo) => Promise.resolve(freeEssentials(b, f, d, opts, fo)));
   const doFetch = o.fetch ?? fetch.bind(globalThis);
   const design: DraftDesign = structuredClone(o.design);
   const name = PROVIDERS[ai.provider].short;
@@ -480,7 +502,19 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       // (A step sent again after the page was away took the time away too: not timed.)
       if (!st.resent) o.onTimed?.('layout', Date.now() - t0);
       if (!concept) return ended('failed');
-      design.concept = concept;
+      // Vetted before any room is sent (free): a room where someone sleeps stays a bedroom, and a
+      // wall whose removal joins it to a living room stays. The concept is stored as vetted.
+      const vetted = vetConcept(
+        concept,
+        ctx.base,
+        ctx.before,
+        design.brief,
+        design.aliases,
+        design.id,
+      );
+      design.concept = vetted.concept;
+      if (vetted.lines.length) design.appLines = vetted.lines;
+      else delete design.appLines;
       say(`Layout and style done. ${usdText(spentSoFar())} so far.`);
       update();
     }
@@ -544,6 +578,24 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
         ),
       };
     };
+    /**
+     * An answer with the app's free fixes (the missing essentials of its must-have checks),
+     * worked out on the space alone as `failing` checks it, and kept only when strictly better.
+     */
+    const withFree = async (s: (typeof spaces)[number], answer: SpaceDesign) => {
+      const trial: DraftDesign = {
+        ...design,
+        spaces: { [s.key]: { name: s.name, status: 'done', design: answer } },
+      };
+      const out = await untilStopped(
+        freeAny(ctx.base, ctx.before, trial, o.result, {
+          spaces: [s.key],
+          ...(o.declined?.length ? { declined: o.declined } : {}),
+        }),
+        o.signal,
+      );
+      return out.added.length ? (out.spaces[s.key]?.design ?? answer) : answer;
+    };
     // A run-stopping error (a refused key, a quota): set before the first room's gate opens,
     // so no other room is sent after it.
     let runError: unknown = null;
@@ -573,7 +625,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
         if (answer) {
           const merge = (a: SpaceDesign) =>
             mergeAnswer(plan.previous?.[s.key], a, plan.keep?.[s.key] ?? [], o.result);
-          let current = merge(answer);
+          let current = await withFree(s, merge(answer));
           // Placed and checked: what fails goes back to the designer, at most twice.
           const first = await failing(s, current);
           let fixes = 0;
@@ -643,13 +695,14 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
               st.error = null;
               break;
             }
-            const next = await failing(s, merge(again));
+            const fixedAnswer = await withFree(s, merge(again));
+            const next = await failing(s, fixedAnswer);
             // Kept only if it fails less; no better twice running is a room that can't pass,
             // and the second round isn't spent on it.
             const out = { before: left.length, after: next.fixable.length };
             if (next.fixable.length < left.length) {
               rounds.push({ outcome: 'fixed', ...out });
-              current = merge(again);
+              current = fixedAnswer;
               now = next;
             } else {
               rounds.push({ outcome: 'no-better', ...out });

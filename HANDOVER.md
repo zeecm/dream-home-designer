@@ -823,6 +823,57 @@ claims only about the checks, the design or "it" ("I can't check the lift size" 
 question counts with the same `mergeLines`; a round with no progress reads "no better" (no
 count).
 
+**The designer listens, PR B1 (issue #66 part 2, 14 Nov): free essentials and room vetting.**
+No money change, no record bump (every new field optional and read tolerantly).
+- **Free fixes** (core `designer/free.ts`, `freeEssentials`): a post-pass on the answer, never
+  inside the solver. From the failing P1 must-have checks only (a bed per sleeper, seats, a dining
+  table with chairs, a desk and chair per person working from home), it adds the catalogue piece
+  as an ordinary answer item with an `app:` ref (a queen for a couple, a super single for an
+  adult, a single for a child or elder; a 3-seat sofa, or an armchair one seat short; `dining-4`
+  or `-6` with a chair each), places the version again with `designResult` and keeps it only
+  when strictly fewer hard checks fail, no new failure signature appears (`checkSig` in
+  `report.ts`: principle|code|room|role; R, K and HDB included) and `piecesNoWorse` holds. The
+  pieces counted there leave out extras (bedside, side and coffee tables, lamps, rugs, decor), so
+  a bedside table with no room by the new bed's head may give way; a kept or app piece always
+  counts. Two tries a space at most: all together, then the most important alone (beds first).
+  What it can't place is said with why (`missed`: the wall's numbers, or the checks it would
+  fail). Pieces the person left out before (`declined`, by room and role) are never added.
+  `parseSpaceDesign` renames any model ref starting `app:` (and what faces or goes by it), so the
+  model can't pose as the app; the stored schema keeps them. `solveSpace` and `designResult` are
+  untouched: the benchmark layouts are byte-identical. PERF test: the post-pass on a heavy living
+  room within 2x the first solve's 300 ms bound (about 175 ms kept at one try, 330 ms for two).
+  Only answers by intent (`v: 2`) get one.
+- **The runner** (`@dhd/ai` `run.ts`): each room's answer, and each fix round's, goes through the
+  free pass (`RunOptions.free`, the web's worker ask `trialFree`; core directly on a server) on the
+  space alone, as `failing` checks it; `declined` comes from the Decisions.
+- **Vetting** (core `designer/vet.ts`, `vetConcept`): after the layout is parsed, before any room
+  is sent. A room where the brief has someone sleeping keeps a sleeping use; a name for another
+  use ("Living & Study", "Study") goes back to the room's own, one that reads as a bedroom ("Main
+  bedroom & study") or their own ("Mdm Lim's room") stays. `remove_wall` ops that would put a
+  sleeping room in one space with a living, dining or kitchen room are refused newest first, those
+  with a living room on one side before any other, so two bedrooms joined still stand. Entries
+  landing in one room are made one, the sleeping use first. The concept is stored as vetted; the
+  lines go on the option (`appLines`) and show in the card's lead. The owner's V4: W8 and W10
+  kept, W5 hacked (the bigger master), Main bedroom "Master Bedroom" master; fixture
+  `designer/fixtures/owner-v4.json`.
+- **The card** (web `talk/free.ts`): app rows tagged By the app (the row's head piece has an
+  `app:` ref), ticked like any; the lead says "Placed by the app, free: a queen bed in Main
+  bedroom, against …" and the vetting lines (two, the rest under How it was checked; "Who sleeps
+  where ›" on a bedroom line). Left out at Accept (never on untick): a Decision "Left out: the
+  app's queen bed in Main bedroom" with `free: {room, role}` (optional on `Decision`), kept out of
+  the usual "Left out of V4" line. A dry run in the worker (`readFree`) offers **Place a queen bed
+  · free** (never primary, no `data-spends`) when it would place something (a card an older build
+  made): it adds the pieces to the same option (no new tab), ticks the new rows, adds a log line
+  (`note` with optional `free`) whose Undo takes them out (`freeUndone`) while it is the newest
+  such line and not accepted since, announces, and folds the phone sheet to peek. On a phone the
+  On the table bar carries it ("V1 · 1 doesn't pass [Place a bed · free]").
+- **Prompts:** `TALK_SYSTEM` now says the app places a missing bed, seats, dining table or desk
+  itself, free, and keeps a sleeping room a bedroom (lead blocker 5); the fix block says app:
+  pieces are the app's, to keep, move or replace with refs of their own (within FIX_EXTRA).
+- Left for B2/C: the fix-up pool by progress, Keep fixing, repeats, strict mode; orphans and the
+  nudge stay out (lead decisions). A structured `declined` list in talk v5 (C) replaces the
+  tolerant `Decision.free`.
+
 **AI costs always have a figure (#67, 14 Nov).** The owner's Gemini 3 runs had no price, so no
 cost card had a figure and neither the approved figure nor the tab's limit held.
 - **Prices** (`core designer/prices.ts`, checked 14 Nov against Google's

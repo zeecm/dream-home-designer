@@ -44,6 +44,7 @@ import {
   planMoved,
   tickedExtra,
 } from './cards';
+import { freeLabel, freeLines, freeOffer, isAppChange, placeFree, useFreeBusy } from './free';
 import { bringBackCard } from './iterate';
 import {
   anotherPrice,
@@ -547,6 +548,19 @@ export const ProposalCard = memo(function ProposalCard({
     () => (r ? timed(() => cardRunReport(card, r, changes, { waive: waiveKey.split('|') })) : null),
     [card, r, changes, waiveKey],
   );
+  // The free fix's dry run (in the worker, free): offered only when it would place something.
+  const freeBusy = useFreeBusy((s) => s.card);
+  const declinedKey = useTalk((s) =>
+    (s.conv?.decisions ?? [])
+      .filter((d) => !d.deleted && d.free)
+      .map((d) => d.id)
+      .join(','),
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
+  const offer = useMemo(
+    () => (active && r && !running ? timed(() => freeOffer(project, card)) : null),
+    [active, r, running, project, card, tick, declinedKey],
+  );
   // The electrical layer's notes on the points this proposal adds (surface trunking on a
   // structural wall, an aircon with no compressor): notes, not failures, so amber.
   const elecNotes = useMemo(() => {
@@ -747,8 +761,34 @@ export const ProposalCard = memo(function ProposalCard({
     ruleCount,
   );
   const failingLine = report || !running ? { text: one.text, tone: one.tone } : null;
+  // What the app did itself (free): the pieces it placed, and its vetting lines.
+  const did = [...freeLines(changes, r), ...(card.option?.appLines ?? [])];
+  const missedLines = (offer?.missed ?? []).map((m) => m.text);
+  const freeButton =
+    offer && offer.added.length > 0 ? (
+      <button
+        type="button"
+        className="btn btn-small talk-free-btn"
+        data-free-fix=""
+        disabled={!!freeBusy || accepting}
+        onClick={() => {
+          void placeFree(card).then((line) => {
+            if (!line) return;
+            requestAnimationFrame(() =>
+              focusInLog(document.querySelector<HTMLButtonElement>(`[data-undo-free="${line}"]`)),
+            );
+          });
+        }}
+      >
+        {freeBusy === card.key ? 'Placing…' : freeLabel(offer)}
+      </button>
+    ) : null;
   // The lead: how this version was checked, above the summary ("did it work?" comes first).
-  const lead = !running && card.status !== 'failed' && !!failingLine && hasLead(rep);
+  const lead =
+    !running &&
+    card.status !== 'failed' &&
+    !!failingLine &&
+    (hasLead(rep) || did.length > 0 || missedLines.length > 0 || !!freeButton);
   const verdict = running ? 'Checking…' : (failingLine?.text ?? 'Checking…');
   const title =
     card.input.concept?.summary ||
@@ -824,7 +864,15 @@ export const ProposalCard = memo(function ProposalCard({
     >
       {head}
       {tabs}
-      {lead && <CheckLead cardKey={card.key} report={rep} />}
+      {lead && (
+        <CheckLead
+          cardKey={card.key}
+          report={rep}
+          did={did}
+          missed={missedLines}
+          action={freeButton}
+        />
+      )}
       {title && <p className="talk-card-summary">{keepTogether(title)}</p>}
       {card.words.trim() && <p className="talk-card-words">Your words: “{card.words.trim()}”</p>}
       {!running && card.status !== 'failed' && card.option?.addresses?.length ? (
@@ -1071,6 +1119,12 @@ export const ProposalCard = memo(function ProposalCard({
                               {keepTogether(c.text)}
                               {keptIds.some((k) => c.items.target.includes(k)) && (
                                 <span className="talk-kept-tag"> Kept</span>
+                              )}
+                              {isAppChange(c, r) && (
+                                <span className="talk-kept-tag" data-by-app="">
+                                  {' '}
+                                  By the app
+                                </span>
                               )}
                             </span>
                             <span className="talk-row-why" aria-hidden="true">

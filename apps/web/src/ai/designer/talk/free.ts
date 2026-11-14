@@ -1,0 +1,316 @@
+import {
+  type Change,
+  type DesignResult,
+  type FreeLine,
+  type FreeOutcome,
+  type Project,
+  type ProposalOption,
+  freeName,
+  furnitureKind,
+  isAppRef,
+  roleOf,
+  roomIdAt,
+} from '@dhd/core';
+import { create } from 'zustand';
+import { useStore } from '../../../store';
+import { readFree, requestFree, requestResult } from '../results';
+import { designOpts } from '../state';
+import { type CardModel, cardChanges, cardRunReport, madeWith, nowOf, optionCard } from './cards';
+import { act, actProposal, newId, nowIso, say, useTalk } from './useTalk';
+
+/**
+ * The app's free fixes on a card (spec docs/specs/designer-listens.md, UX "The free fixes: shown
+ * and undone"). The pieces the app placed itself are ordinary rows, tagged By the app (their
+ * refs start `app:`), ticked like any other; one left out is a Decision at Accept, never on
+ * untick. Place … · free asks the results worker for a dry run of the free fixes on the card as
+ * it is: offered only when it would place something, it adds the pieces to the same option (no
+ * new tab, no request), with a log line whose Undo takes them out again.
+ */
+
+/** Pieces the person left out before (Decisions at Accept): never offered again there. */
+export function declinedPieces(): { room: string; role: string }[] {
+  const ds = useTalk.getState().conv?.decisions ?? [];
+  return ds.flatMap((d) => (!d.deleted && d.free ? [d.free] : []));
+}
+
+/**
+ * A change row the app placed itself: the piece it is about (its first: a row says a bedside
+ * table or chairs with their bed or table) has an `app:` ref.
+ */
+export function isAppChange(c: Change, r: DesignResult): boolean {
+  const head = c.items.target[0];
+  return !!head && isAppRef(r.refs[head]);
+}
+
+const lower = (s: string) => (s ? `${s[0]?.toLowerCase()}${s.slice(1)}` : s);
+
+/**
+ * "a queen bed in Main bedroom, against the wall opposite the window" from the row "Add a queen
+ * bed against the wall opposite the window" in Main bedroom.
+ */
+export function placedWords(c: Change): string {
+  if (c.verb !== 'add') {
+    const name = c.name.replace(/^the /, '');
+    return `${/^[aeiou8]/i.test(name) ? 'an' : 'a'} ${name} in ${c.groupName}`;
+  }
+  // What goes with it is the answer's own ("with a bedside table"): not said as the app's.
+  const rest = c.text.replace(/^Add /, '').replace(/, with .*$/, '');
+  const m = /^(an? .+?)(?=,| against | by | in front of | under | facing | beside |$)(.*)$/.exec(
+    rest,
+  );
+  const what = m?.[1] ?? rest;
+  const tail = (m?.[2] ?? '').replace(/^,\s*/, '').trim();
+  return `${lower(what)} in ${c.groupName}${tail ? `, ${tail}` : ''}`;
+}
+
+/** The lead's lines for the pieces the app placed: "Placed by the app, free: a queen bed in …". */
+export function freeLines(changes: readonly Change[], r: DesignResult): string[] {
+  return changes
+    .filter((c) => c.verb !== 'remove' && isAppChange(c, r))
+    .map((c) => `Placed by the app, free: ${placedWords(c)}.`);
+}
+
+/** The room and role of a row the app placed (its first piece), for a Decision. */
+export function appRowOf(c: Change, r: DesignResult): { room: string; role: string } | null {
+  const id = c.items.target[0];
+  const it = id ? r.level.items[id] : undefined;
+  if (!it) return null;
+  const room = roomIdAt(r.level, { x: it.position.x, y: it.position.z });
+  return room ? { room, role: roleOf(furnitureKind(it.assetId)) } : null;
+}
+
+/** The pieces a free fix would place that stand on their own (a table's chairs go with it). */
+const heads = (out: FreeOutcome) => {
+  const refs = new Set(out.added.map((a) => a.ref));
+  return out.added.filter((a) => {
+    const item = out.spaces[a.space]?.design?.items.find((i) => i.ref === a.ref);
+    return !(item?.near && refs.has(item.near));
+  });
+};
+
+const SHORT: Record<string, string> = {
+  bed: 'bed',
+  sofa: 'sofa',
+  armchair: 'chair',
+  'dining-table': 'table',
+  'dining-chair': 'chair',
+  desk: 'desk',
+};
+
+/** "Place a queen bed · free", "Place 3 missing pieces · free"; on the bar "Place a bed · free". */
+export function freeLabel(out: FreeOutcome, short = false): string {
+  const h = heads(out);
+  const one = h.length === 1 ? h[0] : undefined;
+  if (one) {
+    const name = short ? (SHORT[one.role] ?? 'piece') : freeName(one.assetId);
+    return `Place ${/^[aeiou8]/i.test(name) ? 'an' : 'a'} ${name} · free`;
+  }
+  return short ? `Place ${h.length} pieces · free` : `Place ${h.length} missing pieces · free`;
+}
+
+/**
+ * A card's dry run of the free fixes on the plan as it is (from the worker, free): what it would
+ * place and what it couldn't, or null while it is worked out or the card can't take one.
+ */
+export function freeOffer(project: Project, card: CardModel): FreeOutcome | null {
+  if (card.kind !== 'proposal' || !card.option || card.status === 'running') return null;
+  if (card.status === 'failed') return null;
+  const b = nowOf(project, card.levelId);
+  if (!b) return null;
+  const out = readFree(
+    b.now,
+    b.before,
+    card.input,
+    designOpts(project, card.levelId, madeWith(card)),
+    { declined: declinedPieces() },
+  );
+  return out;
+}
+
+/** Bumped when a free fix lands on a card: the phone's sheet folds to peek to show it. */
+export const useFreePlaced = create(() => ({ n: 0, card: null as string | null }));
+
+/** Placing on a card now (the button reads "Placing…"). */
+export const useFreeBusy = create(() => ({ card: null as string | null }));
+
+/** An option with the pieces a free fix added put into its answers (the rest as it was). */
+export function withFree(
+  o: ProposalOption,
+  out: Pick<FreeOutcome, 'added' | 'spaces'>,
+): ProposalOption {
+  const spaces = new Set(out.added.map((a) => a.space));
+  return {
+    ...o,
+    spaces: Object.fromEntries(
+      Object.entries(o.spaces).map(([k, s]) => {
+        const d = out.spaces[k]?.design;
+        if (!spaces.has(k) || !d || !s.design) return [k, s];
+        const items = d.items.filter((i) =>
+          out.added.some((a) => a.space === k && a.ref === i.ref),
+        );
+        return [k, { ...s, design: { ...s.design, items: [...s.design.items, ...items] } }];
+      }),
+    ),
+  };
+}
+
+/** An option with a free fix's pieces taken out of its answers again (its line's Undo). */
+export function withoutFree(o: ProposalOption, free: Pick<FreeLine, 'refs'>): ProposalOption {
+  const out = new Set(free.refs.map((x) => `${x.space}|${x.ref}`));
+  return {
+    ...o,
+    spaces: Object.fromEntries(
+      Object.entries(o.spaces).map(([k, s]) => [
+        k,
+        s.design
+          ? {
+              ...s,
+              design: {
+                ...s.design,
+                items: s.design.items.filter((i) => !out.has(`${k}|${i.ref}`)),
+              },
+            }
+          : s,
+      ]),
+    ),
+  };
+}
+
+/**
+ * The Decisions an Accept records for the app's own rows left out ("Left out: the app's queen
+ * bed in Main bedroom"), by room and role so the free fix doesn't offer them there again.
+ */
+export function appDecisions(
+  left: readonly Change[],
+  r: DesignResult,
+): { text: string; free: { room: string; role: string } | null }[] {
+  return left
+    .filter((c) => isAppChange(c, r))
+    .map((c) => ({
+      text: `Left out: the app’s ${c.name.replace(/^the /, '')} in ${c.groupName}`,
+      free: appRowOf(c, r),
+    }));
+}
+
+/**
+ * Place … · free: the free fixes worked out afresh, put into the option's answers (the same
+ * card, no request), the new rows ticked as rows are, a log line with Undo, and one
+ * announcement. The id of the line, or null when nothing was placed.
+ */
+export async function placeFree(card: CardModel): Promise<string | null> {
+  const p = card.proposal;
+  const o = card.option;
+  if (!p || !o || useFreeBusy.getState().card) return null;
+  const project = useStore.getState().editor.doc;
+  const b = nowOf(project, card.levelId);
+  if (!b) return null;
+  useFreeBusy.setState({ card: card.key });
+  try {
+    const opts = designOpts(project, card.levelId, madeWith(card));
+    const out = await requestFree(b.now, b.before, card.input, opts, {
+      declined: declinedPieces(),
+    });
+    if (!out.added.length) return null;
+    const patch = (x: ProposalOption) => withFree(x, out);
+    // The rows it adds, ticked as the card ticks rows (none yet: all that pass, as before).
+    const nextOption = patch(o);
+    const nextCard = optionCard(p, nextOption, card.levelId);
+    const r2 = await requestResult(b.now, b.before, nextCard.input, opts);
+    const changes = cardChanges(project, nextCard, r2);
+    const refs = new Set(out.added.map((a) => a.ref));
+    const added = changes.filter(
+      (c) => isAppChange(c, r2) && c.items.target.some((id) => refs.has(r2.refs[id] ?? '')),
+    );
+    const letter = o.letter;
+    await actProposal(p.id, (x) =>
+      x
+        ? {
+            ...x,
+            options: x.options.map((y) =>
+              y.letter === letter && y.designId === o.designId
+                ? {
+                    ...patch(y),
+                    ...(y.ticks ? { ticks: [...y.ticks, ...added.map((c) => c.id)] } : {}),
+                  }
+                : y,
+            ),
+          }
+        : x,
+    );
+    const words = added.map(placedWords);
+    const text = `Placed by the app, free: ${words.join('; ') || 'the missing pieces'}.`;
+    const id = newId('turn');
+    await act({
+      type: 'event',
+      id,
+      at: nowIso(),
+      event: {
+        type: 'note',
+        text,
+        free: {
+          proposalId: p.id,
+          letter,
+          refs: out.added.map((a) => ({ space: a.space, ref: a.ref })),
+          undone: false,
+        },
+      },
+    });
+    const rep = cardRunReport(nextCard, r2, changes);
+    const n = rep.failures.length;
+    const what = words.map((w) => w.replace(/,.*$/, '')).join(' and ');
+    say(
+      `Placed ${what}. ${n ? `${n} still ${n === 1 ? 'doesn’t' : 'don’t'} pass.` : 'Passes all checks.'} Undo is available.`,
+    );
+    useFreePlaced.setState((s) => ({ n: s.n + 1, card: card.key }));
+    useTalk.setState({ shown: card.key });
+    return id;
+  } finally {
+    useFreeBusy.setState({ card: null });
+  }
+}
+
+/** Whether a free fix's line still offers Undo: the newest such line, not undone, not accepted. */
+export function freeUndoable(eventId: string): boolean {
+  const s = useTalk.getState();
+  const turns = s.conv?.turns ?? [];
+  let newest: string | null = null;
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const t = turns[i];
+    if (t?.kind === 'event' && t.event.type === 'note' && t.event.free) {
+      newest = t.id;
+      break;
+    }
+  }
+  if (newest !== eventId) return false;
+  const t = turns.find((x) => x.id === eventId);
+  const free = t?.kind === 'event' && t.event.type === 'note' ? t.event.free : undefined;
+  if (!free || free.undone) return false;
+  // Once accepted after it, the plan has them: Undo the accept instead.
+  const at = turns.findIndex((x) => x.id === eventId);
+  return !turns
+    .slice(at + 1)
+    .some(
+      (x) =>
+        x.kind === 'event' &&
+        x.event.type === 'accepted' &&
+        x.event.proposalId === free.proposalId &&
+        !x.event.undone,
+    );
+}
+
+/** The line's Undo: the pieces it added come out of the option's answers again. */
+export async function undoFree(eventId: string): Promise<void> {
+  const t = useTalk.getState().conv?.turns.find((x) => x.id === eventId);
+  const free = t?.kind === 'event' && t.event.type === 'note' ? t.event.free : undefined;
+  if (!free || !freeUndoable(eventId)) return;
+  await actProposal(free.proposalId, (p) =>
+    p
+      ? {
+          ...p,
+          options: p.options.map((o) => (o.letter === free.letter ? withoutFree(o, free) : o)),
+        }
+      : p,
+  );
+  await act({ type: 'freeUndone', eventId });
+  say('Took out what the app placed.');
+}

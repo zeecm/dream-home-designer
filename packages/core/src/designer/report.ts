@@ -114,6 +114,17 @@ export function checkRoomOf(r: DesignResult, c: { roomId?: string; itemId?: stri
   return it ? roomIdAt(r.level, { x: it.position.x, y: it.position.z }) : null;
 }
 
+/**
+ * A check's failure signature, principle|code|room|role: the same failure across runs and
+ * answers (item ids are new each run). B's progress rule, the free fixes and C's repeats use it.
+ */
+export function checkSig(r: DesignResult, c: ResultCheck): string {
+  const parts = c.key.split('|');
+  const it = c.itemId ? r.level.items[c.itemId] : undefined;
+  const role = it ? roleOf(furnitureKind(it.assetId)) : (parts[3] ?? '');
+  return `${c.principle}|${parts[1] ?? ''}|${checkRoomOf(r, c) ?? ''}|${role}`;
+}
+
 /** The roles a programme check's missing piece would have (a bed for "has no bed"). */
 const NEEDS: Record<string, Role[]> = {
   bed: ['bed'],
@@ -385,7 +396,6 @@ export function runReport(
     const ref = c.itemId ? r.refs[c.itemId] : undefined;
     const parts = c.key.split('|');
     const code = parts[1] ?? '';
-    const role = it ? roleOf(furnitureKind(it.assetId)) : (parts[3] ?? '');
     // A missing piece's cause: the piece of its kind the app left out in that room's space.
     const need = !it ? NEEDS[code] : undefined;
     const space = roomId ? r.spaces.find((s) => s.rooms.includes(roomId)) : undefined;
@@ -403,7 +413,7 @@ export function runReport(
       says: peopleWords(c.text, input.brief),
       piece: c.itemId ? (ref ?? short.get(c.itemId) ?? null) : null,
       assetId: it?.assetId ?? null,
-      sig: `${c.principle}|${code}|${roomId ?? ''}|${role}`,
+      sig: checkSig(r, c),
       code,
       cause:
         why?.cause ??

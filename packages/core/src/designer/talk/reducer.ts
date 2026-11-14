@@ -173,6 +173,8 @@ export type TalkAction =
   | { type: 'undone'; eventId: string }
   | { type: 'redone'; eventId: string }
   | { type: 'event'; id: string; at: string; event: TalkEvent }
+  /** A free fix asked for from a card, taken back (its line's Undo). */
+  | { type: 'freeUndone'; eventId: string }
   | {
       type: 'decisionAdd';
       id: string;
@@ -180,6 +182,8 @@ export type TalkAction =
       kind: Decision['kind'];
       text: string;
       from: string | null;
+      /** A piece the app placed itself, left out (by room and role). */
+      free?: Decision['free'];
     }
   | { type: 'decisionEdit'; id: string; text: string }
   /** A message to the designer: the person's turn, its reply on its way. */
@@ -693,6 +697,14 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
     }
     case 'event':
       return push(conv, { kind: 'event', id: a.id, at: a.at, event: eventCut(a.event) });
+    case 'freeUndone': {
+      const t = findTurn(conv, a.eventId, 'event');
+      if (!t || t.event.type !== 'note' || !t.event.free || t.event.free.undone) return conv;
+      return replaceTurn(conv, {
+        ...t,
+        event: { ...t.event, free: { ...t.event.free, undone: true } },
+      });
+    }
     case 'decisionAdd': {
       const text = a.text.trim().slice(0, DECISION_CHARS);
       if (!text) return conv;
@@ -700,7 +712,15 @@ export function talk(conv: Conversation, a: TalkAction): Conversation {
       if (live.some((d) => d.text === text && d.kind === a.kind)) return conv;
       const decisions = [
         ...conv.decisions,
-        { id: a.id, kind: a.kind, text, at: a.at, from: a.from, deleted: false },
+        {
+          id: a.id,
+          kind: a.kind,
+          text,
+          at: a.at,
+          from: a.from,
+          deleted: false,
+          ...(a.free ? { free: a.free } : {}),
+        },
       ];
       // The oldest go first past the cap (deleted ones before any that stand).
       const over = decisions.length - MAX_DECISIONS;

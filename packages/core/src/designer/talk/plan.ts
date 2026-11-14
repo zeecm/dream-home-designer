@@ -22,8 +22,11 @@ import { roomIdAt, spacesOf } from '../spaces';
 import { levelFingerprint } from '../util';
 import type { ScopeRef } from './schema';
 
-/** A version as the runner builds it. */
-export type DraftDesign = DesignInput & { usage: Usage[] };
+/**
+ * A version as the runner builds it: its answers and spending, and the app's own lines about
+ * it (room vetting, `appLines`), which the option keeps.
+ */
+export type DraftDesign = DesignInput & { usage: Usage[]; appLines?: string[] };
 
 export type { TalkAsk };
 

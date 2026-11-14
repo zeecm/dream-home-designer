@@ -1,5 +1,8 @@
 import { type DesignBrief, designResult, usageTotals } from '@dhd/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import sampleMain from '../../core/src/designer/benchmark/answers/sample-main-bedroom.json' with {
+  type: 'json',
+};
 import {
   AI,
   type Phone,
@@ -9,13 +12,14 @@ import {
   ctx,
   fakePhone,
   fresh,
+  level,
   midRun as midRunOn,
   provider,
   rowOf,
   start,
   until,
 } from './fixtures/runner';
-import { answerFor, promptOf } from './fixtures/sample';
+import { CONCEPT, answerFor, promptOf } from './fixtures/sample';
 import { anthropicStream, geminiStream } from './fixtures/streams';
 import { QUIET_MS } from './request';
 import { type RunOptions, runDesign } from './run';
@@ -619,6 +623,73 @@ describe('fix rounds: the app checks each answer before it is shown (designer v2
     expect(body).toMatch(
       /"sofa1 \(3-seat sofa\): free at \(\d+(\.\d+)?, \d+(\.\d+)?\), facing [NESW]{1,2}"/,
     );
+  });
+});
+
+describe('free fixes and room vetting (designer listens, B1)', () => {
+  const sse = (answer: unknown) =>
+    new Response(anthropicStream(answer, USAGE), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  const couple: DesignBrief = {
+    ...brief,
+    sleeping: { 'rm_main-bedroom': ['adult-1', 'adult-2'], rm_bedroom: ['elder-1'] },
+  };
+  const main = (c: { step: string }) => /furnish "(Master|Main) bedroom"/.test(c.step);
+  /** The benchmark's main bedroom answer (by intent) with its bed left out. */
+  const noBed = () => ({
+    ...sampleMain,
+    items: sampleMain.items.filter((i) => i.ref !== 'bed1'),
+  });
+
+  it('a main bedroom answer with no bed gets the app’s queen bed, with no request (11)', async () => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (main(c) ? sse(noBed()) : null),
+    });
+    const { state, design } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+    }).run;
+    expect(state.phase).toBe('done');
+    // One request for the room: the free fix sent nothing, and no fix round was needed for it.
+    expect(prov.calls.filter(main)).toHaveLength(1);
+    const space = design.spaces['rm_main-bedroom'];
+    const app = space?.design?.items.filter((i) => i.ref.startsWith('app:')) ?? [];
+    expect(app.map((i) => [i.ref, i.assetId])).toEqual([['app:bed', 'bed-queen']]);
+    expect(space?.fixes).toBeUndefined();
+    const r = designResult(level, level, design);
+    expect(r.checks.filter((c) => c.hard && c.key.startsWith('P1|bed|rm_main-bedroom'))).toEqual(
+      [],
+    );
+  });
+
+  it('a layout naming the couple’s room “Study” is vetted before any room is sent (21)', async () => {
+    const study = {
+      ...CONCEPT,
+      rooms: CONCEPT.rooms.map((r) =>
+        r.room === 'R2' ? { ...r, name: 'Study', use: 'study' } : r,
+      ),
+    };
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (c.step === 'layout' ? sse(study) : null),
+    });
+    const { design } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+    }).run;
+    const kept = design.concept?.rooms.find((r) => r.room === 'R2');
+    expect([kept?.name, kept?.use]).toEqual(['Main bedroom', 'master']);
+    expect(design.appLines).toEqual([
+      'Main bedroom stays a bedroom: You and Partner sleep there. To make it a study, change who sleeps where.',
+    ]);
+    // The room step asks for the bedroom by its kept name.
+    expect(prov.calls.some((c) => c.step === 'furnish "Main bedroom"')).toBe(true);
+    expect(prov.calls.some((c) => /furnish "Study"/.test(c.step))).toBe(false);
   });
 });
 

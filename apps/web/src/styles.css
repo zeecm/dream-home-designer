@@ -9393,6 +9393,33 @@ html[data-proposal] .plan-svg g.clearance {
   font-size: var(--fs-hint);
   color: var(--muted);
 }
+/*
+ * Designer listens, PR B1: what the app did itself (a ✓ line, grey like any app line) and what it
+ * couldn't place (a warn line in ink), in the lead; the free fix's button content-width, the
+ * ordinary small button (never the near-black primary), and 44 px under a finger.
+ */
+.talk-check-did {
+  font-size: var(--fs-hint);
+  color: var(--muted);
+}
+.talk-check-did[data-app-line="missed"] {
+  color: var(--text);
+}
+.talk-check-link {
+  margin-left: 4px;
+  color: var(--text);
+}
+.talk-check-lead .talk-free-btn {
+  justify-self: start;
+  margin-top: 4px;
+}
+@media (pointer: coarse) {
+  .talk-free-btn,
+  .talk-check-link {
+    min-height: 44px;
+  }
+}
+
 /* What this design set out to fix: 13 px, no frame, under the summary. */
 .talk-set-out {
   display: grid;

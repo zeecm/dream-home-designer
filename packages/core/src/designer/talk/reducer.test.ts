@@ -390,6 +390,50 @@ describe('the reducer', () => {
     ).toBe(c);
   });
 
+  it('B1: a piece the app placed, left out: a Decision with its room and role, read back', () => {
+    const c = talk(met(), {
+      type: 'decisionAdd',
+      id: 'd1',
+      at: AT,
+      kind: 'rejected',
+      text: 'Left out: the app’s queen bed in Main bedroom',
+      from: 'V1',
+      free: { room: 'rm_main-bedroom', role: 'bed' },
+    });
+    expect(c.decisions[0]?.free).toEqual({ room: 'rm_main-bedroom', role: 'bed' });
+    const back = conversationFromRecord(JSON.parse(JSON.stringify(c)));
+    expect(back?.decisions[0]?.free).toEqual({ room: 'rm_main-bedroom', role: 'bed' });
+    // A value this build can't read is dropped, never the record.
+    const odd = JSON.parse(JSON.stringify(c));
+    odd.decisions[0].free = { room: 3 };
+    expect(conversationFromRecord(odd)?.decisions[0]?.free).toBeUndefined();
+  });
+
+  it('B1: a free fix asked for from a card is a line with Undo, once', () => {
+    let c = talk(met(), {
+      type: 'event',
+      id: 'ev1',
+      at: AT,
+      event: {
+        type: 'note',
+        text: 'Placed by the app, free: a queen bed in Main bedroom.',
+        free: {
+          proposalId: 'prp1',
+          letter: 'A',
+          refs: [{ space: 'rm_main-bedroom', ref: 'app:bed' }],
+          undone: false,
+        },
+      },
+    });
+    c = talk(c, { type: 'freeUndone', eventId: 'ev1' });
+    const e = (last(c) as TurnOf<'event'>).event;
+    expect(e.type === 'note' && e.free?.undone).toBe(true);
+    expect(talk(c, { type: 'freeUndone', eventId: 'ev1' })).toBe(c);
+    // An older record's plain note has no Undo, and reads as before.
+    const back = conversationFromRecord(JSON.parse(JSON.stringify(c)));
+    expect((back?.turns.at(-1) as TurnOf<'event'>).event).toMatchObject({ type: 'note' });
+  });
+
   it('invalid answers leave it as it was; the record survives a round trip', () => {
     const c = start();
     const q = question(c);

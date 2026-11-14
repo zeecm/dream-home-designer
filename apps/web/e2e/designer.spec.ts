@@ -15,6 +15,12 @@ import {
   geminiStream,
   openaiStream,
 } from '../../../packages/ai/src/fixtures/streams';
+import sampleMainV2 from '../../../packages/core/src/designer/benchmark/answers/sample-main-bedroom.json' with {
+  type: 'json',
+};
+import ownerV4 from '../../../packages/core/src/designer/fixtures/owner-v4.json' with {
+  type: 'json',
+};
 import living from '../../../packages/core/src/designer/fixtures/room-living.json' with {
   type: 'json',
 };
@@ -1701,6 +1707,252 @@ async function menu(page: Page, item: string) {
   await panel(page).getByRole('button', { name: 'Designer menu' }).click();
   await panel(page).getByRole('menuitem', { name: item }).click();
 }
+
+test.describe('designer listens, B1: free fixes and room vetting', () => {
+  /** The benchmark's main bedroom answer (by intent) with its bed left out. */
+  const noBed = {
+    ...sampleMainV2,
+    items: sampleMainV2.items.filter((i) => i.ref !== 'bed1'),
+  };
+  const main = (c: Call) => /furnish "(Main|Master) bedroom"/.test(c.step);
+  const noBedReply = (c: Call) =>
+    main(c)
+      ? {
+          status: 200,
+          body: anthropicStream(noBed, USAGE),
+          headers: { 'content-type': 'text/event-stream' },
+        }
+      : null;
+  const appRow = (v: ReturnType<typeof card>) =>
+    v.locator('.talk-rows > li').filter({ has: v.page().locator('[data-by-app]') });
+
+  test('a bed missing from the answer is placed by the app, free; left out at Accept it is a Decision; Undo takes it all back (11)', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const m = await mock(page, { reply: noBedReply });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // One request for the room: the app placed the bed itself, with no fix round.
+    expect(m.calls.filter(main)).toHaveLength(1);
+    const lead = v1.locator('[data-lead]');
+    await expect(lead).toContainText(
+      /Placed by the app, free: a queen bed in (Main|Master) bedroom/,
+    );
+    await expect(lead).not.toContainText(/no bed/);
+    // Its row is tagged By the app, ticked like any row; no free button (nothing left to place).
+    await expect(appRow(v1)).toHaveCount(1);
+    await expect(appRow(v1)).toContainText(/Add a queen bed.*By the app/);
+    await expect(appRow(v1).getByRole('checkbox')).toBeChecked();
+    await expect(v1.locator('[data-free-fix]')).toHaveCount(0);
+    await shot(page, 'b1-free-card');
+    if (process.env.SHOTS) {
+      await page.emulateMedia({ colorScheme: 'dark' });
+      await shot(page, 'b1-free-card-dark');
+      await page.emulateMedia({ colorScheme: 'light' });
+      for (const [width, height] of [
+        [390, 844],
+        [844, 390],
+      ] as const) {
+        await page.setViewportSize({ width, height });
+        await appRow(v1).scrollIntoViewIfNeeded();
+        await shot(page, `b1-free-card-${width}`);
+      }
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+    // The reason, one tap away.
+    await appRow(v1)
+      .getByRole('button', { name: /^Why: Add a queen bed/ })
+      .click();
+    await expect(appRow(v1)).toContainText('A bed for You and Partner: nobody had one.');
+    // Unticked: nothing is recorded yet (trying ticks out records nothing).
+    await appRow(v1).getByRole('checkbox').uncheck();
+    expect(await dumpIdb(page)).not.toContain('Left out: the app’s');
+    const prior = Object.keys((await saved(page)).renovation?.levels?.[0]?.items ?? {}).sort();
+    // Accept (asked first if leaving the bed out fails a check; the plan's own bed may stay).
+    await v1.locator('[data-accept-selected]').click();
+    const anyway = v1.getByRole('button', { name: 'Accept anyway' });
+    const accepted = log(page).getByText(/^You accepted \d+ of \d+ changes from V1\./);
+    await expect(anyway.or(accepted).first()).toBeVisible();
+    if (await anyway.isVisible()) await anyway.click();
+    await expect(accepted).toBeVisible();
+    // The Decision, at Accept: by room and role, so the free fix doesn't offer it again.
+    await expect.poll(() => dumpIdb(page)).toContain('Left out: the app’s queen bed in');
+    expect(await dumpIdb(page)).toContain('"free":{"room":"rm_main-bedroom","role":"bed"}');
+    await panel(page).getByRole('button', { name: 'Designer menu' }).click();
+    await page.getByRole('menuitem', { name: 'Decisions' }).click();
+    await expect(
+      panel(page).getByText(/^Left out: the app’s queen bed in (Main|Master) bedroom/),
+    ).toBeVisible();
+    await panel(page).getByRole('button', { name: '‹ Conversation' }).click();
+    // Never offered again for that room: no free button on the card.
+    await expect(v1.locator('[data-free-fix]')).toHaveCount(0);
+    // Accept's Undo takes the whole accept back.
+    await log(page).locator('[data-undo-line]').first().click();
+    await expect(log(page).getByText(/^Undone: the \d+ changes from V1/)).toBeVisible();
+    const after = await saved(page);
+    expect(Object.keys(after.renovation?.levels?.[0]?.items ?? {}).sort()).toEqual(prior);
+    expect(m.calls.filter(main)).toHaveLength(1);
+  });
+
+  test('Place a queen bed · free on a card an older build made: no request, rows on the same card, a log line with Undo; on a phone the bar carries it', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const m = await mock(page, { reply: noBedReply });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // As a build before this one kept it: the answer with no app piece in it.
+    await page.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const r = indexedDB.open('dhd-talk');
+        r.onsuccess = () => resolve(r.result);
+        r.onerror = () => reject(r.error);
+      });
+      const tx = db.transaction('proposals', 'readwrite');
+      const store = tx.objectStore('proposals');
+      const rows = await new Promise<Record<string, unknown>[]>((resolve) => {
+        const q = store.getAll();
+        q.onsuccess = () => resolve(q.result as Record<string, unknown>[]);
+      });
+      for (const p of rows) {
+        const options = p.options as {
+          spaces: Record<string, { design?: { items: { ref: string }[] } }>;
+        }[];
+        for (const o of options) {
+          for (const s of Object.values(o.spaces)) {
+            if (s.design) s.design.items = s.design.items.filter((i) => !i.ref.startsWith('app:'));
+          }
+        }
+        store.put(p);
+      }
+      await new Promise((resolve) => {
+        tx.oncomplete = resolve;
+      });
+      db.close();
+    });
+    await page.reload();
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    await page.getByRole('button', { name: /^Designer · V1 on the table$/ }).click();
+    const calls = m.calls.length;
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    await expect(v1.locator('[data-lead]')).toContainText(/have no bed in (Main|Master) bedroom/);
+    // Offered: a dry run in the worker would place a bed. "· free", never priced or primary.
+    const free = v1.locator('[data-free-fix]');
+    await expect(free).toHaveText('Place a queen bed · free');
+    await expect(free).not.toHaveAttribute('data-spends', /.*/);
+    await expect(free).not.toHaveClass(/btn-primary/);
+    await shot(page, 'b1-free-button');
+    if (process.env.SHOTS) {
+      // The same card in dark mode, and on a phone held sideways (the column).
+      await page.emulateMedia({ colorScheme: 'dark' });
+      await free.scrollIntoViewIfNeeded();
+      await shot(page, 'b1-free-button-dark');
+      await page.emulateMedia({ colorScheme: 'light' });
+      await page.setViewportSize({ width: 844, height: 390 });
+      await expect(free).toBeVisible();
+      await free.scrollIntoViewIfNeeded();
+      await shot(page, 'b1-free-button-844');
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+    await free.click();
+    // The same card (no new tab), its row By the app, the lead worked out again.
+    const line = log(page).getByText(
+      /^Placed by the app, free: a queen bed in (Main|Master) bedroom/,
+    );
+    await expect(line).toBeVisible();
+    await expect(appRow(v1)).toHaveCount(1);
+    await expect(v1.locator('[data-lead]')).not.toContainText(/no bed/);
+    await expect(v1.locator('[data-free-fix]')).toHaveCount(0);
+    await expect(v1.getByRole('tab')).toHaveCount(0);
+    const undo = log(page).locator('[data-undo-free]');
+    await expect(undo).toBeFocused();
+    await shot(page, 'b1-free-placed');
+    // No request: free.
+    expect(m.calls).toHaveLength(calls);
+    // Undo takes those pieces out again; the button is back.
+    await undo.click();
+    await expect(log(page).getByText(/^Placed by the app, free: .* Undone\.$/)).toBeVisible();
+    await expect(appRow(v1)).toHaveCount(0);
+    await expect(v1.locator('[data-free-fix]')).toHaveText('Place a queen bed · free');
+    // A phone at peek: the On the table bar carries the free fix, with its short label.
+    await page.setViewportSize({ width: 390, height: 844 });
+    const bar = panel(page).getByRole('region', { name: 'On the table' });
+    const barFree = bar.locator('[data-free-fix="bar"]');
+    await expect(barFree).toHaveText('Place a bed · free');
+    await expect(bar).not.toContainText('On the table:');
+    await expect(bar).toContainText(/V1 · 1 doesn’t pass/);
+    await shot(page, 'b1-phone-bar');
+    await barFree.click();
+    await expect(bar.locator('[data-free-fix]')).toHaveCount(0);
+    await expect(bar).toContainText(/V1 · Passes all checks|V1 · \d+ don/);
+    await expect(bar.getByRole('button', { name: 'Accept…' })).toBeVisible();
+    await shot(page, 'b1-phone-placed');
+    expect(m.calls).toHaveLength(calls);
+  });
+
+  test('the owner’s V4 layout: the walls to the living room are kept, Main bedroom stays a bedroom, the bigger master goes through (20)', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const v4 = {
+      ...ownerV4.concept,
+      // The mocked rooms are found by name: the master bedroom's as the fixtures have it.
+      rooms: ownerV4.concept.rooms.map((r) =>
+        r.name === 'Master Bedroom' ? { ...r, name: 'Master bedroom' } : r,
+      ),
+    };
+    const m = await mock(page, {
+      reply: (c) =>
+        c.step === 'layout'
+          ? {
+              status: 200,
+              body: anthropicStream(v4, USAGE),
+              headers: { 'content-type': 'text/event-stream' },
+            }
+          : null,
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^The whole flat · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 60_000,
+    });
+    const lead = v1.locator('[data-lead]');
+    await expect(lead).toContainText(
+      'Kept the walls between Bedroom and Living and dining: taking them out would join the room You and Partner sleep in to the living room.',
+    );
+    await expect(v1).not.toContainText('doesn’t belong');
+    // The bigger master bedroom: the wall to Bedroom comes out.
+    await expect(v1).toContainText('Hack the wall between Main bedroom and Bedroom');
+    await expect(v1).not.toContainText(
+      /Hack the wall between (Living and dining and Bedroom|Bedroom and Living and dining)/,
+    );
+    // No room was asked for as a living room where they sleep.
+    expect(m.calls.some((c) => /furnish "Master bedroom"/.test(c.step))).toBe(true);
+    await shot(page, 'b1-vetting');
+  });
+});
 
 test.describe('iterating (slice 2, PR 3)', () => {
   test('alternatives A/B/C: Another idea adds B to the card; switching is free and keeps each option’s ticks (25)', async ({

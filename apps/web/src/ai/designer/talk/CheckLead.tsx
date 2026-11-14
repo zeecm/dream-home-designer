@@ -6,8 +6,10 @@ import {
   leadParts,
   roundLines,
 } from '@dhd/core';
+import type { ReactNode } from 'react';
 import { keepTogether } from '../words';
 import { Mark } from './Mark';
+import { useTalk } from './useTalk';
 
 /**
  * How a version was checked, at the top of its card (spec docs/specs/designer-listens.md, UX
@@ -24,14 +26,39 @@ const FIRST = 3;
 /** A line without its full stop, to run on after a colon. */
 export const bare = (s: string) => s.trim().replace(/[.;:]+$/, '');
 
-export function CheckLead({ cardKey, report }: { cardKey: string; report: RunReport }) {
+/** Lines of what the app did itself shown in the lead before "How it was checked". */
+const DID = 2;
+
+/** A vetting line about who sleeps where ends with the way to change it. */
+const SLEEPS = /To make it a study, change who sleeps where\.$/;
+
+export function CheckLead({
+  cardKey,
+  report,
+  did = [],
+  missed = [],
+  action = null,
+}: {
+  cardKey: string;
+  report: RunReport;
+  /** What the app did itself, free: pieces it placed, rooms it kept a bedroom, walls it kept. */
+  did?: readonly string[];
+  /** Missing essentials it couldn't place, with why. */
+  missed?: readonly string[];
+  /** The free fix's button, when a dry run would place something. */
+  action?: ReactNode;
+}) {
   const failing = report.failures.length;
   const { fix, count } = leadParts(report.rooms, failing);
   const rounds = roundLines(report.rooms);
-  if (!fix && !count) return null;
+  if (!fix && !count && !did.length && !missed.length && !action) return null;
   const id = `lead-${cardKey}`;
   const shown = report.failures.slice(0, FIRST);
   const more = report.failures.slice(FIRST);
+  const didShown = did.slice(0, DID);
+  const didMore = did.slice(DID);
+  // With no headline (nothing failed, no fix rounds), the first line the app says names it.
+  const headless = !fix && !count;
   const item = (f: RunReport['failures'][number]) => (
     <li key={f.id} className="talk-check-fail">
       <span className="talk-app-icon talk-warn-mark">
@@ -43,20 +70,48 @@ export function CheckLead({ cardKey, report }: { cardKey: string; report: RunRep
       </span>
     </li>
   );
+  const line = (l: string, kind: 'check' | 'warn', first: boolean) => (
+    <li
+      key={l}
+      className="talk-app-line talk-check-did"
+      data-app-line={kind === 'check' ? 'did' : 'missed'}
+      {...(headless && first ? { id } : {})}
+    >
+      <span className={kind === 'warn' ? 'talk-app-icon talk-warn-mark' : 'talk-app-icon'}>
+        <Mark kind={kind} />
+      </span>
+      <span className="talk-app-text">
+        <span>
+          {keepTogether(SLEEPS.test(l) ? l.replace(SLEEPS, '') : l)}
+          {SLEEPS.test(l) && (
+            <button
+              type="button"
+              className="link-plain talk-check-link"
+              onClick={() => useTalk.setState({ view: 'know', knowAt: 'sleeping' })}
+            >
+              Who sleeps where ›
+            </button>
+          )}
+        </span>
+      </span>
+    </li>
+  );
   return (
     <section className="talk-check-lead" aria-labelledby={id} data-lead="">
-      <p id={id} className={failing ? 'talk-check-head' : 'talk-check-head talk-check-pass'}>
-        {!failing && (
-          <span className="talk-check-mark">
-            <Mark kind="check" />
+      {!headless && (
+        <p id={id} className={failing ? 'talk-check-head' : 'talk-check-head talk-check-pass'}>
+          {!failing && (
+            <span className="talk-check-mark">
+              <Mark kind="check" />
+            </span>
+          )}
+          <span>
+            {fix}
+            {fix && count ? ' ' : ''}
+            {count && <strong className="talk-check-count">{count}</strong>}
           </span>
-        )}
-        <span>
-          {fix}
-          {fix && count ? ' ' : ''}
-          {count && <strong className="talk-check-count">{count}</strong>}
-        </span>
-      </p>
+        </p>
+      )}
       {failing > 0 && <ul className="talk-check-fails">{shown.map(item)}</ul>}
       {more.length > 0 && (
         <details className="talk-already talk-check-more">
@@ -64,16 +119,26 @@ export function CheckLead({ cardKey, report }: { cardKey: string; report: RunRep
           <ul className="talk-check-fails">{more.map(item)}</ul>
         </details>
       )}
-      {rounds.length > 0 && (
+      {missed.length + didShown.length > 0 && (
+        <ul className="talk-check-fails talk-check-app">
+          {missed.map((l, i) => line(l, 'warn', i === 0 && !didShown.length))}
+          {didShown.map((l, i) => line(l, 'check', i === 0))}
+        </ul>
+      )}
+      {rounds.length + didMore.length > 0 && (
         <details className="talk-already talk-check-how">
           <summary>How it was checked</summary>
           <ul>
             {rounds.map((l) => (
               <li key={l}>{keepTogether(l)}</li>
             ))}
+            {didMore.map((l) => (
+              <li key={l}>{keepTogether(l)}</li>
+            ))}
           </ul>
         </details>
       )}
+      {action}
     </section>
   );
 }
