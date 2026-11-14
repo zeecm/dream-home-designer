@@ -1,6 +1,9 @@
 import { freeze } from 'immer';
 import { describe, expect, it } from 'vitest';
 import { ageingReport } from './ageing';
+import { type DesignCheck, designChecks } from './designer/checks';
+import { NUDGE_BUDGET, nudgeNearMisses } from './designer/nudge';
+import { defaultBrief } from './designer/schema';
 import { wallElevation } from './elevation';
 import { roomFaces } from './faces';
 import { furnishedSample } from './fixtures/furnishedSample';
@@ -161,5 +164,60 @@ describe('timing (room labels on a terrace of 8 furnished flats, 72 rooms)', () 
     const t = median(times);
     console.log(`room labels: ${shapes.length} rooms, ${avoid.length} circles, ${t.toFixed(2)} ms`);
     expect(t).toBeLessThan(100 * (PERF ? 1 : 3));
+  });
+});
+
+describe('timing (near misses mended on a heavy plan, issue #66)', () => {
+  it('nudges make at most NUDGE_BUDGET checks of the level, however many near misses', () => {
+    const { lvl } = sample40();
+    const brief = defaultBrief();
+    const real = (l: Level) => designChecks(l, { brief }).filter((c) => c.hard);
+    // Twelve near misses no move can mend (each piece a centimetre short of a way), on top of
+    // the plan's own checks: every move is tried and refused, until the budget is spent.
+    const ids = Object.keys(lvl.items).slice(0, 12);
+    const missing = (id: string): DesignCheck => ({
+      key: `P3|walkway|${id}|circulation`,
+      principle: 'P3',
+      hard: true,
+      waivable: true,
+      text: 'A centimetre short.',
+      itemId: id,
+      issue: {
+        kind: 'walkway',
+        itemId: id,
+        route: 'circulation',
+        to: [],
+        need: 0.9,
+        have: 0.89,
+        capped: false,
+        pinch: [
+          { x: 0, y: 0 },
+          { x: 0.89, y: 0 },
+        ],
+        path: [],
+      },
+    });
+    let calls = 0;
+    const hard = (l: Level) => {
+      calls++;
+      return [...real(l), ...ids.map(missing)];
+    };
+    real({ ...lvl, items: { ...lvl.items } });
+    const one: number[] = [];
+    for (let k = 0; k < 3; k++) {
+      const t0 = performance.now();
+      real({ ...lvl, items: { ...lvl.items } });
+      one.push(performance.now() - t0);
+    }
+    const level = structuredClone(lvl) as Level;
+    const t0 = performance.now();
+    const done = nudgeNearMisses(level, new Set(ids), hard);
+    const t = performance.now() - t0;
+    console.log(
+      `nudges: ${calls} checks of the level in ${t.toFixed(0)} ms (one: ${median(one).toFixed(0)} ms)`,
+    );
+    expect(done).toEqual([]);
+    expect(calls).toBeLessThanOrEqual(NUDGE_BUDGET);
+    expect(t).toBeLessThan(NUDGE_BUDGET * median(one) * (PERF ? 1.5 : 3) + 50);
   });
 });

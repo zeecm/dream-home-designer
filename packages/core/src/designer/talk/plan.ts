@@ -1,11 +1,13 @@
 import { designLevels } from '../../levels';
 import type { Level, Project } from '../../schema';
+import { aspectOf } from '../accept';
 import { aliasesFor } from '../aliases';
 import type { ContextInput } from '../describe';
-import { handEdits, lockCovers } from '../handEdits';
+import { handEdits, heldAspects, lockCovers } from '../handEdits';
 import { lensOn } from '../lenses/lens';
 import { type StepPrompt, type TalkAsk, layoutStep, roomStep, runPrompts } from '../prompts';
 import { type DesignOptions, type DesignResult, designResult } from '../result';
+import { type Kept, withKept } from '../rules/kept';
 import type {
   Aspect,
   Concept,
@@ -16,7 +18,7 @@ import type {
   SpaceDesign,
   Usage,
 } from '../schema';
-import { spacesOf } from '../spaces';
+import { roomIdAt, spacesOf } from '../spaces';
 import { levelFingerprint } from '../util';
 import type { ScopeRef } from './schema';
 
@@ -62,6 +64,20 @@ export function baseOf(
   return want === 'after' && after
     ? { base: after, before, variant: 'after' }
     : { base: before, before, variant: 'before' };
+}
+
+/**
+ * The pieces of `base` that stay as they are whatever an answer says: kept with Keep this, or
+ * of a part changed by hand since the accept (`hand-edit` locks). The shared context lists
+ * them "in-place", as the room steps do.
+ */
+export function inPlaceOf(base: Level, locks: readonly Lock[], kept: readonly Kept[]): string[] {
+  const ids = new Set(withKept(base, kept).ids);
+  for (const it of Object.values(base.items)) {
+    const room = roomIdAt(base, { x: it.position.x, y: it.position.z });
+    if (room && heldAspects(locks, [room]).includes(aspectOf(it))) ids.add(it.id);
+  }
+  return [...ids].filter((id) => base.items[id]).sort();
 }
 
 export function contextFor(
@@ -483,8 +499,10 @@ function planScopeOnly(
       },
       designId,
     );
-    const ctx = made && contextFor(project, v.brief, levelId, made.design.aliases);
-    if (!made || !ctx) return null;
+    const ctx0 = made && contextFor(project, v.brief, levelId, made.design.aliases);
+    if (!made || !ctx0) return null;
+    const inPlace = inPlaceOf(ctx0.base, made.locks, opts.kept ?? []);
+    const ctx = inPlace.length ? { ...ctx0, inPlace } : ctx0;
     return {
       scope,
       brief: v.brief,
@@ -499,8 +517,10 @@ function planScopeOnly(
         .map((s) => ({ key: s.key, label: s.name })),
     };
   }
-  const ctx = contextFor(project, brief, levelId);
-  if (!ctx) return null;
+  const ctx0 = contextFor(project, brief, levelId);
+  if (!ctx0) return null;
+  const inPlace = inPlaceOf(ctx0.base, [], opts.kept ?? []);
+  const ctx = inPlace.length ? { ...ctx0, inPlace } : ctx0;
   const draft: DraftDesign = {
     id: designId,
     brief,

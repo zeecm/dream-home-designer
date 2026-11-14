@@ -786,25 +786,38 @@ design starts from After (cards' `nowOf`, the run's `planScope` → `contextFor`
 dropped every one: `resolveWant` took only pieces the brief's keep list brings (`brief.keep` is
 about the household's furniture in the flat as it is, and empty), so V6–V9 of the owner's
 conversation lost the bed, sofa, dining set and fridge whatever was said. Now, on After
-(`startsFromAfter(base, before)`, levels.ts) a piece the answer keeps is a `Want` with `stays`:
-the solver places it first, where it stands (`stayAt`, `stayHit`: walls, door swings and ways
-kept clear only, not doorway throats; then nudges of up to 0.10 m), places what goes with it
-round it (anchors turned round: a new TV faces the kept sofa), never swaps it, and only if it
-no longer fits places it again ("Moved the queen bed: it no longer fits where it stood.").
-Pieces in scope it leaves out go, as before; the flat as it is keeps the brief's rules. The
-prompts say so (`pieceKeep`: "keep" ones in the context and the room step), and a scoped run's
-aliases are the shared context's (`planScope` draft), so P7 is the same piece in every step
-and in the result. The solve memo key now carries the pieces kept or brought (a bring/leave
-change used to hit a stale solve). Near misses (`designer/nudge.ts`): a hard walkway or
-room-to-use check failing by at most 0.06 m is mended by moving the version's piece (with the
-pieces that then fail with it, a coffee table with its sofa) the shortfall plus 2–4 cm, kept
-only if fewer hard checks fail and none new ("Moved the fridge 3 cm to keep the room it
-needs."); looked for only when the walkways or clearances show one. Regression:
-`designer/fixtures/owner-after-accept.json` (trimmed export) and `afterAccept.test.ts`. Not in
-the benchmark: the recorded V6–V9 answers still crowd two desks into the main bedroom (a real
-"desk short of room" the fix rounds would send back), so they can't meet its 0-failures bar.
-PR 2 (being specified): the drop reasons sent to the model, fix rounds until no progress, the
-free deterministic fix on the card.
+(`startsFromAfter(base, before)`, levels.ts) a piece the answer keeps is a `Want` with `stays`,
+if any of it stands in that space, it isn't kept with Keep this and its room isn't held by a
+hand edit (else a left-out line says why); a piece the brief brings is still placed anew, as
+on the flat as it is, and one alias kept twice is placed once. The solver places a kept piece
+first where it stands (`stayAt`, `stayHit`: walls, door swings, ways kept clear and doorways,
+and the throats of openings the design adds or moves, `ix.fresh`, not of those it stood by;
+then nudges of up to 0.10 m), places what goes with it round it (a new TV faces the kept
+sofa) and never swaps it. One that can't stay (a wall moved by hand runs through it) is placed
+again by its own priority, a bed before the pieces kept round it, which follow it, and says
+"Moved the queen bed: it no longer fits where it stood."; nothing a space before placed is
+cleared by a later one. Pieces in scope it leaves out go, as before. The prompts say so
+(`pieceKeep`: "keep", or "in-place" for held and Keep-this pieces, `inPlaceOf` into the shared
+context), and a scoped run's aliases are the shared context's (`planScope` draft), so P7 is
+the same piece in every step and in the result. The solve memo key carries the pieces kept or
+brought (kind, pose, stays), and `designResultKey` whether it starts from After. Near misses
+(`designer/nudge.ts`): a hard walkway or room-to-use check failing by at most 0.06 m is mended
+by moving the version's piece (with the pieces that then fail with it, a coffee table with its
+sofa) the shortfall plus 2–4 cm, kept only if fewer hard checks fail and none new ("Moved the
+3-seat sofa 3 cm to leave the fridge the room it needs."); only pieces of the spaces asked for
+(`nudgeable`: not copied or locked ones), at most `NUDGE_BUDGET` (20) checks of the level, and
+looked for only when the walkways or clearances show one. Regression:
+`designer/fixtures/owner-after-accept.json` (trimmed export) and `afterAccept.test.ts`; the
+bent-wall case in `talk/plan.test.ts` and the e2e "a wall moved by hand into the kept bed".
+Not in the benchmark: the recorded V6–V9 answers still crowd two desks into the main bedroom
+(a real "desk short of room" the fix rounds would send back). Known, for PR 2: the talk card
+shows no repaired or left-out notes at all (only change rows and checks), so a kept piece left
+out is said only by its "Remove …" row; Compare counts advice (a bed side at 0.01 m) as
+"Problems" where the card says "Passes all checks"; a room asked again shows the copied
+whole-flat concept summary. Accepted risks: old cards re-compute with fewer rows; a card whose
+earlier accept removed a piece shows "no piece P7"; nudges may add small "Move…" rows when an
+old card is reopened. PR 2 (being specified): the drop reasons sent to the model, fix rounds
+until no progress, the free deterministic fix on the card.
 
 ## 5. Owner to-dos
 

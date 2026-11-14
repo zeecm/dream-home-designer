@@ -19,6 +19,8 @@ export const NEAR_MISS = 0.06;
 const MARGINS = [0.02, 0.04] as const;
 /** Near misses mended in one result, at most (each costs a few checks of the level). */
 const MAX_MENDS = 6;
+/** Checks of the whole level a result's nudges may make, at most. */
+export const NUDGE_BUDGET = 20;
 
 export interface Nudge {
   itemId: string;
@@ -26,6 +28,10 @@ export interface Nudge {
   by: number;
   /** The check it mended. */
   key: string;
+  /** Moved along with this piece (a coffee table with its sofa). */
+  with?: string;
+  /** The piece whose room to use it made (the fridge whose door it now clears). */
+  owner?: string;
 }
 
 interface Move {
@@ -97,18 +103,21 @@ function movesFor(
 /**
  * Moves the version's pieces (`movable`) a few cm where that mends a near miss: a move is kept
  * only if fewer hard checks fail after it and none fails that didn't. Mutates `level`.
- * `hard`: the level's failing hard checks.
+ * `hard`: the level's failing hard checks. At most `budget` checks of the level are made
+ * (the first included), so a crowded plan with many near misses costs a bounded time.
  */
 export function nudgeNearMisses(
   level: Level,
   movable: ReadonlySet<string>,
   hard: (l: Level) => DesignCheck[],
+  budget = NUDGE_BUDGET,
 ): Nudge[] {
   const done: Nudge[] = [];
+  let calls = 1;
   let checks = hard(level);
   /** Near misses no move mended: not tried again. */
   const stuck = new Set<string>();
-  while (done.length < MAX_MENDS) {
+  while (done.length < MAX_MENDS && calls < budget) {
     const keys = new Set(checks.map((c) => c.key));
     let mended = false;
     for (const c of checks) {
@@ -118,7 +127,7 @@ export function nudgeNearMisses(
         // The piece alone; then, if that leaves what goes with it failing (a coffee table no
         // longer in reach of the sofa), it and those pieces together.
         let ids = [m.id];
-        for (let tries = 0; tries < 2 && !mended; tries++) {
+        for (let tries = 0; tries < 2 && !mended && calls < budget; tries++) {
           const was = ids.map((id) => level.items[id] as Item);
           for (const it of was) {
             level.items[it.id] = {
@@ -126,11 +135,21 @@ export function nudgeNearMisses(
               position: { ...it.position, x: it.position.x + m.d.x, z: it.position.z + m.d.y },
             };
           }
+          calls++;
           const now = hard(level);
           const nowKeys = new Set(now.map((x) => x.key));
           if (nowKeys.size < keys.size && [...nowKeys].every((k) => keys.has(k))) {
-            for (const id of ids)
-              done.push({ itemId: id, by: Math.hypot(m.d.x, m.d.y), key: c.key });
+            const by = Math.hypot(m.d.x, m.d.y);
+            const owner = c.issue.kind === 'zone' ? c.issue.itemId : null;
+            for (const id of ids) {
+              done.push({
+                itemId: id,
+                by,
+                key: c.key,
+                ...(id !== m.id ? { with: m.id } : {}),
+                ...(owner && owner !== id ? { owner } : {}),
+              });
+            }
             checks = now;
             mended = true;
             break;
@@ -144,12 +163,30 @@ export function nudgeNearMisses(
           if (!along.length) break;
           ids = [...ids, ...new Set(along)];
         }
-        if (mended) break;
+        if (mended || calls >= budget) break;
       }
-      if (mended) break;
+      if (mended || calls >= budget) break;
       stuck.add(c.key);
     }
     if (!mended) break;
   }
   return done;
+}
+
+/**
+ * The pieces a nudge may move: those the version placed in the spaces it was asked to design
+ * (not a copied or locked space's, whose moves the card leaves out, so the miss would come
+ * back on accept), less those kept where they are.
+ */
+export function nudgeable(
+  spaces: readonly { status: string; items: readonly string[] }[],
+  placed: ReadonlySet<string>,
+  kept: ReadonlySet<string>,
+): Set<string> {
+  return new Set(
+    spaces
+      .filter((s) => s.status !== 'copied' && s.status !== 'locked')
+      .flatMap((s) => s.items)
+      .filter((id) => placed.has(id) && !kept.has(id)),
+  );
 }

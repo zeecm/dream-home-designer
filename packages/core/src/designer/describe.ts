@@ -23,19 +23,22 @@ import { clean, levelFingerprint, pt, r2, stableJson } from './util';
 /**
  * What becomes of a piece of the level a design starts from, as the prompts say it: on After
  * (once a version is in), "keep" — the design so far, kept where it stands if the answer keeps
- * it (`keep` = its alias) and gone if it leaves it out; on the flat as it is, what the brief
- * says ("bring", "in-place"), else "leave".
+ * it (`keep` = its alias) and gone if it leaves it out. What the brief says comes first
+ * ("bring", "in-place"), and what stays as it is whatever the answer says (`inPlace`: changed by
+ * hand since the accept, or kept with Keep this) is "in-place"; on the flat as it is, else "leave".
  */
 export function pieceKeep(
   base: Level,
   before: Level,
   id: string,
   keep: DesignBrief['keep']['items'],
+  inPlace?: ReadonlySet<string>,
 ): 'keep' | 'bring' | 'in-place' | 'leave' {
   const how = keep[id];
-  if (how === 'in-place') return how;
+  if (how === 'in-place' || how === 'bring') return how;
+  if (inPlace?.has(id)) return 'in-place';
   if (startsFromAfter(base, before) && base.items[id]) return 'keep';
-  return how ?? 'leave';
+  return 'leave';
 }
 
 /**
@@ -48,8 +51,9 @@ export function planForDesign(
   level: Level,
   before: Level,
   aliases: AliasMap,
-  opts: { site?: Site; keep?: DesignBrief['keep']['items'] } = {},
+  opts: { site?: Site; keep?: DesignBrief['keep']['items']; inPlace?: readonly string[] } = {},
 ) {
+  const inPlace = new Set(opts.inPlace ?? []);
   const site = opts.site ?? DEFAULT_SITE;
   const of = aliasOf(aliases);
   const a = (id: string | null) => (id ? (of.get(id) ?? id) : 'outside');
@@ -158,7 +162,7 @@ export function planForDesign(
         size: [r2(sz.w), r2(sz.d), r2(sz.h)],
         room: a(room),
         at: pt({ x: it.position.x, y: it.position.z }),
-        keep: pieceKeep(level, before, it.id, opts.keep ?? {}),
+        keep: pieceKeep(level, before, it.id, opts.keep ?? {}, inPlace),
       };
     }),
   );
@@ -255,6 +259,8 @@ export interface ContextInput {
   aliases: AliasMap;
   site?: Site;
   models?: Project['models'];
+  /** Pieces of `base` that stay as they are whatever an answer says (held, or Keep this). */
+  inPlace?: readonly string[];
 }
 
 const memo = new Map<string, string>();
@@ -272,12 +278,14 @@ export function designContext(input: ContextInput): string {
     stableJson(input.aliases),
     stableJson(input.site ?? null),
     stableJson(input.models ?? null),
+    stableJson(input.inPlace ?? []),
   ].join('|');
   const hit = memo.get(key);
   if (hit !== undefined) return hit;
   const plan = planForDesign(input.base, input.before, input.aliases, {
     ...(input.site ? { site: input.site } : {}),
     keep: input.brief.keep.items,
+    ...(input.inPlace?.length ? { inPlace: input.inPlace } : {}),
   });
   const text = [
     '## Catalogue (furniture you may place, by id)',

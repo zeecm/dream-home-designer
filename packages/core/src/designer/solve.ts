@@ -771,11 +771,34 @@ function solveOnce(input: SolveInput): SolveOutcome {
       else anchorOf.delete(a);
     }
   }
+  // Pieces kept where they stand (`fixed`, by ref): those that can still stand there, or a
+  // few cm off, whatever else is placed (a wall moved by hand since may run through one).
+  // One that can't is placed again by its own priority, a bed before the pieces round it;
+  // and what went with it (a bedside table by that bed) is placed again with it.
+  const stayable = new Set(
+    intents
+      .filter((t) => {
+        if (!t.want.stays || !t.want.brought) return false;
+        const keepOut = ix.keepOut;
+        if (input.keepOutFor && !input.keepOutFor.has(t.want.id)) ix.keepOut = [];
+        const ok = stayPoses(t).some((p) => !stayHit(ix, t.want.kind, p.fp));
+        ix.keepOut = keepOut;
+        return ok;
+      })
+      .map((t) => t.want.ref),
+  );
+  const fixed = new Set(
+    [...stayable].filter((ref) => {
+      const a = anchorOf.get(ref);
+      const at = a ? byRef.get(a) : undefined;
+      return !at?.want.stays || stayable.has(at.want.ref);
+    }),
+  );
   // A piece kept where it stands goes first and is placed by nothing: what it went with is
   // placed by it instead (a new TV faces the sofa kept, not the other way round).
   for (const t of intents) {
-    const a = t.want.stays ? anchorOf.get(t.want.ref) : undefined;
-    if (!a || byRef.get(a)?.want.stays) continue;
+    const a = fixed.has(t.want.ref) ? anchorOf.get(t.want.ref) : undefined;
+    if (!a || fixed.has(a)) continue;
     anchorOf.delete(t.want.ref);
     if (!anchorOf.has(a)) anchorOf.set(a, t.want.ref);
   }
@@ -904,7 +927,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
   const sorted = [...intents].sort(
     (p, q) =>
       // What is kept where it stands first: the rest is placed round it.
-      Number(!!q.want.stays) - Number(!!p.want.stays) ||
+      Number(fixed.has(q.want.ref)) - Number(fixed.has(p.want.ref)) ||
       rankOf(p) - rankOf(q) ||
       (room.get(p.want.ref) ?? 0) - (room.get(q.want.ref) ?? 0) ||
       q.want.w * q.want.d - p.want.w * p.want.d ||
@@ -963,7 +986,7 @@ function solveOnce(input: SolveInput): SolveOutcome {
     if (input.keepOutFor && !input.keepOutFor.has(w.id)) ix.keepOut = [];
     const cache = poseCacheOf(ix, t);
     // A piece kept where it stands: there, or a few cm off, if it fits; else placed again.
-    const stay = w.stays && w.brought ? stayAt(t, cache, anchor, anchorRole, placed) : null;
+    const stay = fixed.has(w.ref) ? stayAt(t, cache, anchor, anchorRole, placed) : null;
     if (stay?.clear) {
       ix.keepOut = keepOut;
       return [stay.clear];
@@ -1248,6 +1271,24 @@ function solveOnce(input: SolveInput): SolveOutcome {
     return best;
   }
 
+  /** A kept piece's own pose, then its nudges (`STAY_NUDGES`), made once per space. */
+  function stayPoses(t: Intent, cache = poseCacheOf(ix, t)): Pose[] {
+    const own = t.want.brought as Item;
+    cache.stay ??= STAY_NUDGES.map(([across, ahead]) => {
+      const f = fwd(own.rotationY);
+      const item: Item = {
+        ...structuredClone(own),
+        position: {
+          ...own.position,
+          x: own.position.x - f.y * across + f.x * ahead,
+          z: own.position.z + f.x * across + f.y * ahead,
+        },
+      };
+      return poseOf(item, t.want.kind);
+    });
+    return cache.stay;
+  }
+
   /**
    * A piece kept where it stands: its own pose, else the nearest of a few nudges clear of
    * everything (`clear`); its own pose short of room only (`soft`), for when it fits nowhere
@@ -1261,21 +1302,8 @@ function solveOnce(input: SolveInput): SolveOutcome {
     placed: Map<string, Item>,
   ): { clear: Candidate | null; soft: Candidate | null } {
     const k = t.want.kind;
-    const own = t.want.brought as Item;
-    cache.stay ??= STAY_NUDGES.map(([across, ahead]) => {
-      const f = fwd(own.rotationY);
-      const item: Item = {
-        ...structuredClone(own),
-        position: {
-          ...own.position,
-          x: own.position.x - f.y * across + f.x * ahead,
-          z: own.position.z + f.x * across + f.y * ahead,
-        },
-      };
-      return poseOf(item, k);
-    });
     let soft: Candidate | null = null;
-    for (const [n, p] of cache.stay.entries()) {
+    for (const [n, p] of stayPoses(t, cache).entries()) {
       tries++;
       if (stayHit(ix, k, p.fp)) continue;
       const hs = hitsOf(ix, p.item, k, p.on, true, p.fp);

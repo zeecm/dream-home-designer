@@ -5,14 +5,19 @@ import {
   type Level,
   type Part,
   acceptDesign,
+  designContext,
   designResult,
   dispatch,
   emptyHistory,
   levelBounds,
   levelFingerprint,
+  moveVertex,
   parseSpaceDesign,
+  roomIdAt,
+  roomsBeside,
   sampleFlatProject,
   spacesOf,
+  splitWall,
   undo,
   updateItem,
   updateWall,
@@ -447,5 +452,126 @@ describe('a room asked again after an Accept (issue #66)', () => {
     });
     expect(r.level.items[bedId]?.position).toEqual(after.items[bedId]?.position);
     expect(r.refs[bedId]).toBe('bed1');
+
+    // Kept with Keep this: "in-place" in the shared context too, not "keep".
+    const it = after.items[bedId] as NonNullable<(typeof after.items)[string]>;
+    const kept = {
+      id: 'kept_1',
+      itemId: bedId,
+      assetId: it.assetId,
+      pose: { x: it.position.x, y: it.position.z, rot: it.rotationY },
+      from: 'V1',
+      levelId: after.id,
+      at: '2026-11-07T00:00:00.000Z',
+    };
+    const sp2 = planScope(scope, v1.brief, s1.doc, flatOf(s1).id, [v1a], '', 'dsn_v3', {
+      kept: [kept],
+    });
+    expect(sp2?.ctx.inPlace).toContain(bedId);
+    const prefix = sp2 ? designContext(sp2.ctx) : '';
+    const plan = JSON.parse(prefix.split('```json\n')[2]?.split('\n```')[0] ?? '{}') as {
+      pieces: { id: string; keep: string }[];
+    };
+    expect(plan.pieces.find((p) => p.id === bed.id)?.keep).toBe('in-place');
+    expect(plan.pieces.filter((p) => p.id !== bed.id).every((p) => p.keep === 'keep')).toBe(true);
+  });
+
+  it('QA H1: the wall bent by hand over the kept bed: the bed is placed again, or said why not', () => {
+    const s0 = fresh();
+    const v1 = record(flatOf(s0), 'dsn_v1', 1);
+    const { s: s1, d: v1a } = accept(s0, v1, '2026-11-06T11:00:00.000Z');
+    const after = afterOf(s1);
+    const main = SAMPLE_KEYS.main;
+    const bed = Object.values(after.items).find(
+      (i) =>
+        i.assetId.startsWith('bed-') &&
+        roomIdAt(after, { x: i.position.x, y: i.position.z }) === main,
+    );
+    if (!bed) throw new Error('no bed in the main bedroom');
+    // The middle of the wall to the bedroom dragged into the main bedroom, over the bed.
+    const wallId = Object.keys(after.walls).find((id) => {
+      const [l, r] = roomsBeside(after, id);
+      return (l === 'rm_bedroom' && r === main) || (r === 'rm_bedroom' && l === main);
+    }) as string;
+    const w = after.walls[wallId] as Level['walls'][string];
+    const a = after.vertices[w.a] as { x: number; y: number };
+    const b = after.vertices[w.b] as { x: number; y: number };
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const split = splitWall(after.id, wallId, mid, after);
+    // Square to the wall, into the main bedroom, by `by` metres (QA's drag: about 0.25 m).
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    let n = { x: -(b.y - a.y) / len, y: (b.x - a.x) / len };
+    if (roomIdAt(after, { x: mid.x + n.x * 0.3, y: mid.y + n.y * 0.3 }) !== main) {
+      n = { x: -n.x, y: -n.y };
+    }
+    const by = 0.25;
+    const into = { x: mid.x + n.x * by, y: mid.y + n.y * by };
+    const s2 = dispatch(dispatch(s1, split.command), moveVertex(after.id, split.vertexId, into));
+    const bent = afterOf(s2);
+    // "Redo the main bedroom, keep the bed": the answer keeps every piece listed, by alias.
+    const scope = { label: 'Main bedroom', spaces: [main], all: false };
+    const sp = planScope(scope, v1.brief, s2.doc, flatOf(s2).id, [v1a], '', 'dsn_v2', {});
+    if (!sp) throw new Error('no plan');
+    const [step] = roomPrompts(sp.ctx, sp.draft, sp.plan, {});
+    const line = step?.tail.split('\n').find((l) => l.startsWith("Pieces of the household's here"));
+    const pieces = JSON.parse(line?.slice(line.indexOf('): ') + 3) ?? '[]') as {
+      id: string;
+      kind: string;
+    }[];
+    expect(pieces.map((p) => sp.draft.aliases[p.id])).toContain(bed.id);
+    const items = pieces.map((p, i) => ({
+      ref: `p${i}`,
+      assetId: p.kind,
+      keep: p.id,
+      wall: null,
+      along: null,
+      at: null,
+      rotation: null,
+      width: null,
+      depth: null,
+      height: null,
+      why: '',
+      against: 'wall',
+      faces: null,
+      near: null,
+      zone: null,
+    }));
+    const answer = parsed(
+      parseSpaceDesign(
+        { v: 2, items, faces: [], notes: [], summary: 'Kept it all.' },
+        levelBounds(bent),
+      ),
+    );
+    const r = designResult(bent, flatOf(s2), {
+      ...sp.draft,
+      spaces: {
+        ...sp.draft.spaces,
+        [main]: { name: 'Main bedroom', status: 'done', design: answer },
+      },
+    });
+    const now = r.level.items[bed.id];
+    const said = [...r.repaired, ...r.dropped].filter(
+      (n) =>
+        n.itemId === bed.id ||
+        n.ref === `p${pieces.findIndex((p) => sp.draft.aliases[p.id] === bed.id)}`,
+    );
+    if (now) {
+      // Placed again in the main bedroom, and said (the wall runs where it stood).
+      expect(roomIdAt(r.level, { x: now.position.x, y: now.position.z })).toBe(main);
+      expect(
+        Math.hypot(now.position.x - bed.position.x, now.position.z - bed.position.z),
+      ).toBeGreaterThan(0.15);
+      expect(said.map((n) => n.text)).toContain(
+        'Moved the queen bed: it no longer fits where it stood.',
+      );
+      expect(r.checks.filter((c) => c.hard && !c.already && c.key.startsWith('P1|bed|'))).toEqual(
+        [],
+      );
+      // The bed is placed before the kept pieces it no longer stands by: the wardrobe the
+      // wall doesn't touch stays, rather than losing its wall to the bed.
+      expect(r.dropped.map((n) => n.text).filter((x) => /wardrobe/.test(x))).toEqual([]);
+    } else {
+      expect(said.length).toBeGreaterThan(0);
+    }
   });
 });

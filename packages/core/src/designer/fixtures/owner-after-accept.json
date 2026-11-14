@@ -1580,7 +1580,7 @@
             "pets": "",
             "text": ""
           },
-          "lifestyle": { "wfh": 2, "cooking": "daily", "guests": false },
+          "lifestyle": { "wfh": 0, "cooking": "daily", "guests": false },
           "wishes": [],
           "style": "warm-modern",
           "colours": "",
@@ -2296,7 +2296,7 @@
             "pets": "",
             "text": ""
           },
-          "lifestyle": { "wfh": 2, "cooking": "daily", "guests": false },
+          "lifestyle": { "wfh": 0, "cooking": "daily", "guests": false },
           "wishes": [],
           "style": "warm-modern",
           "colours": "",
@@ -3075,7 +3075,7 @@
             "pets": "",
             "text": ""
           },
-          "lifestyle": { "wfh": 2, "cooking": "daily", "guests": false },
+          "lifestyle": { "wfh": 0, "cooking": "daily", "guests": false },
           "wishes": [],
           "style": "warm-modern",
           "colours": "",
@@ -3854,7 +3854,7 @@
             "pets": "",
             "text": ""
           },
-          "lifestyle": { "wfh": 2, "cooking": "daily", "guests": false },
+          "lifestyle": { "wfh": 0, "cooking": "daily", "guests": false },
           "wishes": [],
           "style": "warm-modern",
           "colours": "",
@@ -4582,7 +4582,7 @@
             "pets": "",
             "text": ""
           },
-          "lifestyle": { "wfh": 2, "cooking": "daily", "guests": false },
+          "lifestyle": { "wfh": 0, "cooking": "daily", "guests": false },
           "wishes": [],
           "style": "warm-modern",
           "colours": "",
