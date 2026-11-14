@@ -979,9 +979,15 @@ No money change, no record bump (every new field optional and read tolerantly).
   talk record v5 must carry `declined` under its bump.
 - Left for B2/C: the fix-up pool by progress, Keep fixing, repeats, strict mode; orphans and the
   nudge stay out (lead decisions). A structured `declined` list in talk v5 (C) replaces the
-  tolerant `Decision.free`. When the second look merges: `withFree` at run scope (the look's
-  round answer gets the free pass), `actOnLook`/`applyLookEdit` leave `app:` pieces alone (or
-  rename them on a swap), `lookFacts` marks them, and its round signatures use `checkSig`.
+  tolerant `Decision.free`.
+- With the second look (#73, merged in): `withFree` is at run scope, so the look's round answer
+  gets the free pass too (a bed the round's answer dropped is put back, said so, and the round
+  is judged with it by `lookNoWorse` and recorded with it). `actOnLook` drops a removal of an
+  `app:` piece ('kept'); `applyLookEdit` gives an `app:` piece it swaps a ref of its own
+  (`lookN`, with what faces or goes by it following); `lookFacts` marks the app's pieces
+  (`byApp`) and the look's task says never to remove one. `lookNoWorse` refuses a round for a
+  new hard failure by signature (`checkSig`), so the same failure under a piece's new id or ref
+  isn't new.
 
 **AI costs always have a figure (#67, 14 Nov).** The owner's Gemini 3 runs had no price, so no
 cost card had a figure and neither the approved figure nor the tab's limit held.

@@ -732,7 +732,55 @@ describe('free fixes and room vetting (designer listens, B1)', () => {
     expect(space?.rounds?.[0]?.outcome).toBe('fixed');
     const bed = space?.design?.items.find((i) => i.ref.startsWith('app:'));
     expect(bed?.assetId).toBe('bed-queen');
-    expect(bed?.why).toBe('Put back by the app: the fix round’s answer left out the queen bed.');
+    expect(bed?.why).toMatch(
+      /^Put back by the app: the fix round’s answer left out the queen bed\.( One .+ left out\.)?$/,
+    );
+  });
+
+  it('a second look’s round whose answer drops the bed: put back free, and the round kept', async () => {
+    const PNG = [{ mediaType: 'image/png' as const, data: 'iVBORw0KGgo' }];
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => {
+        // The room's answer has its bed; the look sends the room back once (a taste fix), and
+        // that answer leaves the bed out.
+        if (main(c)) return sse(n === 1 ? sampleMain : noBed());
+        if (c.step === 'look') {
+          return sse({
+            findings: [
+              {
+                target: { kind: 'room', id: 'R2' },
+                principle: 'taste',
+                severity: 'fix',
+                line: 'Give the room a calmer layout.',
+                suggest: null,
+              },
+            ],
+            summary: null,
+          });
+        }
+        return null;
+      },
+    });
+    const { design, look } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+      look: { rasterise: async () => PNG },
+    }).run;
+    // The round was sent, and its answer (no bed) came back with the app's bed in it.
+    expect(prov.calls.filter(main)).toHaveLength(2);
+    expect(look?.round).toBe('kept');
+    const items = design.spaces['rm_main-bedroom']?.design?.items ?? [];
+    const bed = items.find((i) => i.ref.startsWith('app:'));
+    expect(bed?.assetId).toBe('bed-queen');
+    expect(bed?.why).toMatch(
+      /^Put back by the app: the fix round’s answer left out the queen bed\./,
+    );
+    const r = designResult(level, level, design);
+    expect(r.checks.filter((c) => c.hard && c.key.startsWith('P1|bed|rm_main-bedroom'))).toEqual(
+      [],
+    );
   });
 
   it('a free pass that fails leaves the paid answer as it is, and the run goes on (S2)', async () => {

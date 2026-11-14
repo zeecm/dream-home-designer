@@ -1,6 +1,7 @@
 import type { Project } from '../../schema';
 import { type AliasMap, resolveAlias } from '../aliases';
 import { categoriesFor, resolveAsset } from '../catalogue';
+import { checkSig } from '../report';
 import type { DesignResult } from '../result';
 import { type Kept, keptHolds } from '../rules/kept';
 import { type OfferCtx, ruleOffer } from '../rules/offer';
@@ -186,6 +187,13 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
       plan.dropped.push({ finding: f, why: 'kept' });
       continue;
     }
+    // A piece the app placed itself for a must-have (its ref starts `app:`) is never taken out:
+    // that would leave the bed, the seats or the table missing again.
+    const aboutRef = about && level.items[about] ? result.refs[about] : null;
+    if (f.suggest?.kind === 'remove' && aboutRef?.startsWith('app:')) {
+      plan.dropped.push({ finding: f, why: 'kept' });
+      continue;
+    }
     const space = spaceOf(result, addTo ?? (about && level.items[about] ? about : id));
     if (!space || !ctx.answers[space]) {
       plan.dropped.push({ finding: f, why: 'not-designed' });
@@ -260,10 +268,29 @@ export function applyLookEdit(d: SpaceDesign, e: LookEdit, n: number): SpaceDesi
       if (s.faces && refOr(s.faces)) it.faces = refOr(s.faces);
       if (s.near && refOr(s.near)) it.near = refOr(s.near);
       return { ...d, items };
-    case 'swap':
+    case 'swap': {
       if (!it || !s.kindId) return d;
-      items[at] = { ...it, assetId: s.kindId, keep: null, width: null, depth: null, height: null };
+      // The app's own piece swapped for another is the look's choice now, not the app's: it
+      // takes a ref of its own (and what faces or goes by it follows), so it is never tagged as
+      // the app's.
+      const ref = it.ref.startsWith('app:') ? `look${n}` : it.ref;
+      items[at] = {
+        ...it,
+        ref,
+        assetId: s.kindId,
+        keep: null,
+        width: null,
+        depth: null,
+        height: null,
+      };
+      if (ref !== it.ref) {
+        for (const x of items) {
+          if (x.faces === it.ref) x.faces = ref;
+          if (x.near === it.ref) x.near = ref;
+        }
+      }
       return { ...d, items };
+    }
     case 'remove':
       if (!it) return d;
       return { ...d, items: items.filter((x) => x.ref !== e.ref) };
@@ -307,11 +334,15 @@ export function lookNoWorse(
 ): boolean {
   const hard = (r: DesignResult) =>
     new Set(r.checks.filter((c) => c.hard && !c.already).map((c) => c.key));
+  const sigs = (r: DesignResult) =>
+    new Set(r.checks.filter((c) => c.hard && !c.already).map((c) => checkSig(r, c)));
   const was = hard(before);
   const now = hard(after);
   // A new hard failure refuses it, whatever it fixes: HDB rules, kept pieces (K) and house rules
-  // (R) above all.
-  if ([...now].some((k) => !was.has(k))) return false;
+  // (R) above all. Judged by signature (principle|code|room|role), as the free fixes and the
+  // run report are: a piece placed again under a new ref or id is the same failure, not a new one.
+  const wasSigs = sigs(before);
+  if ([...sigs(after)].some((s) => !wasSigs.has(s))) return false;
   if (now.size < was.size) return true;
   const still = new Set(after.checks.filter((c) => !c.already).map((c) => c.key));
   if (targets.some((k) => still.has(k))) return false;
