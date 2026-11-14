@@ -140,7 +140,8 @@ function SecondLook({ look, usage }: { look: OptionLook; usage: CardModel['usage
   const cost = usage.filter((u) => u.step === 'look').reduce((t, u) => t + (u.usd ?? 0), 0);
   const notes = look.notes;
   const head = look.state === 'done' ? look.summary : look.line;
-  if (!head && !notes.length && look.round === 'none') return null;
+  // (Nothing to say but what it cost: still shown, so the card's figure is never unexplained.)
+  if (!head && !notes.length && look.round === 'none' && cost <= 0) return null;
   return (
     <div data-look="">
       <dt>Second look</dt>

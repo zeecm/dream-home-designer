@@ -22,6 +22,7 @@ import { anthropicStream, geminiStream } from './fixtures/streams';
 import { QUIET_MS } from './request';
 import {
   type DraftDesign,
+  LOOK_STOPPED,
   LOOK_UNPRICED,
   PICTURE_REFUSED,
   type RunOptions,
@@ -974,6 +975,52 @@ describe('the second look in the run: its gate, its checkpoint, a run carried on
     expect(rounds.at(-1)).toEqual({ outcome: 'no-better', before: 1, after: 1, by: 'look' });
   });
 
+  it('a round that brings the missing bed back is used and recorded fixed, soft notes and all (QA H1)', async () => {
+    const isMain = (c: Call) => /furnish "(Master|Main) bedroom"/.test(c.step);
+    /** The main bedroom with no bed: what the room's own answers say, every time. */
+    const noBed = () => {
+      const a = structuredClone(answerFor('furnish "Main bedroom"')?.answer) as {
+        items: { assetId: string }[];
+      };
+      a.items = a.items.filter((i) => !i.assetId.startsWith('bed-'));
+      return a;
+    };
+    // The look: a P1 fix on the main bedroom (the room with no bed), in each room it may be.
+    const p1 = () =>
+      ['R1', 'R2', 'R3', 'R4', 'R5', 'R6'].map((id) => ({
+        target: { kind: 'room', id },
+        principle: 'P1',
+        severity: 'fix',
+        line: 'MODEL: there is no bed.',
+        suggest: null,
+      }));
+    // Once the look has answered, the room's round brings the full answer (the bed back).
+    let looked = false;
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => {
+        if (c.step === 'look') {
+          looked = true;
+          return sse({ findings: p1(), summary: null });
+        }
+        return isMain(c) && !looked ? sse(noBed()) : null;
+      },
+    });
+    const r = start('anthropic', { fetch: prov.fetch, look: { rasterise: async () => PNG } });
+    const { look, design } = await r.run;
+    const lookAt = prov.calls.findIndex((c) => c.step === 'look');
+    expect(prov.calls.slice(lookAt).some(isMain)).toBe(true);
+    expect(look?.round).toBe('kept');
+    const key = Object.keys(design.spaces).find((k) =>
+      /^(Main|Master) bedroom/.test(design.spaces[k]?.name ?? ''),
+    );
+    const entry = design.spaces[key as string];
+    expect(entry?.design?.items.some((i) => i.assetId.startsWith('bed-'))).toBe(true);
+    const last = entry?.rounds?.at(-1);
+    expect(last).toMatchObject({ outcome: 'fixed', by: 'look' });
+    expect((last?.before ?? 0) - (last?.after ?? 0)).toBeGreaterThan(0);
+  });
+
   it('the look’s round under the pool’s rules: refused at its gate, its fix-up is given back', async () => {
     const prov = provider('anthropic', { auto: true, reply: livingOrLook });
     const left: number[] = [];
@@ -1003,6 +1050,43 @@ describe('the second look in the run: its gate, its checkpoint, a run carried on
     );
     // Its own rounds only: none from the look, which never went.
     expect(design.spaces[key as string]?.rounds?.every((x) => x.outcome !== 'fixed')).toBe(true);
+  });
+
+  it('Stop in a room, before the look: the run stops, the look says it never came', async () => {
+    const prov = provider('anthropic');
+    const r = start('anthropic', { fetch: prov.fetch, look: { rasterise: async () => PNG } });
+    await until(() => prov.calls.length === 1, 'layout');
+    prov.calls[0]?.release();
+    await until(() => prov.calls.length >= 2, 'room 1');
+    r.ctrl.abort();
+    const { state, look } = await r.run;
+    expect(state.phase).toBe('stopped');
+    expect(prov.calls.some((c) => c.step === 'look')).toBe(false);
+    expect(look).toMatchObject({ state: 'skipped', line: LOOK_STOPPED.before });
+  });
+
+  it('its findings are handed over as soon as read, before its round, and saved with its cost', async () => {
+    const prov = provider('anthropic', { auto: true, reply: livingOrLook });
+    const order: string[] = [];
+    const looksSaved: number[] = [];
+    const r = start('anthropic', {
+      fetch: prov.fetch,
+      look: {
+        rasterise: async () => PNG,
+        onAnswer: (l) => order.push(`answer:${l.dropped.length}`),
+      },
+      onStep: (key, kind, phase) => {
+        if (key === 'look') order.push(`${kind}:${phase}`);
+      },
+      onSave: (d) => {
+        looksSaved.push(d.usage.filter((u) => u.step === 'look').length);
+      },
+    });
+    await r.run;
+    expect(order.slice(0, 4)).toEqual(['look:start', 'look:end', 'answer:2', 'fix:start']);
+    // A save taken with the look's request metered and its round not yet (a page that goes in
+    // the round keeps what the look cost).
+    expect(looksSaved).toContain(1);
   });
 
   it('a model whose price goes before the look: no look, in plain words, nothing sent', async () => {
@@ -1042,6 +1126,9 @@ describe('the second look in the run: its gate, its checkpoint, a run carried on
     expect(state.phase).toBe('done');
     expect(state.said).toMatch(/^Design done\./);
     expect(look?.state).toBe('skipped');
+    // Said as the limit, never as a Stop.
+    expect(look?.line).toBe(LOOK_STOPPED.limit);
+    expect(look?.line).toBe('Not looked at: the second look would have gone past the limit.');
     expect(state.steps.at(-1)).toMatchObject({ kind: 'look', status: 'skipped' });
   });
 
@@ -1056,6 +1143,7 @@ describe('the second look in the run: its gate, its checkpoint, a run carried on
     const { state, look, design } = await r.run;
     expect(state.phase).toBe('done');
     expect(look?.state).toBe('stopped');
+    expect(look?.line).toBe(LOOK_STOPPED.asked);
     expect(Object.values(design.spaces).every((x) => x.status === 'done')).toBe(true);
   });
 

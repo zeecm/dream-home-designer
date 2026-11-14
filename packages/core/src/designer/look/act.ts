@@ -51,6 +51,8 @@ export interface LookRound {
    * record counts. Zero: a round only of taste suggestions or soft checks, the look's own.
    */
   checks: number;
+  /** Their keys (to count those still failing after it). */
+  keys: string[];
 }
 
 export interface LookPlan {
@@ -117,7 +119,8 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
     if (r) {
       if (!r.failures.some((x) => x.text === f.text && x.ref === f.ref)) r.failures.push(f);
       r.checks = keys.size;
-    } else plan.rounds.push({ space, failures: [f], checks: keys.size });
+      r.keys = [...keys];
+    } else plan.rounds.push({ space, failures: [f], checks: keys.size, keys: [...keys] });
   };
   /** An alias to the ref of the piece it names in a designed space's answer. */
   const refOf = (alias: string | null): string | null => {
@@ -204,7 +207,8 @@ export function actOnLook(answer: LookAnswer, ctx: LookCtx): LookPlan {
     if (f.principle === 'taste') taste = true;
     if (target) plan.targets.push(target);
     // What it was, in the note if the round changes nothing: a P1–P4 fix in the app's words.
-    plan.acted.push(target ? failure : line);
+    const said = target ? failure : line;
+    if (!plan.acted.includes(said)) plan.acted.push(said);
     const ref = about && level.items[about] ? (result.refs[about] ?? null) : null;
     if (s && EXECUTES.has(s.kind) && (s.kind === 'add' || (ref && !onKept))) {
       const refs: Record<string, string> = {};
@@ -290,26 +294,29 @@ export function applyLookEdit(d: SpaceDesign, e: LookEdit, n: number): SpaceDesi
 }
 
 /**
- * Whether the plan after a second look's round is no worse than before it (the `acceptResolve`
- * idea): no hard check failing that didn't, no more soft ones, no more pieces left out; and
- * each check the round was for (`targets`) passes now.
+ * Whether a second look's round is used, judged as a room's fix round is: fewer hard failures
+ * wins (a bed brought back brings soft notes with it, and is still better). Never one that
+ * breaks a kept piece or a house rule that held. With as many hard failures, it is used only if
+ * none is new, each check it was for (`targets`) passes, no more soft notes fail and no more
+ * pieces are left out: soft notes only break a tie.
  */
 export function lookNoWorse(
   before: DesignResult,
   after: DesignResult,
   targets: readonly string[] = [],
 ): boolean {
-  const still = new Set(after.checks.filter((c) => !c.already).map((c) => c.key));
-  if (targets.some((k) => still.has(k))) return false;
   const hard = (r: DesignResult) =>
     new Set(r.checks.filter((c) => c.hard && !c.already).map((c) => c.key));
-  const soft = (r: DesignResult) => r.checks.filter((c) => !c.hard && !c.already).length;
   const was = hard(before);
-  return (
-    [...hard(after)].every((k) => was.has(k)) &&
-    soft(after) <= soft(before) &&
-    after.dropped.length <= before.dropped.length
-  );
+  const now = hard(after);
+  // Kept pieces (K) and house rules (R) that held still hold, whatever else it fixes.
+  if ([...now].some((k) => /^(K|R)\|/.test(k) && !was.has(k))) return false;
+  if (now.size < was.size) return true;
+  if (now.size > was.size || [...now].some((k) => !was.has(k))) return false;
+  const still = new Set(after.checks.filter((c) => !c.already).map((c) => c.key));
+  if (targets.some((k) => still.has(k))) return false;
+  const soft = (r: DesignResult) => r.checks.filter((c) => !c.hard && !c.already).length;
+  return soft(after) <= soft(before) && after.dropped.length <= before.dropped.length;
 }
 
 /** The card's note when a look's round changed nothing for the better. */

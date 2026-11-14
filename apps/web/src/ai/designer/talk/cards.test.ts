@@ -370,6 +370,16 @@ describe('the one list (designer listens: the card bug, criterion 8)', () => {
     );
   });
 
+  it('stopped before a room was placed: its missing bed is the stopped line, never also a failure', () => {
+    const spaces = structuredClone(design.spaces);
+    spaces[SAMPLE_KEYS.main] = { name: 'Main bedroom', status: 'cancelled' };
+    const { rep } = reportOf(option({ spaces, status: 'stopped' }));
+    expect(rep.failures.some((f) => /no bed/.test(f.says))).toBe(false);
+    // Checked (not stopped), the same room counts.
+    const checked = reportOf(option({ spaces, status: 'checked' })).rep;
+    expect(checked.failures.some((f) => /no bed/.test(f.says))).toBe(true);
+  });
+
   it('the fix line from stored rounds: fixed, still failing, cut off and no better each say so', () => {
     const withRounds = (rounds: FixRound[], fixes = rounds.length, fixed = 0) => {
       const spaces = structuredClone(design.spaces);

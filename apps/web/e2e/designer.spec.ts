@@ -521,6 +521,33 @@ test.describe('desktop', () => {
     expect(m.calls.length + m.looks.length).toBe(before);
   });
 
+  test('the second look: Stop while it is asked ends the run done, and says so (QA M3)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    const m = await mock(page, {
+      // The look's request held: Stop goes while it is on its way.
+      reply: (c) => (c.step === 'look' ? new Promise<undefined | 'abort'>(() => {}) : null),
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    await expect.poll(() => m.looks.length, { timeout: 30_000 }).toBe(1);
+    await panel(page).getByRole('button', { name: 'Stop' }).click();
+    await expect(
+      log(page).getByText('You stopped the second look. The rooms are done and checked.'),
+    ).toBeVisible();
+    const v1 = card(page, 1);
+    await expect(v1.locator('[data-look]')).toContainText(
+      'Not looked at: you stopped the second look before it answered.',
+    );
+    // Done, not stopped part-way: no room said as never placed.
+    await expect(v1.getByText(/^Stopped before/)).toHaveCount(0);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled();
+  });
+
   test('the second look: Quicker and cheaper sends none (41)', async ({ page }) => {
     test.setTimeout(120_000);
     await setup(page);
@@ -3627,6 +3654,12 @@ test.describe('a locked phone: resume and the wake lock (locked-phone runs, part
     await expect
       .poll(async () => ((await runs(page))[0] as { look?: string } | undefined)?.look)
       .toBe('done');
+    // And what it found, saved with it (before its round goes).
+    await expect
+      .poll(
+        async () => !!((await runs(page))[0] as { lookResult?: unknown } | undefined)?.lookResult,
+      )
+      .toBe(true);
     await page.reload();
     waits[0]?.('abort');
     await reopen(page);
@@ -3636,6 +3669,24 @@ test.describe('a locked phone: resume and the wake lock (locked-phone runs, part
     // One look in all: never sent (or priced) again on carrying on.
     expect(m.looks).toHaveLength(1);
     await expect(panel(page).getByText(/and a second look at the result/)).toHaveCount(0);
+    // What it found is still on the card, and what it cost is in the totals (QA M2).
+    const section = card(page, 1).locator('[data-look]');
+    await expect(section).toBeVisible();
+    await expect(section).toContainText(/second look US\$0\.\d\d/);
+    await expect(section).toContainText('Its round didn’t finish (the page went)');
+    const lookCost = Number(
+      /second look US\$(\d+\.\d\d)/.exec((await section.textContent()) ?? '')?.[1] ?? 0,
+    );
+    const total = Number(
+      /This conversation US\$(\d+\.\d\d)/.exec(
+        (await panel(page)
+          .getByRole('button', { name: /^This conversation US\$/ })
+          .textContent()) ?? '',
+      )?.[1] ?? 0,
+    );
+    expect(lookCost).toBeGreaterThan(0);
+    // The room's answer (about US$0.04 a request here) and the look, at least.
+    expect(total).toBeGreaterThanOrEqual(lookCost + 0.04);
   });
 
   test('reloaded, then a wall moved before reopening: it asks once, and sends nothing until Carry on (4, 6)', async ({

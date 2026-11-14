@@ -165,6 +165,9 @@ export function logFollowing(): boolean {
   return document.querySelector<HTMLElement>('.talk-log')?.dataset.pinned !== '0';
 }
 
+/** The event that tells the log it is held where it was put (no longer following its foot). */
+export const HOLD = 'talk-hold';
+
 export function cardHeadIntoView(cardKey: string, within = 5000) {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   const t0 = Date.now();
@@ -179,7 +182,11 @@ export function cardHeadIntoView(cardKey: string, within = 5000) {
     // A frame more: the turn after it (the scope offer) is in, and the log has followed it.
     requestAnimationFrame(() => {
       const log = el.closest<HTMLElement>('.talk-log');
-      if (log && el.getBoundingClientRect().height > log.clientHeight) scrollInLog(el, 'start');
+      if (!log || el.getBoundingClientRect().height <= log.clientHeight) return;
+      scrollInLog(el, 'start');
+      // Held there: a write that comes after (a look's offer, the card's checks) doesn't take
+      // the log back to its foot, as if the person had scrolled up to the head themselves.
+      log.dispatchEvent(new Event(HOLD));
     });
   };
   requestAnimationFrame(tick);

@@ -393,9 +393,14 @@ export function runReport(
       ? leftOut.find((l) => l.space === space?.key && need.includes(l.role) && l.cause)
       : undefined;
     const tries = space ? rooms.find((x) => x.key === space.key) : undefined;
+    // The room's own answers only: the second look's round is judged on fewer failures, so an
+    // answer of its that had the piece was used, and one it refused is never counted as one
+    // that left it out.
     const answers =
       1 +
-      (tries?.rounds.filter((x) => x.outcome === 'fixed' || x.outcome === 'no-better').length ?? 0);
+      (tries?.rounds.filter(
+        (x) => x.by !== 'look' && (x.outcome === 'fixed' || x.outcome === 'no-better'),
+      ).length ?? 0);
     ones.push({
       c,
       roomId,

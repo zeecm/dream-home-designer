@@ -51,7 +51,7 @@ import {
   pressScope,
   scopeRequest,
 } from './propose';
-import { toNewest } from './scroll';
+import { HOLD, toNewest } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { lineTitle, versionTitle } from './titles';
 import {
@@ -734,8 +734,17 @@ export function Log() {
       el.dataset.pinned = pinned.current ? '1' : '0';
       if (pinned.current) setBehind(false);
     };
+    // Put at a card's head at a run's end: held there, as if the person had scrolled.
+    const hold = () => {
+      pinned.current = false;
+      el.dataset.pinned = '0';
+    };
     el.addEventListener('scroll', on, { passive: true });
-    return () => el.removeEventListener('scroll', on);
+    el.addEventListener(HOLD, hold);
+    return () => {
+      el.removeEventListener('scroll', on);
+      el.removeEventListener(HOLD, hold);
+    };
   }, []);
   if (!conv) return <div className="talk-log" />;
   let lastDay = '';

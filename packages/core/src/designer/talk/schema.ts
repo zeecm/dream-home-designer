@@ -670,6 +670,8 @@ export const RunCheckpoint = z.object({
    * skipped or failed: never asked again). Absent: none asked for, or an older build's.
    */
   look: z.enum(['left', 'done']).optional(),
+  /** What the look found, kept once read (a page that goes during its round still shows it). */
+  lookResult: OptionLook.optional().catch(undefined),
   /** The rooms it designs, once known (after the layout, or from the start without one). */
   rooms: z.array(z.string()).nullable(),
   /** Fix requests it may still send. */

@@ -1090,7 +1090,18 @@ async function runOption(
     look: looked,
   } = await runDesign({
     // At every finished room it was asked for (carried on: the checkpoint's, not only those left).
-    ...(looks ? { look: { rasterise, scope: ck.plan.rooms } } : {}),
+    ...(looks
+      ? {
+          look: {
+            rasterise,
+            scope: ck.plan.rooms,
+            // Kept with the checkpoint (the runner saves it next): a reload in its round keeps it.
+            onAnswer: (l: OptionLook) => {
+              ck.lookResult = l;
+            },
+          },
+        }
+      : {}),
     ai,
     ctx: sp.ctx,
     design: sp.draft,
@@ -1219,11 +1230,13 @@ async function runOption(
         ? 'checked'
         : 'stopped';
   const cutOff = state.steps.reduce((t, s) => t + (s.cutOffHigh ?? 0), 0);
+  // The look as it ended; carried on after it answered, as the checkpoint kept it.
+  const lookNow = looked ?? ck.lookResult ?? noLook(sp.brief, ai);
   // A house rule the second look suggests, vetted on the plan as it is (only while open).
   const { look, offers } =
     doc().id === projectId
-      ? lookOffersOf(looked ?? noLook(sp.brief, ai), p, letter, design)
-      : { look: looked ?? noLook(sp.brief, ai), offers: [] };
+      ? lookOffersOf(lookNow, p, letter, design)
+      : { look: lookNow, offers: [] };
   await writeOption((o) => {
     // Ended: nothing to carry on from.
     const { run: _ended, ...rest } = o;
@@ -1250,6 +1263,18 @@ async function runOption(
         id: newId('turn'),
         at: nowIso(),
         event: { type: 'stopped', usd: cutOff > 0 ? cutOff : null },
+      });
+    }
+    // Stopped during the look, every room done: said, and the design stands as checked.
+    if (state.phase === 'done' && ctrl.signal.aborted && lookNow) {
+      await act({
+        type: 'event',
+        id: newId('turn'),
+        at: nowIso(),
+        event: {
+          type: 'note',
+          text: 'You stopped the second look. The rooms are done and checked.',
+        },
       });
     }
     // A house rule the second look suggests: offered in the log as a reply's is (free).

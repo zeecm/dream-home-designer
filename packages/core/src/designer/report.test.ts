@@ -382,6 +382,27 @@ describe('the card’s lead and the app’s lines (criterion 8’s copy)', () =>
     expect(leadLine([room([], 0)], 0)).toBeNull();
   });
 
+  it('“left it out (N tries)” counts the room’s own answers, never the second look’s round', () => {
+    const answers = sampleAnswers(level);
+    const main = answers[SAMPLE_KEYS.main];
+    if (!main) throw new Error('sample answers');
+    main.items = main.items.filter((i) => !i.assetId.startsWith('bed-'));
+    const d = sampleDesign({ level, answers, brief: couple });
+    const r = designResult(level, level, d);
+    const entry = d.spaces[SAMPLE_KEYS.main];
+    if (!entry) throw new Error('no main bedroom');
+    const causeOf = (rounds: FixRound[]) =>
+      runReport(r, {
+        ...d,
+        spaces: { ...d.spaces, [SAMPLE_KEYS.main]: { ...entry, rounds } },
+      }).failures.find((f) => /no bed/.test(f.says))?.cause ?? null;
+    const own: FixRound = { outcome: 'no-better', before: 1, after: 1 };
+    const look: FixRound = { outcome: 'no-better', before: 1, after: 1, by: 'look' };
+    expect(causeOf([own])).toBe('The designer’s answers left it out (2 tries).');
+    expect(causeOf([own, look])).toBe('The designer’s answers left it out (2 tries).');
+    expect(causeOf([look])).toBeNull();
+  });
+
   it('How it was checked, room by room', () => {
     expect(
       roundLines([

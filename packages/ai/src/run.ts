@@ -37,6 +37,7 @@ import {
   parseConcept,
   parseLook,
   parseSpaceDesign,
+  peopleWords,
   placedWords,
   resolveAsset,
   roomIdAt,
@@ -225,8 +226,22 @@ export interface RunOptions {
   look?: {
     rasterise: (images: LookImage[]) => Promise<PromptImage[] | null>;
     scope?: RunPlan['rooms'];
+    /**
+     * Its findings, as soon as they are read (before its round): the caller keeps them with the
+     * run's checkpoint, so a page that goes during the round still shows the look, and saves.
+     */
+    onAnswer?: (look: OptionLook) => void;
   };
 }
+
+/** The look's lines when it was stopped: before it went, while it was asked, or in its round. */
+export const LOOK_STOPPED = {
+  before: 'Not looked at: you stopped the run before the second look.',
+  asked: 'Not looked at: you stopped the second look before it answered.',
+  round: 'You stopped its round, so the rooms are as the first answers left them.',
+  away: 'Its round didn’t finish (the page went), so the rooms are as the first answers left them.',
+  limit: 'Not looked at: the second look would have gone past the limit.',
+} as const;
 
 /** Furniture or built-ins: which part an answer's piece is. */
 function aspectOfAnswer(assetId: string, o: DesignOptions | undefined): Aspect {
@@ -329,6 +344,8 @@ export async function runDesign(
   if (o.look) state.steps.push(blank('look', 'Second look', 'look'));
   /** The second look, once it has run (or why it didn't). */
   let look: OptionLook | null = null;
+  /** Its findings once read, before its round (what a Stop or a halt in the round keeps). */
+  let answered: OptionLook | null = null;
 
   const update = () =>
     o.onUpdate?.({ ...state, steps: state.steps.map((s) => ({ ...s })), usage: [...state.usage] });
@@ -600,7 +617,15 @@ export async function runDesign(
     out.notes = acted.notes;
     out.offers = acted.offers.map((x) => ({ rule: x.rule, line: x.line }));
     out.dropped = acted.dropped.map((d) => ({ line: d.finding.line, why: d.why }));
-    if (!acted.edits.length && !acted.rounds.length) return out;
+    // Read and paid for: kept now, with the run's usage (a page that goes in its round has it,
+    // and says its round never finished).
+    answered = { ...out };
+    const rounds = acted.edits.length > 0 || acted.rounds.length > 0;
+    o.look?.onAnswer?.(
+      rounds ? { ...out, notes: [...out.notes, LOOK_STOPPED.away].slice(0, 12) } : answered,
+    );
+    void save();
+    if (!rounds) return out;
 
     // The round: the edits made, and each space's request sent (while the run's few last).
     const next: DraftDesign = structuredClone(design);
@@ -617,7 +642,7 @@ export async function runDesign(
      * round only of taste suggestions is the look's own, said on its card section). Those that
      * came back are settled once the round is kept or not.
      */
-    const records: { space: string; round: FixRound | null; checks: number }[] = [];
+    const records: { space: string; round: FixRound | null; checks: number; keys: string[] }[] = [];
     for (const r of acted.rounds) {
       const s = designed.find((x) => x.key === r.space);
       const entry = next.spaces[r.space];
@@ -629,6 +654,7 @@ export async function runDesign(
           space: r.space,
           round: { outcome: 'no-fixups', before: r.checks, after: r.checks, by: 'look' },
           checks: r.checks,
+          keys: r.keys,
         });
         continue;
       }
@@ -679,7 +705,7 @@ export async function runDesign(
           o.result,
         );
         changed = true;
-        records.push({ space: r.space, round: null, checks: r.checks });
+        records.push({ space: r.space, round: null, checks: r.checks, keys: r.keys });
       } else {
         // No answer: what was there stands, and its record says why.
         const outcome = st.failed ? NO_ANSWER[st.failed] : 'error';
@@ -687,22 +713,29 @@ export async function runDesign(
           space: r.space,
           round: { outcome, before: r.checks, after: r.checks, by: 'look' },
           checks: r.checks,
+          keys: r.keys,
         });
         st.error = null;
       }
     }
     st.status = 'done';
-    /** Writes each check round's record on the space as it stands now. */
-    const record = (kept: boolean) => {
+    /**
+     * Writes each check round's record on the space as it stands now (`after`: the result it
+     * was judged on, when it was used: its checks still failing are counted from it).
+     */
+    const record = (after: DesignResult | null) => {
+      const failing = after
+        ? new Set(after.checks.filter((c) => c.hard && !c.already).map((c) => c.key))
+        : null;
       for (const x of records) {
         if (!x.checks) continue;
         const entry = design.spaces[x.space];
         if (!entry || entry.status !== 'done') continue;
+        const left = failing ? x.keys.filter((k) => failing.has(k)).length : x.checks;
         const round: FixRound = x.round ?? {
-          outcome: kept ? 'fixed' : 'no-better',
+          outcome: failing ? 'fixed' : 'no-better',
           before: x.checks,
-          // Kept only once each check it was for passes (`lookNoWorse`).
-          after: kept ? 0 : x.checks,
+          after: left,
           by: 'look',
         };
         const sent = round.outcome !== 'no-fixups';
@@ -717,21 +750,25 @@ export async function runDesign(
       }
     };
     if (!changed) {
-      record(false);
+      record(null);
       return out;
     }
     const after = await place(ctx.base, ctx.before, next, o.result);
-    // Kept only if no worse, and each app check a P1–P4 fix was for passes now.
+    // Used as a room's fix round is: fewer hard failures, never a kept piece or rule broken.
     if (lookNoWorse(before, after, acted.targets)) {
       design.spaces = next.spaces;
-      record(true);
+      record(after);
       return { ...out, round: 'kept' };
     }
-    record(false);
+    record(null);
     return {
       ...out,
       round: 'refused',
-      notes: [...out.notes, ...acted.acted.map(keptAsWas)].slice(0, 12),
+      // Once a check, in the household's words ("You and Partner", as the lead says it).
+      notes: [
+        ...out.notes,
+        ...[...new Set(acted.acted.map((l) => peopleWords(l, ctx.brief)))].map(keptAsWas),
+      ].slice(0, 12),
     };
   }
 
@@ -997,9 +1034,7 @@ export async function runDesign(
       else if (!(await mayStart({ key: lookSt.key, kind: 'look' }))) {
         // Not sent: the limit was reached and the person said no, or stopped while it asked.
         lookSt.status = 'skipped';
-        const line = o.signal.aborted
-          ? 'Not looked at: you stopped the run before the second look.'
-          : 'Not looked at: the second look would have gone past the limit.';
+        const line = o.signal.aborted ? LOOK_STOPPED.before : LOOK_STOPPED.limit;
         look = { ...blankLook(), state: 'skipped', line };
       } else {
         try {
@@ -1008,12 +1043,18 @@ export async function runDesign(
         } catch (e) {
           // A refused key or a spent quota during the look: the look failed, with its line; the
           // rooms are done and checked, so the design stands.
+          // In its round, what it found stands (its round's answer is what's lost).
+          const got = answered as OptionLook | null;
           if (e instanceof Halted) {
-            look = { ...blankLook(), state: 'failed', line: e.halt.message.slice(0, 300) };
+            look = got
+              ? { ...got, notes: [...got.notes, e.halt.message.slice(0, 300)].slice(0, 12) }
+              : { ...blankLook(), state: 'failed', line: e.halt.message.slice(0, 300) };
             lookSt.status = 'failed';
             lookSt.error = e.halt.message;
           } else {
-            look = { ...blankLook(), state: 'stopped' };
+            look = got
+              ? { ...got, notes: [...got.notes, LOOK_STOPPED.round].slice(0, 12) }
+              : { ...blankLook(), state: 'stopped', line: LOOK_STOPPED.asked };
             if (!(e instanceof Stopped)) throw e;
           }
         } finally {
@@ -1024,6 +1065,7 @@ export async function runDesign(
     }
     if (lookSt?.status === 'waiting') lookSt.status = 'skipped';
     if ((stopping || o.signal.aborted) && !lookOnly) {
+      if (o.look && !look) look = { ...blankLook(), state: 'skipped', line: LOOK_STOPPED.before };
       say('Stopped. Finished steps are kept.');
       return ended('stopped');
     }
@@ -1039,6 +1081,8 @@ export async function runDesign(
     return ended('done');
   } catch (e) {
     if (e instanceof Stopped || o.signal.aborted) {
+      // Stopped before the look came (in a room or its fix round): the card says so.
+      if (o.look && !look) look = { ...blankLook(), state: 'skipped', line: LOOK_STOPPED.before };
       say('Stopped. Finished steps are kept.');
       return ended('stopped');
     }

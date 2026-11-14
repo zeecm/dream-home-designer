@@ -92,8 +92,14 @@ function sigCut(sig: string): string {
 }
 
 /** Whether a sentence is a claim the filter takes out. */
+/** A claim it can't check, verify or test something itself. */
+const MYSELF =
+  /\bI\s+(?:can(?:no|['’])?t|cannot|am\s+unable\s+to)\s+(?:check|verify|test)\b[^.!?]*\bmyself\b/i;
+
 export function cantClaim(sentence: string): boolean {
   if (NO_ACCESS.test(sentence)) return true;
+  // "I can't check the walkway myself": the app does, before anyone sees it.
+  if (MYSELF.test(sentence)) return true;
   const m = CANT.exec(sentence);
   if (!m) return false;
   const verb = (m[1] ?? '').toLowerCase();
