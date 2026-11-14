@@ -423,6 +423,13 @@ describe('the card’s lead and the app’s lines (criterion 8’s copy)', () =>
     ).toEqual([
       'Main bedroom · fix round 1: no better, not used · the second look’s round: 1 → 0 problems',
     ]);
+    // A round you stopped: said so, and the first design stands.
+    expect(roundLines([room([{ outcome: 'stopped', before: 1, after: 1 }])])).toEqual([
+      'Main bedroom · fix round 1: stopped, not used',
+    ]);
+    expect(leadLine([room([{ outcome: 'stopped', before: 1, after: 1 }])], 1)).toBe(
+      'Sent back to be fixed once, but you stopped the run, so the first design is shown. 1 still doesn’t pass:',
+    );
     expect(roundLines([room([{ outcome: 'no-fixups', before: 1, after: 1, by: 'look' }])])).toEqual(
       ['Main bedroom · not sent back after the second look: the run’s fix-ups were used up'],
     );

@@ -1052,6 +1052,39 @@ describe('the second look in the run: its gate, its checkpoint, a run carried on
     expect(design.spaces[key as string]?.rounds?.every((x) => x.outcome !== 'fixed')).toBe(true);
   });
 
+  it('Stop in a room’s fix round: its checked first answer is kept, the round said stopped', async () => {
+    // The living room's answer faces the wall; its fix round is held on its way.
+    const prov = provider('anthropic', {
+      reply: (c) =>
+        c.step === 'furnish "Living' && !promptOf(c.body).includes('## Fix round')
+          ? sse(sofaWall())
+          : null,
+    });
+    const r = start('anthropic', { fetch: prov.fetch, look: { rasterise: async () => PNG } });
+    // Everything goes but the living room's fix round, which is stopped on its way.
+    await until(() => {
+      for (const c of prov.calls) {
+        const fix = c.step === 'furnish "Living' && promptOf(c.body).includes('## Fix round');
+        if (!fix) c.release();
+      }
+      return prov.calls.some(
+        (c) => c.step === 'furnish "Living' && promptOf(c.body).includes('## Fix round'),
+      );
+    }, 'the living room sent back');
+    r.ctrl.abort();
+    const { state, design, look } = await r.run;
+    expect(state.phase).toBe('stopped');
+    const key = Object.keys(design.spaces).find((k) =>
+      design.spaces[k]?.name?.startsWith('Living'),
+    );
+    const living = design.spaces[key as string];
+    // Paid for and checked: placed, never dropped.
+    expect(living?.status).toBe('done');
+    expect(living?.design?.items.length).toBeGreaterThan(0);
+    expect(living?.rounds?.at(-1)?.outcome).toBe('stopped');
+    expect(look).toMatchObject({ state: 'skipped', line: LOOK_STOPPED.before });
+  });
+
   it('Stop in a room, before the look: the run stops, the look says it never came', async () => {
     const prov = provider('anthropic');
     const r = start('anthropic', { fetch: prov.fetch, look: { rasterise: async () => PNG } });

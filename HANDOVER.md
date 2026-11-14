@@ -772,11 +772,19 @@ only break a tie, never a new kept-piece or house-rule failure), so a round that
 back is used and recorded `fixed` (its count from the checks still failing after it); "left it
 out (N tries)" counts only the room's own answers. Its findings go to the checkpoint as soon as
 read (`look.onAnswer`, `RunCheckpoint.lookResult`, saved with the usage), so a reload in its
-round keeps the card's section and its cost ("Its round didn't finish (the page went)…"). Every
+round keeps the card's section and its cost ("Its round didn't finish, so the rooms are as the
+first answers left them."). Every
 Stop says so (`LOOK_STOPPED`: before the look, while it is asked, in its round; the limit apart),
 and a Stop during the look posts "You stopped the second look. The rooms are done and checked."
 A stopped card's lead leaves out the rooms it never placed (`cardRunReport`). The log is held at
-a card's head at a run's end (`HOLD`), so a later write doesn't take it back to the foot. The picture leaves
+a card's head at a run's end (`HOLD`, from the first frame while the card works its checks out,
+up to 12 s), so a later write doesn't take it back to the foot (an e2e at 844×390 checks it).
+Round 3 (14 Nov): any new hard failure refuses the look's round (HDB, kept pieces, rules,
+anything); a round records `fixed` only when its own checks went down. A Stop in a room's fix
+round keeps its checked first answer (placed, the round `stopped`: a new `FixRound` outcome read
+tolerantly; "Sent back to be fixed once, but you stopped the run…"). `lookAtEnd` (pricing.ts)
+picks the look an option ends with and the stop line. A refused round's note uses the run
+report's words ("You and Partner have no bed in Main bedroom"). The picture leaves
 out ceiling lights, clips a piece's room-in-front to its room, and keeps labels a quarter metre
 off each edge (a split's halves overlap by half a metre, so each label is drawn in one). WebKit
 draws the picture's sans-serif labels fine (checked on a screenshot). The runner part lives in

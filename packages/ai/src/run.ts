@@ -239,7 +239,7 @@ export const LOOK_STOPPED = {
   before: 'Not looked at: you stopped the run before the second look.',
   asked: 'Not looked at: you stopped the second look before it answered.',
   round: 'You stopped its round, so the rooms are as the first answers left them.',
-  away: 'Its round didn’t finish (the page went), so the rooms are as the first answers left them.',
+  away: 'Its round didn’t finish, so the rooms are as the first answers left them.',
   limit: 'Not looked at: the second look would have gone past the limit.',
 } as const;
 
@@ -733,7 +733,8 @@ export async function runDesign(
         if (!entry || entry.status !== 'done') continue;
         const left = failing ? x.keys.filter((k) => failing.has(k)).length : x.checks;
         const round: FixRound = x.round ?? {
-          outcome: failing ? 'fixed' : 'no-better',
+          // Fixed only if its own checks went down (used or not, otherwise no better).
+          outcome: failing && left < x.checks ? 'fixed' : 'no-better',
           before: x.checks,
           after: left,
           by: 'look',
@@ -748,6 +749,23 @@ export async function runDesign(
           rounds: [...(entry.rounds ?? []), round].slice(-12),
         };
       }
+    };
+    /**
+     * What a refused round was for, as the card's lead says it: its checks by the run report's
+     * lines (people of one room together), its taste suggestions as they were.
+     */
+    const refusedLines = (a: typeof acted): string[] => {
+      const rep = reportOf(designed.map((d) => d.key));
+      const texts = new Set(before.checks.map((c) => c.text));
+      const said = new Set<string>();
+      for (const k of a.targets) {
+        const f = rep.failures.find((x) => x.keys.includes(k));
+        const c = before.checks.find((x) => x.key === k);
+        if (f) said.add(f.says);
+        else if (c) said.add(peopleWords(c.text, ctx.brief));
+      }
+      for (const l of a.acted) if (!texts.has(l)) said.add(l);
+      return [...said].map(keptAsWas);
     };
     if (!changed) {
       record(null);
@@ -764,11 +782,8 @@ export async function runDesign(
     return {
       ...out,
       round: 'refused',
-      // Once a check, in the household's words ("You and Partner", as the lead says it).
-      notes: [
-        ...out.notes,
-        ...[...new Set(acted.acted.map((l) => peopleWords(l, ctx.brief)))].map(keptAsWas),
-      ].slice(0, 12),
+      // Once a failure, in the lead's words ("You and Partner have no bed in Main bedroom").
+      notes: [...out.notes, ...refusedLines(acted)].slice(0, 12),
     };
   }
 
@@ -875,6 +890,8 @@ export async function runDesign(
         locks: plan.locks ?? [],
         previous: plan.previous?.[s.key] ?? null,
       });
+      /** The room as checked so far (its answer in): what a Stop in its fix round keeps. */
+      let checked: ((stopped: FixRound) => DraftDesign['spaces'][string]) | null = null;
       try {
         const parse = (raw: unknown) => parseSpaceDesign(raw, bounds);
         const t0 = Date.now();
@@ -892,6 +909,15 @@ export async function runDesign(
           const most = fixRoundsFor(ctx.brief.quality);
           /** How each round went (and one not sent for want of fix-ups), for the card. */
           const rounds: FixRound[] = [];
+          // Paid for and checked: kept if the run is stopped in a fix round, with that round said.
+          checked = (stopped) => ({
+            name: s.name,
+            status: 'done',
+            design: current,
+            fixes,
+            fixed: Math.max(0, first.fixable.length - now.fixable.length),
+            rounds: [...rounds, stopped],
+          });
           while (now.fixable.length && fixes < most) {
             if (fixesLeft <= 0) {
               const n = now.fixable.length;
@@ -981,7 +1007,13 @@ export async function runDesign(
           design.spaces[s.key] = { name: s.name, status: 'failed', error: st.error ?? '' };
         }
       } catch (e) {
-        if (e instanceof Stopped) design.spaces[s.key] = { name: s.name, status: 'cancelled' };
+        if (e instanceof Stopped) {
+          const keep = checked as typeof checked;
+          const n = st.fixing?.problems ?? 0;
+          design.spaces[s.key] = keep
+            ? keep({ outcome: 'stopped', before: n, after: n })
+            : { name: s.name, status: 'cancelled' };
+        }
         runError ??= e;
       } finally {
         onStart?.();

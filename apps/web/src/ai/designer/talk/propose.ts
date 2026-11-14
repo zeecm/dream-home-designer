@@ -1,17 +1,9 @@
-import {
-  type AiSettings,
-  type StepKind,
-  type StepState,
-  blankStep,
-  interruptText,
-  runDesign,
-} from '@dhd/ai';
+import { type StepKind, type StepState, blankStep, interruptText, runDesign } from '@dhd/ai';
 import {
   type Conversation,
   DRAFT_CHARS,
   type DraftDesign,
   FIX_PER_RUN,
-  NO_LOOK,
   type OptionLook,
   PROPOSAL_RECORD_VERSION,
   type PlanAddress,
@@ -30,7 +22,6 @@ import {
   anotherAsk,
   askRule,
   atMostOf,
-  canSee,
   cut,
   entranceDoor,
   levelFingerprint,
@@ -70,6 +61,7 @@ import {
   approvedLeft,
   figureHolds,
   finishedSpace,
+  lookAtEnd,
   resumeFigure,
   spentWithInflight,
 } from './pricing';
@@ -707,23 +699,6 @@ function lookOffersOf(
   return { look: { ...look, notes: [...new Set(notes)].slice(0, 12) }, offers };
 }
 
-/** Thorough on a model that can't see: the card says why there is no second look (else none). */
-function noLook(brief: { quality: string }, ai: Pick<AiSettings, 'provider' | 'model'>) {
-  if (brief.quality !== 'thorough' || canSee(ai.provider, ai.model)) return null;
-  const look: OptionLook = {
-    state: 'skipped',
-    summary: null,
-    notes: [],
-    findings: [],
-    dropped: [],
-    offers: [],
-    round: 'none',
-    line: NO_LOOK,
-    at: nowIso(),
-  };
-  return look;
-}
-
 /** A run carried on from its checkpoint: its lock already held here. */
 interface CarryFrom {
   run: RunCheckpoint;
@@ -1231,7 +1206,16 @@ async function runOption(
         : 'stopped';
   const cutOff = state.steps.reduce((t, s) => t + (s.cutOffHigh ?? 0), 0);
   // The look as it ended; carried on after it answered, as the checkpoint kept it.
-  const lookNow = looked ?? ck.lookResult ?? noLook(sp.brief, ai);
+  const ending = lookAtEnd({
+    looked,
+    run: ck,
+    brief: sp.brief,
+    ai,
+    phase: state.phase,
+    stopped: ctrl.signal.aborted,
+    at: nowIso(),
+  });
+  const lookNow = ending.look;
   // A house rule the second look suggests, vetted on the plan as it is (only while open).
   const { look, offers } =
     doc().id === projectId
@@ -1266,15 +1250,12 @@ async function runOption(
       });
     }
     // Stopped during the look, every room done: said, and the design stands as checked.
-    if (state.phase === 'done' && ctrl.signal.aborted && lookNow) {
+    if (ending.stopNote) {
       await act({
         type: 'event',
         id: newId('turn'),
         at: nowIso(),
-        event: {
-          type: 'note',
-          text: 'You stopped the second look. The rooms are done and checked.',
-        },
+        event: { type: 'note', text: ending.stopNote },
       });
     }
     // A house rule the second look suggests: offered in the log as a reply's is (free).

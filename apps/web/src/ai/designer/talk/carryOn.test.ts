@@ -1,5 +1,12 @@
 import { type DraftDesign, type Page, type RunOptions, runDesign } from '@dhd/ai';
-import { PRICES, type ProposalOption, type RunCheckpoint, sampleFlatProject } from '@dhd/core';
+import {
+  NO_LOOK,
+  type OptionLook,
+  PRICES,
+  type ProposalOption,
+  type RunCheckpoint,
+  sampleFlatProject,
+} from '@dhd/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AI,
@@ -10,8 +17,10 @@ import {
 } from '../../../../../../packages/ai/src/fixtures/runner';
 import { browserPage } from '../page';
 import {
+  LOOK_STOP_NOTE,
   approvedLeft,
   figureHolds,
+  lookAtEnd,
   priceRequest,
   resumeFigure,
   spentWithInflight,
@@ -183,5 +192,54 @@ describe('a locked phone: a step cut off while away goes again on return (locked
     expect(Object.values(again.design.spaces).every((s) => s.status === 'done')).toBe(true);
     // Its earlier usage is kept with it, the new requests' added.
     expect(again.design.usage.length).toBe(d.usage.length + 2);
+  });
+});
+
+describe('the look an option ends with (lookAtEnd)', () => {
+  const found: OptionLook = {
+    state: 'done',
+    summary: 'Calm.',
+    notes: ['Its round didn’t finish, so the rooms are as the first answers left them.'],
+    findings: [],
+    dropped: [],
+    offers: [],
+    round: 'none',
+    line: null,
+    at: '2026-11-14T00:00:00.000Z',
+  };
+  const base = {
+    looked: null,
+    run: {},
+    brief: { quality: 'thorough' },
+    ai: { provider: 'anthropic' as const, model: 'claude-opus-5-5' },
+    phase: 'done',
+    stopped: false,
+    at: '2026-11-14T00:00:00.000Z',
+  };
+
+  it('carried on after the look answered: what the checkpoint kept, never nothing', () => {
+    expect(lookAtEnd({ ...base, run: { lookResult: found } })).toEqual({
+      look: found,
+      stopNote: null,
+    });
+    // The run's own, when it has one.
+    const own = { ...found, summary: 'Own.' };
+    expect(lookAtEnd({ ...base, looked: own, run: { lookResult: found } }).look).toBe(own);
+    // None at all: none (Thorough, a model that can see).
+    expect(lookAtEnd(base).look).toBeNull();
+    // A model that can't see says so.
+    expect(lookAtEnd({ ...base, ai: { provider: 'openai', model: 'gpt-4.1' } }).look?.line).toBe(
+      NO_LOOK,
+    );
+  });
+
+  it('stopped during the look, every room done: the log says so; stopped part-way: not this line', () => {
+    expect(lookAtEnd({ ...base, run: { lookResult: found }, stopped: true }).stopNote).toBe(
+      LOOK_STOP_NOTE,
+    );
+    expect(
+      lookAtEnd({ ...base, run: { lookResult: found }, stopped: true, phase: 'stopped' }).stopNote,
+    ).toBeNull();
+    expect(lookAtEnd({ ...base, stopped: true }).stopNote).toBeNull();
   });
 });

@@ -3,6 +3,8 @@ import {
   type DesignBrief,
   type DesignOptions,
   type DraftDesign,
+  NO_LOOK,
+  type OptionLook,
   type Price,
   type Project,
   type ProposalOption,
@@ -12,6 +14,7 @@ import {
   type ScopePlan,
   type ScopeRef,
   type TalkAsk,
+  canSee,
   contextFor,
   estimateRun,
   lookBase,
@@ -199,4 +202,41 @@ export function priceRequest(i: PriceInput): Priced {
       : false,
   });
   return { sp, est };
+}
+
+/** The log's line when the person stopped the second look with every room done. */
+export const LOOK_STOP_NOTE = 'You stopped the second look. The rooms are done and checked.';
+
+/**
+ * The look an option ends with: the run's, else what its checkpoint kept (carried on after it
+ * answered), else, on Thorough with a model that can't see, why there is none; and the log's
+ * line when the person stopped the look with every room done.
+ */
+export function lookAtEnd(o: {
+  looked: OptionLook | null;
+  run: Pick<RunCheckpoint, 'lookResult'>;
+  brief: { quality: string };
+  ai: { provider: RunCheckpoint['provider']; model: string };
+  phase: string;
+  stopped: boolean;
+  at: string;
+}): { look: OptionLook | null; stopNote: string | null } {
+  const look =
+    o.looked ??
+    o.run.lookResult ??
+    (o.brief.quality === 'thorough' && !canSee(o.ai.provider, o.ai.model)
+      ? {
+          state: 'skipped' as const,
+          summary: null,
+          notes: [],
+          findings: [],
+          dropped: [],
+          offers: [],
+          round: 'none' as const,
+          line: NO_LOOK,
+          at: o.at,
+        }
+      : null);
+  const stopNote = o.phase === 'done' && o.stopped && look ? LOOK_STOP_NOTE : null;
+  return { look, stopNote };
 }

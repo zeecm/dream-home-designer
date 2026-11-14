@@ -295,10 +295,10 @@ export function applyLookEdit(d: SpaceDesign, e: LookEdit, n: number): SpaceDesi
 
 /**
  * Whether a second look's round is used, judged as a room's fix round is: fewer hard failures
- * wins (a bed brought back brings soft notes with it, and is still better). Never one that
- * breaks a kept piece or a house rule that held. With as many hard failures, it is used only if
- * none is new, each check it was for (`targets`) passes, no more soft notes fail and no more
- * pieces are left out: soft notes only break a tie.
+ * wins (a bed brought back brings soft notes with it, and is still better), but never at the
+ * cost of a hard failure that wasn't there (an HDB rule, a kept piece, a house rule, anything).
+ * With as many hard failures, each check it was for (`targets`) must pass, and no more soft
+ * notes fail and no more pieces are left out: soft notes only break a tie.
  */
 export function lookNoWorse(
   before: DesignResult,
@@ -309,10 +309,10 @@ export function lookNoWorse(
     new Set(r.checks.filter((c) => c.hard && !c.already).map((c) => c.key));
   const was = hard(before);
   const now = hard(after);
-  // Kept pieces (K) and house rules (R) that held still hold, whatever else it fixes.
-  if ([...now].some((k) => /^(K|R)\|/.test(k) && !was.has(k))) return false;
+  // A new hard failure refuses it, whatever it fixes: HDB rules, kept pieces (K) and house rules
+  // (R) above all.
+  if ([...now].some((k) => !was.has(k))) return false;
   if (now.size < was.size) return true;
-  if (now.size > was.size || [...now].some((k) => !was.has(k))) return false;
   const still = new Set(after.checks.filter((c) => !c.already).map((c) => c.key));
   if (targets.some((k) => still.has(k))) return false;
   const soft = (r: DesignResult) => r.checks.filter((c) => !c.hard && !c.already).length;

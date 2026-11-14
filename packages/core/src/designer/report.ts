@@ -519,6 +519,8 @@ export interface FixSummary {
   usedUp: boolean;
   /** Rounds sent after the second look (a fix-up each, apart from `sent`). */
   looked: number;
+  /** A round was on its way when the person stopped the run. */
+  stopped: boolean;
 }
 
 export function fixSummary(rooms: readonly ReportRoom[]): FixSummary {
@@ -534,6 +536,7 @@ export function fixSummary(rooms: readonly ReportRoom[]): FixSummary {
     unknown: false,
     usedUp: false,
     looked: 0,
+    stopped: false,
   };
   for (const room of rooms) {
     if (!room.rounds.length) {
@@ -561,6 +564,7 @@ export function fixSummary(rooms: readonly ReportRoom[]): FixSummary {
       if (x.outcome === 'refused') f.refused = true;
       if (x.outcome === 'error') f.error = true;
       if (x.outcome === 'no-better') f.noBetter = true;
+      if (x.outcome === 'stopped') f.stopped = true;
     }
     if (sentHere) f.rooms++;
   }
@@ -584,6 +588,7 @@ function fixSentence(f: FixSummary): string | null {
       ? `${sent}, but the answers were cut off at the length limit and weren’t used.`
       : `${sent}, but the answer was cut off at the length limit and wasn’t used.`;
   }
+  if (f.stopped) return `${sent}, but you stopped the run, so ${first}.`;
   if (f.failed) {
     return `${sent}, but no readable answer came, so ${first}.`;
   }
@@ -665,6 +670,8 @@ export function roundLines(rooms: readonly ReportRoom[]): string[] {
           return `${name}: the model declined it, not used`;
         case 'error':
           return `${name}: the request didn’t go through, not used`;
+        case 'stopped':
+          return `${name}: stopped, not used`;
         default:
           return `${name}: no readable answer, not used`;
       }

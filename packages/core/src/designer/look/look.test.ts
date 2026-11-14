@@ -620,6 +620,15 @@ describe('what the app does with them (actOnLook): the checks always win', () =>
     ]);
     expect(lookNoWorse(twoHard, ruleBroken)).toBe(false);
     expect(lookNoWorse(twoHard, res([['K|kept_1', true]]))).toBe(false);
+    // Nor any new hard failure: fixing no bed and no seats while breaking an HDB rule is refused.
+    const bedAndSeats = res([
+      ['P1|bed|rm_main-bedroom|bed', true],
+      ['P1|seats|rm_living|sofa', true],
+    ]);
+    expect(lookNoWorse(bedAndSeats, res([['HDB|shelter-bed|rm_shelter|bed', true]]))).toBe(false);
+    expect(lookNoWorse(bedAndSeats, res([['P3|walkway|x|main', true]]))).toBe(false);
+    // Fixing both with only soft notes new: used.
+    expect(lookNoWorse(bedAndSeats, res([['P4|side|rm_main-bedroom|bed', false]]))).toBe(true);
     // As many hard failures: none new, no more soft notes, nothing more left out.
     const swapped = res([['P3|walkway|x|main', true]]);
     expect(lookNoWorse(noBed, swapped)).toBe(false);

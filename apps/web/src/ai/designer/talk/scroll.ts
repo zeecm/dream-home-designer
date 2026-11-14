@@ -168,25 +168,33 @@ export function logFollowing(): boolean {
 /** The event that tells the log it is held where it was put (no longer following its foot). */
 export const HOLD = 'talk-hold';
 
-export function cardHeadIntoView(cardKey: string, within = 5000) {
+export function cardHeadIntoView(cardKey: string, within = 12_000) {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   const t0 = Date.now();
+  let held = false;
   const tick = () => {
     const el = document.querySelector<HTMLElement>(
       `article.talk-card[data-card="${CSS.escape(cardKey)}"]`,
     );
+    const log = el?.closest<HTMLElement>('.talk-log');
+    // Held from the start: while the card works its checks out (seconds, on a slow phone), no
+    // later write takes the log on to its foot and past the head it is about to show.
+    if (log && !held) {
+      held = true;
+      log.dispatchEvent(new Event(HOLD));
+    }
     if (!el?.querySelector('[data-lead], .talk-lens, .talk-changes')) {
       if (Date.now() - t0 < within) requestAnimationFrame(tick);
       return;
     }
     // A frame more: the turn after it (the scope offer) is in, and the log has followed it.
     requestAnimationFrame(() => {
-      const log = el.closest<HTMLElement>('.talk-log');
-      if (!log || el.getBoundingClientRect().height <= log.clientHeight) return;
+      const at = el.closest<HTMLElement>('.talk-log');
+      if (!at || el.getBoundingClientRect().height <= at.clientHeight) return;
       scrollInLog(el, 'start');
       // Held there: a write that comes after (a look's offer, the card's checks) doesn't take
       // the log back to its foot, as if the person had scrolled up to the head themselves.
-      log.dispatchEvent(new Event(HOLD));
+      at.dispatchEvent(new Event(HOLD));
     });
   };
   requestAnimationFrame(tick);

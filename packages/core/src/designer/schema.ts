@@ -411,7 +411,17 @@ export function parseSpaceDesign(raw: unknown, bounds: Bounds | null): ParseResu
  * read tolerantly (an older build drops it; only the card's fix line loses its detail).
  */
 export const FixRound = z.object({
-  outcome: z.enum(['fixed', 'no-better', 'cut-off', 'failed', 'refused', 'error', 'no-fixups']),
+  outcome: z.enum([
+    'fixed',
+    'no-better',
+    'cut-off',
+    'failed',
+    'refused',
+    'error',
+    'no-fixups',
+    // You stopped the run while it was on its way: the answer before it stands.
+    'stopped',
+  ]),
   before: z.number().int().min(0),
   after: z.number().int().min(0),
   /** Sent after the second look (its one round), not by the room's own checks. */
