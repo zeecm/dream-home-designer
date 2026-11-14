@@ -242,13 +242,21 @@ export const OUTPUT: Record<
   },
 };
 
-/** How many times a room's answer is sent back when it fails a hard check, at most. */
-export const FIX_ROUNDS = 2;
-/** How many fix requests a whole run sends, at most (whatever the rooms). */
+/** The fix-ups a Thorough run may send in all (its pool), whatever the rooms. */
 export const FIX_PER_RUN = 3;
-/** How many times one room's answer may be sent back: once on Quick, twice on Thorough. */
-export const fixRoundsFor = (quality: DesignBrief['quality']) =>
-  quality === 'quick' ? 1 : FIX_ROUNDS;
+/**
+ * The run's fix-up pool (spec docs/specs/designer-listens.md §3, lead decisions B2): Thorough 3,
+ * Quick one a room up to 3. A room keeps taking them while each round makes progress; the rooms
+ * take them in turn (`firstPassOf`), and the second look's round draws on what is left.
+ */
+export const fixPoolFor = (quality: DesignBrief['quality'], rooms: number) =>
+  quality === 'quick' ? Math.max(0, Math.min(FIX_PER_RUN, rooms)) : FIX_PER_RUN;
+/**
+ * How many fix-ups one room may take in its first pass, before every room has had its turn:
+ * max(1, floor(pool / rooms)). What is left then goes one at a time to rooms still progressing.
+ */
+export const firstPassOf = (pool: number, rooms: number) =>
+  Math.max(1, Math.floor(pool / Math.max(1, rooms)));
 /**
  * Tokens a fix round's prompt adds: the failures, where the pieces were placed, and the pieces
  * left out with their hints (at most 8 + 8 lines of at most 300 characters).
@@ -269,8 +277,12 @@ export interface StepEstimate {
   /** Of `input`, the stable part a provider can cache. */
   cacheable: number;
   output: { typical: number; high: number };
-  /** `fix`: what its fix rounds may add on top of high (the run's cap aside). */
-  usd: { typical: number; high: number; fix: number } | null;
+  /**
+   * `fixOne`: one fix request of this step at its most (a fix round is reserved at this; the
+   * look's: the dearest room's). `fix`: what the pool may add on top of high if every fix-up
+   * went to this step.
+   */
+  usd: { typical: number; high: number; fix: number; fixOne: number } | null;
 }
 
 export interface RunEstimate {
@@ -279,11 +291,11 @@ export interface RunEstimate {
   input: number;
   tokens: { typical: number; high: number };
   /**
-   * Null when the model has no price. `fix`: what fix rounds may add on top of high, at most
-   * FIX_PER_RUN requests in the run.
+   * Null when the model has no price. `fix`: what the fix-up pool may add on top of high: the
+   * pool's size times the dearest fix request (`fixOne`), as any room may take the whole pool.
    */
-  usd: { typical: number; high: number; fix: number } | null;
-  /** The fix requests a run may send, at most. */
+  usd: { typical: number; high: number; fix: number; fixOne: number } | null;
+  /** The fix requests a run may send, at most (its pool). */
   fixes: number;
   /** The largest prompt of any step, in tokens. */
   largestInput: number;
@@ -295,8 +307,9 @@ export interface RunEstimate {
  * stable prefix from cache from the second room step on, where the provider caches (Claude
  * writes it on the first room step, at the cache-write rate); high assumes no cache at all.
  * `fix` is what the fix rounds may add on top of high: a room whose answer the app's checks send
- * back goes again up to once (Quick) or twice (Thorough), and a run sends at most FIX_PER_RUN
- * fix requests in all, so the dearest three are counted. Retries aren't in it.
+ * back goes again while it makes progress, drawing on the run's pool (`fixPoolFor`), and any room
+ * may take all of it, so the pool is priced as that many of the dearest fix request (lead
+ * decisions, blocker 2). Retries aren't in it.
  */
 export function estimateRun(
   prompts: StepPrompt[],
@@ -314,8 +327,19 @@ export function estimateRun(
      * on with every room done), its round then priced as a room step on that prefix.
      */
     look?: boolean | { pictures: { width: number; height: number }[]; base?: StepPrompt };
+    /**
+     * The pool, when it isn't the quality's for these rooms: a run carried on has its fix-ups
+     * left, and Keep fixing its own.
+     */
+    pool?: number;
+    /**
+     * Room steps (by step key) that send only fix rounds (a room carried on in its rounds, Keep
+     * fixing): their own request isn't sent, so it isn't priced; typical is one fix round.
+     */
+    fixOnly?: readonly string[];
   },
 ): RunEstimate {
+  const only = new Set(opts.fixOnly ?? []);
   const price = priceOf(opts.model, opts.prices);
   const first = prompts[0] ?? (typeof opts.look === 'object' ? opts.look.base : undefined);
   const all = [...prompts];
@@ -346,8 +370,7 @@ export function estimateRun(
     );
     const out = OUTPUT[opts.quality][p.kind];
     const n = p.kind === 'room' ? ++room : 0;
-    // A room step may be sent back to be fixed, once or twice by quality.
-    const rounds = p.kind === 'room' ? fixRoundsFor(opts.quality) : 0;
+    const fixOnly = p.kind === 'room' && only.has(p.step);
     // The second look reads the run's prefix from the cache, like any step after the first.
     const cached = n >= 2 || p.kind === 'look';
     let usd: StepEstimate['usd'] = null;
@@ -363,14 +386,30 @@ export function estimateRun(
             }
           : { input, cachedInput: 0, cacheWrite: 0, output: out.typical };
       const high = usdOf({ input, cachedInput: 0, cacheWrite: 0, output: out.max }, price);
-      // A fix round sends the prompt again with the answer and the failures (about a typical
-      // answer's length more), and may write as much as the first.
+      // A fix round sends the prompt again with the answer it changes (at most a whole answer's
+      // length: reserved at its most, literally) and the failures, and may write as much again.
       const fixOne = usdOf(
-        { input: input + out.typical + FIX_EXTRA, cachedInput: 0, cacheWrite: 0, output: out.max },
+        { input: input + out.max + FIX_EXTRA, cachedInput: 0, cacheWrite: 0, output: out.max },
         price,
       );
-      usd = { typical: usdOf(typical, price), high, fix: fixOne * rounds };
-      for (let k = 0; k < rounds; k++) fixOnes.push(fixOne);
+      if (p.kind === 'room') fixOnes.push(fixOne);
+      usd = fixOnly
+        ? {
+            // Only its fix rounds go: one at a typical length is what it is expected to take.
+            typical: usdOf(
+              {
+                input: input + out.typical + FIX_EXTRA,
+                cachedInput: 0,
+                cacheWrite: 0,
+                output: out.typical,
+              },
+              price,
+            ),
+            high: 0,
+            fix: 0,
+            fixOne,
+          }
+        : { typical: usdOf(typical, price), high, fix: 0, fixOne: p.kind === 'room' ? fixOne : 0 };
     }
     return {
       step: p.step,
@@ -392,7 +431,7 @@ export function estimateRun(
         ? Math.max(...fixOnes)
         : usdOf(
             {
-              input: bare + out.typical + FIX_EXTRA,
+              input: bare + out.max + FIX_EXTRA,
               cachedInput: 0,
               cacheWrite: 0,
               output: out.max,
@@ -402,9 +441,23 @@ export function estimateRun(
     );
   }
   const sum = (f: (s: StepEstimate) => number) => steps.reduce((t, s) => t + f(s), 0);
-  const roomFixes =
-    steps.filter((s) => s.kind === 'room').length * fixRoundsFor(opts.quality) + (looks ? 1 : 0);
-  const fixes = Math.min(FIX_PER_RUN, roomFixes);
+  const rooms = steps.filter((s) => s.kind === 'room').length;
+  // The pool: the quality's for these rooms (the look's round draws on it too), or the one given.
+  const pool = Math.max(
+    0,
+    Math.floor(opts.pool ?? Math.max(fixPoolFor(opts.quality, rooms), looks && !rooms ? 1 : 0)),
+  );
+  const dearest = fixOnes.length ? Math.max(...fixOnes) : 0;
+  // Fix-ups go only to room steps and the look's round (priced or not: the pool is a request cap).
+  const fixes = rooms || looks ? pool : 0;
+  for (const s of steps) {
+    if (!s.usd) continue;
+    // The look's round is the dearest room's fix request; any step may take the whole pool.
+    if (s.kind === 'look') s.usd.fixOne = dearest;
+    s.usd.fix = s.usd.fixOne * fixes;
+    // A room only sent back to be fixed, with no fix-up left: it sends nothing.
+    if (!fixes && s.kind === 'room' && only.has(s.step)) s.usd.typical = 0;
+  }
   return {
     requests: steps.length,
     steps,
@@ -417,10 +470,8 @@ export function estimateRun(
       ? {
           typical: sum((s) => s.usd?.typical ?? 0),
           high: sum((s) => s.usd?.high ?? 0),
-          fix: [...fixOnes]
-            .sort((a, b) => b - a)
-            .slice(0, FIX_PER_RUN)
-            .reduce((t, v) => t + v, 0),
+          fix: dearest * fixes,
+          fixOne: dearest,
         }
       : null,
     fixes,

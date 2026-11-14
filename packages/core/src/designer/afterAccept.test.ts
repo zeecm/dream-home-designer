@@ -587,6 +587,24 @@ describe('nudgeNearMisses', () => {
     expect(calls).toBeLessThanOrEqual(NUDGE_BUDGET);
   });
 
+  it('criterion 15: a 0.89 m walkway against 0.90 m is mended and passes; 0.84 m is not nudged', () => {
+    // Short by 1 cm: moved a few cm past the need, and the check passes.
+    expect(shortOf(issue(0.89).issue, lvl(3.02))).toBeCloseTo(0.01, 9);
+    const near = lvl(3.02);
+    const done = nudgeNearMisses(near, new Set(['it_f000']), hard);
+    expect(done).toHaveLength(1);
+    expect(done[0]?.by).toBeLessThanOrEqual(0.06);
+    expect(hard(near)).toEqual([]);
+    // Short by 6 cm (0.84 m of 0.90 m): no near miss, never moved, and it still fails.
+    expect(shortOf(issue(0.84).issue, lvl(2.97))).toBeNull();
+    const far = lvl(2.97);
+    expect(nudgeNearMisses(far, new Set(['it_f000']), hard)).toEqual([]);
+    expect(far.items.it_f000?.position.x).toBe(2.97);
+    expect(hard(far).map((c) => c.key)).toEqual(['P3|walkway|it_f000|circulation']);
+    // 5 cm short is still a near miss.
+    expect(shortOf(issue(0.85).issue, lvl(2.98))).toBeCloseTo(0.05, 9);
+  });
+
   it('keeps no move that makes another check fail', () => {
     const l = lvl(3);
     const worse = (x: Level) => [

@@ -10,6 +10,8 @@ import {
 } from './fixtures/sample';
 import { roomStep } from './prompts';
 import {
+  type ReportLeftOut,
+  type ReportRoom,
   type RunReport,
   addressedIn,
   failureLines,
@@ -17,6 +19,7 @@ import {
   leadLine,
   leadParts,
   leftOutLines,
+  leftOutWords,
   leftSig,
   manyOf,
   mergeLines,
@@ -572,5 +575,234 @@ describe('a fix round’s prompt (criterion 4)', () => {
     expect(p.tail).not.toContain('"Failure 9"');
     expect(p.tail).toContain('"L8 left out"');
     expect(p.tail).not.toContain('"L9 left out"');
+  });
+});
+
+describe('the designer’s pieces left out, on the card (B2, from QA)', () => {
+  const out = (
+    ref: string,
+    assetId: string,
+    code: ReportLeftOut['code'],
+    extra: Partial<ReportLeftOut> = {},
+  ): ReportLeftOut => ({
+    id: `L-${ref}`,
+    ref,
+    assetId,
+    space: 'rm_main-bedroom',
+    room: 'Main bedroom',
+    text: `“${ref}”: no wall long enough.`,
+    code,
+    hint: '',
+    cause: `The ${assetId} needs 2.40 m of wall; the longest free wall is 1.80 m.`,
+    says: `The ${assetId} in Main bedroom was left out`,
+    role: 'wardrobe',
+    causes: null,
+    ...extra,
+  });
+  const rep = (leftOut: ReportLeftOut[]): RunReport => ({ failures: [], leftOut, rooms: [] });
+
+  it('says what was left out in one line, with each reason one tap away', () => {
+    const r = rep([
+      out('ward1', 'built-in-wardrobe', 'no-wall'),
+      out('ward2', 'wardrobe', 'no-wall'),
+      out('ward4', 'wardrobe', 'no-wall'),
+      out('ward3', 'wardrobe', 'no-place', { cause: null }),
+      out('desk1', 'desk', 'no-wall'),
+    ]);
+    const w = leftOutWords(r);
+    expect(w?.line).toBe('Left out, didn’t fit: built-in wardrobe, 3 wardrobes, desk.');
+    expect(w?.reasons).toEqual([
+      'The built-in-wardrobe needs 2.40 m of wall; the longest free wall is 1.80 m.',
+      'The wardrobe needs 2.40 m of wall; the longest free wall is 1.80 m.',
+      'The wardrobe in Main bedroom was left out.',
+      'The desk needs 2.40 m of wall; the longest free wall is 1.80 m.',
+    ]);
+    // The announcement doesn't read as all done either.
+    expect(readyLine('V4', r, null)).toBe(
+      'V4 is ready. Passes all checks. Left out, didn’t fit: built-in wardrobe, 3 wardrobes, desk.',
+    );
+  });
+
+  it('another reason: "Left out"; the app’s own and a failure’s cause aren’t listed', () => {
+    expect(leftOutWords(rep([out('w', 'wardrobe', 'keep-missing')]))?.line).toBe(
+      'Left out: wardrobe.',
+    );
+    expect(
+      leftOutWords(
+        rep([
+          out('app:bed', 'bed-queen', 'no-wall'),
+          out('bed1', 'bed-queen', 'no-wall', { causes: 'F1' }),
+        ]),
+      ),
+    ).toBeNull();
+    expect(leftOutWords(rep([]))).toBeNull();
+    expect(readyLine('V4', rep([]), null)).toBe('V4 is ready. Passes all checks.');
+  });
+});
+
+describe('Keep fixing on the card, and the left-out line’s wording (B2, UX review)', () => {
+  const room = (rounds: ReportRoom['rounds']): ReportRoom => ({
+    key: 'rm_main',
+    name: 'Main bedroom',
+    fixes: rounds.length,
+    fixed: 0,
+    rounds,
+  });
+  const run = [
+    { outcome: 'fixed' as const, before: 4, after: 3 },
+    { outcome: 'fixed' as const, before: 3, after: 2 },
+    { outcome: 'fixed' as const, before: 2, after: 1 },
+  ];
+
+  it('rounds Keep fixing sent are said apart from those before the version was shown', () => {
+    const kept = room([...run, { outcome: 'fixed', before: 1, after: 0, by: 'keep' }]);
+    expect(leadParts([kept], 0).fix).toBe(
+      'Checked and fixed 3 problems before showing you, and 1 more when you asked to keep fixing.',
+    );
+    expect(roundLines([kept])).toEqual([
+      'Main bedroom · fix round 1: 4 → 3 problems',
+      'Main bedroom · fix round 2: 3 → 2 problems',
+      'Main bedroom · fix round 3: 2 → 1 problem',
+      'Main bedroom · fix round 4 (Keep fixing): 1 → 0 problems',
+    ]);
+    const none = room([...run, { outcome: 'no-better', before: 1, after: 1, by: 'keep' }]);
+    expect(leadParts([none], 1)).toEqual({
+      fix: 'Checked and fixed 3 problems before showing you. Nothing more was fixed when you asked to keep fixing.',
+      count: '1 still doesn’t pass:',
+    });
+    const out = room([
+      ...run,
+      { outcome: 'fixed', before: 3, after: 2, by: 'keep' },
+      { outcome: 'no-fixups', before: 2, after: 2, by: 'keep' },
+    ]);
+    expect(leadParts([out], 2).fix).toBe(
+      'Checked and fixed 3 problems before showing you, and 1 more when you asked to keep fixing. Keep fixing used the 1 fix-up it was priced for.',
+    );
+    // Two rounds stay on one line.
+    expect(roundLines([room(run.slice(0, 2))])).toEqual([
+      'Main bedroom · fix round 1: 4 → 3 problems · fix round 2: 3 → 2 problems',
+    ]);
+  });
+
+  const out = (
+    ref: string,
+    assetId: string,
+    extra: Partial<ReportLeftOut> = {},
+  ): ReportLeftOut => ({
+    id: `L-${ref}`,
+    ref,
+    assetId,
+    space: 'rm_main',
+    room: 'Main bedroom',
+    text: '',
+    code: 'no-wall',
+    hint: '',
+    cause: 'The walls in Main bedroom that could take it are taken by other pieces.',
+    says: 'It was left out',
+    role: assetId === 'bedside' ? 'bedside' : 'wardrobe',
+    causes: null,
+    ...extra,
+  });
+
+  it('a second of a kind, bedside tables first, the walls taken said once a room', () => {
+    const takers = 'the queen bed and the built-in wardrobe';
+    const w = leftOutWords({
+      failures: [],
+      rooms: [],
+      leftOut: [
+        out('bw2', 'built-in-wardrobe', { another: true, takers }),
+        out('w1', 'wardrobe', { takers }),
+        out('w2', 'wardrobe', { takers }),
+        out('side1', 'bedside', { takers }),
+        out('side2', 'bedside', { takers }),
+      ],
+    });
+    expect(w?.line).toBe(
+      'Left out, didn’t fit: 2 bedside tables, a second built-in wardrobe, 2 wardrobes.',
+    );
+    expect(w?.reasons).toEqual([
+      'No free wall left in Main bedroom for these: the queen bed and the built-in wardrobe take the walls.',
+    ]);
+  });
+});
+
+describe('the left-out line across rooms (QA, B2)', () => {
+  it('names each room when the pieces are in more than one', () => {
+    const l = (ref: string, assetId: string, room: string, another = false): ReportLeftOut => ({
+      id: `L-${ref}`,
+      ref,
+      assetId,
+      space: room,
+      room,
+      text: '',
+      code: 'no-place',
+      hint: '',
+      cause: null,
+      says: `The ${assetId} in ${room} was left out`,
+      role: 'bedside',
+      causes: null,
+      another,
+    });
+    const w = leftOutWords({
+      failures: [],
+      rooms: [],
+      leftOut: [
+        l('side2', 'bedside', 'Main bedroom', true),
+        l('dc1', 'desk-chair', 'Study'),
+        l('dc2', 'desk-chair', 'Study'),
+      ],
+    });
+    expect(w?.line).toBe(
+      'Left out, didn’t fit: Main bedroom: a second bedside table; Study: 2 desk chairs.',
+    );
+  });
+});
+
+describe('a fix round cut off when the page went (QA, B2)', () => {
+  it('is counted as used and said, in the headline and room by room', () => {
+    const room: ReportRoom = {
+      key: 'rm_main',
+      name: 'Main bedroom',
+      fixes: 3,
+      fixed: 2,
+      rounds: [
+        { outcome: 'fixed', before: 4, after: 3 },
+        { outcome: 'fixed', before: 3, after: 2 },
+        { outcome: 'away', before: 2, after: 2 },
+        { outcome: 'no-fixups', before: 2, after: 2 },
+      ],
+    };
+    expect(leadParts([room], 2)).toEqual({
+      fix: 'Checked and fixed 2 problems before showing you; a fix round was cut off when the page went (it may still be billed). This design used the 3 fix-ups it was priced for.',
+      count: '2 still don’t pass:',
+    });
+    expect(roundLines([room])).toContain(
+      'Main bedroom · fix round 3: cut off when the page went; it may still be billed',
+    );
+    const only: ReportRoom = { ...room, rounds: [{ outcome: 'away', before: 2, after: 2 }] };
+    expect(leadParts([only], 2).fix).toBe(
+      'Sent back to be fixed once, but the page went while it was on its way, so the first design is shown; it may still be billed.',
+    );
+  });
+});
+
+describe('a Keep fixing round cut off when the page went (QA, B2)', () => {
+  it('is said with what Keep fixing did, not with the rounds before the version was shown', () => {
+    const room: ReportRoom = {
+      key: 'rm_main',
+      name: 'Main bedroom',
+      fixes: 5,
+      fixed: 4,
+      rounds: [
+        { outcome: 'fixed', before: 4, after: 3 },
+        { outcome: 'fixed', before: 3, after: 2 },
+        { outcome: 'fixed', before: 2, after: 1 },
+        { outcome: 'away', before: 1, after: 1, by: 'keep' },
+        { outcome: 'fixed', before: 1, after: 0, by: 'keep' },
+      ],
+    };
+    expect(leadParts([room], 0).fix).toBe(
+      'Checked and fixed 3 problems before showing you, and 1 more when you asked to keep fixing (one of those rounds was cut off when the page went; it may still be billed).',
+    );
   });
 });

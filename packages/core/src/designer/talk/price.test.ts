@@ -9,7 +9,9 @@ import type { Usage } from '../schema';
 import { spacesOf } from '../spaces';
 import { type AskInput, askRule, atMostOf, estimatePlan, spentOf } from './price';
 
-const est = (typical: number, high: number, fix: number) => ({ usd: { typical, high, fix } });
+const est = (typical: number, high: number, fix: number) => ({
+  usd: { typical, high, fix, fixOne: fix },
+});
 const base: AskInput = {
   spentTab: 0,
   cap: 5,

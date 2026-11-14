@@ -85,16 +85,34 @@ export interface FreeMiss {
   text: string;
 }
 
+/** A piece of the answer the app took out: a dining chair with no table, a bedside with no bed. */
+export interface FreeRemove {
+  space: string;
+  ref: string;
+  assetId: string;
+  roomId: string | null;
+  role: Role;
+}
+
 export interface FreeOutcome {
   /** The version's answers with the kept additions (the input's own object when none). */
   spaces: DesignInput['spaces'];
   added: FreeAdd[];
+  /** Orphans taken out (`FreeOptions.orphans`): only pieces this answer added. */
+  removed?: FreeRemove[];
   missed: FreeMiss[];
   /** Extras of the answer that no longer fit once the app's pieces went in (said with them). */
   gaveWay: { space: string; ref: string; assetId: string }[];
   /** Placings tried (each a `designResult`). */
   tries: number;
 }
+
+/** A piece's reason once it gave way for the app's: "Made way for the queen bed the app placed." */
+export const madeWayFor = (assetId: string) =>
+  `Made way for the ${freeName(assetId)} the app placed.`;
+/** Whether an answer's piece gave way for the app's (its reason says so). */
+export const madeWay = (why: string | null | undefined) =>
+  /^Made way for the .+ the app placed\.$/.test(why ?? '');
 
 /** "one bedside table no longer fits and is left out" (without a full stop). */
 export function gaveWayWords(lost: readonly { assetId: string }[]): string {
@@ -103,8 +121,6 @@ export function gaveWayWords(lost: readonly { assetId: string }[]): string {
     names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
   return `${list} no longer ${names.length > 1 ? 'fit and are' : 'fits and is'} left out`;
 }
-
-const cap = (s: string) => (s ? `${s[0]?.toUpperCase()}${s.slice(1)}` : s);
 
 export interface FreeOptions {
   /** Only these spaces (by result or stored key); every designed space when absent. */
@@ -116,6 +132,13 @@ export interface FreeOptions {
    * never an extra that may give way ("no worse" leaves out only what this answer added).
    */
   theirs?: Readonly<Record<string, readonly string[]>>;
+  /**
+   * Also take out the answer's orphans (criterion 12): a dining chair with no dining table or
+   * desk in its space, a bedside table with no bed. Never a kept piece, one carried over
+   * (`theirs`), the app's own, or one another piece goes with. A run's free pass asks for it;
+   * the card's dry run doesn't (its Undo only takes pieces out again).
+   */
+  orphans?: boolean;
 }
 
 /** What a free fix is judged by: the version's failing hard checks and its pieces. */
@@ -381,10 +404,16 @@ function missText(
   if (note) return `No ${name} fits in ${room}: it had no place clear of the other pieces.`;
   // Placed, but at a cost: how many other checks it would fail, and the first in the app's words.
   const worse = r.checks.filter((c) => c.hard && !c.already && !was.has(c.key));
+  // What blocks it, first, with one of the checks it would break as an example (QA).
   const first = worse[0]?.text.replace(/\.$/, '');
+  const example = first ? `${first[0]?.toLowerCase()}${first.slice(1)}` : '';
   return worse.length
-    ? `${an(name)[0]?.toUpperCase()}${an(name).slice(1)} fits in ${room} only with ${worse.length === 1 ? 'another check' : `${worse.length} other checks`} failing (${first ?? ''}), so the app didn’t place one.`
-    : `${an(name)[0]?.toUpperCase()}${an(name).slice(1)} in ${room} would leave other pieces out, so the app didn’t place one.`;
+    ? `The app didn’t place ${an(name)} in ${room}: it would only fit by breaking ${
+        worse.length === 1
+          ? `another check${example ? `: “${example}”` : ''}`
+          : `${worse.length} other checks${example ? `, such as “${example}”` : ''}`
+      }.`
+    : `The app didn’t place ${an(name)} in ${room}: it would leave other pieces out.`;
 }
 
 /**
@@ -411,8 +440,9 @@ export function freeEssentials(
     if (!key || s.status !== 'done') continue;
     if (o.spaces && !o.spaces.includes(s.key) && !o.spaces.includes(key)) continue;
     const answer = current.spaces[key]?.design;
-    // Only answers by intent: the solver places the pieces (a first answer by position can't).
-    if (!answer || answer.v !== 2) continue;
+    // Answers by position (v1) too: the app's piece is placed against the longest free wall, as
+    // the v1 placer does, and is kept only by the same rule (strictly better, nothing worse).
+    if (!answer) continue;
     // Never where the person kept the furniture (a lock, or changed by hand since accepting).
     const held = (design.request?.locks ?? []).some(
       (l) => l.aspect === 'furniture' && (l.space === '*' || lockCovers(l, s.rooms)),
@@ -498,8 +528,11 @@ export function freeEssentials(
       });
       current = kept.design;
       if (lost.length) {
-        const head = kept.wants[0]?.item.ref;
-        const said = gaveWayWords(lost);
+        // Said once, in the card's left-out line (UX, B2): each piece that gave way says what it
+        // made way for, as data on the answer ("Made way for the queen bed the app placed.").
+        const head = kept.wants[0]?.item;
+        const said = head ? madeWayFor(head.assetId) : '';
+        const gone = new Set(lost.map((l) => l.ref));
         const d = current.spaces[key]?.design;
         if (d) {
           current = {
@@ -511,7 +544,7 @@ export function freeEssentials(
                 design: {
                   ...d,
                   items: d.items.map((i) =>
-                    i.ref === head ? { ...i, why: clean(`${i.why} ${cap(said)}.`, LIMITS.why) } : i,
+                    gone.has(i.ref) ? { ...i, why: clean(said, LIMITS.why) } : i,
                   ),
                 },
               },
@@ -547,5 +580,113 @@ export function freeEssentials(
       });
     }
   }
-  return { spaces: current.spaces, added, missed, gaveWay, tries };
+  const removed: FreeRemove[] = [];
+  if (o.orphans) {
+    for (const s of r.spaces) {
+      const key = s.storedKey;
+      if (!key || s.status !== 'done') continue;
+      if (o.spaces && !o.spaces.includes(s.key) && !o.spaces.includes(key)) continue;
+      const answer = current.spaces[key]?.design;
+      if (!answer) continue;
+      const held = (design.request?.locks ?? []).some(
+        (l) => l.aspect === 'furniture' && (l.space === '*' || lockCovers(l, s.rooms)),
+      );
+      if (held) continue;
+      const out = orphansOf(r, s, key, answer, o.theirs?.[key] ?? o.theirs?.[s.key] ?? []);
+      if (!out.length) continue;
+      const gone = new Set(out.map((x) => x.ref));
+      const next: DesignInput = {
+        ...current,
+        spaces: {
+          ...current.spaces,
+          [key]: {
+            ...(current.spaces[key] as DesignInput['spaces'][string]),
+            design: { ...answer, items: answer.items.filter((i) => !gone.has(i.ref)) },
+          },
+        },
+      };
+      tries++;
+      const rn = designResult(base, before, next, opts);
+      const was = sideOf(r, current, o.theirs);
+      const now = sideOf(rn, next, o.theirs);
+      // The free pass's rule, with the orphans counted: no more hard failures (a chair with no
+      // table fails one, so it usually goes down), none new, and nothing else worse.
+      if (
+        piecesNoWorse(was, now) &&
+        [...now.sigs].every((x) => was.sigs.has(x)) &&
+        now.keys.size <= was.keys.size
+      ) {
+        current = next;
+        r = rn;
+        removed.push(...out);
+      }
+    }
+  }
+  return {
+    spaces: current.spaces,
+    added,
+    ...(removed.length ? { removed } : {}),
+    missed,
+    gaveWay,
+    tries,
+  };
+}
+
+/** What an orphan needs in its space to belong: a table (or a desk) for a chair, a bed. */
+const BELONGS: Partial<Record<Role, Role[]>> = {
+  'dining-chair': ['dining-table', 'desk'],
+  bedside: ['bed'],
+};
+
+/**
+ * The answer's orphans in a space: a dining chair with no dining table or desk anywhere in it, a
+ * bedside table with no bed. Only pieces this answer added (no keep, not carried over, not the
+ * app's), and never one another piece faces or goes beside.
+ */
+function orphansOf(
+  r: DesignResult,
+  s: DesignResult['spaces'][number],
+  key: string,
+  answer: SpaceDesign,
+  theirs: readonly string[],
+): FreeRemove[] {
+  const inSpace = Object.values(r.level.items).filter((it) => {
+    const id = roomIdAt(r.level, { x: it.position.x, y: it.position.z });
+    return !!id && s.rooms.includes(id);
+  });
+  const roles = new Set(inSpace.map((it) => roleOf(furnitureKind(it.assetId))));
+  const pointed = new Set(answer.items.flatMap((i) => [i.near, i.faces].filter(Boolean)));
+  const placedRoom = (ref: string) => {
+    const id = Object.keys(r.refs).find((k) => r.refs[k] === ref && r.level.items[k]);
+    const it = id ? r.level.items[id] : undefined;
+    return it ? roomIdAt(r.level, { x: it.position.x, y: it.position.z }) : null;
+  };
+  return answer.items.flatMap((a): FreeRemove[] => {
+    const role = roleOf(furnitureKind(a.assetId));
+    const needs = BELONGS[role];
+    if (!needs || a.keep || isAppRef(a.ref) || theirs.includes(a.ref) || pointed.has(a.ref))
+      return [];
+    if (needs.some((n) => roles.has(n))) return [];
+    return [{ space: key, ref: a.ref, assetId: a.assetId, roomId: placedRoom(a.ref), role }];
+  });
+}
+
+/**
+ * The app's line for the orphans it took out of a space: "Took out 2 dining chairs the answer
+ * added in Living and dining, with no table to go with them."
+ */
+export function orphanLines(removed: readonly FreeRemove[], spaceName: (key: string) => string) {
+  const groups = new Map<string, FreeRemove[]>();
+  for (const x of removed) {
+    const k = `${x.space}|${x.role}`;
+    groups.set(k, [...(groups.get(k) ?? []), x]);
+  }
+  return [...groups.values()].map((g) => {
+    const first = g[0] as FreeRemove;
+    const n = g.length;
+    const name = freeName(first.assetId);
+    const what = n === 1 ? an(name) : `${n} ${name}s`;
+    const lacks = first.role === 'bedside' ? 'no bed' : 'no table';
+    return `Took out ${what} the designer added in ${spaceName(first.space)}, with ${lacks} to go with ${n === 1 ? 'it' : 'them'}.`;
+  });
 }

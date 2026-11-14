@@ -1,6 +1,7 @@
 import {
   type DesignBrief,
   PRICES,
+  type RoomFix,
   type Rule,
   designResult,
   freeEssentials,
@@ -2119,5 +2120,687 @@ describe('money safety (issue #67)', () => {
       'gemini-3-pro': { input: 2, cachedInput: 0.2, cacheWrite: null, output: 12, checked: false },
     };
     expect(designerCannotUse({ provider: 'gemini', model: 'gemini-3-pro' }, own)).toBeNull();
+  });
+});
+
+describe('the fix-up pool by progress (designer listens B2, criteria 16–19)', () => {
+  const sse = (answer: unknown) =>
+    new Response(anthropicStream(answer, USAGE), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  const LIVING = 'furnish "Living';
+  const MAIN = 'furnish "Main bedroom"';
+  const isFix = (c: { body: Record<string, unknown> }) => promptOf(c.body).includes('## Fix round');
+  /** The room's recorded answer, saying in its summary how many made-up checks it fails. */
+  const failingBy = (step: string, n: number, tag = 'f') => ({
+    ...(answerFor(step)?.answer as Record<string, unknown>),
+    summary: `fails ${n} ${tag}`,
+  });
+  /**
+   * Placed and checked as the worker would, plus `n` made-up hard failures in the space whose
+   * answer's summary says "fails n" (their signatures by tag and number: "fails 2 g" fails two
+   * that "fails 3 f" didn't).
+   */
+  const scripted: NonNullable<RunOptions['results']> = async (base, before, d, opts) => {
+    const r = designResult(base, before, d, opts);
+    const extra = r.spaces.flatMap((s) => {
+      const m = /fails (\d+) (\w+)/.exec(
+        (s.storedKey && d.spaces[s.storedKey]?.design?.summary) || '',
+      );
+      const room = s.rooms[0];
+      if (!m || !room) return [];
+      return Array.from({ length: Number(m[1]) }, (_, i) => ({
+        key: `P2|madeup|${room}|${m[2]}${i}`,
+        principle: 'P2' as const,
+        hard: true,
+        waivable: true,
+        text: `Made-up failure ${m[2]}${i}.`,
+        roomId: room,
+        already: false,
+        part: null,
+      }));
+    });
+    return { ...r, checks: [...r.checks, ...extra] };
+  };
+  /** The plan's spaces, by name: the living room's and the main bedroom's keys. */
+  const spaces = designResult(level, level, { ...fresh(), spaces: {} }).spaces;
+  const keyOf = (name: RegExp) => spaces.find((s) => name.test(s.name))?.key as string;
+  const living = keyOf(/^Living/);
+  const main = keyOf(/^Main bedroom/);
+  /** A run of these rooms only (no layout), each answered by `answers(step, n)`. */
+  const runOf = (
+    rooms: string[],
+    answers: (step: string, n: number) => unknown,
+    extra: Partial<RunOptions> = {},
+  ) => {
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => {
+        const a = answers(c.step, n);
+        return a ? sse(a) : null;
+      },
+    });
+    const r = start('anthropic', {
+      fetch: prov.fetch,
+      plan: { layout: null, rooms },
+      results: scripted,
+      ...extra,
+    });
+    return { prov, r };
+  };
+
+  it('16: one room, 3 failures, each fix answer fixing one: 3 rounds run and all pass', async () => {
+    const { prov, r } = runOf([living], (step, n) =>
+      step === LIVING ? failingBy(step, Math.max(0, 4 - n)) : null,
+    );
+    const { state, design } = await r.run;
+    expect(state.phase).toBe('done');
+    expect(prov.calls.filter((c) => c.step === LIVING)).toHaveLength(4);
+    expect(prov.calls.filter(isFix)).toHaveLength(3);
+    expect(design.spaces[living]).toMatchObject({ status: 'done', fixes: 3, fixed: 3 });
+    expect(design.spaces[living]?.rounds).toEqual([
+      { outcome: 'fixed', before: 3, after: 2 },
+      { outcome: 'fixed', before: 2, after: 1 },
+      { outcome: 'fixed', before: 1, after: 0 },
+    ]);
+    expect(design.spaces[living]?.design?.summary).toBe('fails 0 f');
+  });
+
+  it('16: a round no better stops the room: the fix-up left isn’t spent, and the answer before stands', async () => {
+    const { prov, r } = runOf([living], (step, n) =>
+      step === LIVING ? failingBy(step, n === 1 ? 3 : 2) : null,
+    );
+    const { design } = await r.run;
+    // The first answer, one round that fixed one, one no better: three requests, not four.
+    expect(prov.calls).toHaveLength(3);
+    expect(design.spaces[living]?.rounds).toEqual([
+      { outcome: 'fixed', before: 3, after: 2 },
+      { outcome: 'no-better', before: 2, after: 2 },
+    ]);
+    expect(design.spaces[living]).toMatchObject({ fixes: 2, fixed: 1 });
+    // The answer the no-better round replaced is the one kept (its own request's answer).
+    expect(design.spaces[living]?.design?.summary).toBe('fails 2 f');
+  });
+
+  it('16: fewer failures but a new one is no progress (by signature); the same answer again stalls', async () => {
+    const swapped = runOf([living], (step, n) =>
+      step === LIVING ? (n === 1 ? failingBy(step, 3) : failingBy(step, 1, 'g')) : null,
+    );
+    const a = await swapped.r.run;
+    expect(a.design.spaces[living]?.rounds).toEqual([
+      { outcome: 'no-better', before: 3, after: 1 },
+    ]);
+    expect(a.design.spaces[living]?.design?.summary).toBe('fails 3 f');
+    const same = runOf([living], (step) => (step === LIVING ? failingBy(step, 3) : null));
+    const b = await same.r.run;
+    expect(same.prov.calls).toHaveLength(2);
+    expect(b.design.spaces[living]?.rounds).toEqual([
+      { outcome: 'no-better', before: 3, after: 3 },
+    ]);
+  });
+
+  it('17: two rooms, 3 fix-ups: they take them in turn; a stubborn room never takes all three', async () => {
+    const { prov, r } = runOf([living, main], (step, n) =>
+      step === LIVING
+        ? failingBy(step, Math.max(1, 4 - n))
+        : step === MAIN
+          ? failingBy(step, n === 1 ? 1 : 0)
+          : null,
+    );
+    const { design } = await r.run;
+    const fixes = prov.calls.filter(isFix);
+    expect(fixes).toHaveLength(3);
+    // Each room's first pass took one; what was left went to the room still progressing.
+    expect(design.spaces[main]?.rounds).toEqual([{ outcome: 'fixed', before: 1, after: 0 }]);
+    expect(design.spaces[living]?.rounds).toEqual([
+      { outcome: 'fixed', before: 3, after: 2 },
+      { outcome: 'fixed', before: 2, after: 1 },
+      { outcome: 'no-fixups', before: 1, after: 1 },
+    ]);
+    // The same order every time.
+    const again = runOf([living, main], (step, n) =>
+      step === LIVING
+        ? failingBy(step, Math.max(1, 4 - n))
+        : step === MAIN
+          ? failingBy(step, n === 1 ? 1 : 0)
+          : null,
+    );
+    const second = await again.r.run;
+    expect(second.design.spaces[living]?.rounds).toEqual(design.spaces[living]?.rounds);
+  });
+
+  it('17: with both rooms stubborn, the first pass gives each one; the last goes in room order', async () => {
+    const { prov, r } = runOf([living, main], (step, n) =>
+      step === LIVING || step === MAIN ? failingBy(step, Math.max(1, 5 - n)) : null,
+    );
+    const { design } = await r.run;
+    expect(prov.calls.filter(isFix)).toHaveLength(3);
+    // In the plan's room order: the first room the last fix-up, the other told they ran out.
+    const [one, two] = spaces.map((s) => s.key).filter((k) => k === living || k === main);
+    expect(design.spaces[one as string]?.fixes).toBe(2);
+    expect(design.spaces[two as string]?.fixes).toBe(1);
+    expect(design.spaces[two as string]?.rounds?.at(-1)?.outcome).toBe('no-fixups');
+  });
+
+  it('18: a room that keeps progressing sends exactly its pool, then says the fix-ups ran out', async () => {
+    const { prov, r } = runOf(
+      [living],
+      (step, n) => (step === LIVING ? failingBy(step, 10 - n) : null),
+      { fixesLeft: 3 },
+    );
+    const { design } = await r.run;
+    expect(prov.calls.filter(isFix)).toHaveLength(3);
+    // Keep fixing is offered from this: the last round says the pool was used up.
+    expect(design.spaces[living]?.rounds?.at(-1)).toEqual({
+      outcome: 'no-fixups',
+      before: 6,
+      after: 6,
+    });
+  });
+
+  it('18: every fix round is reserved at its most before it goes; at the figure the run asks', async () => {
+    // A figure that holds the room step and two fix rounds at their most: the third round asks.
+    const most = { room: 1, fix: 0.5 };
+    let committed = 0;
+    let asked = 0;
+    const { prov, r } = runOf(
+      [living],
+      (step, n) => (step === LIVING ? failingBy(step, 10 - n) : null),
+      {
+        fixesLeft: 3,
+        askAgain: true,
+        onStep: (_k, kind, phase) => {
+          if (phase === 'start') committed += kind === 'fix' ? most.fix : most.room;
+        },
+        overLimit: (next) =>
+          !!next && committed + (next.kind === 'fix' ? most.fix : most.room) > 2 + 1e-9,
+        confirmOver: async () => {
+          asked++;
+          return false;
+        },
+      },
+    );
+    const { state, design } = await r.run;
+    expect(asked).toBe(1);
+    expect(committed).toBeLessThanOrEqual(2);
+    expect(prov.calls.filter(isFix)).toHaveLength(2);
+    expect(state.phase).toBe('stopped');
+    // Its checked answer is kept, with the rounds that went.
+    expect(design.spaces[living]?.rounds?.map((x) => x.outcome)).toEqual(['fixed', 'fixed']);
+  });
+
+  it('19: interrupted after fix round 1, carried on with its fix-ups left and its rounds; round 1 isn’t sent again', async () => {
+    const answers = (step: string, n: number) => (step === LIVING ? failingBy(step, 4 - n) : null);
+    // The page dies once round 1 is judged: what the checkpoint holds is the save just after it.
+    const saves: { design: DraftDesign; fixesLeft: number; fixing: Record<string, RoomFix> }[] = [];
+    const first = runOf([living], answers, {
+      onSave: (d, info) => {
+        saves.push({ design: structuredClone(d), ...structuredClone(info) });
+      },
+    });
+    await first.r.run;
+    const after1 = saves.find((s) => s.design.spaces[living]?.rounds?.length === 1);
+    if (!after1) throw new Error('no save after round 1');
+    expect(after1.design.spaces[living]?.status).toBe('done');
+    expect(after1.fixesLeft).toBe(2);
+    // Its first pass (one room: the whole pool) has two left, and it isn't settled.
+    expect(after1.fixing[living]).toEqual({ left: 2, settled: false });
+    // Carried on: fix rounds only, from round 2.
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => {
+        // The model's next answers: its first two (the room step and round 1) are behind it.
+        const a = answers(c.step, n + 2);
+        return a ? sse(a) : null;
+      },
+    });
+    const { state, design } = await runDesign({
+      ai: AI.anthropic,
+      ctx,
+      design: after1.design,
+      plan: { layout: null, rooms: [living], fixOnly: [living] },
+      signal: new AbortController().signal,
+      fetch: prov.fetch,
+      results: scripted,
+      fixesLeft: after1.fixesLeft,
+      fixing: after1.fixing,
+    });
+    expect(state.phase).toBe('done');
+    expect(prov.calls.every(isFix)).toBe(true);
+    expect(prov.calls).toHaveLength(2);
+    expect(promptOf(prov.calls[0]?.body)).toContain('## Fix round 2');
+    expect(design.spaces[living]?.rounds).toEqual([
+      { outcome: 'fixed', before: 3, after: 2 },
+      { outcome: 'fixed', before: 2, after: 1 },
+      { outcome: 'fixed', before: 1, after: 0 },
+    ]);
+    expect(design.spaces[living]).toMatchObject({ fixes: 3, fixed: 3 });
+  });
+
+  it('Keep fixing: a fix-only run on the stored answer, its "used up" round answered, no room step', async () => {
+    const { r } = runOf([living], (step, n) => (step === LIVING ? failingBy(step, 10 - n) : null), {
+      fixesLeft: 1,
+    });
+    const { design: d } = await r.run;
+    expect(d.spaces[living]?.rounds?.map((x) => x.outcome)).toEqual(['fixed', 'no-fixups']);
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => (c.step === LIVING ? sse(failingBy(c.step, Math.max(0, 8 - 4 * n))) : null),
+    });
+    const { design } = await runDesign({
+      ai: AI.anthropic,
+      ctx,
+      design: d,
+      plan: { layout: null, rooms: [living], fixOnly: [living] },
+      signal: new AbortController().signal,
+      fetch: prov.fetch,
+      results: scripted,
+      fixesLeft: 3,
+    });
+    expect(prov.calls.every(isFix)).toBe(true);
+    expect(prov.calls).toHaveLength(2);
+    expect(design.spaces[living]?.rounds).toEqual([
+      { outcome: 'fixed', before: 9, after: 8 },
+      { outcome: 'fixed', before: 8, after: 4 },
+      { outcome: 'fixed', before: 4, after: 0 },
+    ]);
+  });
+
+  it('an orphan dining chair the answer added is taken out free, and said in the app’s lines', async () => {
+    const withChair = () => {
+      const a = structuredClone(sampleMain) as { items: Record<string, unknown>[] };
+      a.items.push({
+        ref: 'chair9',
+        assetId: 'dining-chair',
+        keep: null,
+        wall: null,
+        along: null,
+        at: null,
+        rotation: null,
+        width: null,
+        depth: null,
+        height: null,
+        why: '',
+        against: 'free',
+        faces: null,
+        near: null,
+        zone: 'work',
+      });
+      return a;
+    };
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (c.step === MAIN ? sse(withChair()) : null),
+    });
+    const { design } = await start('anthropic', {
+      fetch: prov.fetch,
+      plan: { layout: null, rooms: [main] },
+    }).run;
+    expect(prov.calls).toHaveLength(1);
+    expect(design.spaces[main]?.design?.items.map((i) => i.ref)).not.toContain('chair9');
+    expect(design.appLines).toEqual([
+      'Took out a dining chair the designer added in Main bedroom, with no table to go with it.',
+    ]);
+  });
+});
+
+describe('B2 money review: no paid answer lost, no fix-up past the pool, first pass in room order', () => {
+  const sse = (answer: unknown) =>
+    new Response(anthropicStream(answer, USAGE), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  const LIVING = 'furnish "Living';
+  const isFix = (c: { body: Record<string, unknown> }) => promptOf(c.body).includes('## Fix round');
+  const failingBy = (step: string, n: number) => ({
+    ...(answerFor(step)?.answer as Record<string, unknown>),
+    summary: `fails ${n} f`,
+  });
+  const scripted: NonNullable<RunOptions['results']> = async (base, before, d, opts) => {
+    const r = designResult(base, before, d, opts);
+    const extra = r.spaces.flatMap((s) => {
+      const m = /fails (\d+) (\w+)/.exec(
+        (s.storedKey && d.spaces[s.storedKey]?.design?.summary) || '',
+      );
+      const room = s.rooms[0];
+      if (!m || !room) return [];
+      return Array.from({ length: Number(m[1]) }, (_, i) => ({
+        key: `P2|madeup|${room}|${m[2]}${i}`,
+        principle: 'P2' as const,
+        hard: true,
+        waivable: true,
+        text: `Made-up failure ${m[2]}${i}.`,
+        roomId: room,
+        already: false,
+        part: null,
+      }));
+    });
+    return { ...r, checks: [...r.checks, ...extra] };
+  };
+  const spaces = designResult(level, level, { ...fresh(), spaces: {} }).spaces;
+  const keyOf = (name: RegExp) => spaces.find((s) => name.test(s.name))?.key as string;
+  const living = keyOf(/^Living/);
+  const main = keyOf(/^Main bedroom/);
+  const freeHere: NonNullable<RunOptions['free']> = (b, f, d, opts, fo) =>
+    Promise.resolve(freeEssentials(b, f, d, opts, fo));
+  type Saved = { design: DraftDesign; fixesLeft: number; fixing: Record<string, RoomFix> };
+
+  it('S1: the page goes while a room’s answer gets its free pass: carried on, it isn’t sent again', async () => {
+    const couple: DesignBrief = {
+      ...brief,
+      sleeping: { 'rm_main-bedroom': ['adult-1', 'adult-2'], rm_bedroom: ['elder-1'] },
+    };
+    const noBed = { ...sampleMain, items: sampleMain.items.filter((i) => i.ref !== 'bed1') };
+    const MAIN = /furnish "(Master|Main) bedroom"/;
+    const saves: Saved[] = [];
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => (MAIN.test(c.step) ? sse(noBed) : null),
+    });
+    // The free pass never comes back (the page is about to die), then the page goes.
+    const r = start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+      plan: { layout: null, rooms: [main] },
+      free: () => new Promise(() => {}),
+      onSave: (d, info) => {
+        saves.push({ design: structuredClone(d), ...structuredClone(info) });
+      },
+    });
+    await until(() => saves.some((s) => s.design.spaces[main]?.status === 'done'), 'saved');
+    r.ctrl.abort();
+    await r.run;
+    expect(prov.calls).toHaveLength(1);
+    const at = saves.find((s) => s.design.spaces[main]?.status === 'done') as Saved;
+    // Saved as it came: no free pass yet, its place in the pool kept.
+    expect(at.design.spaces[main]?.design?.items.some((i) => i.ref.startsWith('app:'))).toBe(false);
+    expect(at.fixing[main]).toEqual({ left: 3, settled: false });
+    // Carried on: its free pass and checks from what is stored; nothing is sent.
+    const again = provider('anthropic', { auto: true });
+    const { design } = await runDesign({
+      ai: AI.anthropic,
+      ctx: { ...ctx, brief: couple },
+      design: at.design,
+      plan: { layout: null, rooms: [main], fixOnly: [main] },
+      signal: new AbortController().signal,
+      fetch: again.fetch,
+      free: freeHere,
+      fixesLeft: at.fixesLeft,
+      fixing: at.fixing,
+    });
+    expect(again.calls).toHaveLength(0);
+    expect(
+      design.spaces[main]?.design?.items
+        .filter((i) => i.ref.startsWith('app:'))
+        .map((i) => i.assetId),
+    ).toEqual(['bed-queen']);
+  });
+
+  it('S1: the page goes while a fix round’s answer is checked: carried on, it is judged, not sent again', async () => {
+    const answers = (step: string, n: number) => (step === LIVING ? failingBy(step, 4 - n) : null);
+    const saves: Saved[] = [];
+    let frees = 0;
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => {
+        const a = answers(c.step, n);
+        return a ? sse(a) : null;
+      },
+    });
+    const r = start('anthropic', {
+      fetch: prov.fetch,
+      plan: { layout: null, rooms: [living] },
+      results: scripted,
+      // The second free pass (fix round 1's answer) never comes back.
+      free: (b, f, d, opts, fo) =>
+        ++frees === 2 ? new Promise(() => {}) : freeHere(b, f, d, opts, fo),
+      onSave: (d, info) => {
+        saves.push({ design: structuredClone(d), ...structuredClone(info) });
+      },
+    });
+    await until(() => saves.some((s) => !!s.fixing[living]?.pending), 'pending saved');
+    r.ctrl.abort();
+    await r.run;
+    expect(prov.calls).toHaveLength(2);
+    const at = saves.find((s) => !!s.fixing[living]?.pending) as Saved;
+    expect(at.fixesLeft).toBe(2);
+    expect(at.design.spaces[living]?.fixes).toBe(1);
+    const again = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => {
+        const a = answers(c.step, n + 2);
+        return a ? sse(a) : null;
+      },
+    });
+    const { design } = await runDesign({
+      ai: AI.anthropic,
+      ctx,
+      design: at.design,
+      plan: { layout: null, rooms: [living], fixOnly: [living] },
+      signal: new AbortController().signal,
+      fetch: again.fetch,
+      results: scripted,
+      free: freeHere,
+      fixesLeft: at.fixesLeft,
+      fixing: at.fixing,
+    });
+    // Round 1's answer judged from the checkpoint; only rounds 2 and 3 are sent.
+    expect(again.calls).toHaveLength(2);
+    expect(promptOf(again.calls[0]?.body)).toContain('## Fix round 2');
+    expect(design.spaces[living]?.rounds).toEqual([
+      { outcome: 'fixed', before: 3, after: 2 },
+      { outcome: 'fixed', before: 2, after: 1 },
+      { outcome: 'fixed', before: 1, after: 0 },
+    ]);
+  });
+
+  it('S2: a fix round’s reservation says the fix-ups left with its own taken', async () => {
+    const seen: number[] = [];
+    let starts = 0;
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => (c.step === LIVING ? sse(failingBy(c.step, 10 - n)) : null),
+    });
+    await start('anthropic', {
+      fetch: prov.fetch,
+      plan: { layout: null, rooms: [living] },
+      results: scripted,
+      fixesLeft: 3,
+      onStep: (_k, kind, phase, info) => {
+        if (kind !== 'fix' || phase !== 'start') return;
+        starts++;
+        seen.push(info?.fixesLeft ?? -1);
+      },
+    }).run;
+    expect(starts).toBe(3);
+    // Written with each reservation: the pool less every round sent, this one included.
+    expect(seen).toEqual([2, 1, 0]);
+    expect(prov.calls.filter(isFix)).toHaveLength(3);
+  });
+
+  it('N1: one fix-up for two rooms goes to the first in room order, whichever answer comes first', async () => {
+    const [first, second] = spaces.map((s) => s.key).filter((k) => k === living || k === main);
+    // The first room's checks come back late: the second room's answer is checked first.
+    const slow: NonNullable<RunOptions['results']> = async (base, before, d, opts) => {
+      if (d.spaces[first as string]?.design?.summary === 'fails 2 f')
+        await new Promise((r) => setTimeout(r, 5000));
+      return scripted(base, before, d, opts);
+    };
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) =>
+        c.step === LIVING || /furnish "Main bedroom"/.test(c.step)
+          ? sse(failingBy(c.step, Math.max(0, 3 - n)))
+          : null,
+    });
+    const r = start('anthropic', {
+      fetch: prov.fetch,
+      plan: { layout: null, rooms: [living, main] },
+      results: slow,
+      fixesLeft: 1,
+    });
+    await vi.advanceTimersByTimeAsync(20_000);
+    const { design } = await r.run;
+    expect(prov.calls.filter(isFix)).toHaveLength(1);
+    expect(design.spaces[first as string]?.rounds?.[0]?.outcome).toBe('fixed');
+    expect(design.spaces[second as string]?.rounds).toEqual([
+      { outcome: 'no-fixups', before: 2, after: 2 },
+    ]);
+  });
+
+  it('Keep fixing’s rounds are marked so (the card says them apart)', async () => {
+    const { design: d } = await start('anthropic', {
+      fetch: provider('anthropic', {
+        auto: true,
+        reply: (c, n) => (c.step === LIVING ? sse(failingBy(c.step, 10 - n)) : null),
+      }).fetch,
+      plan: { layout: null, rooms: [living] },
+      results: scripted,
+      fixesLeft: 1,
+    }).run;
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => (c.step === LIVING ? sse(failingBy(c.step, Math.max(0, 8 - 8 * n))) : null),
+    });
+    const { design } = await runDesign({
+      ai: AI.anthropic,
+      ctx,
+      design: d,
+      plan: { layout: null, rooms: [living], fixOnly: [living] },
+      signal: new AbortController().signal,
+      fetch: prov.fetch,
+      results: scripted,
+      fixesLeft: 3,
+      roundsBy: 'keep',
+    });
+    expect(design.spaces[living]?.rounds).toEqual([
+      { outcome: 'fixed', before: 9, after: 8 },
+      { outcome: 'fixed', before: 8, after: 0, by: 'keep' },
+    ]);
+  });
+});
+
+describe('a fix round on its way when the page went (QA, B2)', () => {
+  const sse = (answer: unknown) =>
+    new Response(anthropicStream(answer, USAGE), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  const LIVING = 'furnish "Living';
+  const isFix = (c: { body: Record<string, unknown> }) => promptOf(c.body).includes('## Fix round');
+  const failingBy = (step: string, n: number) => ({
+    ...(answerFor(step)?.answer as Record<string, unknown>),
+    summary: `fails ${n} f`,
+  });
+  const scripted: NonNullable<RunOptions['results']> = async (base, before, d, opts) => {
+    const r = designResult(base, before, d, opts);
+    const extra = r.spaces.flatMap((s) => {
+      const m = /fails (\d+) (\w+)/.exec(
+        (s.storedKey && d.spaces[s.storedKey]?.design?.summary) || '',
+      );
+      const room = s.rooms[0];
+      if (!m || !room) return [];
+      return Array.from({ length: Number(m[1]) }, (_, i) => ({
+        key: `P2|madeup|${room}|${m[2]}${i}`,
+        principle: 'P2' as const,
+        hard: true,
+        waivable: true,
+        text: `Made-up failure ${m[2]}${i}.`,
+        roomId: room,
+        already: false,
+        part: null,
+      }));
+    });
+    return { ...r, checks: [...r.checks, ...extra] };
+  };
+  const spaces = designResult(level, level, { ...fresh(), spaces: {} }).spaces;
+  const living = spaces.find((s) => /^Living/.test(s.name))?.key as string;
+  type Saved = { design: DraftDesign; fixesLeft: number; fixing: Record<string, RoomFix> };
+
+  it('is recorded as gone (counted, said), never sent again; the next round goes on from it', async () => {
+    const answers = (step: string, n: number) => (step === LIVING ? failingBy(step, 5 - n) : null);
+    const saves: Saved[] = [];
+    await start('anthropic', {
+      fetch: provider('anthropic', {
+        auto: true,
+        reply: (c, n) => {
+          const a = answers(c.step, n);
+          return a ? sse(a) : null;
+        },
+      }).fetch,
+      plan: { layout: null, rooms: [living] },
+      results: scripted,
+      onSave: (d, info) => {
+        saves.push({ design: structuredClone(d), ...structuredClone(info) });
+      },
+    }).run;
+    // The checkpoint as round 2's request had gone (its fix-up taken, nothing back yet).
+    const at = saves.find(
+      (s) =>
+        s.design.spaces[living]?.fixes === 2 &&
+        s.design.spaces[living]?.rounds?.length === 1 &&
+        !s.fixing[living]?.pending,
+    ) as Saved;
+    expect(at.fixesLeft).toBe(1);
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c, n) => {
+        const a = answers(c.step, n + 3);
+        return a ? sse(a) : null;
+      },
+    });
+    const { design } = await runDesign({
+      ai: AI.anthropic,
+      ctx,
+      design: at.design,
+      plan: { layout: null, rooms: [living], fixOnly: [living] },
+      signal: new AbortController().signal,
+      fetch: prov.fetch,
+      results: scripted,
+      fixesLeft: at.fixesLeft,
+      fixing: at.fixing,
+      lost: [living],
+    });
+    // Round 2 isn't sent again; round 3 is the pool's last.
+    expect(prov.calls.filter(isFix)).toHaveLength(1);
+    expect(promptOf(prov.calls[0]?.body)).toContain('## Fix round 3');
+    expect(design.spaces[living]?.rounds).toEqual([
+      { outcome: 'fixed', before: 4, after: 3 },
+      { outcome: 'away', before: 3, after: 3 },
+      { outcome: 'fixed', before: 3, after: 1 },
+      { outcome: 'no-fixups', before: 1, after: 1 },
+    ]);
+    expect(design.spaces[living]?.fixes).toBe(3);
+  });
+
+  it('the second look’s round on its way: recorded as gone on its space, nothing sent', async () => {
+    const d = structuredClone(fresh());
+    const prov0 = provider('anthropic', { auto: true });
+    const { design: done } = await start('anthropic', {
+      fetch: prov0.fetch,
+      design: d,
+      plan: { layout: null, rooms: [living] },
+    }).run;
+    const prov = provider('anthropic', { auto: true });
+    const { design } = await runDesign({
+      ai: AI.anthropic,
+      ctx,
+      design: done,
+      plan: { layout: null, rooms: [] },
+      signal: new AbortController().signal,
+      fetch: prov.fetch,
+      fixesLeft: 0,
+      fixing: { [living]: { left: 0, settled: true, look: true } },
+    });
+    expect(prov.calls).toHaveLength(0);
+    expect(design.spaces[living]?.rounds?.at(-1)).toEqual({
+      outcome: 'away',
+      before: 0,
+      after: 0,
+      by: 'look',
+    });
+    expect(design.spaces[living]?.fixes).toBe(1);
   });
 });

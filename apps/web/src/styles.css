@@ -9437,7 +9437,38 @@ html[data-proposal] .plan-svg g.clearance {
   justify-self: start;
   margin-top: 4px;
 }
+/*
+ * Designer listens, PR B2: Keep fixing (a priced button, content-width, in the lead) and its own
+ * cost card in the lead's frame (the stopped and limit notices' border, no fill); the designer's
+ * pieces left out as one app line whose reasons open under it.
+ */
+.talk-check-lead .talk-keep-fixing {
+  justify-self: start;
+  margin-top: 4px;
+}
+.talk-keep-fixing-card {
+  margin-top: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.talk-keep-fixing-card p:focus:not(:focus-visible) {
+  outline: none;
+}
+.talk-check-left > summary {
+  cursor: pointer;
+}
+.talk-check-left ul {
+  margin: 4px 0 0;
+  padding-left: 0;
+  list-style: none;
+}
 @media (pointer: coarse) {
+  .talk-keep-fixing,
+  .talk-keep-fixing-card .btn {
+    min-height: 44px;
+  }
   .talk-free-btn,
   .talk-check-link {
     min-height: 44px;

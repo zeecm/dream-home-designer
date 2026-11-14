@@ -5,7 +5,15 @@ import { sampleDesign, sampleLevel, tanBrief } from './fixtures/sample';
 import anthropic from './fixtures/usage-anthropic.json';
 import gemini from './fixtures/usage-gemini.json';
 import openai from './fixtures/usage-openai.json';
-import { PRICES, estimateRun, meteredPrice, priceOf, usdOf } from './prices';
+import {
+  PRICES,
+  estimateRun,
+  firstPassOf,
+  fixPoolFor,
+  meteredPrice,
+  priceOf,
+  usdOf,
+} from './prices';
 import { runPrompts } from './prompts';
 import { designResult } from './result';
 import { spacesOf } from './spaces';
@@ -78,8 +86,8 @@ describe('estimateRun (criterion 21)', () => {
       const out = i === 0 ? 8000 : 5000;
       const max = i === 0 ? 24_000 : 16_000;
       high += (input * 4 + max * 20) / 1e6;
-      // A room step's two fix rounds: the prompt, the failures and the pieces left out.
-      if (i > 0) fixOnes.push(...Array(2).fill(((input + out + 2100) * 4 + max * 20) / 1e6));
+      // A room step's fix round: the prompt, the failures and the pieces left out.
+      if (i > 0) fixOnes.push(((input + max + 2100) * 4 + max * 20) / 1e6);
       if (i <= 0) typical += (input * 4 + out * 20) / 1e6;
       else if (i === 1) typical += ((input - stable) * 4 + stable * 5 + out * 20) / 1e6;
       else typical += ((input - stable) * 4 + stable * 0.2 + out * 20) / 1e6;
@@ -91,13 +99,15 @@ describe('estimateRun (criterion 21)', () => {
     expect(est.usd!.typical).toBeLessThan(0.9);
     expect(est.usd!.high).toBeGreaterThan(1.4);
     expect(est.usd!.high).toBeLessThan(2.4);
-    // At most three fix requests in a run: the dearest three of the rooms' eight.
-    const fix = fixOnes
-      .sort((a, b) => b - a)
-      .slice(0, 3)
-      .reduce((t, v) => t + v, 0);
+    // The pool of three fix-ups, any room may take all of it: three of the dearest room's.
+    const dearest = Math.max(...fixOnes);
     expect(est.fixes).toBe(3);
-    expect(est.usd?.fix.toFixed(2)).toBe(fix.toFixed(2));
+    expect(est.usd?.fixOne).toBeCloseTo(dearest, 10);
+    expect(est.usd?.fix).toBeCloseTo(3 * dearest, 10);
+    // Each room's own fix request, for the reservation of its rounds.
+    est.steps
+      .filter((s) => s.kind === 'room')
+      .forEach((s, i) => expect(s.usd?.fixOne).toBeCloseTo(fixOnes[i] as number, 10));
     // At most, fix-ups included, is well under the US$5 default limit, twice over with a run
     // spent before it.
     expect(est.usd!.high + est.usd!.fix).toBeLessThan(3.5);
@@ -134,14 +144,49 @@ describe('estimateRun (criterion 21)', () => {
     expect(quick.usd!.fix).toBeLessThan(thorough.usd!.fix);
   });
 
-  it('fix-ups: three in a run at most, one a room on Quick and two on Thorough', () => {
+  it('the fix-up pool: Thorough 3, Quick one a room up to 3 (B2)', () => {
     const opts = { provider: 'anthropic' as const, model: 'claude-opus-5-5' };
     const oneRoom = prompts.slice(0, 2);
     expect(estimateRun(oneRoom, { ...opts, quality: 'quick' }).fixes).toBe(1);
-    expect(estimateRun(oneRoom, { ...opts, quality: 'thorough' }).fixes).toBe(2);
+    // One room may take the whole pool while it makes progress, so it is priced for three.
+    const one = estimateRun(oneRoom, { ...opts, quality: 'thorough' });
+    expect(one.fixes).toBe(3);
+    expect(one.usd?.fix).toBeCloseTo(3 * (one.steps[1]?.usd?.fixOne ?? 0), 10);
     expect(estimateRun(prompts, { ...opts, quality: 'quick' }).fixes).toBe(3);
     expect(estimateRun(prompts, { ...opts, quality: 'thorough' }).fixes).toBe(3);
     expect(estimateRun(prompts.slice(0, 1), { ...opts, quality: 'thorough' }).fixes).toBe(0);
+    expect(fixPoolFor('quick', 2)).toBe(2);
+    expect(fixPoolFor('thorough', 1)).toBe(3);
+    expect(firstPassOf(3, 2)).toBe(1);
+    expect(firstPassOf(3, 1)).toBe(3);
+    expect(firstPassOf(6, 2)).toBe(3);
+    expect(firstPassOf(3, 5)).toBe(1);
+  });
+
+  it('a given pool and fix-only rooms: priced as the fix requests they may send', () => {
+    const opts = {
+      provider: 'anthropic' as const,
+      model: 'claude-opus-5-5',
+      quality: 'thorough' as const,
+    };
+    const rooms = prompts.slice(1, 3);
+    const full = estimateRun(rooms, opts);
+    const keys = rooms.map((p) => p.step);
+    const fixing = estimateRun(rooms, { ...opts, fixOnly: keys, pool: 2 });
+    // No room step goes: nothing at its high, the pool of two at the dearest fix request.
+    expect(fixing.usd?.high).toBe(0);
+    expect(fixing.fixes).toBe(2);
+    expect(fixing.usd?.fixOne).toBeCloseTo(full.usd?.fixOne ?? 0, 10);
+    expect(fixing.usd?.fix).toBeCloseTo(2 * (full.usd?.fixOne ?? 0), 10);
+    // Typical: one fix round a room, at a typical length.
+    expect(fixing.usd?.typical).toBeGreaterThan(0);
+    expect(fixing.usd?.typical).toBeLessThan(fixing.usd?.fix ?? 0);
+    // A run carried on with one fix-up left prices one, whatever the quality's pool.
+    expect(estimateRun(rooms, { ...opts, pool: 1 }).usd?.fix).toBeCloseTo(
+      full.usd?.fixOne ?? 0,
+      10,
+    );
+    expect(estimateRun(rooms, { ...opts, pool: 0 }).fixes).toBe(0);
   });
 
   it('finds a model by its id, then by the longest listed prefix', () => {
