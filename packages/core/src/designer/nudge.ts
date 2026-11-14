@@ -13,7 +13,11 @@ import { ACCESS } from './principles';
  * on a raster round the pieces as they end up, so a centimetre can be lost between the two.
  */
 
-/** A failure short by at most this much is a near miss. */
+/**
+ * A failure short by less than this much is a near miss: 0.89 m of 0.90 m is, 0.84 m isn't
+ * (criterion 15). Measured with a micrometre's slack, so a 6 cm miss is never one by the float
+ * arithmetic of the sides it was worked out from.
+ */
 export const NEAR_MISS = 0.06;
 /** How much more than the shortfall a piece is moved by: placed for 0.92 m where 0.90 m is needed. */
 const MARGINS = [0.02, 0.04] as const;
@@ -58,7 +62,7 @@ export function shortOf(i: ClearanceIssue | undefined, level: Level): number | n
         : i.need
       : ((it && ACCESS[it.assetId]?.hard) ?? i.need);
   const short = need - i.have;
-  return short > 0 && short <= NEAR_MISS ? short : null;
+  return short > 0 && short < NEAR_MISS - 1e-6 ? short : null;
 }
 
 /** The small moves that could mend an issue, best guess first. */

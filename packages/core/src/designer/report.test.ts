@@ -10,6 +10,7 @@ import {
 } from './fixtures/sample';
 import { roomStep } from './prompts';
 import {
+  type ReportLeftOut,
   type RunReport,
   addressedIn,
   failureLines,
@@ -17,6 +18,7 @@ import {
   leadLine,
   leadParts,
   leftOutLines,
+  leftOutWords,
   leftSig,
   manyOf,
   mergeLines,
@@ -572,5 +574,67 @@ describe('a fix round’s prompt (criterion 4)', () => {
     expect(p.tail).not.toContain('"Failure 9"');
     expect(p.tail).toContain('"L8 left out"');
     expect(p.tail).not.toContain('"L9 left out"');
+  });
+});
+
+describe('the designer’s pieces left out, on the card (B2, from QA)', () => {
+  const out = (
+    ref: string,
+    assetId: string,
+    code: ReportLeftOut['code'],
+    extra: Partial<ReportLeftOut> = {},
+  ): ReportLeftOut => ({
+    id: `L-${ref}`,
+    ref,
+    assetId,
+    space: 'rm_main-bedroom',
+    room: 'Main bedroom',
+    text: `“${ref}”: no wall long enough.`,
+    code,
+    hint: '',
+    cause: `The ${assetId} needs 2.40 m of wall; the longest free wall is 1.80 m.`,
+    says: `The ${assetId} in Main bedroom was left out`,
+    role: 'wardrobe',
+    causes: null,
+    ...extra,
+  });
+  const rep = (leftOut: ReportLeftOut[]): RunReport => ({ failures: [], leftOut, rooms: [] });
+
+  it('says what was left out in one line, with each reason one tap away', () => {
+    const r = rep([
+      out('ward1', 'built-in-wardrobe', 'no-wall'),
+      out('ward2', 'wardrobe', 'no-wall'),
+      out('ward4', 'wardrobe', 'no-wall'),
+      out('ward3', 'wardrobe', 'no-place', { cause: null }),
+      out('desk1', 'desk', 'no-wall'),
+    ]);
+    const w = leftOutWords(r);
+    expect(w?.line).toBe('Left out, didn’t fit: built-in wardrobe, 3 wardrobes, desk.');
+    expect(w?.reasons).toEqual([
+      'The built-in-wardrobe needs 2.40 m of wall; the longest free wall is 1.80 m.',
+      'The wardrobe needs 2.40 m of wall; the longest free wall is 1.80 m.',
+      'The wardrobe in Main bedroom was left out.',
+      'The desk needs 2.40 m of wall; the longest free wall is 1.80 m.',
+    ]);
+    // The announcement doesn't read as all done either.
+    expect(readyLine('V4', r, null)).toBe(
+      'V4 is ready. Passes all checks. Left out, didn’t fit: built-in wardrobe, 3 wardrobes, desk.',
+    );
+  });
+
+  it('another reason: "Left out"; the app’s own and a failure’s cause aren’t listed', () => {
+    expect(leftOutWords(rep([out('w', 'wardrobe', 'keep-missing')]))?.line).toBe(
+      'Left out: wardrobe.',
+    );
+    expect(
+      leftOutWords(
+        rep([
+          out('app:bed', 'bed-queen', 'no-wall'),
+          out('bed1', 'bed-queen', 'no-wall', { causes: 'F1' }),
+        ]),
+      ),
+    ).toBeNull();
+    expect(leftOutWords(rep([]))).toBeNull();
+    expect(readyLine('V4', rep([]), null)).toBe('V4 is ready. Passes all checks.');
   });
 });

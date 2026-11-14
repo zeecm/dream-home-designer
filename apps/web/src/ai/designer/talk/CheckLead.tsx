@@ -4,6 +4,7 @@ import {
   addressedIn,
   fixSummary,
   leadParts,
+  leftOutWords,
   roundLines,
 } from '@dhd/core';
 import type { ReactNode } from 'react';
@@ -50,14 +51,18 @@ export function CheckLead({
 }) {
   const failing = report.failures.length;
   const { fix, count } = leadParts(report.rooms, failing);
+  // The designer's own pieces the app left out (they didn't fit): said in one line, the reason a
+  // tap away, so a card whose checks pass never reads as all done when they were dropped.
+  const out = leftOutWords(report);
   // A tick only beside a headline that came out well: never beside "Sent back… no better" (or
-  // cut off, refused…), though the plan passes now (the free fix placed the bed: QA).
+  // cut off, refused…), though the plan passes now (the free fix placed the bed: QA), nor when
+  // the designer's pieces were left out.
   const f = fixSummary(report.rooms);
   const badly =
     f.noBetter || f.cutOff || f.failed || f.refused || f.error || f.unknown || f.stopped;
-  const passMark = !failing && (f.fixed > 0 || !badly);
+  const passMark = !failing && !out && (f.fixed > 0 || !badly);
   const rounds = roundLines(report.rooms);
-  if (!fix && !count && !did.length && !missed.length && !action) return null;
+  if (!fix && !count && !did.length && !missed.length && !action && !out) return null;
   const id = `lead-${cardKey}`;
   const shown = report.failures.slice(0, FIRST);
   const more = report.failures.slice(FIRST);
@@ -65,6 +70,27 @@ export function CheckLead({
   const didMore = did.slice(DID);
   // With no headline (nothing failed, no fix rounds), the first line the app says names it.
   const headless = !fix && !count;
+  const leftLine = out && (
+    <li
+      className="talk-app-line talk-check-did"
+      data-app-line="left-out"
+      {...(headless ? { id } : {})}
+    >
+      <span className="talk-app-icon talk-warn-mark">
+        <Mark kind="warn" />
+      </span>
+      <span className="talk-app-text">
+        <details className="talk-already talk-check-left">
+          <summary>{keepTogether(out.line)}</summary>
+          <ul>
+            {out.reasons.map((l) => (
+              <li key={l}>{keepTogether(l)}</li>
+            ))}
+          </ul>
+        </details>
+      </span>
+    </li>
+  );
   const item = (f: RunReport['failures'][number]) => (
     <li key={f.id} className="talk-check-fail">
       <span className="talk-app-icon talk-warn-mark">
@@ -125,12 +151,13 @@ export function CheckLead({
           <ul className="talk-check-fails">{more.map(item)}</ul>
         </details>
       )}
-      {missed.length + didShown.length > 0 && (
+      {missed.length + didShown.length > 0 || leftLine ? (
         <ul className="talk-check-fails talk-check-app">
-          {missed.map((l, i) => line(l, 'warn', i === 0 && !didShown.length))}
-          {didShown.map((l, i) => line(l, 'check', i === 0))}
+          {leftLine}
+          {missed.map((l, i) => line(l, 'warn', i === 0 && !didShown.length && !leftLine))}
+          {didShown.map((l, i) => line(l, 'check', i === 0 && !leftLine && !missed.length))}
         </ul>
-      )}
+      ) : null}
       {rounds.length + didMore.length > 0 && (
         <details className="talk-already talk-check-how">
           <summary>How it was checked</summary>
@@ -151,7 +178,7 @@ export function CheckLead({
 
 /** Whether a card has a lead to show (so its Checks row says "listed above"). */
 export const hasLead = (report: RunReport) =>
-  report.failures.length > 0 || fixSummary(report.rooms).sent > 0;
+  report.failures.length > 0 || fixSummary(report.rooms).sent > 0 || !!leftOutWords(report);
 
 /**
  * What this design set out to fix (its plan's `addresses`), each with how it came out on this

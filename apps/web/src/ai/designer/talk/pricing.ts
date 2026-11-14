@@ -17,6 +17,7 @@ import {
   canSee,
   contextFor,
   estimateRun,
+  fixPoolFor,
   lookBase,
   lookPictureSizes,
   looksAt,
@@ -42,6 +43,11 @@ export interface PriceInput {
   finish?: { option: ProposalOption; rooms: string[]; words: string; scope: ScopeRef };
   /** An interrupted run carried on: from its checkpoint, into the same option. */
   resume?: { option: ProposalOption; run: RunCheckpoint; scope: ScopeRef };
+  /**
+   * Keep fixing (B2): a fix-only run on an option whose fix-ups ran out with failures left, into
+   * the same option: its stored answers stand, only fix rounds go (`fixRoomsOf`).
+   */
+  keepFixing?: { option: ProposalOption; words: string; scope: ScopeRef };
   designId: string;
   opts: DesignOptions;
   ai: { provider: 'anthropic' | 'openai' | 'gemini'; model: string };
@@ -84,6 +90,63 @@ function finishPlan(
   };
 }
 
+/**
+ * The rooms Keep fixing would send back (B2): those whose last round says the run's fix-ups were
+ * used up while they still failed. A round that made no progress never offers it (paying again
+ * would likely give the same answer).
+ */
+export function fixRoomsOf(o: Pick<ProposalOption, 'spaces'>): string[] {
+  return Object.entries(o.spaces)
+    .filter(
+      ([, s]) => s.status === 'done' && !!s.design && s.rounds?.at(-1)?.outcome === 'no-fixups',
+    )
+    .map(([k]) => k);
+}
+
+/** The plan Keep fixing runs: the rooms whose fix-ups ran out, fix rounds only, same option. */
+function keepFixingPlan(
+  i: PriceInput & { keepFixing: NonNullable<PriceInput['keepFixing']> },
+): ScopePlan | null {
+  const o = i.keepFixing.option;
+  const ctx = contextFor(i.project, o.brief, i.levelId, o.aliases);
+  const rooms = fixRoomsOf(o);
+  if (!ctx || !rooms.length) return null;
+  const plan: RunPlan = {
+    layout: null,
+    rooms,
+    fixOnly: rooms,
+    ...(i.keepFixing.words.trim() ? { feedback: i.keepFixing.words.trim() } : {}),
+    locks: structuredClone(o.locks),
+  };
+  const draft: DraftDesign = structuredClone({
+    id: o.designId,
+    brief: o.brief,
+    aliases: o.aliases,
+    concept: o.concept,
+    spaces: o.spaces,
+    usage: o.usage,
+    request: { locks: o.locks },
+  });
+  return {
+    scope: i.keepFixing.scope,
+    brief: o.brief,
+    plan,
+    draft,
+    ctx,
+    locks: structuredClone(o.locks),
+  };
+}
+
+/**
+ * The rooms an interrupted run left in their fix rounds: answered and saved, not settled in the
+ * pool. Carried on, they send only their next round (never their room step or a round they had).
+ */
+export function roomsFixing(o: ProposalOption, run: RunCheckpoint): string[] {
+  return Object.entries(run.fixing)
+    .filter(([k, f]) => !f.settled && o.spaces[k]?.status === 'done' && !!o.spaces[k]?.design)
+    .map(([k]) => k);
+}
+
 /** A room an interrupted run finished (done, or failed after its answer): never sent again. */
 export const finishedSpace = (s: ProposalOption['spaces'][string] | undefined) =>
   !!s && (s.status === 'done' || s.status === 'failed' || s.status === 'copied');
@@ -106,7 +169,20 @@ function resumePlan(
   if (!ctx) return null;
   const left = roomsLeft(o, run);
   const asked = structuredClone(run.plan) as RunPlan;
-  const plan: RunPlan = left === null ? asked : { ...asked, layout: null, rooms: left };
+  // Rooms still in their fix rounds go on with them alone (in room order, as the run had them).
+  const fixing = left === null ? [] : roomsFixing(o, run);
+  const rooms =
+    left === null ? [] : (run.rooms ?? []).filter((k) => left.includes(k) || fixing.includes(k));
+  const plan: RunPlan =
+    left === null
+      ? asked
+      : {
+          ...asked,
+          layout: null,
+          rooms,
+          ...(fixing.length ? { fixOnly: fixing } : {}),
+        };
+  if (left !== null && !fixing.length) delete plan.fixOnly;
   const draft: DraftDesign = structuredClone({
     id: o.designId,
     brief: o.brief,
@@ -129,12 +205,33 @@ function resumePlan(
 
 /**
  * What carrying an interrupted run on may cost at most: the steps left at their high, and the
- * fix rounds it may still send (the run's `remainingHigh`, priced afresh on what is left).
+ * fix-ups it has left at the dearest fix request (any room may take them all).
  */
 export function resumeFigure(est: RunEstimate, fixesLeft: number): number | null {
   if (!est.usd) return null;
-  const share = est.fixes > 0 ? Math.min(1, fixesLeft / est.fixes) : 0;
-  return est.usd.high + est.usd.fix * share;
+  return est.usd.high + est.usd.fixOne * Math.max(0, fixesLeft);
+}
+
+/**
+ * The most a step sent now may cost, reserved in the run's figure before it goes: its own
+ * estimate; a room the layout made, a room's on average (so the rooms together are what was
+ * priced); a fix round, that room's own fix request at its most (the second look's round, or a
+ * room the layout made: the dearest), so the pool at the dearest always covers it.
+ */
+export function stepHigh(
+  est: RunEstimate,
+  key: string,
+  kind: 'layout' | 'room' | 'fix' | 'look',
+): number {
+  if (!est.usd) return 0;
+  if (kind === 'fix') {
+    const own = est.steps.find((x) => x.step === key)?.usd?.fixOne;
+    return own && own > 0 ? own : est.usd.fixOne;
+  }
+  const own = est.steps.find((x) => x.step === key)?.usd?.high;
+  if (own !== undefined) return own;
+  const rooms = est.steps.filter((x) => x.kind === 'room').map((x) => x.usd?.high ?? 0);
+  return rooms.length ? rooms.reduce((t, x) => t + x, 0) / rooms.length : 0;
 }
 
 /**
@@ -164,26 +261,39 @@ export const figureHolds = (shown: number | null, now: number | null): boolean =
 export function priceRequest(i: PriceInput): Priced {
   const sp = i.resume
     ? resumePlan(i as PriceInput & { resume: NonNullable<PriceInput['resume']> })
-    : i.finish
-      ? finishPlan(i as PriceInput & { finish: NonNullable<PriceInput['finish']> })
-      : planScope(
-          i.scope,
-          i.brief,
-          i.project,
-          i.levelId,
-          i.designs,
-          i.words,
-          i.designId,
-          i.opts,
-          i.talk,
-        );
+    : i.keepFixing
+      ? keepFixingPlan(i as PriceInput & { keepFixing: NonNullable<PriceInput['keepFixing']> })
+      : i.finish
+        ? finishPlan(i as PriceInput & { finish: NonNullable<PriceInput['finish']> })
+        : planScope(
+            i.scope,
+            i.brief,
+            i.project,
+            i.levelId,
+            i.designs,
+            i.words,
+            i.designId,
+            i.opts,
+            i.talk,
+          );
   if (!sp) return null;
   const prompts = plannedPrompts(sp.ctx, sp.draft, sp.plan, i.opts, i.declined ?? []);
   // The look covers what the run was asked for (a run carried on: its checkpoint's), not only
   // the rooms left; a carried-on run looks only while its checkpoint says the look is to come.
   const asked = i.resume ? i.resume.run.plan.rooms : sp.plan.rooms;
-  const looks = looksAt(sp.brief, i.ai) && (!i.resume || i.resume.run.look === 'left');
+  // Keep fixing never looks again (its rooms were looked at, or the look's round ran out too).
+  const looks =
+    !i.keepFixing && looksAt(sp.brief, i.ai) && (!i.resume || i.resume.run.look === 'left');
+  // The pool it may really spend: a run carried on, what it has left; Keep fixing, the quality's
+  // for its rooms; else the quality's for the rooms asked for.
+  const pool = i.resume
+    ? i.resume.run.fixesLeft
+    : i.keepFixing
+      ? fixPoolFor(sp.brief.quality, sp.plan.fixOnly?.length ?? 0)
+      : undefined;
   const est = estimateRun(prompts, {
+    ...(pool !== undefined ? { pool } : {}),
+    ...(sp.plan.fixOnly?.length ? { fixOnly: sp.plan.fixOnly } : {}),
     provider: i.ai.provider,
     model: i.ai.model,
     quality: sp.brief.quality,

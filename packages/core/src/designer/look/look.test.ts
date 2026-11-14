@@ -868,9 +868,18 @@ describe('the request and its price', () => {
     });
     expect(est.steps.map((s) => s.kind)).toEqual(['look']);
     expect(est.usd!.high).toBeGreaterThan(0);
-    // Its one round, priced as a room step on the same prefix.
-    expect(est.fixes).toBe(1);
-    expect(est.usd!.fix).toBeGreaterThan(0);
+    // Its round, priced as a room step on the same prefix, from the pool (B2: a run carried on
+    // passes the fix-ups it has left).
+    expect(est.fixes).toBe(3);
+    expect(est.usd!.fix).toBeCloseTo(3 * est.usd!.fixOne, 10);
+    expect(est.usd!.fixOne).toBeGreaterThan(0);
+    const left = estimateRun([], {
+      ...base,
+      look: { pictures: [{ width: 1568, height: 1200 }], base: lookBase(ctxIn) },
+      pool: 1,
+    });
+    expect(left.fixes).toBe(1);
+    expect(left.usd!.fix).toBeCloseTo(est.usd!.fixOne, 10);
     const room = roomStep(ctxIn, spacesOf(level)[0]!, level, ctxIn.aliases);
     // The same request as a run with a room step prices: the prefix is the run's.
     const withRoom = estimateRun([room], {
@@ -940,12 +949,12 @@ describe('the request and its price', () => {
       ],
     };
     const back = proposalFromRecord(p);
-    expect(PROPOSAL_RECORD_VERSION).toBe(4);
-    expect(back?.recordVersion).toBe(4);
+    expect(PROPOSAL_RECORD_VERSION).toBe(5);
+    expect(back?.recordVersion).toBe(5);
     expect(back?.options[0]?.look).toBeNull();
     expect(back?.options[0]?.madeAt).toBe('2026-11-08T00:00:00Z');
     expect(back?.options[0]?.kept).toEqual([]);
-    expect(proposalFromRecord({ ...p, recordVersion: 5 })).toBeNull();
+    expect(proposalFromRecord({ ...p, recordVersion: 6 })).toBeNull();
   });
 });
 

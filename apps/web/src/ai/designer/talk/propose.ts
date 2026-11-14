@@ -3,7 +3,6 @@ import {
   type Conversation,
   DRAFT_CHARS,
   type DraftDesign,
-  FIX_PER_RUN,
   type OptionLook,
   PROPOSAL_RECORD_VERSION,
   type PlanAddress,
@@ -62,9 +61,11 @@ import {
   approvedLeft,
   figureHolds,
   finishedSpace,
+  fixRoomsOf,
   lookAtEnd,
   resumeFigure,
   spentWithInflight,
+  stepHigh,
 } from './pricing';
 import { type RunHold, takeRunLock } from './runLock';
 import { cardHeadIntoView, logFollowing } from './scroll';
@@ -282,6 +283,118 @@ const finishRequest = (p: Proposal, letter: string, rooms: string[]): PressReque
 /** The price of the rooms a stopped option lacks. */
 export const finishPrice = (p: Proposal, letter: string, rooms: string[]) =>
   pressPrice(finishRequest(p, letter, rooms));
+
+/**
+ * Keep fixing's price input (B2): the option's rooms whose fix-ups ran out with failures left,
+ * fix rounds only, into the same option, placed with what it was made with.
+ */
+function keepFixingInput(
+  p: Proposal,
+  letter: string,
+  designId?: string,
+): Omit<PriceInput, 'designs'> | null {
+  const conv = useTalk.getState().conv;
+  const ai = aiSettings();
+  const o = p.options.find((x) => x.letter === letter);
+  if (!conv || !ai || cannotDesign(ai) || levelGone() || !o || !fixRoomsOf(o).length) return null;
+  const project = doc();
+  return {
+    project,
+    levelId: designLevelId(),
+    brief: conv.brief,
+    scope: p.scope,
+    words: '',
+    keepFixing: { option: o, words: p.words, scope: p.scope },
+    designId: designId ?? o.designId,
+    opts: designOpts(project, designLevelId(), madeOf(p, letter)),
+    ai: { provider: ai.provider, model: ai.model },
+    prices: priceTable(),
+    ...(declinedPieces().length ? { declined: declinedPieces() } : {}),
+  };
+}
+
+/** What Keep fixing's shown price is kept by: the option as it is, the plan, the prices. */
+function keepFixingKey(p: Proposal, letter: string): string | null {
+  const ai = aiSettings();
+  const o = p.options.find((x) => x.letter === letter);
+  const levels = talkLevels();
+  if (!ai || !o) return null;
+  return JSON.stringify([
+    'keep-fixing',
+    p.id,
+    letter,
+    ai.model,
+    priceTable()[ai.model] ?? null,
+    o.usage.length,
+    fixRoomsOf(o),
+    levels ? levelFingerprint(levels.before) : null,
+    levels?.after ? levelFingerprint(levels.after) : null,
+    meterSetting(doc().id),
+    declinedPieces(),
+  ]);
+}
+
+/**
+ * Keep fixing's price for its button and its cost card: its rooms' fix rounds, the pool the
+ * quality gives that many rooms at the dearest fix request (null while worked out, or none).
+ */
+export function keepFixingPrice(
+  p: Proposal,
+  letter: string,
+): { est: RunEstimate | null; pending: boolean } {
+  const key = keepFixingKey(p, letter);
+  if (!key) return { est: null, pending: false };
+  const v = readPrice(key, () => keepFixingInput(p, letter));
+  return { est: v?.est ?? null, pending: v === undefined };
+}
+
+/**
+ * Keep fixing (B2), from its cost card's confirm (always asked): a fix-only run on the same
+ * option, bound to the figure the card showed. Priced higher since: the new figure (the card
+ * shows it and asks again); nothing to fix or nothing priced: 'no'.
+ */
+export async function keepFixing(
+  p: Proposal,
+  letter: string,
+  shown: number | null,
+): Promise<'started' | 'no' | { dearer: number }> {
+  if (!begin()) return 'no';
+  try {
+    const input = keepFixingInput(p, letter);
+    const made = input ? await freshPrice(input).catch(() => null) : null;
+    if (!made || doc().id !== p.projectId) return 'no';
+    const now = atMostOf(made.est);
+    // Never on a figure it wasn't shown at (no price at all, or a higher one).
+    if (shown === null || now === null) return 'no';
+    if (!figureHolds(shown, now)) return { dearer: now };
+    const sp: ScopePlan = {
+      ...made.sp,
+      draft: structuredClone(made.sp.draft),
+      plan: structuredClone(made.sp.plan),
+      locks: structuredClone(made.sp.locks),
+    };
+    const q = await actProposal(p.id, (x) =>
+      x
+        ? {
+            ...x,
+            options: x.options.map((y) =>
+              y.letter === letter ? { ...y, status: 'running' as const, note: null } : y,
+            ),
+          }
+        : x,
+    );
+    if (!q || doc().id !== p.projectId) return 'no';
+    useTalk.setState({ shown: `${p.id}:${letter}`, open: null, why: null });
+    useDesigner.setState({ previewing: true });
+    say(
+      `Fixing ${optionTitle(q.n, letter, q.options.length)} again, up to ${made.est.fixes} more fix-ups.`,
+    );
+    void runOption(q, letter, sp, made.est, shown);
+    return 'started';
+  } finally {
+    end();
+  }
+}
 
 /** One priced press at a time, from the first tap (a double tap starts one run). */
 let starting = false;
@@ -865,7 +978,9 @@ async function runOption(
   // Thorough with a model that can see ends with the second look (priced in its figure). A run
   // carried on looks only if its checkpoint says the look is still to come: never once it went,
   // and never for one written before there was a look.
-  const looks = looksAt(sp.brief, ai) && (!from || from.run.look === 'left');
+  // Keep fixing (fix rounds only) never looks again; carried on, as its checkpoint says.
+  const looks =
+    looksAt(sp.brief, ai) && (from ? from.run.look === 'left' : !sp.plan.fixOnly?.length);
   const runId = from?.run.id ?? newId('run');
   const now = nowIso();
   const prior = from?.run;
@@ -895,7 +1010,9 @@ async function runOption(
         layout: sp.plan.layout ? 'left' : 'none',
         rooms: null,
         ...(looks ? { look: 'left' as const } : {}),
-        fixesLeft: FIX_PER_RUN,
+        // The pool its figure priced (any room may take it all while it makes progress).
+        fixesLeft: est.fixes,
+        fixing: {},
         approved,
         spent: 0,
         inflight: [],
@@ -995,21 +1112,24 @@ async function runOption(
   // What this run has spent, as each request is metered (the checkpoint has it at once).
   let spentHere = 0;
   const spentRun = () => spentHere;
-  /** The most finishing may still cost: the steps not done, at their limit, and the fix rounds. */
+  /**
+   * The most finishing may still cost: the steps not done, at their limit, and the fix-ups left
+   * at the dearest fix request (a room done may still take them while it makes progress).
+   */
   const remainingHigh = () => {
     if (!est.usd) return null;
     const done = new Set(
       (liveState()?.steps ?? []).filter((s) => s.status === 'done').map((s) => s.key),
     );
     const left = est.steps.filter((s) => !done.has(s.step));
-    return left.reduce((t, s) => t + (s.usd?.high ?? 0), 0) + (left.length ? est.usd.fix : 0);
+    return left.reduce((t, s) => t + (s.usd?.high ?? 0), 0) + est.usd.fixOne * ck.fixesLeft;
   };
   // The runner's own rows (without the ones finished before it carried on).
   let runnerSteps: StepState[] = [];
   let left = firstLeft;
   let lastBack = 0;
-  /** The checkpoint as of `d` (the version just saved): rooms known, fix budget, spent. */
-  const checkpoint = (d: DraftDesign, fixesLeft: number) => {
+  /** The checkpoint as of `d` (the version just saved): rooms known, the pool, spent. */
+  const checkpoint = (d: DraftDesign, fixesLeft: number, fixing = ck.fixing) => {
     if (ck.layout === 'left' && runnerSteps.some((s) => s.kind === 'layout' && s.status === 'done'))
       ck.layout = 'done';
     if (ck.rooms === null && ck.layout !== 'left') {
@@ -1021,38 +1141,37 @@ async function runOption(
     if (ck.look === 'left' && lk && ['done', 'failed', 'skipped'].includes(lk.status))
       ck.look = 'done';
     ck.fixesLeft = fixesLeft;
+    ck.fixing = structuredClone(fixing);
     ck.spent = spentBefore + spentRun();
     ck.at = nowIso();
     return structuredClone(ck);
   };
-  /**
-   * The most a step sent now may cost: its own estimate; a room the layout made, a room's on
-   * average (so the rooms together are what was priced); a fix round, its share of the fixes.
-   */
-  const highOf = (key: string, kind: StepKind) => {
-    if (!est.usd) return 0;
-    if (kind === 'fix') return est.fixes > 0 ? est.usd.fix / est.fixes : 0;
-    const own = est.steps.find((x) => x.step === key)?.usd?.high;
-    if (own !== undefined) return own;
-    const rooms = est.steps.filter((x) => x.kind === 'room').map((x) => x.usd?.high ?? 0);
-    return rooms.length ? rooms.reduce((t, x) => t + x, 0) / rooms.length : 0;
-  };
+  /** The most a step sent now may cost, reserved before it goes (`stepHigh`). */
+  const highOf = (key: string, kind: StepKind) => stepHigh(est, key, kind);
   /** The steps on their way, at their most. */
   const inflightHigh = () => ck.inflight.reduce((t, x) => t + x.high, 0);
   // The run's own figure: past what it was priced at, it asks as the tab's limit does. After
   // Finish, a new figure (what finishing may still cost) holds until the run ends.
   let cap = approved;
   let pastTab = false;
-  const save = async (d: DraftDesign, info: { fixesLeft: number }) => {
+  const save = async (
+    d: DraftDesign,
+    info: { fixesLeft: number; fixing: RunCheckpoint['fixing'] },
+  ) => {
     const copy = structuredClone(d);
-    const run = checkpoint(copy, info.fixesLeft);
+    const run = checkpoint(copy, info.fixesLeft, info.fixing);
     await writeOption((o) => ({
       ...o,
       aliases: copy.aliases,
       concept: copy.concept,
       spaces: copy.spaces,
-      // The layout's vetting lines (a run with no layout step keeps the option's own).
-      ...(sp.plan.layout ? { appLines: copy.appLines } : {}),
+      // The layout's vetting lines and the orphans taken out (a run with no layout step keeps
+      // the option's own, with its own added).
+      ...(sp.plan.layout
+        ? { appLines: copy.appLines }
+        : copy.appLines?.length
+          ? { appLines: [...new Set([...(o.appLines ?? []), ...copy.appLines])].slice(0, 8) }
+          : {}),
       usage: copy.usage,
       run,
     }));
@@ -1097,6 +1216,7 @@ async function runOption(
     free: trialFree,
     declined: declinedPieces(),
     fixesLeft: ck.fixesLeft,
+    fixing: ck.fixing,
     ...(sp.expected ? { expected: sp.expected } : {}),
     onUpdate: (st) => {
       runnerSteps = st.steps;

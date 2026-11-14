@@ -116,10 +116,10 @@ describe('the kept set a version was made with (slice 3a)', () => {
   it('a 2 proposal record reads as the current one without them, a newer one is not read', () => {
     const v2 = { ...proposal([option('A')]), recordVersion: 2 };
     const read = proposalFromRecord(JSON.parse(JSON.stringify(v2)));
-    expect(PROPOSAL_RECORD_VERSION).toBe(4);
-    expect(read?.recordVersion).toBe(4);
+    expect(PROPOSAL_RECORD_VERSION).toBe(5);
+    expect(read?.recordVersion).toBe(5);
     expect(read?.options[0]?.kept).toBeUndefined();
-    expect(proposalFromRecord({ ...v2, recordVersion: 5 })).toBeNull();
+    expect(proposalFromRecord({ ...v2, recordVersion: 6 })).toBeNull();
   });
 
   it('is on its record, read back as written; an older record reads with none', () => {

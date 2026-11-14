@@ -43,6 +43,11 @@ export interface RunPlan {
   previous?: Record<string, SpaceDesign>;
   /** Per space, what stays as the previous answer had it (locked, or not asked for). */
   keep?: Record<string, Aspect[]>;
+  /**
+   * Of `rooms`, those whose stored answer stands and is only sent back to be fixed: no room step
+   * (a room carried on in its fix rounds, Keep fixing).
+   */
+  fixOnly?: string[];
   /** From the conversation: what this proposal is for (the talk block). */
   talk?: TalkAsk;
 }

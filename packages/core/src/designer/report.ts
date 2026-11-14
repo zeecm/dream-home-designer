@@ -699,13 +699,43 @@ export function firstAndMore(rep: RunReport): string {
   return rest.length ? `${head}, and ${rest.length} more` : head;
 }
 
+/** Reasons a piece is left out because it didn't fit (no wall long enough, no place in it). */
+const NO_FIT = new Set<DropCode>(['no-wall', 'no-place', 'outside']);
+
+/**
+ * The designer's pieces the app left out, for the card's lead (B2, from QA): one short line, "Left
+ * out, didn’t fit: built-in wardrobe, 2 wardrobes, desk" ("Left out: …" when some went for
+ * another reason), and each piece's reason, one tap away. Only the answer's own pieces: never the
+ * app's (said with what it couldn't place), nor one already said as a failure's cause (a bed left
+ * out is "You and Partner have no bed …"). Null when none was.
+ */
+export function leftOutWords(rep: RunReport): { line: string; reasons: string[] } | null {
+  const own = rep.leftOut.filter((l) => !l.ref.startsWith('app:') && !l.causes);
+  if (!own.length) return null;
+  const names = new Map<string, number>();
+  for (const l of own) {
+    const n = kindName(l.assetId);
+    names.set(n, (names.get(n) ?? 0) + 1);
+  }
+  const list = [...names].map(([n, k]) => (k > 1 ? `${k} ${pluralNoun(n)}` : n)).join(', ');
+  const fit = own.every((l) => !!l.code && NO_FIT.has(l.code));
+  return {
+    line: `${fit ? 'Left out, didn’t fit' : 'Left out'}: ${list}.`,
+    // Each in the person's words, the piece and its room named: the measured cause, else that
+    // it was left out (two wardrobes for the same reason: said once).
+    reasons: [...new Set(own.map((l) => (l.cause ?? `${l.says}.`).replace(/\.?$/, '.')))],
+  };
+}
+
 /** The announcement at a run's end (one, through the polite region), from the one list. */
 export function readyLine(title: string, rep: RunReport, cost: string | null): string {
   const n = rep.failures.length;
   const f = fixSummary(rep.rooms);
   const tail = cost ? ` Cost ${cost}.` : '';
   if (!n) {
-    return `${title} is ready. Passes all checks${f.fixed ? `; the app fixed ${plural(f.fixed, 'problem')} first` : ''}.${tail}`;
+    // The designer's pieces left out are said too: it isn't all done when they were dropped.
+    const out = leftOutWords(rep);
+    return `${title} is ready. Passes all checks${f.fixed ? `; the app fixed ${plural(f.fixed, 'problem')} first` : ''}.${out ? ` ${out.line}` : ''}${tail}`;
   }
   return `${title} is ready. ${dont(n)}: ${firstAndMore(rep)}.${tail}`;
 }

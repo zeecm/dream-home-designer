@@ -254,6 +254,8 @@ describe('a run’s checkpoint in its option (locked-phone runs, part 1)', () =>
     layout: 'done' as const,
     rooms: ['rm_kitchen', 'rm_bedroom'],
     fixesLeft: 2,
+    // A room in its fix rounds (B2): its first pass's fix-ups left, not settled.
+    fixing: { rm_kitchen: { left: 1, settled: false } },
     approved: 0.9,
     spent: 0.3,
     inflight: [{ step: 'rm_bedroom', high: 0.12 }],
@@ -278,6 +280,15 @@ describe('a run’s checkpoint in its option (locked-phone runs, part 1)', () =>
     await s.applyProposal('prj_a', 'prop1', () => withRun({ ...run, paused: 'resent' }));
     const [back] = await s.proposals('prj_a');
     expect(back?.options[0]?.run?.paused).toBe('resent');
+  });
+
+  it('one from before the pool by progress (records 4) reads with no room in its rounds', async () => {
+    const s = await openTalk(new IDBFactory());
+    const { fixing: _none, ...older } = run;
+    await s.applyProposal('prj_a', 'prop1', () => ({ ...withRun(older), recordVersion: 4 }));
+    const [back] = await s.proposals('prj_a');
+    expect(back?.recordVersion).toBe(5);
+    expect(back?.options[0]?.run?.fixing).toEqual({});
   });
 
   it('one that can’t be read is dropped, never the proposal with it', async () => {

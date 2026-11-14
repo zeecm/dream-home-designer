@@ -2259,6 +2259,167 @@ test.describe('designer listens, B1: free fixes and room vetting', () => {
   });
 });
 
+test.describe('designer listens, B2: fix rounds by progress, Keep fixing, what was left out', () => {
+  const main = mainStep;
+  /** A piece of an answer as a model sends it. */
+  const piece = (p: Record<string, unknown>) => ({
+    keep: null,
+    wall: null,
+    along: null,
+    at: null,
+    rotation: null,
+    width: null,
+    depth: null,
+    height: null,
+    why: '',
+    against: null,
+    faces: null,
+    near: null,
+    zone: null,
+    ...p,
+  });
+  /** The main bedroom with `k` desk chairs and no desk: k checks fail ("isn't at a table"). */
+  const chairs = (k: number) => ({
+    ...sampleMainV2,
+    items: [
+      ...sampleMainV2.items,
+      ...Array.from({ length: k }, (_, i) =>
+        piece({ ref: `dc${i + 1}`, assetId: 'desk-chair', against: 'free', zone: 'work' }),
+      ),
+    ],
+  });
+  const answer = (a: unknown) => ({
+    status: 200,
+    body: anthropicStream(a, USAGE),
+    headers: { 'content-type': 'text/event-stream' },
+  });
+
+  test('a room sent back while it gets better, the pool used up: Keep fixing · at most US$x asks with its own cost card, then fixes it (16, 18)', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await setup(page);
+    // Four chairs, then three, two, one: each round fixes one; the pool of three runs out with
+    // one still failing. Keep fixing's round takes the last one out.
+    const m = await mock(page, {
+      reply: (c, n) => (main(c) ? answer(chairs(Math.max(0, 5 - n))) : null),
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 60_000,
+    });
+    // The room step and three fix rounds: the whole pool, while each round got better.
+    expect(m.calls.filter(main)).toHaveLength(4);
+    const lead = v1.locator('[data-lead]');
+    await expect(lead).toContainText('Checked and fixed 3 problems before showing you.');
+    await expect(lead).toContainText('This design used the 3 fix-ups it was priced for.');
+    await expect(lead).toContainText('1 still doesn’t pass:');
+    await expect(lead).toContainText('The desk chair isn’t at a table.');
+    const keep = v1.locator('[data-keep-fixing]');
+    await expect(keep).toHaveText(/^Keep fixing · at most US\$\d+\.\d\d$/);
+    await expect(keep).toHaveAttribute('data-spends', '');
+    await shot(page, 'b2-keep-fixing');
+    // Its own cost card, every time: nothing is sent until it is confirmed.
+    await keep.click();
+    const ask = v1.locator('[data-keep-fixing-card]');
+    await expect(ask).toContainText(
+      /^Keep fixing (Main|Master) bedroom: up to 3 more fix-ups, each sent only while the last made progress\. About US\$\d+\.\d\d, at most US\$\d+\.\d\d\./,
+    );
+    await expect(ask.locator('p')).toBeFocused();
+    await shot(page, 'b2-keep-fixing-ask');
+    if (process.env.SHOTS) {
+      await page.emulateMedia({ colorScheme: 'dark' });
+      await shot(page, 'b2-keep-fixing-ask-dark');
+      await page.emulateMedia({ colorScheme: 'light' });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await ask.scrollIntoViewIfNeeded();
+      await shot(page, 'b2-keep-fixing-ask-390');
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+    await ask.getByRole('button', { name: 'Not now' }).click();
+    await expect(ask).toHaveCount(0);
+    expect(m.calls.filter(main)).toHaveLength(4);
+    await keep.click();
+    await v1
+      .locator('[data-keep-fixing-card]')
+      .getByRole('button', { name: /^Keep fixing · at most US\$/ })
+      .click();
+    // Fix rounds only, on the same card: one more, and it passes.
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 60_000,
+    });
+    await expect(lead).toContainText('Checked and fixed 4 problems before showing you.');
+    await expect(lead).not.toContainText('doesn’t pass');
+    await expect(v1.locator('[data-keep-fixing]')).toHaveCount(0);
+    const calls = m.calls.filter(main);
+    expect(calls).toHaveLength(5);
+    expect(promptOf(JSON.parse(calls[4]?.body ?? '{}'))).toContain('## Fix round 4');
+    // No second look for Keep fixing (the run's one look went with the first run).
+    expect(m.looks).toHaveLength(1);
+    // Still one card, one option: no new version or tab.
+    await expect(panel(page).locator('article.talk-card')).toHaveCount(1);
+    await shot(page, 'b2-kept-fixing');
+  });
+
+  test('the designer’s pieces left out because they didn’t fit are said on the card, the reason a tap away; the lead isn’t all done', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    await setup(page);
+    const crowded = {
+      ...sampleMainV2,
+      items: [
+        ...sampleMainV2.items,
+        piece({
+          ref: 'bw2',
+          assetId: 'built-in-wardrobe',
+          width: 2.4,
+          against: 'wall',
+          zone: 'store',
+        }),
+        piece({ ref: 'w1', assetId: 'wardrobe', against: 'wall', zone: 'store' }),
+        piece({ ref: 'w2', assetId: 'wardrobe', against: 'wall', zone: 'store' }),
+      ],
+    };
+    await mock(page, { reply: (c) => (main(c) ? answer(crowded) : null) });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 60_000,
+    });
+    // Every check passes, and the card says so, but not as if it were all done.
+    await expect(v1.locator('.talk-lens')).toContainText('Passes all checks');
+    const lead = v1.locator('[data-lead]');
+    const left = lead.locator('[data-app-line="left-out"]');
+    // (Its words keep together: a non-breaking hyphen in "built-in".)
+    await expect(left.locator('summary')).toHaveText(
+      /^Left out, didn’t fit: built.in wardrobe, 2 wardrobes, 2 bedside tables\.$/,
+    );
+    await expect(lead.locator('.talk-check-pass')).toHaveCount(0);
+    // The reason, one tap away.
+    await expect(left.getByText(/taken by other pieces|longest free wall/).first()).toBeHidden();
+    await left.locator('summary').click();
+    await expect(left.getByText(/wardrobe/).nth(1)).toBeVisible();
+    await expect(left).toContainText(
+      /The walls in (Main|Master) bedroom that could take the wardrobe are taken by other pieces\.|The wardrobe needs [\d.]+ m of wall/,
+    );
+    await shot(page, 'b2-left-out');
+    if (process.env.SHOTS) {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await left.scrollIntoViewIfNeeded();
+      await shot(page, 'b2-left-out-390');
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+  });
+});
+
 test.describe('designer listens, B1, on a phone (fingers only)', () => {
   const { defaultBrowserType: _webkit, ...iPhone } = devices['iPhone 13'];
   test.use({ ...iPhone, viewport: { width: 390, height: 844 } });

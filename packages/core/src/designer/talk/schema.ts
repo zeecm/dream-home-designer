@@ -31,12 +31,16 @@ import { clean } from '../util';
  */
 export const TALK_RECORD_VERSION = 4;
 /**
- * 4: an option's second look (slice 3b). 3: an option's `madeAt` and the kept pieces it was made
- * with (slice 3a). 1 to 3 are read as 4 with defaults (no look; `madeAt` worked out from the
- * proposal's time). A build that knows only 3 reads a 4 as nothing, so it never writes one back
- * without the look (or, for 2, without `madeAt` and the kept pieces).
+ * 5: the fix-up pool by progress (designer listens B2): a run's checkpoint keeps each room's
+ * place in the pool (`RunCheckpoint.fixing`) and the rooms it only sends back to be fixed
+ * (`plan.fixOnly`: a room carried on in its rounds, Keep fixing). 4: an option's second look
+ * (slice 3b). 3: an option's `madeAt` and the kept pieces it was made with (slice 3a). 1 to 4 are
+ * read as 5 with defaults (no rooms in their rounds; no look; `madeAt` worked out from the
+ * proposal's time). A build that knows only 4 reads a 5 as nothing, so it never writes one back
+ * without the pool's state (it would carry such a run on with the room step again, paid twice,
+ * and its fix-ups as new), nor, for 3, without the look.
  */
-export const PROPOSAL_RECORD_VERSION = 4;
+export const PROPOSAL_RECORD_VERSION = 5;
 /** Rules kept per conversation, the recently deleted (for Undo) included. */
 export const MAX_RULE_RECORDS = 40;
 /** Pointers in one message (UX §1.2). */
@@ -653,6 +657,18 @@ export const OptionLook = z.object({
   at: z.string(),
 });
 export type OptionLook = z.infer<typeof OptionLook>;
+/**
+ * A room's place in a run's fix-up pool (B2): the fix-ups it may still take in its first pass
+ * (before every room has had its turn; after that, what is left goes one at a time to rooms still
+ * making progress), and whether it is settled (it passes, a round made no progress, no answer
+ * came, it was stopped, or the pool ran out): no more fix-ups go to it in this run.
+ */
+export const RoomFix = z.object({
+  left: z.number().int().min(0),
+  settled: z.boolean(),
+});
+export type RoomFix = z.infer<typeof RoomFix>;
+
 /** How far ahead an interrupted run carries on by itself, from its last progress (ms). */
 export const RESUME_MS = 10 * 60_000;
 
@@ -681,6 +697,8 @@ export const RunCheckpoint = z.object({
     locks: z.array(Lock).optional(),
     previous: z.record(SpaceDesign).optional(),
     keep: z.record(z.array(Aspect)).optional(),
+    /** Rooms whose stored answer stands, only sent back to be fixed (no room step). */
+    fixOnly: z.array(z.string()).max(30).optional(),
     talk: z
       .object({
         intent: z.string(),
@@ -702,8 +720,14 @@ export const RunCheckpoint = z.object({
   lookResult: OptionLook.optional().catch(undefined),
   /** The rooms it designs, once known (after the layout, or from the start without one). */
   rooms: z.array(z.string()).nullable(),
-  /** Fix requests it may still send. */
+  /** Fix requests it may still send (a fix-up held at a gate counts as still left). */
   fixesLeft: z.number().int().min(0),
+  /**
+   * Each room's place in the pool, by space key, once its first answer is in (the answer itself
+   * is saved with the option, `done`, after it and after each round): a run carried on sends an
+   * unsettled room's next round, never its room step or a round it already had.
+   */
+  fixing: z.record(RoomFix).default({}),
   /** The most it was approved for (US$), and what it has spent of it (as each request is metered). */
   approved: z.number().min(0).nullable(),
   spent: z.number().min(0),

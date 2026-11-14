@@ -16,6 +16,7 @@ import {
   type ParseResult,
   type Price,
   type PromptImage,
+  type RoomFix,
   type RunPlan,
   type SpaceDesign,
   type StepPrompt,
@@ -23,9 +24,10 @@ import {
   actOnLook,
   aliasesFor,
   applyLookEdit,
+  checkSig,
   critiqueSketch,
   designResult,
-  fixRoundsFor,
+  firstPassOf,
   freeEssentials,
   freeName,
   furnitureKind,
@@ -41,6 +43,7 @@ import {
   lookNoWorse,
   lookStep,
   meteredPrice,
+  orphanLines,
   parseConcept,
   parseLook,
   parseSpaceDesign,
@@ -51,6 +54,7 @@ import {
   roomIdAt,
   roomStep,
   runReport,
+  stableJson,
   tokensOf,
   usageOf,
   usdOf,
@@ -89,8 +93,11 @@ const NO_ANSWER: Record<FailReason, FixRound['outcome']> = {
  * The layout is vetted as it arrives (`vetConcept`: a room where someone sleeps stays a
  * bedroom). Each room's answer gets the app's free fixes (a missing bed, seats, dining table or
  * desk, `freeEssentials`, no request), is placed and checked: hard checks it fails go back to
- * the designer (once a room on Quick, twice on Thorough, FIX_PER_RUN requests in a run at most,
- * with the app's own lines), each answer again with its free fixes, before the version is shown.
+ * the designer, each answer again with its free fixes, before the version is shown. The fix
+ * rounds draw on the run's pool (`fixesLeft`, priced as that many of the dearest fix request): a
+ * room keeps going while each round makes progress (strictly fewer hard failures, none new), the
+ * rooms taking the fix-ups in turn (a first pass each, then one at a time), and the second look's
+ * round draws on what is left.
  */
 
 export type StepStatus = 'waiting' | 'running' | 'done' | 'failed' | 'cancelled' | 'skipped';
@@ -194,9 +201,20 @@ export interface RunOptions {
    * The version after each step that changed it (never called if the layout fails), with
    * the fix requests the run may still send.
    */
-  onSave?: (design: DraftDesign, info: { fixesLeft: number }) => void | Promise<void>;
-  /** Fix requests this run may send (a run carried on keeps what was left); FIX_PER_RUN. */
+  onSave?: (
+    design: DraftDesign,
+    info: { fixesLeft: number; fixing: Record<string, RoomFix> },
+  ) => void | Promise<void>;
+  /**
+   * Fix requests this run may send, its pool (a run carried on keeps what was left; Keep fixing
+   * its own); FIX_PER_RUN when not given.
+   */
   fixesLeft?: number;
+  /**
+   * Each room's place in the pool, as a checkpoint kept it (a run carried on): a room in its
+   * rounds keeps its first pass's fix-ups left, and a settled one gets no more.
+   */
+  fixing?: Record<string, RoomFix>;
   /** How long a finished step took: the layout, a room's answer, a fix round (ms). */
   onTimed?: (kind: 'layout' | 'room' | 'fix', ms: number) => void;
   /** A step cut off while the page was out of view was sent again on its return. */
@@ -392,9 +410,11 @@ export async function runDesign(
    * so a run carried on after the page closed mid-pause still has them.
    */
   let held = 0;
+  /** Each room's place in the pool (by space key): saved with the version. */
+  const fixing: Record<string, RoomFix> = structuredClone(o.fixing ?? {});
   const save = () => {
     const snapshot = structuredClone(design);
-    const info = { fixesLeft: fixesLeft + held };
+    const info = { fixesLeft: fixesLeft + held, fixing: structuredClone(fixing) };
     saving = saving.then(() => o.onSave?.(snapshot, info)).catch(() => {});
     return saving;
   };
@@ -568,6 +588,8 @@ export async function runDesign(
     answer: SpaceDesign,
     /** The answer a fix round changed: a piece of it the new one dropped and the app puts back. */
     prior?: SpaceDesign,
+    /** Also take out the answer's orphans (a room's own answers; not the second look's round). */
+    orphans = true,
   ) => {
     if (furnitureHeld(s)) return answer;
     const trial: DraftDesign = {
@@ -586,20 +608,28 @@ export async function runDesign(
         spaces: [s.key],
         ...(o.declined?.length ? { declined: o.declined } : {}),
         ...(carried.length ? { theirs: { [s.key]: carried } } : {}),
+        ...(orphans ? { orphans: true } : {}),
       }),
       o.signal,
     ).catch((e: unknown) => {
       if (e instanceof Stopped) throw e;
       return null;
     });
-    const placed = out?.added.length ? out.spaces[s.key]?.design : undefined;
+    const placed =
+      out?.added.length || out?.removed?.length ? out.spaces[s.key]?.design : undefined;
     if (!placed) return answer;
+    // The orphans it took out are said with the answer, once it is the one used (`write`).
+    const lines = orphanLines(out?.removed ?? [], () => s.name);
+    const said = (d: SpaceDesign) => {
+      if (lines.length) took.set(d, lines);
+      return d;
+    };
     // A piece the fix round's answer dropped, put back by the app: its row says so.
     const had = new Set((prior?.items ?? []).map((i) => roleOf(furnitureKind(i.assetId))));
     const back = (out?.added ?? []).filter((a) => a.space === s.key && had.has(a.role));
-    if (!back.length) return placed;
+    if (!back.length) return said(placed);
     const refs = new Set(back.map((a) => a.ref));
-    return {
+    return said({
       ...placed,
       items: placed.items.map((i) =>
         refs.has(i.ref) && isAppRef(i.ref)
@@ -610,8 +640,10 @@ export async function runDesign(
             }
           : i,
       ),
-    };
+    });
   };
+  /** The app's lines about the orphans each answer had taken out, by the answer. */
+  const took = new WeakMap<SpaceDesign, string[]>();
   /** The person kept this space's furniture: by the plan (Change something) or a lock. */
   const furnitureHeld = (s: RunSpace) =>
     !!plan.keep?.[s.key]?.includes('furniture') ||
@@ -813,6 +845,7 @@ export async function runDesign(
           s,
           mergeAnswer(plan.previous?.[r.space], again, plan.keep?.[r.space] ?? [], o.result),
           prior,
+          false,
         );
         changed = true;
         records.push({ space: r.space, round: null, checks: r.checks, keys: r.keys });
@@ -953,7 +986,12 @@ export async function runDesign(
     const layoutRow = state.steps.filter((s) => s.kind === 'layout');
     const lookRow = state.steps.filter((s) => s.kind === 'look');
     state.steps = [...layoutRow, ...spaces.map((s) => blank(s.key, s.name, 'room')), ...lookRow];
-    for (const s of spaces) design.spaces[s.key] = { name: s.name, status: 'skipped' };
+    for (const s of spaces) {
+      // A room only sent back to be fixed keeps its answer (and its rounds) as stored.
+      const kept = design.spaces[s.key];
+      if (plan.fixOnly?.includes(s.key) && kept?.status === 'done' && kept.design) continue;
+      design.spaces[s.key] = { name: s.name, status: 'skipped' };
+    }
     if (plan.layout) await save();
     update();
 
@@ -985,6 +1023,9 @@ export async function runDesign(
           // sent back to be fixed, never a fix-up spent on it.
           .filter((c) => !c.unfixable && !declinedCheck(c))
           .map((c) => ({ ref: (c.itemId && res.refs[c.itemId]) || null, text: c.text })),
+        // Every hard failure's signature (principle|code|room|role): a round that brings in one
+        // not there before is no progress, whatever it fixed.
+        sigs: new Set(mine.filter((c) => !declinedCheck(c)).map((c) => checkSig(res, c))),
         placed: placedWords(res.level, s, res.refs, design.aliases, ctx.site?.north ?? 0),
         // The pieces it left out, with why and a hint: so a bed dropped for a keep ref the
         // plan doesn't have is said as that, not only as "has no bed".
@@ -997,13 +1038,181 @@ export async function runDesign(
         ),
       };
     };
+    type Failing = Awaited<ReturnType<typeof failing>>;
     // A run-stopping error (a refused key, a quota): set before the first room's gate opens,
     // so no other room is sent after it.
     let runError: unknown = null;
 
+    /**
+     * The fix-up pool by progress (spec §3, lead decisions B2). Each room's place in it (carried
+     * on: the checkpoint's): in its first pass a room may take `quota`; once every room has had
+     * its pass, what is left goes one fix-up at a time to the rooms still making progress, in
+     * room order. A room settles when it passes, a round makes no progress (that answer isn't
+     * used), no answer comes, or the pool is used up (said as `no-fixups`).
+     */
+    const quota = firstPassOf(fixesLeft, spaces.length);
+    /** A room in its fix rounds: its checked answer and what it fails, and its record so far. */
+    interface Fixing {
+      s: (typeof spaces)[number];
+      st: StepState;
+      current: SpaceDesign;
+      now: Failing;
+      fixes: number;
+      fixed: number;
+      rounds: FixRound[];
+    }
+    const open = new Map<string, Fixing>();
+    // The app's lines about the version: the layout's vetting, then the orphans each room's
+    // answer in use had taken out.
+    const vetLines = [...(design.appLines ?? [])];
+    const tookOut = new Map<string, string[]>();
+    const placeOf = (key: string): RoomFix => {
+      fixing[key] ??= { left: quota, settled: false };
+      return fixing[key];
+    };
+    /** The room as checked so far, into the version (saved with the next `save`). */
+    const write = (f: Fixing, last?: FixRound) => {
+      const rounds = last ? [...f.rounds, last] : f.rounds;
+      design.spaces[f.s.key] = {
+        name: f.s.name,
+        status: 'done',
+        design: f.current,
+        ...(f.fixes ? { fixes: f.fixes, fixed: f.fixed } : {}),
+        ...(rounds.length ? { rounds: rounds.slice(-12) } : {}),
+      };
+      tookOut.set(f.s.key, took.get(f.current) ?? []);
+      const lines = [...new Set([...vetLines, ...[...tookOut.values()].flat()])].slice(0, 8);
+      if (lines.length) design.appLines = lines;
+      else delete design.appLines;
+    };
+    /** The same answer as before, after the merge and the free pass: the room has stalled. */
+    const sameAnswer = (a: SpaceDesign, b: SpaceDesign) => stableJson(a) === stableJson(b);
+    const merge = (s: RunSpace, a: SpaceDesign) =>
+      mergeAnswer(plan.previous?.[s.key], a, plan.keep?.[s.key] ?? [], o.result);
+    /**
+     * One fix round for a room, from the pool: true when it made progress and still fails (it
+     * may have another). The fix-up is taken before any wait and given back if the step may not
+     * go (held meanwhile, so saved as still left); once taken it is saved as gone.
+     */
+    const fixOnce = async (f: Fixing): Promise<boolean> => {
+      const { s, st } = f;
+      const rf = placeOf(s.key);
+      const left = f.now.fixable;
+      if (!left.length || rf.settled) {
+        rf.settled = true;
+        return false;
+      }
+      if (fixesLeft <= 0) {
+        f.rounds.push({ outcome: 'no-fixups', before: left.length, after: left.length });
+        rf.settled = true;
+        write(f);
+        void save();
+        return false;
+      }
+      fixesLeft--;
+      held++;
+      const go = await mayStart({ key: s.key, kind: 'fix' });
+      held--;
+      if (!go) {
+        // Stopped, or a no at the limit: the run ends; the room isn't settled (a page that goes
+        // now carries it on with the fix-up given back).
+        fixesLeft++;
+        return false;
+      }
+      if (rf.left > 0) rf.left--;
+      f.fixes++;
+      // The fix-up is gone once its request goes: written now, never counted twice on carrying on.
+      void save();
+      st.fixing = { round: f.fixes, problems: left.length };
+      st.status = 'running';
+      say(`${s.name}: checking… fixing ${plural(left.length, 'problem')}.`);
+      update();
+      const fix: FixRequest = {
+        round: f.fixes,
+        failures: left,
+        placed: f.now.placed,
+        leftOut: f.now.leftOut,
+      };
+      const tf = Date.now();
+      const again = await step(
+        fixStepFor(
+          ai,
+          roomStep(ctx, s, r.level, design.aliases, {
+            concept: design.concept,
+            ...(o.result?.kept?.length ? { kept: o.result.kept } : {}),
+            ...(storage !== undefined ? { storage } : {}),
+            ...(plan.feedback ? { feedback: plan.feedback } : {}),
+            ...(plan.talk ? { talk: plan.talk } : {}),
+            ...(o.declined?.length ? { declined: o.declined } : {}),
+            locks: plan.locks ?? [],
+            previous: f.current,
+            fix,
+          }),
+        ),
+        st,
+        (raw) => parseSpaceDesign(raw, bounds),
+      );
+      o.onStep?.(st.key, 'fix', 'end');
+      if (!st.resent) o.onTimed?.('fix', Date.now() - tf);
+      st.fixing = null;
+      const settle = (round: FixRound) => {
+        f.rounds.push(round);
+        rf.settled = true;
+        st.status = 'done';
+        write(f);
+        void save();
+        return false;
+      };
+      if (!again) {
+        // The fix didn't come: the answer before it stands, checked as it is, and the card says
+        // why (cut off at the length limit, or no readable answer).
+        st.error = null;
+        return settle({
+          outcome: st.failed ? NO_ANSWER[st.failed] : 'error',
+          before: left.length,
+          after: left.length,
+        });
+      }
+      const fixedAnswer = await withFree(s, merge(s, again), f.current);
+      // The same answer again: stalled, and not placed again to find out.
+      if (sameAnswer(fixedAnswer, f.current)) {
+        return settle({ outcome: 'no-better', before: left.length, after: left.length });
+      }
+      const next = await failing(s, fixedAnswer);
+      // Progress: strictly fewer hard failures, and none that wasn't there before.
+      const progress =
+        next.fixable.length < left.length && [...next.sigs].every((x) => f.now.sigs.has(x));
+      const out = { before: left.length, after: next.fixable.length };
+      if (!progress) return settle({ outcome: 'no-better', ...out });
+      f.rounds.push({ outcome: 'fixed', ...out });
+      f.fixed += left.length - next.fixable.length;
+      f.current = fixedAnswer;
+      f.now = next;
+      if (!next.fixable.length) rf.settled = true;
+      write(f);
+      void save();
+      return !rf.settled;
+    };
+    /** A Stop in a room's fix round: its checked answer is kept, with that round said. */
+    const stoppedIn = (f: Fixing) => {
+      const n = f.st.fixing?.problems ?? 0;
+      write(f, { outcome: 'stopped', before: n, after: n });
+      placeOf(f.s.key).settled = true;
+    };
+
     const room = async (s: (typeof spaces)[number], onStart?: () => void) => {
       const st = state.steps.find((x) => x.key === s.key) as StepState;
-      if (!(await mayStart({ key: s.key, kind: 'room' }))) {
+      const stored = design.spaces[s.key];
+      // Its answer stands (carried on in its rounds, or Keep fixing): only its fix rounds go.
+      const fixOnly =
+        !!plan.fixOnly?.includes(s.key) && stored?.status === 'done' && !!stored.design;
+      // One asked only for its fix rounds with no answer to fix: nothing is sent (its room step
+      // was never priced).
+      if (plan.fixOnly?.includes(s.key) && !fixOnly) {
+        onStart?.();
+        return;
+      }
+      if (!fixOnly && !(await mayStart({ key: s.key, kind: 'room' }))) {
         onStart?.();
         return;
       }
@@ -1017,131 +1226,51 @@ export async function runDesign(
         locks: plan.locks ?? [],
         previous: plan.previous?.[s.key] ?? null,
       });
-      /** The room as checked so far (its answer in): what a Stop in its fix round keeps. */
-      let checked: ((stopped: FixRound) => DraftDesign['spaces'][string]) | null = null;
       try {
-        const parse = (raw: unknown) => parseSpaceDesign(raw, bounds);
-        const t0 = Date.now();
-        const answer = await step(prompt, st, parse, onStart);
-        o.onStep?.(st.key, 'room', 'end');
-        if (!st.resent) o.onTimed?.('room', Date.now() - t0);
-        if (answer) {
-          const merge = (a: SpaceDesign) =>
-            mergeAnswer(plan.previous?.[s.key], a, plan.keep?.[s.key] ?? [], o.result);
-          let current = await withFree(s, merge(answer));
-          // Placed and checked: what fails goes back to the designer, at most twice.
-          const first = await failing(s, current);
-          let fixes = 0;
-          let now = first;
-          const most = fixRoundsFor(ctx.brief.quality);
-          /** How each round went (and one not sent for want of fix-ups), for the card. */
-          const rounds: FixRound[] = [];
-          // Paid for and checked: kept if the run is stopped in a fix round, with that round said.
-          checked = (stopped) => ({
-            name: s.name,
-            status: 'done',
-            design: current,
-            fixes,
-            fixed: Math.max(0, first.fixable.length - now.fixable.length),
-            rounds: [...rounds, stopped],
-          });
-          while (now.fixable.length && fixes < most) {
-            if (fixesLeft <= 0) {
-              const n = now.fixable.length;
-              rounds.push({ outcome: 'no-fixups', before: n, after: n });
-              break;
-            }
-            // Taken from the run's few before any wait (rooms run side by side, and may all
-            // wait on one pause), and given back if the step may not go. Held, it is saved as
-            // still left until the request goes.
-            fixesLeft--;
-            held++;
-            const go = await mayStart({ key: s.key, kind: 'fix' });
-            held--;
-            if (!go) {
-              fixesLeft++;
-              break;
-            }
-            fixes++;
-            const left = now.fixable;
-            st.fixing = { round: fixes, problems: left.length };
-            st.status = 'running';
-            say(`${s.name}: checking… fixing ${plural(left.length, 'problem')}.`);
-            update();
-            const fix: FixRequest = {
-              round: fixes,
-              failures: left,
-              placed: now.placed,
-              leftOut: now.leftOut,
-            };
-            const tf = Date.now();
-            const again = await step(
-              fixStepFor(
-                ai,
-                roomStep(ctx, s, r.level, design.aliases, {
-                  concept: design.concept,
-                  ...(o.result?.kept?.length ? { kept: o.result.kept } : {}),
-                  ...(storage !== undefined ? { storage } : {}),
-                  ...(plan.feedback ? { feedback: plan.feedback } : {}),
-                  ...(plan.talk ? { talk: plan.talk } : {}),
-                  ...(o.declined?.length ? { declined: o.declined } : {}),
-                  locks: plan.locks ?? [],
-                  previous: current,
-                  fix,
-                }),
-              ),
-              st,
-              parse,
-            );
-            o.onStep?.(st.key, 'fix', 'end');
-            if (!st.resent) o.onTimed?.('fix', Date.now() - tf);
-            st.fixing = null;
-            if (!again) {
-              // The fix didn't come: the answer before it stands, checked as it is, and the
-              // card says why (cut off at the length limit, or no readable answer).
-              rounds.push({
-                outcome: st.failed ? NO_ANSWER[st.failed] : 'error',
-                before: left.length,
-                after: left.length,
-              });
-              st.status = 'done';
-              st.error = null;
-              break;
-            }
-            const fixedAnswer = await withFree(s, merge(again), current);
-            const next = await failing(s, fixedAnswer);
-            // Kept only if it fails less; no better twice running is a room that can't pass,
-            // and the second round isn't spent on it.
-            const out = { before: left.length, after: next.fixable.length };
-            if (next.fixable.length < left.length) {
-              rounds.push({ outcome: 'fixed', ...out });
-              current = fixedAnswer;
-              now = next;
-            } else {
-              rounds.push({ outcome: 'no-better', ...out });
-              break;
-            }
-          }
-          design.spaces[s.key] = {
-            name: s.name,
-            status: 'done',
-            design: current,
-            ...(fixes
-              ? { fixes, fixed: Math.max(0, first.fixable.length - now.fixable.length) }
-              : {}),
-            ...(rounds.length ? { rounds } : {}),
+        let f: Fixing;
+        if (fixOnly && stored?.design) {
+          onStart?.();
+          st.status = 'done';
+          // A round "not sent: the fix-ups were used up" is what this run now answers.
+          const rounds = [...(stored.rounds ?? [])];
+          if (rounds.at(-1)?.outcome === 'no-fixups') rounds.pop();
+          f = {
+            s,
+            st,
+            current: stored.design,
+            now: await failing(s, stored.design),
+            fixes: stored.fixes ?? 0,
+            fixed: stored.fixed ?? 0,
+            rounds,
           };
-          say(`${s.name} done. ${usdText(spentSoFar())} so far.`);
         } else {
-          design.spaces[s.key] = { name: s.name, status: 'failed', error: st.error ?? '' };
+          const parse = (raw: unknown) => parseSpaceDesign(raw, bounds);
+          const t0 = Date.now();
+          const answer = await step(prompt, st, parse, onStart);
+          o.onStep?.(st.key, 'room', 'end');
+          if (!st.resent) o.onTimed?.('room', Date.now() - t0);
+          if (!answer) {
+            design.spaces[s.key] = { name: s.name, status: 'failed', error: st.error ?? '' };
+            return;
+          }
+          const current = await withFree(s, merge(s, answer));
+          f = { s, st, current, now: await failing(s, current), fixes: 0, fixed: 0, rounds: [] };
         }
+        open.set(s.key, f);
+        const rf = placeOf(s.key);
+        if (!f.now.fixable.length) rf.settled = true;
+        // Placed and checked, and saved as done: a page that goes in its rounds carries on with
+        // them, never with its room step again.
+        write(f);
+        void save();
+        // Its first pass: what it fails goes back to the designer while each round makes progress.
+        while (rf.left > 0 && !rf.settled && (await fixOnce(f))) {}
+        say(`${s.name} done. ${usdText(spentSoFar())} so far.`);
       } catch (e) {
         if (e instanceof Stopped) {
-          const keep = checked as typeof checked;
-          const n = st.fixing?.problems ?? 0;
-          design.spaces[s.key] = keep
-            ? keep({ outcome: 'stopped', before: n, after: n })
-            : { name: s.name, status: 'cancelled' };
+          const f = open.get(s.key);
+          if (f) stoppedIn(f);
+          else design.spaces[s.key] = { name: s.name, status: 'cancelled' };
         }
         runError ??= e;
       } finally {
@@ -1151,22 +1280,16 @@ export async function runDesign(
       }
     };
 
-    const [first, ...rest] = spaces;
-    if (first) {
-      let release: () => void = () => {};
-      const gate = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      const firstDone = room(first, release);
-      await gate;
-      const queue = [...rest];
-      await new Promise<void>((resolve) => {
+    /** Runs `jobs` at most `cap` at a time (one at a time after a rate limit), in order. */
+    const pumped = (jobs: (() => Promise<void>)[]) =>
+      new Promise<void>((resolve) => {
+        const queue = [...jobs];
         let running = 0;
         const pump = () => {
           while (queue.length && running < cap && !runError && !stopping && !o.signal.aborted) {
-            const s = queue.shift() as (typeof spaces)[number];
+            const job = queue.shift() as () => Promise<void>;
             running++;
-            room(s).finally(() => {
+            job().finally(() => {
               running--;
               pump();
             });
@@ -1175,7 +1298,42 @@ export async function runDesign(
         };
         pump();
       });
+
+    const [first, ...rest] = spaces;
+    if (first) {
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const firstDone = room(first, release);
+      await gate;
+      await pumped(rest.map((s) => () => room(s)));
       await firstDone;
+      if (runError) throw runError;
+    }
+
+    // Every room has had its first pass: what the pool has left goes one fix-up at a time to
+    // each room still making progress, in room order, until it is used up or none progresses.
+    for (;;) {
+      if (runError || stopping || o.signal.aborted) break;
+      const turn = spaces.flatMap((s) => {
+        const f = open.get(s.key);
+        return f && !placeOf(s.key).settled && f.now.fixable.length ? [f] : [];
+      });
+      if (!turn.length) break;
+      await pumped(
+        turn.map((f) => async () => {
+          try {
+            await fixOnce(f);
+          } catch (e) {
+            if (e instanceof Stopped) stoppedIn(f);
+            runError ??= e;
+          } finally {
+            update();
+            void save();
+          }
+        }),
+      );
       if (runError) throw runError;
     }
 

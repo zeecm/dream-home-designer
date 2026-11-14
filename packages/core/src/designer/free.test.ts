@@ -7,7 +7,7 @@ import sampleBedroom from './benchmark/answers/sample-bedroom.json';
 import sampleLiving from './benchmark/answers/sample-living.json';
 import sampleMain from './benchmark/answers/sample-main-bedroom.json';
 import { ONGS } from './benchmark/benchmark';
-import { APP_REF, freeEssentials, isAppRef, isDeclined } from './free';
+import { APP_REF, freeEssentials, isAppRef, isDeclined, orphanLines } from './free';
 import { runReport } from './report';
 import { designResult } from './result';
 import { Rule } from './rules/schema';
@@ -127,7 +127,7 @@ describe('free fixes: beds (criterion 11)', () => {
   });
 });
 
-describe('free fixes: seats and dining (criterion 12, orphans out of B)', () => {
+describe('free fixes: seats and dining (criterion 12)', () => {
   it('a living answer with no sofa gets one that fits, and P1 seats passes', () => {
     const { lvl, d } = version('dsn_free_sofa', { [LIVING]: without(sampleLiving, ['sofa1']) });
     const seats = (r: ReturnType<typeof designResult>) =>
@@ -183,6 +183,84 @@ describe('free fixes: seats and dining (criterion 12, orphans out of B)', () => 
     );
     expect(table.tries).toBe(0);
     expect(table.added).toEqual([]);
+  });
+});
+
+describe('free fixes: orphans (criterion 12, B2)', () => {
+  const chair = (ref: string, extra: Record<string, unknown> = {}) =>
+    piece({ ref, assetId: 'dining-chair', against: 'free', zone: 'work', ...extra });
+  const items = (raw: { items: unknown[] }, more: unknown[]) => ({
+    ...raw,
+    items: [...raw.items, ...more],
+  });
+  const refsOf = (out: ReturnType<typeof freeEssentials>, key: string) =>
+    (out.spaces[key]?.design?.items ?? []).map((i) => i.ref);
+
+  it('a living answer with no sofa and a dining chair with no table: a sofa placed, the chair taken out', () => {
+    const { lvl, d } = version('dsn_free_orphan', {
+      [LIVING]: without(sampleLiving, ['sofa1']),
+      [MAIN]: items(sampleMain, [chair('chair9')]),
+    });
+    const before = designResult(lvl, lvl, d);
+    const lone = Object.keys(before.refs).find((k) => before.refs[k] === 'chair9') as string;
+    expect(before.checks.some((c) => c.hard && c.key === `P2|belongs|${lone}`)).toBe(true);
+    const out = freeEssentials(lvl, lvl, d, {}, { orphans: true });
+    expect(out.added.map((a) => a.role)).toEqual(['sofa']);
+    expect(out.removed).toEqual([
+      { space: MAIN, ref: 'chair9', assetId: 'dining-chair', roomId: MAIN, role: 'dining-chair' },
+    ]);
+    expect(refsOf(out, MAIN)).not.toContain('chair9');
+    const after = designResult(lvl, lvl, { ...d, spaces: out.spaces });
+    expect(
+      after.checks.filter((c) => c.hard && !c.already && c.key.startsWith('P1|seats|')),
+    ).toEqual([]);
+    expect(after.checks.some((c) => c.key.startsWith('P2|belongs|'))).toBe(false);
+    // The living room's chairs are at its table: never orphans.
+    expect(refsOf(out, LIVING)).toEqual(expect.arrayContaining(['chair1', 'chair4']));
+    expect(orphanLines(out.removed ?? [], () => 'Main bedroom')).toEqual([
+      'Took out a dining chair the answer added in Main bedroom, with no table to go with it.',
+    ]);
+  });
+
+  it('never a kept chair, one carried over, one another piece goes with, or the app’s own', () => {
+    const { lvl, d } = version('dsn_free_orphan_kept', {
+      [MAIN]: items(sampleMain, [
+        chair('kept1', { keep: 'P1' }),
+        chair('theirs1'),
+        chair('lamped1'),
+        piece({ ref: 'lamp9', assetId: 'floor-lamp', near: 'lamped1', against: 'free' }),
+        chair('mine9'),
+      ]),
+    });
+    // The app's own chair (as stored: a model's answer can't carry the prefix).
+    const main = d.spaces[MAIN]?.design;
+    for (const i of main?.items ?? []) if (i.ref === 'mine9') i.ref = 'app:chair';
+    const out = freeEssentials(lvl, lvl, d, {}, { orphans: true, theirs: { [MAIN]: ['theirs1'] } });
+    expect(out.removed ?? []).toEqual([]);
+    for (const ref of ['kept1', 'theirs1', 'lamped1', 'app:chair'])
+      expect(refsOf(out, MAIN)).toContain(ref);
+  });
+
+  it('a bedside table with no bed (the bed declined): taken out; asked without orphans, kept', () => {
+    const { lvl, d } = version('dsn_free_orphan_side', { [MAIN]: without(sampleMain, ['bed1']) });
+    const declined = [{ room: MAIN, role: 'bed' }];
+    const out = freeEssentials(lvl, lvl, d, {}, { declined, orphans: true });
+    expect(out.added).toEqual([]);
+    expect((out.removed ?? []).map((x) => x.ref).sort()).toEqual(['side1', 'side2']);
+    expect(orphanLines(out.removed ?? [], () => 'Main bedroom')).toEqual([
+      'Took out 2 bedside tables the answer added in Main bedroom, with no bed to go with them.',
+    ]);
+    // A card's dry run never asks for it: nothing taken out.
+    const dry = freeEssentials(lvl, lvl, d, {}, { declined });
+    expect(dry.removed).toBeUndefined();
+    expect(dry.spaces).toBe(d.spaces);
+  });
+
+  it('nothing to take out: the answers are the same object (layouts unchanged)', () => {
+    const { lvl, d } = version('dsn_free_orphan_none', { [MAIN]: sampleMain });
+    const out = freeEssentials(lvl, lvl, d, {}, { orphans: true });
+    expect(out.tries).toBe(0);
+    expect(out.spaces).toBe(d.spaces);
   });
 });
 

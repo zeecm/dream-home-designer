@@ -213,8 +213,14 @@ export function runFlat(flat: BenchFlat): BenchReport {
         ]),
       ),
     };
-    const out = freeEssentials(level, level, d);
-    free.splice(0, free.length, ...out.added.map((a) => `${a.ref} ${a.assetId}`));
+    // As a run's free pass: the missing essentials, and the answer's orphans taken out.
+    const out = freeEssentials(level, level, d, {}, { orphans: true });
+    free.splice(
+      0,
+      free.length,
+      ...out.added.map((a) => `${a.ref} ${a.assetId}`),
+      ...(out.removed ?? []).map((a) => `took out ${a.ref} ${a.assetId}`),
+    );
     return { ...d, spaces: out.spaces };
   };
   let result = designResult(level, level, design(`dsn_bench_${flat.id}`));
