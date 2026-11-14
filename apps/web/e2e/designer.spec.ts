@@ -2748,7 +2748,7 @@ test.describe('designer listens, C: no paying twice, fix every check first', () 
     const strictLine = strictCost.locator('[data-strict-line]');
     await expect(strictLine).toHaveAttribute('data-strict-ask', '');
     await expect(strictLine).toHaveText(
-      /^You asked me to fix every check first, so this keeps fixing until every check passes: up to 6 fix-ups, adding up to US\$\d+\.\d\d at most\. Change$/,
+      /^You asked for every check to pass first, so this keeps fixing until every check passes: up to 6 fix-ups, adding up to US\$\d+\.\d\d at most\. Change$/,
     );
     await expect(strictLine).toBeFocused();
     await shot(page, 'c-strict-cost');
@@ -2849,13 +2849,15 @@ test.describe('designer listens, C: no paying twice, fix every check first', () 
     const fixRow = know(page).locator('[data-fact="fix-all"]');
     await expect(fixRow.getByRole('radio', { name: 'Fix every check first' })).toBeFocused();
     await expect(fixRow.locator('[data-fix-all-hint]')).toHaveText(
-      'Keeps sending fixes until every check passes, up to 6 fix-ups, so a design can cost up to about twice as much. You always see the figure before it runs.',
+      'Keeps sending fixes until every check passes, up to 6 fix-ups on Thorough, 4 on Quick, so a design can cost up to about twice as much. You always see the figure before it runs.',
     );
     await know(page).getByRole('button', { name: '‹ Conversation' }).click();
     await expect(cost).toContainText(/up to 6 fix-ups included\)/);
     await page.waitForTimeout(500);
     expect(m.calls.filter(main)).toHaveLength(before);
     await shot(page, 'c-strict-ask');
+    // The words and the figure from one estimate, kept with the card (QA): 6 fix-ups.
+    expect(await dumpIdb(page)).toMatch(/"fixes":6,"adds":\d/);
     await cost.getByRole('button', { name: /^Go ahead( anyway)? · about US\$/ }).click();
     await expect(card(page, 2).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
       timeout: 60_000,
@@ -2866,6 +2868,50 @@ test.describe('designer listens, C: no paying twice, fix every check first', () 
       timeout: 60_000,
     });
     await expect(panel(page).locator('.talk-cost-card')).toHaveCount(0);
+  });
+
+  test('fewer failures than the version before, every one failed there: “Also failed in V1.”, never “the same”, and no blocking frame (UX 3)', async ({
+    page,
+  }) => {
+    test.setTimeout(240_000);
+    await setup(page, 'anthropic', { 'dhd-ai-ask': 'never' });
+    const m = await mock(page, {
+      talk: [planR2('I’ll put the bed back and sort the desk chairs.')],
+      reply: (c) => (main(c) ? answer(chairs(2, false)) : null),
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    await expect(card(page, 1).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 60_000,
+    });
+    // As an older build kept it: V1 lacks the bed (no bed, and the chairs at no desk).
+    await stripAppPieces(page);
+    await page.reload();
+    await waitSaved(page);
+    await page.keyboard.press('1');
+    await page.getByRole('button', { name: /^Designer · V1 on the table$/ }).click();
+    await expect(card(page, 1).getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 60_000,
+    });
+    // Fix every check first, set by the person; V2's run places the bed itself.
+    await openKnow(page);
+    const row = know(page).locator('[data-fact="fix-all"]');
+    await row.getByRole('button', { name: 'Change' }).click();
+    await row.getByRole('radio', { name: 'Fix every check first' }).click();
+    await know(page).getByRole('button', { name: '‹ Conversation' }).click();
+    await send(page, 'Where is the bed? Also you should fix the problems');
+    const v2 = await ran(page, 2);
+    const lead = v2.locator('[data-lead]');
+    // Strict, not met: V2 fails only on the chairs, which V1 failed on too (with the bed).
+    await expect(lead).toHaveAttribute('data-frame', 'strict');
+    await expect(lead).not.toContainText(/have no bed/);
+    await expect(lead).toContainText(/desk chairs? (isn’t|aren’t) at a table/);
+    await expect(lead).toContainText('Also failed in V1.');
+    await expect(lead).not.toContainText('Same failures as');
+    expect(m.calls.filter(main).length).toBeGreaterThanOrEqual(2);
+    await shot(page, 'c-also-failed');
   });
 
   test('Fix every check first set by the person, every check fixed by round 3: the normal card, and requests = rooms + 3 (29)', async ({
@@ -3032,7 +3078,10 @@ test.describe('designer listens, C: no paying twice, fix every check first', () 
     );
     await expect(again.getByRole('button', { name: /^Run it anyway/ })).toBeInViewport();
     await shot(page, 'c-owner-again-844');
-    await again.getByRole('button', { name: 'Not now' }).click();
+    // Escape is Not now (as B2's ask), and focus goes back where it was: the composer.
+    await page.keyboard.press('Escape');
+    await expect(panel(page).locator('[data-repeat]')).toHaveCount(0);
+    await expect(panel(page).getByRole('textbox', { name: 'Message the designer' })).toBeFocused();
     expect(m.calls.filter(main)).toHaveLength(presses);
   });
 

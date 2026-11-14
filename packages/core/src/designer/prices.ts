@@ -503,3 +503,24 @@ export function strictAdds(est: RunEstimate, quality: DesignBrief['quality']): n
   const plain = rooms || looks ? Math.max(fixPoolFor(quality, rooms), looks && !rooms ? 1 : 0) : 0;
   return est.usd.fixOne * Math.max(0, est.fixes - plain);
 }
+
+/**
+ * What a cost card keeps of an estimate (its figure, and the words beside it): the typical and
+ * high cost, the pool's part, the fix-ups it may send and what Fix every check first adds. The
+ * card's "up to N fix-ups" and its figure come from this one value, so they never disagree (QA:
+ * the words read the pool of 3 while the figure was already the strict one). Null without a price.
+ */
+export function costFigure(
+  est: RunEstimate,
+  quality: DesignBrief['quality'],
+): { typical: number; high: number; fix: number; fixes: number; adds: number } | null {
+  const u = est.usd;
+  if (!u) return null;
+  return {
+    typical: u.typical,
+    high: u.high,
+    fix: u.fix,
+    fixes: est.fixes,
+    adds: strictAdds(est, quality) ?? 0,
+  };
+}

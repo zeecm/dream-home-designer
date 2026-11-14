@@ -21,6 +21,7 @@ import {
   anotherAsk,
   askRule,
   atMostOf,
+  costFigure,
   cut,
   entranceDoor,
   firstAndMore,
@@ -403,6 +404,10 @@ export async function keepFixing(
   }
 }
 
+/** What a cost card keeps of an estimate: its figure and its words from one value (QA). */
+export const figureOf = (est: RunEstimate) =>
+  costFigure(est, useTalk.getState().conv?.brief.quality ?? 'thorough');
+
 /** One priced press at a time, from the first tap (a double tap starts one run). */
 let starting = false;
 function begin(): boolean {
@@ -484,7 +489,6 @@ export async function followPlan(plan: TalkPlan, said: string, replyTo: string) 
       await run(req, made, atMostOf(made.est), { person: null, turn: newId('turn') });
       return;
     }
-    const u = made.est.usd;
     await act({
       type: 'ask',
       at: nowIso(),
@@ -492,7 +496,7 @@ export async function followPlan(plan: TalkPlan, said: string, replyTo: string) 
       scope: req.scope,
       words: said,
       reason: ask === 'go' ? 'ask-threshold' : ask,
-      estimate: u ? { typical: u.typical, high: u.high, fix: u.fix } : null,
+      estimate: figureOf(made.est),
       talk: { replyTo, title: plan.title, intent: plan.intent },
       just: plan.just,
       ...(repeat ? { repeat } : {}),
@@ -552,7 +556,6 @@ async function askOrRun(req: PressRequest) {
     await run(req, made, atMostOf(made.est), { person: newId('turn'), turn: newId('turn') });
     return;
   }
-  const u = made.est.usd;
   await act({
     type: 'ask',
     at: nowIso(),
@@ -560,7 +563,7 @@ async function askOrRun(req: PressRequest) {
     scope: req.scope,
     words: req.words,
     reason: ask === 'go' ? 'ask-threshold' : ask,
-    estimate: u ? { typical: u.typical, high: u.high, fix: u.fix } : null,
+    estimate: figureOf(made.est),
     finish: req.finish,
     alt: req.alternative ?? null,
     ...(repeat ? { repeat } : {}),
@@ -612,11 +615,10 @@ export async function answerCost(
     const shown = card.estimate ? card.estimate.high + card.estimate.fix : null;
     const fresh = made ? atMostOf(made.est) : null;
     if (answer === 'go' && shown !== null && fresh !== null && fresh > shown + 0.005) {
-      const u = made?.est.usd;
       await act({
         type: 'costRefresh',
         turnId: card.id,
-        estimate: u ? { typical: u.typical, high: u.high, fix: u.fix } : null,
+        estimate: made ? figureOf(made.est) : null,
       });
       say('The price has gone up since; check it again before going ahead.');
       return;

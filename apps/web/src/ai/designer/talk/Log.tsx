@@ -59,6 +59,7 @@ import { unkeep } from './pointers';
 import {
   answerCost,
   cardRequest,
+  figureOf,
   pressPrice,
   pressPriceState,
   pressScope,
@@ -423,9 +424,8 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
     [open, first, t.words, project, prices, ai, tick],
   );
   useEffect(() => {
-    const u = est?.usd;
-    if (!open || !u) return;
-    const now = { typical: u.typical, high: u.high, fix: u.fix };
+    if (!open || !est?.usd) return;
+    const now = figureOf(est);
     if (JSON.stringify(now) !== JSON.stringify(t.estimate)) {
       void act({ type: 'costRefresh', turnId: t.id, estimate: now });
     }
@@ -442,10 +442,12 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
   const quality = useTalk((s) => s.conv?.brief.quality ?? 'thorough');
   // From what the card is priced with (its estimate's pool), never the setting as it is now
   // beside an estimate made before (money review N3); with no price, the setting.
+  // The words follow the figure shown (the card's stored estimate), never a price still being
+  // worked out beside it (QA): an older card with no words kept takes the live estimate's.
   const strictNow = useTalk((s) => !!s.conv?.brief.fixAll);
-  const adds = est ? strictAdds(est, quality) : null;
-  const strict = est?.usd ? (adds ?? 0) > 0 : strictNow;
-  const fixes = est?.fixes ?? FIX_PER_RUN;
+  const adds = t.estimate?.adds ?? (est ? strictAdds(est, quality) : null);
+  const strict = t.estimate ? (adds ?? 0) > 0 : strictNow;
+  const fixes = t.estimate?.fixes ?? est?.fixes ?? FIX_PER_RUN;
   const strictText = useRef<HTMLParagraphElement>(null);
   const strictLine = strict ? (
     <p
@@ -456,7 +458,7 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
       {...(t.strict ? { 'data-strict-ask': '', tabIndex: -1, ref: strictText } : {})}
     >
       {t.strict
-        ? `You asked me to fix every check first, so this keeps fixing until every check passes: up to ${fixes} fix-ups${adds !== null && adds > 0 ? `, adding up to ${usd(adds)} at most` : ''}.`
+        ? `You asked for every check to pass first, so this keeps fixing until every check passes: up to ${fixes} fix-ups${adds !== null && adds > 0 ? `, adding up to ${usd(adds)} at most` : ''}.`
         : `Fix every check first is on: keeps fixing until every check passes, up to ${fixes} fix-ups${adds !== null && adds > 0 ? ` (adds up to ${usd(adds)} at most)` : ''}.`}{' '}
       <button
         type="button"
@@ -486,19 +488,33 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
     [open, repCard, slowProject, tick, declinedKey],
   );
   const repeatText = useRef<HTMLParagraphElement>(null);
+  /** Where focus was when the card took it: Escape (Not now) gives it back there. */
+  const cameFrom = useRef<HTMLElement | null>(null);
   // Its first sentence takes focus (as CostCheck's heading does); never a spend button.
   useEffect(() => {
+    const at = document.activeElement;
+    if ((open && repeat) || (open && t.strict))
+      cameFrom.current = at instanceof HTMLElement && at !== document.body ? at : null;
     if (open && repeat) repeatText.current?.focus({ preventScroll: true });
     else if (open && t.strict) strictText.current?.focus({ preventScroll: true });
   }, [open, repeat, t.strict]);
+  /** Escape on the repeat card is Not now (as B2's Keep fixing ask), focus back where it was. */
+  const onEscape = (e: { key: string; preventDefault: () => void }) => {
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    const back = cameFrom.current;
+    void answerCost(t, 'not-now').then(() =>
+      requestAnimationFrame(() =>
+        (back?.isConnected ? back : document.querySelector<HTMLElement>('#talk-text'))?.focus(),
+      ),
+    );
+  };
   // Answered: your bubble says it ("Not now"), and the card that follows shows the run.
   if (t.state !== 'open') return null;
   const priceSentence = t.estimate ? (
     <p className="talk-text">
       {what} takes about {usd(t.estimate.typical)} (at most {usd(t.estimate.high + t.estimate.fix)}
-      {t.estimate.fix > 0
-        ? `, up to ${est?.fixes ?? FIX_PER_RUN} fix-up${(est?.fixes ?? FIX_PER_RUN) === 1 ? '' : 's'} included`
-        : ''}
+      {t.estimate.fix > 0 ? `, up to ${fixes} fix-up${fixes === 1 ? '' : 's'} included` : ''}
       ).{repeat ? '' : ' Go ahead?'}
     </p>
   ) : null;
@@ -529,6 +545,7 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
         className="talk-turn talk-app talk-card talk-cost-card"
         aria-labelledby={`h-${t.id}`}
         data-repeat=""
+        onKeyDown={onEscape}
       >
         <h3 id={`h-${t.id}`} className="visually-hidden">
           App: before spending
@@ -601,7 +618,7 @@ function CostAsk({ t }: { t: TurnOf<'cost-ask'> }) {
             <p className="talk-repeat-fails">
               (at most {usd(t.estimate.high + t.estimate.fix)}
               {t.estimate.fix > 0
-                ? `, up to ${est?.fixes ?? FIX_PER_RUN} fix-up${(est?.fixes ?? FIX_PER_RUN) === 1 ? '' : 's'} included`
+                ? `, up to ${fixes} fix-up${fixes === 1 ? '' : 's'} included`
                 : ''}
               )
             </p>

@@ -94,6 +94,7 @@ export {
   CHARS_PER_TOKEN,
   FIX_PER_RUN,
   FIX_STRICT,
+  costFigure,
   strictAdds,
   firstPassOf,
   OUTPUT,

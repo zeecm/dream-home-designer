@@ -536,7 +536,14 @@ export const Turn = z.discriminatedUnion('kind', [
     reason: z.enum(['ask-threshold', 'ask-cost-check', 'ask-limit']),
     /** What the card showed (US$), bound by Go ahead; null without a price. */
     estimate: z
-      .object({ typical: z.number().min(0), high: z.number().min(0), fix: z.number().min(0) })
+      .object({
+        typical: z.number().min(0),
+        high: z.number().min(0),
+        fix: z.number().min(0),
+        /** The fix-ups the figure includes and what strict adds (`costFigure`): its words. */
+        fixes: z.number().int().min(0).optional(),
+        adds: z.number().min(0).optional(),
+      })
       .nullable(),
     state: z.enum(['open', 'go', 'cheaper', 'not-now', 'expired']),
     /** The answer's id: only the call that answered it starts the run (two tabs). */

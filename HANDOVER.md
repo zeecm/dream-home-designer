@@ -1246,13 +1246,23 @@ fixing, orphans, what was left out.** Proposal records 5.
   up to US$2.94)."; core `notMet`, web `notMetOf`), and "within US$x" only when a room's last
   round was `no-fixups`; the log line likewise. Fewer failures than the version before (a
   subset) read "Also failed in V1." and get no blocking frame; "Same failures as …" only for the
-  same set or more. The strict cost line is one sentence; on the owed ask (S1) "You asked me to
-  fix every check first, so this keeps fixing until every check passes: up to 6 fix-ups, adding
-  up to US$1.25 at most. Change", focused. What I know's chooser has the hint on what it costs;
+  same set or more. The strict cost line is one sentence; on the owed ask (S1) "You asked for
+  every check to pass first, so this keeps fixing until every check passes: up to 6 fix-ups,
+  adding up to US$1.25 at most. Change", focused. What I know's chooser has the hint on what it
+  costs ("up to 6 fix-ups on Thorough, 4 on Quick");
   Change opens it at that row with the chooser focused (`Back` no longer takes focus when
   `knowAt` is set). A cost card arriving in the side column scrolls its buttons (the repeat
   card's too) into view, again after 350 and 800 ms. The left-out line has the disclosure's
   triangle only. e2e: the one-line "again" card (arriving at 844 × 390, its buttons in view).
+- **Final round (14 Nov):** the bedside path is one try (the bed without the loose bedsides),
+  then at most two put back by it (no separate "by the bed" try): about 340 ms on the owner's
+  merged Master bedroom, 4 solves; PERF-gated test in `ownerBed.test.ts` (2x the first solve's
+  300 ms bound). The essentials go again after orphans only in a room where one was missed and
+  an orphan came out. A cost card keeps its words with its figure (`costFigure`: `fixes`,
+  `adds` on the stored estimate), so "up to N fix-ups" never reads the pool of 3 beside a strict
+  figure while the live price is worked out. Escape on the repeat card is Not now, focus back
+  where it was (the composer). e2e: "Also failed in V1." (strict V2 with the bed placed, V1 an
+  older build's with no bed).
 - Known, not done: the hover-to-light of a failure line.
 
 **AI costs always have a figure (#67, 14 Nov).** The owner's Gemini 3 runs had no price, so no

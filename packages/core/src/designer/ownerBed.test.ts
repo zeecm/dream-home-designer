@@ -114,3 +114,34 @@ describe('the owner’s replay: the run places the bed in the merged Master bedr
     expect(out.gaveWay).toEqual([]);
   });
 });
+
+describe('the owner’s replay: PERF', () => {
+  // The first solve's bound is 300 ms (solve.test.ts, HEAVY_PERF). The bedside path solves the
+  // room a few times (the usual try, the bed without its bedsides, each of at most two put
+  // back): within 2x the bound (about 340 ms here), gated as the other free-fix PERF tests are.
+  const BOUND = process.env.PERF ? 2 * 300 : 3 * 2 * 300;
+  it('PERF: the run’s free pass on the merged Master bedroom (the bed, a bedside put back), within it', () => {
+    let n = 0;
+    const run = () => {
+      // A fresh design id each time: never the memo's answer from the run before.
+      const d = { ...draft(answer), id: `dsn_owner_bed_perf_${++n}` };
+      const t0 = performance.now();
+      designResult(after, before, d);
+      const first = performance.now() - t0;
+      const t1 = performance.now();
+      const out = freeEssentials(after, before, d, {}, { spaces: [KEY], orphans: true });
+      return { first, free: performance.now() - t1, out };
+    };
+    run();
+    const times = Array.from({ length: 5 }, run);
+    const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[2] as number;
+    const free = median(times.map((t) => t.free));
+    console.log(
+      `free fix, owner's merged Master bedroom: ${free.toFixed(0)} ms median (${times[0]?.out.tries} tries), its first solve ${median(times.map((t) => t.first)).toFixed(0)} ms`,
+    );
+    expect(times[0]?.out.added.map((a) => a.role)).toEqual(['bed']);
+    // The usual try, the bed without its bedsides, at most two put back.
+    expect(times[0]?.out.tries).toBeLessThanOrEqual(4);
+    expect(free).toBeLessThan(BOUND);
+  });
+});

@@ -7,6 +7,7 @@ import gemini from './fixtures/usage-gemini.json';
 import openai from './fixtures/usage-openai.json';
 import {
   PRICES,
+  costFigure,
   estimateRun,
   firstPassOf,
   fixPoolFor,
@@ -174,6 +175,17 @@ describe('estimateRun (criterion 21)', () => {
     expect(strict.usd?.fix).toBeCloseTo(6 * (one.usd?.fixOne ?? 0), 10);
     expect(strictAdds(strict, 'thorough')).toBeCloseTo(3 * (one.usd?.fixOne ?? 0), 10);
     expect(strictAdds(one, 'thorough')).toBe(0);
+    // What a cost card keeps: its figure and its words ("up to 6 fix-ups", what strict adds)
+    // from one estimate, so they can never disagree (QA).
+    const kept = costFigure(strict, 'thorough');
+    expect(kept).toEqual({
+      typical: strict.usd?.typical,
+      high: strict.usd?.high,
+      fix: strict.usd?.fix,
+      fixes: 6,
+      adds: strictAdds(strict, 'thorough'),
+    });
+    expect(costFigure(one, 'thorough')).toMatchObject({ fixes: 3, adds: 0 });
     expect(estimateRun(prompts, { ...opts, quality: 'quick', strict: true }).fixes).toBe(4);
     // A given pool (carried on, Keep fixing) is its own, strict or not.
     expect(

@@ -537,8 +537,9 @@ export function FactEditor(p: FactProps) {
             autoFocus={p.autoFocus}
           />
           <p className="field-hint" data-fix-all-hint="">
-            Keeps sending fixes until every check passes, up to 6 fix-ups, so a design can cost up
-            to about twice as much. You always see the figure before it runs.
+            Keeps sending fixes until every check passes, up to 6 fix-ups on Thorough, 4 on Quick,
+            so a design can cost up to about twice as much. You always see the figure before it
+            runs.
           </p>
         </>
       );

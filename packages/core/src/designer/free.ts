@@ -495,8 +495,9 @@ export function freeEssentials(
     // The answer's bedside tables that go with no bed of its own (their bed was left out, or
     // never asked for): placed before the app's bed, they can take the walls it needs (the
     // owner's replay: a merged Master bedroom, its bedsides against the long wall, and the queen
-    // bed then only by a desk chair's way). When the bed doesn't fit as they stand, they go by
-    // the app's bed instead; failing that, they make way for it. Never taken out as orphans
+    // bed then only by a desk chair's way). When the bed doesn't fit as they stand, the bed goes
+    // in without them and each goes back by it while it breaks nothing; the rest made way for
+    // it (said so). Never taken out as orphans
     // while a bed for the room's sleepers can be placed (essentials first, orphans after).
     const bedWant = wants.find((w) => w.role === 'bed');
     const refs = new Set(answer.items.map((a) => a.ref));
@@ -519,21 +520,14 @@ export function freeEssentials(
     const withBeds = sets.find((set) => set.some((w) => w.role === 'bed'));
     type Try = { set: Want[]; items: SpaceDesign['items']; madeWay: string[] };
     const tryList: Try[] = sets.map((set) => ({ set, items: answer.items, madeWay: [] }));
+    // One more try, not two (PERF): the bed with the loose bedsides out, then each put back by
+    // the bed in turn (both back is what moving them by the bed would have been).
     if (bedWant && withBeds && loose.length) {
-      tryList.push(
-        {
-          set: withBeds,
-          items: answer.items.map((a) =>
-            looseRefs.has(a.ref) ? { ...a, near: bedWant.item.ref } : a,
-          ),
-          madeWay: [],
-        },
-        {
-          set: withBeds,
-          items: answer.items.filter((a) => !looseRefs.has(a.ref)),
-          madeWay: [...looseRefs],
-        },
-      );
+      tryList.push({
+        set: withBeds,
+        items: answer.items.filter((a) => !looseRefs.has(a.ref)),
+        madeWay: [...looseRefs],
+      });
     }
     const was = sideOf(r, current, o.theirs);
     let kept: { wants: Want[]; r: DesignResult; design: DesignInput; madeWay: string[] } | null =
@@ -560,7 +554,8 @@ export function freeEssentials(
         lastTry ??= rn;
         if (!freeBetter(was, sideOf(rn, next, o.theirs))) continue;
         const madeWay = [...t.madeWay];
-        for (const side of loose) {
+        // At most two put back (a bed's two sides): each is a solve of the room (PERF).
+        for (const side of loose.slice(0, 2)) {
           const more = [...items, { ...side, near: bedWant?.item.ref ?? side.near }];
           const n2 = nextOf(more);
           tries++;
