@@ -1927,6 +1927,91 @@ test.describe('iterating (slice 2, PR 3)', () => {
     await expect(folded).not.toContainText('Accepted');
   });
 
+  test('after an Accept, a wall moved by hand into the kept bed: the bed is placed again, never removed (#66, QA H1)', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await setup(page);
+    // The Master bedroom asked again keeps every piece its prompt lists as "keep", by alias,
+    // as the owner's model did.
+    const keepAll = (c: Call) => {
+      if (!/furnish "(Main|Master) bedroom"/.test(c.step)) return null;
+      const text = promptOf(JSON.parse(c.body));
+      const line = text.split('\n').find((l) => l.startsWith("Pieces of the household's here"));
+      if (!line?.includes('"keep":"keep"')) return null;
+      const pieces = JSON.parse(line.slice(line.indexOf('): ') + 3)) as {
+        id: string;
+        kind: string;
+        keep: string;
+      }[];
+      const items = pieces
+        .filter((p) => p.keep === 'keep')
+        .map((p, i) => ({
+          ref: `p${i}`,
+          assetId: p.kind,
+          keep: p.id,
+          wall: null,
+          along: null,
+          at: null,
+          rotation: null,
+          width: null,
+          depth: null,
+          height: null,
+          why: 'Kept.',
+          against: 'wall',
+          faces: null,
+          near: null,
+          zone: null,
+        }));
+      const answer = { v: 2, items, faces: [], notes: [], summary: 'Everything kept.' };
+      return {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+        body: STREAM[c.provider](answer, USAGE),
+      };
+    };
+    await mock(page, { reply: (c) => keepAll(c) });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await design(page, /^The whole flat · about US\$/);
+    const v1 = card(page, 1);
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 60_000,
+    });
+    await v1.getByRole('button', { name: /^Accept selected/ }).click();
+    await expect(log(page).getByText(/^You accepted \d+ changes from V1\./)).toBeVisible();
+    const bed = Object.values(
+      (await saved(page)).renovation.levels[0].items as Record<
+        string,
+        { id: string; assetId: string }
+      >,
+    ).find((i) => i.assetId === 'bed-queen');
+    expect(bed).toBeTruthy();
+    // The wall between the bedrooms bent into the Master bedroom, into its bed, by hand: a
+    // double-click below the bed makes a corner there, and Shift+← moves it 0.1 m at a time.
+    const wall = page.locator('[data-hit="wall:w_bedroom_main-bedroom"]').first();
+    const w = await wall.boundingBox();
+    if (!w) throw new Error('no wall');
+    await page.mouse.dblclick(w.x + w.width / 2, w.y + w.height * 0.85);
+    for (let i = 0; i < 4; i++) await page.keyboard.press('Shift+ArrowLeft');
+    await page.keyboard.press('Escape');
+    await waitSaved(page);
+    await shot(page, 'h1-wall-bent');
+    // The rooms are as they were (the bedroom still a room of its own), its wall now bent.
+    await expect(page.getByRole('button', { name: /^Master bedroom/ })).toHaveCount(1);
+    await design(page, /^(Main|Master) bedroom · about US\$/);
+    const v2 = card(page, 2);
+    await expect(v2.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 60_000,
+    });
+    await shot(page, 'h1-wall-moved-v2');
+    // The bed is still in the version: moved, never removed, and nobody is without a bed.
+    await expect(v2.getByText(/Remove the queen bed/)).toHaveCount(0);
+    await expect(v2.getByText(/^Move the queen bed/).first()).toBeVisible();
+    await expect(v2.getByText(/has no bed/)).toHaveCount(0);
+  });
+
   test('Copy as text and Download conversation: the decisions, facts, accepted changes; no key', async ({
     page,
     context,

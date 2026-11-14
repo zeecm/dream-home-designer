@@ -1,4 +1,3 @@
-import { designerCannotUse } from '@dhd/ai';
 import {
   type Change,
   type DesignResult,
@@ -23,7 +22,7 @@ import { useAi } from '../../credentials';
 import { CaseDialog } from '../CaseDialog';
 import { failingChecks } from '../parts';
 import { useResultsTickN } from '../results';
-import { tokens, usd, useSpend } from '../spend';
+import { cannotDesign, tokens, usd, useSpend } from '../spend';
 import { houseKeptFor, houseRulesFor, openCompare, useDesigner } from '../state';
 import { keepTogether } from '../words';
 import { CheckLead, SetOutToFix, hasLead } from './CheckLead';
@@ -547,7 +546,7 @@ export const ProposalCard = memo(function ProposalCard({
   const another = useMemo(
     () =>
       // Priced only while the card is open: a folded card shows no button to price.
-      expanded && !running && proposal && ai && !designerCannotUse(ai)
+      expanded && !running && proposal && ai && !cannotDesign(ai)
         ? timed(() =>
             card.status === 'failed' ? scopePrice(proposal.scope) : anotherPrice(proposal),
           )
@@ -733,7 +732,7 @@ export const ProposalCard = memo(function ProposalCard({
       .map((s) => s.design?.summary ?? '')
       .filter(Boolean)
       .join(' ');
-  const cantDesign = !ai || !!designerCannotUse(ai);
+  const cantDesign = !ai || !!cannotDesign(ai);
   const head = (
     <div className="talk-card-head">
       <h3 className="talk-card-title" id={`card-${card.key}`}>

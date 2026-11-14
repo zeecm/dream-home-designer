@@ -808,6 +808,86 @@ design set out to fix" with ✓/⚠. At a run's end the log brings the card's he
 card is taller than the log. Left for B1/B2/C: free fixes, the fix-up pool, vetting, repeats,
 strict mode; the hover-to-light of a failure line.
 
+**AI costs always have a figure (#67, 14 Nov).** The owner's Gemini 3 runs had no price, so no
+cost card had a figure and neither the approved figure nor the tab's limit held.
+- **Prices** (`core designer/prices.ts`, checked 14 Nov against Google's
+  aistudio.google.com/docs/pricing and Anthropic's pricing page; the sources are in the comment
+  over `PRICES`): every Gemini 3 text model Google lists, plus the old endpoints it routes to
+  them (`gemini-3.5-flash`, `gemini-3.7-flash`), and the Claude models the designer takes.
+  `gemini-3-pro` (the old default, never an API id) and `gemini-3-pro-preview` (shut down)
+  stay unpriced. The Gemini default is `gemini-3.1-pro-preview`, and a saved key naming either
+  dead id moves to it (`RETIRED` in `credentials.ts`).
+- **Dated `changes`:** a `Price` can carry announced changes (`{ from: 'YYYY-MM-DD', ...rates }`).
+  `priceOf(model, table, at)` applies the latest change by that UTC day, and keeps the
+  long-prompt tier unless the change sets one. 3.6 and 3.8 Flash double on 1 Jan 2027. 2.5 Pro
+  goes to 3.8 Flash on 1 Dec, so it is kept at the dearer of the two, rate by rate. A browser's
+  own price has no changes.
+- **No figure, no run:** `designerCannotUse(ai, prices)` (`@dhd/ai`) refuses a model with no
+  price (`UNPRICED`). The web asks it through `cannotDesign` (`spend.ts`, the browser's own
+  prices included) on every paid path. `requestStep` halts (`'unpriced'`) before sending,
+  whatever the caller checked, so nothing unpriced goes: runs, fix rounds, carry on, Another
+  idea, talk replies. AI settings marks such a model "no price yet" and never recommends one
+  while a priced model is listed. Entering its prices in AI settings makes it usable.
+- **`meteredPrice(served, asked)`:** usage from a served model the table doesn't know is billed
+  at the asked model's price, never as free.
+- **Thinking per model** (`stream.ts` `geminiThinking`, `lowerEffort`, `fixStepFor`):
+  - Gemini 3 sends the level asked for. `medium` goes as `low` on the exceptions
+    (`GEMINI_NO_MEDIUM`: 3 Pro Preview), never as `high`, so Quick runs and talk calls are
+    medium.
+  - Gemini 3 fix rounds start at `low`.
+  - The retry after a cut-off goes to `low` where Gemini thinks by level, and one step down
+    elsewhere. It goes only when the request's thinking part really differs: a Gemini 2.x
+    budget capped alike at two levels, or a model that takes no effort (gpt-4o), is not sent
+    the same request twice.
+  - Claude sends `output_config.effort`; OpenAI's reasoning models send `reasoning_effort`.
+- **1 Dec 2026:** Google routes `gemini-2.5-pro` to 3.8 Flash and `gemini-2.5-flash` to 3.5
+  Flash-Lite, whose guides say to send `thinkingLevel` in place of `thinkingBudget`. They take
+  the budget until that day and the level from it (`ROUTED_2X`, by date as prices are).
+  2.5 Flash-Lite stays and keeps its budget.
+- **Fix-up pool (tech lead):** a room takes its fix-up before waiting at the gate and gives it
+  back if refused. It is held (`held`) and saved as still left until its request goes. Every
+  step that waited on a pause is checked again after Carry on. Three rooms paused with one
+  fix-up left used to send three.
+
+**Designer: keeping pieces after an Accept (issue #66 PR 1, 14 Nov).** After an Accept every
+design starts from After (cards' `nowOf`, the run's `planScope` → `contextFor`, `brief.start`
+'after'), and its answers keep the accepted pieces by alias (`keep: "P7"`). `designResult`
+dropped every one: `resolveWant` took only pieces the brief's keep list brings (`brief.keep` is
+about the household's furniture in the flat as it is, and empty), so V6–V9 of the owner's
+conversation lost the bed, sofa, dining set and fridge whatever was said. Now, on After
+(`startsFromAfter(base, before)`, levels.ts) a piece the answer keeps is a `Want` with `stays`,
+if any of it stands in that space, it isn't kept with Keep this and its room isn't held by a
+hand edit (else a left-out line says why); a piece the brief brings is still placed anew, as
+on the flat as it is, and one alias kept twice is placed once. The solver places a kept piece
+first where it stands (`stayAt`, `stayHit`: walls, door swings, ways kept clear and doorways,
+and the throats of openings the design adds or moves, `ix.fresh`, not of those it stood by;
+then nudges of up to 0.10 m), places what goes with it round it (a new TV faces the kept
+sofa) and never swaps it. One that can't stay (a wall moved by hand runs through it) is placed
+again by its own priority, a bed before the pieces kept round it, which follow it, and says
+"Moved the queen bed: it no longer fits where it stood."; nothing a space before placed is
+cleared by a later one. Pieces in scope it leaves out go, as before. The prompts say so
+(`pieceKeep`: "keep", or "in-place" for held and Keep-this pieces, `inPlaceOf` into the shared
+context), and a scoped run's aliases are the shared context's (`planScope` draft), so P7 is
+the same piece in every step and in the result. The solve memo key carries the pieces kept or
+brought (kind, pose, stays), and `designResultKey` whether it starts from After. Near misses
+(`designer/nudge.ts`): a hard walkway or room-to-use check failing by at most 0.06 m is mended
+by moving the version's piece (with the pieces that then fail with it, a coffee table with its
+sofa) the shortfall plus 2–4 cm, kept only if fewer hard checks fail and none new ("Moved the
+3-seat sofa 3 cm to leave the fridge the room it needs."); only pieces of the spaces asked for
+(`nudgeable`: not copied or locked ones), at most `NUDGE_BUDGET` (20) checks of the level, and
+looked for only when the walkways or clearances show one. Regression:
+`designer/fixtures/owner-after-accept.json` (trimmed export) and `afterAccept.test.ts`; the
+bent-wall case in `talk/plan.test.ts` and the e2e "a wall moved by hand into the kept bed".
+Not in the benchmark: the recorded V6–V9 answers still crowd two desks into the main bedroom
+(a real "desk short of room" the fix rounds would send back). Known, for PR 2: the talk card
+shows no repaired or left-out notes at all (only change rows and checks), so a kept piece left
+out is said only by its "Remove …" row; Compare counts advice (a bed side at 0.01 m) as
+"Problems" where the card says "Passes all checks"; a room asked again shows the copied
+whole-flat concept summary. Accepted risks: old cards re-compute with fewer rows; a card whose
+earlier accept removed a piece shows "no piece P7"; nudges may add small "Move…" rows when an
+old card is reopened. PR 2 (being specified): the drop reasons sent to the model, fix rounds
+until no progress, the free deterministic fix on the card.
+
 ## 5. Owner to-dos
 
 - **Before the repo goes public:** `apps/web/public/samples/hdb-3room-type4.pdf` (and its PNG
@@ -934,7 +1014,7 @@ renovation (`restore`), taking back its steps already carried, and stays held ba
 nothing. One undo step, which shows Before (`touchedVariant`).
 **AI: walls from a plan image (stage 1, 5 Nov):** bring your own key. Project menu "AI
 assistant…" (`ai/AiSettingsDialog.tsx`): Claude, OpenAI or Gemini, key and model (defaults
-`claude-opus-5-5`, `gpt-5`, `gemini-3-pro` since 6 Nov), Test, Forget; kept in this tab
+`claude-opus-5-5`, `gpt-5`, `gemini-3.1-pro-preview` since 14 Nov, #67), Test, Forget; kept in this tab
 (sessionStorage), or on this device if ticked (`ai/credentials.ts`, key `dhd-ai`), never
 in a project, export, share link or `/api` request (e2e checks). Calls go straight from the
 browser to the provider (`ai/providers.ts`: the Anthropic SDK, lazy-loaded, with

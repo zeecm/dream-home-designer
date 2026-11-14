@@ -1,3 +1,4 @@
+import { designerCannotUse } from '@dhd/ai';
 import { PRICES, type Price, type Usage } from '@dhd/core';
 import { useSyncExternalStore } from 'react';
 
@@ -121,6 +122,12 @@ export const spent = (): Spend => spend;
 export const capUsd = (): number | null => cap;
 /** The price table: list prices, with this browser's own where it has them. */
 export const priceTable = (): Record<string, Price> => prices;
+/**
+ * Why the designer can't use `ai`'s model, with this browser's prices (a model with no price,
+ * listed or the person's own, never starts a request), or null when it can.
+ */
+export const cannotDesign = (ai: { provider: string; model: string }): string | null =>
+  designerCannotUse(ai, prices);
 /** Whether the person has entered their own price for `model`. */
 export const hasOverride = (model: string) => !!overrides[model.trim().toLowerCase()];
 

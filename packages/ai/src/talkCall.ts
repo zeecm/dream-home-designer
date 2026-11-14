@@ -6,9 +6,9 @@ import {
   type TalkReply,
   type Usage,
   filterClaims,
+  meteredPrice,
   parseTalkReply,
   partialTalk,
-  priceOf,
   talkChars,
   tokensOf,
   usageOf,
@@ -17,7 +17,7 @@ import {
 import type { Page } from './page';
 import type { AiSettings } from './providers';
 import { type Halt, Halted, type RequestState, Stopped, requestStep } from './request';
-import { streamRequest, talkRequestFor } from './stream';
+import { lowerEffort, streamRequest, talkRequestFor } from './stream';
 
 /**
  * One talk call (tech §2.8): sent with the runner's retry rules, its text read as it streams
@@ -95,6 +95,7 @@ export async function talkCall(o: TalkCallOptions): Promise<TalkCallResult> {
           o.fetch,
         ),
       effort: prompt.effort,
+      lower: (e) => lowerEffort(ai, e, (x) => talkRequestFor(ai, prompt, x)),
       promptChars: chars.all,
       maxTokens: prompt.maxTokens,
       st,
@@ -113,7 +114,7 @@ export async function talkCall(o: TalkCallOptions): Promise<TalkCallResult> {
         if (!finished) {
           // Cut off before its usage came: what streamed, counted from its characters.
           const output = Math.max(u.output, tokensOf(outputChars));
-          const price = priceOf(u.model, o.prices);
+          const price = meteredPrice(u.model, ai.model, o.prices);
           u = { ...u, output, estimated: true, usd: price ? usdOf({ ...u, output }, price) : null };
         }
         usage.push(u);

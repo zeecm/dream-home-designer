@@ -1,4 +1,3 @@
-import { designerCannotUse } from '@dhd/ai';
 import {
   type Decision,
   type Kept,
@@ -16,7 +15,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { LengthField } from '../../../ui/fields';
 import { useAi } from '../../credentials';
 import { useResultsTickN } from '../results';
-import { tokens, usd } from '../spend';
+import { cannotDesign, tokens, usd, useSpend } from '../spend';
 import { Mark } from './Mark';
 import { cardResult } from './cards';
 import { lightPointer, unkeep } from './pointers';
@@ -505,6 +504,8 @@ function KeptList() {
 export function MakeRule({ d }: { d: Decision }) {
   const busy = useBusy();
   const ai = useAi();
+  // Re-rendered when prices change (a price entered makes the model usable).
+  useSpend();
   const conv = useTalk((s) => s.conv);
   const text = `Make this a rule: ${d.text}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: priced on the conversation as it is
@@ -516,7 +517,7 @@ export function MakeRule({ d }: { d: Decision }) {
         Make this a rule
       </button>
     );
-  if (!ai || designerCannotUse(ai)) return null;
+  if (!ai || cannotDesign(ai)) return null;
   const price = est?.usd
     ? `about ${usd(est.usd.typical)}`
     : est

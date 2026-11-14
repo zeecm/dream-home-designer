@@ -22,10 +22,10 @@ import {
   leftOutLines,
   lensOn,
   levelBounds,
+  meteredPrice,
   parseConcept,
   parseSpaceDesign,
   placedWords,
-  priceOf,
   resolveAsset,
   roomStep,
   runReport,
@@ -44,7 +44,7 @@ import {
   Stopped,
   requestStep,
 } from './request';
-import { type StepSink, streamStep } from './stream';
+import { type StepSink, fixStepFor, lowerEffort, requestFor, streamStep } from './stream';
 
 /** A step's error when its answer was cut off at the output limit (request.ts says it so). */
 const CUT_OFF = /too long for one step/;
@@ -283,9 +283,14 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
   let saving: Promise<void> = Promise.resolve();
   /** Fix requests the run may still send (the estimate counts this many at most). */
   let fixesLeft = o.fixesLeft ?? FIX_PER_RUN;
+  /**
+   * Fix-ups taken by rooms waiting at their gate (a pause), not yet sent: saved as still left,
+   * so a run carried on after the page closed mid-pause still has them.
+   */
+  let held = 0;
   const save = () => {
     const snapshot = structuredClone(design);
-    const info = { fixesLeft };
+    const info = { fixesLeft: fixesLeft + held };
     saving = saving.then(() => o.onSave?.(snapshot, info)).catch(() => {});
     return saving;
   };
@@ -312,25 +317,32 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       if (next) o.onStep?.(next.key, next.kind, 'start');
       return true;
     };
-    if (stopping || o.signal.aborted) return false;
-    if (allowOver || !o.overLimit?.(next)) return reserve();
-    if (!asking) {
-      state.phase = 'paused';
-      say(`Paused: this tab has reached its limit. ${usdText(spentSoFar())} spent on this design.`);
-      update();
-      asking = (o.confirmOver?.() ?? Promise.resolve(false)).then((go) => {
-        state.phase = 'running';
-        if (go && !o.askAgain) allowOver = true;
-        if (!go) stopping = true;
-        // Asked once for this figure; the next one is asked afresh.
-        if (go && o.askAgain) asking = null;
+    for (;;) {
+      if (stopping || o.signal.aborted) return false;
+      if (allowOver || !o.overLimit?.(next)) return reserve();
+      if (!asking) {
+        state.phase = 'paused';
+        say(
+          `Paused: this tab has reached its limit. ${usdText(spentSoFar())} spent on this design.`,
+        );
         update();
-        return go;
-      });
+        asking = (o.confirmOver?.() ?? Promise.resolve(false)).then((go) => {
+          state.phase = 'running';
+          if (go && !o.askAgain) allowOver = true;
+          if (!go) stopping = true;
+          // Asked once for this figure; the next one is asked afresh.
+          if (go && o.askAgain) asking = null;
+          update();
+          return go;
+        });
+      }
+      // Stop while paused ends the wait too.
+      const go = await Promise.race([asking, aborted]);
+      if (!go || o.signal.aborted) return false;
+      // Carried on: every step that waited on the answer is checked again, one at a time,
+      // against what it allowed (each reserved as it goes), so only those that fit it go; one
+      // that doesn't asks afresh.
     }
-    // Stop while paused ends the wait too.
-    const go = await Promise.race([asking, aborted]);
-    return go && !o.signal.aborted && reserve();
   };
 
   let cap = 2;
@@ -351,7 +363,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       // Cut off before its usage arrived (a locked phone, a dropped connection): it may be
       // billed in full, its whole prompt and output to its limit, and is counted so (the
       // figure it is held to never assumes less). Stop's cut-off is said apart, at that most.
-      const price = priceOf(u.model, o.prices);
+      const price = meteredPrice(u.model, ai.model, o.prices);
       const most = {
         input: tokensOf(promptChars),
         cachedInput: 0,
@@ -362,7 +374,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
     } else if (!finished) {
       // Cut off by Stop: what streamed, counted from its characters.
       const output = Math.max(u.output, tokensOf(outputChars));
-      const price = priceOf(u.model, o.prices);
+      const price = meteredPrice(u.model, ai.model, o.prices);
       u = { ...u, output, estimated: true, usd: price ? usdOf({ ...u, output }, price) : null };
     }
     state.usage.push(u);
@@ -389,6 +401,7 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
       send: (effort, sink, signal, hooks) =>
         streamStep(ai, p, effort, sink, signal, hooks, doFetch, { browser: !!o.page }),
       effort: p.effort,
+      lower: (e) => lowerEffort(ai, e, (x) => requestFor(ai, p, x)),
       promptChars: p.system.length + p.prefix.length + p.shared.length + p.tail.length,
       maxTokens: p.maxTokens,
       st,
@@ -564,9 +577,17 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
               rounds.push({ outcome: 'no-fixups', before: n, after: n });
               break;
             }
-            if (!(await mayStart({ key: s.key, kind: 'fix' }))) break;
-            // Taken from the run's few before the request goes (rooms run side by side).
+            // Taken from the run's few before any wait (rooms run side by side, and may all
+            // wait on one pause), and given back if the step may not go. Held, it is saved as
+            // still left until the request goes.
             fixesLeft--;
+            held++;
+            const go = await mayStart({ key: s.key, kind: 'fix' });
+            held--;
+            if (!go) {
+              fixesLeft++;
+              break;
+            }
             fixes++;
             const left = now.fixable;
             st.fixing = { round: fixes, problems: left.length };
@@ -581,16 +602,19 @@ export async function runDesign(o: RunOptions): Promise<{ state: RunState; desig
             };
             const tf = Date.now();
             const again = await step(
-              roomStep(ctx, s, r.level, design.aliases, {
-                concept: design.concept,
-                ...(o.result?.kept?.length ? { kept: o.result.kept } : {}),
-                ...(storage !== undefined ? { storage } : {}),
-                ...(plan.feedback ? { feedback: plan.feedback } : {}),
-                ...(plan.talk ? { talk: plan.talk } : {}),
-                locks: plan.locks ?? [],
-                previous: current,
-                fix,
-              }),
+              fixStepFor(
+                ai,
+                roomStep(ctx, s, r.level, design.aliases, {
+                  concept: design.concept,
+                  ...(o.result?.kept?.length ? { kept: o.result.kept } : {}),
+                  ...(storage !== undefined ? { storage } : {}),
+                  ...(plan.feedback ? { feedback: plan.feedback } : {}),
+                  ...(plan.talk ? { talk: plan.talk } : {}),
+                  locks: plan.locks ?? [],
+                  previous: current,
+                  fix,
+                }),
+              ),
               st,
               parse,
             );

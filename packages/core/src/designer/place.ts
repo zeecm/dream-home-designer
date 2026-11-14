@@ -93,13 +93,19 @@ export const shape = (poly: Vec2[]): Shape => ({ poly, box: boxOf(poly) });
 export interface SpaceIndex {
   rooms: { outer: Vec2[]; holes: Vec2[][] }[];
   solid: Shape[];
-  doorways: Shape[];
+  /** Each doorway's gap and its throat, by the opening's id. */
+  doorways: (Shape & { openingId: string; throat: boolean })[];
   sweeps: Shape[];
   /** In front of each window, kept clear above its sill. */
   windows: (Shape & { sill: number })[];
   placed: Placed[];
   /** Ways being kept clear (a walkway a piece narrowed). */
   keepOut: Shape[];
+  /**
+   * Openings the design adds or moves (not in the level it starts from, or not where they
+   * were): a piece kept where it stands must keep clear of their throats too.
+   */
+  fresh?: ReadonlySet<string>;
 }
 
 /** The index for a space of `level`: its rooms, and walls, windows and doors within a metre. */
@@ -129,7 +135,11 @@ export function spaceIndex(level: Level, geom: PlanGeometry, rooms: string[]): S
         x: f.a.x + f.d.x * u + f.n.x * k,
         y: f.a.y + f.d.y * u + f.n.y * k,
       });
-      return [shape(o.polygon), shape([at(u0, -v), at(u1, -v), at(u1, v), at(u0, v)])];
+      const openingId = o.opening.id;
+      return [
+        { ...shape(o.polygon), openingId, throat: false },
+        { ...shape([at(u0, -v), at(u1, -v), at(u1, v), at(u0, v)]), openingId, throat: true },
+      ];
     })
     .filter(near);
   const sweeps = Object.values(level.openings)
@@ -250,6 +260,26 @@ export function fixedHitOf(
     const high = ix.windows.filter((w) => top > w.sill - FIT.sill);
     if (hit(high, 0.01)) return { kind: 'opening', window: true };
   }
+  return null;
+}
+
+/**
+ * What stops a piece kept where it stands (Want.stays) from staying: outside the rooms, a
+ * wall, a doorway, a door's sweep, a way kept clear. Not the throat of a doorway it stood by
+ * already, as fixedHit has for a new piece (the checks judge the ways past it), but the
+ * throat of one the design adds or moves (`ix.fresh`). Not a window either.
+ */
+export function stayHit(ix: SpaceIndex, kind: FurnitureKind, fp: Vec2[]): Hit | null {
+  if (!inset(fp).every((p) => inRooms(ix, p))) return { kind: 'outside' };
+  if (!blocksFloor(kind)) return null;
+  const box = boxOf(fp);
+  const hit = (shapes: Shape[], depth: number) =>
+    shapes.some((s) => !apart(s.box, box) && overlapDepth(fp, s.poly) > depth);
+  if (hit(ix.solid, 0.01)) return { kind: 'wall' };
+  const doorways = ix.doorways.filter((d) => !d.throat || ix.fresh?.has(d.openingId));
+  if (hit(doorways, 0.01)) return { kind: 'doorway' };
+  if (hit(ix.sweeps, 0.005)) return { kind: 'door' };
+  if (hit(ix.keepOut, 0.01)) return { kind: 'keep-out' };
   return null;
 }
 
@@ -483,6 +513,12 @@ export interface Want {
   ceiling: number;
   /** A piece of the flat's own, brought along. */
   brought: Item | null;
+  /**
+   * `brought` is a piece of the renovation the design starts from (an accepted version's, or
+   * put in by hand) that the answer keeps: it stands where it is, or a few cm off, while it
+   * still fits there; only otherwise is it placed again, like a piece brought along.
+   */
+  stays?: boolean;
 }
 
 export interface PlaceOutcome {

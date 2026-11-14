@@ -110,7 +110,7 @@ test('opens on Exact and renders by itself, on this device: stop, carry on, swit
         keys: {
           gemini: {
             key: 'AIza-not-a-real-key',
-            model: 'gemini-3-pro',
+            model: 'gemini-3.1-pro-preview',
             imageModel: 'gemini-3-pro-image',
           },
         },

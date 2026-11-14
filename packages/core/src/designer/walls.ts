@@ -26,6 +26,8 @@ export interface Note {
   roomId?: string;
   /** Why a piece was left out (computed, never stored): the run report's to-fix hint. */
   code?: DropCode;
+  /** The short id the answer kept the piece by ("P7"), when it kept one. */
+  keep?: string;
   /** The wall a piece needed and the longest the room had, in metres, where known. */
   need?: number;
   longest?: number;
@@ -36,13 +38,16 @@ export type DropCode =
   | 'keep-missing'
   | 'keep-brief'
   | 'keep-in-place'
+  /** On After: it stands in another room, is kept by the household, or was moved by hand. */
+  | 'keep-held'
+  /** A piece of the household's placed once already. */
+  | 'duplicate'
   | 'no-wall'
   | 'no-place'
   | 'outside'
   | 'wet'
   | 'bathroom'
-  | 'not-catalogue'
-  | 'wrong-use';
+  | 'not-catalogue';
 
 export const LOCK_TEXT: Record<WallLock, string> = {
   shelter: 'household shelter walls can’t be changed. HDB doesn’t allow it.',

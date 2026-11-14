@@ -569,6 +569,31 @@ describe('the solver', () => {
       expect(r.checks.filter((c) => c.key.startsWith('P2|apart') && c.hard)).toEqual([]);
     });
 
+    it('the household’s own sofa, brought along, is never swapped for a 2-seat (issue #66)', () => {
+      // As 0.65 m narrower above, but the 3-seat sofa is theirs: the table may still give way.
+      const lvl = withPieces(withEastWall(9.5), [['sofa-3', { x: 7.5, y: 5.45 }, Math.PI]]);
+      const aliases = aliasesFor(lvl);
+      const alias = Object.entries(aliases).find(([, id]) => id === 'it_f000')?.[0];
+      const theirs = {
+        ...sampleLiving,
+        items: sampleLiving.items.map((i) => (i.ref === 'sofa1' ? { ...i, keep: alias } : i)),
+      };
+      const brief = { ...couple, keep: { items: { it_f000: 'bring' as const }, text: '' } };
+      const r = designResult(lvl, lvl, {
+        ...sampleDesign({
+          level: lvl,
+          answers: { [SAMPLE_KEYS.living]: parsed(parseSpaceDesign(theirs, levelBounds(lvl))) },
+          brief,
+          concept: null,
+          id: 'dsn_apart_theirs',
+        }),
+        aliases,
+      });
+      expect(swaps(r).filter((t) => /sofa/.test(t))).toEqual([]);
+      expect(r.level.items.it_f000?.assetId).toBe('sofa-3');
+      expect(r.refs.it_f000).toBe('sofa1');
+    });
+
     it('a sofa swap names the sofa as a sentence would, without what follows a comma', () => {
       const name = (id: string) =>
         sofaName(furnitureKind(id) as NonNullable<ReturnType<typeof furnitureKind>>);

@@ -9,7 +9,7 @@ import { type AliasMap, aliasOf, resolveAlias } from './aliases';
 import { categoriesFor } from './catalogue';
 import { roomNeeds } from './checks';
 import { type ContextInput, designContext } from './describe';
-import { compass } from './describe';
+import { compass, pieceKeep } from './describe';
 import { heldAspects, lockCovers } from './handEdits';
 import { storageBlock } from './lenses/storage';
 import { OUTPUT } from './prices';
@@ -410,7 +410,7 @@ export function roomStep(
         keep:
           held.includes(aspectOf(it)) || kept.ids.has(it.id)
             ? 'in-place'
-            : (ctx.brief.keep.items[it.id] ?? 'leave'),
+            : pieceKeep(ctx.base, ctx.before, it.id, ctx.brief.keep.items),
       };
     })
     .sort((p, q) => (p.id < q.id ? -1 : 1));
@@ -442,7 +442,11 @@ export function roomStep(
 ## Your task: furnish ${JSON.stringify(clean(space.name, 40))}
 Its rooms (data): ${JSON.stringify(rooms)}
 Its wall faces, "face" and openings "along" in metres from each wall's end "a" (data): ${JSON.stringify(faces)}
-Pieces of the household's here (data; "bring" ones you may place again with keep = their id, "in-place" ones stay where they are): ${JSON.stringify(pieces)}
+Pieces of the household's here (data; "bring" ones you may place again with keep = their id${
+    pieces.some((p) => p.keep === 'keep')
+      ? ', "keep" ones (the design so far) stay where they stand when you list them with keep = their id and go when you leave them out'
+      : ''
+  }, "in-place" ones stay where they are): ${JSON.stringify(pieces)}
 ${intent ? `What the layout intends here: ${JSON.stringify(clean(intent, 600))}\n` : ''}${needs.length ? `What it must have (the app checks): ${JSON.stringify(needs)}\n` : ''}${storage}${ways}Choose from these catalogue categories and ids: ${categoriesFor(space.kinds).join(', ')}, and the household's own pieces.
 - v: 2.
 - items: up to ${LIMITS.items} pieces. "ref" is your own short label (bed1). Say what each piece is for; the app places it:

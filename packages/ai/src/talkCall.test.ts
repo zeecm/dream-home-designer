@@ -17,6 +17,7 @@ import { fakePhone } from './fixtures/runner';
 import { anthropicStream } from './fixtures/streams';
 import type { AiSettings } from './providers';
 import { NET_WAITS } from './request';
+import { UNPRICED } from './stream';
 import { type TalkCallResult, talkCall } from './talkCall';
 
 const level = sampleFlatProject('prj_t').levels[0] as Level;
@@ -313,5 +314,19 @@ describe('talkCall', () => {
       if (r.status === 'halted') expect(r.halt.kind).toBe(kind);
       expect(p.calls).toHaveLength(1);
     }
+  });
+
+  it('a model with no price sends nothing (issue #67)', async () => {
+    const p = provider(REPLY_TEXT_FIXTURE);
+    const r = await talkCall({
+      ai: { provider: 'gemini', key: 'AIza-test', model: 'gemini-3-pro' },
+      prompt,
+      parseCtx,
+      signal: new AbortController().signal,
+      fetch: p.fetch,
+    });
+    expect(p.calls).toHaveLength(0);
+    expect(r).toMatchObject({ status: 'halted', halt: { kind: 'unpriced', message: UNPRICED } });
+    expect(r.usage).toEqual([]);
   });
 });

@@ -1,4 +1,5 @@
 import { AiError, type AiSettings, PROVIDERS, type Provider } from '@dhd/ai';
+import type { Price } from '@dhd/core';
 import { useEffect, useRef, useState } from 'react';
 import { icons } from '../ui/icons';
 import {
@@ -11,6 +12,7 @@ import {
   useSavedProviders,
 } from './credentials';
 import { SpendSettings } from './designer/SpendSettings';
+import { useSpend } from './designer/spend';
 import {
   type ModelLists,
   checkPictureModel,
@@ -18,6 +20,7 @@ import {
   listModels,
   modelName,
   recommended,
+  unpricedNote,
 } from './models';
 import { askForJson, inSettings } from './providers';
 
@@ -43,12 +46,16 @@ function choices(
    * swapped for the recommended one by saving again.
    */
   saved: string | undefined,
+  /** The prices in use (list prices, with this browser's own). */
+  prices: Record<string, Price>,
 ): { options: { id: string; label: string }[]; value: string } {
   const listed = lists[kind];
   const ids = listed.map((o) => o.id);
-  const best = recommended(p, kind, ids);
+  const best = recommended(p, kind, ids, prices);
   const label = (id: string, name: string, ...tags: (string | false | undefined)[]) => {
-    const notes = [...tags, kind === 'image' && priceNote(id)].filter(Boolean);
+    // A model for plans with no price: the designer refuses it (it says why).
+    const unpriced = kind === 'text' && unpricedNote(id, prices);
+    const notes = [...tags, kind === 'image' && priceNote(id), unpriced].filter(Boolean);
     return notes.length ? `${name} (${notes.join(', ')})` : name;
   };
   // The recommended one first, then the rest best first.
@@ -168,7 +175,8 @@ export function AiSettingsDialog({
     };
   }, [provider, key]);
 
-  const text = choices(provider, 'text', lists, model, saved?.model);
+  const { prices: priceList } = useSpend();
+  const text = choices(provider, 'text', lists, model, saved?.model, priceList);
   const pictures = makesPictures(provider)
     ? choices(
         provider,
@@ -177,6 +185,7 @@ export function AiSettingsDialog({
         imageModel,
         // A key saved before the choice existed renders with the default: that stays.
         saved ? saved.imageModel || PROVIDERS[provider].imageModel : undefined,
+        priceList,
       )
     : null;
 

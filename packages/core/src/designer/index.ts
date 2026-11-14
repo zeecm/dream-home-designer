@@ -83,6 +83,7 @@ export {
   type StepEstimate,
   estimateRun,
   fixRoundsFor,
+  meteredPrice,
   priceOf,
   tokensOf,
   usdOf,

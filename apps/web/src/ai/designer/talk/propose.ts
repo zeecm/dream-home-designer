@@ -1,4 +1,4 @@
-import { type StepState, blankStep, designerCannotUse, interruptText, runDesign } from '@dhd/ai';
+import { type StepState, blankStep, interruptText, runDesign } from '@dhd/ai';
 import {
   type Conversation,
   DRAFT_CHARS,
@@ -34,7 +34,16 @@ import { useStore } from '../../../store';
 import { aiSettings } from '../../credentials';
 import { browserPage } from '../page';
 import { freshPrice, readPrice, trialResult } from '../results';
-import { addUsage, capUsd, countRun, overLimit, priceTable, spent, usd } from '../spend';
+import {
+  addUsage,
+  cannotDesign,
+  capUsd,
+  countRun,
+  overLimit,
+  priceTable,
+  spent,
+  usd,
+} from '../spend';
 import { type MadeWith, type Running, designOpts, houseKeptFor, useDesigner } from '../state';
 import { cardReportNow, optionCard } from './cards';
 import {
@@ -134,7 +143,7 @@ const replyPlan = (turnId: string): TalkPlan | null => {
 function priceInput(req: PressRequest, designId: string): Omit<PriceInput, 'designs'> | null {
   const conv = useTalk.getState().conv;
   const ai = aiSettings();
-  if (!conv || !ai || designerCannotUse(ai) || levelGone()) return null;
+  if (!conv || !ai || cannotDesign(ai) || levelGone()) return null;
   const project = doc();
   let finish: PriceInput['finish'];
   // What it is placed with: a new design's kept pieces now; finishing an option, its own.
@@ -657,7 +666,7 @@ export async function resumePriced(p: Proposal, letter: string): Promise<Priced>
   const o = p.options.find((x) => x.letter === letter);
   const conv = useTalk.getState().conv;
   const ai = aiSettings();
-  if (!o?.run || !conv || !ai || designerCannotUse(ai) || levelGone()) return null;
+  if (!o?.run || !conv || !ai || cannotDesign(ai) || levelGone()) return null;
   const project = doc();
   return freshPrice({
     project,
