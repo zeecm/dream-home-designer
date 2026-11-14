@@ -31,6 +31,14 @@ export function designLevels<L extends { id: string }>(
 export const beforeId = (id: string) =>
   id.endsWith(AFTER_SUFFIX) ? id.slice(0, -AFTER_SUFFIX.length) : id;
 
+/**
+ * Whether a design starting from `base` starts from the renovation of `before` (After, once a
+ * version was accepted) rather than from the flat as it is. Its pieces are then the design so
+ * far, not the household's own furniture the brief's keep list speaks of.
+ */
+export const startsFromAfter = (base: { id: string }, before: { id: string }) =>
+  base.id === `${before.id}${AFTER_SUFFIX}`;
+
 /** In a recipe: the level with this id, wherever it is; throws if there's none. */
 export function draftLevel(d: Draft<Project>, id: string): Draft<Level> {
   const l = findLevel<Draft<Level>>(d, id);

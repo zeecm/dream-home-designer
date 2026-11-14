@@ -124,6 +124,10 @@ for any plan.
 
 ### In progress
 - Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
+- AI designer after an Accept (issue #66): redesigns keep the pieces you accepted (the bed, the
+  sofa, the fridge) where they stand, and checks missed by a centimetre or two are mended by a
+  small move (PR 1); the model told why a piece couldn't be kept, and the card offering the
+  free fix when the same failures come back (PR 2).
 - AI interior designer v2, slice 3a part B: point at the plan (a piece or a spot, "keep this",
   "why here?", "something else here") with the pointers sent with your message.
 - AI interior designer v2, slice 3b part 2: a second look at each proposal (a picture of the plan

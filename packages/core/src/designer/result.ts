@@ -5,6 +5,7 @@ import { type Delivery, deliverable, deliveryCheck, entranceDoor, partsNote } fr
 import { FLOOR_FINISHES, PAINTS, WALLPAPERS, customPaint } from '../finishes';
 import { type FurnitureKind, furnitureKind, itemFootprint, itemSize } from '../furniture';
 import { placeLabel, pointInPolygon } from '../geometry';
+import { startsFromAfter } from '../levels';
 import { planGeometry } from '../plan';
 import { roomShapes } from '../rooms';
 import { ElecPoint } from '../schema';
@@ -22,6 +23,7 @@ import { BED_ACCESS } from './checks';
 import { bathroomsHeld, heldAspects, wallsHeld } from './handEdits';
 import { type LensId, type Steer, steerFor, steerOnly } from './lenses';
 import { WET } from './locks';
+import { nudgeNearMisses, nudgeable, shortOf } from './nudge';
 import {
   type SpaceIndex,
   type Want,
@@ -219,6 +221,8 @@ export const designResultKey = (
     design.id,
     levelFingerprint(baseLevel),
     levelFingerprint(beforeLevel),
+    // On After or on the flat as it is (the same rooms fingerprint alike after a partial accept).
+    startsFromAfter(baseLevel, beforeLevel),
     hash(stableJson(design)),
     hash(stableJson(opts)),
   ].join('|');
@@ -266,6 +270,8 @@ function work(
   const notes: Note[] = (concept?.notes ?? []).map((text) => ({ text }));
   const start = settled(baseLevel);
   const before = settled(beforeLevel);
+  /** Designing on After: the pieces it has are the design so far. */
+  const fromAfter = startsFromAfter(baseLevel, beforeLevel);
   // Parts the person changed by hand since accepting stay as the plan has them.
   const locks = design.request?.locks;
   const held = (rooms: readonly string[]) => heldAspects(locks, rooms);
@@ -358,6 +364,21 @@ function work(
 
   // 3. Spaces, and which stored answer each takes.
   const named = settled(lvl);
+  /** Openings the design adds or moves: a piece kept where it stands keeps out of their way. */
+  const freshOpenings = new Set(
+    Object.values(named.openings)
+      .filter((o) => {
+        const was = start.openings[o.id];
+        return (
+          !was ||
+          was.wallId !== o.wallId ||
+          was.kind !== o.kind ||
+          Math.abs(was.t - o.t) > 1e-6 ||
+          Math.abs(was.width - o.width) > 1e-6
+        );
+      })
+      .map((o) => o.id),
+  );
   const spaces = spacesOf(named);
   const stored = Object.entries(design.spaces);
   const taken = new Set<string>();
@@ -398,6 +419,8 @@ function work(
   const placedNew = new Set<string>();
   const usedIds = new Set<string>();
   const placedBrought = new Set<string>();
+  /** The pieces answers keep or bring, each once (a second "keep" of it is left out). */
+  const claimed = new Set<string>();
   for (const s of spaces) {
     const key = storedFor(s);
     if (key) taken.add(key);
@@ -437,6 +460,9 @@ function work(
     for (const it of Object.values(lvl.items)) {
       if (!inRooms(s.rooms, centreOf(it))) continue;
       if (brief.keep.items[it.id] === 'in-place' || keptIds.has(it.id)) continue;
+      // Never what this design placed already, in a space before (a kept bed a wall moved by
+      // hand now crosses into this room is the other room's again).
+      if (placedNew.has(it.id) || placedBrought.has(it.id)) continue;
       if (keepAs.includes(aspectOf(it))) continue;
       if (WET_PIECES.has(it.assetId)) {
         if (!replaces.has(it.assetId)) continue;
@@ -445,6 +471,7 @@ function work(
       delete lvl.items[it.id];
     }
     const ix = spaceIndex(named, geom, s.rooms);
+    ix.fresh = freshOpenings;
     for (const it of Object.values(lvl.items)) {
       const kind = furnitureKind(it.assetId);
       if (kind && inRooms(s.rooms, centreOf(it))) addToIndex(ix, it, kind);
@@ -504,6 +531,15 @@ function work(
       const fixedKey = ix.placed.map(
         (p) => `${p.id}:${p.fp.map((q) => q.x.toFixed(3) + q.y.toFixed(3)).join()}`,
       );
+      // The pieces it keeps, as they stand (one kept where it is moved by hand solves again).
+      for (const w of wants) {
+        const b = w.brought;
+        if (b) {
+          fixedKey.push(
+            `${w.id}~${stableJson([b.assetId, b.position, b.rotationY, b.scale, !!w.stays])}`,
+          );
+        }
+      }
       // What the lenses ask of the solver here (a short bedroom keeps its wardrobe): weights
       // only, from the level as this space is about to be furnished, and only for the roles
       // the answer has (a space with none solves as it would with no lens).
@@ -723,8 +759,10 @@ function work(
       return null;
     };
     let brought: Item | null = null;
+    let stays = false;
     let kind: FurnitureKind | null;
     if (a.keep) {
+      // Kept by its alias in the level the design starts from (After, once a version is in).
       const id = resolveAlias(aliases, a.keep);
       const it = id ? start.items[id] : undefined;
       if (!id || !it) return leftOut(`“${a.ref}”: there’s no piece “${a.keep}” in the flat.`);
@@ -732,7 +770,28 @@ function work(
       kind = furnitureKind(it.assetId) ?? null;
       const what = kind ? nameOf(kind) : 'piece';
       if (how === 'in-place') return leftOut(`Your ${what} stays where it is, as the brief says.`);
-      if (how !== 'bring') return leftOut(`Your ${what}: the brief leaves it out.`);
+      // The brief's keep list is about the household's furniture in the flat as it is. On After
+      // the other pieces are the design so far: one the answer keeps stays where it stands, if
+      // it stands in this space and nothing else holds it there.
+      if (!fromAfter && how !== 'bring') return leftOut(`Your ${what}: the brief leaves it out.`);
+      stays = fromAfter && how !== 'bring';
+      if (stays) {
+        // In this space, if any of it is (a wall moved by hand since may cross it).
+        const fp = inset(itemFootprint(it, kind ?? undefined));
+        const mid = (p: Vec2, q: Vec2) => ({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
+        const probes = [
+          centreOf(it),
+          ...fp,
+          ...fp.map((p, i) => mid(p, fp[(i + 1) % fp.length] as Vec2)),
+        ];
+        if (!probes.some((p) => inRooms(ctx.s.rooms, p))) {
+          return leftOut(`Your ${what} stands in another room: it stays there.`);
+        }
+        if (keptIds.has(id)) return leftOut(`Your ${what} is kept where it is, as you asked.`);
+        if (held(ctx.s.rooms).includes(aspectOf(it))) {
+          return leftOut(`Your ${what} stays as you changed it by hand.`);
+        }
+      }
       brought = it;
     } else {
       kind = resolveAsset(a.assetId, opts.models);
@@ -759,9 +818,13 @@ function work(
     } else {
       [w, d, h] = [clamp(a.width, k.size.w), clamp(a.depth, k.size.d), clamp(a.height, k.size.h)];
     }
-    const wallId = resolveAlias(aliases, a.wall);
+    // Answers of version 1 place by coordinates: a piece kept from After goes where it stands
+    // (placePiece moves it a little if it must).
+    const here =
+      stays && !ctx.v2 && brought ? { at: centreOf(brought), r: brought.rotationY } : null;
+    const wallId = here ? null : resolveAlias(aliases, a.wall);
     let face = wallId ? (ctx.faces.find((f) => f.wallId === wallId) ?? null) : null;
-    if (a.wall && !face && !ctx.v2) {
+    if (a.wall && !face && !ctx.v2 && !here) {
       if (!k.againstWall && !k.carpentry && a.at === null) {
         return leftOut(`The ${nameOf(k)}: ${a.wall} isn’t a wall of ${ctx.s.name}.`);
       }
@@ -772,7 +835,7 @@ function work(
       });
       face = null;
     }
-    const free = !face && a.at !== null;
+    const free = !face && (a.at !== null || !!here);
     if (!face && !free && !k.againstWall && !k.carpentry && !ctx.v2) {
       return leftOut(`The ${nameOf(k)}: the designer didn’t say where it goes.`);
     }
@@ -797,9 +860,10 @@ function work(
         return leftOut(wetText(k.id));
       }
     }
-    if (brought && placedBrought.has(brought.id)) {
+    if (brought && (placedBrought.has(brought.id) || claimed.has(brought.id))) {
       return leftOut(`Your ${nameOf(k)} is placed once already; left out here.`);
     }
+    if (brought) claimed.add(brought.id);
     let id = brought?.id ?? seededId('it', design.id, ctx.key, a.ref);
     if (!brought) {
       for (let n = 2; usedIds.has(id); n++) id = seededId('it', design.id, ctx.key, a.ref, n);
@@ -815,10 +879,11 @@ function work(
       face,
       faces: free && !ctx.v2 ? [] : ctx.byLength,
       along: a.along,
-      at: free || ctx.v2 ? a.at : null,
-      rotation: rotationOf(a.rotation ?? 0),
+      at: here ? here.at : free || ctx.v2 ? a.at : null,
+      rotation: here ? here.r : rotationOf(a.rotation ?? 0),
       ceiling: lvl.ceilingHeight,
       brought,
+      ...(stays ? { stays } : {}),
       priority: priorityOf(k),
     };
   }
@@ -838,7 +903,7 @@ function work(
   // from the main door (or to a bed) is moved off it where it can be, else left for the
   // checks to say.
   const resolves: DesignResult['resolves'] = [];
-  const walked =
+  let walked =
     opts.walkways === false
       ? null
       : keepWalkwaysClear(lvl, runs, repaired, resolves, {
@@ -851,6 +916,48 @@ function work(
                 .map((c) => c.key),
             ),
         });
+  // Near misses: a check the version fails by a centimetre or two (a walkway at 0.89 m of
+  // 0.90 m) is mended by moving one of its pieces a few cm, where that leaves nothing else
+  // failing, rather than shown or sent back.
+  // Looked for first in the walkways as last checked and the room to use each piece (cheap),
+  // and only then in the whole checks.
+  const nearMiss =
+    opts.walkways !== false &&
+    (!walked ||
+      walked.issues.some((i) => shortOf(i, lvl) !== null) ||
+      clearanceIssues(lvl).some((i) => shortOf(i, lvl) !== null));
+  if (nearMiss) {
+    const movable = nudgeable(resultSpaces, new Set([...placedNew, ...placedBrought]), keptIds);
+    const nudges = nudgeNearMisses(lvl, movable, (l) =>
+      designChecks({ ...l, items: { ...l.items } }, { brief, uses, ...rulesOpt }).filter(
+        (c) => c.hard,
+      ),
+    );
+    if (nudges.length) walked = null;
+    const theName = (id: string | undefined) => {
+      const it = id ? lvl.items[id] : undefined;
+      const kind = it && furnitureKind(it.assetId);
+      return kind ? `the ${nameOf(kind)}` : 'the piece';
+    };
+    for (const n of nudges) {
+      const space = resultSpaces.find((s) => s.items.includes(n.itemId))?.key;
+      const cm = Math.round(n.by * 100);
+      const what = theName(n.itemId);
+      const why = n.with
+        ? `with ${theName(n.with)}`
+        : n.key.startsWith('P3|')
+          ? 'to keep the way clear'
+          : n.owner
+            ? `to leave ${theName(n.owner)} the room it needs`
+            : 'to keep the room it needs';
+      repaired.push({
+        text: `Moved ${what} ${cm} cm ${why}.`,
+        itemId: n.itemId,
+        ...(refs[n.itemId] ? { ref: refs[n.itemId] } : {}),
+        ...(space ? { space } : {}),
+      });
+    }
+  }
   // The notes of each space solved by intent, as finally placed.
   for (const run of runs) {
     if (!run.outcome) continue;
