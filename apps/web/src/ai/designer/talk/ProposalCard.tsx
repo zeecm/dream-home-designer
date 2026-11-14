@@ -8,6 +8,7 @@ import {
   defaultTicks,
   keptHolds,
   mergeChanges,
+  mergeLines,
   peopleWords,
   spentOf,
   subsetReport,
@@ -397,6 +398,22 @@ function ResumeNote({
       </div>
     </div>
   );
+}
+
+/**
+ * Accept's question, counted as the card counts (one line a failure as the person reads it):
+ * "Accept anyway? 1 problem: 4 dining chairs aren't at a table".
+ */
+function askLine(checks: readonly ResultCheck[], brief: CardModel['input']['brief']): string {
+  const lines = mergeLines(
+    checks.map((c) => ({
+      key: c.key,
+      text: c.text,
+      says: peopleWords(c.text, brief),
+      roomId: c.roomId ?? null,
+    })),
+  );
+  return `Accept anyway? ${plural(lines.length, 'problem')}: ${lines.map((l) => l.says.replace(/\.$/, '')).join('; ')}`;
 }
 
 /** What a folded card last said of itself (its checks need the plan worked out again). */
@@ -1090,10 +1107,7 @@ export const ProposalCard = memo(function ProposalCard({
                           ))}
                           {confirm === c.id && (
                             <div className="talk-confirm notice-warning">
-                              <p>
-                                Accept anyway? {plural(fail.length, 'problem')}:{' '}
-                                {fail.map((f) => f.text).join('; ')}
-                              </p>
+                              <p>{askLine(fail, card.input.brief)}</p>
                               <div className="button-row">
                                 <button
                                   type="button"
@@ -1153,12 +1167,19 @@ export const ProposalCard = memo(function ProposalCard({
                     : ''
               }
             >
-              {failingLine?.tone === 'pass' && <Mark kind="check" />}
-              {verdict}
+              {failingLine?.tone === 'pass' && !extras.length && <Mark kind="check" />}
+              {/* The version passes, what is ticked doesn't: said plainly, never ✓ over red. */}
+              {failingLine?.tone === 'pass' && extras.length
+                ? 'The design passes as a whole'
+                : verdict}
               {lead && rep.failures.length > 0 && <span className="muted"> · listed above</span>}
               {extras.length > 0 && (
                 <div className="talk-ticked-extra" data-ticked-extra="">
-                  <p className="negative">What you ticked also fails, together:</p>
+                  <p className="negative">
+                    {rep.failures.length
+                      ? 'What you ticked also fails, together:'
+                      : 'What you ticked fails, together:'}
+                  </p>
                   <ul className="talk-room-fails">
                     {extras.map((c) => (
                       <li key={c.key} className="negative">
@@ -1297,10 +1318,7 @@ export const ProposalCard = memo(function ProposalCard({
                     .join('; ')}
                 </p>
               ) : (
-                <p>
-                  Accept anyway? {plural(asking.checks.length, 'problem')}:{' '}
-                  {asking.checks.map((c) => c.text).join('; ')}
-                </p>
+                <p>{askLine(asking.checks, card.input.brief)}</p>
               )}
               <div className="button-row">
                 {!asking.hdb && (

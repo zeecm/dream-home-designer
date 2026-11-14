@@ -19,6 +19,7 @@ import {
   leftOutLines,
   leftSig,
   manyOf,
+  mergeLines,
   peopleWords,
   readyLine,
   reportLine,
@@ -197,6 +198,24 @@ describe('runReport (criterion 1)', () => {
 });
 
 describe('merging lines', () => {
+  it('the same words in two rooms are two lines; one room’s, one', () => {
+    const t = (key: string, roomId: string) => ({
+      key,
+      text: 'The dining chair isn’t at a table.',
+      says: 'The dining chair isn’t at a table.',
+      roomId,
+    });
+    const lines = mergeLines([
+      t('P2|belongs|a', 'r1'),
+      t('P2|belongs|b', 'r1'),
+      t('P2|belongs|c', 'r2'),
+    ]);
+    expect(lines.map((l) => l.says)).toEqual([
+      '2 dining chairs aren’t at a table.',
+      'The dining chair isn’t at a table.',
+    ]);
+  });
+
   it('pieces said many times', () => {
     expect(manyOf('The dining chair isn’t at a table.', 4)).toBe(
       '4 dining chairs aren’t at a table.',
@@ -371,9 +390,7 @@ describe('the card’s lead and the app’s lines (criterion 8’s copy)', () =>
           { outcome: 'no-better', before: 1, after: 2 },
         ]),
       ]),
-    ).toEqual([
-      'Main bedroom · fix round 1: 3 → 1 problem · fix round 2: still 2 problems, not used',
-    ]);
+    ).toEqual(['Main bedroom · fix round 1: 3 → 1 problem · fix round 2: no better, not used']);
   });
 
   it('the announcement and the line in place of an emptied reply, from the one list', () => {
@@ -425,6 +442,19 @@ describe('the card’s lead and the app’s lines (criterion 8’s copy)', () =>
       [true, false],
       [false, true],
     ]);
+    // A piece left out, named by the failure it caused: never "Fixed" while that failure
+    // stands, even when the next answer simply leaves the piece out of its list.
+    const l1 = tableEntries(rep).find((e) => e.id === 'L1');
+    if (!l1) throw new Error('fixture');
+    expect(l1.sig.split(' ')).toEqual([
+      'L|rm_main-bedroom|bed-queen',
+      'P1|bed|rm_main-bedroom|adult-1',
+      'P1|bed|rm_main-bedroom|adult-2',
+    ]);
+    const asL = { ...l1, change: 'a new queen bed' };
+    const bedStillOut = { ...rep, leftOut: [] };
+    expect(addressedIn([asL], bedStillOut)[0]?.done).toBe(false);
+    expect(addressedIn([asL], { ...rep, leftOut: [], failures: [] })[0]?.done).toBe(true);
     // Half of the couple still without a bed: not done.
     const half = runReport(r, d, { waived: ['P1|bed|rm_main-bedroom|adult-1'] });
     expect(addressedIn([{ id: 'F1', sig: f1.sig, says: '', change: '' }], half)[0]?.done).toBe(

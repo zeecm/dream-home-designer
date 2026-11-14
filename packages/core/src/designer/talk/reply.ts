@@ -70,13 +70,26 @@ const CANT = new RegExp(
 /** "I don't have access to the check results." */
 const NO_ACCESS =
   /\bI\s+(?:do(?:n['’]t|\s+not)\s+have|have\s+no)\s+(?:any\s+)?access\s+to\s+(?:the\s+|its\s+)?(?:checks?|check\s+results|results)\b/i;
-/** What run, see, access and perform must be about to be a claim about the checks. */
+/** What a checking verb must be about to be a claim about the checks (not the lift's size). */
 const ABOUT_CHECKS =
   /\b(?:checks|checked|checking|check\s+results|results|before\s+(?:you|they)\s+see|in\s+the\s+background)\b/i;
-/** What the designer may honestly say it can't check: what the app doesn't cover. */
-const NOT_THE_APP =
-  /\b(?:beams?|ceilings?|plumbing|pipes?|wiring|electrical|structur\w*|asbestos|hacking|cabling|termites?|leaks?)\b/i;
+/** Check, verify and test about the design itself: the checks, the layout, whether it passes. */
+const ABOUT_DESIGN =
+  /\b(?:the\s+checks?|checks|check\s+results|results|the\s+(?:design|layout|proposal)|whether\s+(?:it|they|this|that|the\s+\w+)\s+pass(?:es)?|before\s+(?:you|they)\s+see)\b/i;
+/** Or a bare "it", "them", "this" or "that" ending the sentence ("I can't check it."). */
+const BARE_OBJECT = /^\s*(?:it|them|this|that)\s*[.!?"”’)]*\s*$/i;
 const BEFORE_YOU_SEE = /\bbefore\s+(?:you|they)\s+see\b/i;
+
+/** A signature list kept within the record's 300 characters, whole signatures only. */
+function sigCut(sig: string): string {
+  let out = '';
+  for (const s of sig.split(' ')) {
+    const next = out ? `${out} ${s}` : s;
+    if (next.length > 300) break;
+    out = next;
+  }
+  return out;
+}
 
 /** Whether a sentence is a claim the filter takes out. */
 export function cantClaim(sentence: string): boolean {
@@ -86,12 +99,14 @@ export function cantClaim(sentence: string): boolean {
   const verb = (m[1] ?? '').toLowerCase();
   const rest = sentence.slice(m.index + m[0].length);
   if (verb === 'fix') return BEFORE_YOU_SEE.test(rest);
-  if (verb === 'check' || verb === 'verify' || verb === 'test') return !NOT_THE_APP.test(rest);
+  if (verb === 'check' || verb === 'verify' || verb === 'test') {
+    return ABOUT_DESIGN.test(rest) || BARE_OBJECT.test(rest);
+  }
   return ABOUT_CHECKS.test(rest);
 }
 
 /** Abbreviations whose full stop doesn't end a sentence ("e.g. a 1.2 m desk"). */
-const ABBREV = /\b(?:e\.g|i\.e|etc|vs|approx|incl|cf|no|mr|mrs|ms|dr|st)$/i;
+const ABBREV = /\b(?:e\.g|i\.e|etc|vs|approx|incl|cf|mr|mrs|ms|dr|st)$/i;
 
 /**
  * A text cut into its sentences, each with what follows it up to the next (spaces, line breaks
@@ -403,7 +418,9 @@ function planOf(raw: unknown, ctx: TalkParseContext, lines: string[]): TalkPlan 
           const id = typeof a?.id === 'string' ? a.id.trim().toUpperCase() : '';
           const e = table.entries.find((x) => x.id === id);
           const change = asStr(a?.change, REPLY_LIMITS.change);
-          return e && change ? [{ id: e.id, sig: e.sig, says: cut(e.says, 200), change }] : [];
+          return e && change
+            ? [{ id: e.id, sig: sigCut(e.sig), says: cut(e.says, 200), change }]
+            : [];
         })
         .filter((a, i, all) => all.findIndex((b) => b.id === a.id) === i)
         .slice(0, REPLY_LIMITS.addresses)

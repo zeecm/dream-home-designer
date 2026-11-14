@@ -258,6 +258,56 @@ const kindName = (assetId: string | null) => {
   return k ? pieceWords(k.name).toLowerCase() : 'piece';
 };
 
+/** What `mergeLines` groups: a check's key and words, its room and its cause. */
+export interface Mergeable {
+  key: string;
+  /** The app's words. */
+  text: string;
+  /** The person's words. */
+  says: string;
+  roomId: string | null;
+  cause?: string | null;
+}
+
+/**
+ * Failures as the person reads them, one line each, ordered by severity (the run report's lines,
+ * and Accept's question): people of one room, one check and one cause together ("You and
+ * Partner have no bed in Main bedroom"); the same words on several pieces of one room together
+ * ("4 dining chairs aren't at a table").
+ */
+export function mergeLines<T extends Mergeable>(
+  items: readonly T[],
+  roomName: (t: T) => string | null = () => null,
+): { first: T; g: T[]; says: string; text: string }[] {
+  const groups = new Map<string, T[]>();
+  const codeOf = (t: T) => t.key.split('|').slice(0, 2).join('|');
+  const isPeople = (t: T) => /^P1\|(bed|unplaced)$/.test(codeOf(t));
+  for (const t of items) {
+    const k = isPeople(t)
+      ? `${codeOf(t)}|${t.roomId ?? ''}|${t.cause ?? ''}|${t.says.replace(/^.+? (has|have) /, '')}`
+      : `${codeOf(t)}|${t.roomId ?? ''}|${t.says}`;
+    groups.set(k, [...(groups.get(k) ?? []), t]);
+  }
+  const merged = [...groups.values()].map((g) => {
+    const first = g[0] as T;
+    const n = g.length;
+    const words = (f: (t: T) => string) =>
+      n < 2
+        ? f(first)
+        : isPeople(first)
+          ? (mergePeople(g.map(f)) ?? f(first))
+          : manyOf(f(first), n);
+    return { first, g, says: words((t) => t.says), text: words((t) => t.text) };
+  });
+  return merged.sort(
+    (p, q) =>
+      severity(p.first.key) - severity(q.first.key) ||
+      (roomName(p.first) ?? '').localeCompare(roomName(q.first) ?? '') ||
+      p.says.localeCompare(q.says) ||
+      (p.first.key < q.first.key ? -1 : 1),
+  );
+}
+
 interface One {
   c: ResultCheck;
   roomId: string | null;
@@ -362,35 +412,9 @@ export function runReport(
     });
   }
 
-  // One line a failure as the person reads it: people of one room, one check and one cause
-  // together; the same words on several pieces together.
-  const groups = new Map<string, One[]>();
-  for (const o of ones) {
-    const people = o.code === 'bed' || o.code === 'unplaced';
-    const k = people
-      ? `${o.c.principle}|${o.code}|${o.roomId ?? ''}|${o.cause ?? ''}|${o.says.replace(/^.+? (has|have) /, '')}`
-      : `${o.c.principle}|${o.code}|${o.says}`;
-    groups.set(k, [...(groups.get(k) ?? []), o]);
-  }
-  const merged = [...groups.values()].map((g) => {
-    const first = g[0] as One;
-    const n = g.length;
-    const people = first.code === 'bed' || first.code === 'unplaced';
-    const words = (f: (o: One) => string) =>
-      n < 2 ? f(first) : people ? (mergePeople(g.map(f)) ?? f(first)) : manyOf(f(first), n);
-    return {
-      first,
-      g,
-      says: words((o) => o.says),
-      text: words((o) => o.c.text),
-    };
-  });
-  merged.sort(
-    (p, q) =>
-      severity(p.first.c.key) - severity(q.first.c.key) ||
-      (p.first.room ?? '').localeCompare(q.first.room ?? '') ||
-      p.says.localeCompare(q.says) ||
-      (p.first.c.key < q.first.c.key ? -1 : 1),
+  const merged = mergeLines(
+    ones.map((o) => ({ ...o, key: o.c.key, text: o.c.text })),
+    (o) => o.room,
   );
   const failures = merged.map(({ first, g, says, text }, i): ReportFailure => {
     const id = `F${i + 1}`;
@@ -398,8 +422,8 @@ export function runReport(
     if (l && !l.causes) l.causes = id;
     return {
       id,
-      key: first.c.key,
-      keys: g.map((o) => o.c.key),
+      key: first.key,
+      keys: g.map((o) => o.key),
       sig: [...new Set(g.map((o) => o.sig))].join(' '),
       text,
       says,
@@ -454,11 +478,15 @@ export function tableEntries(rep: RunReport): { id: string; sig: string; says: s
   const byId = new Map(rep.failures.map((f) => [f.id, f]));
   return [
     ...rep.failures.slice(0, REPORT_MAX).map((f) => ({ id: f.id, sig: f.sig, says: f.says })),
-    ...rep.leftOut.slice(0, REPORT_MAX).map((l) => ({
-      id: l.id,
-      sig: leftSig(l),
-      says: (l.causes && byId.get(l.causes)?.says) || l.says,
-    })),
+    ...rep.leftOut.slice(0, REPORT_MAX).map((l) => {
+      // Named by the failure it causes, and fixed only when that failure is gone too.
+      const f = l.causes ? byId.get(l.causes) : undefined;
+      return {
+        id: l.id,
+        sig: f ? `${leftSig(l)} ${f.sig}` : leftSig(l),
+        says: f?.says || l.says,
+      };
+    }),
   ];
 }
 
@@ -610,7 +638,7 @@ export function roundLines(rooms: readonly ReportRoom[]): string[] {
         case 'fixed':
           return `fix round ${k}: ${x.before} → ${plural(x.after, 'problem')}`;
         case 'no-better':
-          return `fix round ${k}: still ${plural(x.after, 'problem')}, not used`;
+          return `fix round ${k}: no better, not used`;
         case 'cut-off':
           return `fix round ${k}: cut off at the length limit, not used`;
         case 'refused':
@@ -680,13 +708,13 @@ export function addressedIn(
 ): { says: string; change: string; done: boolean; left: boolean }[] {
   const failing = new Set(rep.failures.flatMap((f) => f.sig.split(' ')));
   const out = new Set(rep.leftOut.map(leftSig));
-  return addresses.map((a) => {
-    const left = a.id.startsWith('L');
-    return {
-      says: a.says,
-      change: a.change,
-      left,
-      done: left ? !out.has(a.sig) : !a.sig.split(' ').some((s) => failing.has(s)),
-    };
-  });
+  // Each signature it carries: a piece left out (L|…) or a failure's member; done when none is
+  // left (a piece left out named by the failure it caused carries both).
+  const remains = (sig: string) => (sig.startsWith('L|') ? out.has(sig) : failing.has(sig));
+  return addresses.map((a) => ({
+    says: a.says,
+    change: a.change,
+    left: a.id.startsWith('L'),
+    done: !a.sig.split(' ').some(remains),
+  }));
 }

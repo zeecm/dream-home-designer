@@ -8743,6 +8743,10 @@ html[data-proposal] .elec-warn circle {
     display: flex;
     align-items: center;
   }
+  .talk summary,
+  .talk-names summary {
+    -webkit-tap-highlight-color: transparent;
+  }
   /* A flex summary loses its marker: a chevron in its place, turned while open. */
   .talk summary::before,
   .talk-names summary::before {

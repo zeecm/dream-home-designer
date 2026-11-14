@@ -121,6 +121,8 @@ export {
   leadLine,
   leadParts,
   leftSig,
+  mergeLines,
+  type Mergeable,
   leftOutLines,
   manyOf,
   peopleWords,

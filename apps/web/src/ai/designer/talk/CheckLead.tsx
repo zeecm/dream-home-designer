@@ -95,10 +95,17 @@ export function SetOutToFix({
   report: RunReport;
 }) {
   if (!addresses.length) return null;
-  // A piece left out and the failure it causes may both be named: one row for the two.
-  const rows = addressedIn(addresses, report).filter(
-    (a, i, all) => all.findIndex((b) => b.says === a.says) === i,
-  );
+  // A piece left out and the failure it causes may both be named: one row for the two, done
+  // only when both are (the failure's warning never hidden behind the piece's tick).
+  const rows: ReturnType<typeof addressedIn> = [];
+  for (const a of addressedIn(addresses, report)) {
+    const same = rows.find((b) => b.says === a.says);
+    if (!same) rows.push({ ...a });
+    else {
+      same.done &&= a.done;
+      same.left &&= a.left;
+    }
+  }
   return (
     <section className="talk-set-out" aria-label="What this design set out to fix">
       <h4 className="talk-set-out-head">What this design set out to fix</h4>

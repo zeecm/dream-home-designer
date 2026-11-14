@@ -233,6 +233,8 @@ describe('the claims filter (criterion 6, as the lead fixed it)', () => {
     'I do not have access to the check results.',
     // QA M2: verify governed by the inability.
     'I am not able to verify the design.',
+    'I can’t check whether it passes before you see it.',
+    'I can’t verify it.',
     // A decimal point inside a removed sentence doesn't split it.
     'I can’t run the checks on the 0.9 m walkway before you see it.',
   ];
@@ -252,6 +254,9 @@ describe('the claims filter (criterion 6, as the lead fixed it)', () => {
     'A smaller piece, e.g. a 1.2 m desk, fits under the window.',
     // What the app doesn't cover, said honestly.
     'I can’t check the beam depth from the plan; your ID should.',
+    'I can’t check the lift size, so please measure it before ordering.',
+    'I can’t verify the exact product dimensions of that IKEA sofa.',
+    'I can’t test how the colour looks in your light.',
   ];
 
   it('takes out each banned sentence, and keeps the rest', () => {
@@ -277,6 +282,11 @@ describe('the claims filter (criterion 6, as the lead fixed it)', () => {
         'I can’t run the checks on the 0.9 m walkway before you see it. I’ll widen it to 1.0 m.',
       ),
     ).toEqual({ say: 'I’ll widen it to 1.0 m.', removed: 1 });
+    // "no" isn't an abbreviation: "I'd say no." stays a sentence of its own.
+    expect(filterClaims('I’d say no. I can’t run the checks myself. The bed goes back.')).toEqual({
+      say: 'I’d say no. The bed goes back.',
+      removed: 1,
+    });
     // Lines and paragraphs stay as they were.
     expect(filterClaims('First line.\nI can’t run the checks myself.\nLast line.').say).toBe(
       'First line.\nLast line.',
@@ -376,6 +386,21 @@ describe('plan.addresses (criterion 7, core)', () => {
       },
     ]);
     expect(r.ok && r.reply.plan?.unaddressed).toBeUndefined();
+  });
+
+  it('a long signature is kept within the record, whole signatures only (never dropping it)', () => {
+    const long = Array.from({ length: 30 }, (_, i) => `P2|belongs|rm_living|chair-${i}`).join(' ');
+    const r = parseTalkReply(
+      {
+        ...REPLY_PLAN,
+        plan: { ...REPLY_PLAN.plan, addresses: [{ id: 'F1', change: 'a table for the chairs' }] },
+      },
+      ctx({ title: 'V8', failing: 1, entries: [{ id: 'F1', sig: long, says: 'Chairs' }] }),
+    );
+    const sig = r.ok ? (r.reply.plan?.addresses?.[0]?.sig ?? '') : '';
+    expect(sig.length).toBeLessThanOrEqual(300);
+    expect(long.startsWith(sig)).toBe(true);
+    expect(sig.endsWith('chair-')).toBe(false);
   });
 
   it('none after a failing design: the plan says so; no table, nothing either way', () => {

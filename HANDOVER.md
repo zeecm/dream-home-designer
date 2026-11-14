@@ -817,6 +817,11 @@ in the count. The filter splits sentences only at a stop followed by a space (ne
 refused, busy, network, limit), so a round reads cut off, declined or "didn't go through", never
 guessed from the error text. An emptied reply shows the app's line in its place with its cost
 (`talk.appLine`). Phone disclosures in the panel get a chevron (a flex `summary` has no marker).
+Re-review: a plan's L address named by the failure it caused carries that failure's
+signatures too, so it never reads "Fixed" while the failure stands; check, verify and test are
+claims only about the checks, the design or "it" ("I can't check the lift size" stays); Accept's
+question counts with the same `mergeLines`; a round with no progress reads "no better" (no
+count).
 
 **AI costs always have a figure (#67, 14 Nov).** The owner's Gemini 3 runs had no price, so no
 cost card had a figure and neither the approved figure nor the tab's limit held.
