@@ -27,17 +27,22 @@ import { clean } from './util';
  * exactly as before.
  */
 
-/** The roles that meet each must-have check, by its code. */
-const MEETS: Record<string, readonly string[]> = {
-  bed: ['bed'],
-  seats: ['sofa', 'armchair'],
-  dining: ['dining-table', 'dining-chair', 'stool'],
-  desks: ['desk'],
+/**
+ * The piece that heads each must-have, by its check's code: the one whose decline waives it. A
+ * supporting piece declined (a dining chair, an armchair) only stops the app adding that piece
+ * again; the must-have itself is still fixed, reported and asked about (tech lead S2).
+ */
+const HEADS: Record<string, string> = {
+  bed: 'bed',
+  seats: 'sofa',
+  dining: 'dining-table',
+  desks: 'desk',
 };
 
 /**
  * Whether a must-have check (`P1|bed|room|…`) is one the person chose (a Decision: they left
- * the app's bed out of that room): theirs, never a failure to fix there.
+ * the app's bed out of that room): theirs, never a failure to fix there. A decline lasts for
+ * that room until its Decision is deleted.
  */
 export function isDeclined(
   key: string,
@@ -45,8 +50,8 @@ export function isDeclined(
   declined: readonly { room: string; role: string }[],
 ): boolean {
   const [principle, code] = key.split('|');
-  const roles = principle === 'P1' && code ? MEETS[code] : undefined;
-  return !!roles && declined.some((d) => d.room === roomId && roles.includes(d.role));
+  const head = principle === 'P1' && code ? HEADS[code] : undefined;
+  return !!head && declined.some((d) => d.room === roomId && d.role === head);
 }
 
 /** The ref prefix of the app's own pieces. A model's ref never has it (`parseSpaceDesign`). */
@@ -443,7 +448,13 @@ export function freeEssentials(
     const wants = coupleBeds(
       failing.flatMap((c) => essentialsFor(c, r, s.rooms, answer, current.brief, ref)),
       current.brief,
-    ).filter((w) => !declined.has(`${w.roomId}|${w.role}`) && !appRoles.has(w.role));
+    ).filter(
+      (w) =>
+        // Never a piece they left out there, nor what goes with a must-have they declined.
+        !declined.has(`${w.roomId}|${w.role}`) &&
+        !isDeclined(w.key, w.roomId, o.declined ?? []) &&
+        !appRoles.has(w.role),
+    );
     if (!wants.length) continue;
     // Two tries at most: every missing essential together, then the one that matters most
     // alone (beds, then seats, a dining table, desks) with what goes with it.

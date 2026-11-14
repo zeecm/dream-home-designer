@@ -196,6 +196,7 @@ function priceInput(req: PressRequest, designId: string): Omit<PriceInput, 'desi
     opts: designOpts(project, designLevelId(), made),
     ai: { provider: ai.provider, model: ai.model },
     prices: priceTable(),
+    ...(declinedPieces().length ? { declined: declinedPieces() } : {}),
   };
 }
 
@@ -216,6 +217,8 @@ function priceKey(req: PressRequest): string | null {
     levels?.after ? levelFingerprint(levels.after) : null,
     // The storage meter's setting: the room steps' storage block (and the results) read it.
     meterSetting(doc().id),
+    // What the person left out (the room steps are told).
+    declinedPieces(),
     designs.map((d) => [d.id, d.accepted?.at ?? null]),
     useTalk
       .getState()

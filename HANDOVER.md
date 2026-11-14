@@ -973,9 +973,10 @@ No money change, no record bump (every new field optional and read tolerantly).
   names ("Kept the walls between Bedroom (now part of Master bedroom) and the living room: …").
   The run-end announcement adds "; the app placed a queen bed, free.". The Accept line says
   "Left out: the app's queen bed"; Decisions offer no Make this a rule for a free piece.
-- **Caveat, `Decision.free`:** an older tab (PR A, #71) that rewrites the conversation drops it,
-  and the app may then place a piece the person declined again (they untick it once more). C's
-  talk record v5 must carry `declined` under its bump.
+- **Caveat, `Decision.free`:** a decline lasts for that room until its Decision is deleted (no
+  expiry, nothing else lifts it). An older tab (PR A, #71) that rewrites the conversation drops
+  it, and the app may then place a piece the person declined again (they untick it once more).
+  C's talk record v5 must carry `declined` under its bump.
 - Left for B2/C: the fix-up pool by progress, Keep fixing, repeats, strict mode; orphans and the
   nudge stay out (lead decisions). A structured `declined` list in talk v5 (C) replaces the
   tolerant `Decision.free`.
@@ -1005,6 +1006,15 @@ No money change, no record bump (every new field optional and read tolerantly).
   in Main bedroom"), and the card counts it nowhere (`chosenChecks` in `cardRunReport`, the ticked
   subset and Accept's question) and says "Left out by you: a bed in Main bedroom.". Vetting's
   "already" joins are worked out on the plan as it is.
+- Tech lead's last round (14 Nov): only the piece that heads a must-have waives it when declined
+  (bed, sofa for seats, dining table, desk; `HEADS` in core `free.ts`); a supporting piece
+  declined (a dining chair, an armchair) only stops the app adding that piece again, and "no
+  dining table" is still fixed, reported and asked about. The second look honours a decline too:
+  its facts report waives the declined must-have, and `actOnLook` (`LookCtx.declined`) drops a
+  finding about it or one adding the piece back ('kept'), so no round and no fix-up go on it. The
+  estimate's prompts carry `declined` (`plannedPrompts`, `PriceInput.declined`, in the price's
+  key), so they match what is sent. A look swap gives any piece a new ref (`lookN`), so
+  `lookNoWorse` judges what the new piece breaks as new.
 
 **AI costs always have a figure (#67, 14 Nov).** The owner's Gemini 3 runs had no price, so no
 cost card had a figure and neither the approved figure nor the tab's limit held.

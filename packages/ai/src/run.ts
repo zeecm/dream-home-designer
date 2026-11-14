@@ -651,11 +651,21 @@ export async function runDesign(
     const before = await place(ctx.base, ctx.before, design, o.result);
     design.aliases = aliasesFor(before.level, design.aliases);
     /** The run's report on the version (its F and L lines), for these spaces or all of them. */
+    // A must-have the person left out (a Decision) is theirs: never a failure the look is shown.
+    const chosen = before.checks
+      .filter(
+        (c) => c.hard && !c.itemId && !!c.roomId && isDeclined(c.key, c.roomId, o.declined ?? []),
+      )
+      .map((c) => c.key);
     const reportOf = (spaces?: string[]) =>
       runReport(
         before,
         { spaces: design.spaces, brief: ctx.brief },
-        { aliases: design.aliases, ...(spaces ? { spaces } : {}) },
+        {
+          aliases: design.aliases,
+          ...(spaces ? { spaces } : {}),
+          ...(chosen.length ? { waived: chosen } : {}),
+        },
       );
     const facts = lookFacts(before, ctx.base, {
       report: reportOf(scope ? designed.map((d) => d.key) : undefined),
@@ -709,6 +719,7 @@ export async function runDesign(
       answers,
       ...(o.result?.models ? { models: o.result.models } : {}),
       ...(o.result?.kept?.length ? { kept: o.result.kept } : {}),
+      ...(o.declined?.length ? { declined: o.declined } : {}),
     });
     out.notes = acted.notes;
     out.offers = acted.offers.map((x) => ({ rule: x.rule, line: x.line }));

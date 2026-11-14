@@ -155,6 +155,35 @@ describe('free fixes: seats and dining (criterion 12, orphans out of B)', () => 
       [],
     );
   });
+
+  it('a dining chair declined: the table is still tried, never the chair; the table declined: nothing (S2)', () => {
+    const { lvl, d } = version('dsn_free_dining_declined', {
+      [LIVING]: without(sampleLiving, ['dine1', 'chair1', 'chair2', 'chair3', 'chair4']),
+    });
+    const chairs = freeEssentials(
+      lvl,
+      lvl,
+      d,
+      {},
+      {
+        declined: [{ room: 'rm_living-and-dining', role: 'dining-chair' }],
+      },
+    );
+    const tried = [...chairs.added, ...chairs.missed].map((a) => a.assetId);
+    expect(tried).toContain('dining-4');
+    expect(tried).not.toContain('dining-chair');
+    const table = freeEssentials(
+      lvl,
+      lvl,
+      d,
+      {},
+      {
+        declined: [{ room: 'rm_living-and-dining', role: 'dining-table' }],
+      },
+    );
+    expect(table.tries).toBe(0);
+    expect(table.added).toEqual([]);
+  });
 });
 
 describe('free fixes: kept only when strictly better (criterion 14)', () => {
@@ -264,8 +293,16 @@ describe('a must-have the person left out (a Decision)', () => {
     expect(isDeclined('P1|bed|rm_bedroom|bed', 'rm_bedroom', declined)).toBe(false);
     expect(isDeclined('P1|seats|rm_main-bedroom', 'rm_main-bedroom', declined)).toBe(false);
     expect(isDeclined('P4|clear|rm_main-bedroom|bed', 'rm_main-bedroom', declined)).toBe(false);
+    // Only the piece that heads a must-have waives it (tech lead S2): a dining chair or an
+    // armchair declined never hides "no dining table" or "not enough seats".
     const chairs = [{ room: 'rm_living', role: 'dining-chair' }];
-    expect(isDeclined('P1|dining|rm_living', 'rm_living', chairs)).toBe(true);
+    expect(isDeclined('P1|dining|rm_living', 'rm_living', chairs)).toBe(false);
+    const table = [{ room: 'rm_living', role: 'dining-table' }];
+    expect(isDeclined('P1|dining|rm_living', 'rm_living', table)).toBe(true);
+    const armchair = [{ room: 'rm_living', role: 'armchair' }];
+    expect(isDeclined('P1|seats|rm_living', 'rm_living', armchair)).toBe(false);
+    const sofa = [{ room: 'rm_living', role: 'sofa' }];
+    expect(isDeclined('P1|seats|rm_living', 'rm_living', sofa)).toBe(true);
     expect(isDeclined('P1|bed|rm_main-bedroom|bed', 'rm_main-bedroom', [])).toBe(false);
   });
 });

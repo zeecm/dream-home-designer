@@ -430,7 +430,11 @@ describe('what the app does with them (actOnLook): the checks always win', () =>
     expect(edit?.space).toBe(SAMPLE_KEYS.living);
     const d = answers[SAMPLE_KEYS.living] as SpaceDesign;
     const swapped = applyLookEdit(d, edit!, 1);
-    expect(swapped.items.find((i) => i.ref === 'sofa1')?.assetId).toBe('sofa-2');
+    // A swapped piece is a new piece, with a ref of its own (tech lead N1); what faced or went
+    // by the old one follows it.
+    expect(swapped.items.find((i) => i.ref === 'look1')?.assetId).toBe('sofa-2');
+    expect(swapped.items.some((i) => i.ref === 'sofa1')).toBe(false);
+    expect(swapped.items.some((i) => i.faces === 'sofa1' || i.near === 'sofa1')).toBe(false);
     const removed = applyLookEdit(
       d,
       { ...edit!, suggest: { ...base, kind: 'remove', piece: sofa } },

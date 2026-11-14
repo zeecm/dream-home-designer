@@ -119,6 +119,8 @@ export function roomPrompts(
   design: DraftDesign,
   plan: RunPlan,
   opts: DesignOptions,
+  /** Pieces the person left out of a room (Decisions), as the run tells the room step. */
+  declined: readonly { room: string; role: string }[] = [],
 ): StepPrompt[] {
   const r0 = designResult(ctx.base, ctx.before, { ...design, spaces: {} }, opts);
   const all = r0.spaces.map((s) => s.key);
@@ -144,6 +146,7 @@ export function roomPrompts(
             : {}),
         ...(plan.feedback ? { feedback: plan.feedback } : {}),
         ...(plan.talk ? { talk: plan.talk } : {}),
+        ...(declined.length ? { declined } : {}),
         locks: plan.locks ?? [],
         previous: plan.previous?.[s.key] ?? null,
       }),
@@ -156,8 +159,10 @@ export function plannedPrompts(
   design: DraftDesign,
   plan: RunPlan,
   opts: DesignOptions,
+  /** Pieces the person left out of a room (Decisions): so the estimate's prompts are the run's. */
+  declined: readonly { room: string; role: string }[] = [],
 ): StepPrompt[] {
-  if (!plan.layout) return roomPrompts(ctx, design, plan, opts);
+  if (!plan.layout) return roomPrompts(ctx, design, plan, opts, declined);
   if (!design.concept) {
     // A whole design: the rooms of the plan as it is, as the estimate's best guess.
     return runPrompts(ctx, spacesOf(ctx.base), ctx.aliases);
@@ -168,7 +173,7 @@ export function plannedPrompts(
     locks: plan.locks ?? [],
     previous: plan.layout.previous ?? null,
   });
-  return [layout, ...roomPrompts(ctx, design, plan, opts)];
+  return [layout, ...roomPrompts(ctx, design, plan, opts, declined)];
 }
 
 export const ROOM_ASPECTS: Aspect[] = ['furniture', 'built-ins', 'finishes'];

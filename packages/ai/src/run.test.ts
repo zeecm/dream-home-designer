@@ -892,6 +892,65 @@ describe('free fixes and room vetting (designer listens, B1)', () => {
     expect(space?.fixes).toBeUndefined();
     expect(space?.design?.items.some((i) => i.ref.startsWith('app:'))).toBe(false);
   });
+
+  it('a declined bed and a second look finding "no bed" on it: no round, no fix-up (tech lead S1)', async () => {
+    const PNG = [{ mediaType: 'image/png' as const, data: 'iVBORw0KGgo' }];
+    const prov = provider('anthropic', {
+      auto: true,
+      reply: (c) => {
+        if (main(c)) return sse(noBed());
+        if (c.step === 'look') {
+          return sse({
+            findings: [
+              {
+                target: { kind: 'room', id: 'R2' },
+                principle: 'P1',
+                severity: 'fix',
+                line: 'The main bedroom has no bed for the couple.',
+                suggest: null,
+              },
+              {
+                target: { kind: 'room', id: 'R2' },
+                principle: 'taste',
+                severity: 'fix',
+                line: 'Put a queen bed back.',
+                suggest: {
+                  kind: 'add',
+                  piece: null,
+                  against: 'wall',
+                  faces: null,
+                  near: null,
+                  zone: 'sleep',
+                  kindId: 'bed-queen',
+                  room: 'R2',
+                  rule: null,
+                },
+              },
+            ],
+            summary: null,
+          });
+        }
+        return null;
+      },
+    });
+    const { design, look } = await start('anthropic', {
+      fetch: prov.fetch,
+      ctx: { ...ctx, brief: couple },
+      design: { ...fresh(), brief: couple },
+      declined: [{ room: 'rm_main-bedroom', role: 'bed' }],
+      look: { rasterise: async () => PNG },
+    }).run;
+    // The look was sent, told nothing failed for want of the bed, and acted on neither finding.
+    const lookCall = prov.calls.find((c) => c.step === 'look');
+    expect(lookCall).toBeDefined();
+    expect(JSON.stringify(lookCall?.body)).not.toMatch(/no bed/i);
+    expect(look?.round).toBe('none');
+    expect(look?.dropped.map((d) => d.why)).toEqual(['kept', 'kept']);
+    expect(prov.calls.filter(main)).toHaveLength(1);
+    const space = design.spaces['rm_main-bedroom'];
+    expect(space?.rounds ?? []).toEqual([]);
+    expect(space?.design?.items.some((i) => i.assetId.startsWith('bed-'))).toBe(false);
+  });
 });
 
 describe('a whole design with each provider (41)', () => {
