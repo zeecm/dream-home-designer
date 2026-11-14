@@ -1,4 +1,4 @@
-import { QUIET_MS, designerCannotUse, talkCall } from '@dhd/ai';
+import { QUIET_MS, UNPRICED, talkCall } from '@dhd/ai';
 import {
   BUDGET_CHOICES,
   COOKING_CHOICES,
@@ -41,7 +41,7 @@ import {
 import { useStore } from '../../../store';
 import { aiSettings } from '../../credentials';
 import { browserPage } from '../page';
-import { addUsage, capUsd, overLimit, priceTable, spent, usd } from '../spend';
+import { addUsage, cannotDesign, capUsd, overLimit, priceTable, spent, usd } from '../spend';
 import { designOpts, useDesigner } from '../state';
 import { cardChanges, cardResultNow, cardVerdict, optionCard } from './cards';
 import { followPlan } from './propose';
@@ -198,7 +198,7 @@ const priceMemo = new Map<string, TalkEstimate | null>();
 export function sendPrice(text: string, pointers?: readonly Pointer[]): TalkEstimate | null {
   const ai = aiSettings();
   const conv = useTalk.getState().conv;
-  if (!ai || !conv || designerCannotUse(ai)) return null;
+  if (!ai || !conv || cannotDesign(ai)) return null;
   const key = JSON.stringify([
     conv.id,
     conv.rev,
@@ -244,8 +244,18 @@ function priceOfPrompt(prompt: TalkPrompt, conv: Conversation): TalkEstimate | n
 /** Would pass the tab's limit: said as an app line, and nothing goes. */
 async function pastLimit(prompt: TalkPrompt, conv: Conversation, anyway = false): Promise<boolean> {
   const est = priceOfPrompt(prompt, conv);
+  if (!est?.usd) {
+    // No figure: nothing goes (`cannotDesign` stops it first; this is the backstop).
+    await act({
+      type: 'event',
+      id: newId('turn'),
+      at: nowIso(),
+      event: { type: 'note', text: UNPRICED },
+    });
+    return true;
+  }
   const cap = capUsd();
-  if (!est?.usd || cap === null) return false;
+  if (cap === null) return false;
   // Sent anyway (P2-6): only its typical figure must fit; the limit still stops a second try.
   const over = anyway ? spent().usd + est.usd.typical > cap : talkAsks(est, spent().usd, cap);
   if (!over) return false;
@@ -275,7 +285,7 @@ export async function sendMessage(
   const words = text.trim();
   const ai = aiSettings();
   const conv0 = useTalk.getState().conv;
-  if (!words || !ai || !conv0 || designerCannotUse(ai)) return false;
+  if (!words || !ai || !conv0 || cannotDesign(ai)) return false;
   if (pendingReply(conv0) || useTalk.getState().reply) return false;
   let sent = false;
   // The lock first: a tab opening the panel meanwhile can't take this reply for a dead one.

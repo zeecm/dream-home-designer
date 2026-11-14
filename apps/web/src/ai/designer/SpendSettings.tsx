@@ -148,7 +148,7 @@ export function SpendSettings({
             ? 'Your own prices. '
             : listed
               ? `List prices as of ${PRICES_AS_OF}${listed.checked ? '' : ': check your provider'}. `
-              : 'No list price for this model: enter its prices to see costs. '}
+              : 'No list price for this model, so the designer won’t use it: enter its prices to use it. '}
           {hasOverride(model) && (
             <button type="button" className="link-btn" onClick={() => setPrice(model, null)}>
               Reset to list prices

@@ -1,4 +1,4 @@
-import type { StepPrompt, TalkPrompt } from '@dhd/core';
+import { PRICES, type Price, type StepPrompt, type TalkPrompt, priceOf } from '@dhd/core';
 import { errorBody } from './errors';
 import type { AiSettings, Provider } from './providers';
 import { readSse } from './sse';
@@ -83,10 +83,84 @@ const FALLBACK = /^claude-opus-5(-5)?$/;
 /** OpenAI models that take `reasoning_effort`. */
 const REASONING = /^(gpt-5|o\d)/;
 
-/** Why the designer can't use this model, or null when it can. */
-export function designerCannotUse(ai: { provider: string; model: string }): string | null {
-  if (ai.provider !== 'anthropic' || DESIGNER_CLAUDE.includes(ai.model.trim())) return null;
-  return `The designer works with Claude Opus 5.5 or 5, Sonnet 5.5 or 5, Haiku 5.5 and Fable 5; “${ai.model}” isn’t one of them. Choose one in AI settings.`;
+/**
+ * Why a model with no price is refused: no designer request (a design run, its fix rounds,
+ * carrying it on, a talk reply) goes without a figure the person has seen.
+ */
+export const UNPRICED =
+  'We don’t know this model’s price yet, so the designer can’t use it. Pick another model in AI settings, or enter its prices there.';
+
+/**
+ * Why the designer can't use this model, or null when it can: a Claude model its requests
+ * aren't written for, or a model with no price in `prices` (the list prices, with the
+ * browser's own where it has them).
+ */
+export function designerCannotUse(
+  ai: { provider: string; model: string },
+  prices: Record<string, Price> = PRICES,
+): string | null {
+  if (ai.provider === 'anthropic' && !DESIGNER_CLAUDE.includes(ai.model.trim())) {
+    return `The designer works with Claude Opus 5.5 or 5, Sonnet 5.5 or 5, Haiku 5.5 and Fable 5; “${ai.model}” isn’t one of them. Choose one in AI settings.`;
+  }
+  return priceOf(ai.model, prices) ? null : UNPRICED;
+}
+
+const LOWER: Record<Effort, Effort | null> = { high: 'medium', medium: 'low', low: null };
+/** One step down in effort, or null from low. */
+export const effortBelow = (e: Effort): Effort | null => LOWER[e];
+
+/**
+ * The effort an answer cut off at its limit is asked for again at: on Gemini 3, `low` (the
+ * owner's cut-off answers had spent about 15k of their 16k tokens thinking); elsewhere the next
+ * one down. Only if its request really differs (Gemini 2.x's thinking budget may be capped
+ * alike at two levels; a model that takes no effort sends the same request at every level):
+ * else the next one down again, or null when none does, so the same request is never paid for
+ * twice.
+ */
+export function lowerEffort(
+  ai: { provider: Provider; model: string },
+  effort: Effort,
+  build: (e: Effort) => ProviderRequest,
+): Effort | null {
+  const now = JSON.stringify(build(effort).body);
+  const steps: Effort[] = [];
+  if (thinksByLevel(ai)) steps.push('low');
+  else for (let e = LOWER[effort]; e; e = LOWER[e]) steps.push(e);
+  return steps.find((e) => e !== effort && JSON.stringify(build(e).body) !== now) ?? null;
+}
+
+/** Gemini 3 and later: thinking set by `thinkingLevel` (2.x takes a token budget). */
+const thinksByLevel = (ai: { provider: Provider; model: string }) =>
+  ai.provider === 'gemini' && !/^gemini-2/.test(ai.model.trim().toLowerCase());
+
+/**
+ * A fix round's request: on Gemini 3 it starts at `low` (in the owner's runs every fix round
+ * was cut off at its 16k limit by thinking); elsewhere at the room step's own effort.
+ */
+export function fixStepFor(ai: { provider: Provider; model: string }, p: StepPrompt): StepPrompt {
+  return thinksByLevel(ai) ? { ...p, effort: 'low' } : p;
+}
+
+/** Gemini 2.x thinking budgets by effort, in tokens (at most half the answer's limit). */
+const GEMINI_BUDGET: Record<Effort, number> = { high: 16_384, medium: 8192, low: 2048 };
+/**
+ * Gemini 3 models that take thinkingLevel `medium` (Google's thinking guide, 14 Nov 2026):
+ * 3.1 Pro, 3 Flash and the 3.x Flash and Flash-Lite models. Others (3 Pro Preview) take
+ * only `low` and `high`, so `medium` goes as `low` there: never as `high`.
+ */
+const GEMINI_MEDIUM = /^gemini-(3\.1-pro|3-flash|3\.\d+-flash)/;
+
+/** A Gemini request's `thinkingConfig` thinking part for `effort`. */
+export function geminiThinking(
+  model: string,
+  effort: Effort,
+  maxTokens: number,
+): { thinkingBudget: number } | { thinkingLevel: Effort } {
+  const m = model.trim().toLowerCase();
+  if (/^gemini-2/.test(m)) {
+    return { thinkingBudget: Math.min(GEMINI_BUDGET[effort], Math.floor(maxTokens / 2)) };
+  }
+  return { thinkingLevel: effort === 'medium' && !GEMINI_MEDIUM.test(m) ? 'low' : effort };
 }
 const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 
@@ -191,8 +265,6 @@ export function talkRequestFor(
       },
     };
   }
-  const older = /^gemini-2/.test(ai.model);
-  const budget = { high: 16_384, medium: 8192, low: 2048 }[effort];
   return {
     url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(ai.model)}:streamGenerateContent?alt=sse`,
     headers: { 'x-goog-api-key': ai.key },
@@ -208,9 +280,7 @@ export function talkRequestFor(
         maxOutputTokens: p.maxTokens,
         thinkingConfig: {
           includeThoughts: true,
-          ...(older
-            ? { thinkingBudget: Math.min(budget, Math.floor(p.maxTokens / 2)) }
-            : { thinkingLevel: effort === 'low' ? 'low' : 'high' }),
+          ...geminiThinking(ai.model, effort, p.maxTokens),
         },
       },
     },
@@ -283,8 +353,6 @@ export function requestFor(
     };
   }
   // Gemini caches matching prefixes by itself (implicit caching).
-  const older = /^gemini-2/.test(ai.model);
-  const budget = { high: 16_384, medium: 8192, low: 2048 }[effort];
   return {
     url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(ai.model)}:streamGenerateContent?alt=sse`,
     headers: { 'x-goog-api-key': ai.key },
@@ -297,9 +365,7 @@ export function requestFor(
         maxOutputTokens: p.maxTokens,
         thinkingConfig: {
           includeThoughts: true,
-          ...(older
-            ? { thinkingBudget: Math.min(budget, Math.floor(p.maxTokens / 2)) }
-            : { thinkingLevel: effort === 'low' ? 'low' : 'high' }),
+          ...geminiThinking(ai.model, effort, p.maxTokens),
         },
       },
     },

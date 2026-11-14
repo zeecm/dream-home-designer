@@ -85,7 +85,7 @@ describe('saved AI settings', () => {
       'dhd-ai': JSON.stringify({ provider: 'gemini', key: 'AIza-x', model: 'gemini-3-pro-image' }),
     });
     expect(mod.keyFor('gemini')).toMatchObject({
-      model: 'gemini-3-pro',
+      model: 'gemini-3.1-pro-preview',
       imageModel: 'gemini-3-pro-image',
     });
     expect(mod.imageSettings()?.model).toBe('gemini-3-pro-image');
@@ -105,5 +105,13 @@ describe('saved AI settings', () => {
     expect(
       migrateKey('gemini', { key: 'k', model: 'gemini-2.5-pro', imageModel: 'gemini-3-pro-image' }),
     ).toEqual({ key: 'k', model: 'gemini-2.5-pro', imageModel: 'gemini-3-pro-image' });
+    // The old default (never a Gemini API id) and the shut-down preview go to today's default.
+    for (const model of ['gemini-3-pro', 'gemini-3-pro-preview']) {
+      expect(migrateKey('gemini', { key: 'k', model, imageModel: 'gemini-3-pro-image' })).toEqual({
+        key: 'k',
+        model: 'gemini-3.1-pro-preview',
+        imageModel: 'gemini-3-pro-image',
+      });
+    }
   });
 });

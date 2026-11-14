@@ -1,4 +1,3 @@
-import { designerCannotUse } from '@dhd/ai';
 import {
   type Level,
   type Project,
@@ -17,7 +16,7 @@ import { type Size, type View, worldToScreen } from '../../../plan/view';
 import { useStore } from '../../../store';
 import { FLOAT_DIALOG } from '../../../ui/dialogs';
 import { useAi } from '../../credentials';
-import { usd } from '../spend';
+import { cannotDesign, usd } from '../spend';
 import { useDesigner } from '../state';
 import {
   type Target,
@@ -328,8 +327,8 @@ export function PlanPopover({ view, size }: { view: View; size: Size }) {
   const kept = keptOf(target);
   const cantPay = !ai
     ? 'Add your AI key to ask for other ideas.'
-    : designerCannotUse(ai)
-      ? designerCannotUse(ai)
+    : cannotDesign(ai)
+      ? cannotDesign(ai)
       : typeof navigator !== 'undefined' && navigator.onLine === false
         ? 'You’re offline.'
         : busy
