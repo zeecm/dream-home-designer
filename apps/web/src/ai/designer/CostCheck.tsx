@@ -1,6 +1,6 @@
 import { type AiSettings, PROVIDERS, designerCannotUse } from '@dhd/ai';
 import { type DesignBrief, PRICES_AS_OF, type RunEstimate, priceOf } from '@dhd/core';
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Segmented } from '../../ui/fields';
 import { LARGE_INPUT, MAX_STEP_INPUT } from './plan';
 import { tokens, usd, useSpend } from './spend';
@@ -62,6 +62,12 @@ export interface CostCheckProps {
   onEditPrices: () => void;
   /** Inside a cost card that already asks: no heading of its own unless it may cost US$0.50. */
   quiet?: boolean;
+  /**
+   * Inside the repeat cost card (designer listens C): the spend button outlined, never the
+   * near-black primary; the card's own price sentence and limit notice not said again; `lead`
+   * (the free fix, or Change what I asked) first in the same button group.
+   */
+  repeat?: { lead: ReactNode };
 }
 
 export function CostCheck(p: CostCheckProps) {
@@ -114,7 +120,7 @@ export function CostCheck(p: CostCheckProps) {
             </p>
           </>
         )}
-        {over && (
+        {over && !p.repeat && (
           <p className="notice-warning">
             This would take you past your {usd(cap ?? 0)} limit for this tab.
           </p>
@@ -172,13 +178,17 @@ export function CostCheck(p: CostCheckProps) {
         </p>
       </div>
       <footer className="dialog-foot">
-        <div className="button-row">
-          <button type="button" className="btn" onClick={p.onBack}>
-            {p.backLabel ?? 'Back'}
-          </button>
+        <div className={p.repeat ? 'button-row talk-repeat-row' : 'button-row'}>
+          {p.repeat?.lead}
+          {!p.repeat && (
+            <button type="button" className="btn" onClick={p.onBack}>
+              {p.backLabel ?? 'Back'}
+            </button>
+          )}
           <button
             type="button"
-            className="btn btn-primary"
+            className={p.repeat ? 'btn' : 'btn btn-primary'}
+            data-run-anyway={p.repeat ? '' : undefined}
             disabled={tooBig || !!unsupported || busy}
             onClick={() => {
               if (busy) return;
@@ -189,6 +199,11 @@ export function CostCheck(p: CostCheckProps) {
           >
             {label}
           </button>
+          {p.repeat && (
+            <button type="button" className="link-btn" onClick={p.onBack}>
+              {p.backLabel ?? 'Back'}
+            </button>
+          )}
         </div>
       </footer>
     </>

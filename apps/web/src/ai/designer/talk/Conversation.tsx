@@ -1,6 +1,7 @@
 import {
   type Bounds,
   type DesignBrief,
+  declinedNow,
   designLevels,
   optionTitle,
   roomShapes,
@@ -126,10 +127,7 @@ function OnTheTable() {
   const side = useMedia(sideNow);
   const freeBusy = useFreeBusy((s) => s.card);
   const declinedKey = useTalk((s) =>
-    (s.conv?.decisions ?? [])
-      .filter((d) => !d.deleted && d.free)
-      .map((d) => d.id)
-      .join(','),
+    (s.conv ? declinedNow(s.conv) : []).map((d) => `${d.room}|${d.role}`).join(','),
   );
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
   const offer = useMemo(
@@ -580,13 +578,22 @@ export function TalkPanel() {
     }
     // Its answers in sight at every size: in a short column (a phone on its side) the card is
     // taller than the log, and its foot is what is needed (QA P4-7).
-    const f = requestAnimationFrame(() => {
-      const foot = document.querySelector(
-        `[aria-labelledby="h-${CSS.escape(costCard)}"] .dialog-foot`,
-      );
+    // The repeat card's buttons too (they are no dialog foot), and again a moment later: a
+    // column on its side lays the card out after the first frame (UX review C 6).
+    const place = () => {
+      const card = document.querySelector(`[aria-labelledby="h-${CSS.escape(costCard)}"]`);
+      const foot =
+        card?.querySelector('.dialog-foot') ??
+        card?.querySelector('.talk-cost-buttons') ??
+        card?.querySelector('.talk-repeat-ways');
       foot?.scrollIntoView({ block: 'nearest' });
-    });
-    return () => cancelAnimationFrame(f);
+    };
+    const f = requestAnimationFrame(place);
+    const later = [setTimeout(place, 350), setTimeout(place, 800)];
+    return () => {
+      cancelAnimationFrame(f);
+      for (const t of later) clearTimeout(t);
+    };
   }, [costCard, sheet]);
   // Keep fixing's own cost card (B2), as a cost card: full height on a phone, its buttons in
   // sight at every size (a phone on its side has a log about 75 px tall).

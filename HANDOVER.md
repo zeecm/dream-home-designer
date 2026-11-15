@@ -1139,6 +1139,132 @@ fixing, orphans, what was left out.** Proposal records 5.
 - Known, not done: in dark mode a part-ticked group's checkbox draws an empty box, not "−"
   (older than B2).
 
+**The designer listens, PR C (issue #66 part 2, 14 Nov): no paying twice for the same failures,
+"Fix every check first", the owner's conversation replayed.** Talk records 5.
+- **Same failures** (core `designer/repeat.ts`): `sameFailures(older, newer)` compares the
+  reports' failure signatures (`checkSig`: principle|code|room|role, never item ids); every one
+  of the older's in the newer (a superset is the same), none at all is never the same; waived and
+  already-in-plan checks are never in a report's failures. `repeatRun` finds the run of versions
+  ("V6 to V8"); `repeatAhead(versions, now, plan)` says a paid run will likely fail the same way:
+  the newest two repeat, the newest's `depends` equals `now`, no waiver on it, and the plan's
+  `addresses` name nothing or the same signatures as the newest's plan did (lead: "the set of F
+  and L ids", compared by what they name, since ids are renumbered each table). `dependsKey`
+  hashes §5's list: the brief (strict and quality included), live Decisions and declines, the
+  level's house rules, kept pieces, the before/after level fingerprints (hand edits, accepts) and
+  the storage meter. It is stored on each new option (`ProposalOption.depends`, optional, read
+  tolerantly within proposal records 5; with talk records 5 no older build can act on its
+  conversation). An option without it (an older build's) is taken as changed: no warning.
+- **The card** (web `talk/repeat.ts` `blockingFor`, `CheckLead` `frame`): state C on the newest
+  checked card of its scope when the versions before it failed the same way: a framed lead
+  headed "V1 and V2 failed on the same 2 things", the fix rounds' sentence in grey, every failure
+  with its cause, then the ways forward stacked: the free fix (only when the dry run places
+  something), Keep fixing (only after `no-fixups` and when some failure is fixable: never for
+  unfurnishable ones, which now say "Can't be fixed by furnishing." with Who sleeps where ›), and
+  Change what I asked (focuses the composer, placeholder "Say what to change, e.g. one desk
+  instead of two", cleared at the next Send). No Accept anyway in the block (UX). State D wins
+  over C: strict on and failures left: "Couldn't make everything pass within US$x" (x the
+  figure the run was approved for, `ProposalOption.approved`), the count, "Same failures as V1
+  and V2." when it also repeats; the log gets the app's line "V3: couldn't make everything pass
+  within US$x. 1 still doesn't pass: …" and the announcement "V3 is back. Couldn't make
+  everything pass: 1 still doesn't pass.".
+- **The repeat cost card** (money; web `propose.ts` `followPlan`/`askOrRun`, `Log.tsx`
+  `CostAsk`): before a paid run of a new design (a plan's, a scope button's, a concern's
+  alternative; never Design … too, Another idea or Keep fixing), `repeatFor(scope, addressed)`
+  works the scope's newest six versions' reports out in the worker (free) and, when
+  `repeatAhead` holds, the run never goes at once: a `cost-ask` turn with `repeat` (titles,
+  failures, count, the newest card, `again`, signatures) is written whatever the rule said
+  (`'go'` becomes `'ask-threshold'`; a cost-check or limit reason stays, so it only ever adds an
+  ask). The card: "This will likely come back with the same 2 problems: V1 and V2 did, and
+  nothing they depend on has changed." (focused, never a spend button), the failures in one
+  line, the strict line when on, then the newest card's free fix first (`freeOffer` dry run,
+  `placeFree`: no request) or Change what I asked, then Run it anyway · about US$x (outlined
+  `btn`, `data-spends`, `answerCost(t, 'go')`: the same figure binding as Go ahead) and Not now;
+  under a cost-check or limit reason it keeps CostCheck with "Run it anyway". The long sentence
+  once a set of signatures, then "Likely the same 2 problems again (V1 to V3).". "This plan
+  doesn't say how it fixes…" is not shown under a reply whose cost card repeats. No Just {room}.
+- **Fix every check first** (core `fixPoolFor(quality, rooms, strict)`, `FIX_STRICT`,
+  `estimateRun({ strict })`, `strictAdds`; web `pricing.ts`): `DesignBrief.fixAll` (optional,
+  read tolerantly, never in `briefData`, so room prefixes stay cached; the talk call's live
+  facts say `beforeTheySeeADesign`). Pool: Thorough 6, Quick two a room up to 4 (lead), priced as
+  pool × the dearest fix request like B2's; Keep fixing on a strict option prices its rooms'
+  strict pool. The runner is unchanged: the checkpoint's `fixesLeft` is the priced pool, rounds
+  still stop at the first round no better. What I know row "Before you see a design: Fix every
+  check first · Show it as it is" (QuestionKey `fix-all`, never asked in the first meeting),
+  changed free; its "You changed" line has Undo while it is the newest (`factUndo`, the line
+  then reads "… Undone."). The reply may note it (FactKey `fix-all`, choice on/off; the task
+  block lists it), applied directly: the bigger figure still goes through the person's own
+  threshold, as any figure does. Every cost card says "Fix every check first is on: keeps fixing
+  until every check passes, up to 6 fix-ups (adds up to US$0.54 at most). Change" (opens the
+  row).
+- **Keep fixing**: B2's fix-only run stands; C only offers it in the framed lead and keeps it
+  off for unfurnishable failures.
+- **Records**: `TALK_RECORD_VERSION` 5. `Conversation.declined: {decision, room, role}[]` (each
+  lasting while its Decision stands: deleted or trimmed past the cap, lifted; `declinedNow`,
+  `isDeclineDecision`); `decisionAdd`'s `free` writes it (the same Decision again adds nothing).
+  A 1–4 record's `Decision.free` moves into it on read (`migrateDeclined`; a deleted one's is
+  dropped); `Decision.free` is gone from the schema. Also new in 5: the fix-all question and fact,
+  `fact` events' `undone`, `cost-ask.repeat`. A v4 build sees a 5 as newer and goes read-only, so
+  a decline or the strict setting is never dropped by a stale tab. The conversation export is
+  version 5 (as each bump before).
+- **Replay** (criterion 30, `packages/ai/src/replay.test.ts`): V6–V9 from
+  `owner-after-accept.json` through `runDesign`, the provider scripted with the export's answer
+  for every room step and fix round: each comes back with a bed in Main bedroom and seats in the
+  living room (kept pieces), every hard failure left named in the report with its numbers, one
+  round a room at most, `no-better` (the same answer stalls). e2e (31, 32, the "designer
+  listens, C" describe): the owner's pattern on the sample flat with `owner-v4.json`'s layout and
+  `fixtures/owner-talk.json` (three of the owner's messages and the designer's plan replies,
+  word for word, nothing else).
+- **The missing bed the replay found** (31c, fixed): after V1 with the owner's V4 layout was
+  accepted (Main bedroom and Bedroom one Master bedroom), an answer with no bed kept its two
+  bedside tables (`near` the bed it dropped) and two desk chairs. The bedsides, placed first,
+  took the walls the bed needed, so the app's queen bed only fitted by a desk chair's way (a
+  new failure: refused); then the orphan step took the bedsides out "with no bed", and the
+  card's dry run on that answer placed the bed, so the run and the card disagreed. Now
+  `freeEssentials` (core `free.ts`), after its usual tries, tries the bed with the answer's own
+  unattached bedsides going by the app's bed, then with them making way and put back one at a
+  time while they break nothing (here one stays by the bed; the other is said "Took out a
+  bedside table the designer added in Master bedroom to make room for the queen bed the app
+  placed.", `madeWayLines`, an app line from the run). Kept and carried-over (theirs) pieces
+  are never moved or lost. And where the orphan step made room in a space whose essential was
+  missed, the essentials go once more (a bedside taken out then made way instead), so what the
+  run keeps is one the card's dry run places nothing more in. Test `ownerBed.test.ts` with
+  `fixtures/owner-after-v4.json` (the plan V2 was designed on in the replay, brief, aliases,
+  concept); the e2e asserts the run placed it. The bench report is unchanged.
+- **Money review (tech lead, 14 Nov), S1:** strict turned on by a reply's fact sets
+  `Conversation.strictAsk`; the next run (`followPlan`, `askOrRun`) asks once whatever the
+  threshold, its card marked `strict` ("The designer noted Fix every check first from your
+  words, so this asks before it runs.") with the strict line and what it adds; that ask, or the
+  person setting it in What I know (or its Undo), clears it. Nits: the model and provider are in
+  `dependsKey`'s inputs; a fact line keeps `was` and its Undo restores that; Keep fixing writes
+  its figure to `ProposalOption.approved` (the heading says the latest); the cost card's strict
+  line follows its own estimate's pool (`strictAdds` > 0), not the setting as it is now.
+- **UX review (14 Nov):** the repeat card under a cost-check or limit reason embeds CostCheck
+  with `repeat={{ lead }}`: its spend button outlined (never primary), the free fix (or Change
+  what I asked) first in the same row, its own price sentence and limit notice not repeated
+  (e2e: a dear whole-flat repeat). Strict not met says "Couldn't make everything pass" with why
+  and what it spent of the figure ("The fix round made no progress, so it stopped (US$0.13 of
+  up to US$2.94)."; core `notMet`, web `notMetOf`), and "within US$x" only when a room's last
+  round was `no-fixups`; the log line likewise. Fewer failures than the version before (a
+  subset) read "Also failed in V1." and get no blocking frame; "Same failures as …" only for the
+  same set or more. The strict cost line is one sentence; on the owed ask (S1) "You asked for
+  every check to pass first, so this keeps fixing until every check passes: up to 6 fix-ups,
+  adding up to US$1.25 at most. Change", focused. What I know's chooser has the hint on what it
+  costs ("up to 6 fix-ups on Thorough, 4 on Quick");
+  Change opens it at that row with the chooser focused (`Back` no longer takes focus when
+  `knowAt` is set). A cost card arriving in the side column scrolls its buttons (the repeat
+  card's too) into view, again after 350 and 800 ms. The left-out line has the disclosure's
+  triangle only. e2e: the one-line "again" card (arriving at 844 × 390, its buttons in view).
+- **Final round (14 Nov):** the bedside path is one try (the bed without the loose bedsides),
+  then at most two put back by it (no separate "by the bed" try): about 340 ms on the owner's
+  merged Master bedroom, 4 solves; PERF-gated test in `ownerBed.test.ts` (2x the first solve's
+  300 ms bound). The essentials go again after orphans only in a room where one was missed and
+  an orphan came out. A cost card keeps its words with its figure (`costFigure`: `fixes`,
+  `adds` on the stored estimate), so "up to N fix-ups" never reads the pool of 3 beside a strict
+  figure while the live price is worked out. Escape on the repeat card is Not now, focus back
+  where it was (the composer). e2e: "Also failed in V1." (strict V2 with the bed placed, V1 an
+  older build's with no bed).
+- Known, not done: the hover-to-light of a failure line.
+
 **AI costs always have a figure (#67, 14 Nov).** The owner's Gemini 3 runs had no price, so no
 cost card had a figure and neither the approved figure nor the tab's limit held.
 - **Prices** (`core designer/prices.ts`, checked 14 Nov against Google's

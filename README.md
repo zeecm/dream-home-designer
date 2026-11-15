@@ -125,13 +125,6 @@ for any plan.
   the plan the model checks for flow, focal point, too empty or too full), acted on only where the
   app's checks agree and never with a new failure, priced up front, never paid twice on resume,
   and house rules it suggests offered to keep.
-
-### In progress
-- Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
-- AI designer after an Accept (issue #66): redesigns keep the pieces you accepted (the bed, the
-  sofa, the fridge) where they stand, and checks missed by a centimetre or two are mended by a
-  small move (PR 1); the model told why a piece couldn't be kept, and the card offering the
-  free fix when the same failures come back (PR 2).
 - The designer listens (issue #66 part 2, PR A): every failure on the card named, a missing bed
   included, in your names; the card says when it sent a room back to be fixed and how that went;
   the designer is told what the app found and why a piece was left out, never says it can't
@@ -144,8 +137,22 @@ for any plan.
   card offers Keep fixing · at most US$x, which always asks first; a dining chair with no table
   or a bedside table with no bed that the answer added is taken out, free; the designer's pieces
   that didn't fit are said on the card ("Left out, didn't fit: built-in wardrobe, 2 wardrobes");
-  a run carried on after a locked phone never repeats a fix round. Next: no paying twice for the
-  same failures, and "fix every check first". [spec](docs/specs/designer-listens.md)
+  a run carried on after a locked phone never repeats a fix round. PR C: when the last two
+  designs of a room fail on the same things, the newest card says "V7 and V8 failed on the same 3
+  things" with each cause and the ways forward (the free fix, Keep fixing where it can help,
+  Change what I asked), and asking again with nothing changed always shows a cost card that says
+  it will likely come back the same, the free fix first and Run it anyway priced; "Before you
+  see a design: Fix every check first" in What I know (set by you, or by the designer on your
+  word; free, with Undo) prices 6 fix-ups instead of 3, and a design that still fails says
+  "Couldn't make everything pass within US$x". The owner's conversation is replayed as a test.
+  [spec](docs/specs/designer-listens.md)
+
+### In progress
+- Reviews of the AI features with real keys (owner) and a recorded real reading as a test.
+- AI designer after an Accept (issue #66): redesigns keep the pieces you accepted (the bed, the
+  sofa, the fridge) where they stand, and checks missed by a centimetre or two are mended by a
+  small move (PR 1); the model told why a piece couldn't be kept, and the card offering the
+  free fix when the same failures come back (PR 2).
 - AI interior designer v2, slice 3a part B: point at the plan (a piece or a spot, "keep this",
   "why here?", "something else here") with the pointers sent with your message.
 - AI runs that survive a locked phone, part 2: opt-in cloud runs that keep going while the phone is

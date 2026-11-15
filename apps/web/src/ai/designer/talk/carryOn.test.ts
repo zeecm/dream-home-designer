@@ -367,6 +367,49 @@ describe('the fix-up pool, priced as it is spent (designer listens B2, criteria 
     expect(stepHigh(est, 'look', 'fix')).toBeCloseTo(est.usd.fixOne, 12);
   });
 
+  it('Fix every check first (C, 27–29): priced for 6 fix-ups; every room progressing sends 6, the figure never passed', async () => {
+    const plain = priced()?.est;
+    const made = priced({ brief: { ...defaultBrief(), fixAll: true } });
+    const est = made?.est;
+    if (!made || !est?.usd || !plain?.usd) throw new Error('not priced');
+    expect(est.fixes).toBe(6);
+    expect(est.usd.fix).toBeCloseTo(6 * est.usd.fixOne, 9);
+    // The same rooms at the same price, only the pool larger: what it adds is 3 more fix-ups.
+    expect(est.usd.high).toBeCloseTo(plain.usd.high, 9);
+    expect(est.usd.fix - plain.usd.fix).toBeCloseTo(3 * est.usd.fixOne, 9);
+    const figure = atMostOf(est) as number;
+    let committed = 0;
+    let asked = 0;
+    const prov = better();
+    const { state } = await runDesign({
+      ai: AI.anthropic,
+      ctx: made.sp.ctx,
+      design: made.sp.draft,
+      plan: made.sp.plan,
+      signal: new AbortController().signal,
+      fetch: prov.fetch,
+      results: scripted,
+      fixesLeft: est.fixes,
+      onStep: (key, kind, phase) => {
+        if (phase === 'start') committed += stepHigh(est, key, kind);
+      },
+      overLimit: (next) => !!next && committed + stepHigh(est, next.key, next.kind) > figure + 1e-9,
+      confirmOver: async () => {
+        asked++;
+        return false;
+      },
+    });
+    expect(state.phase).toBe('done');
+    expect(asked).toBe(0);
+    expect(committed).toBeLessThanOrEqual(figure + 1e-9);
+    expect(prov.calls.filter((c) => promptOf(c.body).includes('## Fix round'))).toHaveLength(6);
+    expect(prov.calls).toHaveLength(2 + 6);
+    // Keep fixing on a strict option prices its own strict pool for its rooms.
+    expect(
+      priced({ brief: { ...defaultBrief(), quality: 'quick', fixAll: true } })?.est.fixes,
+    ).toBe(4);
+  });
+
   it('Keep fixing: its rooms’ fix rounds alone, at most the pool at the dearest; the run on it', async () => {
     const made = priced();
     if (!made) throw new Error('not priced');

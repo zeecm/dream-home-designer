@@ -125,6 +125,8 @@ function applies(key: QuestionKey, brief: DesignBrief, level: Level): boolean {
   // Never asked in the first meeting (its 8 questions are for the rest): Typical is assumed,
   // and changed in What I know or with the chips on a card's storage line.
   if (key === 'owns') return false;
+  // Never asked: Show it as it is until the person (or the designer, on their word) says.
+  if (key === 'fix-all') return false;
   return true;
 }
 
@@ -179,6 +181,8 @@ export function questionText(key: QuestionKey, brief: DesignBrief): string {
       return 'Does anyone work from home?';
     case 'owns':
       return 'How much do you own?';
+    case 'fix-all':
+      return 'Before you see a design?';
     case 'budget':
       return 'What’s your renovation budget?';
     case 'walls':
@@ -224,6 +228,14 @@ export const WFH_CHOICES: { id: DesignBrief['lifestyle']['wfh']; label: string }
   { id: 0, label: 'No one' },
   { id: 1, label: 'One of us' },
   { id: 2, label: 'Two of us' },
+];
+/**
+ * Before you see a design (designer listens §6): fix every check first (a larger fix-up pool,
+ * priced on the cost card), or show it as it is (the default).
+ */
+export const FIX_ALL_CHOICES: { id: 'on' | 'off'; label: string }[] = [
+  { id: 'on', label: 'Fix every check first' },
+  { id: 'off', label: 'Show it as it is' },
 ];
 /** How much they own: the storage meter's own choices and words (shared with its setting). */
 export const OWNS_CHOICES: { id: NonNullable<DesignBrief['owns']>; label: string }[] = [
@@ -343,6 +355,8 @@ export function factText(key: QuestionKey, brief: DesignBrief, level: Level): st
       return WFH_CHOICES.find((c) => c.id === brief.lifestyle.wfh)?.label ?? 'No one';
     case 'owns':
       return OWNS_CHOICES.find((c) => c.id === (brief.owns ?? 'typical'))?.label ?? 'Typical';
+    case 'fix-all':
+      return brief.fixAll ? 'Fix every check first' : 'Show it as it is';
     case 'budget':
       return brief.budget ? budgetWords(brief.budget) : 'Not sure';
     case 'walls':
@@ -364,6 +378,7 @@ export const FACT_LABELS: Record<QuestionKey, string> = {
   cooking: 'Cooking',
   wfh: 'Working from home',
   owns: 'How much you own',
+  'fix-all': 'Before you see a design',
   budget: 'Budget',
   walls: 'Walls',
   style: 'Style',

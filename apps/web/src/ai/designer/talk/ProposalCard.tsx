@@ -7,7 +7,9 @@ import {
   type StorageAmount,
   type SubsetReport,
   WARNING_TEXT,
+  blockingHead,
   cardPieces,
+  declinedNow,
   defaultTicks,
   keptHolds,
   mergeChanges,
@@ -16,6 +18,7 @@ import {
   spentOf,
   subsetReport,
   usageTotals,
+  versionsWords,
 } from '@dhd/core';
 import { type ReactNode, memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useRates } from '../../../cost/estimate';
@@ -30,7 +33,7 @@ import { useResultsTickN } from '../results';
 import { cannotDesign, tokens, usd, useSpend } from '../spend';
 import { houseKeptFor, houseRulesFor, openCompare, useDesigner } from '../state';
 import { keepTogether } from '../words';
-import { CheckLead, SetOutToFix, hasLead } from './CheckLead';
+import { CheckLead, type LeadFrame, SetOutToFix, hasLead } from './CheckLead';
 import { KeepFixing, useKeepAsk } from './KeepFixing';
 import { Mark } from './Mark';
 import { acceptCard, precheckNow } from './accept';
@@ -73,6 +76,7 @@ import {
   pressScope,
   scopePrice,
 } from './propose';
+import { blockingFor, notMetOf } from './repeat';
 import { pressCarryOn, pressKeep } from './resume';
 import { focusInLog, scrollInLog } from './scroll';
 import { timed, useSettledProject } from './settle';
@@ -666,15 +670,34 @@ export const ProposalCard = memo(function ProposalCard({
     () => (r ? timed(() => cardRunReport(card, r, changes, { waive: waiveKey.split('|') })) : null),
     [card, r, changes, waiveKey],
   );
+  // What's blocking this (UX state C): the versions of this scope before this card failed the
+  // same way, worked out free from their own cards once this one is checked and failing. Only
+  // ever on the newest card of its scope (`blockingFor`).
+  const versionsN = useTalk((s) => s.proposals.length);
+  const failingN = runRep?.failures.length ?? 0;
+  const [blocking, setBlocking] = useState<{ titles: string[]; same: boolean } | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: worked out again as versions come
+  useEffect(() => {
+    if (!active || running || card.kind !== 'proposal' || card.status !== 'checked' || !failingN) {
+      setBlocking(null);
+      return;
+    }
+    let live = true;
+    void blockingFor(card)
+      .catch(() => null)
+      .then((b) => {
+        if (live) setBlocking(b);
+      });
+    return () => {
+      live = false;
+    };
+  }, [active, running, card, failingN, versionsN, tick]);
   // The free fix's dry run (in the worker, free): offered only when it would place something.
   // From the plan once edits have paused a full second: never re-run as a drag goes on.
   const slowProject = useSettledProject(1000);
   const freeBusy = useFreeBusy((s) => s.card);
   const declinedKey = useTalk((s) =>
-    (s.conv?.decisions ?? [])
-      .filter((d) => !d.deleted && d.free)
-      .map((d) => d.id)
-      .join(','),
+    (s.conv ? declinedNow(s.conv) : []).map((d) => `${d.room}|${d.role}`).join(','),
   );
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again as results land
   const offer = useMemo(
@@ -967,8 +990,14 @@ export const ProposalCard = memo(function ProposalCard({
     card.option && card.proposal && card.status === 'checked' && !card.accepted.length
       ? fixRoomsOf(card.option)
       : [];
+  // Only while a fix round could still help: never for failures no furnishing fixes alone
+  // (more people than bedrooms, a bedroom with no window).
   const keepFixingButton =
-    !running && fixRooms.length > 0 && rep.failures.length > 0 && card.proposal && card.option ? (
+    !running &&
+    fixRooms.length > 0 &&
+    rep.failures.some((f) => !f.unfixable) &&
+    card.proposal &&
+    card.option ? (
       <KeepFixing
         cardKey={card.key}
         proposal={card.proposal}
@@ -990,6 +1019,27 @@ export const ProposalCard = memo(function ProposalCard({
     card.status !== 'failed' &&
     !!failingLine &&
     (hasLead(rep) || did.length > 0 || missedLines.length > 0 || !!leadAction);
+  // States D then C (UX "The lead"): one frame a card. Fix every check first, with failures left;
+  // else the same failures as the versions before it.
+  const strictNotMet =
+    !running && card.status === 'checked' && !!card.option?.brief.fixAll && rep.failures.length > 0;
+  const notMetNow = strictNotMet && card.option ? notMetOf(card.option) : null;
+  const earlier = blocking ? versionsWords(blocking.titles.slice(0, -1)) : '';
+  const frame: LeadFrame | null = notMetNow
+    ? {
+        kind: 'strict',
+        heading: notMetNow.head,
+        why: notMetNow.why,
+        // The same set (or more) is "the same"; fewer, every one failed before: "also".
+        same: blocking
+          ? blocking.same
+            ? `Same failures as ${earlier}.`
+            : `Also failed in ${earlier}.`
+          : null,
+      }
+    : blocking?.same && rep.failures.length > 0 && !running
+      ? { kind: 'blocking', heading: blockingHead(blocking.titles, rep.failures.length) }
+      : null;
   const verdict = running ? 'Checking…' : (failingLine?.text ?? 'Checking…');
   const title =
     card.input.concept?.summary ||
@@ -1072,6 +1122,7 @@ export const ProposalCard = memo(function ProposalCard({
           did={did}
           missed={missedLines}
           action={leadAction}
+          frame={frame}
         />
       )}
       {title && <p className="talk-card-summary">{keepTogether(title)}</p>}
