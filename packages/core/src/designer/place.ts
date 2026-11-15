@@ -170,7 +170,9 @@ export function spaceIndex(level: Level, geom: PlanGeometry, rooms: string[]): S
 /**
  * Where the room to use a piece ends whatever stands there, as the clearance check measures
  * it (`clearanceIssues`): walls and windows, doorways (a bed's side open only onto a doorway
- * has no room to get in), and the floor's edge. Those near the box `zb`.
+ * has no room to get in), and the floor's edge. Those near the box `zb`. A doorway's gap,
+ * not its throat: the check's walls cover each opening's gap in the wall only, and a throat
+ * is floor in the room (kept free to walk through, `fixedHit`), not a wall a zone ends at.
  */
 function roomEnds(ix: SpaceIndex, zb: Box): Vec2[][] {
   return [

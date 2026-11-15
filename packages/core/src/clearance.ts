@@ -35,6 +35,15 @@ export function zoneDepth(zone: readonly Vec2[]): number {
   return a && d ? Math.hypot(d.x - a.x, d.y - a.y) : 0;
 }
 
+/**
+ * A zone shallower than this is a side on a wall, give or take a piece set a few millimetres
+ * off it: drawn as nothing (its label says the side is closed), on the plan and in sketches.
+ */
+export const ZONE_MIN_DEPTH = 0.03;
+
+/** Whether a zone is deep enough to draw (`ZONE_MIN_DEPTH`). */
+export const zoneShown = (zone: readonly Vec2[]) => zoneDepth(zone) >= ZONE_MIN_DEPTH;
+
 export { overlapDepth } from './convex';
 
 /**
@@ -515,7 +524,14 @@ const PROBE = 0.05;
 /** Half the width of a floor edge's strip. */
 const EDGE_HALF = 0.001;
 
-/** The floor's open edges (`Fixed.edges`). */
+/** At most this far apart, the points a boundary is looked at along (and at least four). */
+const EDGE_STEP = 0.25;
+
+/**
+ * The floor's open edges (`Fixed.edges`): each room boundary looked at along its length, so
+ * one with a room beyond only part of it (an open kitchen along half of it) is an edge only
+ * where there is no floor beyond, found to the millimetre between the points looked at.
+ */
 export function floorEdges(level: Level): Vec2[][] {
   const bounded = Object.values(level.walls).filter(isBoundary);
   if (!bounded.length) return [];
@@ -530,18 +546,49 @@ export function floorEdges(level: Level): Vec2[][] {
     const len = Math.hypot(b.x - a.x, b.y - a.y);
     if (len < 1e-9) continue;
     const n = { x: -(b.y - a.y) / len, y: (b.x - a.x) / len };
-    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    const left = onFloor({ x: mid.x + n.x * PROBE, y: mid.y + n.y * PROBE });
-    const right = onFloor({ x: mid.x - n.x * PROBE, y: mid.y - n.y * PROBE });
-    // Floor on one side only: the edge of the flat (or of a hole in a room).
-    if (left === right) continue;
-    const h = { x: n.x * EDGE_HALF, y: n.y * EDGE_HALF };
-    out.push([
-      { x: a.x - h.x, y: a.y - h.y },
-      { x: b.x - h.x, y: b.y - h.y },
-      { x: b.x + h.x, y: b.y + h.y },
-      { x: a.x + h.x, y: a.y + h.y },
-    ]);
+    const at = (t: number) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    // Floor on one side only, at t along it: the edge of the flat (or of a hole in a room).
+    const edgeAt = (t: number) => {
+      const p = at(t);
+      const left = onFloor({ x: p.x + n.x * PROBE, y: p.y + n.y * PROBE });
+      return left !== onFloor({ x: p.x - n.x * PROBE, y: p.y - n.y * PROBE });
+    };
+    // Where it changes between t0 (as `was`) and t1, to a millimetre or so.
+    const change = (t0: number, t1: number, was: boolean) => {
+      let [lo, hi] = [t0, t1];
+      while ((hi - lo) * len > 0.001) {
+        const m = (lo + hi) / 2;
+        if (edgeAt(m) === was) lo = m;
+        else hi = m;
+      }
+      return (lo + hi) / 2;
+    };
+    const strip = (t0: number, t1: number) => {
+      const [p, q] = [at(t0), at(t1)];
+      const h = { x: n.x * EDGE_HALF, y: n.y * EDGE_HALF };
+      out.push([
+        { x: p.x - h.x, y: p.y - h.y },
+        { x: q.x - h.x, y: q.y - h.y },
+        { x: q.x + h.x, y: q.y + h.y },
+        { x: p.x + h.x, y: p.y + h.y },
+      ]);
+    };
+    // Looked at the middle of each stretch; an edge runs from the wall's end, or from where
+    // it changes, to where it changes back or the other end.
+    const k = Math.max(4, Math.ceil(len / EDGE_STEP));
+    let from: number | null = null;
+    let prev = { t: 0, edge: false };
+    for (let i = 0; i < k; i++) {
+      const t = (i + 0.5) / k;
+      const edge = edgeAt(t);
+      if (edge && from === null) from = i === 0 ? 0 : change(prev.t, t, false);
+      if (!edge && from !== null) {
+        strip(from, change(prev.t, t, true));
+        from = null;
+      }
+      prev = { t, edge };
+    }
+    if (from !== null) strip(from, 1);
   }
   return out;
 }

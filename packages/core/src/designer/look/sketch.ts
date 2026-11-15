@@ -1,3 +1,4 @@
+import { zoneShown } from '../../clearance';
 import { furnitureKind, itemFootprint } from '../../furniture';
 import { placeLabel } from '../../geometry';
 import { doorLeaf, doorSwing, planGeometry } from '../../plan';
@@ -263,9 +264,12 @@ function draw(
         out.push(`<clipPath id="${id}"><polygon points="${poly(shape.outer)}"/></clipPath>`);
         clip = ` clip-path="url(#${id})"`;
       }
-      out.push(
-        `<polygon points="${poly(i.zone)}" fill="none" stroke="${C.zone}" stroke-width="2" stroke-dasharray="5 3"${clip}/>`,
-      );
+      // A side on a wall has no zone to draw (as on the plan): its label says what is left.
+      if (zoneShown(i.zone)) {
+        out.push(
+          `<polygon points="${poly(i.zone)}" fill="none" stroke="${C.zone}" stroke-width="2" stroke-dasharray="5 3"${clip}/>`,
+        );
+      }
       const z = i.zone;
       const m = z.reduce((t, q) => ({ x: t.x + q.x / z.length, y: t.y + q.y / z.length }), {
         x: 0,

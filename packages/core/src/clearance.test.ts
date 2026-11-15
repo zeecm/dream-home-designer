@@ -1,19 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
   type ClearanceIssue,
+  ZONE_MIN_DEPTH,
   chairsOf,
   clearanceIssues,
   clearanceZones,
   doorSweep,
+  floorEdges,
   issueItem,
   zoneDepth,
+  zoneShown,
 } from './clearance';
 import { addOpening, drawWall } from './commands';
 import { blankProject } from './factory';
+import { ledgeFlatLevel } from './fixtures/ledgeFlat';
 import { furnitureKind, newItem, placeFurniture } from './furniture';
 import { type EditorDoc, dispatch, emptyHistory } from './history';
 import { doorSwing, planGeometry } from './plan';
-import type { Level, Opening, Vec2 } from './schema';
+import { Level, type Opening, type Vec2 } from './schema';
 
 /** A 4 m square room, walls 100 mm thick on centre lines at 0 and 4. */
 function room(): EditorDoc {
@@ -585,5 +589,43 @@ describe('clearance zones stop at walls (#72)', () => {
     if (z?.kind !== 'zone') throw new Error('no zone');
     expect(Math.abs(depth(z.zone) - z.have)).toBeLessThanOrEqual(0.005);
     for (const p of z.zone) expect(p.y).toBeGreaterThanOrEqual(0.05 - 1e-6);
+  });
+});
+
+describe('the floor’s edge along part of a boundary (#72, ledgeFlat)', () => {
+  const flat = ledgeFlatLevel();
+  const xs = (e: Vec2[]) => e.map((p) => p.x);
+
+  it('is found along each boundary, only where there is no floor beyond', () => {
+    expect(Level.safeParse(flat).success).toBe(true);
+    const edges = floorEdges(flat);
+    // The balcony's three sides, and the living room's south line west of the balcony only.
+    expect(edges).toHaveLength(4);
+    const south = edges.filter((e) => e.every((p) => Math.abs(p.y - 4.4) < 0.01));
+    expect(south).toHaveLength(1);
+    const s = south[0] as Vec2[];
+    expect(Math.min(...xs(s))).toBeCloseTo(3.4, 6);
+    expect(Math.abs(Math.max(...xs(s)) - 5.4)).toBeLessThan(0.002);
+  });
+
+  it('a wardrobe facing it is short where it is the edge, not where the balcony is beyond', () => {
+    // Facing south (+y), its front 0.30 m from the line at y 4.4.
+    const at = (x: number) => withItems(flat, [['wardrobe', { x, y: 4.4 - 0.3 - 0.3 }]]);
+    const edge = zones(clearanceIssues(at(4.45)));
+    expect(edge).toHaveLength(1);
+    const z = edge[0];
+    if (z?.kind !== 'zone') throw new Error('no zone');
+    expect(z.have).toBeCloseTo(0.3, 2);
+    expect(depth(z.zone)).toBeCloseTo(0.3, 2);
+    // Over the balcony: open floor, room to open it.
+    expect(zones(clearanceIssues(at(7.0)))).toEqual([]);
+  });
+
+  it('a piece standing on it has a zone too shallow to draw', () => {
+    const lvl = withItems(flat, [['wardrobe', { x: 4.45, y: 4.4 - 0.3 }]]);
+    const z = zones(clearanceIssues(lvl))[0];
+    if (z?.kind !== 'zone') throw new Error('no zone');
+    expect(zoneShown(z.zone)).toBe(false);
+    expect(depth(z.zone)).toBeLessThan(ZONE_MIN_DEPTH);
   });
 });
