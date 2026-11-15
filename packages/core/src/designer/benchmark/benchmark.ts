@@ -1,4 +1,5 @@
 import { hdb4RoomLevel } from '../../fixtures/hdb4room';
+import { ledgeFlatLevel } from '../../fixtures/ledgeFlat';
 import { sampleFlatProject } from '../../fixtures/sampleFlat';
 import { levelBounds } from '../../geometry';
 import type { Level } from '../../schema';
@@ -17,6 +18,8 @@ import hdb4Bed3 from './answers/hdb4-bed3.json';
 import hdb4Kitchen from './answers/hdb4-kitchen.json';
 import hdb4Living from './answers/hdb4-living.json';
 import hdb4Master from './answers/hdb4-master.json';
+import ledgeBedroom from './answers/ledge-bedroom.json';
+import ledgeLiving from './answers/ledge-living.json';
 import ownerBedroom from './answers/owner-bedroom.json';
 import ownerDiningFix from './answers/owner-dining-fix.json';
 import ownerDining from './answers/owner-dining.json';
@@ -177,6 +180,19 @@ export const BENCHMARK: BenchFlat[] = [
         { ...sampleLiving, items: sampleLiving.items.filter((i) => i.ref !== 'sofa1') },
       ],
     },
+  },
+  {
+    id: 'ledge-flat',
+    name: 'A flat whose floor has open edges (#72): a balcony of boundary lines, a living room open to it along part of one side',
+    level: ledgeFlatLevel,
+    brief: {
+      ...defaultBrief(),
+      household: { ...defaultBrief().household, adults: 2 },
+      lifestyle: { wfh: 0, cooking: 'daily', guests: false },
+      sleeping: { rm_bedroom: ['adult-1', 'adult-2'] },
+    },
+    // Written for the benchmark, as a model answers (no request was made).
+    answers: { rm_bedroom: [ledgeBedroom], rm_living: [ledgeLiving] },
   },
 ];
 

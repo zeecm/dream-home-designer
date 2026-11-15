@@ -2172,6 +2172,27 @@ door's swing in its own room; the walkway line looks for the main door on the ot
 the version shown; issues and the walkway line list rooms worst first (a room before its
 en-suite); bed sides name their room when there are several beds; door names and plan geometry
 are cached by walls/openings/rooms. Drag p95 on 21 pieces: 16.7 ms on, 16.8 off.
+**Zones cut at walls (15 Nov, #72):** a zone issue's `zone` (and `clearanceZones(item, level)`)
+now goes only as far as the room: cut at the nearest wall or the floor's edge (`zoneUpTo`), so
+a bed with a long side on a wall no longer draws its side zone through the wall into the next
+room (or out of the flat). A zone under `ZONE_MIN_DEPTH` (3 cm: a side on a wall, give or take
+a piece set a few mm off it) is drawn as nothing, on the plan and in the look sketch, and its
+chip says "Closed / 0.60 m". The issue carries `out` (away from the piece) for the label and
+the nudges. A cut zone's chip goes inside the zone against the wall if it fits, else by a far
+corner, square to the plan, nearest first: every spot is weighed (`LabelSpec.near`) against its
+piece and the walls near it (`keepOff`, by area), its own room's floor (`keepOn`), the handles
+(the turn handle kept ~17 px clear) and room names. `Fixed.edges` (`floorEdges`): room
+boundaries with a room on one side only end the room off a side as a wall does (a boundary
+between two rooms is open floor); each boundary is looked at every 0.25 m (at least 4 points)
+and split to the millimetre where the floor beyond starts or stops, so one open to a balcony
+along part of its length is an edge only along the rest. Used by the zone and chair checks,
+`bedSides`, and the designer's placement (`place.ts` measures room to use a piece against walls,
+doorways' gaps and the floor's edge, as the check does). Checks unchanged (a double with one
+side on a wall was already the soft "one side to get in"); the six earlier benchmark flats are
+byte-identical. The benchmark checks that no zone reaches into a wall or past the floor's
+edge, and has a seventh flat, `ledge-flat` (`fixtures/ledgeFlat.ts`: a balcony of boundary
+lines, a living room open to it along part of one boundary line; answers written for it), with
+four floor edges; its layout happens not to depend on them.
 
 **On hold (owner, 7 Nov): no more ageing work (slices 1b and 2) until the owner says.** It is hidden in the app behind a flag (`apps/web/src/features.ts`): turn it on in a browser with `?ageing=1` in the address (remembered; `?ageing=0` turns it off) or localStorage `dhd-feature-ageing` = "1"; `ageing.spec.ts` turns it on per test. **Ageing parents check, slice 1 (7 Nov, spec `docs/specs/ageing-parents.md`, "Slice 1 as
 built"):** no schema change. Core `ageing.ts`: `ageingFacts(level, profile)` (choice-free, cached

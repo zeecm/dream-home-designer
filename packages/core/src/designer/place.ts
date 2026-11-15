@@ -1,4 +1,11 @@
-import { CLEARANCE_RULES, DINING_CHAIRS, PULL_BACK, doorSweep, ruleSide } from '../clearance';
+import {
+  CLEARANCE_RULES,
+  DINING_CHAIRS,
+  PULL_BACK,
+  doorSweep,
+  floorEdges,
+  ruleSide,
+} from '../clearance';
 import { frontReach } from '../clearance-doors';
 import { overlapDepth, box as polyBox, roomOff, sideOf, zoneOf } from '../convex';
 import { type FurnitureKind, furnitureLayer, itemFootprint, itemSize, newItem } from '../furniture';
@@ -95,6 +102,11 @@ export interface SpaceIndex {
   solid: Shape[];
   /** Each doorway's gap and its throat, by the opening's id. */
   doorways: (Shape & { openingId: string; throat: boolean })[];
+  /**
+   * The floor's open edges (`floorEdges`): the room off a side ends there, as at a wall, as
+   * the clearance checks measure it.
+   */
+  edges: Shape[];
   sweeps: Shape[];
   /** In front of each window, kept clear above its sill. */
   windows: (Shape & { sill: number })[];
@@ -151,7 +163,23 @@ export function spaceIndex(level: Level, geom: PlanGeometry, rooms: string[]): S
     .filter((o) => o.kind === 'window')
     .flatMap((o) => windowZones(o).map((z) => ({ ...shape(z), sill: o.opening.sill })))
     .filter(near);
-  return { rooms: rs, solid, doorways, sweeps, windows, placed: [], keepOut: [] };
+  const edges = floorEdges(level).map(shape).filter(near);
+  return { rooms: rs, solid, doorways, edges, sweeps, windows, placed: [], keepOut: [] };
+}
+
+/**
+ * Where the room to use a piece ends whatever stands there, as the clearance check measures
+ * it (`clearanceIssues`): walls and windows, doorways (a bed's side open only onto a doorway
+ * has no room to get in), and the floor's edge. Those near the box `zb`. A doorway's gap,
+ * not its throat: the check's walls cover each opening's gap in the wall only, and a throat
+ * is floor in the room (kept free to walk through, `fixedHit`), not a wall a zone ends at.
+ */
+function roomEnds(ix: SpaceIndex, zb: Box): Vec2[][] {
+  return [
+    ...ix.solid.filter((s) => !apart(s.box, zb)).map((s) => s.poly),
+    ...ix.doorways.filter((d) => !d.throat && !apart(d.box, zb)).map((d) => d.poly),
+    ...ix.edges.filter((s) => !apart(s.box, zb)).map((s) => s.poly),
+  ];
 }
 
 /** A footprint corner pulled 1 cm towards the middle (corners on a room's edge read as in). */
@@ -327,7 +355,7 @@ export function hitsOf(
     const near = (z: Vec2[]) => {
       const zb = boxOf(z);
       return [
-        ...ix.solid.filter((s) => !apart(s.box, zb)).map((s) => s.poly),
+        ...roomEnds(ix, zb),
         ...ix.placed.filter((p) => !apart(p.box, zb) && !tuckedWith(p)).map((p) => p.fp),
       ];
     };
@@ -353,8 +381,10 @@ export function hitsOf(
     const need = chairPull(fp);
     const zone = zoneOf(back, need);
     const zb = boxOf(zone);
+    // As the check has it: solid walls and the floor's edge (not doorways), and pieces.
     const obstacles = [
       ...ix.solid.filter((s) => !apart(s.box, zb)).map((s) => s.poly),
+      ...ix.edges.filter((s) => !apart(s.box, zb)).map((s) => s.poly),
       ...ix.placed.filter((p) => !apart(p.box, zb) && !TABLE.test(p.assetId)).map((p) => p.fp),
     ];
     if (roomOff(back, need, obstacles) < need - 0.005) out.push({ kind: 'zone' });
@@ -400,7 +430,7 @@ function zonesOf(ix: SpaceIndex, kind: FurnitureKind, fp: Vec2[]): Vec2[][] {
   const room = (s: (typeof sides)[number]) => {
     const z = boxOf(zoneOf(s, need));
     const near = [
-      ...ix.solid.filter((x) => !apart(x.box, z)).map((x) => x.poly),
+      ...roomEnds(ix, z),
       ...ix.placed.filter((p) => !apart(p.box, z)).map((p) => p.fp),
     ];
     return roomOff(s, need, near);
