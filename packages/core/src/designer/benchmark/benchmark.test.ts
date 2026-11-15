@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { clearanceIssues, fixedParts, overlapDepth } from '../../clearance';
 import { BENCHMARK, benchText, runFlat } from './benchmark';
 
 /** Extras a room can do without (a chair beyond the household's, a lamp, a bedside table). */
@@ -31,5 +32,20 @@ describe('the designer benchmark (recorded answers, no requests)', () => {
     it(`${r.id}: “passes” only when no hard check it caused fails`, () => {
       expect(r.result.passes).toBe(!r.result.checks.some((c) => c.hard && !c.already));
     });
+    it(`${r.id}: no clearance zone reaches into a wall or past the floor's edge (#72)`, () => {
+      const { walls, edges } = fixedParts(r.result.level);
+      for (const i of clearanceIssues(r.result.level)) {
+        if (i.kind !== 'zone') continue;
+        const into = [...walls, ...edges].map((w) => overlapDepth(i.zone, w));
+        expect(Math.max(0, ...into)).toBeLessThan(0.003);
+      }
+    });
   }
+
+  it('has a flat whose floor has open edges, along part of a boundary too (#72)', () => {
+    const ledge = reports.find((r) => r.id === 'ledge-flat');
+    if (!ledge) throw new Error('no ledge flat');
+    // The balcony's three sides, and the living room's south boundary west of the balcony.
+    expect(fixedParts(ledge.result.level).edges).toHaveLength(4);
+  });
 });
