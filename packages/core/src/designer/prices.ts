@@ -270,8 +270,9 @@ export const firstPassOf = (pool: number, rooms: number) =>
  */
 const FIX_EXTRA = 2100;
 /**
- * Tokens of the second look's facts sheet and task, about: the sample flat's whole-flat look is
- * about 2,200 (with the left-out pieces and the beds' sides, #75), so a little over.
+ * Tokens of the second look's facts sheet and task, at most: `lookStep` cuts the facts to fit
+ * (`fitFacts`, least needed first), so the look is reserved at its most. The sample flat's
+ * whole-flat look is about 2,200 uncut (with the left-out pieces and the beds' sides, #75).
  */
 export const LOOK_FACTS = 2500;
 /**

@@ -1277,14 +1277,25 @@ word against praise, and its text was only run through the "I can't check" filte
   clearances only as the facts give them and never "reads well"/"spacious" where the designer's
   pieces didn't fit.
 - Filter (core `look/claims.ts`, `lookClaims`/`factClaims`; `parseLook(raw, facts)` in the run):
-  clause by clause (a sentence's parts between semicolons), a way/room all round or on both sides
-  of a piece with a short side (named by id, aimed at, or by its kind's word in the line's rooms)
-  goes; "reads well", "spacious", "roomy", "plenty of room" and the like go for a room (named, the
-  finding's, else all) with `didntFit`. An emptied line drops its finding; an emptied summary is
-  null; a parse note says so. Narrow regexes only.
+  clause by clause (a sentence's parts between semicolons, ", but", "however,"), a way/room all
+  round or on both sides of a piece with a short side goes. The piece is named by id, aimed at,
+  or called by its kind's full name in the line's rooms ("coffee table", "dining table"), else by
+  its head word ("bed"). "Reads well", "spacious", "roomy", "plenty of room" and the like go for
+  a room (named, the finding's, else all) with `didntFit`. A claim after a negation ("no",
+  "isn't", "without") or a suggestion ("so there is", "would", "move … to") is no claim and stays.
+  An emptied note (a `consider` with no suggestion) goes, an emptied summary is null, and a parse
+  note says so; a fix or a finding with a suggestion keeps its line (a P1–P4 fix is acted on in
+  the app's words anyway). Narrow regexes only.
 - Price: the tail grew about 230–260 tokens (the task line about 127, the facts 100–130; the
-  sample's whole-flat crowded look 1,950 → 2,210), so `LOOK_FACTS` is 2,500 (was 1,500, already
-  short of a whole-flat look); a test holds the whole-flat look under it.
+  sample's whole-flat crowded look 1,950 → 2,210, uncut). `LOOK_FACTS` is 2,500 (was 1,500,
+  already short of a whole-flat look) and now an upper bound by construction: `lookStep` cuts the
+  facts to it less the task (`fitFacts`, least needed first: lenses, soft lines, unchanged
+  pieces' `clear`, unchanged pieces, rooms nothing is in or about, L lines, rules, kept pieces,
+  then changed pieces, hard lines, rooms) and marks them `cut`. The claims filter reads the whole
+  facts. Tests: the sample flat isn't cut; three tiled furnished flats are, within the bound, and
+  the estimate's look step covers the real prompt.
+- Known: `bedSideRoom` measures as the check did before #79 (bed side access: floor edges, cut
+  zones); once #79 merges it should share the check's measure.
 
 **AI costs always have a figure (#67, 14 Nov).** The owner's Gemini 3 runs had no price, so no
 cost card had a figure and neither the approved figure nor the tab's limit held.
