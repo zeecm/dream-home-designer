@@ -779,6 +779,9 @@ and a Stop during the look posts "You stopped the second look. The rooms are don
 A stopped card's lead leaves out the rooms it never placed (`cardRunReport`). The log is held at
 a card's head at a run's end (`HOLD`, from the first frame while the card works its checks out,
 up to 12 s), so a later write doesn't take it back to the foot (an e2e at 844×390 checks it).
+"New reply ↓" (`talk-behind`, fix 15 Nov) shows only while a designer reply streaming in has
+words below the view (`replyBelow`, read at the time); a run's progress and proposal writes,
+and the held card head, never show it (they once did on any write while scrolled up).
 Round 3 (14 Nov): any new hard failure refuses the look's round (HDB, kept pieces, rules,
 anything); a round records `fixed` only when its own checks went down. A Stop in a room's fix
 round keeps its checked first answer (placed, the round `stopped`: a new `FixRound` outcome read
