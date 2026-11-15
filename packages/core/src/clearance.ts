@@ -1,6 +1,7 @@
 import { doorClashes, doorFrontIssues } from './clearance-doors';
 import {
   type Side,
+  box,
   convexHull,
   dot,
   growRect,
@@ -535,9 +536,19 @@ const EDGE_STEP = 0.25;
 export function floorEdges(level: Level): Vec2[][] {
   const bounded = Object.values(level.walls).filter(isBoundary);
   if (!bounded.length) return [];
-  const shapes = [...roomShapes(level).values()];
+  // Each room's box, so a probe tests only the rooms around it (a wall dragged on a big plan
+  // makes these afresh every frame).
+  const shapes = [...roomShapes(level).values()].map((s) => ({ ...s, box: box(s.outer) }));
   const onFloor = (p: Vec2) =>
-    shapes.some((s) => pointInPolygon(p, s.outer) && !s.holes.some((h) => pointInPolygon(p, h)));
+    shapes.some(
+      (s) =>
+        p.x >= s.box.x0 &&
+        p.x <= s.box.x1 &&
+        p.y >= s.box.y0 &&
+        p.y <= s.box.y1 &&
+        pointInPolygon(p, s.outer) &&
+        !s.holes.some((h) => pointInPolygon(p, h)),
+    );
   const out: Vec2[][] = [];
   for (const w of bounded) {
     const a = level.vertices[w.a];

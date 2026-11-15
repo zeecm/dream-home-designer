@@ -1,6 +1,7 @@
 import { freeze } from 'immer';
 import { describe, expect, it } from 'vitest';
 import { ageingReport } from './ageing';
+import { floorEdges } from './clearance';
 import { type DesignCheck, designChecks } from './designer/checks';
 import { NUDGE_BUDGET, nudgeNearMisses } from './designer/nudge';
 import { defaultBrief } from './designer/schema';
@@ -164,6 +165,31 @@ describe('timing (room labels on a terrace of 8 furnished flats, 72 rooms)', () 
     const t = median(times);
     console.log(`room labels: ${shapes.length} rooms, ${avoid.length} circles, ${t.toFixed(2)} ms`);
     expect(t).toBeLessThan(100 * (PERF ? 1 : 3));
+  });
+});
+
+describe('timing (the floor’s edges on a terrace of 8 flats, 72 rooms, issue #72)', () => {
+  // A wall or corner dragged makes the clearance checks' fixed parts afresh every frame, the
+  // floor's edges with them: each boundary looked at along its length against the rooms
+  // around it (by box), not every room (1.4 ms on 24 rooms before).
+  it('floorEdges within 1 ms', () => {
+    const level = tiledLevel(furnishedSample(), 4, 2);
+    const times: number[] = [];
+    let edges = 0;
+    for (let k = 0; k < 9; k++) {
+      // A fresh level each time, as a drag step: nothing of the last kept. Its rooms' shapes
+      // are made first, as the plan makes them for the frame anyway (and keeps them).
+      const l = freeze({ ...level, walls: { ...level.walls }, rooms: { ...level.rooms } }, true);
+      roomShapes(l);
+      const t0 = performance.now();
+      edges = floorEdges(l).length;
+      times.push(performance.now() - t0);
+    }
+    const t = median(times);
+    console.log(
+      `floor edges: ${Object.keys(level.rooms).length} rooms, ${edges} edges, ${t.toFixed(2)} ms`,
+    );
+    expect(t).toBeLessThan(1 * (PERF ? 1 : 3));
   });
 });
 
