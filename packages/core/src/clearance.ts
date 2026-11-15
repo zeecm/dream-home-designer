@@ -30,6 +30,22 @@ export function zoneUpTo(s: Side, need: number, bounds: Vec2[][]): Vec2[] {
   return zoneOf(s, roomOff(s, need, bounds));
 }
 
+/**
+ * The room off a side as the clearance check measures it: as far as the room goes (`reach`, up
+ * to the nearest of `bounds`: walls and the floor's edge), then the pieces within that (`have`,
+ * up to `reach`). The check's zones, the second look's facts (`bedSideRoom`) and the pull-out
+ * room behind a dining chair all measure this way.
+ */
+export function sideRoom(
+  s: Side,
+  need: number,
+  bounds: Vec2[][],
+  others: Vec2[][],
+): { reach: number; have: number } {
+  const reach = roomOff(s, need, bounds);
+  return { reach, have: roomOff(s, reach, others) };
+}
+
 /** How deep a zone (`zoneOf`: a side's two corners, then each pushed out) reaches. */
 export function zoneDepth(zone: readonly Vec2[]): number {
   const [a, , , d] = zone;
@@ -399,8 +415,8 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
       const check = (side: 'front' | 'left' | 'right') => {
         const s = ruleSide(fp, side);
         // As far as the room goes, then the pieces within that.
-        const reach = roomOff(s, rule.need, bounds);
-        return { side, have: roomOff(s, reach, others), zone: zoneOf(s, reach), out: s.n };
+        const { reach, have } = sideRoom(s, rule.need, bounds, others);
+        return { side, have, zone: zoneOf(s, reach), out: s.n };
       };
       const sides = rule.side === 'front' ? [check('front')] : [check('left'), check('right')];
       const short = sides.filter((s) => s.have < rule.need - 0.005);
@@ -435,8 +451,7 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
         const others = items
           .filter((o) => o.id !== it.id && o.id !== table.id)
           .map((o) => fps.get(o.id) as Vec2[]);
-        const reach = roomOff(s, PULL_BACK, pullBounds);
-        const have = roomOff(s, reach, others);
+        const { reach, have } = sideRoom(s, PULL_BACK, pullBounds, others);
         if (have < PULL_BACK - 0.005) {
           out.push({
             kind: 'zone',
@@ -647,4 +662,30 @@ export function fixedParts(level: Level): Fixed {
     });
   }
   return fixed;
+}
+
+/**
+ * The room off each long side of a bed (from the foot to the bedside table), measured as the
+ * clearance check measures it (`sideRoom`: up to the walls and the floor's edge, then the
+ * pieces): `have` up to `need`, 0 against a wall, a piece or the floor's edge. For what is said
+ * of it (the second look's facts), not a check: both sides, short or not. Empty for any other
+ * piece.
+ */
+export function bedSideRoom(
+  level: Level,
+  item: Item,
+): { side: 'left' | 'right'; need: number; have: number }[] {
+  const rule = CLEARANCE_RULES[item.assetId];
+  if (!rule || rule.side === 'front' || !blocks(item)) return [];
+  const fp = itemFootprint(item);
+  const others = Object.values(level.items)
+    .filter((o) => o.id !== item.id && blocks(o))
+    .map((o) => itemFootprint(o));
+  const { walls, edges } = fixedParts(level);
+  const bounds = [...walls, ...edges];
+  return (['left', 'right'] as const).map((side) => ({
+    side,
+    need: rule.need,
+    have: sideRoom(ruleSide(fp, side), rule.need, bounds, others).have,
+  }));
 }

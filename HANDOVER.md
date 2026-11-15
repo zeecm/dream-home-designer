@@ -1265,6 +1265,39 @@ fixing, orphans, what was left out.** Proposal records 5.
   older build's with no bed).
 - Known, not done: the hover-to-light of a failure line.
 
+**The second look checked against its facts (#75, 15 Nov).** The card said "Reads well; the bed
+has a clear way round it." (the mocked look's recorded summary) beside "Left out, didn't fit: 2
+bedside tables, a second built-in wardrobe, 2 wardrobes", with the bed against a wall. The look
+had the L lines and a soft line among `checks`, but nothing tied to a room or a bed's sides, no
+word against praise, and its text was only run through the "I can't check" filter.
+- Facts (`lookFacts`): `leftOut`, one entry a space with the card's words (`leftOutWords`: line
+  and reasons), its rooms' aliases and `didntFit` (a reason in `NO_FIT`); each piece's `clear`:
+  both long sides of a bed (core `bedSideRoom`, measured as the check does, short or not) and any
+  other piece's short side from its zone issue, `have` of `need`. The task says to say
+  clearances only as the facts give them and never "reads well"/"spacious" where the designer's
+  pieces didn't fit.
+- Filter (core `look/claims.ts`, `lookClaims`/`factClaims`; `parseLook(raw, facts)` in the run):
+  clause by clause (a sentence's parts between semicolons, ", but", "however,"), a way/room all
+  round or on both sides of a piece with a short side goes. The piece is named by id, aimed at,
+  or called by its kind's full name in the line's rooms ("coffee table", "dining table"), else by
+  its head word ("bed"). "Reads well", "spacious", "roomy", "plenty of room" and the like go for
+  a room (named, the finding's, else all) with `didntFit`. A claim after a negation ("no",
+  "isn't", "without") or a suggestion ("so there is", "would", "move … to") is no claim and stays.
+  An emptied note (a `consider` with no suggestion) goes, an emptied summary is null, and a parse
+  note says so; a fix or a finding with a suggestion keeps its line (a P1–P4 fix is acted on in
+  the app's words anyway). Narrow regexes only.
+- Price: the tail grew about 230–260 tokens (the task line about 127, the facts 100–130; the
+  sample's whole-flat crowded look 1,950 → 2,210, uncut). `LOOK_FACTS` is 2,500 (was 1,500,
+  already short of a whole-flat look) and now an upper bound by construction: `lookStep` cuts the
+  facts to it less the task (`fitFacts`, least needed first: lenses, soft lines, unchanged
+  pieces' `clear`, unchanged pieces, rooms nothing is in or about, L lines, rules, kept pieces,
+  then changed pieces, hard lines, rooms) and marks them `cut`. The claims filter reads the whole
+  facts. Tests: the sample flat isn't cut; three tiled furnished flats are, within the bound, and
+  the estimate's look step covers the real prompt.
+- `bedSideRoom` measures as the check does since #79 (`sideRoom`, shared with
+  `clearanceIssues`' zones and a dining chair's pull-out: up to the walls and the floor's edge,
+  then the pieces); a ledgeFlat test holds it to the check's figure.
+
 **AI costs always have a figure (#67, 14 Nov).** The owner's Gemini 3 runs had no price, so no
 cost card had a figure and neither the approved figure nor the tab's limit held.
 - **Prices** (`core designer/prices.ts`, checked 14 Nov against Google's

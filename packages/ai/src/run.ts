@@ -785,7 +785,7 @@ export async function runDesign(
       st.status = 'skipped';
       return { ...out, state: 'skipped', line: 'The plan couldn’t be drawn for the second look.' };
     }
-    const answer = await step(lookStep(ctx, facts, images), st, parseLook);
+    const answer = await step(lookStep(ctx, facts, images), st, (raw) => parseLook(raw, facts));
     o.onStep?.(st.key, 'look', 'end');
     if (!answer) {
       // The look ends there; the design stands. A picture the provider refused (a 400 about

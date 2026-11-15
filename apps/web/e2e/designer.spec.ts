@@ -468,7 +468,7 @@ test.describe('desktop', () => {
               },
             },
           ],
-          summary: 'Calm, with a clear way round the bed.',
+          summary: 'Calm, with a clear way round the bed. Soft light from the window.',
         },
       ],
     });
@@ -498,7 +498,9 @@ test.describe('desktop', () => {
     );
     // Its notes on the card, its cost beside them; the contradicted fix sent nothing back.
     const second = v1.locator('[data-look]');
-    await expect(second).toContainText('Calm, with a clear way round the bed.');
+    // The summary less what its facts contradict (#75): the bed's right side is against the wall.
+    await expect(second).toContainText('Soft light from the window.');
+    await expect(second).not.toContainText('clear way round');
     await expect(second).toContainText('A reading lamp by the window would finish it.');
     await expect(second).not.toContainText('The way to the window is blocked.');
     await expect(second).toContainText(/second look US\$0\.\d\d/);
@@ -2441,7 +2443,7 @@ test.describe('designer listens, B2: fix rounds by progress, Keep fixing, what w
         piece({ ref: 'w2', assetId: 'wardrobe', against: 'wall', zone: 'store' }),
       ],
     };
-    await mock(page, { reply: (c) => (main(c) ? answer(crowded) : null) });
+    const m = await mock(page, { reply: (c) => (main(c) ? answer(crowded) : null) });
     await openSample(page);
     await talk(page);
     await justDesign(page);
@@ -2468,6 +2470,18 @@ test.describe('designer listens, B2: fix rounds by progress, Keep fixing, what w
     await expect(left).toContainText(
       /No free wall left in (Main|Master) bedroom for these: .+ take the walls\./,
     );
+    // The second look was told so, and the bed's sides: its recorded "Reads well; the bed has a
+    // clear way round it." is taken out, its note on the room stays (#75).
+    await expect.poll(() => m.looks.length).toBe(1);
+    const facts = promptOf(JSON.parse(m.looks[0]?.body ?? '{}'));
+    expect(facts).toContain(
+      '"line":"Left out, didn’t fit: 2 bedside tables, a second built-in wardrobe, 2 wardrobes."',
+    );
+    expect(facts).toMatch(/"kind":"bed-queen".*"clear":\[/);
+    const second = v1.locator('[data-look]');
+    await expect(second).toContainText('A reading lamp by the window would finish');
+    await expect(second).not.toContainText('Reads well');
+    await expect(second).not.toContainText('clear way round');
     await shot(page, 'b2-left-out');
     if (process.env.SHOTS) {
       await page.setViewportSize({ width: 390, height: 844 });

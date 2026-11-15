@@ -119,7 +119,7 @@ const ABBREV = /\b(?:e\.g|i\.e|etc|vs|approx|incl|cf|mr|mrs|ms|dr|st)$/i;
  * as parts of their own). A sentence ends at . ! or ? (and a closing quote or bracket) followed
  * by a space or the end: never at a decimal point ("0.9 m") or after "e.g.".
  */
-function sentences(text: string): string[] {
+export function sentences(text: string): string[] {
   const out: string[] = [];
   for (const line of text.split(/(\n+)/)) {
     if (!line) continue;
