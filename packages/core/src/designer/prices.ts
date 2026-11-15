@@ -269,8 +269,11 @@ export const firstPassOf = (pool: number, rooms: number) =>
  * left out with their hints (at most 8 + 8 lines of at most 300 characters).
  */
 const FIX_EXTRA = 2100;
-/** Tokens of the second look's facts sheet and task, about. */
-const LOOK_FACTS = 1500;
+/**
+ * Tokens of the second look's facts sheet and task, about: the sample flat's whole-flat look is
+ * about 2,200 (with the left-out pieces and the beds' sides, #75), so a little over.
+ */
+export const LOOK_FACTS = 2500;
 /**
  * Tokens a room step adds to the prefix (the space, its needs, the answer it had), at most
  * about: the second look's round priced with no room step to price it from.

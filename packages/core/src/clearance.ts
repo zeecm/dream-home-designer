@@ -500,3 +500,26 @@ export function fixedParts(level: Level): Fixed {
   }
   return fixed;
 }
+
+/**
+ * The room off each long side of a bed (from the foot to the bedside table), measured as the
+ * clearance check measures it: `have` up to `need`, 0 against a wall or a piece. For what is said
+ * of it (the second look's facts), not a check: both sides, short or not. Empty for any other piece.
+ */
+export function bedSideRoom(
+  level: Level,
+  item: Item,
+): { side: 'left' | 'right'; need: number; have: number }[] {
+  const rule = CLEARANCE_RULES[item.assetId];
+  if (!rule || rule.side === 'front' || !blocks(item)) return [];
+  const fp = itemFootprint(item);
+  const others = Object.values(level.items)
+    .filter((o) => o.id !== item.id && blocks(o))
+    .map((o) => itemFootprint(o));
+  const obstacles = [...fixedParts(level).walls, ...others];
+  return (['left', 'right'] as const).map((side) => ({
+    side,
+    need: rule.need,
+    have: roomOff(ruleSide(fp, side), rule.need, obstacles),
+  }));
+}

@@ -1265,6 +1265,27 @@ fixing, orphans, what was left out.** Proposal records 5.
   older build's with no bed).
 - Known, not done: the hover-to-light of a failure line.
 
+**The second look checked against its facts (#75, 15 Nov).** The card said "Reads well; the bed
+has a clear way round it." (the mocked look's recorded summary) beside "Left out, didn't fit: 2
+bedside tables, a second built-in wardrobe, 2 wardrobes", with the bed against a wall. The look
+had the L lines and a soft line among `checks`, but nothing tied to a room or a bed's sides, no
+word against praise, and its text was only run through the "I can't check" filter.
+- Facts (`lookFacts`): `leftOut`, one entry a space with the card's words (`leftOutWords`: line
+  and reasons), its rooms' aliases and `didntFit` (a reason in `NO_FIT`); each piece's `clear`:
+  both long sides of a bed (core `bedSideRoom`, measured as the check does, short or not) and any
+  other piece's short side from its zone issue, `have` of `need`. The task says to say
+  clearances only as the facts give them and never "reads well"/"spacious" where the designer's
+  pieces didn't fit.
+- Filter (core `look/claims.ts`, `lookClaims`/`factClaims`; `parseLook(raw, facts)` in the run):
+  clause by clause (a sentence's parts between semicolons), a way/room all round or on both sides
+  of a piece with a short side (named by id, aimed at, or by its kind's word in the line's rooms)
+  goes; "reads well", "spacious", "roomy", "plenty of room" and the like go for a room (named, the
+  finding's, else all) with `didntFit`. An emptied line drops its finding; an emptied summary is
+  null; a parse note says so. Narrow regexes only.
+- Price: the tail grew about 230–260 tokens (the task line about 127, the facts 100–130; the
+  sample's whole-flat crowded look 1,950 → 2,210), so `LOOK_FACTS` is 2,500 (was 1,500, already
+  short of a whole-flat look); a test holds the whole-flat look under it.
+
 **AI costs always have a figure (#67, 14 Nov).** The owner's Gemini 3 runs had no price, so no
 cost card had a figure and neither the approved figure nor the tab's limit held.
 - **Prices** (`core designer/prices.ts`, checked 14 Nov against Google's

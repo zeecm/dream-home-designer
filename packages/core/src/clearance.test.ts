@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   type ClearanceIssue,
+  bedSideRoom,
   chairsOf,
   clearanceIssues,
   clearanceZones,
@@ -12,7 +13,7 @@ import { blankProject } from './factory';
 import { furnitureKind, newItem, placeFurniture } from './furniture';
 import { type EditorDoc, dispatch, emptyHistory } from './history';
 import { doorSwing, planGeometry } from './plan';
-import type { Level, Opening, Vec2 } from './schema';
+import type { Item, Level, Opening, Vec2 } from './schema';
 
 /** A 4 m square room, walls 100 mm thick on centre lines at 0 and 4. */
 function room(): EditorDoc {
@@ -114,6 +115,26 @@ describe('clearance checks', () => {
     expect(
       zones(clearanceIssues(withItems(base, [['bed-single', { x: sx, y: 1.5 }]]))),
     ).toHaveLength(0);
+  });
+
+  it('bedSideRoom: both long sides of a bed as measured, short or not; nothing for other pieces', () => {
+    const base = level(room());
+    const queen = furnitureKind('bed-queen');
+    const single = furnitureKind('bed-single');
+    if (!queen || !single) throw new Error('no bed');
+    const qx = 0.05 + 0.4 + queen.size.w / 2;
+    const ql = withItems(base, [['bed-queen', { x: qx, y: 1.5 }]]);
+    const q = bedSideRoom(ql, Object.values(ql.items).at(-1) as Item);
+    expect(q.map((s) => s.side)).toEqual(['left', 'right']);
+    expect(q.map((s) => s.have).sort()).toEqual([expect.closeTo(0.4, 3), 0.6]);
+    expect(q.every((s) => s.need === 0.6)).toBe(true);
+    // A single bed against the wall (3 mm off): that side is closed, though the check finds
+    // nothing (one side is enough).
+    const sl = withItems(base, [['bed-single', { x: 0.05 + single.size.w / 2 + 0.003, y: 1.5 }]]);
+    const s = bedSideRoom(sl, Object.values(sl.items).at(-1) as Item);
+    expect(s.map((x) => x.have).sort()).toEqual([expect.closeTo(0.003, 3), 0.6]);
+    const wl = withItems(base, [['wardrobe', { x: 2, y: 2 }]]);
+    expect(bedSideRoom(wl, Object.values(wl.items).at(-1) as Item)).toEqual([]);
   });
 
   it('a piece in a swinging door’s sweep blocks it; beside a sliding door it does not', () => {

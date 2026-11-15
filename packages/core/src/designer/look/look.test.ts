@@ -8,22 +8,24 @@ import { aliasOf, aliasesFor } from '../aliases';
 import sampleLiving from '../benchmark/answers/sample-living.json';
 import sampleMain from '../benchmark/answers/sample-main-bedroom.json';
 import { ONGS } from '../benchmark/benchmark';
-import { SAMPLE_KEYS, parsed, sampleDesign, sampleLevel } from '../fixtures/sample';
+import { SAMPLE_KEYS, parsed, sampleAnswers, sampleDesign, sampleLevel } from '../fixtures/sample';
 import { freeEssentials } from '../free';
-import { estimateRun } from '../prices';
+import { CHARS_PER_TOKEN, LOOK_FACTS, estimateRun } from '../prices';
 import { roomStep } from '../prompts';
+import { runReport } from '../report';
 import { type DesignResult, designResult } from '../result';
 import type { Rule } from '../rules/schema';
 import { type SpaceDesign, parseSpaceDesign } from '../schema';
-import { spacesOf } from '../spaces';
+import { roomIdAt, spacesOf } from '../spaces';
 import { eventsSince, exchanges } from '../talk/prompt';
 import { liveRules, talk } from '../talk/reducer';
 import { filterClaims } from '../talk/reply';
 import { PROPOSAL_RECORD_VERSION, proposalFromRecord } from '../talk/schema';
 import type { Conversation, TurnOf } from '../talk/schema';
 import { actOnLook, applyLookEdit, lookNoWorse, lookNote, lookRuleOffer } from './act';
+import { factClaims } from './claims';
 import { type LookAnswer, type LookFinding, MAX_FINDINGS, parseLook } from './findings';
-import { lookBase, lookFacts, lookStep } from './prompt';
+import { type LookClear, lookBase, lookFacts, lookStep } from './prompt';
 import { LOOK_PX, MIN_PX_PER_M, critiqueSketch, lookPictureSizes } from './sketch';
 import { IMAGE_TOKENS, canSee, imageTokens, looksAt } from './vision';
 
@@ -1071,5 +1073,165 @@ describe('the app’s own pieces in the second look (designer listens, B1)', () 
     expect(lookNoWorse(a, b2)).toBe(true);
     // A new failure (the table where there was none) still refuses it.
     expect(lookNoWorse(r0, a)).toBe(false);
+  });
+});
+
+describe('what the facts contradict (#75)', () => {
+  const piece = (p: Record<string, unknown>) => ({
+    keep: null,
+    wall: null,
+    along: null,
+    at: null,
+    rotation: null,
+    width: null,
+    depth: null,
+    height: null,
+    why: '',
+    against: null,
+    faces: null,
+    near: null,
+    zone: null,
+    ...p,
+  });
+  /** The issue's card: a second built-in wardrobe and two wardrobes asked for in the main bedroom. */
+  const crowded = v2({
+    ...sampleMain,
+    items: [
+      ...sampleMain.items,
+      piece({
+        ref: 'bw2',
+        assetId: 'built-in-wardrobe',
+        width: 2.4,
+        against: 'wall',
+        zone: 'store',
+      }),
+      piece({ ref: 'w1', assetId: 'wardrobe', against: 'wall', zone: 'store' }),
+      piece({ ref: 'w2', assetId: 'wardrobe', against: 'wall', zone: 'store' }),
+    ],
+  });
+  const factsFor = (answers: Record<string, SpaceDesign>) => {
+    const d = sampleDesign({ level, answers, brief: ONGS, concept: null, id: 'dsn_look_out' });
+    const input = { ...d, aliases: aliasesFor(level) };
+    const fixed = { ...input, spaces: freeEssentials(level, level, input).spaces };
+    const r = designResult(level, level, fixed);
+    const al = aliasesFor(r.level, aliasesFor(level));
+    return lookFacts(r, level, {
+      report: runReport(r, fixed, { aliases: al }),
+      aliases: al,
+      scope: null,
+      brief: ONGS,
+      lenses: [],
+      roomOf: (it) => roomIdAt(r.level, { x: it.position.x, y: it.position.z }),
+    });
+  };
+  const facts = factsFor({ [SAMPLE_KEYS.main]: crowded });
+  const bed = facts.pieces.find((p) => p.kind === 'bed-queen');
+  const ISSUE = 'Reads well; the bed has a clear way round it.';
+  const all = { rooms: 'all' as const, piece: null };
+
+  it('the facts say what was left out and why, as the card does, and each side of the bed', () => {
+    expect(facts.leftOut).toEqual([
+      {
+        rooms: ['R2'],
+        line: 'Left out, didn’t fit: 2 bedside tables, a second built-in wardrobe, 2 wardrobes.',
+        why: [
+          'No free wall left in Main bedroom for these: the queen bed and the built-in wardrobe take the walls.',
+        ],
+        didntFit: true,
+      },
+    ]);
+    // The bed's right side is against the wall; its left has the room it needs.
+    expect(bed?.clear).toEqual([
+      { side: 'left', need: 0.6, have: 0.6 },
+      { side: 'right', need: 0.6, have: 0 },
+    ]);
+    // A piece with nothing measured says nothing.
+    expect(facts.pieces.find((p) => p.kind === 'ceiling-light')?.clear).toBeUndefined();
+    const step = lookStep({ base: level, before: level, brief: ONGS, aliases }, facts, []);
+    expect(step.tail).toContain('Say clearances only as the facts give them');
+    expect(step.tail).toContain('never call that room "reads well", "spacious" or the like');
+  });
+
+  it('the issue’s sentence is taken out: the bed is against a wall, and pieces didn’t fit', () => {
+    const r = parseLook({ findings: [], summary: ISSUE }, facts);
+    expect(r.ok && r.value.summary).toBeNull();
+    expect(r.ok && r.notes).toContain('What the app’s own measurements contradict was taken out.');
+    // Without the facts, as before (the claims filter only).
+    const bare = parseLook({ findings: [], summary: ISSUE });
+    expect(bare.ok && bare.value.summary).toBe(ISSUE);
+  });
+
+  it('each claim on its own facts: a clause goes, the rest of the sentence stays', () => {
+    const open = (c: LookClear[]) => ({
+      ...facts,
+      pieces: facts.pieces.map((p) => (p.id === bed?.id ? { ...p, clear: c } : p)),
+    });
+    const roomy = open([
+      { side: 'left', need: 0.6, have: 0.6 },
+      { side: 'right', need: 0.6, have: 0.6 },
+    ]);
+    // Pieces left out, the bed with room both sides: only "reads well" goes.
+    expect(factClaims(ISSUE, all, roomy).text).toBe('The bed has a clear way round it.');
+    // Nothing left out, the bed against a wall: only the way round goes.
+    const none = { ...facts, leftOut: undefined };
+    expect(factClaims(ISSUE, all, none).text).toBe('Reads well.');
+    // Neither: it stands as said.
+    expect(factClaims(ISSUE, all, { ...roomy, leftOut: undefined })).toEqual({
+      text: ISSUE,
+      removed: 0,
+    });
+    // Other ways of saying it, of a piece named by its kind or id, or aimed at.
+    const id = bed?.id as string;
+    for (const s of [
+      `There is room all round ${id}.`,
+      'You can walk round the bed.',
+      'The bed can be got into from both sides.',
+      'Plenty of space on either side of the bed.',
+    ])
+      expect(factClaims(s, all, none).text).toBe('');
+    expect(factClaims('A clear way round it.', { rooms: ['R2'], piece: id }, none).text).toBe('');
+    // Said of a room where nothing was left out, "spacious" stands.
+    const living = 'Living and dining feels spacious.';
+    expect(factClaims(living, all, facts).text).toBe(living);
+    expect(factClaims('It feels spacious.', { rooms: ['R3'], piece: null }, facts).removed).toBe(0);
+    expect(factClaims('It feels spacious.', { rooms: ['R2'], piece: null }, facts).removed).toBe(1);
+    // What the facts don't speak to stays.
+    const lamp = 'A reading lamp by the window would finish the main bedroom.';
+    expect(factClaims(lamp, { rooms: ['R2'], piece: null }, facts).text).toBe(lamp);
+  });
+
+  it('a finding whose line is all contradicted goes; one partly so is cut to the rest', () => {
+    const line = (target: { kind: string; id: string | undefined }, l: string) => ({
+      target,
+      principle: 'taste',
+      severity: 'consider',
+      line: l,
+      suggest: null,
+    });
+    const r = parseLook(
+      {
+        findings: [
+          line({ kind: 'room', id: 'R2' }, 'The main bedroom reads well.'),
+          line(
+            { kind: 'piece', id: bed?.id },
+            'A clear way round the bed; a softer headboard would suit it.',
+          ),
+          line({ kind: 'room', id: 'R3' }, 'The living room reads well.'),
+        ],
+        summary: null,
+      },
+      facts,
+    );
+    expect(r.ok && r.value.findings.map((f) => f.line)).toEqual([
+      'A softer headboard would suit it.',
+      'The living room reads well.',
+    ]);
+  });
+
+  it('the look’s price still covers its facts and task: the whole flat, crowded', () => {
+    const whole = factsFor({ ...sampleAnswers(level), [SAMPLE_KEYS.main]: crowded });
+    expect(whole.leftOut?.[0]?.didntFit).toBe(true);
+    const tail = lookStep({ base: level, before: level, brief: ONGS, aliases }, whole, []).tail;
+    expect(tail.length / CHARS_PER_TOKEN).toBeLessThan(LOOK_FACTS);
   });
 });
