@@ -98,6 +98,13 @@ export const DesignBrief = z.object({
    */
   // Read tolerantly (records v3): a value from a later build is not said, not a lost record.
   owns: z.enum(['few', 'typical', 'lots']).optional().catch(undefined),
+  /**
+   * Before you see a design (designer listens §6): true, fix every check first (a larger fix-up
+   * pool, priced, and a card that says plainly when they couldn't all pass); absent or false,
+   * show it as it is. Never sent to the model in the brief (`briefData`), so room prefixes stay
+   * cached. Talk records 5 (a build that knows 4 can't write the conversation that holds it).
+   */
+  fixAll: z.boolean().optional().catch(undefined),
   electrical: z.boolean(),
   start: z.enum(['after', 'before']),
   quality: z.enum(['thorough', 'quick']),

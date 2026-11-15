@@ -135,6 +135,11 @@ interface TalkState {
   why: string | null;
   /** AI settings open over the panel, and where. */
   settings: null | 'key' | 'prices' | 'spending';
+  /**
+   * Change what I asked (designer listens C): the composer was focused from a blocking block or
+   * a repeat cost card, and its placeholder says what to type, until the next Send.
+   */
+  changeAsk: boolean;
 }
 
 export const useTalk = create<TalkState>(() => ({
@@ -146,6 +151,7 @@ export const useTalk = create<TalkState>(() => ({
   newer: false,
   view: 'log',
   knowAt: null,
+  changeAsk: false,
   shown: null,
   open: null,
   hover: null,

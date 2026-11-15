@@ -293,10 +293,12 @@ export function priceRequest(i: PriceInput): Priced {
   const pool = i.resume
     ? i.resume.run.fixesLeft
     : i.keepFixing
-      ? fixPoolFor(sp.brief.quality, sp.plan.fixOnly?.length ?? 0)
+      ? fixPoolFor(sp.brief.quality, sp.plan.fixOnly?.length ?? 0, !!sp.brief.fixAll)
       : undefined;
   const est = estimateRun(prompts, {
     ...(pool !== undefined ? { pool } : {}),
+    // Fix every check first (designer listens §6): the strict pool, priced in the figure.
+    ...(sp.brief.fixAll ? { strict: true } : {}),
     ...(sp.plan.fixOnly?.length ? { fixOnly: sp.plan.fixOnly } : {}),
     provider: i.ai.provider,
     model: i.ai.model,

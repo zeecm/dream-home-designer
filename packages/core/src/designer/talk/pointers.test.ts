@@ -215,16 +215,16 @@ describe('records version 4 (slice 3a, pointing)', () => {
     const conv = met();
     const { draftPointers: _p, kept: _k, tips: _t, ...v3 } = { ...conv, recordVersion: 3 };
     const read = conversationFromRecord(JSON.parse(JSON.stringify(v3)));
-    expect(TALK_RECORD_VERSION).toBe(4);
-    expect(read?.recordVersion).toBe(4);
+    expect(TALK_RECORD_VERSION).toBe(5);
+    expect(read?.recordVersion).toBe(5);
     expect(read).toMatchObject({ draftPointers: [], kept: [], tips: [] });
     expect(read?.turns).toEqual(conv.turns);
-    expect(conversationFromRecord({ ...conv, recordVersion: 5 })).toBeNull();
+    expect(conversationFromRecord({ ...conv, recordVersion: 6 })).toBeNull();
   });
 
-  it('a record written by this build says 4, so a build that knows 3 goes read-only', () => {
+  it('a record written by this build says 5, so a build that knows 3 or 4 goes read-only', () => {
     const c = talk(met(), { type: 'pointerAdd', pointer: pointer() });
-    expect(JSON.parse(JSON.stringify(c)).recordVersion).toBe(4);
+    expect(JSON.parse(JSON.stringify(c)).recordVersion).toBe(5);
   });
 });
 

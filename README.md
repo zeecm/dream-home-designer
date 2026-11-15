@@ -144,8 +144,15 @@ for any plan.
   card offers Keep fixing · at most US$x, which always asks first; a dining chair with no table
   or a bedside table with no bed that the answer added is taken out, free; the designer's pieces
   that didn't fit are said on the card ("Left out, didn't fit: built-in wardrobe, 2 wardrobes");
-  a run carried on after a locked phone never repeats a fix round. Next: no paying twice for the
-  same failures, and "fix every check first". [spec](docs/specs/designer-listens.md)
+  a run carried on after a locked phone never repeats a fix round. PR C: when the last two
+  designs of a room fail on the same things, the newest card says "V7 and V8 failed on the same 3
+  things" with each cause and the ways forward (the free fix, Keep fixing where it can help,
+  Change what I asked), and asking again with nothing changed always shows a cost card that says
+  it will likely come back the same, the free fix first and Run it anyway priced; "Before you
+  see a design: Fix every check first" in What I know (set by you, or by the designer on your
+  word; free, with Undo) prices 6 fix-ups instead of 3, and a design that still fails says
+  "Couldn't make everything pass within US$x". The owner's conversation is replayed as a test.
+  [spec](docs/specs/designer-listens.md)
 - AI interior designer v2, slice 3a part B: point at the plan (a piece or a spot, "keep this",
   "why here?", "something else here") with the pointers sent with your message.
 - AI runs that survive a locked phone, part 2: opt-in cloud runs that keep going while the phone is

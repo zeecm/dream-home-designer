@@ -17,6 +17,7 @@ import {
   cardPieces,
   changeSet,
   checkRoomOf,
+  declinedNow,
   designLevels,
   isDeclined,
   levelFingerprint,
@@ -40,8 +41,8 @@ export function reportFor<T>(worked: { on: unknown; rep: T } | null, on: unknown
 
 /** Pieces the person left out before (Decisions at Accept): never offered again there. */
 export function declinedPieces(): { room: string; role: string }[] {
-  const ds = useTalk.getState().conv?.decisions ?? [];
-  return ds.flatMap((d) => (!d.deleted && d.free ? [d.free] : []));
+  const conv = useTalk.getState().conv;
+  return conv ? declinedNow(conv) : [];
 }
 
 /**

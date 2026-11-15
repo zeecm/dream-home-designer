@@ -355,6 +355,7 @@ export async function sendMessage(
   if (!words || !ai || !conv0 || cannotDesign(ai)) return false;
   if (pendingReply(conv0) || useTalk.getState().reply) return false;
   let sent = false;
+  useTalk.setState({ changeAsk: false });
   // The lock first: a tab opening the panel meanwhile can't take this reply for a dead one.
   const got = await withReplyLock(conv0.projectId, async () => {
     await noteHandEdits();
