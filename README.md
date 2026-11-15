@@ -160,18 +160,21 @@ for any plan.
   Keys stored on the server are built next but stay off until Google sign-in is set up.
 
 ### Planned
-1. Levels you can switch between in the editor: today it shows only the first level of a
+1. One rule for a bed against the wall ([#78](https://github.com/zeecm/dream-home-designer/issues/78)):
+   red only when no side is free; an amber note for a shared queen or king.
+   [spec](docs/specs/clearance-one-sided-bed.md)
+2. Levels you can switch between in the editor: today it shows only the first level of a
    multi-level home (a maisonette), so the upper floor can't be drawn or designed.
-2. AI interior designer v2, slice 3b part 3: regression cases from the second look, and asking the
+3. AI interior designer v2, slice 3b part 3: regression cases from the second look, and asking the
    designer on a comment; slice 3a part C: the solver aims for house rules, not only checks them.
-3. Elevations on the contractor sheet (elevation slice 2), with piece labels, the saved
+4. Elevations on the contractor sheet (elevation slice 2), with piece labels, the saved
    picture's font and the iPhone canvas size. [spec](docs/specs/elevation.md)
-4. Storage meter 1b: storage beds, a pantry and a bay seat. [spec](docs/specs/storage-meter.md)
-5. AI interior designer v2, slice 4: sharing a conversation.
-6. Exact render, slice 2: quality settings, real textures, AI polish; daylight bounced up off
+5. Storage meter 1b: storage beds, a pantry and a bay seat. [spec](docs/specs/storage-meter.md)
+6. AI interior designer v2, slice 4: sharing a conversation.
+7. Exact render, slice 2: quality settings, real textures, AI polish; daylight bounced up off
    the ground outside, and dark dots seen through a far window.
-7. Elevation 1b: dragging heights in the wall view.
-8. Storage meter slice 2: the household saved in the project.
+8. Elevation 1b: dragging heights in the wall view.
+9. Storage meter slice 2: the household saved in the project.
 
 ### Waiting on the owner
 - Google sign-in keys ([#21](https://github.com/zeecm/dream-home-designer/issues/21)) and the
