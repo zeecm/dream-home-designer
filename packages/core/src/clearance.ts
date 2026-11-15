@@ -1,6 +1,7 @@
 import { doorClashes, doorFrontIssues } from './clearance-doors';
 import {
   type Side,
+  box,
   convexHull,
   dot,
   growRect,
@@ -18,6 +19,47 @@ import { pointInPolygon } from './geometry';
 import { DOOR_LEAF_THICKNESS, doorLeaves, planGeometry } from './plan';
 import { roomShapes } from './rooms';
 import { type Item, type Level, type Vec2, isBoundary } from './schema';
+
+/**
+ * The area `need` deep off a side, as far as the room goes: up to the nearest of `bounds`
+ * (walls and the floor's edge), never through a wall into the next room or out of the flat.
+ * No depth when the side is against a wall. What a zone issue draws, so the plan shows what
+ * the check measured.
+ */
+export function zoneUpTo(s: Side, need: number, bounds: Vec2[][]): Vec2[] {
+  return zoneOf(s, roomOff(s, need, bounds));
+}
+
+/**
+ * The room off a side as the clearance check measures it: as far as the room goes (`reach`, up
+ * to the nearest of `bounds`: walls and the floor's edge), then the pieces within that (`have`,
+ * up to `reach`). The check's zones, the second look's facts (`bedSideRoom`) and the pull-out
+ * room behind a dining chair all measure this way.
+ */
+export function sideRoom(
+  s: Side,
+  need: number,
+  bounds: Vec2[][],
+  others: Vec2[][],
+): { reach: number; have: number } {
+  const reach = roomOff(s, need, bounds);
+  return { reach, have: roomOff(s, reach, others) };
+}
+
+/** How deep a zone (`zoneOf`: a side's two corners, then each pushed out) reaches. */
+export function zoneDepth(zone: readonly Vec2[]): number {
+  const [a, , , d] = zone;
+  return a && d ? Math.hypot(d.x - a.x, d.y - a.y) : 0;
+}
+
+/**
+ * A zone shallower than this is a side on a wall, give or take a piece set a few millimetres
+ * off it: drawn as nothing (its label says the side is closed), on the plan and in sketches.
+ */
+export const ZONE_MIN_DEPTH = 0.03;
+
+/** Whether a zone is deep enough to draw (`ZONE_MIN_DEPTH`). */
+export const zoneShown = (zone: readonly Vec2[]) => zoneDepth(zone) >= ZONE_MIN_DEPTH;
 
 export { overlapDepth } from './convex';
 
@@ -91,8 +133,14 @@ export type ClearanceIssue =
       need: number;
       /** The room there is: to the nearest wall or piece in the way. */
       have: number;
-      /** The room needed, as an area off that side. */
+      /**
+       * The room needed, as an area off that side, as far as the room goes: cut at the
+       * nearest wall or the floor's edge (`zoneUpTo`), so never through a wall. No depth when
+       * the side is against one (a bed's side on a wall).
+       */
       zone: Vec2[];
+      /** Out from that side, away from the piece (a unit vector), even when `zone` has no depth. */
+      out: Vec2;
     }
   | { kind: 'door'; itemId: string; openingId: string; sweep: Vec2[][] }
   | { kind: 'overlap'; itemId: string; otherId: string; depth: number }
@@ -233,21 +281,27 @@ function pullSide(chair: Item, table: Item): Side {
 }
 
 /**
- * The areas a piece needs kept clear by its rule (full depth), to show while it's handled.
- * A dining chair's is behind it, from its table; `level` finds the table.
+ * The areas a piece needs kept clear by its rule, to show while it's handled: full depth, or
+ * with `level` as far as the room goes (cut at walls and the floor's edge, as the checks
+ * measure). A dining chair's is behind it, from its table; `level` finds the table.
  */
 export function clearanceZones(
   item: Item,
   level?: Level,
 ): { side: 'front' | 'left' | 'right' | 'back'; zone: Vec2[] }[] {
+  const fixed = level && fixedParts(level);
   const table = level && tableOf(item, level);
-  if (table) return [{ side: 'back', zone: zoneOf(pullSide(item, table), PULL_BACK) }];
+  if (table) {
+    const bounds = fixed ? [...fixed.solid, ...fixed.edges] : [];
+    return [{ side: 'back', zone: zoneUpTo(pullSide(item, table), PULL_BACK, bounds) }];
+  }
   const rule = CLEARANCE_RULES[item.assetId];
   if (!rule) return [];
   const fp = itemFootprint(item);
   const sides: ('front' | 'left' | 'right')[] =
     rule.side === 'front' ? ['front'] : ['left', 'right'];
-  return sides.map((side) => ({ side, zone: zoneOf(sideOf(fp, side), rule.need) }));
+  const bounds = fixed ? [...fixed.walls, ...fixed.edges] : [];
+  return sides.map((side) => ({ side, zone: zoneUpTo(sideOf(fp, side), rule.need, bounds) }));
 }
 
 /** The area each leaf of a door sweeps from shut to open (one polygon per leaf). */
@@ -295,13 +349,13 @@ export function bedSides(
   const rule = CLEARANCE_RULES[item.assetId];
   if (!rule || rule.side === 'front' || !blocks(item)) return [];
   const fp = itemFootprint(item);
-  const { walls } = fixedParts(level);
+  const { walls, edges } = fixedParts(level);
   const others = standing
     ? standing.fps.filter((_, i) => standing.pieces[i]?.id !== item.id)
     : Object.values(level.items)
         .filter((o) => o.id !== item.id && blocks(o))
         .map((o) => itemFootprint(o));
-  const obstacles = [...walls, ...others];
+  const obstacles = [...walls, ...edges, ...others];
   const sides = (['left', 'right'] as const).map((side) => {
     const s = ruleSide(fp, side);
     return { side, have: roomOff(s, rule.need, obstacles), zone: zoneOf(s, rule.need) };
@@ -326,7 +380,11 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
   const out: ClearanceIssue[] = [];
   const items = Object.values(level.items).filter(blocks);
   const fps = new Map(items.map((it) => [it.id, itemFootprint(it)]));
-  const { walls, solid, sweeps, clashes } = fixedParts(level);
+  const { walls, solid, edges, sweeps, clashes } = fixedParts(level);
+  // Where the room off a side ends whatever stands there: a wall (a doorway too, to be safe)
+  // or the floor's edge. A zone is never measured, nor drawn, past one.
+  const bounds = [...walls, ...edges];
+  const pullBounds = [...solid, ...edges];
 
   // Kitchen cabinets joined into one run (straight, L or U): one counter, not in each
   // other's way. Runs apart (a galley's two sides) still are.
@@ -340,8 +398,8 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
     const fp = fps.get(it.id) as Vec2[];
     const rule = CLEARANCE_RULES[it.assetId];
     if (rule) {
-      // In the way: walls (doorways too, to be safe), and pieces on the floor, but not a seat
-      // in front of a desk, nor a cabinet of its own kitchen run.
+      // In the way, up to the walls: pieces on the floor, but not a seat in front of a desk,
+      // nor a cabinet of its own kitchen run.
       const others = items
         .filter((o) => {
           if (o.id === it.id) return false;
@@ -354,10 +412,11 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
         .map((o) => fps.get(o.id) as Vec2[]);
       // Not a piece of its own kitchen run, unless it faces this one across the kitchen
       // (a U's arms): an L's other leg or the next cabinet along is one counter.
-      const obstacles = [...walls, ...others];
       const check = (side: 'front' | 'left' | 'right') => {
         const s = ruleSide(fp, side);
-        return { side, have: roomOff(s, rule.need, obstacles), zone: zoneOf(s, rule.need) };
+        // As far as the room goes, then the pieces within that.
+        const { reach, have } = sideRoom(s, rule.need, bounds, others);
+        return { side, have, zone: zoneOf(s, reach), out: s.n };
       };
       const sides = rule.side === 'front' ? [check('front')] : [check('left'), check('right')];
       const short = sides.filter((s) => s.have < rule.need - 0.005);
@@ -378,23 +437,21 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
           need: rule.need,
           have: s.have,
           zone: s.zone,
+          out: s.out,
         });
       }
     }
     // A dining chair: room behind it to pull it out and sit, from its table's edge. In the
-    // way: solid walls and pieces on the floor, not this chair nor its table (a chair of
-    // another table behind it is).
+    // way: solid walls and the floor's edge, then pieces on the floor, not this chair nor its
+    // table (a chair of another table behind it is).
     if (DINING_CHAIRS.has(it.assetId) && tables.length) {
       const table = tableOf(it, level);
       if (table && fps.has(table.id)) {
         const s = pullSide(it, table);
-        const obstacles = [
-          ...solid,
-          ...items
-            .filter((o) => o.id !== it.id && o.id !== table.id)
-            .map((o) => fps.get(o.id) as Vec2[]),
-        ];
-        const have = roomOff(s, PULL_BACK, obstacles);
+        const others = items
+          .filter((o) => o.id !== it.id && o.id !== table.id)
+          .map((o) => fps.get(o.id) as Vec2[]);
+        const { reach, have } = sideRoom(s, PULL_BACK, pullBounds, others);
         if (have < PULL_BACK - 0.005) {
           out.push({
             kind: 'zone',
@@ -403,7 +460,8 @@ export function clearanceIssues(level: Level): ClearanceIssue[] {
             what: PULL_WHAT,
             need: PULL_BACK,
             have,
-            zone: zoneOf(s, PULL_BACK),
+            zone: zoneOf(s, reach),
+            out: s.n,
           });
         }
       }
@@ -461,16 +519,116 @@ export type Fixed = {
   /** Every wall's outline (openings count as wall) and the hubs; not room boundaries. */
   walls: Vec2[][];
   solid: Vec2[][];
+  /**
+   * The floor's open edges: room boundaries with a room on one side only (a ledge or a
+   * hole drawn without walls), as thin strips. The room off a side ends there as at a wall;
+   * a boundary between two rooms (an open kitchen) is open floor.
+   */
+  edges: Vec2[][];
   sweeps: [string, Vec2[][]][];
   clashes: Extract<ClearanceIssue, { kind: 'doors' }>[];
 };
-// Walls and doors don't change while furniture moves: kept by the walls, corners and openings
-// (Immer keeps those objects while only items change).
-const fixedCache = new WeakMap<object, { vertices: object; openings: object; fixed: Fixed }>();
+// Walls and doors don't change while furniture moves: kept by the walls, corners, openings and
+// rooms (Immer keeps those objects while only items change).
+const fixedCache = new WeakMap<
+  object,
+  { vertices: object; openings: object; rooms: object; fixed: Fixed }
+>();
+
+/** How far past a room boundary to look for a room on its other side. */
+const PROBE = 0.05;
+/** Half the width of a floor edge's strip. */
+const EDGE_HALF = 0.001;
+
+/** At most this far apart, the points a boundary is looked at along (and at least four). */
+const EDGE_STEP = 0.25;
+
+/**
+ * The floor's open edges (`Fixed.edges`): each room boundary looked at along its length, so
+ * one with a room beyond only part of it (an open kitchen along half of it) is an edge only
+ * where there is no floor beyond, found to the millimetre between the points looked at.
+ */
+export function floorEdges(level: Level): Vec2[][] {
+  const bounded = Object.values(level.walls).filter(isBoundary);
+  if (!bounded.length) return [];
+  // Each room's box, so a probe tests only the rooms around it (a wall dragged on a big plan
+  // makes these afresh every frame).
+  const shapes = [...roomShapes(level).values()].map((s) => ({ ...s, box: box(s.outer) }));
+  const onFloor = (p: Vec2) =>
+    shapes.some(
+      (s) =>
+        p.x >= s.box.x0 &&
+        p.x <= s.box.x1 &&
+        p.y >= s.box.y0 &&
+        p.y <= s.box.y1 &&
+        pointInPolygon(p, s.outer) &&
+        !s.holes.some((h) => pointInPolygon(p, h)),
+    );
+  const out: Vec2[][] = [];
+  for (const w of bounded) {
+    const a = level.vertices[w.a];
+    const b = level.vertices[w.b];
+    if (!a || !b) continue;
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (len < 1e-9) continue;
+    const n = { x: -(b.y - a.y) / len, y: (b.x - a.x) / len };
+    const at = (t: number) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    // Floor on one side only, at t along it: the edge of the flat (or of a hole in a room).
+    const edgeAt = (t: number) => {
+      const p = at(t);
+      const left = onFloor({ x: p.x + n.x * PROBE, y: p.y + n.y * PROBE });
+      return left !== onFloor({ x: p.x - n.x * PROBE, y: p.y - n.y * PROBE });
+    };
+    // Where it changes between t0 (as `was`) and t1, to a millimetre or so.
+    const change = (t0: number, t1: number, was: boolean) => {
+      let [lo, hi] = [t0, t1];
+      while ((hi - lo) * len > 0.001) {
+        const m = (lo + hi) / 2;
+        if (edgeAt(m) === was) lo = m;
+        else hi = m;
+      }
+      return (lo + hi) / 2;
+    };
+    const strip = (t0: number, t1: number) => {
+      const [p, q] = [at(t0), at(t1)];
+      const h = { x: n.x * EDGE_HALF, y: n.y * EDGE_HALF };
+      out.push([
+        { x: p.x - h.x, y: p.y - h.y },
+        { x: q.x - h.x, y: q.y - h.y },
+        { x: q.x + h.x, y: q.y + h.y },
+        { x: p.x + h.x, y: p.y + h.y },
+      ]);
+    };
+    // Looked at the middle of each stretch; an edge runs from the wall's end, or from where
+    // it changes, to where it changes back or the other end.
+    const k = Math.max(4, Math.ceil(len / EDGE_STEP));
+    let from: number | null = null;
+    let prev = { t: 0, edge: false };
+    for (let i = 0; i < k; i++) {
+      const t = (i + 0.5) / k;
+      const edge = edgeAt(t);
+      if (edge && from === null) from = i === 0 ? 0 : change(prev.t, t, false);
+      if (!edge && from !== null) {
+        strip(from, change(prev.t, t, true));
+        from = null;
+      }
+      prev = { t, edge };
+    }
+    if (from !== null) strip(from, 1);
+  }
+  return out;
+}
 
 export function fixedParts(level: Level): Fixed {
   const hit = fixedCache.get(level.walls);
-  if (hit && hit.vertices === level.vertices && hit.openings === level.openings) return hit.fixed;
+  if (
+    hit &&
+    hit.vertices === level.vertices &&
+    hit.openings === level.openings &&
+    hit.rooms === level.rooms
+  ) {
+    return hit.fixed;
+  }
   const fw = wallFootprints(level);
   const hubs = fw.hubs.map((h) => h.polygon);
   const walls = [
@@ -494,17 +652,24 @@ export function fixedParts(level: Level): Fixed {
     .map((o): [string, Vec2[][]] => [o.id, doorSweep(level, o.id, geom.frames)])
     .filter(([, sw]) => sw.length > 0);
   // Door against door depends only on walls and doors.
-  const fixed = { walls, solid, sweeps, clashes: doorClashes(sweeps) };
+  const fixed = { walls, solid, edges: floorEdges(level), sweeps, clashes: doorClashes(sweeps) };
   if (Object.isFrozen(level.walls)) {
-    fixedCache.set(level.walls, { vertices: level.vertices, openings: level.openings, fixed });
+    fixedCache.set(level.walls, {
+      vertices: level.vertices,
+      openings: level.openings,
+      rooms: level.rooms,
+      fixed,
+    });
   }
   return fixed;
 }
 
 /**
  * The room off each long side of a bed (from the foot to the bedside table), measured as the
- * clearance check measures it: `have` up to `need`, 0 against a wall or a piece. For what is said
- * of it (the second look's facts), not a check: both sides, short or not. Empty for any other piece.
+ * clearance check measures it (`sideRoom`: up to the walls and the floor's edge, then the
+ * pieces): `have` up to `need`, 0 against a wall, a piece or the floor's edge. For what is said
+ * of it (the second look's facts), not a check: both sides, short or not. Empty for any other
+ * piece.
  */
 export function bedSideRoom(
   level: Level,
@@ -516,10 +681,11 @@ export function bedSideRoom(
   const others = Object.values(level.items)
     .filter((o) => o.id !== item.id && blocks(o))
     .map((o) => itemFootprint(o));
-  const obstacles = [...fixedParts(level).walls, ...others];
+  const { walls, edges } = fixedParts(level);
+  const bounds = [...walls, ...edges];
   return (['left', 'right'] as const).map((side) => ({
     side,
     need: rule.need,
-    have: roomOff(ruleSide(fp, side), rule.need, obstacles),
+    have: sideRoom(ruleSide(fp, side), rule.need, bounds, others).have,
   }));
 }

@@ -9,11 +9,13 @@ import {
   type Vec2,
   type WalkwayReport,
   type WalkwayTo,
+  ZONE_MIN_DEPTH,
   ageingSupersedes,
   chairsOf,
   clearanceIssues,
   clearanceZones,
   entranceDoor,
+  fixedParts,
   furnitureKind,
   issueItem,
   itemFootprint,
@@ -22,6 +24,8 @@ import {
   pointInPolygon,
   roomShapes,
   variantLevels,
+  zoneDepth,
+  zoneShown,
 } from '@dhd/core';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
@@ -442,38 +446,108 @@ export interface LabelSpec {
   text: string;
   /**
    * Where it may go, best first: a point and the unit direction from it to the label, its
-   * near edge `gap` px out (10 unless given).
+   * near edge `gap` px out (10 unless given), centred across that direction. With `align`
+   * (a unit vector across it) the label instead takes the corner of the box that way: its
+   * corner at the point `gap` px along, the rest along and to that side.
    */
-  spots: { at: Vec2; n: Vec2; gap?: number }[];
+  spots: { at: Vec2; n: Vec2; gap?: number; align?: Vec2 }[];
+  /** Shapes it keeps off as it does handles (a zone's piece and the walls round it). */
+  keepOff?: Vec2[][];
+  /** The floor it keeps on, as it keeps off handles (its room: not past the walls). */
+  keepOn?: Vec2[][];
+  /** What it labels (a zone): it goes the nearest spot that keeps clear, not the first. */
+  near?: Vec2[];
   have: number;
   need: number;
 }
 
 export const shortLabel = (have: number, need: number) =>
-  `${have <= 0 ? 'Closed' : have.toFixed(2)} / ${formatLength(need)}`;
+  `${have < 0.005 ? 'Closed' : have.toFixed(2)} / ${formatLength(need)}`;
 
-/** A zone's label, off the middle of its far edge (zone: side a, b, then b and a pushed out). */
-function zoneLabel(key: string, zone: Vec2[], have: number, need: number): LabelSpec | null {
-  const [a, , b2, a2] = zone as [Vec2, Vec2, Vec2, Vec2];
-  if (!a || !a2 || !b2) return null;
-  const len = Math.hypot(a2.x - a.x, a2.y - a.y) || 1;
-  const n = { x: (a2.x - a.x) / len, y: (a2.y - a.y) / len };
-  const wl = Math.hypot(b2.x - a2.x, b2.y - a2.y) || 1;
-  const d = { x: (b2.x - a2.x) / wl, y: (b2.y - a2.y) / wl };
+/** A zone cut short by a wall (by more than this). */
+const CUT = 0.005;
+
+/**
+ * A zone's label, off the middle of its far edge (zone: side a, b, then b and a pushed out
+ * along `n`, out from the piece). A zone a wall cuts short (or closes: too shallow to draw)
+ * has the wall at its far edge: the label goes inside it against the wall, else past a far
+ * corner on the room's side, keeping off the piece and the walls (`keepOff`). A closed side
+ * says so, whatever millimetres are left.
+ */
+function zoneLabel(
+  key: string,
+  zone: Vec2[],
+  n: Vec2,
+  have: number,
+  need: number,
+  keepOff: Vec2[][],
+  keepOn: Vec2[][],
+): LabelSpec | null {
+  const [a, b, b2, a2] = zone as [Vec2, Vec2, Vec2, Vec2];
+  if (!a || !b || !a2 || !b2) return null;
+  const wl = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const d = { x: (b.x - a.x) / wl, y: (b.y - a.y) / wl };
   const mid = { x: (a2.x + b2.x) / 2, y: (a2.y + b2.y) / 2 };
+  const back = { x: -n.x, y: -n.y };
+  const along = { x: -d.x, y: -d.y };
+  const depth = zoneDepth(zone);
   return {
     key,
-    text: shortLabel(have, need),
+    text: shortLabel(depth < ZONE_MIN_DEPTH ? 0 : have, need),
     have,
     need,
-    // Off the far edge; further out, past a turn handle; else beside either far corner.
-    spots: [
-      { at: mid, n },
-      { at: mid, n, gap: 34 },
-      { at: b2, n: d },
-      { at: a2, n: { x: -d.x, y: -d.y } },
-    ],
+    keepOff,
+    keepOn,
+    near: zone,
+    spots:
+      depth < need - CUT
+        ? // Inside, against the wall; else by a far corner (a bed's foot first), nearest first;
+          // else off the far edge.
+          [{ at: mid, n: back, gap: 3 }, ...cornerSpots([a2, along], [b2, d], back), { at: mid, n }]
+        : // Off the far edge; further out, past a turn handle; else beside either far corner.
+          [
+            { at: mid, n },
+            { at: mid, n, gap: 34 },
+            { at: b2, n: d },
+            { at: a2, n: along },
+          ],
   };
+}
+
+const AXES: Vec2[] = [
+  { x: 1, y: 0 },
+  { x: -1, y: 0 },
+  { x: 0, y: 1 },
+  { x: 0, y: -1 },
+];
+
+/**
+ * Spots by a zone's far corners for a label kept on the room's side: square to the plan (the
+ * piece may be turned), the label's corner a gap from the zone's corner, going on past the
+ * zone's end (`[corner, way past its end]`) and back from the wall (`back`) first. Nearest
+ * first, then further out (clear of a turn handle, a wall's end).
+ */
+function cornerSpots(
+  a: [Vec2, Vec2],
+  b: [Vec2, Vec2],
+  back: Vec2,
+): NonNullable<LabelSpec['spots']> {
+  const out: { spot: LabelSpec['spots'][number]; rank: number }[] = [];
+  [10, 28, 56, 76].forEach((gap, g) => {
+    [a, b].forEach(([at, past], k) => {
+      for (const n of AXES) {
+        const ahead = n.x * past.x + n.y * past.y;
+        // Centred across, or to either side.
+        out.push({ spot: { at, n, gap }, rank: g * 100 + k * 10 - ahead });
+        for (const align of AXES) {
+          if (Math.abs(n.x * align.x + n.y * align.y) > 0.5) continue;
+          const lead = ahead + align.x * back.x + align.y * back.y;
+          out.push({ spot: { at, n, gap, align }, rank: g * 100 + k * 10 - lead });
+        }
+      }
+    });
+  });
+  return out.sort((p, q) => p.rank - q.rank).map((o) => o.spot);
 }
 
 /**
@@ -520,6 +594,40 @@ export interface PlacedLabel {
   h: number;
 }
 
+/** How much a pixel further from what it labels weighs, against a label's area covering a room name. */
+const NEAR_WEIGHT = 0.02;
+
+/** The area of a polygon inside a label's box (the polygon clipped to it, edge by edge). */
+function areaIn(b: { x: number; y: number; w: number; h: number }, poly: Vec2[]): number {
+  let ps = poly;
+  const clip = (keep: (p: Vec2) => number) => {
+    const out: Vec2[] = [];
+    for (let i = 0; i < ps.length; i++) {
+      const p = ps[i] as Vec2;
+      const q = ps[(i + 1) % ps.length] as Vec2;
+      const kp = keep(p);
+      const kq = keep(q);
+      if (kp >= 0) out.push(p);
+      if (kp >= 0 !== kq >= 0) {
+        const t = kp / (kp - kq);
+        out.push({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t });
+      }
+    }
+    ps = out;
+  };
+  clip((p) => p.x - b.x);
+  clip((p) => b.x + b.w - p.x);
+  clip((p) => p.y - b.y);
+  clip((p) => b.y + b.h - p.y);
+  let a = 0;
+  for (let i = 0; i < ps.length; i++) {
+    const p = ps[i] as Vec2;
+    const q = ps[(i + 1) % ps.length] as Vec2;
+    a += p.x * q.y - q.x * p.y;
+  }
+  return Math.abs(a) / 2;
+}
+
 /**
  * Labels in plan units at this zoom: each chip 10 px off its point, skipped where it would
  * cover one already placed or leave the visible plan.
@@ -550,8 +658,16 @@ export function placeLabels(
   for (const s of specs) {
     const w = (textWidth(s.text) + 8) * px;
     const h = 16 * px;
-    const place = ({ at, n, gap: g }: { at: Vec2; n: Vec2; gap?: number }): PlacedLabel => {
+    const place = ({ at, n, gap: g, align }: LabelSpec['spots'][number]): PlacedLabel => {
       const gap = (g ?? 10) * px;
+      if (align) {
+        // The box's corner at the point `gap` along: the rest along and to `align`'s side.
+        const q = { x: n.x + align.x, y: n.y + align.y };
+        const c = { x: at.x + n.x * gap, y: at.y + n.y * gap };
+        const x = Math.abs(q.x) < 1e-6 ? c.x - w / 2 : q.x > 0 ? c.x : c.x - w;
+        const y = Math.abs(q.y) < 1e-6 ? c.y - h / 2 : q.y > 0 ? c.y : c.y - h;
+        return { key: s.key, text: s.text, x, y, w, h };
+      }
       // Anchored as the wall tags are: by its near side, centred across.
       const x =
         Math.abs(n.x) > 0.7 ? (n.x > 0 ? at.x + gap : at.x - gap - w) : at.x + n.x * gap - w / 2;
@@ -559,10 +675,43 @@ export function placeLabels(
         Math.abs(n.x) > 0.7 ? at.y + n.y * gap - h / 2 : n.y > 0 ? at.y + gap : at.y - gap - h;
       return { key: s.key, text: s.text, x, y, w, h };
     };
+    // Its shapes to keep off, as much as a handle: by how far in, across the label.
+    // Its shapes to keep off and floor to keep on, as much as a handle: by the area covered.
+    const off = (b: PlacedLabel) => {
+      const over = (s.keepOff ?? []).reduce((t, k) => t + areaIn(b, k), 0);
+      if (!s.keepOn?.length) return over;
+      // Out past the walls: by how many of its corners and its middle are on no floor.
+      const pts = [
+        { x: b.x + b.w / 2, y: b.y + b.h / 2 },
+        ...[b.x + 1e-6, b.x + b.w - 1e-6].flatMap((x) =>
+          [b.y + 1e-6, b.y + b.h - 1e-6].map((y) => ({ x, y })),
+        ),
+      ];
+      const out = pts.filter((p) => !s.keepOn?.some((f) => pointInPolygon(p, f))).length;
+      return over + (b.w * b.h * out) / pts.length;
+    };
+    // Kept near what it labels (`near`): every spot weighed, a little more the further off.
+    const far = (b: PlacedLabel) => {
+      if (!s.near?.length) return 0;
+      const c = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+      let d = Number.POSITIVE_INFINITY;
+      s.near.forEach((p, i) => {
+        const q = s.near?.[(i + 1) % (s.near?.length ?? 1)] ?? p;
+        const ex = q.x - p.x;
+        const ey = q.y - p.y;
+        const l2 = ex * ex + ey * ey;
+        const t = l2 > 0 ? Math.max(0, Math.min(1, ((c.x - p.x) * ex + (c.y - p.y) * ey) / l2)) : 0;
+        d = Math.min(d, Math.hypot(p.x + ex * t - c.x, p.y + ey * t - c.y));
+      });
+      return b.w * b.h * NEAR_WEIGHT * (d / px);
+    };
     let best: { b: PlacedLabel; c: number } | null = null;
     for (const b of s.spots.map(place)) {
       if (!fits(b)) continue;
-      const c = 100 * covers(b, handles) + covers(b, avoid);
+      // A room name under a label kept near its zone weighs more: every spot is weighed, and
+      // one a little further off beats text over text.
+      const names = covers(b, avoid) * (s.near ? 10 : 1);
+      const c = 100 * (covers(b, handles) + off(b)) + names + far(b);
       if (!best || c < best.c) best = { b, c };
       if (c === 0) break;
     }
@@ -635,7 +784,10 @@ export const ClearanceLayer = memo(function ClearanceLayer({
           .map((i) => (i.kind === 'zone' ? i.side : '')),
       );
       for (const z of clearanceZones(it, level)) {
-        if (!short.has(z.side)) out.push({ key: `${id}-${z.side}`, zone: z.zone });
+        // Cut at the walls: a side against one has none to show.
+        if (!short.has(z.side) && zoneShown(z.zone)) {
+          out.push({ key: `${id}-${z.side}`, zone: z.zone });
+        }
       }
     }
     return out;
@@ -663,9 +815,26 @@ export const ClearanceLayer = memo(function ClearanceLayer({
   // Labels: the selected piece's zones, then its pinches, then the others, worst first.
   const specs = useMemo(() => {
     const out: LabelSpec[] = [];
+    const walls = mine.size ? fixedParts(level).walls : [];
+    const rooms = mine.size ? [...roomShapes(level).values()].map((r) => r.outer) : [];
     for (const i of issues) {
       if (i.kind === 'zone' && mine.has(i.itemId)) {
-        const l = zoneLabel(`z-${i.itemId}-${i.side}`, i.zone, i.have, i.need);
+        // Kept off its piece (the selection is drawn over labels) and the walls near it.
+        const it = level.items[i.itemId];
+        const zx = i.zone.map((p) => p.x);
+        const zy = i.zone.map((p) => p.y);
+        const [x0, x1] = [Math.min(...zx) - 1.5, Math.max(...zx) + 1.5];
+        const [y0, y1] = [Math.min(...zy) - 1.5, Math.max(...zy) + 1.5];
+        const near = (poly: Vec2[]) =>
+          poly.some((p) => p.x >= x0) &&
+          poly.some((p) => p.x <= x1) &&
+          poly.some((p) => p.y >= y0) &&
+          poly.some((p) => p.y <= y1);
+        const keepOff = [...(it ? [itemFootprint(it)] : []), ...walls.filter(near)];
+        // And on its own room's floor: not over the wall in the next room.
+        const c = it ? { x: it.position.x, y: it.position.z } : null;
+        const own = c ? rooms.filter((r) => pointInPolygon(c, r)) : [];
+        const l = zoneLabel(`z-${i.itemId}-${i.side}`, i.zone, i.out, i.have, i.need, keepOff, own);
         if (l) out.push(l);
       }
     }
@@ -698,7 +867,7 @@ export const ClearanceLayer = memo(function ClearanceLayer({
       if (!twin) out.push(pinchLabel(`p-${key}`, i.pinch, i.have, i.need));
     }
     return out;
-  }, [issues, mine, pinches]);
+  }, [issues, mine, pinches, level]);
   const visible = {
     x0: view.cx - size.width / 2 / view.zoom,
     y0: view.cy - size.height / 2 / view.zoom,
@@ -726,7 +895,11 @@ export const ClearanceLayer = memo(function ClearanceLayer({
       {issues.map((i, k) => {
         const key = `${i.kind}-${issueItem(i) ?? ''}-${k}`;
         if (i.kind === 'zone') {
-          return <polygon key={key} className="clearance-short" points={pts(i.zone)} />;
+          // Drawn as far as the room goes (cut at walls, as measured): none for a side against
+          // a wall, whose label says it is closed.
+          return zoneShown(i.zone) ? (
+            <polygon key={key} className="clearance-short" points={pts(i.zone)} />
+          ) : null;
         }
         if (i.kind === 'door' || i.kind === 'doors' || i.kind === 'door-front') {
           // A door's sweep once, however many problems it's in.

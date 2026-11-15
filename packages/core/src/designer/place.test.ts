@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { clearanceIssues } from '../clearance';
+import { drawWall } from '../commands';
 import { LIFT_PRESETS } from '../delivery';
+import { blankProject } from '../factory';
 import { furnishedSample } from '../fixtures/furnishedSample';
-import { furnitureKind, itemFootprint } from '../furniture';
+import { furnitureKind, itemFootprint, newItem } from '../furniture';
 import { levelBounds } from '../geometry';
+import { type EditorDoc, dispatch, emptyHistory } from '../history';
 import { planGeometry } from '../plan';
 import { DEFAULT_SITE, type Level } from '../schema';
 import { aliasesFor } from './aliases';
@@ -20,7 +23,7 @@ import {
   sampleLevel,
   tanBrief,
 } from './fixtures/sample';
-import { type Want, keepOutOf, placePiece, spaceIndex } from './place';
+import { type Want, hitsOf, keepOutOf, placePiece, spaceIndex } from './place';
 import { designResult } from './result';
 import { type Concept, type DesignOp, type SpaceDesign, parseSpaceDesign } from './schema';
 import { facesOf, roomIdAt, spacesOf } from './spaces';
@@ -659,5 +662,40 @@ describe('review fixes: delivery, the wet area, brought pieces', () => {
     expect(r.dropped.map((x) => x.text)).toContain(
       'Your 3-seat sofa is placed once already; left out here.',
     );
+  });
+});
+
+describe('room to use a piece, as the clearance check measures it (#72)', () => {
+  it('a single bed whose open side faces the floor’s edge has no side to get in', () => {
+    // A 1.3 m wide room whose right side (x 1.3) is a room boundary with nothing beyond.
+    let s: EditorDoc = { doc: blankProject('t', 'prj_t'), history: emptyHistory() };
+    const segs: [number, number, number, number, boolean][] = [
+      [0, 0, 1.3, 0, false],
+      [1.3, 0, 1.3, 3, true],
+      [1.3, 3, 0, 3, false],
+      [0, 3, 0, 0, false],
+    ];
+    for (const [ax, ay, bx, by, open] of segs) {
+      const lvl = s.doc.levels[0] as Level;
+      const opts = { thickness: 0.1, ...(open ? { kind: 'boundary' as const } : {}) };
+      s = dispatch(
+        s,
+        drawWall(lvl, { point: { x: ax, y: ay } }, { point: { x: bx, y: by } }, opts).command,
+      );
+    }
+    const lvl = s.doc.levels[0] as Level;
+    const roomId = Object.keys(lvl.rooms)[0] as string;
+    const ix = spaceIndex(lvl, planGeometry(lvl), [roomId]);
+    const kind = furnitureKind('bed-single');
+    if (!kind) throw new Error('no single');
+    // Its left side on the left wall's face (x 0.05), its right side short of the edge.
+    const bed = newItem('it_b', kind, { x: 0.05 + kind.size.w / 2, y: 1.5 }, 0);
+    expect(1.3 - (0.05 + kind.size.w)).toBeLessThan(0.5);
+    expect(hitsOf(ix, bed, kind).map((h) => h.kind)).toEqual(['zone']);
+    // As the check has it: short on its right, the floor's edge.
+    const zones = clearanceIssues({ ...lvl, items: { [bed.id]: bed } }).filter(
+      (i) => i.kind === 'zone',
+    );
+    expect(zones.map((i) => i.kind === 'zone' && i.side)).toEqual(['right']);
   });
 });
