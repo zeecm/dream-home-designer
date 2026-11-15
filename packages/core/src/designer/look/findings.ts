@@ -1,6 +1,8 @@
 import { AGAINST, type ParseResult, ZONES } from '../schema';
 import { RULE_REPLY_SCHEMA, filterClaims } from '../talk/reply';
 import { clean } from '../util';
+import { lookClaims } from './claims';
+import type { LookFacts } from './prompt';
 
 /**
  * The second look's answer (tech 3b §2.5): findings in a fixed schema, each aimed at a short
@@ -134,9 +136,11 @@ function suggestOf(raw: unknown): LookSuggest | null {
  * A second look's answer, read finding by finding: enums in any case, text cleaned and cut,
  * at most 8 findings; one with no target alias or no line is left out, a suggestion that
  * doesn't fit is cut down to the line. Storage is a lens, never a fix: a storage "fix" is a
- * "consider". Fails only when it isn't an object with findings.
+ * "consider". With the facts it was told, what they contradict is taken out (`lookClaims`: a
+ * way all round a piece with a side short, a room that "reads well" when the designer's pieces
+ * didn't fit in it). Fails only when it isn't an object with findings.
  */
-export function parseLook(raw: unknown): ParseResult<LookAnswer> {
+export function parseLook(raw: unknown, facts?: LookFacts): ParseResult<LookAnswer> {
   const o = asObj(raw);
   if (!o || !Array.isArray(o.findings)) return { ok: false, error: 'No findings in the answer.' };
   const notes: string[] = [];
@@ -164,7 +168,10 @@ export function parseLook(raw: unknown): ParseResult<LookAnswer> {
     });
   }
   const summary = unclaimed(text(o.summary, LOOK_SUMMARY_CHARS));
-  return { ok: true, value: { findings, summary }, notes };
+  if (!facts) return { ok: true, value: { findings, summary }, notes };
+  const checked = lookClaims({ findings, summary }, facts);
+  if (checked.removed) notes.push('What the app’s own measurements contradict was taken out.');
+  return { ok: true, value: checked.value, notes };
 }
 
 /** The model's words with the claims filter's sentences out (null when nothing is left). */

@@ -468,7 +468,7 @@ test.describe('desktop', () => {
               },
             },
           ],
-          summary: 'Calm, with a clear way round the bed.',
+          summary: 'Calm, with a clear way round the bed. Soft light from the window.',
         },
       ],
     });
@@ -498,7 +498,9 @@ test.describe('desktop', () => {
     );
     // Its notes on the card, its cost beside them; the contradicted fix sent nothing back.
     const second = v1.locator('[data-look]');
-    await expect(second).toContainText('Calm, with a clear way round the bed.');
+    // The summary less what its facts contradict (#75): the bed's right side is against the wall.
+    await expect(second).toContainText('Soft light from the window.');
+    await expect(second).not.toContainText('clear way round');
     await expect(second).toContainText('A reading lamp by the window would finish it.');
     await expect(second).not.toContainText('The way to the window is blocked.');
     await expect(second).toContainText(/second look US\$0\.\d\d/);
@@ -2441,7 +2443,7 @@ test.describe('designer listens, B2: fix rounds by progress, Keep fixing, what w
         piece({ ref: 'w2', assetId: 'wardrobe', against: 'wall', zone: 'store' }),
       ],
     };
-    await mock(page, { reply: (c) => (main(c) ? answer(crowded) : null) });
+    const m = await mock(page, { reply: (c) => (main(c) ? answer(crowded) : null) });
     await openSample(page);
     await talk(page);
     await justDesign(page);
@@ -2468,6 +2470,18 @@ test.describe('designer listens, B2: fix rounds by progress, Keep fixing, what w
     await expect(left).toContainText(
       /No free wall left in (Main|Master) bedroom for these: .+ take the walls\./,
     );
+    // The second look was told so, and the bed's sides: its recorded "Reads well; the bed has a
+    // clear way round it." is taken out, its note on the room stays (#75).
+    await expect.poll(() => m.looks.length).toBe(1);
+    const facts = promptOf(JSON.parse(m.looks[0]?.body ?? '{}'));
+    expect(facts).toContain(
+      '"line":"Left out, didn’t fit: 2 bedside tables, a second built-in wardrobe, 2 wardrobes."',
+    );
+    expect(facts).toMatch(/"kind":"bed-queen".*"clear":\[/);
+    const second = v1.locator('[data-look]');
+    await expect(second).toContainText('A reading lamp by the window would finish');
+    await expect(second).not.toContainText('Reads well');
+    await expect(second).not.toContainText('clear way round');
     await shot(page, 'b2-left-out');
     if (process.env.SHOTS) {
       await page.setViewportSize({ width: 390, height: 844 });
@@ -5463,6 +5477,7 @@ test.describe('a phone held sideways, 844 × 390', () => {
     await panel(page)
       .getByRole('button', { name: /^(Main|Master) bedroom · about US\$/ })
       .tap();
+    await watchBehind(page);
     await panel(page)
       .getByRole('button', { name: /^Go ahead · about US\$/ })
       .tap();
@@ -5472,6 +5487,8 @@ test.describe('a phone held sideways, 844 × 390', () => {
     });
     // Its checks worked out, the look's notes in, the scope offer after it: still at its head.
     await page.waitForTimeout(4000);
+    // Held there, the run's writes and those after it never said "New reply" (owner, 15 Nov).
+    expect(await behindSeen(page)).toBe(0);
     const where = await page.evaluate(() => {
       const log = document.querySelector<HTMLElement>('.talk-log');
       const cards = document.querySelectorAll<HTMLElement>('article.talk-card');
@@ -5489,5 +5506,129 @@ test.describe('a phone held sideways, 844 × 390', () => {
     expect(where?.top ?? -1).toBeGreaterThanOrEqual(-12);
     expect(where?.top ?? 9999).toBeLessThan(40);
     expect(where?.pinned).toBe('0');
+  });
+});
+
+/** Counts every time "New reply ↓" is on screen, however briefly (`window.__behind`). */
+async function watchBehind(page: Page) {
+  await page.evaluate(() => {
+    const w = window as unknown as { __behind: number; __behindOn: boolean };
+    w.__behind = 0;
+    w.__behindOn = false;
+    const look = () => {
+      const on = !!document.querySelector('.talk-behind');
+      if (on && !w.__behindOn) w.__behind++;
+      w.__behindOn = on;
+    };
+    look();
+    new MutationObserver(look).observe(document.body, { childList: true, subtree: true });
+  });
+}
+const behindSeen = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __behind: number }).__behind);
+const newReply = (page: Page) =>
+  panel(page).getByRole('button', { name: 'Jump to the newest message' });
+
+/** The person scrolls the log up by `px` with the wheel, until it no longer follows its foot. */
+async function scrollUp(page: Page, px: number) {
+  const box = await panel(page).locator('.talk-log').boundingBox();
+  if (!box) throw new Error('no log');
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await expect
+    .poll(
+      async () => {
+        await page.waitForTimeout(150); // past the log's own last follow
+        await page.mouse.wheel(0, -px);
+        await page.waitForTimeout(150);
+        return page.evaluate(
+          () => document.querySelector<HTMLElement>('.talk-log')?.dataset.pinned,
+        );
+      },
+      { timeout: 10_000 },
+    )
+    .toBe('0');
+}
+
+test.describe('“New reply ↓” only for a reply (owner, 15 Nov)', () => {
+  test('a run’s progress and its end, scrolled up a little: never “New reply”', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await setup(page);
+    const held: (() => void)[] = [];
+    await mock(page, {
+      reply: (c, n) =>
+        /Kitchen/.test(c.step) && n === 1 ? new Promise<void>((r) => held.push(r)) : null,
+    });
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await watchBehind(page);
+    await design(page, /^The whole flat · about US\$/);
+    const v1 = card(page, 1);
+    await expect.poll(() => held.length, { timeout: 30_000 }).toBeGreaterThan(0);
+    await expect(v1.getByText(/Placed and checked/).first()).toBeVisible({ timeout: 30_000 });
+    // A little way up from the foot, while the run goes on below.
+    await scrollUp(page, 80);
+    for (const r of held) r();
+    await expect(v1.getByRole('button', { name: /^Accept selected/ })).toBeEnabled({
+      timeout: 30_000,
+    });
+    // The card's checks, the scope offer and the writes after the run's end: still none.
+    await page.waitForTimeout(3000);
+    await expect(newReply(page)).toHaveCount(0);
+    expect(await behindSeen(page)).toBe(0);
+  });
+
+  test('a reply streaming in: none at the foot; scrolled up, “New reply” until it is seen', async ({
+    page,
+  }) => {
+    await setup(page);
+    await holdTalk(page);
+    await mock(page);
+    await openSample(page);
+    await talk(page);
+    await justDesign(page);
+    await page.evaluate(() => {
+      (window as unknown as { __talk: { held: boolean } }).__talk.held = true;
+    });
+    await watchBehind(page);
+    // At the foot: the log follows the reply, and the button never shows.
+    await send(page, 'Is a 2.4 m sofa too big for the living room?');
+    const [head, rest] = halves(REPLY_TEXT);
+    await feed(page, head);
+    await expect(panel(page).locator('.talk-streaming .talk-text')).toHaveText(/^A 2\.4 m/);
+    await feed(page, rest);
+    await endFeed(page);
+    await expect(log(page).getByText(REPLY_TEXT.say)).toBeVisible();
+    await expect(panel(page).locator('.talk-streaming')).toHaveCount(0);
+    expect(await behindSeen(page)).toBe(0);
+    // Scrolled up while the next reply streams in below the view: it says so.
+    await page.evaluate(() => {
+      (window as unknown as { __feed?: unknown }).__feed = undefined;
+    });
+    await send(page, 'And a 2.0 m one?');
+    await feed(page, head);
+    await expect(panel(page).locator('.talk-streaming .talk-text')).toHaveText(/^A 2\.4 m/);
+    await scrollUp(page, 2000);
+    expect(
+      await page.evaluate(() => {
+        const l = document.querySelector<HTMLElement>('.talk-log');
+        const r = document.querySelector<HTMLElement>('.talk-streaming');
+        if (!l || !r) return false;
+        return r.getBoundingClientRect().bottom > l.getBoundingClientRect().bottom;
+      }),
+      'the reply is below the view',
+    ).toBe(true);
+    await expect(newReply(page)).toHaveCount(0);
+    await feed(page, rest);
+    await expect(newReply(page)).toBeVisible();
+    await expect(newReply(page)).toHaveText('New reply ↓');
+    // Jumping to it: at the foot, and gone.
+    await newReply(page).click();
+    await expect(newReply(page)).toHaveCount(0);
+    await endFeed(page);
+    await expect(panel(page).locator('.talk-streaming')).toHaveCount(0);
+    await expect(newReply(page)).toHaveCount(0);
   });
 });

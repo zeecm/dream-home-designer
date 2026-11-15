@@ -165,6 +165,27 @@ export function logFollowing(): boolean {
   return document.querySelector<HTMLElement>('.talk-log')?.dataset.pinned !== '0';
 }
 
+/** The parts of the log that say what is in view (a test passes plain numbers). */
+type View = Pick<HTMLElement, 'scrollHeight' | 'scrollTop' | 'clientHeight'>;
+
+/** Whether the log's foot is in view, or within `slack` px of it (read now, never remembered). */
+export function footInView(log: View, slack = 24): boolean {
+  return log.scrollHeight - log.scrollTop - log.clientHeight < slack;
+}
+
+/**
+ * Whether the designer's reply streaming in reaches below the log's view: words the person
+ * can't see arrived there. None streaming, or all of it in view: false.
+ */
+export function replyBelow(
+  log: Pick<HTMLElement, 'clientHeight' | 'getBoundingClientRect' | 'querySelector'>,
+): boolean {
+  const r = log.querySelector('.talk-streaming');
+  if (!r) return false;
+  const frame = log.getBoundingClientRect();
+  return r.getBoundingClientRect().bottom > frame.top + log.clientHeight + 2;
+}
+
 /** The event that tells the log it is held where it was put (no longer following its foot). */
 export const HOLD = 'talk-hold';
 

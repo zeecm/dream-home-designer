@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type ClearanceIssue,
   ZONE_MIN_DEPTH,
+  bedSideRoom,
   chairsOf,
   clearanceIssues,
   clearanceZones,
@@ -17,7 +18,7 @@ import { ledgeFlatLevel } from './fixtures/ledgeFlat';
 import { furnitureKind, newItem, placeFurniture } from './furniture';
 import { type EditorDoc, dispatch, emptyHistory } from './history';
 import { doorSwing, planGeometry } from './plan';
-import { Level, type Opening, type Vec2 } from './schema';
+import { type Item, Level, type Opening, type Vec2 } from './schema';
 
 /** A 4 m square room, walls 100 mm thick on centre lines at 0 and 4. */
 function room(): EditorDoc {
@@ -119,6 +120,26 @@ describe('clearance checks', () => {
     expect(
       zones(clearanceIssues(withItems(base, [['bed-single', { x: sx, y: 1.5 }]]))),
     ).toHaveLength(0);
+  });
+
+  it('bedSideRoom: both long sides of a bed as measured, short or not; nothing for other pieces', () => {
+    const base = level(room());
+    const queen = furnitureKind('bed-queen');
+    const single = furnitureKind('bed-single');
+    if (!queen || !single) throw new Error('no bed');
+    const qx = 0.05 + 0.4 + queen.size.w / 2;
+    const ql = withItems(base, [['bed-queen', { x: qx, y: 1.5 }]]);
+    const q = bedSideRoom(ql, Object.values(ql.items).at(-1) as Item);
+    expect(q.map((s) => s.side)).toEqual(['left', 'right']);
+    expect(q.map((s) => s.have).sort()).toEqual([expect.closeTo(0.4, 3), 0.6]);
+    expect(q.every((s) => s.need === 0.6)).toBe(true);
+    // A single bed against the wall (3 mm off): that side is closed, though the check finds
+    // nothing (one side is enough).
+    const sl = withItems(base, [['bed-single', { x: 0.05 + single.size.w / 2 + 0.003, y: 1.5 }]]);
+    const s = bedSideRoom(sl, Object.values(sl.items).at(-1) as Item);
+    expect(s.map((x) => x.have).sort()).toEqual([expect.closeTo(0.003, 3), 0.6]);
+    const wl = withItems(base, [['wardrobe', { x: 2, y: 2 }]]);
+    expect(bedSideRoom(wl, Object.values(wl.items).at(-1) as Item)).toEqual([]);
   });
 
   it('a piece in a swinging door’s sweep blocks it; beside a sliding door it does not', () => {
@@ -619,6 +640,26 @@ describe('the floor’s edge along part of a boundary (#72, ledgeFlat)', () => {
     expect(depth(z.zone)).toBeCloseTo(0.3, 2);
     // Over the balcony: open floor, room to open it.
     expect(zones(clearanceIssues(at(7.0)))).toEqual([]);
+  });
+
+  it('bedSideRoom measures a bed’s side as the check does: up to the floor’s edge', () => {
+    const queen = furnitureKind('bed-queen');
+    if (!queen) throw new Error('no queen');
+    // Turned so a long side faces south, 0.30 m from the edge west of the balcony, its foot
+    // clear of the living room's west wall.
+    const lvl = withItems(flat, [
+      ['bed-queen', { x: 4.55, y: 4.4 - 0.3 - queen.size.w / 2 }, Math.PI / 2],
+    ]);
+    const bed = Object.values(lvl.items).at(-1) as Item;
+    const sides = bedSideRoom(lvl, bed);
+    const short = sides.filter((s) => s.have < s.need - 0.005);
+    expect(short).toHaveLength(1);
+    expect(short[0]?.have).toBeCloseTo(0.3, 2);
+    // The same figure the check gives that side.
+    const z = zones(clearanceIssues(lvl)).filter((x) => x.kind === 'zone' && x.itemId === bed.id);
+    expect(z.map((x) => x.kind === 'zone' && [x.side, x.have])).toEqual(
+      short.map((s) => [s.side, s.have]),
+    );
   });
 
   it('a piece standing on it has a zone too shallow to draw', () => {

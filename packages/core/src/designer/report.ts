@@ -804,7 +804,7 @@ export function firstAndMore(rep: RunReport): string {
 }
 
 /** Reasons a piece is left out because it didn't fit (no wall long enough, no place in it). */
-const NO_FIT = new Set<DropCode>(['no-wall', 'no-place', 'outside']);
+export const NO_FIT = new Set<DropCode>(['no-wall', 'no-place', 'outside']);
 
 /**
  * The designer's pieces the app left out, for the card's lead (B2, from QA): one short line, "Left

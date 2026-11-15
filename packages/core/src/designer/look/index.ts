@@ -4,3 +4,4 @@ export * from './findings';
 export * from './sketch';
 export * from './prompt';
 export * from './act';
+export * from './claims';

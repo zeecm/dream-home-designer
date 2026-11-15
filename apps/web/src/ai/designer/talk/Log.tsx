@@ -65,7 +65,7 @@ import {
   pressScope,
   scopeRequest,
 } from './propose';
-import { HOLD, focusInLog, toNewest } from './scroll';
+import { HOLD, focusInLog, footInView, replyBelow, toNewest } from './scroll';
 import { timed, useSettledProject } from './settle';
 import { lineTitle, versionTitle } from './titles';
 import {
@@ -933,13 +933,13 @@ export function Log() {
     el.dataset.pinned = '1';
     setBehind(false);
   }, [turns.length]);
-  // A run's progress: followed only if the log was at its foot.
+  // A run's progress: followed only if the log was at its foot. Never "New reply": a proposal's
+  // writes (progress, checkpoints, checks, ticks, free fixes) aren't a reply, and a card's head
+  // held in view at a run's end stays as it is.
   // biome-ignore lint/correctness/useExhaustiveDependencies: on a run's progress
   useLayoutEffect(() => {
     const el = list.current;
-    if (!el || !live) return;
-    if (pinned.current) follow(el);
-    else setBehind(true);
+    if (el && live && pinned.current) follow(el);
   }, [live?.state.steps, proposals]);
   // A turn changed in place (a message not answered gains its line): followed if at the foot,
   // so the newest is never cut off at the bottom (P3-1).
@@ -949,24 +949,28 @@ export function Log() {
     const el = list.current;
     if (el && pinned.current) follow(el);
   }, [rev]);
-  // A reply streaming in: followed only if the log was at its foot.
+  // A reply streaming in: followed only if the log was at its foot. Otherwise "New reply" only
+  // while some of its words are below the view (read now, after they're laid out).
   const replySay = useTalk((st) => st.reply?.say.length ?? 0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: on the reply's text
   useLayoutEffect(() => {
     const el = list.current;
-    if (!el || !replySay) return;
-    if (pinned.current) follow(el);
-    else setBehind(true);
+    if (!el) return;
+    // None streaming (it ended, or a new one has no words yet): nothing new to point at.
+    if (!replySay) setBehind(false);
+    else if (pinned.current) follow(el);
+    else if (!footInView(el) && replyBelow(el)) setBehind(true);
   }, [replySay]);
   useEffect(() => {
     const el = list.current;
     if (!el) return;
     const on = () => {
       if (Date.now() - moved.current < 100) return; // our own scroll, not the person's
-      pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+      pinned.current = footInView(el);
       // Read at a run's end: its card's head comes into view only if the log was following.
       el.dataset.pinned = pinned.current ? '1' : '0';
-      if (pinned.current) setBehind(false);
+      // Gone once the reply's words are all in view.
+      if (pinned.current || !replyBelow(el)) setBehind(false);
     };
     // Put at a card's head at a run's end: held there, as if the person had scrolled.
     const hold = () => {
