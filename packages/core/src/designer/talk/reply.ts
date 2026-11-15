@@ -516,11 +516,13 @@ function factOf(raw: unknown): TalkFact | null {
           ? StyleId.safeParse(lower(choice)).success
           : k === 'cooking'
             ? COOKING_CHOICES.some((c) => c.id === lower(choice))
-            : k === 'wfh'
-              ? // One of the two must say it: a missing figure is never "No one".
-                (number !== null || (choice !== null && choice.trim() !== '')) &&
-                WFH_CHOICES.some((c) => c.id === (number ?? Number(choice)))
-              : !!text;
+            : k === 'fix-all'
+              ? ['on', 'off'].includes(lower(choice))
+              : k === 'wfh'
+                ? // One of the two must say it: a missing figure is never "No one".
+                  (number !== null || (choice !== null && choice.trim() !== '')) &&
+                  WFH_CHOICES.some((c) => c.id === (number ?? Number(choice)))
+                : !!text;
   if (!ok) return null;
   return { key: k, text, number, choice: choice ? cut(choice, 40) : null };
 }
@@ -657,7 +659,12 @@ export function confirmText(f: TalkFact): string {
 
 /** The What I know fact a reply's fact is about (Assumed comes off it once noted). */
 export const factQuestion = (k: FactKey): QuestionKey =>
-  k === 'budget' || k === 'walls' || k === 'style' || k === 'cooking' || k === 'wfh'
+  k === 'budget' ||
+  k === 'walls' ||
+  k === 'style' ||
+  k === 'cooking' ||
+  k === 'wfh' ||
+  k === 'fix-all'
     ? k
     : 'anything';
 
@@ -737,6 +744,17 @@ export function applyFacts(
         b = { ...b, keep: { ...b.keep, text: clean(`${b.keep.text} ${f.text}`.trim(), 1000) } };
         add('keep', `keep: ${f.text}`);
         break;
+      case 'fix-all': {
+        // Their own word (designer listens §6): the larger pool is priced on the next cost card,
+        // and the figure holds whatever this says.
+        const on = choice === 'on';
+        b = { ...b, fixAll: on };
+        add(
+          'fix-all',
+          on ? 'fix every check before you see a design' : 'show you a design as it is',
+        );
+        break;
+      }
     }
   }
   return { brief: b, keys: [...new Set(keys)], lines };

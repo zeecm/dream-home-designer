@@ -24,6 +24,7 @@ export {
   gaveWayWords,
   isAppRef,
   isDeclined,
+  madeWayLines,
   orphanLines,
 } from './free';
 export { type VetResult, readsAsBedroom, vetConcept } from './vet';
@@ -92,6 +93,9 @@ export {
 export {
   CHARS_PER_TOKEN,
   FIX_PER_RUN,
+  FIX_STRICT,
+  costFigure,
+  strictAdds,
   firstPassOf,
   OUTPUT,
   PRICES,
@@ -154,6 +158,22 @@ export {
   tableEntries,
   verdictWords,
 } from './report';
+export {
+  type DependsOn,
+  type RepeatFound,
+  type RepeatVersion,
+  blockingHead,
+  dependsKey,
+  failureSigs,
+  notMet,
+  notMetHead,
+  notMetText,
+  repeatAhead,
+  repeatRun,
+  repeatWords,
+  sameFailures,
+  versionsWords,
+} from './repeat';
 export {
   type DesignOptions,
   type DesignProblem,

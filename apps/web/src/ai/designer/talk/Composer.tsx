@@ -53,6 +53,7 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
   const conv = useTalk((s) => s.conv);
   const running = useTalk((s) => !!s.live);
   const replying = useTalk((s) => !!s.reply);
+  const changeAsk = useTalk((s) => s.changeAsk);
   const ai = useAi();
   const level = useThreshold();
   const [online, setOnline] = useState(() =>
@@ -305,7 +306,9 @@ export function Composer({ onFocus, onBlur }: { onFocus?: () => void; onBlur?: (
         className="input talk-textarea"
         rows={1}
         maxLength={DRAFT_CHARS}
-        placeholder="Message the designer"
+        placeholder={
+          changeAsk ? 'Say what to change, e.g. one desk instead of two' : 'Message the designer'
+        }
         aria-describedby="talk-hint"
         value={text}
         onChange={(e) => setText(e.target.value)}

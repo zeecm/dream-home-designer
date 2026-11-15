@@ -33,12 +33,52 @@ const DID = 2;
 /** A vetting line about who sleeps where ends with the way to change it. */
 const SLEEPS = /To make it a study, change who sleeps where\.$/;
 
+/**
+ * The lead's frame (UX states C and D): "What's blocking this" when the newest versions of the
+ * scope failed the same way ("V7 and V8 failed on the same 3 things"), or Fix every check first
+ * not met ("Couldn't make everything pass within US$0.60", with "Same failures as V7." when it
+ * repeats too). One frame a card, D before C.
+ */
+export interface LeadFrame {
+  kind: 'blocking' | 'strict';
+  heading: string;
+  /** D only: why it stopped, with what it spent of the figure (when not used up). */
+  why?: string | null;
+  /** D only: "Same failures as V7." (or "Also failed in V7." for fewer). */
+  same?: string | null;
+}
+
+/**
+ * Change what I asked (UX C and D, the repeat cost card): a text button that focuses the
+ * composer, its placeholder saying what to type. On a phone the composer's focus folds the sheet
+ * to peek with the keyboard, as it always does.
+ */
+export function ChangeAsked() {
+  return (
+    <button
+      type="button"
+      className="link-btn talk-change-asked"
+      data-change-asked=""
+      onClick={() => {
+        useTalk.setState({ changeAsk: true, view: 'log' });
+        requestAnimationFrame(() => document.querySelector<HTMLElement>('#talk-text')?.focus());
+      }}
+    >
+      Change what I asked
+    </button>
+  );
+}
+
+/** Who sleeps where, for a failure no furnishing can fix (more people than bedrooms). */
+const SLEEPING_CODES = new Set(['unplaced', 'sleeping']);
+
 export function CheckLead({
   cardKey,
   report,
   did = [],
   missed = [],
   action = null,
+  frame = null,
 }: {
   cardKey: string;
   report: RunReport;
@@ -48,6 +88,8 @@ export function CheckLead({
   missed?: readonly string[];
   /** The free fix's button, when a dry run would place something. */
   action?: ReactNode;
+  /** States C and D: the frame and its heading. */
+  frame?: LeadFrame | null;
 }) {
   const failing = report.failures.length;
   const { fix, count } = leadParts(report.rooms, failing);
@@ -84,9 +126,8 @@ export function CheckLead({
       data-app-line="left-out"
       {...(headless ? { id } : {})}
     >
-      <span className="talk-app-icon">
-        <Mark kind="dot" />
-      </span>
+      {/* The disclosure's own triangle is its mark (one, not a dot as well: UX review nit). */}
+      <span className="talk-app-icon" />
       <span className="talk-app-text">
         <details className="talk-already talk-check-left">
           <summary>{keepTogether(out.line)}</summary>
@@ -99,17 +140,37 @@ export function CheckLead({
       </span>
     </li>
   );
-  const item = (f: RunReport['failures'][number]) => (
-    <li key={f.id} className="talk-check-fail">
-      <span className="talk-app-icon talk-warn-mark">
-        <Mark kind="warn" />
-      </span>
-      <span className="talk-app-text">
-        <span className="talk-check-text">{keepTogether(f.says)}</span>
-        {f.cause && <span className="talk-check-cause">{keepTogether(f.cause)}</span>}
-      </span>
-    </li>
-  );
+  const item = (f: RunReport['failures'][number]) => {
+    // No furnishing fixes it (more people than bedrooms, a bedroom with no window): said so,
+    // with the way forward where it is who sleeps where (UX "Can't be fixed by furnishing").
+    const code = f.key.split('|')[1] ?? '';
+    const unfurnishable = f.unfixable && !f.cause;
+    return (
+      <li key={f.id} className="talk-check-fail">
+        <span className="talk-app-icon talk-warn-mark">
+          <Mark kind="warn" />
+        </span>
+        <span className="talk-app-text">
+          <span className="talk-check-text">{keepTogether(f.says)}</span>
+          {f.cause && <span className="talk-check-cause">{keepTogether(f.cause)}</span>}
+          {unfurnishable && (
+            <span className="talk-check-cause" data-unfurnishable="">
+              Can’t be fixed by furnishing.
+              {SLEEPING_CODES.has(code) && (
+                <button
+                  type="button"
+                  className="link-plain talk-check-link"
+                  onClick={() => useTalk.setState({ view: 'know', knowAt: 'sleeping' })}
+                >
+                  Who sleeps where ›
+                </button>
+              )}
+            </span>
+          )}
+        </span>
+      </li>
+    );
+  };
   const line = (l: string, kind: 'check' | 'warn', first: boolean) => (
     <li
       key={l}
@@ -136,6 +197,61 @@ export function CheckLead({
       </span>
     </li>
   );
+  if (frame) {
+    // C and D: the frame leads with its heading (the section's name); the fix rounds' outcome
+    // under it in grey, then the count (D) and every failure, then the ways forward.
+    return (
+      <section
+        className="talk-check-lead talk-check-frame"
+        aria-labelledby={id}
+        data-lead=""
+        data-frame={frame.kind}
+      >
+        <p id={id} className="talk-check-head talk-check-frame-head">
+          {frame.heading}
+        </p>
+        {frame.why && <p className="talk-check-did talk-check-frame-fix">{frame.why}</p>}
+        {fix && <p className="talk-check-did talk-check-frame-fix">{fix}</p>}
+        {frame.kind === 'strict' && count && (
+          <p className="talk-check-head">
+            <strong className="talk-check-count">{count}</strong>
+          </p>
+        )}
+        <ul className="talk-check-fails">{shown.map(item)}</ul>
+        {more.length > 0 && (
+          <details className="talk-already talk-check-more">
+            <summary>and {more.length} more</summary>
+            <ul className="talk-check-fails">{more.map(item)}</ul>
+          </details>
+        )}
+        {frame.same && <p className="talk-check-did">{frame.same}</p>}
+        {missed.length + didShown.length > 0 || leftLine ? (
+          <ul className="talk-check-fails talk-check-app">
+            {leftLine}
+            {missed.map((l) => line(l, 'warn', false))}
+            {didShown.map((l) => line(l, 'check', false))}
+          </ul>
+        ) : null}
+        {rounds.length + didMore.length > 0 && (
+          <details className="talk-already talk-check-how">
+            <summary>How it was checked</summary>
+            <ul>
+              {rounds.map((l) => (
+                <li key={l}>{keepTogether(l)}</li>
+              ))}
+              {didMore.map((l) => (
+                <li key={l}>{keepTogether(l)}</li>
+              ))}
+            </ul>
+          </details>
+        )}
+        <div className="talk-check-ways">
+          {action}
+          <ChangeAsked />
+        </div>
+      </section>
+    );
+  }
   return (
     <section className="talk-check-lead" aria-labelledby={id} data-lead="">
       {!headless && (

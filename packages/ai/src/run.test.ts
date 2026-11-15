@@ -2223,6 +2223,38 @@ describe('the fix-up pool by progress (designer listens B2, criteria 16–19)', 
     expect(design.spaces[living]?.design?.summary).toBe('fails 2 f');
   });
 
+  it('C (28, 29): Fix every check first’s pool of 6: a room fixing one a round takes all 6, never a 7th', async () => {
+    // Six failures, each fix answer fixing one: requests = rooms + 6, and it passes.
+    const { prov, r } = runOf(
+      [living],
+      (step, n) => (step === LIVING ? failingBy(step, Math.max(0, 7 - n)) : null),
+      { fixesLeft: 6 },
+    );
+    const { design } = await r.run;
+    expect(prov.calls.filter(isFix)).toHaveLength(6);
+    expect(design.spaces[living]).toMatchObject({ fixes: 6, fixed: 6 });
+    expect(design.spaces[living]?.design?.summary).toBe('fails 0 f');
+    // Seven failures: the sixth round is the last; the one left is said as the pool used up.
+    const more = runOf(
+      [living],
+      (step, n) => (step === LIVING ? failingBy(step, Math.max(0, 8 - n)) : null),
+      { fixesLeft: 6 },
+    );
+    const left = await more.r.run;
+    expect(more.prov.calls).toHaveLength(7);
+    expect(left.design.spaces[living]?.rounds?.at(-1)?.outcome).toBe('no-fixups');
+  });
+
+  it('C (28, 31e): with the strict pool, answers that never fix stop at the first round no better', async () => {
+    const { prov, r } = runOf([living], (step) => (step === LIVING ? failingBy(step, 2) : null), {
+      fixesLeft: 6,
+    });
+    const { design } = await r.run;
+    // The room step and one round: the same answer again stalls; 5 fix-ups are never spent.
+    expect(prov.calls).toHaveLength(2);
+    expect(design.spaces[living]?.rounds).toEqual([{ outcome: 'no-better', before: 2, after: 2 }]);
+  });
+
   it('16: fewer failures but a new one is no progress (by signature); the same answer again stalls', async () => {
     const swapped = runOf([living], (step, n) =>
       step === LIVING ? (n === 1 ? failingBy(step, 3) : failingBy(step, 1, 'g')) : null,

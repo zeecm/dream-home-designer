@@ -29,7 +29,11 @@ import { act, newId, nowIso, talkLevel, useBusy, useTalk } from './useTalk';
 
 export function Back({ title }: { title: string }) {
   const head = useRef<HTMLHeadingElement>(null);
-  useEffect(() => head.current?.focus({ preventScroll: true }), []);
+  // Opened at a fact (a cost card's Change, Who sleeps where ›): its row takes focus, not the
+  // title (UX review C 5).
+  useEffect(() => {
+    if (!useTalk.getState().knowAt) head.current?.focus({ preventScroll: true });
+  }, []);
   return (
     <div className="talk-view-head">
       <button

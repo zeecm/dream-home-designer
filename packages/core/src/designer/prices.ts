@@ -244,13 +244,20 @@ export const OUTPUT: Record<
 
 /** The fix-ups a Thorough run may send in all (its pool), whatever the rooms. */
 export const FIX_PER_RUN = 3;
+/** The pool of a Thorough run with Fix every check first on (designer listens §6). */
+export const FIX_STRICT = 6;
 /**
  * The run's fix-up pool (spec docs/specs/designer-listens.md §3, lead decisions B2): Thorough 3,
  * Quick one a room up to 3. A room keeps taking them while each round makes progress; the rooms
  * take them in turn (`firstPassOf`), and the second look's round draws on what is left.
+ * With Fix every check first on (`strict`, lead decisions): Thorough 6, Quick two a room up to 4.
  */
-export const fixPoolFor = (quality: DesignBrief['quality'], rooms: number) =>
-  quality === 'quick' ? Math.max(0, Math.min(FIX_PER_RUN, rooms)) : FIX_PER_RUN;
+export const fixPoolFor = (quality: DesignBrief['quality'], rooms: number, strict = false) =>
+  quality === 'quick'
+    ? Math.max(0, strict ? Math.min(4, 2 * rooms) : Math.min(FIX_PER_RUN, rooms))
+    : strict
+      ? FIX_STRICT
+      : FIX_PER_RUN;
 /**
  * How many fix-ups one room may take in its first pass, before every room has had its turn:
  * max(1, floor(pool / rooms)). What is left then goes one at a time to rooms still progressing.
@@ -332,6 +339,8 @@ export function estimateRun(
      * left, and Keep fixing its own.
      */
     pool?: number;
+    /** Fix every check first is on: the quality's strict pool (`fixPoolFor`). */
+    strict?: boolean;
     /**
      * Room steps (by step key) that send only fix rounds (a room carried on in its rounds, Keep
      * fixing): their own request isn't sent, so it isn't priced; typical is one fix round.
@@ -445,7 +454,10 @@ export function estimateRun(
   // The pool: the quality's for these rooms (the look's round draws on it too), or the one given.
   const pool = Math.max(
     0,
-    Math.floor(opts.pool ?? Math.max(fixPoolFor(opts.quality, rooms), looks && !rooms ? 1 : 0)),
+    Math.floor(
+      opts.pool ??
+        Math.max(fixPoolFor(opts.quality, rooms, !!opts.strict), looks && !rooms ? 1 : 0),
+    ),
   );
   const dearest = fixOnes.length ? Math.max(...fixOnes) : 0;
   // Fix-ups go only to room steps and the look's round (priced or not: the pool is a request cap).
@@ -476,5 +488,39 @@ export function estimateRun(
       : null,
     fixes,
     largestInput: Math.max(0, ...steps.map((s) => s.input)),
+  };
+}
+
+/**
+ * What Fix every check first adds to a run's figure at most (US$): the fix-ups past the pool it
+ * would have without it, each at the dearest fix request ("adds up to US$0.54 at most"). Null
+ * without a price; 0 when it adds none (a run carried on, Keep fixing: their own pool).
+ */
+export function strictAdds(est: RunEstimate, quality: DesignBrief['quality']): number | null {
+  if (!est.usd) return null;
+  const rooms = est.steps.filter((s) => s.kind === 'room').length;
+  const looks = est.steps.some((s) => s.kind === 'look');
+  const plain = rooms || looks ? Math.max(fixPoolFor(quality, rooms), looks && !rooms ? 1 : 0) : 0;
+  return est.usd.fixOne * Math.max(0, est.fixes - plain);
+}
+
+/**
+ * What a cost card keeps of an estimate (its figure, and the words beside it): the typical and
+ * high cost, the pool's part, the fix-ups it may send and what Fix every check first adds. The
+ * card's "up to N fix-ups" and its figure come from this one value, so they never disagree (QA:
+ * the words read the pool of 3 while the figure was already the strict one). Null without a price.
+ */
+export function costFigure(
+  est: RunEstimate,
+  quality: DesignBrief['quality'],
+): { typical: number; high: number; fix: number; fixes: number; adds: number } | null {
+  const u = est.usd;
+  if (!u) return null;
+  return {
+    typical: u.typical,
+    high: u.high,
+    fix: u.fix,
+    fixes: est.fixes,
+    adds: strictAdds(est, quality) ?? 0,
   };
 }

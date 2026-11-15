@@ -20,6 +20,7 @@ import {
   type TurnOf,
   conversationFromRecord,
   cutLines,
+  declinedNow,
 } from './schema';
 
 const level = () => sampleFlatProject().levels[0] as Level;
@@ -390,7 +391,7 @@ describe('the reducer', () => {
     ).toBe(c);
   });
 
-  it('B1: a piece the app placed, left out: a Decision with its room and role, read back', () => {
+  it('a piece the app placed, left out: a Decision and its decline by room and role, read back (records 5)', () => {
     const c = talk(met(), {
       type: 'decisionAdd',
       id: 'd1',
@@ -400,13 +401,69 @@ describe('the reducer', () => {
       from: 'V1',
       free: { room: 'rm_main-bedroom', role: 'bed' },
     });
-    expect(c.decisions[0]?.free).toEqual({ room: 'rm_main-bedroom', role: 'bed' });
+    expect(c.declined).toEqual([{ decision: 'd1', room: 'rm_main-bedroom', role: 'bed' }]);
+    expect(declinedNow(c)).toEqual([{ room: 'rm_main-bedroom', role: 'bed' }]);
     const back = conversationFromRecord(JSON.parse(JSON.stringify(c)));
-    expect(back?.decisions[0]?.free).toEqual({ room: 'rm_main-bedroom', role: 'bed' });
-    // A value this build can't read is dropped, never the record.
+    expect(back?.declined).toEqual(c.declined);
+    // The same Decision again keeps the one decline.
+    expect(
+      talk(c, {
+        type: 'decisionAdd',
+        id: 'd2',
+        at: AT,
+        kind: 'rejected',
+        text: 'Left out: the app’s queen bed in Main bedroom',
+        from: 'V2',
+        free: { room: 'rm_main-bedroom', role: 'bed' },
+      }).declined,
+    ).toHaveLength(1);
+    // It lasts while its Decision stands: deleted, it is lifted; restored, it is back.
+    const gone = talk(c, { type: 'decisionDelete', id: 'd1' });
+    expect(declinedNow(gone)).toEqual([]);
+    expect(declinedNow(talk(gone, { type: 'decisionRestore', id: 'd1' }))).toHaveLength(1);
+    // An entry this build can't read is dropped, never the record.
     const odd = JSON.parse(JSON.stringify(c));
-    odd.decisions[0].free = { room: 3 };
-    expect(conversationFromRecord(odd)?.decisions[0]?.free).toBeUndefined();
+    odd.declined.push({ decision: 'd1', room: 3 });
+    expect(conversationFromRecord(odd)?.declined).toEqual(c.declined);
+  });
+
+  it('a version 4 record: each Decision’s `free` moves into `declined` (a deleted one’s is dropped)', () => {
+    const c = talk(met(), {
+      type: 'decisionAdd',
+      id: 'd1',
+      at: AT,
+      kind: 'rejected',
+      text: 'Left out: the app’s queen bed in Main bedroom',
+      from: 'V1',
+    });
+    const v4 = JSON.parse(JSON.stringify({ ...c, recordVersion: 4 }));
+    delete v4.declined;
+    v4.decisions[0].free = { room: 'rm_main-bedroom', role: 'bed' };
+    v4.decisions.push({
+      id: 'd2',
+      kind: 'rejected',
+      text: 'Left out: the app’s 3-seat sofa in Living room',
+      at: AT,
+      from: 'V2',
+      deleted: true,
+      free: { room: 'rm_living', role: 'sofa' },
+    });
+    v4.decisions.push({ ...v4.decisions[0], id: 'd3', text: 'odd', free: { room: 3 } });
+    const read = conversationFromRecord(v4);
+    expect(read?.recordVersion).toBe(5);
+    expect(read?.declined).toEqual([{ decision: 'd1', room: 'rm_main-bedroom', role: 'bed' }]);
+    expect(read?.decisions.map((d) => 'free' in d)).toEqual([false, false, false]);
+    expect(read?.decisions).toHaveLength(3);
+    expect(declinedNow(read as NonNullable<typeof read>)).toEqual([
+      { room: 'rm_main-bedroom', role: 'bed' },
+    ]);
+    // Written back as 5: a build that knows 4 goes read-only on it.
+    expect(
+      JSON.parse(
+        JSON.stringify(talk(read as NonNullable<typeof read>, { type: 'tipSeen', tip: 'point' })),
+      ).recordVersion,
+    ).toBe(5);
+    expect(conversationFromRecord({ ...c, recordVersion: 6 })).toBeNull();
   });
 
   it('B1: a free fix asked for from a card is a line with Undo, once', () => {
