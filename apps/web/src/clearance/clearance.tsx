@@ -22,6 +22,7 @@ import {
   pointInPolygon,
   roomShapes,
   variantLevels,
+  zoneDepth,
 } from '@dhd/core';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
@@ -442,37 +443,63 @@ export interface LabelSpec {
   text: string;
   /**
    * Where it may go, best first: a point and the unit direction from it to the label, its
-   * near edge `gap` px out (10 unless given).
+   * near edge `gap` px out (10 unless given). Centred across that direction, or with `align`
+   * (a unit vector across it) all to that side of the point: kept off a wall it ends at.
    */
-  spots: { at: Vec2; n: Vec2; gap?: number }[];
+  spots: { at: Vec2; n: Vec2; gap?: number; align?: Vec2 }[];
   have: number;
   need: number;
 }
 
 export const shortLabel = (have: number, need: number) =>
-  `${have <= 0 ? 'Closed' : have.toFixed(2)} / ${formatLength(need)}`;
+  `${have < 0.005 ? 'Closed' : have.toFixed(2)} / ${formatLength(need)}`;
 
-/** A zone's label, off the middle of its far edge (zone: side a, b, then b and a pushed out). */
-function zoneLabel(key: string, zone: Vec2[], have: number, need: number): LabelSpec | null {
-  const [a, , b2, a2] = zone as [Vec2, Vec2, Vec2, Vec2];
-  if (!a || !a2 || !b2) return null;
-  const len = Math.hypot(a2.x - a.x, a2.y - a.y) || 1;
-  const n = { x: (a2.x - a.x) / len, y: (a2.y - a.y) / len };
-  const wl = Math.hypot(b2.x - a2.x, b2.y - a2.y) || 1;
-  const d = { x: (b2.x - a2.x) / wl, y: (b2.y - a2.y) / wl };
+/** A zone too shallow to draw: a side against a wall. */
+const SHALLOW = 0.005;
+
+/**
+ * A zone's label, off the middle of its far edge (zone: side a, b, then b and a pushed out
+ * along `n`, out from the piece). A zone a wall cuts short (or closes: no depth) has the wall
+ * at its far edge: the label goes beside a far corner, along the wall on the room's side,
+ * rather than over the wall or the piece.
+ */
+function zoneLabel(
+  key: string,
+  zone: Vec2[],
+  n: Vec2,
+  have: number,
+  need: number,
+): LabelSpec | null {
+  const [a, b, b2, a2] = zone as [Vec2, Vec2, Vec2, Vec2];
+  if (!a || !b || !a2 || !b2) return null;
+  const wl = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const d = { x: (b.x - a.x) / wl, y: (b.y - a.y) / wl };
   const mid = { x: (a2.x + b2.x) / 2, y: (a2.y + b2.y) / 2 };
+  const back = { x: -n.x, y: -n.y };
+  const along = { x: -d.x, y: -d.y };
   return {
     key,
     text: shortLabel(have, need),
     have,
     need,
-    // Off the far edge; further out, past a turn handle; else beside either far corner.
-    spots: [
-      { at: mid, n },
-      { at: mid, n, gap: 34 },
-      { at: b2, n: d },
-      { at: a2, n: { x: -d.x, y: -d.y } },
-    ],
+    spots:
+      zoneDepth(zone) < need - SHALLOW
+        ? // Beside a far corner (a bed's foot first, then past its turn handle), on the room's
+          // side of the wall; else inside the zone, else off it.
+          [
+            { at: a2, n: along, align: back },
+            { at: a2, n: along, gap: 44, align: back },
+            { at: b2, n: d, align: back },
+            { at: mid, n: back },
+            { at: mid, n },
+          ]
+        : // Off the far edge; further out, past a turn handle; else beside either far corner.
+          [
+            { at: mid, n },
+            { at: mid, n, gap: 34 },
+            { at: b2, n: d },
+            { at: a2, n: along },
+          ],
   };
 }
 
@@ -550,13 +577,16 @@ export function placeLabels(
   for (const s of specs) {
     const w = (textWidth(s.text) + 8) * px;
     const h = 16 * px;
-    const place = ({ at, n, gap: g }: { at: Vec2; n: Vec2; gap?: number }): PlacedLabel => {
+    const place = ({ at, n, gap: g, align }: LabelSpec['spots'][number]): PlacedLabel => {
       const gap = (g ?? 10) * px;
-      // Anchored as the wall tags are: by its near side, centred across.
+      // Anchored as the wall tags are: by its near side, centred across (or to one side).
+      const side = Math.abs(n.x) > 0.7;
       const x =
-        Math.abs(n.x) > 0.7 ? (n.x > 0 ? at.x + gap : at.x - gap - w) : at.x + n.x * gap - w / 2;
+        (side ? (n.x > 0 ? at.x + gap : at.x - gap - w) : at.x + n.x * gap - w / 2) +
+        (align && !side ? Math.sign(align.x) * (w / 2) : 0);
       const y =
-        Math.abs(n.x) > 0.7 ? at.y + n.y * gap - h / 2 : n.y > 0 ? at.y + gap : at.y - gap - h;
+        (side ? at.y + n.y * gap - h / 2 : n.y > 0 ? at.y + gap : at.y - gap - h) +
+        (align && side ? Math.sign(align.y) * (h / 2) : 0);
       return { key: s.key, text: s.text, x, y, w, h };
     };
     let best: { b: PlacedLabel; c: number } | null = null;
@@ -569,6 +599,18 @@ export function placeLabels(
     if (best) out.push(best.b);
   }
   return out;
+}
+
+/** A piece's footprint as a box (plan units), for labels to keep off. */
+function pieceBox(it: Item): { at: Vec2; half: Vec2 } {
+  const fp = itemFootprint(it);
+  const xs = fp.map((p) => p.x);
+  const ys = fp.map((p) => p.y);
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  return {
+    at: { x: (x0 + x1) / 2, y: (y0 + y1) / 2 },
+    half: { x: (x1 - x0) / 2, y: (y1 - y0) / 2 },
+  };
 }
 
 /**
@@ -635,7 +677,10 @@ export const ClearanceLayer = memo(function ClearanceLayer({
           .map((i) => (i.kind === 'zone' ? i.side : '')),
       );
       for (const z of clearanceZones(it, level)) {
-        if (!short.has(z.side)) out.push({ key: `${id}-${z.side}`, zone: z.zone });
+        // Cut at the walls: a side against one has none to show.
+        if (!short.has(z.side) && zoneDepth(z.zone) > SHALLOW) {
+          out.push({ key: `${id}-${z.side}`, zone: z.zone });
+        }
       }
     }
     return out;
@@ -665,7 +710,7 @@ export const ClearanceLayer = memo(function ClearanceLayer({
     const out: LabelSpec[] = [];
     for (const i of issues) {
       if (i.kind === 'zone' && mine.has(i.itemId)) {
-        const l = zoneLabel(`z-${i.itemId}-${i.side}`, i.zone, i.have, i.need);
+        const l = zoneLabel(`z-${i.itemId}-${i.side}`, i.zone, i.out, i.have, i.need);
         if (l) out.push(l);
       }
     }
@@ -706,7 +751,9 @@ export const ClearanceLayer = memo(function ClearanceLayer({
     y1: view.cy + size.height / 2 / view.zoom,
   };
   const names = [...roomLabelBoxes(level, geom, view.zoom), ...chips];
-  const handles = selected ? handleBoxes(selected, view.zoom) : [];
+  // Its handles, and the piece itself: the selection is drawn over the labels, so one on the
+  // piece (a closed side's, beside it) would be hidden.
+  const handles = selected ? [...handleBoxes(selected, view.zoom), pieceBox(selected)] : [];
   const labels = placeLabels(specs, view.zoom, visible, names, handles);
   // The selected piece's narrowed way, unless its way in (Show the way) is drawn.
   const route = useMemo(() => {
@@ -726,7 +773,11 @@ export const ClearanceLayer = memo(function ClearanceLayer({
       {issues.map((i, k) => {
         const key = `${i.kind}-${issueItem(i) ?? ''}-${k}`;
         if (i.kind === 'zone') {
-          return <polygon key={key} className="clearance-short" points={pts(i.zone)} />;
+          // Drawn as far as the room goes (cut at walls, as measured): none for a side against
+          // a wall, whose label says it is closed.
+          return zoneDepth(i.zone) > SHALLOW ? (
+            <polygon key={key} className="clearance-short" points={pts(i.zone)} />
+          ) : null;
         }
         if (i.kind === 'door' || i.kind === 'doors' || i.kind === 'door-front') {
           // A door's sweep once, however many problems it's in.

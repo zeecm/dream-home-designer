@@ -91,9 +91,8 @@ function movesFor(
   }
   if (issue.kind === 'zone') {
     // Room off a side of a piece: what stands in that room moves out of it, or the piece
-    // moves back from it.
-    const [a, , , d] = issue.zone as [Vec2, Vec2, Vec2, Vec2];
-    const n = norm({ x: d.x - a.x, y: d.y - a.y });
+    // moves back from it. The zone stops at a wall, so a piece beyond one isn't in it.
+    const n = norm(issue.out);
     if (!n) return out;
     for (const it of Object.values(level.items).sort((x, y) => (x.id < y.id ? -1 : 1))) {
       if (it.id === issue.itemId || !movable.has(it.id)) continue;

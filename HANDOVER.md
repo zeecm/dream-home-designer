@@ -2046,6 +2046,19 @@ door's swing in its own room; the walkway line looks for the main door on the ot
 the version shown; issues and the walkway line list rooms worst first (a room before its
 en-suite); bed sides name their room when there are several beds; door names and plan geometry
 are cached by walls/openings/rooms. Drag p95 on 21 pieces: 16.7 ms on, 16.8 off.
+**Zones cut at walls (15 Nov, #72):** a zone issue's `zone` (and `clearanceZones(item, level)`)
+now goes only as far as the room: cut at the nearest wall or the floor's edge (`zoneUpTo`), so
+a bed with a long side on a wall no longer draws its side zone through the wall into the next
+room (or out of the flat). That side has no depth: the plan draws nothing for it, and the
+selected bed's chip ("Closed / 0.60 m") sits beside the zone's far corner on the room's side
+of the wall, never on the piece (the selection covers it). The issue carries `out` (away from
+the piece) for the label and the nudges. `Fixed.edges` (`floorEdges`): room boundaries with a
+room on one side only end the room off a side as a wall does (a boundary between two rooms is
+open floor); used by the zone and chair checks, `bedSides`, and the designer's placement
+(`place.ts` measures room to use a piece against walls, doorways and the floor's edge, as the
+check does). Checks unchanged (a double with one side on a wall was already the soft "one
+side to get in"); the benchmark is byte-identical, and it now checks that no zone reaches
+into a wall.
 
 **On hold (owner, 7 Nov): no more ageing work (slices 1b and 2) until the owner says.** It is hidden in the app behind a flag (`apps/web/src/features.ts`): turn it on in a browser with `?ageing=1` in the address (remembered; `?ageing=0` turns it off) or localStorage `dhd-feature-ageing` = "1"; `ageing.spec.ts` turns it on per test. **Ageing parents check, slice 1 (7 Nov, spec `docs/specs/ageing-parents.md`, "Slice 1 as
 built"):** no schema change. Core `ageing.ts`: `ageingFacts(level, profile)` (choice-free, cached

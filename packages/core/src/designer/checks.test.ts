@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { doorSweep } from '../clearance';
+import { doorSweep, zoneDepth } from '../clearance';
 import { withPieces } from '../fixtures/furnishedSample';
 import { polygonCentroid } from '../geometry';
 import type { Level, Vec2 } from '../schema';
@@ -107,6 +107,26 @@ describe('P1: function per room (criteria 1, 2)', () => {
     expect(
       squeezed.some((c) => c.hard && /Not enough room to get into the queen bed/.test(c.text)),
     ).toBe(true);
+  });
+
+  it('#72: a queen in the corner, one side on the Bedroom wall: one side to get in, none drawn through it', () => {
+    // As the designer and the app's free bed place it: head on the north wall, its right side
+    // on Main bedroom's east face (x 3.22), the Bedroom beyond.
+    const lvl = withPieces(base, [['bed-queen', at(2.456, 1.1505), 0]]);
+    const zone = run(lvl).filter((c) => c.key.startsWith('P4|zone|'));
+    expect(zone.map((c) => [c.hard, c.text])).toEqual([
+      [
+        false,
+        'The queen bed has one side to get in; the other is against the wall, fine in a small room.',
+      ],
+    ]);
+    const issue = zone[0]?.issue;
+    if (issue?.kind !== 'zone') throw new Error('no zone');
+    expect(issue.side).toBe('right');
+    expect(issue.have).toBeCloseTo(0, 6);
+    // The zone stops at the wall's face: nothing of it in the wall or the Bedroom.
+    expect(Math.max(...issue.zone.map((p) => p.x))).toBeLessThanOrEqual(3.221);
+    expect(zoneDepth(issue.zone)).toBeCloseTo(0, 6);
   });
 
   it('nobody is dropped silently: more people than bedrooms, or a room that is gone', () => {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { clearanceIssues, fixedParts, overlapDepth } from '../../clearance';
 import { BENCHMARK, benchText, runFlat } from './benchmark';
 
 /** Extras a room can do without (a chair beyond the household's, a lamp, a bedside table). */
@@ -30,6 +31,13 @@ describe('the designer benchmark (recorded answers, no requests)', () => {
     });
     it(`${r.id}: “passes” only when no hard check it caused fails`, () => {
       expect(r.result.passes).toBe(!r.result.checks.some((c) => c.hard && !c.already));
+    });
+    it(`${r.id}: no clearance zone reaches into a wall (#72: a bed's side on one)`, () => {
+      const { walls } = fixedParts(r.result.level);
+      for (const i of clearanceIssues(r.result.level)) {
+        if (i.kind !== 'zone') continue;
+        expect(Math.max(0, ...walls.map((w) => overlapDepth(i.zone, w)))).toBeLessThan(0.001);
+      }
     });
   }
 });
